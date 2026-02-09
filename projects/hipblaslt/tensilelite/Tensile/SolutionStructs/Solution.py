@@ -1241,12 +1241,6 @@ class Solution(collections.abc.Mapping):
         if state["StreamK"] == 0:
           reject(state, printRejectionReason, "Can only use auto WGM with StreamK.")
           return False
-        if state["NonTemporalA"] >= 4:
-          reject(state, printRejectionReason, "Cannot use auto WGM with NTA.")
-          return False
-        if state["NonTemporalB"] >= 4:
-          reject(state, printRejectionReason, "Cannot use auto WGM with NTB.")
-          return False
 
     problemType = state["ProblemType"]
 
