@@ -50,6 +50,38 @@ https://github.com/ROCm/TheRock/issues/2179
 | `THEROCK_ASIC_VARIANT` | `dcgpu` | GPU variant suffix (e.g., `dcgpu`, `all`, `dgpu`). Combined with `THEROCK_ASIC` to form the artifact group. |
 | `THEROCK_ARTIFACT_GROUP` | `$THEROCK_ASIC-$THEROCK_ASIC_VARIANT` | Full artifact group override. Available groups: `gfx90X-dcgpu`, `gfx94X-dcgpu`, `gfx950-dcgpu`, `gfx110X-all`, `gfx110X-dgpu`, `gfx120X-all`, etc. See [TheRock releases](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#index-page-listing) for the full list. |
 
+#### Version Logging
+
+The prebuilt stage writes the installed TheRock version to `/opt/rocm/THEROCK_VERSION` inside the image. For pinned releases, this contains the exact version string. For `latest` builds, it captures version information from the install output.
+
+#### ⚠️ Deprecated Prebuilt Arguments
+
+> [!CAUTION]
+> The following build args are **deprecated** and will be removed in a future release. When any of these args are set, the build uses the original wget/tar download method instead of `install_rocm_from_artifacts.py`. A deprecation warning is printed during the build.
+
+| Deprecated Argument | Replacement | Behavior |
+|---------------------|-------------|----------|
+| `THEROCK_TARBALL` | `THEROCK_ARTIFACT_GROUP` + `THEROCK_RELEASE` | Used as-is as the tarball filename for wget download |
+| `THEROCK_PREBUILT_ID` | `THEROCK_ARTIFACT_GROUP` + `THEROCK_RELEASE` | Prefixed with `therock-dist-linux-` and suffixed with `.tar.gz` for wget download |
+| `THEROCK_GIT_TAG` | `THEROCK_RELEASE` | Combined with `THEROCK_ARTIFACT_GROUP` to construct the tarball filename |
+
+Priority when multiple legacy args are set: `THEROCK_TARBALL` > `THEROCK_PREBUILT_ID` > `THEROCK_GIT_TAG`.
+
+**Migration examples:**
+```bash
+# Old: --build-arg THEROCK_GIT_TAG=7.0.0rc20250909
+# New:
+--build-arg THEROCK_RELEASE=7.0.0rc20250909
+
+# Old: --build-arg THEROCK_PREBUILT_ID=gfx94X-dcgpu-7.0.0rc20250909
+# New:
+--build-arg THEROCK_ARTIFACT_GROUP=gfx94X-dcgpu --build-arg THEROCK_RELEASE=7.0.0rc20250909
+
+# Old: --build-arg THEROCK_TARBALL=therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz
+# New:
+--build-arg THEROCK_ARTIFACT_GROUP=gfx94X-dcgpu --build-arg THEROCK_RELEASE=7.0.0rc20250909
+```
+
 #### 🏗️ Fullbuild-Only Arguments
 
 > [!NOTE]

@@ -44,7 +44,8 @@ RUN apt-get update && apt-get install -y \
 # ============================================================================
 # Prebuilt stage - downloads and extracts dev env prebuilt binaries tarball
 #
-# Uses install_rocm_from_artifacts.py for downloading ROCm artifacts.
+# New path: uses install_rocm_from_artifacts.py for downloading ROCm artifacts.
+# Legacy path: uses wget/tar when deprecated args are set (backward compat).
 #
 # Example: Default build (latest nightly for gfx94X-dcgpu):
 #   docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
@@ -74,33 +75,54 @@ ARG THEROCK_RELEASE=latest
 # Full artifact group (combines ASIC and variant)
 ARG THEROCK_ARTIFACT_GROUP=$THEROCK_ASIC-$THEROCK_ASIC_VARIANT
 
+# Deprecated build args (kept for backward compatibility)
+ARG THEROCK_GIT_TAG=
+ARG THEROCK_PREBUILT_ID=
+ARG THEROCK_TARBALL=
+
 # Clone TheRock for build tools (shallow clone, only need scripts)
 RUN git clone --depth 1 https://github.com/ROCm/TheRock.git /TheRock
 
 WORKDIR /TheRock
 
-RUN python3 -m venv /venv
-ENV PATH="/venv/bin:$PATH"
-RUN pip install -r requirements.txt
+RUN python3 -m venv /venv && /venv/bin/pip install -r requirements.txt
 
-# Install ROCm from artifacts directly to /opt/rocm
-# - If THEROCK_RELEASE=latest, uses --latest-release to fetch newest nightly
-# - Otherwise, uses --release to fetch specific version
-RUN if [ "$THEROCK_RELEASE" = "latest" ]; then \
-        echo "Installing latest nightly release for $THEROCK_ARTIFACT_GROUP"; \
-        python build_tools/install_rocm_from_artifacts.py \
+# Install ROCm - two paths:
+# 1. Legacy: any deprecated arg set → wget/tar (old method, no translation needed)
+# 2. New: install_rocm_from_artifacts.py
+# Priority: THEROCK_TARBALL > THEROCK_PREBUILT_ID > THEROCK_GIT_TAG
+RUN if [ -n "$THEROCK_TARBALL" ] || [ -n "$THEROCK_PREBUILT_ID" ] || [ -n "$THEROCK_GIT_TAG" ]; then \
+        echo "WARNING: Using deprecated build args. Migrate to THEROCK_RELEASE + THEROCK_ARTIFACT_GROUP." >&2; \
+        tarball="${THEROCK_TARBALL:-therock-dist-linux-${THEROCK_PREBUILT_ID:-$THEROCK_ARTIFACT_GROUP-$THEROCK_GIT_TAG}.tar.gz}"; \
+        echo "Downloading: $tarball"; \
+        mkdir -p /opt/rocm && \
+        wget --progress=dot:giga \
+            "https://therock-nightly-tarball.s3.us-east-2.amazonaws.com/$tarball" \
+            -O "/tmp/$tarball" && \
+        tar -xf "/tmp/$tarball" -C /opt/rocm --strip-components=1 && \
+        rm "/tmp/$tarball"; \
+        version=$(echo "$tarball" | sed 's/^therock-dist-linux-//; s/\.tar\.gz$//' | rev | cut -d- -f1 | rev); \
+        echo "$version" > /opt/rocm/THEROCK_VERSION; \
+    elif [ "$THEROCK_RELEASE" = "latest" ]; then \
+        echo "Installing latest nightly for $THEROCK_ARTIFACT_GROUP"; \
+        /venv/bin/python build_tools/install_rocm_from_artifacts.py \
             --latest-release \
             --artifact-group "$THEROCK_ARTIFACT_GROUP" \
-            --output-dir /opt/rocm; \
+            --output-dir /opt/rocm \
+            2>&1 | tee /tmp/install.log; \
+        grep -i 'version\|release' /tmp/install.log > /opt/rocm/THEROCK_VERSION || \
+            echo "latest (version details unavailable)" > /opt/rocm/THEROCK_VERSION; \
     else \
         echo "Installing release $THEROCK_RELEASE for $THEROCK_ARTIFACT_GROUP"; \
-        python build_tools/install_rocm_from_artifacts.py \
+        /venv/bin/python build_tools/install_rocm_from_artifacts.py \
             --release "$THEROCK_RELEASE" \
             --artifact-group "$THEROCK_ARTIFACT_GROUP" \
-            --output-dir /opt/rocm; \
+            --output-dir /opt/rocm \
+            2>&1 | tee /tmp/install.log; \
+        echo "$THEROCK_RELEASE" > /opt/rocm/THEROCK_VERSION; \
     fi
 
-RUN rm -rf /TheRock /venv
+RUN rm -rf /TheRock /venv /tmp/install.log
 
 # ============================================================================
 # Build from source stage - clones and builds TheRock
