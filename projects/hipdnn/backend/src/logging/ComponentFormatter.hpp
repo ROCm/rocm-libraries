@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace hipdnn::backend::logging
+namespace hipdnn_backend::logging
 {
 
 class ComponentFormatter final : public spdlog::formatter
@@ -49,4 +49,4 @@ private:
     std::unique_ptr<spdlog::pattern_formatter> _callbackReceiverFormatter;
 };
 
-} // namespace hipdnn::backend::logging
+} // namespace hipdnn_backend::logging

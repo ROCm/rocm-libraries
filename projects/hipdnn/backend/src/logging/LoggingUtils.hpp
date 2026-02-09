@@ -5,7 +5,7 @@
 
 #include <string>
 
-namespace hipdnn::backend::logging
+namespace hipdnn_backend::logging
 {
 
 /**
@@ -35,4 +35,4 @@ inline std::string generateCallbackReceiverPatternString()
     return "[%Y-%m-%d %H:%M:%S.%e] [tid %t] [%l] %v";
 }
 
-} // namespace hipdnn::backend::logging
+} // namespace hipdnn_backend::logging

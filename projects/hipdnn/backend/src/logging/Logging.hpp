@@ -40,7 +40,7 @@ void initialize();
 
 void cleanup();
 
-void setLogLevel(const std::string& level);
+void setLogLevel(hipdnnSeverity_t severity);
 
 std::shared_ptr<spdlog::logger> getBackendLogger();
 

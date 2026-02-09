@@ -99,10 +99,12 @@ void initialize()
         // Register the global callback so non-backend components can send logs to the backend
         hipdnn_data_sdk::logging::registerLoggingCallback(hipdnnLoggingCallback);
 
-        std::string logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
+        std::string logLevelStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
+        hipdnnSeverity_t logLevel
+            = hipdnn_data_sdk::logging::detail::stringToSeverityOrOff(logLevelStr);
 
         // It doesn't need to return if logLevel == off, but it avoids unnecessary initialization
-        if(logLevel == "off")
+        if(logLevel == HIPDNN_SEV_OFF)
         {
             s_loggingInitialized = true;
             return;
@@ -132,14 +134,14 @@ void initialize()
         // However, we need one destination sink for thread safety because the mutex is attached to the sink.
         // Therefore, we implement a custom formatter to have distinct formatting for the backend, which does not use a callback sink.
         backendLogger->set_formatter(
-            std::make_unique<hipdnn::backend::logging::ComponentFormatter>());
+            std::make_unique<hipdnn_backend::logging::ComponentFormatter>());
         spdlog::register_logger(backendLogger);
 
         auto callbackReceiverLogger = std::make_shared<spdlog::async_logger>(
             S_CALLBACK_RECEIVER_LOGGER_NAME, sharedSink, spdlog::thread_pool());
         // Use ComponentFormatter which detects "hipdnn_callback_receiver" and applies appropriate formatting
         callbackReceiverLogger->set_formatter(
-            std::make_unique<hipdnn::backend::logging::ComponentFormatter>());
+            std::make_unique<hipdnn_backend::logging::ComponentFormatter>());
         spdlog::register_logger(callbackReceiverLogger);
 
         setLogLevel(logLevel);
@@ -165,27 +167,29 @@ void cleanup()
     s_loggingInitialized = false;
 }
 
-void setLogLevel(const std::string& level)
+void setLogLevel(hipdnnSeverity_t severity)
 {
-    if(level == "off")
+    switch(severity)
     {
+    case HIPDNN_SEV_OFF:
         spdlog::set_level(spdlog::level::off);
-    }
-    else if(level == "info")
-    {
+        break;
+    case HIPDNN_SEV_INFO:
         spdlog::set_level(spdlog::level::info);
-    }
-    else if(level == "warn")
-    {
+        break;
+    case HIPDNN_SEV_WARN:
         spdlog::set_level(spdlog::level::warn);
-    }
-    else if(level == "error")
-    {
+        break;
+    case HIPDNN_SEV_ERROR:
         spdlog::set_level(spdlog::level::err);
-    }
-    else if(level == "fatal")
-    {
+        break;
+    case HIPDNN_SEV_FATAL:
         spdlog::set_level(spdlog::level::critical);
+        break;
+    default:
+        // Unknown severity, default to off
+        spdlog::set_level(spdlog::level::off);
+        break;
     }
 }
 
