@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -4938,6 +4938,77 @@ private:
     bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
 
     size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
+};
+
+struct PerformanceConfigConvDepthwiseFwd2D : PerfConfigBaseCK<PerformanceConfigConvDepthwiseFwd2D>
+{
+    int index;
+    std::string kernel_id;
+    std::vector<std::string> valid_kernels;
+    PerformanceConfigConvDepthwiseFwd2D(int idx, std::string kernl_id)
+        : index(idx), kernel_id(kernl_id)
+    {
+    }
+    PerformanceConfigConvDepthwiseFwd2D() : PerformanceConfigConvDepthwiseFwd2D(0, "") {}
+    PerformanceConfigConvDepthwiseFwd2D(bool) : PerformanceConfigConvDepthwiseFwd2D(0, "") {}
+    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
+                                               const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool IsValidValue() const;
+    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
+    {
+        return IsValid(problem);
+    }
+    MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
+    MIOPEN_INTERNALS_EXPORT bool operator==(const PerformanceConfigConvDepthwiseFwd2D& other) const;
+
+private:
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    std::vector<int> heuristic_indexes;
+    std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
+#endif
+    template <typename DataType>
+    void Init(const miopen::conv::ProblemDescription&);
+};
+
+struct ConvDepthwiseFwd2D final : ConvTunableSolver<PerformanceConfigConvDepthwiseFwd2D>
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<ConvDepthwiseFwd2D>(); }
+
+    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvDepthwiseFwd2D GetDefaultPerformanceConfig(
+        const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
+    MIOPEN_INTERNALS_EXPORT bool
+    IsValidPerformanceConfig(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&,
+                             const PerformanceConfigConvDepthwiseFwd2D&) const override;
+    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvDepthwiseFwd2D
+    Search(const ExecutionContext&,
+           const miopen::conv::ProblemDescription&,
+           const AnyInvokeParams& invoke_ctx) const override;
+
+    MIOPEN_INTERNALS_EXPORT bool
+    IsApplicable(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return true; }
+    /// Use very small fixed value enough to backup GEMM for cases when
+    /// GEMM is disabled.
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
+    {
+        return 0.02f;
+    }
+    bool MayNeedWorkspace() const override { return false; }
+    size_t GetWorkspaceSize(const ExecutionContext&,
+                            const miopen::conv::ProblemDescription&) const override
+    {
+        return 0;
+    }
+
+    MIOPEN_INTERNALS_EXPORT ConvSolution
+    GetSolution(const ExecutionContext&,
+                const miopen::conv::ProblemDescription&,
+                const PerformanceConfigConvDepthwiseFwd2D&) const override;
+
+    uint32_t GetSupportedSolutionCount(const ExecutionContext&,
+                                       const miopen::conv::ProblemDescription&) const;
 };
 
 // Test helper functions for metadata validation

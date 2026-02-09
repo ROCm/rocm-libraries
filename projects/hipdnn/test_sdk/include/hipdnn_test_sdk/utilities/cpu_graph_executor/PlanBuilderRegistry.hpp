@@ -17,6 +17,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PointwisePlan.hpp>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <sstream>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -41,7 +42,7 @@ public:
     {
         initializeRegistry();
 
-        HIPDNN_LOG_INFO("Looking up plan builder for signature key: {}", key);
+        HIPDNN_SDK_LOG_INFO("Looking up plan builder for signature key: " << key);
 
         auto it = _registry.find(key);
         if(it != _registry.end())
@@ -49,8 +50,9 @@ public:
             return *it->second;
         }
 
-        throw std::runtime_error(
-            fmt::format("No plan builder registered for signature key: {}", key));
+        std::ostringstream oss;
+        oss << "No plan builder registered for signature key: " << key;
+        throw std::runtime_error(oss.str());
     }
 
 private:

@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
+#include <ostream>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -163,26 +164,12 @@ struct BatchnormFwdInferenceSignatureKey
     }
 };
 
+inline std::ostream& operator<<(std::ostream& os, const BatchnormFwdInferenceSignatureKey& key)
+{
+    os << "BatchnormFwdInference(x=" << key.xDataType << ", scale=" << key.scaleBiasDataType
+       << ", mean=" << key.meanVarianceDataType << ", y=" << key.outputDataType
+       << ", compute=" << key.computeDataType << ")";
+    return os;
 }
 
-template <>
-struct fmt::formatter<hipdnn_test_sdk::utilities::BatchnormFwdInferenceSignatureKey>
-{
-    static constexpr auto parse(format_parse_context& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const hipdnn_test_sdk::utilities::BatchnormFwdInferenceSignatureKey& key,
-                FormatContext& ctx) const
-    {
-        return fmt::format_to(ctx.out(),
-                              "BatchnormFwdInference(x={}, scale={}, mean={}, y={}, compute={})",
-                              key.xDataType,
-                              key.scaleBiasDataType,
-                              key.meanVarianceDataType,
-                              key.outputDataType,
-                              key.computeDataType);
-    }
-};
+}
