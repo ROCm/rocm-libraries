@@ -20,7 +20,7 @@ protected:
     void SetUp() override
     {
         _mockBackend = std::make_shared<Mock_hipdnn_backend>();
-        detail::IHipdnnBackend::setInstance(_mockBackend);
+        IHipdnnBackend::setInstance(_mockBackend);
 
         ON_CALL(*_mockBackend, getLastErrorString(_, _))
             .WillByDefault([](char* errorString, size_t size) {
@@ -31,7 +31,7 @@ protected:
     }
     void TearDown() override
     {
-        detail::IHipdnnBackend::resetInstance();
+        IHipdnnBackend::resetInstance();
         _mockBackend.reset();
     }
 };

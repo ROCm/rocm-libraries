@@ -359,4 +359,4 @@ inline Error validateScalarParameter(const std::shared_ptr<graph::TensorAttribut
     return {ErrorCode::OK, ""};
 }
 
-}
+} // namespace hipdnn_frontend::detail

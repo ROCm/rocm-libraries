@@ -121,4 +121,4 @@ inline static std::shared_ptr<IHipdnnBackend> hipdnnBackend()
     return IHipdnnBackend::getInstance();
 }
 
-}
+} // namespace hipdnn_frontend::detail

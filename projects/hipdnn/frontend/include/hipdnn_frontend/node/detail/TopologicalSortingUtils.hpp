@@ -197,4 +197,4 @@ inline TopologicalSortResult
     return {topologicalOrder, componentCount, hasCycle};
 }
 
-}
+} // namespace hipdnn_frontend::detail

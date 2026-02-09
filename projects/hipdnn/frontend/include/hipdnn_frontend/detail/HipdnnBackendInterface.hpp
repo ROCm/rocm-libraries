@@ -73,4 +73,4 @@ public:
     }
 };
 
-}
+} // namespace hipdnn_frontend::detail

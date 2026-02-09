@@ -73,4 +73,4 @@ inline Error
     return {ErrorCode::OK, ""};
 }
 
-}
+} // namespace hipdnn_frontend::detail
