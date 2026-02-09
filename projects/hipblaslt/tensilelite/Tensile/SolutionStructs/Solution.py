@@ -341,6 +341,9 @@ class Solution(collections.abc.Mapping):
       state["LocalSplitU"] = 1 if state["WaveSplitK"] else state["WorkGroup"][2]
       state["NumWaveSplitK"]  = state["WorkGroup"][2] if state["WaveSplitK"] else 1
 
+      state["MIWaveGroup"] = [state["SubGroup0"] // state["WavefrontSize"],  state["SubGroup1"]]
+
+
     if "SubGroup0" in state and "SubGroup1" in state and "LocalSplitU" in state and "NumWaveSplitK" in state:
       state["NumThreads"] = state["SubGroup0"] * state["SubGroup1"] * state["LocalSplitU"] * state["NumWaveSplitK"]
       if (state["NumThreads"] % state['WavefrontSize']) != 0:
@@ -1237,12 +1240,6 @@ class Solution(collections.abc.Mapping):
       if state["WorkGroupMappingXCC"] == -1:
         if state["StreamK"] == 0:
           reject(state, printRejectionReason, "Can only use auto WGM with StreamK.")
-          return False
-        if state["NonTemporalA"] >= 4:
-          reject(state, printRejectionReason, "Cannot use auto WGM with NTA.")
-          return False
-        if state["NonTemporalB"] >= 4:
-          reject(state, printRejectionReason, "Cannot use auto WGM with NTB.")
           return False
 
     problemType = state["ProblemType"]

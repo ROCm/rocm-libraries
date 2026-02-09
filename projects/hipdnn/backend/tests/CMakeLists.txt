@@ -68,7 +68,7 @@ add_library(${TEST_PLUGIN1_NAME} SHARED plugins/PluginApiImpl.cpp plugins/Plugin
 target_link_libraries(${TEST_PLUGIN1_NAME} PRIVATE hipdnn_data_sdk hipdnn_plugin_sdk)
 set_target_properties(${TEST_PLUGIN1_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
 target_compile_options(${TEST_PLUGIN1_NAME} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-target_compile_definitions(${TEST_PLUGIN1_NAME} PRIVATE COMPONENT_NAME="plugin1")
+target_compile_definitions(${TEST_PLUGIN1_NAME} PRIVATE HIPDNN_COMPONENT_NAME="plugin1")
 clang_tidy_check(${TEST_PLUGIN1_NAME})
 add_dependencies(hipdnn_backend_tests ${TEST_PLUGIN1_NAME})
 set_target_properties(
@@ -90,7 +90,7 @@ add_library(${TEST_PLUGIN2_NAME} SHARED plugins/PluginApiImpl.cpp plugins/Plugin
 target_link_libraries(${TEST_PLUGIN2_NAME} PRIVATE hipdnn_data_sdk hipdnn_plugin_sdk)
 set_target_properties(${TEST_PLUGIN2_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
 target_compile_options(${TEST_PLUGIN2_NAME} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-target_compile_definitions(${TEST_PLUGIN2_NAME} PRIVATE COMPONENT_NAME="plugin2")
+target_compile_definitions(${TEST_PLUGIN2_NAME} PRIVATE HIPDNN_COMPONENT_NAME="plugin2")
 clang_tidy_check(${TEST_PLUGIN2_NAME})
 add_dependencies(hipdnn_backend_tests ${TEST_PLUGIN2_NAME})
 set_target_properties(
