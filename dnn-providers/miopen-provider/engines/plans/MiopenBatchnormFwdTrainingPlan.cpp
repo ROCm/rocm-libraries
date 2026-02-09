@@ -237,8 +237,8 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
     if(_trainingParams.hasRunningStats())
     {
         expAvgFactor = _trainingParams.momentumValue();
-        HIPDNN_PLUGIN_LOG_INFO("BatchnormFwdTrainingPlan: expAvgFactor (momentum) = {}",
-                               expAvgFactor);
+        HIPDNN_PLUGIN_LOG_INFO(
+            "BatchnormFwdTrainingPlan: expAvgFactor (momentum) = " << expAvgFactor);
     }
 
     // Get all required device buffers

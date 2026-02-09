@@ -118,8 +118,8 @@ void MiopenEngine::initializeExecutionContext(
             else
             {
                 HIPDNN_PLUGIN_LOG_WARN(
-                    "Benchmarking knob setting value is not an integer. Type: {}",
-                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
+                    "Benchmarking knob setting value is not an integer. Type: "
+                    << hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
             }
         }
     }

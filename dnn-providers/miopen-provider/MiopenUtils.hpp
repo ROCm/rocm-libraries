@@ -22,7 +22,7 @@
     {                                                                                           \
         if(status != miopenStatusSuccess)                                                       \
         {                                                                                       \
-            HIPDNN_PLUGIN_LOG_ERROR("MIOpen error occurred: {}", miopenGetErrorString(status)); \
+            HIPDNN_PLUGIN_LOG_ERROR("MIOpen error occurred: " << miopenGetErrorString(status)); \
         }                                                                                       \
     } while(0)
 
@@ -66,8 +66,8 @@ public:
         auto status = miopenGetTuningPolicy(_handle, &_originalPolicy);
         if(status != miopenStatusSuccess)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("Failed to get tuning policy: {}",
-                                    miopenGetErrorString(status));
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "Failed to get tuning policy: " << miopenGetErrorString(status));
             _originalPolicy = miopenTuningPolicyNone; // Fallback
         }
 
@@ -76,8 +76,8 @@ public:
         status = miopenSetTuningPolicy(_handle, policy);
         if(status != miopenStatusSuccess)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("Failed to set tuning policy: {}",
-                                    miopenGetErrorString(status));
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "Failed to set tuning policy: " << miopenGetErrorString(status));
         }
     }
 
@@ -87,8 +87,8 @@ public:
         auto status = miopenSetTuningPolicy(_handle, _originalPolicy);
         if(status != miopenStatusSuccess)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("Failed to restore tuning policy: {}",
-                                    miopenGetErrorString(status));
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "Failed to restore tuning policy: " << miopenGetErrorString(status));
         }
     }
 
