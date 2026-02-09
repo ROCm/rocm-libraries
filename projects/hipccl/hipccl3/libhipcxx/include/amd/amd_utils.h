@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 #pragma once
 #if defined(__HIP__)
 #include <hip/hip_runtime.h>
+#include <rocm-core/rocm_version.h>
 #endif
 #ifndef __HIP_DEVICE_COMPILE__
 #ifndef __host__ 
@@ -88,3 +89,56 @@ namespace libhipcxx
   #endif
   #endif
 }
+
+#define MINIMUM_ROCM_VERSION(major, minor, patch) \
+    (defined(ROCM_VERSION_MAJOR) && \
+     defined(ROCM_VERSION_MINOR) && \
+     defined(ROCM_VERSION_PATCH) && \
+     (ROCM_VERSION_MAJOR > (major)) || \
+     (ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR > (minor)) || \
+     (ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR == (minor) && ROCM_VERSION_PATCH >= (patch)))
+
+// Returns true if the current ROCm version is at least major.minor the patch value is ignored
+#define MINIMUM_ROCM_VERSION(major, minor) \
+    (defined(ROCM_VERSION_MAJOR) && \
+     defined(ROCM_VERSION_MINOR) && \
+     (ROCM_VERSION_MAJOR > (major)) || \
+     (ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR >= (minor)))
+
+// Returns true if the current ROCm version is at least major the minor and patch value is ignored
+#define MINIMUM_ROCM_VERSION(major) \
+    (defined(ROCM_VERSION_MAJOR) && \
+     (ROCM_VERSION_MAJOR >= (major)))
+
+// Returns true if the current ROCm version is at most major.minor.patch (i.e. >=)
+#define MAXIMUM_ROCM_VERSION(major, minor, patch) \
+    (defined(ROCM_VERSION_MAJOR) && \
+     defined(ROCM_VERSION_MINOR) && \
+     defined(ROCM_VERSION_PATCH) && \
+     (ROCM_VERSION_MAJOR < (major)) || \
+     (ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR < (minor)) || \
+     (ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR == (minor) && ROCM_VERSION_PATCH <= (patch)))
+
+// Returns true if the current ROCm version is at most major.minor (i.e. >=) the patch value is ignored
+#define MAXIMUM_ROCM_VERSION(major, minor) \
+    (defined(ROCM_VERSION_MAJOR) && \
+     defined(ROCM_VERSION_MINOR) && \
+     (ROCM_VERSION_MAJOR < (major)) || \
+     (ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR <= (minor)))
+
+// Returns true if the current ROCm version is at most major (i.e. >=) the patch and minor value is ignored
+#define MAXIMUM_ROCM_VERSION(major) \
+    (defined(ROCM_VERSION_MAJOR) && \
+     (ROCM_VERSION_MAJOR <= (major)))
+
+// Returns true if the current ROCm version matches exactly major.minor.patch
+#define EXACT_ROCM_VERSION(major, minor, patch) \
+     ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR == (minor) && ROCM_VERSION_PATCH == (patch)
+
+// Returns true if the current ROCm version matches exactly major.minor (ignoring patch release)
+#define EXACT_ROCM_VERSION(major, minor) \
+     ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR == (minor)
+
+// Returns true if the current ROCm version matches exactly major (ignoring minor and patch release)
+#define EXACT_ROCM_VERSION(major) \
+     ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR == (minor)

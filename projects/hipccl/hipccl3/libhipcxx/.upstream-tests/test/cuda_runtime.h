@@ -23,7 +23,6 @@
 
 #include <hip/hip_runtime.h>
 #include <amd/amd_utils.h>
-#include <rocm-core/rocm_version.h>
 
 #define CUDART_VERSION 0
 
