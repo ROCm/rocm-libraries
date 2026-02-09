@@ -60,8 +60,6 @@
 #include <cstddef>
 #include <memory>
 
-namespace po = boost::program_options;
-
 namespace TensileLite
 {
     namespace Client
@@ -629,7 +627,11 @@ int main(int argc, const char* argv[])
     auto        hardware = GetHardware(args);
     hipStream_t stream   = GetStream(args);
 
-    auto                              library = LoadSolutionLibrary(args);
+    std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library
+        = LoadSolutionLibrary(args);
+    if(!library)
+        throw std::runtime_error("Failed to load solution library");
+
     TensileLite::hip::SolutionAdapter adapter;
     LoadCodeObjects(args, adapter);
 
