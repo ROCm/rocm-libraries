@@ -62,8 +62,7 @@ template <index_t N>
 using make_index_sequence =
     typename __make_integer_seq<detail::__integer_sequence, index_t, N>::seq_type;
 
-
-template<index_t... Is>
+template <index_t... Is>
 struct Sequence
 {
     using Type      = Sequence;
@@ -196,8 +195,7 @@ struct Sequence
         return modify_impl(make_index_sequence<mSize>{}, Number<I>{}, Number<X>{});
     }
 
-private:
-
+    private:
     /**
      * @brief Helper function to modify the sequence at a specific index
      * @tparam Idxs Indices of the sequence elements (0, 1, ..., Size-1)
@@ -213,8 +211,7 @@ private:
         return Sequence<(Idxs == ModifyIdx ? NewVal : At(Idxs))...>{};
     }
 
-public:
-
+    public:
     template <typename F>
     __host__ __device__ static constexpr auto Transform(F f)
     {
@@ -392,7 +389,6 @@ struct uniform_sequence_gen<0, I>
     using type = Sequence<>;
 };
 
-
 namespace detail {
 
 /**
@@ -406,12 +402,13 @@ struct index_array
 };
 
 /**
- * @brief Compute the reverse inclusive scan of a sequence at compile time using a constexpr function
+ * @brief Compute the reverse inclusive scan of a sequence at compile time using a constexpr
+ * function
  * @tparam Reduce The binary reduction functor
  * @tparam Init The initial value for the reduction
  * @tparam Vs The input sequence values
  * @return An index_array containing the reverse inclusive scan results
- */ 
+ */
 template <typename Reduce, index_t Init, index_t... Vs>
 __host__ __device__ constexpr auto compute_reverse_inclusive_scan()
 {
@@ -445,19 +442,16 @@ struct build_reverse_inclusive_scan<Reduce, Init, Sequence<Vs...>, Sequence<Is..
 } // namespace detail
 
 /**
- * @brief Reverse inclusive scan of a sequence - main interface 
+ * @brief Reverse inclusive scan of a sequence - main interface
  * @tparam Seq The input sequence to scan
  * @tparam Reduce The binary reduction functor
  * @tparam Init The initial value for the reduction
- */ 
+ */
 template <typename Seq, typename Reduce, index_t Init>
 struct sequence_reverse_inclusive_scan
 {
-    using type = typename detail::build_reverse_inclusive_scan<Reduce,
-                                                               Init,
-                                                               Seq,
-                                                               make_index_sequence<Seq::Size()>>::
-        type;
+    using type = typename detail::
+        build_reverse_inclusive_scan<Reduce, Init, Seq, make_index_sequence<Seq::Size()>>::type;
 };
 
 /**

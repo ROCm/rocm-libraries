@@ -120,8 +120,7 @@ struct index_decomposer<Sequence<Ls...>, Sequence<Is...>>
     __host__ __device__ static void decompose_runtime(index_t linear_idx, MultiIndex& result)
     {
         // Compute ordered indices and assign to result in original dimension order
-        ((result(Number<New2Old::At(Number<Is>{})>{}) =
-              (linear_idx / strides[Is]) % lengths[Is]),
+        ((result(Number<New2Old::At(Number<Is>{})>{}) = (linear_idx / strides[Is]) % lengths[Is]),
          ...);
     }
 };

@@ -274,8 +274,7 @@ TEST(FordConsistency, StaticFordMatchesFord2D)
     ASSERT_EQ(static_visited.size(), runtime_visited.size());
     for(size_t idx = 0; idx < static_visited.size(); ++idx)
     {
-        EXPECT_EQ(static_visited[idx], runtime_visited[idx])
-            << "Mismatch at index " << idx;
+        EXPECT_EQ(static_visited[idx], runtime_visited[idx]) << "Mismatch at index " << idx;
     }
 }
 
@@ -301,8 +300,7 @@ TEST(FordConsistency, StaticFordMatchesFord3DWithOrder)
     ASSERT_EQ(static_visited.size(), runtime_visited.size());
     for(size_t idx = 0; idx < static_visited.size(); ++idx)
     {
-        EXPECT_EQ(static_visited[idx], runtime_visited[idx])
-            << "Mismatch at index " << idx;
+        EXPECT_EQ(static_visited[idx], runtime_visited[idx]) << "Mismatch at index " << idx;
     }
 }
 
