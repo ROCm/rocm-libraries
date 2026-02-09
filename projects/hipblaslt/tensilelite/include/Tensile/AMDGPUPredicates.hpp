@@ -42,6 +42,8 @@ namespace TensileLite
      *
      * This mirrors the Python-side SUPPORTED_ARCH_DEVICE_IDS and ARCH_DEVICE_ID_FALLBACKS
      * from Architectures.py to ensure consistency between build-time and runtime behavior.
+     * @todo Move this definition to a shared configuration file so both the Python-side and
+     * runtime side use the same definitions -- single source of truth.
      *
      * Device ID to GFX architecture mapping:
      * - gfx942: 0x74a0, 0x74a1, 0x74a2, 0x74a3, 0x74a5, 0x74a9
@@ -53,17 +55,13 @@ namespace TensileLite
         inline const std::map<int, AMDGPU::Processor>& knownChipIds()
         {
             static const std::map<int, AMDGPU::Processor> ids = {
-                // gfx942 variants
-                {0x74a0, AMDGPU::Processor::gfx942},
-                {0x74a1, AMDGPU::Processor::gfx942},
-                {0x74a2, AMDGPU::Processor::gfx942},
-                {0x74a3, AMDGPU::Processor::gfx942},
-                {0x74a5, AMDGPU::Processor::gfx942},
-                {0x74a9, AMDGPU::Processor::gfx942},
                 // gfx950 variants
                 {0x75a0, AMDGPU::Processor::gfx950}, // mi350
-                {0x75a2, AMDGPU::Processor::gfx950}, // mi355
-                {0x75a3, AMDGPU::Processor::gfx950}, // mi355
+                {0x75b0, AMDGPU::Processor::gfx950}, // mi350
+                {0x75a3, AMDGPU::Processor::gfx950}, // mi355x
+                {0x75b3, AMDGPU::Processor::gfx950}, // mi355x
+                {0x75a8, AMDGPU::Processor::gfx950}, // mi350p
+                {0x75b8, AMDGPU::Processor::gfx950}, // mi350p
             };
             return ids;
         }
@@ -74,8 +72,10 @@ namespace TensileLite
         {
             static const std::map<int, std::vector<int>> fallbacks = {
                 // mi355 chip IDs fall back to mi350
-                {0x75a2, {0x75a0}},
-                {0x75a3, {0x75a0}},
+                {0x75a3, {0x75a0}},  // mi355x -> mi350
+                {0x75b3, {0x75a0}},  // mi355x -> mi350
+                {0x75a8, {0x75a0}},  // mi350p -> mi350
+                {0x75b8, {0x75a0}},  // mi350p -> mi350
             };
             return fallbacks;
         }

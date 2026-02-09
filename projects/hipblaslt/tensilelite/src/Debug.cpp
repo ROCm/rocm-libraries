@@ -105,6 +105,11 @@ namespace TensileLite
         return m_value & 0x10000;
     }
 
+    bool Debug::debugEnabled() const
+    {
+        return m_value != 0;
+    }
+
     bool Debug::printLibraryLogicIndex() const
     {
         return m_value & 0x20000;

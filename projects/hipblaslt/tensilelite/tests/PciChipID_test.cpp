@@ -12,12 +12,14 @@
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/ContractionProblemProperties.hpp>
+#include <Tensile/Debug.hpp>
 #include <Tensile/ExactLogicLibrary.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
 using namespace TensileLite;
 
-// Test: Verify that hipDeviceAttributePciChipId is correctly queried and stored
+// Verify that hipDeviceAttributePciChipId is correctly queried and matches
+// a known chip ID.
 TEST(PciChipIDTest, QueryDeviceChipId)
 {
     int deviceCount = 0;
@@ -30,17 +32,12 @@ TEST(PciChipIDTest, QueryDeviceChipId)
     err = hipDeviceGetAttribute(&pciChipId, hipDeviceAttributePciChipId, 0);
     ASSERT_EQ(err, hipSuccess) << "Failed to get PCI Chip ID attribute";
 
-    // Print the device ID for manual verification
-    std::cout << "\n=== PCI Device ID Test ===" << std::endl;
-    std::cout << "Device 0 PCI Chip ID (decimal): " << pciChipId << std::endl;
-    std::cout << "Device 0 PCI Chip ID (hex):     0x" << std::hex << pciChipId << std::dec << std::endl;
-    std::cout << "Verify with: lspci -nn | grep -i " << std::hex << pciChipId << std::dec << std::endl;
-    std::cout << "==========================\n" << std::endl;
-
-    EXPECT_GT(pciChipId, 0) << "PCI Chip ID should be a positive value";
+    auto isKnownChipId = ChipIdRegistry::isKnownChipId(pciChipId);
+    EXPECT_TRUE(isKnownChipId) << "PCI Chip ID should be known";
 }
 
-// Test: Verify that HipAMDGPU correctly populates pciChipId from HIP runtime
+// Verify that HipAMDGPU correctly populates pciChipId from HIP runtime
+// and matches a known chip ID.
 TEST(PciChipIDTest, HipHardwarePopulatesPciChipId)
 {
     int deviceCount = 0;
@@ -56,24 +53,33 @@ TEST(PciChipIDTest, HipHardwarePopulatesPciChipId)
     auto* amdgpu = dynamic_cast<AMDGPU*>(hardware.get());
     ASSERT_NE(amdgpu, nullptr) << "Hardware is not an AMDGPU";
 
-    // Print device information
-    std::cout << "\n=== AMDGPU Hardware Info ===" << std::endl;
-    std::cout << "Description:    " << amdgpu->description() << std::endl;
-    std::cout << "Processor:      " << AMDGPU::toString(amdgpu->processor) << std::endl;
-    std::cout << "CU Count:       " << amdgpu->computeUnitCount << std::endl;
-    if (amdgpu->pciChipId.has_value()) {
-        std::cout << "PCI Chip ID:    0x" << std::hex << amdgpu->pciChipId.value() << std::dec
-                  << " (" << amdgpu->pciChipId.value() << ")" << std::endl;
-    } else {
-        std::cout << "PCI Chip ID:    (not set)" << std::endl;
+    if(Debug::Instance().debugEnabled())
+    {
+        // Print device information
+        std::cout << "\n=== AMDGPU Hardware Info ===" << std::endl;
+        std::cout << "Description:    " << amdgpu->description() << std::endl;
+        std::cout << "Processor:      " << AMDGPU::toString(amdgpu->processor) << std::endl;
+        std::cout << "CU Count:       " << amdgpu->computeUnitCount << std::endl;
+        if(amdgpu->pciChipId().has_value())
+        {
+            std::cout << "PCI Chip ID:    0x" << std::hex << amdgpu->pciChipId().value() << std::dec
+                      << " (" << amdgpu->pciChipId().value() << ")" << std::endl;
+        }
+        else
+        {
+            std::cout << "PCI Chip ID:    (not set)" << std::endl;
+        }
+        std::cout << "=============================\n" << std::endl;
     }
-    std::cout << "=============================\n" << std::endl;
 
-    EXPECT_TRUE(amdgpu->pciChipId.has_value()) << "pciChipId should be populated from HIP runtime";
-    EXPECT_GT(amdgpu->pciChipId.value(), 0) << "pciChipId should be a positive value";
+    EXPECT_TRUE(amdgpu->pciChipId().has_value()) << "pciChipId should be populated from HIP runtime";
+    EXPECT_GT(amdgpu->pciChipId().value(), 0) << "pciChipId should be a positive value";
+
+    auto isKnownChipId = ChipIdRegistry::isKnownChipId(amdgpu->pciChipId().value());
+    EXPECT_TRUE(isKnownChipId) << "PCI Chip ID should be known";
 }
 
-// Test: Verify PciChipIDEqual predicate matches the correct device
+// Verify PciChipIDEqual predicate matches the correct device
 TEST(PciChipIDTest, PciChipIDEqualPredicate)
 {
     int deviceCount = 0;
@@ -88,25 +94,18 @@ TEST(PciChipIDTest, PciChipIDEqualPredicate)
     auto* amdgpu = dynamic_cast<AMDGPU*>(hardware.get());
     ASSERT_NE(amdgpu, nullptr);
 
-    ASSERT_TRUE(amdgpu->pciChipId.has_value()) << "pciChipId must be set for this test";
-    int actualPciChipId = amdgpu->pciChipId.value();
+    ASSERT_TRUE(amdgpu->pciChipId().has_value()) << "pciChipId must be set for this test";
+    int actualPciChipId = amdgpu->pciChipId().value();
     ASSERT_GT(actualPciChipId, 0) << "pciChipId must be valid for this test";
 
     // Create predicate that matches the actual chip ID
     auto matchingPred = std::make_shared<Predicates::GPU::PciChipIDEqual>(actualPciChipId);
 
     // Create predicate that does NOT match (use a different ID)
-    auto nonMatchingPred = std::make_shared<Predicates::GPU::PciChipIDEqual>(0x9999);
+    auto nonMatchingPred = std::make_shared<Predicates::GPU::PciChipIDEqual>(0x1234);
 
-    // Test predicate evaluation
     EXPECT_TRUE((*matchingPred)(*amdgpu)) << "Predicate should match actual chip ID";
     EXPECT_FALSE((*nonMatchingPred)(*amdgpu)) << "Predicate should NOT match different chip ID";
-
-    std::cout << "\n=== PciChipIDEqual Predicate Test ===" << std::endl;
-    std::cout << "Actual PCI Chip ID: 0x" << std::hex << actualPciChipId << std::dec << std::endl;
-    std::cout << "Matching predicate (0x" << std::hex << actualPciChipId << std::dec << "): PASS" << std::endl;
-    std::cout << "Non-matching predicate (0x9999): CORRECTLY REJECTED" << std::endl;
-    std::cout << "=======================================\n" << std::endl;
 }
 
 // Test: Hardware selection with PciChipIDEqual in a library hierarchy
@@ -124,8 +123,8 @@ TEST(PciChipIDTest, HardwareSelectionWithPciChipID)
     auto* amdgpu = dynamic_cast<AMDGPU*>(hardware.get());
     ASSERT_NE(amdgpu, nullptr);
 
-    ASSERT_TRUE(amdgpu->pciChipId.has_value()) << "pciChipId must be set for this test";
-    int actualPciChipId = amdgpu->pciChipId.value();
+    ASSERT_TRUE(amdgpu->pciChipId().has_value()) << "pciChipId must be set for this test";
+    int actualPciChipId = amdgpu->pciChipId().value();
     AMDGPU::Processor actualProcessor = amdgpu->processor;
 
     // Create solutions for different scenarios
@@ -166,15 +165,22 @@ TEST(PciChipIDTest, HardwareSelectionWithPciChipID)
     // Find best solution - should match device-specific
     auto solution = lib.findBestSolution(problem, *hardware);
 
-    std::cout << "\n=== Hardware Selection with PCI Chip ID ===" << std::endl;
-    std::cout << "Device: " << amdgpu->description() << std::endl;
-    std::cout << "PCI Chip ID: 0x" << std::hex << actualPciChipId << std::dec << std::endl;
-    if (solution) {
-        std::cout << "Selected solution: " << solution->solutionName << " (index=" << solution->index << ")" << std::endl;
-    } else {
-        std::cout << "No solution found!" << std::endl;
+    if(Debug::Instance().debugEnabled())
+    {
+        std::cout << "\n=== Hardware Selection with PCI Chip ID ===" << std::endl;
+        std::cout << "Device: " << amdgpu->description() << std::endl;
+        std::cout << "PCI Chip ID: 0x" << std::hex << actualPciChipId << std::dec << std::endl;
+        if(solution)
+        {
+            std::cout << "Selected solution: " << solution->solutionName << " (index=" << solution->index << ")"
+                      << std::endl;
+        }
+        else
+        {
+            std::cout << "No solution found!" << std::endl;
+        }
+        std::cout << "============================================\n" << std::endl;
     }
-    std::cout << "============================================\n" << std::endl;
 
     ASSERT_NE(solution, nullptr) << "Should find a matching solution";
     EXPECT_EQ(solution->index, 1) << "Should select device-specific solution (index 1)";
@@ -187,9 +193,13 @@ TEST(PciChipIDTest, HardwareSelectionWithPciChipID)
     ASSERT_NE(fallbackResult, nullptr) << "Should find fallback solution";
     EXPECT_EQ(fallbackResult->index, 2) << "Should select fallback solution (index 2) for different chip ID";
 
-    std::cout << "Fallback test with different PCI Chip ID (0x1234):" << std::endl;
-    std::cout << "Selected solution: " << fallbackResult->solutionName << " (index=" << fallbackResult->index << ")" << std::endl;
-    std::cout << "=================================================\n" << std::endl;
+    if(Debug::Instance().debugEnabled())
+    {
+        std::cout << "Fallback test with different PCI Chip ID (0x1234):" << std::endl;
+        std::cout << "Selected solution: " << fallbackResult->solutionName << " (index=" << fallbackResult->index
+                  << ")" << std::endl;
+        std::cout << "=================================================\n" << std::endl;
+    }
 }
 
 // Test: findAllSolutions with hardware containing pciChipId
@@ -234,18 +244,25 @@ TEST(PciChipIDTest, FindAllSolutionsWithPciChipID)
     // Find all solutions
     auto solutions = lib.findAllSolutions(problem, *hardware);
 
-    std::cout << "\n=== findAllSolutions Test ===" << std::endl;
-    std::cout << "Hardware: " << amdgpu->description() << std::endl;
-    if (amdgpu->pciChipId.has_value()) {
-        std::cout << "PCI Chip ID: 0x" << std::hex << amdgpu->pciChipId.value() << std::dec << std::endl;
-    } else {
-        std::cout << "PCI Chip ID: (not set)" << std::endl;
+    if(Debug::Instance().debugEnabled())
+    {
+        std::cout << "\n=== findAllSolutions Test ===" << std::endl;
+        std::cout << "Hardware: " << amdgpu->description() << std::endl;
+        if(amdgpu->pciChipId().has_value())
+        {
+            std::cout << "PCI Chip ID: 0x" << std::hex << amdgpu->pciChipId().value() << std::dec << std::endl;
+        }
+        else
+        {
+            std::cout << "PCI Chip ID: (not set)" << std::endl;
+        }
+        std::cout << "Found " << solutions.size() << " solution(s):" << std::endl;
+        for(const auto& sol : solutions)
+        {
+            std::cout << "  - " << sol->solutionName << " (index=" << sol->index << ")" << std::endl;
+        }
+        std::cout << "==============================\n" << std::endl;
     }
-    std::cout << "Found " << solutions.size() << " solution(s):" << std::endl;
-    for (const auto& sol : solutions) {
-        std::cout << "  - " << sol->solutionName << " (index=" << sol->index << ")" << std::endl;
-    }
-    std::cout << "==============================\n" << std::endl;
 
     EXPECT_EQ(solutions.size(), 2) << "Should find both solutions";
 }
