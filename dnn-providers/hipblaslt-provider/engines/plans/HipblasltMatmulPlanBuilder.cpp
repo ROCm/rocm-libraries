@@ -119,7 +119,7 @@ void HipblasltMatmulPlanBuilder::buildPlan(
     validateGraphConfiguration(opGraph);
 
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
-    HIPDNN_PLUGIN_LOG_INFO("Building matmul plan for node: {}", nodeWrapper.name());
+    HIPDNN_PLUGIN_LOG_INFO("Building matmul plan for node: " << nodeWrapper.name());
 
     const auto& attr = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::MatmulAttributes>();
     MatmulParams params(attr, opGraph.getTensorMap());
