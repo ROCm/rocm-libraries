@@ -109,6 +109,7 @@ namespace TensileLite
                           << " rows for hardware: " << hardware.description() << std::endl;
             }
 
+            // PASS 1: Search for exact matches (no fallback)
             for(auto const& row : rows)
             {
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
@@ -119,11 +120,11 @@ namespace TensileLite
                     std::cout << "  Checking predicate: " << row.first.value->type() << "... ";
                 }
 
-                if(row.first(problem, hardware))
+                if(row.first(problem, hardware) && !isPredicateFallback(row.first, hardware))
                 {
                     if(Debug::Instance().printDeviceSelection())
                     {
-                        std::cout << "MATCHED! Searching nested library." << std::endl;
+                        std::cout << "EXACT MATCH! Searching nested library." << std::endl;
                     }
 
                     rv = row.second->findBestSolution(problem, hardware, fitness);
@@ -137,7 +138,41 @@ namespace TensileLite
                     {
                         if(Debug::Instance().printDeviceSelection())
                         {
-                            std::cout << "  Solution found: " << rv->name()
+                            std::cout << "  Solution found (exact): " << rv->name()
+                                      << " [MatchingTag: " << rv->matchingTag() << "]" << std::endl;
+                        }
+                        return rv;
+                    }
+                }
+            }
+
+            // PASS 2: Search for fallback matches
+            for(auto const& row : rows)
+            {
+                if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
+                    continue;
+
+                row.first.setLibrary(row.second);
+
+                if(row.first(problem, hardware))
+                {
+                    if(Debug::Instance().printDeviceSelection())
+                    {
+                        std::cout << "FALLBACK MATCH! Searching nested library." << std::endl;
+                    }
+
+                    rv = row.second->findBestSolution(problem, hardware, fitness);
+
+                    if(rv
+                       && dynamic_cast<Predicates::Contraction::EqualityMatching*>(
+                           row.first.value.get()))
+                        rv->tag = MySolution::MatchingTag::Equal;
+
+                    if(rv)
+                    {
+                        if(Debug::Instance().printDeviceSelection())
+                        {
+                            std::cout << "  Solution found (fallback): " << rv->name()
                                       << " [MatchingTag: " << rv->matchingTag() << "]" << std::endl;
                         }
                         return rv;
@@ -147,6 +182,24 @@ namespace TensileLite
 
             return rv;
         }
+
+    private:
+        // Helper to check if a predicate match is a fallback match
+        // Uses SFINAE to handle predicates with and without isFallbackMatch method
+        template <typename Pred>
+        auto isPredicateFallback(Pred const& pred, Hardware const& hardware) const
+            -> decltype(pred.isFallbackMatch(hardware), bool())
+        {
+            return pred.isFallbackMatch(hardware);
+        }
+
+        template <typename Pred>
+        bool isPredicateFallback(...) const
+        {
+            return false; // If no isFallbackMatch method, assume not a fallback
+        }
+
+    public:
 
         virtual SolutionSet<MySolution>
             findAllSolutions(MyProblem const&          problem,
@@ -358,6 +411,12 @@ namespace TensileLite
             }
 
             return rv;
+        }
+
+        // Check if this predicate match is a fallback match (e.g., via PCI Chip ID fallback)
+        bool isFallbackMatch(Hardware const& hardware) const
+        {
+            return value->isFallbackMatch(hardware);
         }
     };
 

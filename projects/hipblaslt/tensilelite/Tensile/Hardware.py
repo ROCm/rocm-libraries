@@ -177,7 +177,19 @@ class HardwarePredicate(Properties.Predicate):
         if myPciChipID is None and otherPciChipID is not None:
             return False
         if myPciChipID is not None and otherPciChipID is not None and myPciChipID != otherPciChipID:
-            return myPciChipID < otherPciChipID
+            # Sort descending so that fallback-source devices (higher chip IDs,
+            # e.g. mi355=0x75a3) appear before fallback-target devices (lower
+            # chip IDs, e.g. mi350=0x75a0).  At runtime PciChipIDEqual uses
+            # one-directional fallback (mi355->mi350 but NOT mi350->mi355), so
+            # mi350 will skip the mi355 row and reach its own.  If no mi355-
+            # specific row exists, mi355 naturally falls through to the mi350
+            # row via the built-in fallback.
+            #
+            # NOTE: This is a fragile pattern, it will not necessarily be the
+            # case whereby higher values (or logical greater than) for chip IDs,
+            # but we make this assumption now based on historical observation of
+            # chip IDs by variant.
+            return myPciChipID > otherPciChipID
 
         # If CU properties are empty, then compare processor predicates
         if myCUCount is None and otherCUCount is None:

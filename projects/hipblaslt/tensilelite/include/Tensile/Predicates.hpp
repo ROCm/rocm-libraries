@@ -163,6 +163,15 @@ namespace TensileLite
                     });
             }
 
+            virtual bool isFallbackMatch(Object const& obj) const override
+            {
+                // An And predicate is a fallback match if ANY of its children are fallback matches
+                return std::any_of(
+                    value.begin(), value.end(), [&obj](std::shared_ptr<Predicate<Object>> pred) {
+                        return pred->isFallbackMatch(obj);
+                    });
+            }
+
             virtual bool debugEval(Object const& obj, std::ostream& stream) const
             {
                 bool rv = (*this)(obj);
@@ -213,6 +222,26 @@ namespace TensileLite
                     });
             }
 
+            virtual bool isFallbackMatch(Object const& obj) const override
+            {
+                // An Or predicate is a fallback match if ALL matching children are fallback matches
+                bool hasMatch = false;
+                bool allMatchesAreFallback = true;
+                for(auto const& pred : value)
+                {
+                    if((*pred)(obj))
+                    {
+                        hasMatch = true;
+                        if(!pred->isFallbackMatch(obj))
+                        {
+                            allMatchesAreFallback = false;
+                            break;
+                        }
+                    }
+                }
+                return hasMatch && allMatchesAreFallback;
+            }
+
             virtual bool debugEval(Object const& obj, std::ostream& stream) const
             {
                 bool rv = (*this)(obj);
@@ -253,6 +282,12 @@ namespace TensileLite
             virtual bool operator()(Object const& obj) const
             {
                 return !(*value)(obj);
+            }
+
+            virtual bool isFallbackMatch(Object const& obj) const override
+            {
+                // Not inverts the match, so fallback status propagates from child
+                return value->isFallbackMatch(obj);
             }
 
             virtual bool debugEval(Object const& obj, std::ostream& stream) const

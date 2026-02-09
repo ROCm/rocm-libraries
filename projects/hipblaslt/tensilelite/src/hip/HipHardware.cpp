@@ -30,6 +30,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <iostream>
+#include <sstream>
 
 namespace TensileLite
 {
@@ -77,7 +78,31 @@ namespace TensileLite
             // Query the PCI Chip ID (the actual hardware identifier, e.g., 0x7550)
             // This is distinct from prop.pciDeviceID which is the PCIe bus slot number
             int pciChipId = 0;
-            HIP_CHECK_EXC(hipDeviceGetAttribute(&pciChipId, hipDeviceAttributePciChipId, deviceId));
+            hipError_t chipIdResult = hipDeviceGetAttribute(&pciChipId, hipDeviceAttributePciChipId, deviceId);
+
+            // Check if the attribute is supported by this HIP runtime version
+            if(chipIdResult == hipErrorInvalidValue)
+            {
+                std::ostringstream msg;
+                msg << "\n"
+                    << "********************************************************************************\n"
+                    << "* FATAL ERROR: hipDeviceAttributePciChipId is not supported!\n"
+                    << "*\n"
+                    << "* The HIP runtime does not support hipDeviceAttributePciChipId.\n"
+                    << "* This attribute is required for device-specific kernel selection.\n"
+                    << "*\n"
+                    << "* Device: " << prop.name << "\n"
+                    << "* Architecture: " << prop.gcnArchName << "\n"
+                    << "* HIP Version: " << HIP_VERSION << "\n"
+                    << "*\n"
+                    << "* Please update to a HIP runtime that supports PCI Chip ID queries,\n"
+                    << "* or rebuild with an older version of this code that doesn't require it.\n"
+                    << "********************************************************************************\n";
+                throw std::runtime_error(msg.str());
+            }
+
+            // For any other error, use standard error checking
+            HIP_CHECK_EXC(chipIdResult);
 
             // Warn if the chip ID is not registered in the known chip ID registry
             if(!ChipIdRegistry::isKnownChipId(pciChipId))

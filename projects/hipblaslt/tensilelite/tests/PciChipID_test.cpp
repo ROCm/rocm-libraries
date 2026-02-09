@@ -16,7 +16,10 @@
 #include <Tensile/ExactLogicLibrary.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
+#include "FallbackTestUtils.hpp"
+
 using namespace TensileLite;
+using namespace TensileLite::testing;
 
 // Verify that hipDeviceAttributePciChipId is correctly queried and matches
 // a known chip ID.
@@ -267,3 +270,243 @@ TEST(PciChipIDTest, FindAllSolutionsWithPciChipID)
     EXPECT_EQ(solutions.size(), 2) << "Should find both solutions";
 }
 
+// ===========================================================================
+// ChipIdFallbackTest fixture -- verifies the 4 kernel-availability scenarios
+// described in the mi350/mi355 fallback specification.
+//
+// Each scenario constructs a HardwareSelectionLibrary whose rows are in the
+// exact order the Python build system produces after the descending-chip-ID
+// sort fix (higher chip IDs first, higher CU counts first within a chip,
+// processor-only catch-all last).
+//
+// Row evaluation is first-match-wins (ExactLogicLibrary), and
+// PciChipIDEqual includes one-directional fallback (mi355->mi350).
+// ===========================================================================
+class ChipIdFallbackTest : public ::testing::Test
+{
+protected:
+    // Mock devices
+    AMDGPU mi350spx = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    AMDGPU mi355spx = makeDevice(_MI355_CHIP_ID, _SPX_CU, "mi355spx");
+    AMDGPU mi350cpx = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    AMDGPU mi355cpx = makeDevice(_MI355_CHIP_ID, _CPX_CU, "mi355cpx");
+
+    static constexpr auto gfx950 = AMDGPU::Processor::gfx950;
+
+    // Index counter for unique solution IDs
+    int nextIdx = 1;
+
+    std::shared_ptr<ContractionSolution> sol(const std::string& name)
+    {
+        return makeSolution(name, nextIdx++);
+    }
+
+    void expectSelected(const ContractionHardwareSelectionLibrary& lib,
+                        const AMDGPU&                              device,
+                        const std::string&                         expectedName)
+    {
+        std::string got = selectSolution(lib, device, device.deviceName);
+        EXPECT_EQ(got, expectedName)
+            << "Device " << device.deviceName
+            << " (chip=" << hexChipId(device.pciChipId().value())
+            << ", CU=" << device.computeUnitCount
+            << "): expected \"" << expectedName << "\", got \"" << got << "\"";
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Scenario 1: Only mi350 kernels (equality + Origami)
+//
+// Available kernels : mi350spx_eq, mi350spx_oob
+// Expected:
+//   mi350spx  -> mi350spx_eq  (exact chip match, SPX CU)
+//   mi355spx  -> mi350spx_oob (mi355 falls through mi355-oob-only row)
+//   mi350cpx  -> mi350spx_oob (CU=64 skips CU=256 rows)
+//   mi355cpx  -> mi350spx_oob (CU=64 skips CU=256 rows)
+// ---------------------------------------------------------------------------
+TEST_F(ChipIdFallbackTest, Scenario1_MI350Only)
+{
+    dbg("=== Scenario 1: MI350 Only ===");
+
+    auto mi350spx_eq  = sol("mi350spx_eq");
+    auto mi350spx_oob = sol("mi350spx_oob");
+
+    // Row order mirrors the Python sort: higher chipId first, higher CU first.
+    // Since only mi350 kernels exist, the mi355 rows map to mi350 oob.
+    auto lib = buildHwLib({
+        // Row 1: mi355, CU=256 -- no mi355-specific kernels, oob only
+        {makeHwPred(gfx950, _MI355_CHIP_ID, _SPX_CU),
+         buildProblemLib(singleLib(mi350spx_oob))},
+
+        // Row 2: mi350, CU=256 -- equality + oob
+        {makeHwPred(gfx950, _MI350_CHIP_ID, _SPX_CU),
+         buildProblemLib(singleLib(mi350spx_eq), singleLib(mi350spx_oob))},
+
+        // Row 3: mi355, any CU -- oob only
+        {makeHwPred(gfx950, _MI355_CHIP_ID),
+         buildProblemLib(singleLib(mi350spx_oob))},
+
+        // Row 4: mi350, any CU -- oob only
+        {makeHwPred(gfx950, _MI350_CHIP_ID),
+         buildProblemLib(singleLib(mi350spx_oob))},
+
+        // Row 5: gfx950 catch-all
+        {makeHwPred(gfx950),
+         buildProblemLib(singleLib(mi350spx_oob))},
+    });
+
+    expectSelected(*lib, mi350spx, "mi350spx_eq");
+    expectSelected(*lib, mi355spx, "mi350spx_oob");
+    expectSelected(*lib, mi350cpx, "mi350spx_oob");
+    expectSelected(*lib, mi355cpx, "mi350spx_oob");
+}
+
+// ---------------------------------------------------------------------------
+// Scenario 2: mi355spx equality + mi350 (equality + Origami)
+//
+// Available kernels : mi350spx_eq, mi350spx_oob, mi355spx_eq
+// Expected:
+//   mi350spx  -> mi350spx_eq
+//   mi355spx  -> mi355spx_eq  (exact chip match)
+//   mi350cpx  -> mi350spx_oob
+//   mi355cpx  -> mi350spx_oob
+// ---------------------------------------------------------------------------
+TEST_F(ChipIdFallbackTest, Scenario2_MI355Eq)
+{
+    dbg("=== Scenario 2: MI355 Eq ===");
+
+    auto mi350spx_eq  = sol("mi350spx_eq");
+    auto mi350spx_oob = sol("mi350spx_oob");
+    auto mi355spx_eq  = sol("mi355spx_eq");
+
+    auto lib = buildHwLib({
+        // Row 1: mi355, CU=256 -- mi355 equality + mi350 oob fallback
+        {makeHwPred(gfx950, _MI355_CHIP_ID, _SPX_CU),
+         buildProblemLib(singleLib(mi355spx_eq), singleLib(mi350spx_oob))},
+
+        // Row 2: mi350, CU=256 -- mi350 equality + oob
+        {makeHwPred(gfx950, _MI350_CHIP_ID, _SPX_CU),
+         buildProblemLib(singleLib(mi350spx_eq), singleLib(mi350spx_oob))},
+
+        // Row 3: mi355, any CU -- oob only
+        {makeHwPred(gfx950, _MI355_CHIP_ID),
+         buildProblemLib(singleLib(mi350spx_oob))},
+
+        // Row 4: mi350, any CU -- oob only
+        {makeHwPred(gfx950, _MI350_CHIP_ID),
+         buildProblemLib(singleLib(mi350spx_oob))},
+
+        // Row 5: catch-all
+        {makeHwPred(gfx950),
+         buildProblemLib(singleLib(mi350spx_oob))},
+    });
+
+    expectSelected(*lib, mi350spx, "mi350spx_eq");
+    expectSelected(*lib, mi355spx, "mi355spx_eq");
+    expectSelected(*lib, mi350cpx, "mi350spx_oob");
+    expectSelected(*lib, mi355cpx, "mi350spx_oob");
+}
+
+// ---------------------------------------------------------------------------
+// Scenario 3: mi355spx (equality + Origami) + mi350 (equality + Origami)
+//
+// Available kernels : mi350spx_eq, mi350spx_oob, mi355spx_eq, mi355spx_oob
+// Expected:
+//   mi350spx  -> mi350spx_eq
+//   mi355spx  -> mi355spx_eq
+//   mi350cpx  -> mi350spx_oob
+//   mi355cpx  -> mi355spx_oob
+// ---------------------------------------------------------------------------
+TEST_F(ChipIdFallbackTest, Scenario3_MI355EqOob)
+{
+    dbg("=== Scenario 3: MI355 Eq + Oob ===");
+
+    auto mi350spx_eq  = sol("mi350spx_eq");
+    auto mi350spx_oob = sol("mi350spx_oob");
+    auto mi355spx_eq  = sol("mi355spx_eq");
+    auto mi355spx_oob = sol("mi355spx_oob");
+
+    auto lib = buildHwLib({
+        // Row 1: mi355, CU=256 -- mi355 equality + mi355 oob
+        {makeHwPred(gfx950, _MI355_CHIP_ID, _SPX_CU),
+         buildProblemLib(singleLib(mi355spx_eq), singleLib(mi355spx_oob))},
+
+        // Row 2: mi350, CU=256 -- mi350 equality + mi350 oob
+        {makeHwPred(gfx950, _MI350_CHIP_ID, _SPX_CU),
+         buildProblemLib(singleLib(mi350spx_eq), singleLib(mi350spx_oob))},
+
+        // Row 3: mi355, any CU -- mi355 oob
+        {makeHwPred(gfx950, _MI355_CHIP_ID),
+         buildProblemLib(singleLib(mi355spx_oob))},
+
+        // Row 4: mi350, any CU -- mi350 oob
+        {makeHwPred(gfx950, _MI350_CHIP_ID),
+         buildProblemLib(singleLib(mi350spx_oob))},
+
+        // Row 5: catch-all
+        {makeHwPred(gfx950),
+         buildProblemLib(singleLib(mi350spx_oob))},
+    });
+
+    expectSelected(*lib, mi350spx, "mi350spx_eq");
+    expectSelected(*lib, mi355spx, "mi355spx_eq");
+    expectSelected(*lib, mi350cpx, "mi350spx_oob");
+    expectSelected(*lib, mi355cpx, "mi355spx_oob");
+}
+
+// ---------------------------------------------------------------------------
+// Scenario 4: mi355spx (equality + OOB) + mi355cpx equality + mi350 (eq + oob)
+//
+// Available kernels : mi350spx_eq, mi350spx_oob, mi355spx_eq, mi355spx_oob,
+//                     mi355cpx_eq
+// Expected:
+//   mi350spx  -> mi350spx_eq
+//   mi355spx  -> mi355spx_eq
+//   mi350cpx  -> mi350spx_oob
+//   mi355cpx  -> mi355cpx_eq   (has its own CPX equality kernels)
+//
+// NOTE: The original specification listed "mi355cpx: mi350cpx_eq -> mi355spx_oob"
+// while the prose said "mi355cpx should use mi355cpx equality kernels first".
+// We follow the prose and use mi355cpx_eq; rename if needed.
+// ---------------------------------------------------------------------------
+TEST_F(ChipIdFallbackTest, Scenario4_MI355CpxEq)
+{
+    dbg("=== Scenario 4: MI355 CPX Eq ===");
+
+    auto mi350spx_eq  = sol("mi350spx_eq");
+    auto mi350spx_oob = sol("mi350spx_oob");
+    auto mi355spx_eq  = sol("mi355spx_eq");
+    auto mi355spx_oob = sol("mi355spx_oob");
+    auto mi355cpx_eq  = sol("mi355cpx_eq");
+
+    auto lib = buildHwLib({
+        // Row 1: mi355, CU=256 -- mi355 equality + oob
+        {makeHwPred(gfx950, _MI355_CHIP_ID, _SPX_CU),
+         buildProblemLib(singleLib(mi355spx_eq), singleLib(mi355spx_oob))},
+
+        // Row 2: mi350, CU=256 -- mi350 equality + oob
+        {makeHwPred(gfx950, _MI350_CHIP_ID, _SPX_CU),
+         buildProblemLib(singleLib(mi350spx_eq), singleLib(mi350spx_oob))},
+
+        // Row 3: mi355, CU=64 -- mi355 cpx equality + mi355 spx oob fallback
+        {makeHwPred(gfx950, _MI355_CHIP_ID, _CPX_CU),
+         buildProblemLib(singleLib(mi355cpx_eq), singleLib(mi355spx_oob))},
+
+        // Row 4: mi355, any CU -- mi355 oob
+        {makeHwPred(gfx950, _MI355_CHIP_ID),
+         buildProblemLib(singleLib(mi355spx_oob))},
+
+        // Row 5: mi350, any CU -- mi350 oob
+        {makeHwPred(gfx950, _MI350_CHIP_ID),
+         buildProblemLib(singleLib(mi350spx_oob))},
+
+        // Row 6: catch-all
+        {makeHwPred(gfx950),
+         buildProblemLib(singleLib(mi350spx_oob))},
+    });
+
+    expectSelected(*lib, mi350spx, "mi350spx_eq");
+    expectSelected(*lib, mi355spx, "mi355spx_eq");
+    expectSelected(*lib, mi350cpx, "mi350spx_oob");
+    expectSelected(*lib, mi355cpx, "mi355cpx_eq");
+}

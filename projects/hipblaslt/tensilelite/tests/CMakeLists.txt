@@ -22,6 +22,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/AlmostEqual_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CuCount_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PciChipID_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"

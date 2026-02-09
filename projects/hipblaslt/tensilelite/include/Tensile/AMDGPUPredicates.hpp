@@ -237,7 +237,7 @@ namespace TensileLite
                 }
 
                 // Check if this match is a fallback (not exact)
-                bool isFallbackMatch(AMDGPU const& gpu) const
+                virtual bool isFallbackMatch(AMDGPU const& gpu) const override
                 {
                     if(!gpu.pciChipId().has_value())
                         return false;
