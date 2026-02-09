@@ -50,7 +50,7 @@ public:
                                 << ", opGraph=" << static_cast<const void*>(opGraph)
                                 << ", engineDetails=" << static_cast<void*>(engineDetails));
 
-        return hipdnn_plugin_sdk::tryCatch([&]() {
+        return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
             hipdnn_plugin_sdk::throwIfNull(handle);
             hipdnn_plugin_sdk::throwIfNull(opGraph);
             hipdnn_plugin_sdk::throwIfNull(engineDetails);
@@ -120,7 +120,7 @@ public:
             engineDetails->ptr = tempBuffer;
             engineDetails->size = serializedDetails.size();
 
-            LOG_API_SUCCESS(__func__, "engineDetails->ptr=" << engineDetails->ptr);
+            LOG_API_SUCCESS(apiName, "engineDetails->ptr=" << engineDetails->ptr);
         });
     }
 };
