@@ -80,18 +80,18 @@ conversions={
         }
 
 # not needed, for reference/debugging
-typeIndexToName = {0: "f32_r", 
-                   1: "f64_r", 
-                   2: "f32_c", 
-                   3: "f64_c", 
-                   4: "f16_r", 
-                   5: "i8_r", 
-                   6: "i32_r", 
-                   7: "bf16_r", 
-                   8: "i8_r", 
-                   10: "f8_r", 
-                   11: "bf8_r", 
-                   12: "f8b8", 
+typeIndexToName = {0: "f32_r",
+                   1: "f64_r",
+                   2: "f32_c",
+                   3: "f64_c",
+                   4: "f16_r",
+                   5: "i8_r",
+                   6: "i32_r",
+                   7: "bf16_r",
+                   8: "i8_r",
+                   10: "f8_r",
+                   11: "bf8_r",
+                   12: "f8b8",
                    13: "b8f8"}
 
 # datatype of each GEMM functions
@@ -112,17 +112,17 @@ datatypes={
             'F8B8HS':['  DataType: 12', '  DestDataType: 4', '  ComputeDataType: 0'],
             'B8F8HS':['  DataType: 13', '  DestDataType: 4', '  ComputeDataType: 0'],
 
-            # don't need it, non-SR cases will take care of SR. 
+            # don't need it, non-SR cases will take care of SR.
             #'F8F8S_SR':  ['  DataType: 10', '  DestDataType: 10', '  ComputeDataType: 0'],
             #'B8B8S_SR':  ['  DataType: 11', '  DestDataType: 11', '  ComputeDataType: 0'],
             #'F8B8B8S_SR':['  DataType: 12', '  DestDataType: 11', '  ComputeDataType: 0'],
             #'B8F8B8S_SR':['  DataType: 13', '  DestDataType: 11', '  ComputeDataType: 0']
-            
+
             'BBS':  ['  DataType: 7', '  DestDataType: 7', '  ComputeDataType: 0'],
             'HHS':  ['  DataType: 4', '  DestDataType: 4', '  ComputeDataType: 0'],
 
             'BSS':  ['  DataType: 7', '  DestDataType: 0', '  ComputeDataType: 0'],
-            'HSS':  ['  DataType: 4', '  DestDataType: 0', '  ComputeDataType: 0']            
+            'HSS':  ['  DataType: 4', '  DestDataType: 0', '  ComputeDataType: 0']
           }
 
 def parseArgs():
@@ -139,9 +139,9 @@ def parseArgs():
 
 # This def reads all the files in the liblogic and only selects the reference yamls (see the table)
 def getLogics(liblogic):
-    
+
     logics = []
-    
+
     for yaml in os.listdir(liblogic):
         for val in validLogics:
             if (os.path.isfile(os.path.join(liblogic, yaml)) and yaml == val):
@@ -164,7 +164,7 @@ def updateLogic(filename, old_string, new_string):
 
 # converts reference lib logics to the family
 def convert(logics, libLogic, outDir):
-    
+
     for yaml in logics:
         print("\n\n <<< wokring on {}>>>".format(yaml))
         for inType in conversions.keys():
@@ -175,25 +175,25 @@ def convert(logics, libLogic, outDir):
                     # create the new logic file name
                     newLogic = yaml.replace(inType, newType)
                     print(" New item is: {}. Generating: {}".format(newType, newLogic))
-                    
+
                     # copy the original logic file with new name in the output dir
                     newLogicFile = os.path.join(outDir,newLogic)
                     shutil.copy(os.path.join(libLogic,yaml),newLogicFile)
-                    
+
                     # make changes in the new logic file
                     # change kernel names
                     updateLogic(newLogicFile, inType, newType)
-                    
+
                     #change datatypes
                     for i in range(3):
-                        updateLogic(newLogicFile, datatypes[inType][i], datatypes[newType][i])                
+                        updateLogic(newLogicFile, datatypes[inType][i], datatypes[newType][i])
                 break
 
 def main():
-    args = parseArgs()    
+    args = parseArgs()
 
     # check if lib logic folder exists
-    if not os.path.exists(args.libLogic): 
+    if not os.path.exists(args.libLogic):
       raise FileNotFoundError("{0} folder does not exist! Check the lib logic path.".format(args.libLogic))
 
     if not os.path.exists(args.outDir):
@@ -205,6 +205,6 @@ def main():
     print(" Here are logics to be converted: {}".format(logics))
 
     convert(logics, args.libLogic, args.outDir)
-    
+
 if __name__ == "__main__":
     main()

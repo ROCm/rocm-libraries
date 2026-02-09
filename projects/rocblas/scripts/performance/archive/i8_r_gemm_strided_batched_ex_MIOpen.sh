@@ -34,4 +34,3 @@ ${bench} -f gemm_strided_batched_ex --a_type f32_r --b_type f32_r --c_type f32_r
 ${bench} -f gemm_strided_batched_ex --a_type f32_r --b_type f32_r --c_type f32_r --d_type f32_r --compute_type f32_r --transposeA N --transposeB N -m 3025 -n 64  -k 64  --lda 3025 --ldb 64  --ldc 3025 --ldd 3025 --batch 64
 ${bench} -f gemm_strided_batched_ex --a_type f32_r --b_type f32_r --c_type f32_r --d_type f32_r --compute_type f32_r --transposeA N --transposeB N -m 784  -n 512 -k 32  --lda 784  --ldb 32  --ldc 784  --ldd 784  --batch 64
 ${bench} -f gemm_strided_batched_ex --a_type f32_r --b_type f32_r --c_type f32_r --d_type f32_r --compute_type f32_r --transposeA N --transposeB N -m 784  -n 128 -k 128 --lda 784  --ldb 128 --ldc 784  --ldd 784  --batch 64
-

@@ -127,6 +127,9 @@ namespace
     constexpr auto tensile_datatype<int8_t> = rocisa::DataType::Int8;
 
     template <>
+    constexpr auto tensile_datatype<int32_t> = rocisa::DataType::Int32;    
+
+    template <>
     constexpr auto tensile_datatype<__half> = rocisa::DataType::Half;
 
     template <>
@@ -174,6 +177,8 @@ namespace
             return rocisa::DataType::BFloat16;
         case HIP_R_8I:
             return rocisa::DataType::Int8;
+        case HIP_R_32I:
+            return rocisa::DataType::Int32;            
 #if HIP_FP8_TYPE_OCP
         case HIP_R_8F_E4M3:
             return rocisa::DataType::Float8;
@@ -442,6 +447,7 @@ namespace
 
         // Set the GSU workspace
         inputs.ws = prob.workspace;
+        inputs.Synchronizer = prob.workspace;
 
         // set bias vector
         inputs.bias = reinterpret_cast<const void*>(prob.bias_vector);
@@ -604,10 +610,13 @@ namespace
 #endif // ifndef HIPSPARSELT_STATIC_LIB
 
                 // Find the location of the libraries
-                if(TestPath(path + "/../Tensile/library"))
+                // The first path below is for new build system where `hipblaslt` is added as a subdirectory
+                if(TestPath(path + "/../hipblaslt/Tensile/library"))
+                    path += "/../hipblaslt/Tensile/library";
+                else if(TestPath(path + "/../Tensile/library"))
                     path += "/../Tensile/library";
                 else if(TestPath(path + "../hipsparselt/library"))
-                    path += "../hipsparselt/library";
+                    path += "/../hipsparselt/library";
                 else
                     path += "/hipsparselt/library";
 
@@ -730,6 +739,12 @@ namespace
                 {
                     using MSL = TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>;
                     m_library = std::dynamic_pointer_cast<MSL>(lib);
+                    if(!m_library->initLibraryMapping(tensileLibPath))
+                    {
+                        std::cerr << "\nrocblaslt error: Could not initialize Tensile library "
+                                     "mapping"
+                                  << std::endl;
+                    }
                 }
                 return 0;
             }();
@@ -869,8 +884,8 @@ rocsparselt_status runContractionProblem(const RocsparseltContractionProblem<Ti,
 
             if(!search_iterations)
             {
-                if(configs[*config_id].max_workspace_bytes > prob.workspaceSize
-                   || (configs[*config_id].max_workspace_bytes > 0 && prob.workspace == nullptr))
+                if(configs[*config_id].max_workspace_bytes + configs[*config_id].synchronizer_bytes > prob.workspaceSize
+                   || (configs[*config_id].max_workspace_bytes + configs[*config_id].synchronizer_bytes > 0 && prob.workspace == nullptr))
                 {
                     hipsparselt_cerr << "config " << *config_id << " need extra workspace "
                                      << configs[*config_id].max_workspace_bytes << " bytes."
@@ -886,7 +901,7 @@ rocsparselt_status runContractionProblem(const RocsparseltContractionProblem<Ti,
                                      << " does not exists - skip" << std::endl;
                     return rocsparselt_status_not_implemented;
                 }
-
+                tensile_inputs.ws = (uint8_t*) tensile_inputs.Synchronizer + configs[*config_id].synchronizer_bytes;
                 RETURN_IF_HIP_ERROR(
                     adapter.launchKernels(solution->solve(tensile_prob, tensile_inputs, *hardware),
                                           prob.streams[0],
@@ -902,8 +917,8 @@ rocsparselt_status runContractionProblem(const RocsparseltContractionProblem<Ti,
                 RETURN_IF_HIP_ERROR(hipEventCreate(&stopEvent));
                 for(int id = 0; id < config_max_id; id++)
                 {
-                    if(configs[id].max_workspace_bytes > prob.workspaceSize
-                       || (configs[id].max_workspace_bytes > 0 && prob.workspace == nullptr))
+                    if(configs[id].max_workspace_bytes + configs[id].synchronizer_bytes > prob.workspaceSize
+                       || (configs[id].max_workspace_bytes + configs[id].synchronizer_bytes> 0 && prob.workspace == nullptr))
                     {
                         hipsparselt_cerr << "config " << id << " need extra workspace "
                                          << configs[id].max_workspace_bytes << " bytes - skip."
@@ -919,7 +934,7 @@ rocsparselt_status runContractionProblem(const RocsparseltContractionProblem<Ti,
                                          << std::endl;
                         continue;
                     }
-
+                    tensile_inputs.ws = (uint8_t*) tensile_inputs.Synchronizer + configs[id].synchronizer_bytes;
                     //warm up
                     RETURN_IF_HIP_ERROR(adapter.launchKernels(
                         solution->solve(tensile_prob, tensile_inputs, *hardware),
@@ -1045,6 +1060,7 @@ rocsparselt_status getBestSolutions(const RocsparseltContractionProblem<Ti, To, 
         configs[i].max_workspace_bytes = solution->requiredWorkspaceSize(tensile_prob, *hardware);
         configs[i].use_bias            = tensile_prob.useBias();
         configs[i].use_scale_alpha_vec = tensile_prob.useScaleAlphaVec();
+        configs[i].synchronizer_bytes  = std::ceil(solution->requiredSynchronizerSize(tensile_prob, *hardware) ? 16 * 409600 * sizeof(int) : 0);
     }
     return rocsparselt_status_success;
 }
@@ -1087,6 +1103,7 @@ GENERATE_DEFINITIONS(hip_bfloat16, hip_bfloat16, float)
 GENERATE_DEFINITIONS(int8_t, int8_t, float)
 GENERATE_DEFINITIONS(int8_t, __half, float)
 GENERATE_DEFINITIONS(int8_t, hip_bfloat16, float)
+GENERATE_DEFINITIONS(int8_t, int32_t, float)
 GENERATE_DEFINITIONS(__hip_fp8_e4m3, float, float)
 GENERATE_DEFINITIONS(__hip_fp8_e5m2, float, float)
 

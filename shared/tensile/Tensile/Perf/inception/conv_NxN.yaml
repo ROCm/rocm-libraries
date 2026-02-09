@@ -64,6 +64,3 @@ BenchmarkProblems:
           - Conv: { count: 4 ,n: 32 ,c: 192 ,h: 17 ,w: 17 ,k: 192 ,y: 1 ,x: 7 ,p: 0 ,q: 3 ,u: 1 ,v: 1 ,l: 1 ,j: 1  }
 
           - Conv: { count: 0 ,n: 32 ,c: 2048 ,h: 17 ,w: 18 ,k: 192 ,y: 1 ,x: 7 ,p: 0 ,q: 3 ,u: 1 ,v: 1 ,l: 1 ,j: 1  }
-
-
-

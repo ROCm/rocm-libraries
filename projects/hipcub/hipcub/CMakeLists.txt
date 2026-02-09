@@ -29,16 +29,6 @@ configure_file(
   @ONLY
 )
 
-# Create wrapper for generated version file
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_file(
-      "hipcub_version.hpp"
-      WRAPPER_LOCATIONS cub/${CMAKE_INSTALL_INCLUDEDIR}/hipcub
-      OUTPUT_LOCATIONS cub/wrapper/include/hipcub
-      ORIGINAL_FILES ${CMAKE_CURRENT_BINARY_DIR}/cub/include/hipcub/hipcub_version.hpp
-  )
-endif()
-
 # Only header target, does not include dependencies
 add_library(hipcub INTERFACE)
 target_include_directories(hipcub
@@ -83,16 +73,6 @@ rocm_install(
   PATTERN "*.hpp"
   PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
-
-# Install the wrapper to hipcub folder. 
-# Wrappers would be in /opt/rocm-xxx/hipcub/include/hipcub
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_install(
-    DIRECTORY
-    "${PROJECT_BINARY_DIR}/cub/wrapper/"
-    DESTINATION hipcub/ 
-  )
-endif()
 
 include(ROCMExportTargetsHeaderOnly)
 

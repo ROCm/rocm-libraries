@@ -24,55 +24,39 @@
 
 #include <unittest/unittest.h>
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 template <class Vector>
-void TestFillSimple(void)
+void TestFillSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector v(5);
-  v[0] = 0;
-  v[1] = 1;
-  v[2] = 2;
-  v[3] = 3;
-  v[4] = 4;
+  Vector v{0, 1, 2, 3, 4};
 
   thrust::fill(v.begin() + 1, v.begin() + 4, (T) 7);
 
-  ASSERT_EQUAL(v[0], 0);
-  ASSERT_EQUAL(v[1], 7);
-  ASSERT_EQUAL(v[2], 7);
-  ASSERT_EQUAL(v[3], 7);
-  ASSERT_EQUAL(v[4], 4);
+  Vector ref{0, 7, 7, 7, 4};
+  ASSERT_EQUAL(v, ref);
 
   thrust::fill(v.begin() + 0, v.begin() + 3, (T) 8);
 
-  ASSERT_EQUAL(v[0], 8);
-  ASSERT_EQUAL(v[1], 8);
-  ASSERT_EQUAL(v[2], 8);
-  ASSERT_EQUAL(v[3], 7);
-  ASSERT_EQUAL(v[4], 4);
+  ref = {8, 8, 8, 7, 4};
+  ASSERT_EQUAL(v, ref);
 
   thrust::fill(v.begin() + 2, v.end(), (T) 9);
 
-  ASSERT_EQUAL(v[0], 8);
-  ASSERT_EQUAL(v[1], 8);
-  ASSERT_EQUAL(v[2], 9);
-  ASSERT_EQUAL(v[3], 9);
-  ASSERT_EQUAL(v[4], 9);
+  ref = {8, 8, 9, 9, 9};
+  ASSERT_EQUAL(v, ref);
 
   thrust::fill(v.begin(), v.end(), (T) 1);
 
-  ASSERT_EQUAL(v[0], 1);
-  ASSERT_EQUAL(v[1], 1);
-  ASSERT_EQUAL(v[2], 1);
-  ASSERT_EQUAL(v[3], 1);
-  ASSERT_EQUAL(v[4], 1);
+  ref = Vector(5, 1);
+  ASSERT_EQUAL(v, ref);
 }
 DECLARE_VECTOR_UNITTEST(TestFillSimple);
 
-void TestFillDiscardIterator(void)
+void TestFillDiscardIterator()
 {
   // there's no result to check because fill returns void
   thrust::fill(
@@ -84,23 +68,19 @@ void TestFillDiscardIterator(void)
 DECLARE_UNITTEST(TestFillDiscardIterator);
 
 template <class Vector>
-void TestFillMixedTypes(void)
+void TestFillMixedTypes()
 {
   Vector v(4);
 
   thrust::fill(v.begin(), v.end(), bool(true));
 
-  ASSERT_EQUAL(v[0], 1);
-  ASSERT_EQUAL(v[1], 1);
-  ASSERT_EQUAL(v[2], 1);
-  ASSERT_EQUAL(v[3], 1);
+  Vector ref(4, 1);
+  ASSERT_EQUAL(v, ref);
 
   thrust::fill(v.begin(), v.end(), char(20));
 
-  ASSERT_EQUAL(v[0], 20);
-  ASSERT_EQUAL(v[1], 20);
-  ASSERT_EQUAL(v[2], 20);
-  ASSERT_EQUAL(v[3], 20);
+  ref = Vector(4, 20);
+  ASSERT_EQUAL(v, ref);
 }
 DECLARE_VECTOR_UNITTEST(TestFillMixedTypes);
 
@@ -138,56 +118,43 @@ void TestFill(size_t n)
 DECLARE_VARIABLE_UNITTEST(TestFill);
 
 template <class Vector>
-void TestFillNSimple(void)
+void TestFillNSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector v(5);
-  v[0] = 0;
-  v[1] = 1;
-  v[2] = 2;
-  v[3] = 3;
-  v[4] = 4;
+  Vector v{0, 1, 2, 3, 4};
 
   typename Vector::iterator iter = thrust::fill_n(v.begin() + 1, 3, (T) 7);
 
-  ASSERT_EQUAL(v[0], 0);
-  ASSERT_EQUAL(v[1], 7);
-  ASSERT_EQUAL(v[2], 7);
-  ASSERT_EQUAL(v[3], 7);
-  ASSERT_EQUAL(v[4], 4);
+  Vector ref{0, 7, 7, 7, 4};
+  ASSERT_EQUAL(v, ref);
+
   ASSERT_EQUAL_QUIET(v.begin() + 4, iter);
 
   iter = thrust::fill_n(v.begin() + 0, 3, (T) 8);
 
-  ASSERT_EQUAL(v[0], 8);
-  ASSERT_EQUAL(v[1], 8);
-  ASSERT_EQUAL(v[2], 8);
-  ASSERT_EQUAL(v[3], 7);
-  ASSERT_EQUAL(v[4], 4);
+  ref = {8, 8, 8, 7, 4};
+  ASSERT_EQUAL(v, ref);
+
   ASSERT_EQUAL_QUIET(v.begin() + 3, iter);
 
   iter = thrust::fill_n(v.begin() + 2, 3, (T) 9);
 
-  ASSERT_EQUAL(v[0], 8);
-  ASSERT_EQUAL(v[1], 8);
-  ASSERT_EQUAL(v[2], 9);
-  ASSERT_EQUAL(v[3], 9);
-  ASSERT_EQUAL(v[4], 9);
+  ref = {8, 8, 9, 9, 9};
+  ASSERT_EQUAL(v, ref);
+
   ASSERT_EQUAL_QUIET(v.end(), iter);
 
   iter = thrust::fill_n(v.begin(), v.size(), (T) 1);
 
-  ASSERT_EQUAL(v[0], 1);
-  ASSERT_EQUAL(v[1], 1);
-  ASSERT_EQUAL(v[2], 1);
-  ASSERT_EQUAL(v[3], 1);
-  ASSERT_EQUAL(v[4], 1);
+  ref = Vector(5, 1);
+  ASSERT_EQUAL(v, ref);
+
   ASSERT_EQUAL_QUIET(v.end(), iter);
 }
 DECLARE_VECTOR_UNITTEST(TestFillNSimple);
 
-void TestFillNDiscardIterator(void)
+void TestFillNDiscardIterator()
 {
   thrust::discard_iterator<thrust::host_system_tag> h_result =
     thrust::fill_n(thrust::discard_iterator<thrust::host_system_tag>(), 10, 13);
@@ -203,24 +170,20 @@ void TestFillNDiscardIterator(void)
 DECLARE_UNITTEST(TestFillNDiscardIterator);
 
 template <class Vector>
-void TestFillNMixedTypes(void)
+void TestFillNMixedTypes()
 {
   Vector v(4);
 
   typename Vector::iterator iter = thrust::fill_n(v.begin(), v.size(), bool(true));
 
-  ASSERT_EQUAL(v[0], 1);
-  ASSERT_EQUAL(v[1], 1);
-  ASSERT_EQUAL(v[2], 1);
-  ASSERT_EQUAL(v[3], 1);
+  Vector ref(4, 1);
+  ASSERT_EQUAL(v, ref);
   ASSERT_EQUAL_QUIET(v.end(), iter);
 
   iter = thrust::fill_n(v.begin(), v.size(), char(20));
 
-  ASSERT_EQUAL(v[0], 20);
-  ASSERT_EQUAL(v[1], 20);
-  ASSERT_EQUAL(v[2], 20);
-  ASSERT_EQUAL(v[3], 20);
+  ref = Vector(4, 20);
+  ASSERT_EQUAL(v, ref);
   ASSERT_EQUAL_QUIET(v.end(), iter);
 }
 DECLARE_VECTOR_UNITTEST(TestFillNMixedTypes);
@@ -263,7 +226,7 @@ void TestFillN(size_t n)
 DECLARE_VARIABLE_UNITTEST(TestFillN);
 
 template <typename Vector>
-void TestFillZipIterator(void)
+void TestFillZipIterator()
 {
   using T = typename Vector::value_type;
 
@@ -275,19 +238,18 @@ void TestFillZipIterator(void)
                thrust::make_zip_iterator(thrust::make_tuple(v1.end(), v2.end(), v3.end())),
                thrust::tuple<T, T, T>(4, 7, 13));
 
-  ASSERT_EQUAL(4, v1[0]);
-  ASSERT_EQUAL(4, v1[1]);
-  ASSERT_EQUAL(4, v1[2]);
-  ASSERT_EQUAL(7, v2[0]);
-  ASSERT_EQUAL(7, v2[1]);
-  ASSERT_EQUAL(7, v2[2]);
-  ASSERT_EQUAL(13, v3[0]);
-  ASSERT_EQUAL(13, v3[1]);
-  ASSERT_EQUAL(13, v3[2]);
+  Vector ref1{4, 4, 4};
+  ASSERT_EQUAL(ref1, v1);
+
+  Vector ref2{7, 7, 7};
+  ASSERT_EQUAL(ref2, v2);
+
+  Vector ref3{13, 13, 13};
+  ASSERT_EQUAL(ref3, v3);
 };
 DECLARE_VECTOR_UNITTEST(TestFillZipIterator);
 
-void TestFillTuple(void)
+void TestFillTuple()
 {
   using T     = int;
   using Tuple = thrust::tuple<T, T>;
@@ -307,7 +269,7 @@ struct TypeWithTrivialAssigment
   int x, y, z;
 };
 
-void TestFillWithTrivialAssignment(void)
+void TestFillWithTrivialAssignment()
 {
   using T = TypeWithTrivialAssigment;
 
@@ -364,7 +326,7 @@ struct TypeWithNonTrivialAssigment
   }
 };
 
-void TestFillWithNonTrivialAssignment(void)
+void TestFillWithNonTrivialAssignment()
 {
   using T = TypeWithNonTrivialAssigment;
 
@@ -463,4 +425,4 @@ void TestFillNDispatchImplicit()
 }
 DECLARE_UNITTEST(TestFillNDispatchImplicit);
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
+THRUST_DIAG_POP

@@ -26,7 +26,6 @@
 #ifndef GUARD_MIOPEN_DB_RECORD_HPP_
 #define GUARD_MIOPEN_DB_RECORD_HPP_
 
-#include <miopen/config.hpp>
 #include <miopen/logger.hpp>
 
 #include <cassert>
@@ -212,7 +211,7 @@ private:
     }
 
 public:
-    DbRecord() : key(""){};
+    DbRecord() : key("") {};
     /// T shall provide a db KEY by means of the "void Serialize(std::ostream&) const" member
     /// function.
     template <class T>

@@ -255,17 +255,8 @@ void RC2DNode::AssignParams_internal()
     rowPlan->inStride = inStride;
     rowPlan->iDist    = iDist;
 
-    // make output of row plan contiguous if the 2D node is at the root of the plan tree
-    if(parent == nullptr)
-    {
-        rowPlan->outStride = {1, length[0]};
-        rowPlan->oDist     = length[0] * length[1];
-    }
-    else
-    {
-        rowPlan->outStride = inStride;
-        rowPlan->oDist     = iDist;
-    }
+    rowPlan->outStride = outStride;
+    rowPlan->oDist     = oDist;
 
     rowPlan->AssignParams();
 
@@ -299,8 +290,8 @@ bool Single2DNode::CreateDeviceResources()
     radices1.insert(radices1.cbegin(), kernelFactors.cbegin(), kernelFactors.cbegin() + count);
     radices2.insert(radices2.cbegin(), kernelFactors.cbegin() + count, kernelFactors.cend());
 
-    twd_attach_halfN  = (ebtype == EmbeddedType::Real2C_POST);
-    twd_attach_halfN2 = (ebtype == EmbeddedType::C2Real_PRE);
+    twd_attach_halfN  = (ebtype != EmbeddedType::NONE);
+    twd_attach_halfN2 = false;
     // create one set of twiddles for each dimension
     std::tie(twiddles, twiddles_size) = Repo::GetTwiddles2D(length[0],
                                                             length[1],
@@ -326,22 +317,11 @@ void Single2DNode::SetupGridParam_internal(GridParam& gp)
     size_t padded_len0 = length[0];
     size_t padded_len1 = length[1];
 
-    if(ebtype == EmbeddedType::Real2C_POST)
+    if(ebtype != EmbeddedType::NONE)
         padded_len0 += 1;
-    if(ebtype == EmbeddedType::C2Real_PRE)
-        padded_len1 += 1;
 
     // if fastest length is power of 2, pad it to avoid LDS bank conflicts
-    if(ebtype != EmbeddedType::C2Real_PRE)
-    {
-        // for EBTYPE NONE/POST, the fastest length is length0
-        padded_len0 = IsPo2(padded_len0) ? padded_len0 + 1 : padded_len0;
-    }
-    else
-    {
-        // for EBTYPE PRE, the fastest length is length1
-        padded_len1 = IsPo2(padded_len1) ? padded_len1 + 1 : padded_len1;
-    }
+    padded_len0 = IsPo2(padded_len0) ? padded_len0 + 1 : padded_len0;
 
     lds = padded_len0 * padded_len1 * bwd;
 
@@ -349,6 +329,4 @@ void Single2DNode::SetupGridParam_internal(GridParam& gp)
     // transform in the 3rd dimension
     if(length.size() > 2)
         gp.b_x *= length[2];
-
-    return;
 }

@@ -58,15 +58,16 @@ struct rocsparse_matrix_utils
     //
     // @brief Initialize a host dense matrix with random values.
     // @param[in] that Fill \p that matrix.
+    // @param[in] use_exact If \p use_exact is true, the matrix will be initialized with exact values.
     //
     template <typename T>
-    static void init(host_dense_matrix<T>& that)
+    static void init(host_dense_matrix<T>& that, bool use_exact = false)
     {
         switch(that.order)
         {
         case rocsparse_order_column:
         {
-            rocsparse_init<T>(that, that.m, that.n, that.ld);
+            rocsparse_init<T>(that, that.m, that.n, that.ld, use_exact);
             break;
         }
 
@@ -76,7 +77,7 @@ struct rocsparse_matrix_utils
             // Little trick but the resulting matrix is the transpose of the matrix obtained from rocsparse_order_column.
             // If this poses a problem, we need to refactor rocsparse_init.
             //
-            rocsparse_init<T>(that, that.n, that.m, that.ld);
+            rocsparse_init<T>(that, that.n, that.m, that.ld, use_exact);
             break;
         }
         }

@@ -65,4 +65,3 @@ def pvar(state, field):
 
 def roundupRatio(dividend, divisor):
   return int(math.ceil(float(dividend) / float(divisor)))
-

@@ -16,64 +16,61 @@
  */
 
 #include <thrust/extrema.h>
+#include <thrust/functional.h>
 #include <thrust/iterator/retag.h>
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/universal_vector.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
+
+using VectorTestsParams = ::testing::Types<
+  Params<thrust::host_vector<signed char>>,
+  Params<thrust::host_vector<short>>,
+  Params<thrust::host_vector<int>>,
+  Params<thrust::host_vector<float>>,
+  Params<thrust::host_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::host_memory_resource>>>,
+  Params<thrust::device_vector<signed char>>,
+  Params<thrust::device_vector<short>>,
+  Params<thrust::device_vector<int>>,
+  Params<thrust::device_vector<float>>,
+  Params<thrust::device_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::device_memory_resource>>>,
+  Params<thrust::universal_vector<int>>,
+  Params<thrust::universal_host_pinned_vector<int>>>;
 
 TESTS_DEFINE(MaxElementTests, FullTestsParams);
 TESTS_DEFINE(MaxElementPrimitiveTests, NumericalTestsParams);
+TESTS_DEFINE(MaxElementVectorUnitTests, VectorTestsParams);
 
 TYPED_TEST(MaxElementTests, TestMaxElementSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(6);
-  data[0] = 3;
-  data[1] = 5;
-  data[2] = 1;
-  data[3] = 2;
-  data[4] = 5;
-  data[5] = 1;
+  Vector data{3, 5, 1, 2, 5, 1};
 
-  ASSERT_EQ(*thrust::max_element(Policy{}, data.begin(), data.end()), 5);
-  ASSERT_EQ(thrust::max_element(Policy{}, data.begin(), data.end()) - data.begin(), 1);
+  ASSERT_EQ(*thrust::max_element(data.begin(), data.end()), 5);
+  ASSERT_EQ(thrust::max_element(data.begin(), data.end()) - data.begin(), 1);
 
-  ASSERT_EQ(*thrust::max_element(Policy{}, data.begin(), data.end(), thrust::greater<T>()), 1);
-  ASSERT_EQ(thrust::max_element(Policy{}, data.begin(), data.end(), thrust::greater<T>()) - data.begin(), 2);
+  ASSERT_EQ(*thrust::max_element(data.begin(), data.end(), thrust::greater<T>()), 1);
+  ASSERT_EQ(thrust::max_element(data.begin(), data.end(), thrust::greater<T>()) - data.begin(), 2);
 }
 
-TYPED_TEST(MaxElementTests, TestMaxElementWithTransform)
+TYPED_TEST(MaxElementVectorUnitTests, TestMaxElementWithTransform)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  // We cannot use unsigned types for this test case
-  if (std::is_unsigned<T>::value)
-  {
-    return;
-  }
+  Vector data{3, 5, 1, 2, 5, 1};
 
-  Vector data(6);
-  data[0] = 3;
-  data[1] = 5;
-  data[2] = 1;
-  data[3] = 2;
-  data[4] = 5;
-  data[5] = 1;
-
-  ASSERT_EQ(*thrust::max_element(Policy{},
-                                 thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
+  ASSERT_EQ(*thrust::max_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
                                  thrust::make_transform_iterator(data.end(), thrust::negate<T>())),
             -1);
-  ASSERT_EQ(*thrust::max_element(Policy{},
-                                 thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
+  ASSERT_EQ(*thrust::max_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
                                  thrust::make_transform_iterator(data.end(), thrust::negate<T>()),
                                  thrust::greater<T>()),
             -5);
@@ -103,9 +100,9 @@ TYPED_TEST(MaxElementPrimitiveTests, TestMaxElement)
       ASSERT_EQ(h_max - h_data.begin(), d_max - d_data.begin());
 
       typename thrust::host_vector<T>::iterator h_min =
-        thrust::max_element(h_data.begin(), h_data.end(), thrust::less<T>());
+        thrust::max_element(h_data.begin(), h_data.end(), thrust::greater<T>());
       typename thrust::device_vector<T>::iterator d_min =
-        thrust::max_element(d_data.begin(), d_data.end(), thrust::less<T>());
+        thrust::max_element(d_data.begin(), d_data.end(), thrust::greater<T>());
 
       ASSERT_EQ(h_min - h_data.begin(), d_min - d_data.begin());
     }
@@ -147,4 +144,25 @@ TEST(MaxElementTests, TestMaxElementDispatchImplicit)
   thrust::max_element(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()));
 
   ASSERT_EQ(13, vec.front());
+}
+
+void TestMaxElementWithBigIndexesHelper(int magnitude)
+{
+  thrust::counting_iterator<long long> begin(1);
+  thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
+  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
+
+  ASSERT_EQ(*thrust::max_element(thrust::device, begin, end), (1ll << magnitude));
+}
+
+TEST(MaxElementTests, TestMaxElementWithBigIndexes)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestMaxElementWithBigIndexesHelper(30);
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
+  TestMaxElementWithBigIndexesHelper(31);
+  TestMaxElementWithBigIndexesHelper(32);
+  TestMaxElementWithBigIndexesHelper(33);
+#endif
 }

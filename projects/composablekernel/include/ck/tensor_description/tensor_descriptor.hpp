@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2023, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -7,6 +7,8 @@
 #include "ck/utility/sequence_helper.hpp"
 #include "ck/tensor_description/multi_index_transform.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 namespace ck {
 
 template <index_t NDimHidden, typename VisibleDimensionIds>
@@ -179,7 +181,10 @@ struct TensorDescriptor
     }
 
     // TODO make these private
-    __host__ __device__ constexpr const auto& GetTransforms() const { return transforms_; }
+    __host__ __device__ constexpr const auto& GetTransforms() const [[clang::lifetimebound]]
+    {
+        return transforms_;
+    }
 
     __host__ __device__ static constexpr auto GetLowerDimensionIdss()
     {
@@ -253,9 +258,12 @@ struct TensorCoordinate
     __host__ __device__ constexpr index_t GetOffset() const { return idx_hidden_[Number<0>{}]; }
 
     // TODO make these private
-    __host__ __device__ constexpr const auto& GetHiddenIndex() const { return idx_hidden_; }
+    __host__ __device__ constexpr const auto& GetHiddenIndex() const [[clang::lifetimebound]]
+    {
+        return idx_hidden_;
+    }
 
-    __host__ __device__ auto& GetHiddenIndex() { return idx_hidden_; }
+    __host__ __device__ auto& GetHiddenIndex() [[clang::lifetimebound]] { return idx_hidden_; }
 
     __host__ __device__ constexpr auto GetVisibleIndex() const
     {
@@ -284,7 +292,7 @@ struct TensorCoordinateStep
     __host__ __device__ constexpr const auto& GetIndexDiff() const { return GetVisibleIndexDiff(); }
 
     // TODO make these private
-    __host__ __device__ constexpr const auto& GetVisibleIndexDiff() const
+    __host__ __device__ constexpr const auto& GetVisibleIndexDiff() const [[clang::lifetimebound]]
     {
         return idx_diff_visible_;
     }
@@ -365,7 +373,7 @@ transform_tensor_descriptor(const OldTensorDescriptor& old_tensor_desc,
         Sequence<0>{}, inclusive_scan_sequence(up_dim_numbers, math::plus<index_t>{}, Number<0>{}));
 
     constexpr auto up_dim_hidden_idss = generate_tuple(
-        [ old_hidden_dim_number, up_dim_numbers_scan ](auto i) constexpr {
+        [old_hidden_dim_number, up_dim_numbers_scan](auto i) constexpr {
             return
                 typename arithmetic_sequence_gen<old_hidden_dim_number + up_dim_numbers_scan[i],
                                                  old_hidden_dim_number + up_dim_numbers_scan[i + 1],
@@ -374,12 +382,12 @@ transform_tensor_descriptor(const OldTensorDescriptor& old_tensor_desc,
         Number<num_new_transform>{});
 
     // new visible dimension's hidden ids
-    constexpr auto unordered_new_visible_dim_hidden_ids = unpack(
-        [](auto... xs) constexpr { return merge_sequences(xs...); }, up_dim_hidden_idss);
+    constexpr auto unordered_new_visible_dim_hidden_ids =
+        unpack([](auto... xs) constexpr { return merge_sequences(xs...); }, up_dim_hidden_idss);
 
-    constexpr auto new_visible_dim_unordered2ordered = unpack(
-        [](auto... xs) constexpr { return merge_sequences(xs...); },
-        NewUpperDimensionNewVisibleIdss{});
+    constexpr auto new_visible_dim_unordered2ordered =
+        unpack([](auto... xs) constexpr { return merge_sequences(xs...); },
+               NewUpperDimensionNewVisibleIdss{});
 
     constexpr auto new_visible_dim_hidden_ids =
         unordered_new_visible_dim_hidden_ids.ReorderGivenOld2New(new_visible_dim_unordered2ordered);
@@ -613,3 +621,4 @@ using TensorCoordinateStep_t = decltype(make_tensor_coordinate_step(
     TensorDesc{}, MultiIndex<remove_cvref_t<TensorDesc>::GetNumOfDimension()>{}));
 
 } // namespace ck
+#pragma clang diagnostic pop

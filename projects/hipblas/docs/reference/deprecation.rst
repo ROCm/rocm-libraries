@@ -8,7 +8,7 @@
 Deprecations by version
 ********************************************************************
 
-This topic lists the deprecated hipBLAS API elements by release, from newest to oldest. 
+This topic lists the deprecated hipBLAS API elements by release, from newest to oldest.
 
 Removed in hipBLAS 3.0
 **********************
@@ -49,7 +49,7 @@ Note that there are no deprecation warnings for the hipBLAS Fortran API.
 Removed in hipBLAS 2.0
 **********************
 
-Legacy BLAS in-place trmm is removed 
+Legacy BLAS in-place trmm is removed
 ====================================
 
 The legacy BLAS in-place ``hipblasXtrmm`` that calculates ``B <- alpha * op(A) * B`` is removed and replaced with the

@@ -49,7 +49,7 @@ Here is the project directory structure to help you find the project files avail
 Testing
 =======
 
-Tensile uses `pytest <https://docs.pytest.org/>`_ to manage library or kernel tests. The Tensile project utilizes `pytest markers <https://docs.pytest.org/en/stable/how-to/mark.html>`_ to filter the tests to be run. Important markers include ``pre_checkin``, ``extended``, ``integration``, and ``unit``. Refer to `pytest.ini <https://github.com/ROCm/Tensile/blob/develop/pytest.ini>`_ for all supported markers.
+Tensile uses `pytest <https://docs.pytest.org/>`_ to manage library or kernel tests. The Tensile project utilizes `pytest markers <https://docs.pytest.org/en/stable/how-to/mark.html>`_ to filter the tests to be run. Important markers include ``pre_checkin``, ``extended``, ``integration``, and ``unit``. Refer to `pytest.ini <https://github.com/ROCm/rocm-libraries/blob/develop/shared/tensile/pytest.ini>`_ for all supported markers.
 
 You can run a test via the ``tox ci`` environment by passing the desired test marker using ``-m <MARKER>``:
 
@@ -83,7 +83,7 @@ By default, coverage results are dumped to the terminal. To generate reports in 
 
    tox run -e unittest -- --cov-report=html
 
-Files and directories excluded from coverage reporting are itemized in `.coveragerc <https://github.com/ROCm/Tensile/blob/develop/.coveragerc>`_.
+Files and directories excluded from coverage reporting are itemized in `.coveragerc <https://github.com/ROCm/rocm-libraries/blob/develop/shared/tensile/.coveragerc>`_.
 
 Although, we encourage to run unit tests using ``tox`` for consistency, you can also run the tests directly using ``pytest`` for quicker feedback. For example, To run a single test named ``test_foo``, use:
 
@@ -112,7 +112,7 @@ Next, you can configure, build, and run the host library tests using any of the 
 
   .. note::
 
-   Note that the ``tox`` command wraps `invoke <https://www.pyinvoke.org/index.html>`_, a tool to manage CLI-invokable tasks. Since tox is fundamentally a Python environment manager and test runner, any reusable shell commands that fall outside its purview are managed by invoke (which are again encapsulated by tox sometimes). See `tasks.py <https://github.com/ROCm/Tensile/blob/develop/tasks.py>`_ for details.
+   Note that the ``tox`` command wraps `invoke <https://www.pyinvoke.org/index.html>`_, a tool to manage CLI-invokable tasks. Since tox is fundamentally a Python environment manager and test runner, any reusable shell commands that fall outside its purview are managed by invoke (which are again encapsulated by tox sometimes). See `tasks.py <https://github.com/ROCm/rocm-libraries/blob/develop/shared/tensile/tasks.py>`_ for details.
 
 - ``invoke``:
 
@@ -122,7 +122,7 @@ Next, you can configure, build, and run the host library tests using any of the 
 
   Running the preceding command generates an executable ``TensileTests``, which can be further used to run the tests.
 
-- Manually: To build and run the tests manually, see the commands in `tasks.py <https://github.com/ROCm/Tensile/blob/develop/tasks.py>`_.
+- Manually: To build and run the tests manually, see the commands in `tasks.py <https://github.com/ROCm/rocm-libraries/blob/develop/shared/tensile/tasks.py>`_.
   For advanced usage like filtering or repeating test cases, see the `gtest documentation <https://github.com/google/googletest/blob/main/docs/advanced.md>`_.
 
 ===============
@@ -142,7 +142,7 @@ To run all static analysis, use the top-level ``tox`` label ``static``:
 .. note::
    The preceding command might reformat your code, so make sure to commit your changes after running the command.
 
-**Linting** is evaluated using `flake8 <https://flake8.pycqa.org/en/latest/>`_ and **formatting** is conducted using `black <https://black.readthedocs.io/en/stable/>`_ and `isort <https://pycqa.github.io/isort/>`_. To run a check in isolation, either refer to `tox.ini <https://github.com/ROCm/Tensile/blob/develop/tox.ini>`_ or use one the following commands:
+**Linting** is evaluated using `flake8 <https://flake8.pycqa.org/en/latest/>`_ and **formatting** is conducted using `black <https://black.readthedocs.io/en/stable/>`_ and `isort <https://pycqa.github.io/isort/>`_. To run a check in isolation, either refer to `tox.ini <https://github.com/ROCm/rocm-libraries/blob/develop/shared/tensile/tox.ini>`_ or use one the following commands:
 
 .. code-block::
 
@@ -153,7 +153,7 @@ To run all static analysis, use the top-level ``tox`` label ``static``:
 
 .. tip::
 
-   To ensure consistent formatting, we recommend you to set up the editor to **format on save** using the same formatter settings as in `tox.ini <https://github.com/ROCm/Tensile/blob/develop/tox.ini>`_. Either way, ensuring to commit changes after running static analysis reduces wait times caused by simple CI failures.
+   To ensure consistent formatting, we recommend you to set up the editor to **format on save** using the same formatter settings as in `tox.ini <https://github.com/ROCm/rocm-libraries/blob/develop/shared/tensile/tox.ini>`_. Either way, ensuring to commit changes after running static analysis reduces wait times caused by simple CI failures.
 
 ---
 C++
@@ -166,7 +166,7 @@ The following command formats all given files, however, we recommend you to setu
 
    clang-format -i style=file <files>
 
-Styling rules are configured in `.clang-format <https://github.com/ROCm/Tensile/blob/develop/.clang-format>`_.
+Styling rules are configured in `.clang-format <https://github.com/ROCm/rocm-libraries/blob/develop/shared/tensile/.clang-format>`_.
 
 =========
 Profiling

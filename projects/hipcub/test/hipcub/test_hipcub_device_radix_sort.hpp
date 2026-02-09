@@ -26,8 +26,8 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/device/device_radix_sort.hpp"
-#include "hipcub/util_type.hpp"
+#include <hipcub/device/device_radix_sort.hpp>
+#include <hipcub/util_type.hpp>
 
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
@@ -82,9 +82,9 @@ public:
 TYPED_TEST_SUITE_P(HipcubDeviceRadixSort);
 
 template<class T>
-auto generate_key_input(size_t size, unsigned int seed_value)
-    -> std::enable_if_t<hipcub::NumericTraits<T>::CATEGORY == hipcub::FLOATING_POINT,
-                        std::vector<T>>
+auto generate_key_input(size_t size, unsigned int seed_value) HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+    ->std::enable_if_t<hipcub::NumericTraits<T>::CATEGORY == hipcub::FLOATING_POINT,
+                       std::vector<T>> HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 {
     auto result = test_utils::get_random_data<T>(size,
                                                  test_utils::numeric_limits<T>::min(),
@@ -95,9 +95,9 @@ auto generate_key_input(size_t size, unsigned int seed_value)
 }
 
 template<class T>
-auto generate_key_input(size_t size, unsigned int seed_value)
-    -> std::enable_if_t<hipcub::NumericTraits<T>::CATEGORY != hipcub::FLOATING_POINT,
-                        std::vector<T>>
+auto generate_key_input(size_t size, unsigned int seed_value) HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+    ->std::enable_if_t<hipcub::NumericTraits<T>::CATEGORY != hipcub::FLOATING_POINT,
+                       std::vector<T>> HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 {
     using inner_t = typename test_utils::inner_type<T>::type;
     return test_utils::get_random_data<T>(size,

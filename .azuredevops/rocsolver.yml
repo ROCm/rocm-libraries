@@ -36,8 +36,11 @@ trigger:
 
 pr: none
 
-jobs:
+stages:
+- stage: rocsolver
+  jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocSOLVER.yml@pipelines_repo
     parameters:
       sparseCheckoutDir: projects/rocsolver
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+- template: templates/report-summary-check-wrapper.yml

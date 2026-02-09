@@ -15,14 +15,13 @@
  *  limitations under the License.
  */
 
-#include <thrust/device_vector.h>
-#include <thrust/execution_policy.h>
 #include <thrust/functional.h>
-#include <thrust/host_vector.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/sort.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 template <class Key, class Item, class CompareFunction = thrust::less<Key>>
 struct ParamsSort
@@ -284,31 +283,16 @@ TEST(SortTests, TestSortDispatchImplicit)
 template <class Vector>
 void InitializeSimpleKeySortTest(Vector& unsorted_keys, Vector& sorted_keys)
 {
-  using T = typename Vector::value_type;
-
   unsorted_keys.resize(7);
-  unsorted_keys[0] = T(1);
-  unsorted_keys[1] = T(3);
-  unsorted_keys[2] = T(6);
-  unsorted_keys[3] = T(5);
-  unsorted_keys[4] = T(2);
-  unsorted_keys[5] = T(0);
-  unsorted_keys[6] = T(4);
+  unsorted_keys = {1, 3, 6, 5, 2, 0, 4};
 
   sorted_keys.resize(7);
-  sorted_keys[0] = T(0);
-  sorted_keys[1] = T(1);
-  sorted_keys[2] = T(2);
-  sorted_keys[3] = T(3);
-  sorted_keys[4] = T(4);
-  sorted_keys[5] = T(5);
-  sorted_keys[6] = T(6);
+  sorted_keys = {0, 1, 2, 3, 4, 5, 6};
 }
 
 TYPED_TEST(SortVector, TestSortSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -317,7 +301,7 @@ TYPED_TEST(SortVector, TestSortSimple)
 
   InitializeSimpleKeySortTest(unsorted_keys, sorted_keys);
 
-  thrust::sort(Policy{}, unsorted_keys.begin(), unsorted_keys.end());
+  thrust::sort(unsorted_keys.begin(), unsorted_keys.end());
 
   ASSERT_EQ(unsorted_keys, sorted_keys);
 }
@@ -352,23 +336,20 @@ TEST(SortTests, TestSortDescendingKey)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  for (auto size : {10027})
+  const size_t n = 10027;
+
+  for (auto seed : get_seeds())
   {
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
+    SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-    for (auto seed : get_seeds())
-    {
-      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+    thrust::host_vector<int> h_data =
+      get_random_data<int>(n, get_default_limits<int>::min(), get_default_limits<int>::max(), seed);
+    thrust::device_vector<int> d_data = h_data;
 
-      thrust::host_vector<int> h_data =
-        get_random_data<int>(size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
-      thrust::device_vector<int> d_data = h_data;
+    thrust::sort(h_data.begin(), h_data.end(), thrust::greater<int>());
+    thrust::sort(d_data.begin(), d_data.end(), thrust::greater<int>());
 
-      thrust::sort(h_data.begin(), h_data.end(), thrust::greater<int>());
-      thrust::sort(d_data.begin(), d_data.end(), thrust::greater<int>());
-
-      ASSERT_EQ(h_data, d_data);
-    }
+    ASSERT_EQ(h_data, d_data);
   }
 }
 
@@ -376,24 +357,20 @@ TEST(SortTests, TestSortBool)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  for (auto size : {10027})
+  const size_t n = 10027;
+
+  for (auto seed : get_seeds())
   {
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
+    SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-    for (auto seed : get_seeds())
-    {
-      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+    thrust::host_vector<bool> h_data =
+      get_random_data<bool>(n, get_default_limits<bool>::min(), get_default_limits<bool>::max(), seed);
+    thrust::device_vector<bool> d_data = h_data;
 
-      thrust::host_vector<bool> h_data =
-        get_random_data<bool>(size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed);
+    thrust::sort(h_data.begin(), h_data.end());
+    thrust::sort(d_data.begin(), d_data.end());
 
-      thrust::device_vector<bool> d_data = h_data;
-
-      thrust::sort(h_data.begin(), h_data.end());
-      thrust::sort(d_data.begin(), d_data.end());
-
-      ASSERT_EQ(h_data, d_data);
-    }
+    ASSERT_EQ(h_data, d_data);
   }
 }
 
@@ -401,24 +378,20 @@ TEST(SortTests, TestSortBoolDescending)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  for (auto size : {10027})
+  const size_t n = 10027;
+
+  for (auto seed : get_seeds())
   {
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
+    SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-    for (auto seed : get_seeds())
-    {
-      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+    thrust::host_vector<bool> h_data =
+      get_random_data<bool>(n, get_default_limits<bool>::min(), get_default_limits<bool>::max(), seed);
+    thrust::device_vector<bool> d_data = h_data;
 
-      thrust::host_vector<bool> h_data =
-        get_random_data<bool>(size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed);
+    thrust::sort(h_data.begin(), h_data.end(), thrust::greater<bool>());
+    thrust::sort(d_data.begin(), d_data.end(), thrust::greater<bool>());
 
-      thrust::device_vector<bool> d_data = h_data;
-
-      thrust::sort(h_data.begin(), h_data.end(), thrust::greater<bool>());
-      thrust::sort(d_data.begin(), d_data.end(), thrust::greater<bool>());
-
-      ASSERT_EQ(h_data, d_data);
-    }
+    ASSERT_EQ(h_data, d_data);
   }
 }
 

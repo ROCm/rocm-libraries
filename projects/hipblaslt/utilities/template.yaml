@@ -21,4 +21,7 @@ Bench:
   ProblemSizes:
   - [128, 128, 1, 128]
   - [128, 128, 1, 128]
+# Create equality
 CreateLogic: {}
+# Update existing grid
+# UpdateGrid: {}

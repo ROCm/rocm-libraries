@@ -154,9 +154,7 @@ namespace rocRoller
                             "Either s_barrier or s_barrier_signal must be supported.",
                             ShowValue(architecture.target()));
 
-                m_barrierOpcode = architecture.HasCapability(GPUCapability::s_barrier_signal)
-                                      ? "s_barrier_signal"
-                                      : "s_barrier";
+                m_barrierOpcode = hasBarrierSignal ? "s_barrier_signal" : "s_barrier";
             }
 
             for(uint8_t i = 0; i < static_cast<uint8_t>(GPUWaitQueue::Count); i++)
@@ -244,6 +242,11 @@ namespace rocRoller
                         {
                             WaitQueueRegisters queueRegisters;
                             append(queueRegisters, inst.getAllDsts());
+                            // track LDS access to avoid write-after-read races.
+                            auto isLDSReg = [](Register::ValuePtr const reg) -> bool {
+                                return reg->regType() == Register::Type::LocalData;
+                            };
+                            append(queueRegisters, filter(isLDSReg, inst.getAllSrcs()));
 
                             m_instructionQueues[waitQueue].push_back(std::move(queueRegisters));
                         }
@@ -326,6 +329,10 @@ namespace rocRoller
             const auto& architecture = context->targetArchitecture();
 
             WaitCount retval = computeImplicitWaitCount(inst, explanation);
+
+            // No wait required before LDS reads as the wait happens before LDS barriers
+            if(GPUInstructionInfo::isLDSRead(inst.getOpCode()))
+                return retval.getAsSaturatedWaitCount(architecture);
 
             if(inst.getOpCode().size() > 0 && inst.hasRegisters())
             {

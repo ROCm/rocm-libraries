@@ -23,6 +23,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/mr/memory_resource.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -34,17 +42,10 @@ namespace mr
  *  \{
  */
 
-#if !THRUST_DOXYGEN
+#if !THRUST_DOXYGEN_INVOKED
 class new_delete_resource_base : public memory_resource<>
 {
 public:
-  /*! Allocates memory of size at least \p bytes and alignment at least \p alignment.
-   *
-   *  \param bytes size, in bytes, that is requested from this allocation
-   *  \param alignment alignment that is requested from this allocation
-   *  \throws thrust::bad_alloc when no memory with requested size and alignment can be allocated.
-   *  \return A pointer to void to the newly allocated memory.
-   */
   void* do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
   {
 #  if defined(__cpp_aligned_new)
@@ -66,14 +67,6 @@ public:
 #  endif
   }
 
-  /*! Deallocates memory pointed to by \p p.
-   *
-   *  \param p pointer to be deallocated
-   *  \param bytes the size of the allocation. This must be equivalent to the value of \p bytes that
-   *      was passed to the allocation function that returned \p p.
-   *  \param alignment the size of the allocation. This must be equivalent to the value of \p alignment
-   *      that was passed to the allocation function that returned \p p.
-   */
   void do_deallocate(void* p, std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
   {
 #  if defined(__cpp_aligned_new)
@@ -94,7 +87,7 @@ public:
 #  endif
   }
 };
-#endif // !THRUST_DOXYGEN
+#endif // !THRUST_DOXYGEN_INVOKED
 
 /*! A memory resource that uses global operators new and delete to allocate and deallocate memory. Uses
  * alignment-enabled overloads when available, otherwise uses regular overloads and implements alignment requirements by

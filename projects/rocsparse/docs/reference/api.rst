@@ -9,6 +9,20 @@ Exported rocSPARSE functions
 
 This topic provides a list of the exported rocSPARSE functions in various categories.
 
+
+ROC-TX functions
+----------------
+
++-----------------------------------------------------+
+|Function name                                        |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_enable_roctx`                   |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_disable_roctx`                  |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_state_roctx`                    |
++-----------------------------------------------------+
+
 Debugging functions
 -------------------
 +-----------------------------------------------------+
@@ -152,6 +166,8 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_bell_descr`              |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_create_sell_descr`              |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_const_coo_descr`         |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_const_csr_descr`         |
@@ -159,6 +175,8 @@ Auxiliary functions
 |:cpp:func:`rocsparse_create_const_csc_descr`         |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_const_bell_descr`        |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_create_const_sell_descr`        |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_destroy_spmat_descr`            |
 +-----------------------------------------------------+
@@ -195,6 +213,8 @@ Auxiliary functions
 |:cpp:func:`rocsparse_ell_get`                        |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_bell_get`                       |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_sell_get`                       |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_coo_set_pointers`               |
 +-----------------------------------------------------+
@@ -524,11 +544,23 @@ documentation for details about the supported data types and compute types.
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_v2_spmv()`                      |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmv_set_extra()`               |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmv_clear_extra()`             |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_spsv()`                         |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_sptrsv_buffer_size()`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_sptrsv()`                       |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmm()`                         |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spsm()`                         |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_sptrsm_buffer_size()`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_sptrsm()`                       |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spgemm()`                       |
 +-----------------------------------------------------+

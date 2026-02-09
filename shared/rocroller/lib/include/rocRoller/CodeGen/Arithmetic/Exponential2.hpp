@@ -76,7 +76,8 @@ namespace rocRoller
                                         Register::ValuePtr arg,
                                         Expression::Exponential2 const&);
 
-        static const std::string Name;
+        inline static const std::string Name = concatenate(
+            "Exponential2Generator<", toString(REGISTER_TYPE), ", ", toString(DATATYPE), ">");
     };
 
     template <>

@@ -20,6 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report")
+set_property(GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS "")
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
 file(WRITE "${INSTALL_TEST_FILE}"
 [=[
@@ -28,7 +30,7 @@ file(WRITE "${INSTALL_TEST_FILE}"
 ]=]
 )
 
-function(add_relative_test test_name test_target)
+function(add_relative_test test_name test_target resource_group)
     get_target_property(EXE_PATH ${test_target} RUNTIME_OUTPUT_DIRECTORY)
     if(EXE_PATH STREQUAL "EXE_PATH-NOTFOUND")
         set(EXE_PATH ".")
@@ -41,22 +43,85 @@ function(add_relative_test test_name test_target)
             set(EXE_NAME "${test_target}")
         endif()
     endif()
+    if(BUILD_CODE_COVERAGE)
+	 set(ABS_EXE "${EXE_PATH}/${EXE_NAME}")
+        set_property(GLOBAL APPEND PROPERTY LLVM_COV_OBJECT_ARGS -object "${ABS_EXE}")
+    endif()
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
     if(BUILD_COMPUTE_SANITIZER)
         add_test(NAME "${test_name}" COMMAND "compute-sanitizer" "./${rel_path}")
     else()
         add_test(NAME "${test_name}" COMMAND "./${rel_path}")
     endif()
+    if(BUILD_CODE_COVERAGE)
+      set_tests_properties(${test_name} PROPERTIES
+        ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/hipcub-coverage_%m.profraw"
+      )
+    endif()
     rocm_install(TARGETS ${test_target} COMPONENT tests)
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
+    # Set the resource group for the test. This must correspond to a gfxID present in resources.json.
+    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties([=[${test_name}]=] PROPERTIES RESOURCE_GROUPS \"1,${resource_group}:1\")\n")
 endfunction()
+
+# We'll use this small program to detect available GPUs and build the resource JSON file.
+set(GEN_RES_SPEC_PATH ${CMAKE_SOURCE_DIR}/test/generate_resource_spec.cpp)
+add_executable(generate_resource_spec ${GEN_RES_SPEC_PATH})
+set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+target_link_libraries(generate_resource_spec PRIVATE hip::host)
 
 # hipCUB tests
 add_subdirectory(hipcub)
+
+if(BUILD_CODE_COVERAGE)
+  add_custom_target(
+    coverage_analysis
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${PROFILE_DIR}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${PROFILE_DIR}/profraw
+    COMMAND ctest --output-on-failure
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  get_property(LLVM_COV_OBJECT_ARGS GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS)
+  add_custom_target(
+    coverage
+    DEPENDS coverage_analysis
+    COMMAND ${LLVM_PROFDATA} merge -sparse ${PROFILE_DIR}/profraw/hipcub-coverage_*.profraw -o ${PROFILE_DIR}/hipcub.profdata
+    COMMAND ${LLVM_COV} report ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${PROFILE_DIR}/hipcub.profdata
+    COMMAND ${LLVM_COV} show ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${PROFILE_DIR}/hipcub.profdata -format=html -output-dir=${PROFILE_DIR}
+    COMMAND ${LLVM_COV} export ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/hipcub.profdata -format=lcov > ./coverage-report/coverage.info
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+endif()
+
 
 rocm_install(
     FILES "${INSTALL_TEST_FILE}"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
     COMPONENT tests
     RENAME "CTestTestfile.cmake"
+)
+
+# Install the executable as PROGRAMS (rather than TARGETS)
+# since we want to put it in the correct DESTINATION.
+rocm_install(
+    PROGRAMS $<TARGET_FILE:generate_resource_spec>
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
+    COMPONENT tests
 )

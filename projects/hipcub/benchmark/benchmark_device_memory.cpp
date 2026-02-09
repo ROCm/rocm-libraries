@@ -22,9 +22,9 @@
 
 #include "common_benchmark_header.hpp"
 
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_scan.hpp"
-#include "hipcub/block/block_store.hpp"
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_scan.hpp>
+#include <hipcub/block/block_store.hpp>
 
 enum memory_operation_method
 {

@@ -18,5 +18,5 @@ programming language and is optimized for the latest AMD discrete GPUs.
 hipSPARSELt sits between the application and a "worker" SPARSE library, marshalling inputs into the
 backend library and results back to the application. It exports an interface that doesn't
 require the client to change, regardless of the chosen backend. The supported backends are:
-`rocSPARSELt <https://github.com/ROCm/hipSPARSELt/tree/develop/library/src/hcc_detail/rocsparselt>`_
+`rocSPARSELt <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparselt/library/src/hcc_detail/rocsparselt>`_
 and NVIDIA CUDA `cuSPARSELt v0.6.3 <https://docs.nvidia.com/cuda/cusparselt>`_.

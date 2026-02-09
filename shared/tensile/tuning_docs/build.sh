@@ -30,5 +30,3 @@
 
 pdflatex -shell-escape -synctex=1 -interaction=nonstopmode tensile_tuning.tex
 pdflatex -shell-escape -synctex=1 -interaction=nonstopmode tensile_tuning.tex
-
-

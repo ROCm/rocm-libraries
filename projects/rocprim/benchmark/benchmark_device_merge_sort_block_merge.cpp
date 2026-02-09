@@ -44,40 +44,48 @@
 #define CREATE_BENCHMARK(...) \
     executor.queue_instance(device_merge_sort_block_merge_benchmark<__VA_ARGS__>());
 
+#define CREATE_BENCHMARK_TYPE_TUNING(KeyType)      \
+    CREATE_BENCHMARK(KeyType, rocprim::empty_type) \
+    CREATE_BENCHMARK(KeyType, rocprim::int128_t)   \
+    CREATE_BENCHMARK(KeyType, long long)           \
+    CREATE_BENCHMARK(KeyType, int)                 \
+    CREATE_BENCHMARK(KeyType, short)               \
+    CREATE_BENCHMARK(KeyType, int8_t)
+
 int main(int argc, char* argv[])
 {
     benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
 
 #ifndef BENCHMARK_CONFIG_TUNING
-    CREATE_BENCHMARK(int)
-    CREATE_BENCHMARK(long long)
-    CREATE_BENCHMARK(int8_t)
+    // Tuned types
+    CREATE_BENCHMARK_TYPE_TUNING(rocprim::int128_t)
+    CREATE_BENCHMARK_TYPE_TUNING(long long)
+    CREATE_BENCHMARK_TYPE_TUNING(int)
+    CREATE_BENCHMARK_TYPE_TUNING(short)
+    CREATE_BENCHMARK_TYPE_TUNING(int8_t)
+    CREATE_BENCHMARK_TYPE_TUNING(double)
+    CREATE_BENCHMARK_TYPE_TUNING(float)
+    CREATE_BENCHMARK_TYPE_TUNING(rocprim::half)
+
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
     CREATE_BENCHMARK(uint8_t)
-    CREATE_BENCHMARK(rocprim::half)
-    CREATE_BENCHMARK(short)
-    CREATE_BENCHMARK(rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t)
 
+    // Not tuned custom types
     using custom_float2          = common::custom_type<float, float>;
     using custom_double2         = common::custom_type<double, double>;
     using custom_int2            = common::custom_type<int, int>;
     using custom_char_double     = common::custom_type<char, double>;
     using custom_longlong_double = common::custom_type<long long, double>;
 
-    CREATE_BENCHMARK(int, float)
-    CREATE_BENCHMARK(long long, double)
-    CREATE_BENCHMARK(int8_t, int8_t)
-    CREATE_BENCHMARK(uint8_t, uint8_t)
-    CREATE_BENCHMARK(rocprim::half, rocprim::half)
-    CREATE_BENCHMARK(short, short)
     CREATE_BENCHMARK(int, custom_float2)
     CREATE_BENCHMARK(long long, custom_double2)
     CREATE_BENCHMARK(custom_double2, custom_double2)
     CREATE_BENCHMARK(custom_int2, custom_double2)
     CREATE_BENCHMARK(custom_int2, custom_char_double)
     CREATE_BENCHMARK(custom_int2, custom_longlong_double)
-    CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t)
-    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)
+    #endif
 #endif
 
     executor.run();

@@ -3685,6 +3685,22 @@ Tests:
   use_hipblaslt: 0
   os_flags: LINUX
 
+- name: gemm_ex_h2f #SWDEV-560127
+  category: pre_checkin
+  function: gemm_ex
+  matrix_size:
+    - { M:     1, N:     1, K:    32, lda:    32, ldb:     1, ldc:     1, ldd:     1 }
+    - { M:     1, N:     1, K:    64, lda:    64, ldb:     1, ldc:     1, ldd:     1 }
+  precision:
+    - *hpa_half_in_single_out_precision
+    - *hpa_bf16_in_single_out_precision
+  transA_transB:
+    - { transA: N, transB: N }
+    - { transA: T, transB: T }
+    - { transA: T, transB: N }
+  alpha_beta: *alpha_beta_range
+  initialization: hpl
+  os_flags: LINUX
 
 # Commented out as the category known_bug has currently no good purpose
 # This is category known_bug until the sizes are supported by Tensile,

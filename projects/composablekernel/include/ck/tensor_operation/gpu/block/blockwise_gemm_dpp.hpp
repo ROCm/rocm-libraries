@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -38,12 +38,14 @@ struct BlockwiseGemmDpp_ak0mak1_bk0nbk1_m0n0m1n1m2n2
 
     using ThisThreadBlock = ThisThreadBlock<BlockSize>;
 
-    static constexpr index_t WaveSize = get_warp_size();
-
     static constexpr index_t MPerBlock = AK0MK1BlockDesc{}.GetLength(I1);
     static constexpr index_t NPerBlock = BK0NK1BlockDesc{}.GetLength(I1);
     static constexpr index_t KPerBlock =
         BK0NK1BlockDesc{}.GetLength(I0) * BK0NK1BlockDesc{}.GetLength(I2);
+
+    static constexpr index_t MWaves   = MPerBlock / (MRepeat * MPerDpp);
+    static constexpr index_t NWaves   = NPerBlock / (NRepeat * NPerDpp);
+    static constexpr index_t WaveSize = BlockSize / MWaves / NWaves;
 
     static constexpr index_t A_K0 = AK0MK1BlockDesc{}.GetLength(I0);
     static constexpr index_t B_K0 = BK0NK1BlockDesc{}.GetLength(I0);
@@ -54,9 +56,6 @@ struct BlockwiseGemmDpp_ak0mak1_bk0nbk1_m0n0m1n1m2n2
 
     static constexpr index_t KPerThread = KPerBlock / dpp_gemm.K0PerDpp;
 
-    static constexpr index_t MWaves = MPerBlock / (MRepeat * MPerDpp);
-    static constexpr index_t NWaves = NPerBlock / (NRepeat * NPerDpp);
-
     StaticBufferTupleOfVector<AddressSpaceEnum::Vgpr,
                               AccDataType,
                               MRepeat * NRepeat,
@@ -64,7 +63,10 @@ struct BlockwiseGemmDpp_ak0mak1_bk0nbk1_m0n0m1n1m2n2
                               true>
         c_thread_buf_;
 
-    __host__ __device__ constexpr auto& GetCThreadBuffer() { return c_thread_buf_; }
+    __host__ __device__ constexpr auto& GetCThreadBuffer() [[clang::lifetimebound]]
+    {
+        return c_thread_buf_;
+    }
 
     __device__ static auto GetWaveIdx()
     {

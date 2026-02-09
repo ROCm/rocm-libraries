@@ -497,4 +497,3 @@ The ``swap_batched`` functions support the ``_64`` interface. See the :ref:`ILP6
 .. doxygenfunction:: rocblas_zswap_strided_batched
 
 The ``swap_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
-

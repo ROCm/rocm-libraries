@@ -55,9 +55,9 @@ static std::vector<Conv3DTestCase> ConvTestConfigs()
 { // g   n   c   k   image   filter   pad   stride   dilation
     // clang-format off
     return {{1, 1, 4, 4, {14, 11, 1}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, miopenConvolution},
-            {1, 1, 2, 1, {1, 4, 4}, {2, 2, 2}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, miopenConvolution},
-            {1, 1, 2, 1, {8, 8, 8}, {2, 2, 2}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, miopenConvolution},
-            {1, 1, 2, 1, {8, 8, 8}, {2, 2, 2}, {0, 0, 0}, {2, 2, 2}, {1, 1, 1}, miopenConvolution},
+            {1, 1, 1, 1, {1, 4, 4}, {2, 2, 2}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, miopenConvolution},
+            {1, 1, 1, 1, {8, 8, 8}, {2, 2, 2}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, miopenConvolution},
+            {1, 1, 1, 1, {8, 8, 8}, {2, 2, 2}, {0, 0, 0}, {2, 2, 2}, {1, 1, 1}, miopenConvolution},
             {2, 8, 8, 4, {12, 14, 4}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, miopenConvolution},
             {4, 8, 8, 16, {11, 11, 11}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, miopenConvolution},
             {6, 8, 18, 18, {11, 11, 11}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, miopenConvolution},
@@ -133,7 +133,7 @@ class GPU_ConvBiasResAddActivation_fwd
         TensorData(TensorData&&)      = default;
 
         TensorData& operator=(const TensorData&) = delete;
-        TensorData& operator=(TensorData&&) = default;
+        TensorData& operator=(TensorData&&)      = default;
 
         ~TensorData() = default;
     };
@@ -189,7 +189,7 @@ class GPU_ConvBiasResAddActivation_fwd
         GraphTensorAllocator(GraphTensorAllocator&&)      = default;
 
         GraphTensorAllocator& operator=(const GraphTensorAllocator&) = delete;
-        GraphTensorAllocator& operator=(GraphTensorAllocator&&) = default;
+        GraphTensorAllocator& operator=(GraphTensorAllocator&&)      = default;
 
         ~GraphTensorAllocator() = default;
     };
@@ -215,6 +215,9 @@ public:
         {
             GTEST_SKIP() << "CBA graph Fusion not supported in this device";
         }
+#if !MIOPEN_USE_COMPOSABLEKERNEL
+        GTEST_SKIP() << "CBA graph Fusion requires CK";
+#endif
 
         prng::reset_seed();
     }

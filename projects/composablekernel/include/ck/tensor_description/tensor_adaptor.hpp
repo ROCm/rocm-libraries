@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2023, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -23,7 +23,10 @@ struct TensorAdaptor
 {
     __host__ __device__ static constexpr index_t GetNumOfTransform() { return Transforms::Size(); }
 
-    __host__ __device__ constexpr const auto& GetTransforms() const { return transforms_; }
+    __host__ __device__ constexpr const auto& GetTransforms() const [[clang::lifetimebound]]
+    {
+        return transforms_;
+    }
 
     __host__ __device__ static constexpr auto GetLowerDimensionHiddenIdss()
     {
@@ -108,13 +111,13 @@ struct TensorAdaptor
 
     __host__ __device__ static constexpr index_t GetNumOfHiddenDimension()
     {
-        constexpr auto all_low_dim_ids = unpack(
-            [](auto&&... xs) constexpr { return merge_sequences(xs...); },
-            LowerDimensionHiddenIdss{});
+        constexpr auto all_low_dim_ids =
+            unpack([](auto&&... xs) constexpr { return merge_sequences(xs...); },
+                   LowerDimensionHiddenIdss{});
 
-        constexpr auto all_up_dim_ids = unpack(
-            [](auto&&... xs) constexpr { return merge_sequences(xs...); },
-            UpperDimensionHiddenIdss{});
+        constexpr auto all_up_dim_ids =
+            unpack([](auto&&... xs) constexpr { return merge_sequences(xs...); },
+                   UpperDimensionHiddenIdss{});
 
         constexpr auto all_dim_ids = merge_sequences(all_low_dim_ids, all_up_dim_ids);
 
@@ -338,8 +341,7 @@ __host__ __device__ constexpr auto chain_tensor_adaptors(const TensorAdaptor0& a
                 TensorAdaptor1::GetLowerDimensionHiddenIdss()[itran];
 
             // sequence in, sequence out
-            constexpr auto low_dim_hidden_ids_1_mod = [&]() constexpr
-            {
+            constexpr auto low_dim_hidden_ids_1_mod = [&]() constexpr {
                 auto low_dim_hidden_ids_1_mod_ = to_multi_index(low_dim_hidden_ids_1);
 
                 // shift hidden id so every dim id is unique
@@ -361,8 +363,7 @@ __host__ __device__ constexpr auto chain_tensor_adaptors(const TensorAdaptor0& a
                 });
 
                 return low_dim_hidden_ids_1_mod_;
-            }
-            ();
+            }();
 
             return generate_sequence_v2(
                 [&](auto i) constexpr { return Number<low_dim_hidden_ids_1_mod[i]>{}; },
@@ -384,8 +385,7 @@ __host__ __device__ constexpr auto chain_tensor_adaptors(const TensorAdaptor0& a
                 TensorAdaptor1::GetUpperDimensionHiddenIdss()[itran];
 
             // sequence in, constexpr tuple out
-            constexpr auto up_dim_hidden_ids_1_mod = [&]() constexpr
-            {
+            constexpr auto up_dim_hidden_ids_1_mod = [&]() constexpr {
                 auto up_dim_hidden_ids_1_mod_ = to_multi_index(up_dim_hidden_ids_1);
 
                 // shift hidden id
@@ -394,8 +394,7 @@ __host__ __device__ constexpr auto chain_tensor_adaptors(const TensorAdaptor0& a
                 });
 
                 return up_dim_hidden_ids_1_mod_;
-            }
-            ();
+            }();
 
             // constexpr tuple to sequence
             return generate_sequence_v2(

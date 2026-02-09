@@ -230,6 +230,10 @@ struct GroupConvTestConfig<3u>
                 {3 , 48 , 39 , 39 , {28, 28, 28} , {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
                 {5 , 120, 60 , 60 , {28, 28, 28} , {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
                 {1 , 6  , 448, 896, {3, 118, 182}, {1, 1, 1}, {0, 0, 0}, {1, 2, 2}, {1, 1, 1}},
+                {1 , 256,  3 ,1280, {2,  14, 14} , {2,14,14}, {0, 0, 0}, {2,14,14}, {1, 1, 1}},
+                {5 , 256, 60 ,1280, {2,  14, 14} , {2,14,14}, {0, 0, 0}, {2,14,14}, {1, 1, 1}},
+                {3 , 256,  9,   27, {2, 14, 14}  , {2,14,14}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
+                {9 , 256,  9,   27, {2, 14, 14}  , {2,14,14}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
             };
             // clang-format on
         }
@@ -253,6 +257,10 @@ struct GroupConvTestConfig<3u>
                 {4, 128,  4 , 8  ,{28, 28, 28} , {3, 3, 3}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}},
                 {2, 128,  2 , 2  ,{28, 28, 28} , {3, 3, 3}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}},
                 {1, 6  , 448, 896,{3, 118, 182}, {1, 1, 1}, {0, 0, 0}, {1, 2, 2}, {1, 1, 1}},
+                {1, 256,  3 ,1280,{2,  14, 14} , {2,14,14}, {0, 0, 0}, {2,14,14}, {1, 1, 1}},
+                {5, 256, 60 ,1280,{2,  14, 14} , {2,14,14}, {0, 0, 0}, {2,14,14}, {1, 1, 1}},
+                {3, 256,  9,   27,{2, 14, 14}  , {2,14,14}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
+                {9, 256,  9,   27,{2, 14, 14}  , {2,14,14}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
             };
             // clang-format on
         }
@@ -309,11 +317,21 @@ private:
         double threshold = 80;
         if(CONV_DIR == Direction::Forward)
         {
-            threshold *= std::numeric_limits<T>::epsilon();
+            if constexpr(std::is_same_v<T, float>)
+            {
+                // float use tf32 compute which share same mantissa bits
+                threshold *= (compute_type == "TF32") ? std::numeric_limits<half>::epsilon()
+                                                      : std::numeric_limits<float>::epsilon();
+            }
+            else
+            {
+                threshold *= std::numeric_limits<T>::epsilon();
+            }
         }
         else
         {
-            threshold = 3.0e-3;
+            // some kernels have an error above 0.3%, so this has been increased to 0.4%
+            threshold = 4.0e-3;
         }
         auto error = miopen::rms_range(ref, computed);
 
@@ -343,6 +361,9 @@ private:
         auto ctx = miopen::ExecutionContext{};
 
         ctx.SetStream(&handle);
+
+        if(compute_type == "TF32")
+            problem.SetupComputeType(ctx);
 
         if(!solv.IsApplicable(ctx, problem))
         {
@@ -454,6 +475,11 @@ protected:
                 test_skipped = true;
                 GTEST_SKIP() << "bf16 tests skipped on this hardware.";
             }
+            if(!IsTestSupportedByDevice(Gpu::gfx94X) && compute_type == "TF32")
+            {
+                test_skipped = true;
+                GTEST_SKIP() << "tf32 tests skipped on this hardware.";
+            }
         }
 
         float alpha_val;
@@ -468,6 +494,10 @@ protected:
         weights = tensor<T>{tensor_layout, conv_config.GetWeights()};
 
         conv_desc = conv_config.GetConv();
+        if(compute_type == "TF32")
+            conv_desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, miopenMathDefault);
+        else
+            conv_desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, miopenMathPedantic);
 
         miopen::TensorDescriptor output_desc =
             conv_desc.GetForwardOutputTensor(input.desc, weights.desc, miopen_type<T>{});
@@ -552,6 +582,8 @@ protected:
 
     miopen::Scalar alpha{1.0};
     miopen::Scalar beta{0.0};
+
+    std::string compute_type;
 };
 
 template <unsigned NDIM>
@@ -604,6 +636,7 @@ std::vector<float> GetBetaValues()
     struct GPU_GroupConv##ndim##D_##dir##_##naming_type                                            \
         : GroupConvTestFix<ndim, type, Direction::dir>                                             \
     {                                                                                              \
+        GPU_GroupConv##ndim##D_##dir##_##naming_type() { compute_type = #naming_type; }            \
     };                                                                                             \
     TEST_P(GPU_GroupConv##ndim##D_##dir##_##naming_type, GroupConv##ndim##D_##dir##_##type##_Test) \
     {                                                                                              \

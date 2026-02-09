@@ -71,4 +71,3 @@ HIP Graph known issues in rocBLAS
 =========================================================
 
 On the Windows platform, batched functions (Level-1, Level-2, and Level-3) produce incorrect results.
-

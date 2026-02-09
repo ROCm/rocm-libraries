@@ -84,4 +84,3 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [ [8, 32, 0, 40], [8, 32, 0, 40], [3], [63, 1, 64] ]
-

@@ -179,8 +179,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph LoadPacked::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::LoadPacked");
-
         using namespace ControlGraph;
         using namespace CoordinateGraph;
         using namespace LoadPackedDetail;
@@ -192,7 +190,12 @@ namespace rocRoller::KernelGraph
             auto visitor = [](auto op) -> bool {
                 using T = std::decay_t<decltype(op)>;
 
-                if constexpr(CIsAnyOf<T, LoadTiled, StoreTiled, LoadLDSTile, StoreLDSTile>)
+                if constexpr(CIsAnyOf<T,
+                                      LoadTiled,
+                                      StoreTiled,
+                                      LoadTileDirect2LDS,
+                                      LoadLDSTile,
+                                      StoreLDSTile>)
                 {
                     return DataTypeInfo::Get(op.varType).packedVariableType().has_value();
                 }

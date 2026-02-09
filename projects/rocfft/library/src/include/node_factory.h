@@ -74,7 +74,9 @@ public:
 
     // determine function:
     static bool use_CS_2D_SINGLE(const function_pool& pool,
-                                 NodeMetaData& nodeData); // using scheme CS_KERNEL_2D_SINGLE or not
+                                 NodeMetaData&        nodeData,
+                                 rocfft_array_type    inArrayType,
+                                 rocfft_array_type    outArrayType);
     static bool use_CS_2D_RC(const function_pool& pool,
                              NodeMetaData&        nodeData); // using scheme CS_2D_RC or not
     static bool use_CS_3D_BLOCK_RC(const function_pool& pool, NodeMetaData& nodeData);

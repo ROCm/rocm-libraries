@@ -38,9 +38,9 @@ extern "C" {
  *  \p rocsparse_csr2csr_compress converts a CSR matrix into a compressed CSR matrix by
  *  removing entries in the input CSR matrix that are below a non-negative threshold \p tol
  *
- *  Compressing a CSR matrix involves two steps. First we use 
- *  \ref rocsparse_snnz_compress "rocsparse_Xnnz_compress()" to determine how many entries will 
- *  be in the final compressed CSR matrix. Then we call \p rocsparse_csr2csr_compress to finish 
+ *  Compressing a CSR matrix involves two steps. First we use
+ *  \ref rocsparse_snnz_compress "rocsparse_Xnnz_compress()" to determine how many entries will
+ *  be in the final compressed CSR matrix. Then we call \p rocsparse_csr2csr_compress to finish
  *  the compression and fill in the column indices and values arrays of the compressed CSR matrix.
  *
  *  \note
@@ -96,63 +96,8 @@ extern "C" {
  *              \p nnz_per_row pointer is invalid.
  *
  *  \par Example
- *  This example demonstrates how to compress a CSR matrix. 
- *  \code{.c}
- *      //     1 2 0 3 0
- *      // A = 0 4 5 0 0
- *      //     6 0 0 7 8
- *
- *      float tol = 0.0f;
- *
- *      rocsparse_int m     = 3;
- *      rocsparse_int n     = 5;
- *      rocsparse_int nnz_A = 8;
- *
- *      csr_row_ptr_A[m+1]   = {0, 3, 5, 8};             // device memory
- *      csr_col_ind_A[nnz_A] = {0, 1, 3, 1, 2, 0, 3, 4}; // device memory
- *      csr_val_A[nnz_A]     = {1, 0, 3, 4, 0, 6, 7, 0}; // device memory
- *
- *      // Allocate memory for the row pointer array of the compressed CSR matrix
- *      rocsparse_int* csr_row_ptr_C;
- *      hipMalloc(csr_row_ptr_C, sizeof(rocsparse_int) * (m + 1));
- *
- *      // Allocate memory for the nnz_per_row array
- *      rocsparse_int* nnz_per_row;
- *      hipMalloc(nnz_per_row, sizeof(rocsparse_int) * m);
- *
- *      // Call nnz_compress() which fills in nnz_per_row array and finds the number
- *      // of entries that will be in the compressed CSR matrix
- *      rocsparse_int nnz_C;
- *      nnz_compress(handle,
- *                   m,
- *                   descr_A,
- *                   csr_val_A,
- *                   csr_row_ptr_A,
- *                   nnz_per_row,
- *                   &nnz_C,
- *                   tol);
- *
- *      // Allocate column indices and values array for the compressed CSR matrix
- *      rocsparse_int* csr_col_ind_C;
- *      rocsparse_int* csr_val_C;
- *      hipMalloc(csr_col_ind_C, sizeof(rocsparse_int) * nnz_C;
- *      hipMalloc(csr_val_C, sizeof(rocsparse_int) * nnz_C;
- *
- *      // Finish compression by calling csr2csr_compress()
- *      csr2csr_compress(handle,
- *                       m,
- *                       n,
- *                       descr_A,
- *                       csr_val_A,
- *                       csr_row_ptr_A,
- *                       csr_col_ind_A,
- *                       nnz_A,
- *                       nnz_per_row,
- *                       csr_val_C,
- *                       csr_row_ptr_C,
- *                       csr_col_ind_C,
- *                       tol);
- *  \endcode
+ *  This example demonstrates how to compress a CSR matrix.
+ *  \snippet example_rocsparse_csr2csr_compress.cpp doc example
  */
 /**@{*/
 ROCSPARSE_EXPORT

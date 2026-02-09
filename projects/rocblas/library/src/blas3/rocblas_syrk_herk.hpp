@@ -304,3 +304,13 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
                                            rocblas_int       ldc,
                                            rocblas_stride    strideC,
                                            rocblas_int       batch_count);
+
+// helper
+template <bool copy_from_C_to_W_C, bool is_upper, bool HERM, typename T, typename TPtr>
+rocblas_status rocblas_copy_triangular_syrk_herk(rocblas_handle handle,
+                                                 rocblas_int    n,
+                                                 TPtr           C,
+                                                 rocblas_int    ldc,
+                                                 rocblas_stride stride_C,
+                                                 T*             W_C,
+                                                 rocblas_int    batch_count);

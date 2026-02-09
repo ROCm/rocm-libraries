@@ -74,6 +74,20 @@ namespace rocRoller
             void removeCoordinate(int);
 
             /**
+             * Set the Transformer's coordinate graph.
+             */
+            void setCoordinateGraph(CoordinateGraph const* graph)
+            {
+                AssertFatal(graph != nullptr);
+                m_graph = graph;
+            }
+
+            auto const& getIndexes() const
+            {
+                return m_indexes;
+            }
+
+            /**
              * Forward (bottom-up) coordinate transform.
              *
              * Given current location (see set()), traverse the graph

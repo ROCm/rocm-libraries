@@ -121,30 +121,76 @@ std::string ProblemDescription::GetAlphaBetaCaseStr() const
 
 void ProblemDescription::HeuristicUpdateLayouts()
 {
-    // If we have preset layouts, and they are consistent with each other, we do not need to change
-    // them.
-    if(!in_layout.empty() && in_layout == out_layout && in_layout == weights_layout &&
-       in.IsPossibleLayout4D5D(in_layout) && out.IsPossibleLayout4D5D(out_layout) &&
-       weights.IsPossibleLayout4D5D(weights_layout))
-    {
-        return;
-    }
+    using LayoutValidationMode = TensorDescriptor::LayoutValidationMode;
 
     static const std::vector<std::string> supported_layouts = {
         "NCHW", "NHWC", "CHWN", "NCDHW", "NDHWC"};
 
-    for(const std::string& layout : supported_layouts)
+    static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
+
+    // Note: The order here is important, as we want to try and find a match with strict decreasing
+    // strides first.
+    static const std::vector<LayoutValidationMode> validation_modes = {
+        strict, LayoutValidationMode::IgnoreDegenerateStrides};
+
+    // If we have preset layouts that are valid, and they are consistent with each other, then we do
+    // not need to change them.
+    if(!in_layout.empty() && in_layout == out_layout && in_layout == weights_layout &&
+       std::find(supported_layouts.begin(), supported_layouts.end(), in_layout) !=
+           supported_layouts.end() &&
+       in.IsPossibleLayout4D5D(in_layout, strict) && out.IsPossibleLayout4D5D(out_layout, strict) &&
+       weights.IsPossibleLayout4D5D(weights_layout, strict))
     {
-        if(in.IsPossibleLayout4D5D(layout) && out.IsPossibleLayout4D5D(layout) &&
-           weights.IsPossibleLayout4D5D(layout))
+        return;
+    }
+
+    // Check if we can find a consistent layout across all tensors with the strict mode first,
+    // then try ignoring degenerate strides afterwards.
+    for(auto& mode : validation_modes)
+    {
+        for(const std::string& layout : supported_layouts)
         {
-            in_layout      = layout;
-            weights_layout = layout;
-            out_layout     = layout;
-            return;
+            if(in.IsPossibleLayout4D5D(layout, mode) && out.IsPossibleLayout4D5D(layout, mode) &&
+               weights.IsPossibleLayout4D5D(layout, mode))
+            {
+                in_layout      = layout;
+                weights_layout = layout;
+                out_layout     = layout;
+                return;
+            }
         }
     }
+
     // If we did not find consistent layout, leave them as-is
+}
+
+template <typename in_desc, typename out_desc, typename wei_desc>
+void SerializeStrides(
+    std::ostringstream& stream, in_desc& in, out_desc& out, wei_desc& wei, const char delim)
+{
+
+    auto join_v = [](std::ostringstream& stream, const auto& vec, const char delim) {
+        stream << *vec.begin();
+        std::for_each(std::next(vec.begin()), vec.end(), [&](const auto& value) {
+            stream << delim << value;
+        });
+    };
+
+    if(!in.IsPacked())
+    {
+        stream << "_si_";
+        join_v(stream, in.GetStrides(), delim);
+    }
+    if(!out.IsPacked())
+    {
+        stream << "_so_";
+        join_v(stream, out.GetStrides(), delim);
+    }
+    if(!wei.IsPacked())
+    {
+        stream << "_sw_";
+        join_v(stream, wei.GetStrides(), delim);
+    }
 }
 
 void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
@@ -169,9 +215,14 @@ void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
         ss << 'x' << GetWeightsLayout();
         ss << 'x' << GetOutLayout();
     }
-    ss << 'x' << EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
+    const auto data_type =
+        EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
+    ss << 'x' << data_type;
 
     std::ostringstream optional;
+    if(data_type == "FP32" && UseTF32())
+        optional << "TF32" << 'x';
+
     if(const auto ct = GetInCastType())
         optional << "ci" << GetDataTypeName(*ct);
     if(const auto ct = GetWeightsCastType())
@@ -182,6 +233,9 @@ void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
     {
         ss << 'x' << optional.str();
     }
+
+    const auto sep = 'x';
+    SerializeStrides(optional, in, out, weights, sep);
 
     ss << 'x' << PrintDHW('x', GetSpatialDims(), GetPadD(), GetPadH(), GetPadW());
     ss << 'x'
@@ -222,10 +276,12 @@ void ProblemDescription::Serialize(std::ostream& stream) const
         stream << sep << GetWeightsLayout();
         stream << sep << GetOutLayout();
     }
-    stream << sep << EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
+    // clang-format on
+    const auto data_type =
+        EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
+    stream << sep << data_type;
     stream << sep << GetDirectionStr();
 
-    // clang-format on
     // New performance config entries shall come into variable/optional part of db key.
     // This is to support backward compatibility with previous versions of databases.
     std::ostringstream optional;
@@ -240,6 +296,12 @@ void ProblemDescription::Serialize(std::ostream& stream) const
             optional << "_cw" << GetDataTypeName(*ct);
         if(const auto ct = GetOutCastType())
             optional << "_co" << GetDataTypeName(*ct);
+
+        // cx indicates compute datatype
+        if(data_type == "FP32" && UseTF32())
+            optional << "_cxTF32";
+
+        SerializeStrides(optional, in, out, weights, sep);
     }
     if(!optional.str().empty())
     {
@@ -297,6 +359,14 @@ void ProblemDescription::SetupFloats(ExecutionContext& ctx) const
     MIOPEN_LOG_W("Unsupported data types configuration: "
                  << GetDataTypeName(GetInDataType()) << "x" << GetDataTypeName(GetWeightsDataType())
                  << "x" << GetDataTypeName(GetOutDataType()));
+}
+
+void ProblemDescription::SetupComputeType(const ExecutionContext& ctx) const
+{
+    if(miopen::IsTF32Supported(ctx.GetStream().GetDeviceName()) && conv.EnableTF32())
+    {
+        use_tf32 = true;
+    }
 }
 
 std::string ProblemDescription::ComputeLayout(const TensorDescriptor& td) const

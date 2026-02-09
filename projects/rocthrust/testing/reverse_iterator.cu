@@ -21,7 +21,9 @@
 
 #include <unittest/unittest.h>
 
-void TestReverseIteratorCopyConstructor(void)
+#include _THRUST_STD_INCLUDE(type_traits)
+
+void TestReverseIteratorCopyConstructor()
 {
   thrust::host_vector<int> h_v(1, 13);
 
@@ -40,10 +42,10 @@ void TestReverseIteratorCopyConstructor(void)
   ASSERT_EQUAL(*d_iter2, *d_iter3);
 }
 DECLARE_UNITTEST(TestReverseIteratorCopyConstructor);
-static_assert(std::is_trivially_copy_constructible<thrust::reverse_iterator<int*>>::value, "");
-static_assert(std::is_trivially_copyable<thrust::reverse_iterator<int*>>::value, "");
+static_assert(_THRUST_STD::is_trivially_copy_constructible<thrust::reverse_iterator<int*>>::value, "");
+static_assert(_THRUST_STD::is_trivially_copyable<thrust::reverse_iterator<int*>>::value, "");
 
-void TestReverseIteratorIncrement(void)
+void TestReverseIteratorIncrement()
 {
   thrust::host_vector<int> h_v(4);
   thrust::sequence(h_v.begin(), h_v.end());
@@ -80,27 +82,22 @@ void TestReverseIteratorIncrement(void)
 DECLARE_UNITTEST(TestReverseIteratorIncrement);
 
 template <typename Vector>
-void TestReverseIteratorCopy(void)
+void TestReverseIteratorCopy()
 {
-  Vector source(4);
-  source[0] = 10;
-  source[1] = 20;
-  source[2] = 30;
-  source[3] = 40;
+  Vector source{10, 20, 30, 40};
 
-  Vector destination(4, 0);
+  Vector destination(8, 0); // arm gcc is complaining here
 
   thrust::copy(
     thrust::make_reverse_iterator(source.end()), thrust::make_reverse_iterator(source.begin()), destination.begin());
 
-  ASSERT_EQUAL(destination[0], 40);
-  ASSERT_EQUAL(destination[1], 30);
-  ASSERT_EQUAL(destination[2], 20);
-  ASSERT_EQUAL(destination[3], 10);
+  destination.resize(4);
+  Vector ref{40, 30, 20, 10};
+  ASSERT_EQUAL(destination, ref);
 }
 DECLARE_VECTOR_UNITTEST(TestReverseIteratorCopy);
 
-void TestReverseIteratorExclusiveScanSimple(void)
+void TestReverseIteratorExclusiveScanSimple()
 {
   using T        = int;
   const size_t n = 10;

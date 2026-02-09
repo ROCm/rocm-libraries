@@ -19,11 +19,8 @@
 #include <thrust/scan.h>
 #include <thrust/transform.h>
 
+#include <unittest/hip/testframework.h>
 #include <unittest/unittest.h>
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <unittest/cuda/testframework.h>
-#endif
 
 struct make_pair_functor
 {

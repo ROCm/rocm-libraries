@@ -59,7 +59,7 @@ extern "C" {
 *  @param[in]
 *  threshold   pointer to the pruning non-negative threshold which can exist in either host or device memory.
 *  @param[in]
-*  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref rocsparse_matrix_type_general and 
+*  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref rocsparse_matrix_type_general and
 *              also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
 *  csr_val     array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) nonzero elements of matrix \p A.
@@ -110,7 +110,7 @@ rocsparse_status rocsparse_dprune_dense2csr_buffer_size(rocsparse_handle        
 *  \p rocsparse_prune_dense2csr_nnz computes the number of nonzero elements per row and the total
 *  number of nonzero elements in a sparse CSR matrix once elements less than the threshold are
 *  pruned from the matrix.
-* 
+*
 *  \note
 *  The routine does support asynchronous execution if the pointer mode is set to device.
 *
@@ -136,7 +136,7 @@ rocsparse_status rocsparse_dprune_dense2csr_buffer_size(rocsparse_handle        
 *  @param[out]
 *  nnz_total_dev_host_ptr total number of nonzero elements in device or host memory.
 *  @param[out]
-*  temp_buffer            buffer allocated by the user whose size is determined by calling 
+*  temp_buffer            buffer allocated by the user whose size is determined by calling
 *                         \ref rocsparse_sprune_dense2csr_buffer_size "rocsparse_Xprune_dense2csr_buffer_size()".
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
@@ -178,15 +178,15 @@ rocsparse_status rocsparse_dprune_dense2csr_nnz(rocsparse_handle          handle
 *  This function converts the dense matrix \f$A\f$ into a sparse CSR matrix \f$C\f$ by pruning values in \f$A\f$
 *  that are less than a threshold.
 *
-*  The conversion involves three steps. The user first calls 
-*  \ref rocsparse_sprune_dense2csr_buffer_size "rocsparse_Xprune_dense2csr_buffer_size()" 
-*  to determine the size of the temporary storage buffer. The user allocates this buffer as well as the array 
-*  \p csr_row_ptr to have \p m+1 elements. The user then calls 
+*  The conversion involves three steps. The user first calls
+*  \ref rocsparse_sprune_dense2csr_buffer_size "rocsparse_Xprune_dense2csr_buffer_size()"
+*  to determine the size of the temporary storage buffer. The user allocates this buffer as well as the array
+*  \p csr_row_ptr to have \p m+1 elements. The user then calls
 *  \ref rocsparse_sprune_dense2csr_nnz "rocsparse_Xprune_dense2csr_nnz()" which fills
 *  in the \p csr_row_ptr array and stores the number of elements that are larger than the pruning \p threshold
-*  in \p nnz_total_dev_host_ptr. Now that the number of nonzeros larger than the pruning \p threshold is known, the 
+*  in \p nnz_total_dev_host_ptr. Now that the number of nonzeros larger than the pruning \p threshold is known, the
 *  user uses this information to allocate the \p csr_col_ind and \p csr_val arrays and then calls
-*  \p rocsparse_prune_dense2csr to complete the conversion. Once the conversion is complete, the temporary storage 
+*  \p rocsparse_prune_dense2csr to complete the conversion. Once the conversion is complete, the temporary storage
 *  buffer can be freed.
 *
 *  \note
@@ -208,7 +208,7 @@ rocsparse_status rocsparse_dprune_dense2csr_nnz(rocsparse_handle          handle
 *  @param[in]
 *  threshold   pointer to the non-negative pruning threshold which can exist in either host or device memory.
 *  @param[in]
-*  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref rocsparse_matrix_type_general and 
+*  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref rocsparse_matrix_type_general and
 *              also any valid value of the \ref rocsparse_index_base.
 *  @param[out]
 *  csr_val     array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) nonzero elements of matrix \p A.
@@ -227,93 +227,7 @@ rocsparse_status rocsparse_dprune_dense2csr_nnz(rocsparse_handle          handle
 *              or \p csr_row_ptr or \p csr_col_ind or \p temp_buffer pointer is invalid.
 *
 *  \par Example
-*  \code{.c}
-*    //     1 2 0 7
-*    // A = 3 0 0 4
-*    //     5 6 0 4
-*    //     0 4 2 5
-*    rocsparse_int m   = 4;
-*    rocsparse_int n   = 4;
-*    rocsparse_int lda = m;
-*    float threshold = 3.0f;
-*
-*    std::vector<float> hdense = {1.0f, 3.0f, 5.0f, 0.0f, 2.0f, 0.0f, 6.0f, 4.0f, 0.0f, 0.0f, 0.0f, 2.0f, 7.0f, 4.0f, 4.0f, 5.0f};
-*
-*    rocsparse_handle handle;
-*    rocsparse_create_handle(&handle);
-*
-*    rocsparse_mat_descr descr;
-*    rocsparse_create_mat_descr(&descr);
-*
-*    rocsparse_mat_info info;
-*    rocsparse_create_mat_info(&info);
-*
-*    float* ddense = nullptr;
-*    hipMalloc((void**)&ddense, sizeof(float) * lda * n);
-*    hipMemcpy(ddense, hdense.data(), sizeof(float) * lda * n, hipMemcpyHostToDevice);
-*
-*    rocsparse_int* dcsr_row_ptr = nullptr;
-*    hipMalloc((void**)&dcsr_row_ptr, sizeof(rocsparse_int) * (m + 1));
-*
-*    // Obtain the temporary buffer size
-*    size_t buffer_size;
-*    rocsparse_sprune_dense2csr_buffer_size(handle,
-*                                           m,
-*                                           n,
-*                                           ddense,
-*                                           lda,
-*                                           &threshold,
-*                                           descr,
-*                                           nullptr,
-*                                           nullptr,
-*                                           nullptr,
-*                                           &buffer_size);
-*
-*    // Allocate temporary buffer
-*    void* temp_buffer;
-*    hipMalloc(&temp_buffer, buffer_size);
-*
-*    rocsparse_int nnz;
-*    rocsparse_sprune_dense2csr_nnz(handle,
-*                                   m,
-*                                   n,
-*                                   ddense,
-*                                   lda,
-*                                   &threshold,
-*                                   descr,
-*                                   dcsr_row_ptr,
-*                                   &nnz,
-*                                   temp_buffer);
-*
-*    rocsparse_int* dcsr_col_ind = nullptr;
-*    float* dcsr_val = nullptr;
-*    hipMalloc((void**)&dcsr_col_ind, sizeof(rocsparse_int) * nnz);
-*    hipMalloc((void**)&dcsr_val, sizeof(float) * nnz);
-*
-*    rocsparse_sprune_dense2csr(handle,
-*                               m,
-*                               n,
-*                               ddense,
-*                               lda,
-*                               &threshold,
-*                               descr,
-*                               dcsr_val,
-*                               dcsr_row_ptr,
-*                               dcsr_col_ind,
-*                               temp_buffer);
-*    
-*    rocsparse_destroy_handle(handle);
-*    rocsparse_destroy_mat_descr(descr);
-*    rocsparse_destroy_mat_info(info);
-*
-*    hipFree(temp_buffer);
-*
-*    hipFree(ddense);
-*
-*    hipFree(dcsr_row_ptr);
-*    hipFree(dcsr_col_ind);
-*    hipFree(dcsr_val);
-*  \endcode
+*  \snippet example_rocsparse_prune_dense2csr.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

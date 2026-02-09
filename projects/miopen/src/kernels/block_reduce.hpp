@@ -26,7 +26,7 @@
 #ifndef GUARD_BLOCK_REDUCE_HPP
 #define GUARD_BLOCK_REDUCE_HPP
 
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #endif
@@ -44,7 +44,8 @@ enum class ReduceThreadDim : int32_t
 template <uint32_t WARP_SIZE, BinaryOp_t Op, uint64_t reduce_size, ReduceThreadDim thread_dim>
 __device__ FLOAT_ACCUM block_reduce_warp(FLOAT_ACCUM val)
 {
-    static __shared__ FLOAT_ACCUM shared[reduce_size / WARP_SIZE];
+    // non-zero size
+    static __shared__ FLOAT_ACCUM shared[(reduce_size + WARP_SIZE - 1) / WARP_SIZE];
     uint64_t tid = 0;
     if(static_cast<int32_t>(thread_dim) & static_cast<int32_t>(ReduceThreadDim::X))
         tid += threadIdx.x;

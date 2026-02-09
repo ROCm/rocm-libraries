@@ -82,7 +82,8 @@ namespace rocRoller
         Generator<Instruction>
             generate(Register::ValuePtr dst, Register::ValuePtr arg, Expression::LogicalNot const&);
 
-        static const std::string Name;
+        inline static const std::string Name = concatenate(
+            "LogicalNotGenerator<", toString(REGISTER_TYPE), ", ", toString(DATATYPE), ">");
     };
 
     // Specializations for supported Register Type / DataType combinations

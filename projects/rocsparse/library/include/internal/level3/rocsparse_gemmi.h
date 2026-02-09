@@ -127,57 +127,7 @@ extern "C" {
 *
 *  \par Example
 *  This example multiplies a column-oriented dense matrix with a CSC matrix.
-*  \code{.c}
-*      rocsparse_int m   = 2;
-*      rocsparse_int n   = 5;
-*      rocsparse_int k   = 3;
-*      rocsparse_int nnz = 8;
-*      rocsparse_int lda = m;
-*      rocsparse_int ldc = m;
-*
-*      // Matrix A (m x k)
-*      // (  9.0  10.0  11.0 )
-*      // ( 12.0  13.0  14.0 )
-*
-*      // Matrix B (k x n)
-*      // ( 1.0  2.0  0.0  3.0  0.0 )
-*      // ( 0.0  4.0  5.0  0.0  0.0 )
-*      // ( 6.0  0.0  0.0  7.0  8.0 )
-*
-*      // Matrix C (m x n)
-*      // ( 15.0  16.0  17.0  18.0  19.0 )
-*      // ( 20.0  21.0  22.0  23.0  24.0 )
-*
-*      A[lda * k]           = {9.0, 12.0, 10.0, 13.0, 11.0, 14.0};      // device memory
-*      csc_col_ptr_B[n + 1] = {0, 2, 4, 5, 7, 8};                       // device memory
-*      csc_row_ind_B[nnz]   = {0, 0, 1, 1, 2, 3, 3, 4};                 // device memory
-*      csc_val_B[nnz]       = {1.0, 6.0, 2.0, 4.0, 5.0, 3.0, 7.0, 8.0}; // device memory
-*      C[ldc * n]           = {15.0, 20.0, 16.0, 21.0, 17.0, 22.0,      // device memory
-*                              18.0, 23.0, 19.0, 24.0};
-*
-*      // alpha and beta
-*      float alpha = 1.0f;
-*      float beta  = 0.0f;
-*
-*      // Perform the matrix multiplication
-*      rocsparse_sgemmi(handle,
-*                       rocsparse_operation_none,
-*                       rocsparse_operation_transpose,
-*                       m,
-*                       n,
-*                       k,
-*                       nnz,
-*                       &alpha,
-*                       A,
-*                       lda,
-*                       descr_B,
-*                       csc_val_B,
-*                       csc_col_ptr_B,
-*                       csc_row_ind_B,
-*                       &beta,
-*                       C,
-*                       ldc);
-*  \endcode
+*  \snippet example_rocsparse_gemmi.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

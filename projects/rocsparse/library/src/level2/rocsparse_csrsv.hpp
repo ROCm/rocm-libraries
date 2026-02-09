@@ -24,63 +24,68 @@
 
 #pragma once
 
+#pragma once
+
+#include "rocsparse_control.hpp"
+#include "rocsparse_csrsv_info.hpp"
+#include "rocsparse_datatype_utils.hpp"
 #include "rocsparse_handle.hpp"
+#include "rocsparse_indextype_utils.hpp"
+#include "rocsparse_logging.hpp"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {
-    template <typename I, typename J, typename T>
-    rocsparse_status csrsv_buffer_size_template(rocsparse_handle          handle,
-                                                rocsparse_operation       trans,
-                                                J                         m,
-                                                I                         nnz,
-                                                const rocsparse_mat_descr descr,
-                                                const T*                  csr_val,
-                                                const I*                  csr_row_ptr,
-                                                const J*                  csr_col_ind,
-                                                rocsparse_mat_info        info,
-                                                size_t*                   buffer_size);
 
-    template <typename I, typename J, typename T>
-    rocsparse_status trm_analysis(rocsparse_handle          handle,
-                                  rocsparse_operation       trans,
-                                  J                         m,
-                                  I                         nnz,
-                                  const rocsparse_mat_descr descr,
-                                  const T*                  csr_val,
-                                  const I*                  csr_row_ptr,
-                                  const J*                  csr_col_ind,
-                                  rocsparse::trm_info_t*    info,
-                                  J**                       zero_pivot,
-                                  void*                     temp_buffer);
+    rocsparse_status csrsv_zero_pivot(rocsparse_handle     handle,
+                                      rocsparse_csrsv_info info,
+                                      rocsparse_indextype  indextype,
+                                      void*                position);
 
-    template <typename I, typename J, typename T>
-    rocsparse_status csrsv_analysis_template(rocsparse_handle          handle,
-                                             rocsparse_operation       trans,
-                                             J                         m,
-                                             I                         nnz,
-                                             const rocsparse_mat_descr descr,
-                                             const T*                  csr_val,
-                                             const I*                  csr_row_ptr,
-                                             const J*                  csr_col_ind,
-                                             rocsparse_mat_info        info,
-                                             rocsparse_analysis_policy analysis,
-                                             rocsparse_solve_policy    solve,
-                                             void*                     temp_buffer);
+    rocsparse_status csrsv_analysis_buffer_size(rocsparse_handle            handle,
+                                                rocsparse_operation         trans,
+                                                rocsparse_const_spmat_descr A,
+                                                size_t*                     buffer_size);
 
-    template <typename I, typename J, typename T>
-    rocsparse_status csrsv_solve_template(rocsparse_handle          handle,
-                                          rocsparse_operation       trans,
-                                          J                         m,
-                                          I                         nnz,
-                                          const T*                  alpha,
-                                          const rocsparse_mat_descr descr,
-                                          const T*                  csr_val,
-                                          const I*                  csr_row_ptr,
-                                          const J*                  csr_col_ind,
-                                          rocsparse_mat_info        info,
-                                          const T*                  x,
-                                          int64_t                   x_inc,
-                                          T*                        y,
-                                          rocsparse_solve_policy    policy,
-                                          void*                     temp_buffer);
+    rocsparse_status csrsv_solve_buffer_size(rocsparse_handle            handle,
+                                             rocsparse_operation         trans,
+                                             rocsparse_const_spmat_descr A,
+                                             size_t*                     buffer_size);
+
+    rocsparse_status csrsv_analysis(rocsparse_handle            handle,
+                                    rocsparse_operation         trans,
+                                    rocsparse_const_spmat_descr A,
+                                    rocsparse_analysis_policy   analysis_policy,
+                                    rocsparse_solve_policy      solve_policy,
+                                    rocsparse_csrsv_info*       p_csrsv_info,
+                                    void*                       temp_buffer);
+
+    rocsparse_status csrsv_solve(rocsparse_handle            handle,
+                                 rocsparse_operation         trans,
+                                 rocsparse_datatype          alpha_datatype,
+                                 const void*                 alpha,
+                                 int64_t                     alpha_stride,
+                                 rocsparse_const_spmat_descr A,
+                                 rocsparse_const_dnvec_descr x,
+                                 rocsparse_dnvec_descr       y,
+                                 rocsparse_solve_policy      policy,
+                                 rocsparse_csrsv_info        csrsv_info,
+                                 void*                       temp_buffer);
+
+    rocsparse_status launch_csrsv_analysis_kernel(rocsparse_handle    handle,
+                                                  rocsparse_operation trans,
+                                                  int64_t             m,
+                                                  rocsparse_indextype csr_row_ptr_indextype,
+                                                  const void* __restrict__ csr_row_ptr,
+                                                  rocsparse_indextype csr_col_ind_indextype,
+                                                  const void* __restrict__ csr_col_ind,
+                                                  rocsparse_indextype csr_diag_ind_indextype,
+                                                  void* __restrict__ csr_diag_ind,
+                                                  int32_t* __restrict__ done_array,
+                                                  void* __restrict__ max_nnz,
+                                                  void* __restrict__ zero_pivot,
+                                                  rocsparse_index_base idx_base,
+                                                  rocsparse_diag_type  diag_type,
+                                                  rocsparse_fill_mode  mode);
+
 }

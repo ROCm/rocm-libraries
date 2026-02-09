@@ -31,7 +31,7 @@ extern "C" {
 /*! \ingroup precond_module
 *  \details
 *  \p hipsparseXgtsvInterleavedBatch_bufferSizeExt returns the size of the temporary storage
-*  buffer in bytes that is required by \ref hipsparseSgtsvInterleavedBatch "hipsparseXgtsvInterleavedBatch()". 
+*  buffer in bytes that is required by \ref hipsparseSgtsvInterleavedBatch "hipsparseXgtsvInterleavedBatch()".
 *  The temporary storage buffer must be allocated by the user.
 *
 *  @param[in]

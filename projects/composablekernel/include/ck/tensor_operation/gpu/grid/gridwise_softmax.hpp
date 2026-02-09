@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2023, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -26,7 +26,7 @@ __global__ void kernel_softmax(const GridDesc_M_K in_grid_desc_m_k,
                                AccDataType alpha,
                                const InDataType* const __restrict__ p_in_value_global,
                                AccDataType beta,
-                               OutDataType* const __restrict__ p_out_value_global)
+                               OutDataType* p_out_value_global)
 {
     GridwiseReduction::Run(in_grid_desc_m_k,
                            out_grid_desc_m_k,
@@ -91,7 +91,7 @@ struct GridwiseSoftmax_mk_to_mk
                                AccDataType alpha,
                                const InDataType* const __restrict__ p_in_value_global,
                                AccDataType beta,
-                               OutDataType* const __restrict__ p_out_value_global)
+                               OutDataType* p_out_value_global)
     {
         if constexpr(SweepOnce)
         {

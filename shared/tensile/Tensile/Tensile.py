@@ -34,7 +34,6 @@ import shutil
 from .Common import globalParameters, tPrint, printExit, ensurePath, \
     assignGlobalParameters, restoreDefaultGlobalParameters, HR, gfxArch
 from . import BenchmarkProblems
-from . import ClientExecutable
 from . import ClientWriter
 from . import LibraryIO
 from . import LibraryLogic
@@ -155,9 +154,10 @@ def addCommonArguments(argParser):
     )
     argParser.add_argument("--library-format", dest="LibraryFormat", choices=["yaml", "msgpack"], \
         action="store", help="select which library format to use")
-    argParser.add_argument("--client-build-path", default=None)
     argParser.add_argument("--client-lock", default=None)
-    argParser.add_argument("--prebuilt-client", default=None)
+    argParser.add_argument("--prebuilt-client",
+        default=os.path.abspath(os.path.join('build', 'client', 'tensile-client')),
+        help="Specify the full path to a pre-built tensile-client executable")
     argParser.add_argument("--asm-cache", dest="AsmCacheFile", action="store", type=str, \
         help="Path to ASM cache YAML file. If it does not exist, generate the cache. If it does exist, use the cache file")
     argParser.add_argument("--global-parameters", nargs="+", type=splitExtraParameters, default=[])
@@ -198,11 +198,10 @@ def argUpdatedGlobalParameters(args):
     if args.CxxCompiler:
         rv['CxxCompiler'] = args.CxxCompiler
     tPrint(1, "")
-    if args.client_build_path:
-        rv["ClientBuildPath"] = args.client_build_path
     if args.client_lock:
         rv["ClientExecutionLockPath"] = args.client_lock
     if args.prebuilt_client:
+        args.prebuilt_client = os.path.abspath(args.prebuilt_client)
         rv["PrebuiltClient"] = args.prebuilt_client
 
     for key, value in args.global_parameters:
@@ -239,8 +238,6 @@ def Tensile(userArgs):
             "and optional second file is size list")
     argParser.add_argument("--no-cache", dest="NoCache", action="store_true",
             help="Ignore cache; redo parameter forking and solution generation")
-    argParser.add_argument("--client-path", dest="ClientPath", default=None,
-            help="Path to directory to build benchmarking client")
     # yapf: enable
 
     addCommonArguments(argParser)
@@ -248,7 +245,6 @@ def Tensile(userArgs):
     configPaths = args.config_file
     altFormat = args.AlternateFormat
     useCache = not args.NoCache
-    clientPath = args.ClientPath
 
     if altFormat and len(configPaths) > 2:
         printExit("Only 1 or 2 config_files are accepted for the alternate config format: "
@@ -343,10 +339,6 @@ def Tensile(userArgs):
         print("Overriding {0}={1}".format(key, value))
         globalParameters[key] = value
 
-    # Execute Steps in the config script
-    if clientPath is not None:
-        clientPath = os.path.abspath(clientPath)
-    ClientExecutable.getClientExecutable(clientPath)
     executeStepsInConfig(config)
 
     if not globalParameters["KeepBuildTmp"]:

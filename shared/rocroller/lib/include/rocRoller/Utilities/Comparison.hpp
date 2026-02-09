@@ -26,7 +26,11 @@
 
 #pragma once
 
+#include <stddef.h>
+#include <tuple>
 #include <type_traits>
+
+#include <rocRoller/Utilities/Concepts.hpp>
 
 namespace rocRoller
 {
@@ -156,13 +160,13 @@ namespace rocRoller
         return b ^ (a + 0x9b9773e99e3779b9 + (b << 6) + (b >> 2));
     }
 
-    template <typename T>
+    template <CHashable T>
     inline size_t hash_combine(T const& val)
     {
         return std::hash<T>()(val);
     }
 
-    template <typename T, typename... Ts>
+    template <CHashable T, CHashable... Ts>
     inline size_t hash_combine(T const& val, Ts const&... more)
     {
         //size_t mine = sizeof(val);

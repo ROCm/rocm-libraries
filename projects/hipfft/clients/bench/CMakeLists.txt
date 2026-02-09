@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2020 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,14 +24,14 @@ CMAKE_MINIMUM_REQUIRED(VERSION 3.16)
 
 project( hipfft-clients-bench LANGUAGES CXX )
 
-set( hipfft_bench_source bench.cpp ../../shared/array_validator.cpp )
+set( hipfft_bench_source bench.cpp ../../shared/array_validator.cpp ../../shared/data_gen_device.cpp )
 set( hipfft_bench_includes bench.h ../../shared/array_validator.h )
 
 add_executable( hipfft-bench ${hipfft_bench_source} ${hipfft_bench_includes} )
 
 target_compile_options( hipfft-bench PRIVATE ${WARNING_FLAGS} )
 
-set_target_properties( hipfft-bench PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON )
+set_target_properties( hipfft-bench PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON )
 
 target_include_directories( hipfft-bench
   PRIVATE
@@ -46,7 +46,7 @@ if((NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$") OR CMAKE_CXX_COMPILER_ID STREQUA
     if( WIN32 )
       find_package( HIP CONFIG REQUIRED )
     else()
-      find_package( HIP MODULE REQUIRED )
+      find_package( HIP REQUIRED )
     endif()
 
     target_link_libraries( hipfft-bench PRIVATE hip::host hip::device )

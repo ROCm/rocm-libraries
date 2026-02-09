@@ -15,15 +15,14 @@
  *  limitations under the License.
  */
 
-#include <thrust/system/hip/config.h>
-
+#include <thrust/detail/nv_target.h>
 #include <thrust/device_malloc_allocator.h>
-#include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/uninitialized_fill.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(UninitializedFillTests, FullTestsParams);
 
@@ -103,78 +102,56 @@ TEST(UninitializedFillTests, TestUninitializedFillNDispatchImplicit)
 TYPED_TEST(UninitializedFillTests, TestUninitializedFillPOD)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v(5);
-  v[0] = T(0);
-  v[1] = T(1);
-  v[2] = T(2);
-  v[3] = T(3);
-  v[4] = T(4);
+  Vector v{0, 1, 2, 3, 4};
 
   T exemplar(7);
 
-  thrust::uninitialized_fill(Policy{}, v.begin() + 1, v.begin() + 4, exemplar);
+  thrust::uninitialized_fill(v.begin() + 1, v.begin() + 4, exemplar);
 
-  ASSERT_EQ(v[0], T(0));
-  ASSERT_EQ(v[1], exemplar);
-  ASSERT_EQ(v[2], exemplar);
-  ASSERT_EQ(v[3], exemplar);
-  ASSERT_EQ(v[4], T(4));
+  Vector ref{0, exemplar, exemplar, exemplar, 4};
+  ASSERT_EQ(v, ref);
 
-  exemplar = T(8);
+  exemplar = 8;
 
-  thrust::uninitialized_fill(Policy{}, v.begin() + 0, v.begin() + 3, exemplar);
+  thrust::uninitialized_fill(v.begin() + 0, v.begin() + 3, exemplar);
 
-  ASSERT_EQ(v[0], exemplar);
-  ASSERT_EQ(v[1], exemplar);
-  ASSERT_EQ(v[2], exemplar);
-  ASSERT_EQ(v[3], T(7));
-  ASSERT_EQ(v[4], T(4));
+  ref = {exemplar, exemplar, exemplar, 7, 4};
+  ASSERT_EQ(v, ref);
 
-  exemplar = T(9);
+  exemplar = 9;
 
-  thrust::uninitialized_fill(Policy{}, v.begin() + 2, v.end(), exemplar);
+  thrust::uninitialized_fill(v.begin() + 2, v.end(), exemplar);
 
-  ASSERT_EQ(v[0], T(8));
-  ASSERT_EQ(v[1], T(8));
-  ASSERT_EQ(v[2], exemplar);
-  ASSERT_EQ(v[3], exemplar);
-  ASSERT_EQ(v[4], T(9));
+  ref = {8, 8, exemplar, exemplar, 9};
+  ASSERT_EQ(v, ref);
 
-  exemplar = T(1);
+  exemplar = 1;
 
-  thrust::uninitialized_fill(Policy{}, v.begin(), v.end(), exemplar);
+  thrust::uninitialized_fill(v.begin(), v.end(), exemplar);
 
-  ASSERT_EQ(v[0], exemplar);
-  ASSERT_EQ(v[1], exemplar);
-  ASSERT_EQ(v[2], exemplar);
-  ASSERT_EQ(v[3], exemplar);
-  ASSERT_EQ(v[4], exemplar);
+  ref = {exemplar, exemplar, exemplar, exemplar, exemplar};
+  ASSERT_EQ(v, ref);
 }
 
 struct CopyConstructTest
 {
-  __host__ __device__ CopyConstructTest(void)
+  THRUST_HOST_DEVICE CopyConstructTest()
       : copy_constructed_on_host(false)
       , copy_constructed_on_device(false)
   {}
 
-  __host__ __device__ CopyConstructTest(const CopyConstructTest&)
+  THRUST_HOST_DEVICE CopyConstructTest(const CopyConstructTest&)
   {
-#if defined(THRUST_HIP_DEVICE_CODE)
-    copy_constructed_on_device = true;
-    copy_constructed_on_host   = false;
-#else
-    copy_constructed_on_device = false;
-    copy_constructed_on_host   = true;
-#endif
+    NV_IF_TARGET(NV_IS_DEVICE,
+                 (copy_constructed_on_device = true; copy_constructed_on_host = false;),
+                 (copy_constructed_on_device = false; copy_constructed_on_host = true;));
   }
 
-  __host__ __device__ CopyConstructTest& operator=(const CopyConstructTest& x)
+  THRUST_HOST_DEVICE CopyConstructTest& operator=(const CopyConstructTest& x)
   {
     copy_constructed_on_host   = x.copy_constructed_on_host;
     copy_constructed_on_device = x.copy_constructed_on_device;
@@ -190,31 +167,31 @@ struct CopyConstructTest
  * investigate why.
 TEST(UninitializedFillTests, TestUninitializedFillNonPOD)
 {
-    using T                 = CopyConstructTest;
-    thrust::device_ptr<T> v = thrust::device_malloc<T>(5);
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T                 = CopyConstructTest;
+  thrust::device_ptr<T> v = thrust::device_malloc<T>(5);
 
-    T exemplar;
-    ASSERT_EQ(false, exemplar.copy_constructed_on_device);
-    ASSERT_EQ(false, exemplar.copy_constructed_on_host);
+  T exemplar;
+  ASSERT_EQ(false, exemplar.copy_constructed_on_device);
+  ASSERT_EQ(false, exemplar.copy_constructed_on_host);
 
-    T host_copy_of_exemplar(exemplar);
-    ASSERT_EQ(false, host_copy_of_exemplar.copy_constructed_on_device);
-    ASSERT_EQ(true, host_copy_of_exemplar.copy_constructed_on_host);
+  T host_copy_of_exemplar(exemplar);
+  ASSERT_EQ(false, exemplar.copy_constructed_on_device);
+  ASSERT_EQ(true, exemplar.copy_constructed_on_host);
 
-    // copy construct v from the exemplar
-    thrust::uninitialized_fill(v, v + 1, exemplar);
+  // copy construct v from the exemplar
+  thrust::uninitialized_fill(v, v + 1, exemplar);
 
-    T x;
-    ASSERT_EQ(false, x.copy_constructed_on_device);
-    ASSERT_EQ(false, x.copy_constructed_on_host);
+  T x;
+  ASSERT_EQ(false, x.copy_constructed_on_device);
+  ASSERT_EQ(false, x.copy_constructed_on_host);
 
-    x = v[0];
-    ASSERT_EQ(true, x.copy_constructed_on_device);
-    ASSERT_EQ(false, x.copy_constructed_on_host);
+  x = v[0];
+  ASSERT_EQ(true, x.copy_constructed_on_device);
+  ASSERT_EQ(false, x.copy_constructed_on_host);
 
-    thrust::device_free(v);
+  thrust::device_free(v);
 }
 */
 
@@ -225,57 +202,35 @@ TYPED_TEST(UninitializedFillTests, TestUninitializedFillNPOD)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v(5);
-  v[0] = T(0);
-  v[1] = T(1);
-  v[2] = T(2);
-  v[3] = T(3);
-  v[4] = T(4);
+  Vector v{0, 1, 2, 3, 4};
 
   T exemplar(7);
 
-  using Iterator = typename Vector::iterator;
-  Iterator iter  = thrust::uninitialized_fill_n(v.begin() + 1, size_t(3), exemplar);
+  typename Vector::iterator iter = thrust::uninitialized_fill_n(v.begin() + 1, 3, exemplar);
 
-  ASSERT_EQ(v[0], T(0));
-  ASSERT_EQ(v[1], exemplar);
-  ASSERT_EQ(v[2], exemplar);
-  ASSERT_EQ(v[3], exemplar);
-  ASSERT_EQ(v[4], T(4));
-  ASSERT_EQ(v.begin() + 4, iter);
+  Vector ref{0, exemplar, exemplar, exemplar, 4};
+  ASSERT_EQ_QUIET(v.begin() + 4, iter);
 
-  exemplar = T(8);
+  exemplar = 8;
 
-  iter = thrust::uninitialized_fill_n(v.begin() + 0, size_t(3), exemplar);
+  iter = thrust::uninitialized_fill_n(v.begin() + 0, 3, exemplar);
 
-  ASSERT_EQ(v[0], exemplar);
-  ASSERT_EQ(v[1], exemplar);
-  ASSERT_EQ(v[2], exemplar);
-  ASSERT_EQ(v[3], T(7));
-  ASSERT_EQ(v[4], T(4));
-  ASSERT_EQ(v.begin() + 3, iter);
+  ref = {exemplar, exemplar, exemplar, 7, 4};
+  ASSERT_EQ_QUIET(v.begin() + 3, iter);
 
-  exemplar = T(9);
+  exemplar = 9;
 
-  iter = thrust::uninitialized_fill_n(v.begin() + 2, size_t(3), exemplar);
+  iter = thrust::uninitialized_fill_n(v.begin() + 2, 3, exemplar);
 
-  ASSERT_EQ(v[0], T(8));
-  ASSERT_EQ(v[1], T(8));
-  ASSERT_EQ(v[2], exemplar);
-  ASSERT_EQ(v[3], exemplar);
-  ASSERT_EQ(v[4], T(9));
-  ASSERT_EQ(v.end(), iter);
+  ref = {8, 8, exemplar, exemplar, 9};
+  ASSERT_EQ_QUIET(v.end(), iter);
 
-  exemplar = T(1);
+  exemplar = 1;
 
   iter = thrust::uninitialized_fill_n(v.begin(), v.size(), exemplar);
 
-  ASSERT_EQ(v[0], exemplar);
-  ASSERT_EQ(v[1], exemplar);
-  ASSERT_EQ(v[2], exemplar);
-  ASSERT_EQ(v[3], exemplar);
-  ASSERT_EQ(v[4], exemplar);
-  ASSERT_EQ(v.end(), iter);
+  ref = {exemplar, exemplar, exemplar, exemplar, exemplar};
+  ASSERT_EQ_QUIET(v.end(), iter);
 }
 
 /* TODO: Disabled test
@@ -283,31 +238,31 @@ TYPED_TEST(UninitializedFillTests, TestUninitializedFillNPOD)
  * investigate why.
 TEST(UninitializedFillTests, TestUninitializedFillNNonPOD)
 {
-    using T                 = CopyConstructTest;
-    thrust::device_ptr<T> v = thrust::device_malloc<T>(5);
+  using T                 = CopyConstructTest;
+  thrust::device_ptr<T> v = thrust::device_malloc<T>(5);
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    T exemplar;
-    ASSERT_EQ(false, exemplar.copy_constructed_on_device);
-    ASSERT_EQ(false, exemplar.copy_constructed_on_host);
+  T exemplar;
+  ASSERT_EQ(false, exemplar.copy_constructed_on_device);
+  ASSERT_EQ(false, exemplar.copy_constructed_on_host);
 
-    T host_copy_of_exemplar(exemplar);
-    ASSERT_EQ(false, host_copy_of_exemplar.copy_constructed_on_device);
-    ASSERT_EQ(true, host_copy_of_exemplar.copy_constructed_on_host);
+  T host_copy_of_exemplar(exemplar);
+  ASSERT_EQ(false, exemplar.copy_constructed_on_device);
+  ASSERT_EQ(true, exemplar.copy_constructed_on_host);
 
-    // copy construct v from the exemplar
-    thrust::uninitialized_fill_n(v, size_t(1), exemplar);
+  // copy construct v from the exemplar
+  thrust::uninitialized_fill_n(v, 1, exemplar);
 
-    T x;
-    ASSERT_EQ(false, x.copy_constructed_on_device);
-    ASSERT_EQ(false, x.copy_constructed_on_host);
+  T x;
+  ASSERT_EQ(false, x.copy_constructed_on_device);
+  ASSERT_EQ(false, x.copy_constructed_on_host);
 
-    x = v[0];
-    ASSERT_EQ(true, x.copy_constructed_on_device);
-    ASSERT_EQ(false, x.copy_constructed_on_host);
+  x = v[0];
+  ASSERT_EQ(true, x.copy_constructed_on_device);
+  ASSERT_EQ(false, x.copy_constructed_on_host);
 
-    thrust::device_free(v);
+  thrust::device_free(v);
 }
 */
 

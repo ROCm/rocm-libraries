@@ -26,14 +26,12 @@
 """Result reporting routines."""
 
 import argparse
-import numpy as np
 import pathlib
-import yaml
-
 from typing import List
 
+import numpy as np
 import rrperf.problems
-
+import yaml
 from rrperf.problems import GEMMResult
 
 
@@ -49,18 +47,20 @@ def analyze(directory: pathlib.Path):
     data = read_data(directory)
 
     infos = sorted(map(info, data), key=lambda x: x[2])
-    for (dim, value, time) in infos:
+    for dim, value, time in infos:
         print(f"{dim}, {value}, {time}")
 
 
 def info(res: GEMMResult):
-    dim, value = res.workgroupMapping
+    dim = res.workgroupMappingDim
+    value = res.workgroupMappingValue
     time = np.median(res.kernelExecute)
     return (dim, value, time)
 
 
 def read_data(directory: pathlib.Path) -> List[GEMMResult]:
     import itertools
+
     return itertools.chain(*map(rrperf.problems.load_results, directory.glob("*.yaml")))
 
 

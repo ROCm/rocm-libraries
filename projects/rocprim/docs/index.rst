@@ -5,36 +5,49 @@
 .. _rocprim:
 
 ********************************************************************
- rocPRIM documentation
+rocPRIM documentation
 ********************************************************************
 
-rocPRIM is a header-only library that provides HIP parallel primitives. The purpose of the library is to ease the maintainability of performant, yet portable GPU-accelerated code on the AMD ROCm platform. rocPRIM is written in HIP and has been optimized for AMD's latest discrete GPUs. For more information refer to :ref:`rocprim-intro`.
+rocPRIM is a header-only library that provides HIP parallel primitives. The purpose of the library is to provide a set of portable, commonly used, GPU-accelerated parallel primitive algorithms. rocPRIM is written in HIP and has been optimized for AMD's latest discrete GPUs.
 
-The code is open and hosted at: https://github.com/ROCmSoftwarePlatform/rocPRIM
-
-The rocPRIM documentation is structured as follows:
+The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim.
 
 .. grid:: 2
+  :gutter: 3
 
+  .. grid-item-card:: Installation
+
+    * :doc:`rocPRIM prerequisites <install/rocPRIM-prerequisites>`
+    * :doc:`rocPRIM installation overview <install/rocPRIM-install-overview>`
+    * :doc:`Install rocPRIM on Linux <install/rocPRIM-build-install-linux>`
+    * :doc:`Install rocPRIM on Windows <install/rocPRIM-build-install-windows>`
+  
   .. grid-item-card:: Conceptual
 
-    * :ref:`rocprim-intro`
+    * :doc:`Block and stripe arrangements <./conceptual/rocPRIM-stripe-block>`
+    * :doc:`Types of rocPRIM operations <./conceptual/rocPRIM-operations>`
+    * :doc:`Scope of rocPRIM operations <./conceptual/rocPRIM-scope>`
+    * :doc:`rocPRIM performance tuning <./conceptual/rocPRIM-performance-tuning>`
+
+  .. grid-item-card:: How to
+
+    * :doc:`Use the SPIR-V target with rocPRIM <./how-to/rocPRIM-spir-v>`
+   
+  .. grid-item-card:: Reference
+
     * :ref:`glossary`
-    * :ref:`tuning`
-    * :ref:`developer`
-    * :ref:`spirv`
-
-  .. grid-item-card:: API reference
-
-    * :ref:`ops-summary`
     * :ref:`data-type-support`
-    * :ref:`dev-index`
-    * :ref:`block-index`
-    * :ref:`warp-index` 
-    * :ref:`thread-index`
-    * :ref:`iterators` 
-    * :ref:`intrinsics` 
-    * :ref:`type_traits`
+    * :ref:`reference`
+
+      * :ref:`Iterators <iterators>` 
+      * :ref:`Intrinsics <intrinsics>` 
+      * :ref:`Utility types <types>`
+      * :ref:`Custom type traits <type_traits>`
+      * :ref:`Data movement functions <data_mov_funcs>`
+      * :ref:`Device-level operations <dev-index>`
+      * :ref:`Block-level operations <block-index>`
+      * :ref:`Warp-level operations <warp-index>` 
+      * :ref:`Thread-level operations <thread-index>`
 
 To contribute to the documentation refer to `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 

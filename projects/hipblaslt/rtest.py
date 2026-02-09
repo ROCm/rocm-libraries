@@ -45,7 +45,7 @@ def parse_args():
                         help='Enable specific emulation test mode, e.g. smoke test')
     parser.add_argument('-i', '--install_dir', type=str, required=False, default="",
                         help='Installation directory where build or release folders are (optional, default: $PWD)')
-    parser.add_argument('-o', '--output', type=str, required=False, default="xml", 
+    parser.add_argument('-o', '--output', type=str, required=False, default="xml",
                         help='Test output file (optional, default: test_detail.xml)')
     args = parser.parse_args()
 
@@ -65,9 +65,9 @@ def run_cmd(args, filter):
 
     sub_env = os.environ.copy()
     sub_env["PATH"] = os.getcwd() + os.pathsep + sub_env["PATH"]
-    
+
     output_file = "--gtest_output=" + args.output if args.output else ""
-    
+
     cmd = [test_binary, filter, output_file]
     test_proc = subprocess.run(cmd, stdout=sys.stdout, stderr=sys.stderr, env=sub_env)
 

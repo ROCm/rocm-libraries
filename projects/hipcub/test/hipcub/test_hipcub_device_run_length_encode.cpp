@@ -29,7 +29,7 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/device/device_run_length_encode.hpp"
+#include <hipcub/device/device_run_length_encode.hpp>
 
 #include "test_utils_data_generation.hpp"
 

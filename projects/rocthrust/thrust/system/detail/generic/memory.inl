@@ -101,4 +101,3 @@ void iter_swap(thrust::execution_policy<DerivedPolicy> &, Pointer1, Pointer2)
 } // end detail
 } // end system
 THRUST_NAMESPACE_END
-

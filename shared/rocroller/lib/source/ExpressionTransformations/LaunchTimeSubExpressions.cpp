@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -85,8 +85,7 @@ namespace rocRoller
                            toString(varType),
                            toString(expr));
 
-                return kernel->addArgument(
-                    {.name = argName, .variableType = varType, .expression = expr});
+                return kernel->addArgument({argName, varType, DataDirection::ReadOnly, expr});
             }
 
             ExpressionPtr maybeLaunchEval(ExpressionPtr expr, bool ignoreComplexity)
@@ -106,10 +105,6 @@ namespace rocRoller
 
                 if(!m_allowNewArgs)
                     return nullptr;
-
-                LaunchTimeExpressionVisitor sub(m_context, false);
-                auto                        ex2    = sub.call(expr);
-                auto                        myComp = complexity(ex2);
 
                 if(ignoreComplexity || !evalTimes[EvaluationTime::KernelExecute]
                    || complexity(expr) >= m_minComplexity)
@@ -199,6 +194,22 @@ namespace rocRoller
                 }
             }
 
+            template <CNary Expr>
+            ExpressionPtr operator()(Expr const& expr)
+            {
+                {
+                    auto launchResult = maybeLaunchEval(expr);
+                    if(launchResult)
+                        return launchResult;
+                }
+
+                {
+                    auto cpy = expr;
+                    std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                    return std::make_shared<Expression>(std::move(cpy));
+                }
+            }
+
             ExpressionPtr operator()(CommandArgumentPtr const& expr)
             {
                 // For a Value, if we still have a CommandArgument, we need to
@@ -267,6 +278,8 @@ namespace rocRoller
 
                 AssertFatal(resultVariableType(expr) == resultVariableType(v2),
                             ShowValue(expr),
+                            ShowValue(v0),
+                            ShowValue(v1),
                             ShowValue(v2));
 
                 return v2;

@@ -15,18 +15,20 @@
  *  limitations under the License.
  */
 
-#include <thrust/sort.h>
+#include <thrust/reduce.h>
 #include <thrust/transform.h>
 #include <thrust/tuple.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(TupleReduceTests, IntegerTestsParams);
 
 struct SumTupleFunctor
 {
   template <typename Tuple>
-  __host__ __device__ Tuple operator()(const Tuple& lhs, const Tuple& rhs)
+  THRUST_HOST_DEVICE Tuple operator()(const Tuple& lhs, const Tuple& rhs)
   {
     using thrust::get;
 
@@ -37,7 +39,7 @@ struct SumTupleFunctor
 struct MakeTupleFunctor
 {
   template <typename T1, typename T2>
-  __host__ __device__ thrust::tuple<T1, T2> operator()(T1& lhs, T2& rhs)
+  THRUST_HOST_DEVICE thrust::tuple<T1, T2> operator()(T1& lhs, T2& rhs)
   {
     return thrust::make_tuple(lhs, rhs);
   }
@@ -46,6 +48,7 @@ struct MakeTupleFunctor
 TYPED_TEST(TupleReduceTests, TestTupleReduce)
 {
   using T = typename TestFixture::input_type;
+  using namespace thrust;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -57,26 +60,24 @@ TYPED_TEST(TupleReduceTests, TestTupleReduce)
     {
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-      thrust::host_vector<T> h_t1 =
-        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
-      thrust::host_vector<T> h_t2 = get_random_data<T>(
+      host_vector<T> h_t1 = get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      host_vector<T> h_t2 = get_random_data<T>(
         size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
 
       // zip up the data
-      thrust::host_vector<thrust::tuple<T, T>> h_tuples(size);
-      thrust::transform(h_t1.begin(), h_t1.end(), h_t2.begin(), h_tuples.begin(), MakeTupleFunctor());
+      host_vector<tuple<T, T>> h_tuples(size);
+      transform(h_t1.begin(), h_t1.end(), h_t2.begin(), h_tuples.begin(), MakeTupleFunctor());
 
       // copy to device
-      thrust::device_vector<thrust::tuple<T, T>> d_tuples = h_tuples;
+      device_vector<tuple<T, T>> d_tuples = h_tuples;
 
-      thrust::tuple<T, T> zero(0, 0);
+      tuple<T, T> zero(0, 0);
 
       // sum on host
-      thrust::tuple<T, T> h_result = thrust::reduce(h_tuples.begin(), h_tuples.end(), zero, SumTupleFunctor());
+      tuple<T, T> h_result = thrust::reduce(h_tuples.begin(), h_tuples.end(), zero, SumTupleFunctor());
 
       // sum on device
-      thrust::tuple<T, T> d_result = thrust::reduce(d_tuples.begin(), d_tuples.end(), zero, SumTupleFunctor());
+      tuple<T, T> d_result = thrust::reduce(d_tuples.begin(), d_tuples.end(), zero, SumTupleFunctor());
 
       ASSERT_EQ_QUIET(h_result, d_result);
     }

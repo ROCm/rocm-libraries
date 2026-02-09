@@ -94,9 +94,11 @@ struct MIOPEN_INTERNALS_EXPORT ExecutionContext
     // to optimize the getWorkspaceSize() calls for speed. This specific optimization is correct
     // because Solvers shall be written so that the required workspace size does not depend on the
     // performance config.
-    bool disable_perfdb_access      = false;
-    bool use_dynamic_solutions_only = false;
-    bool is_for_generic_search      = false;
+    bool disable_perfdb_access              = false;
+    bool use_dynamic_solutions_only         = false;
+    bool is_for_generic_search              = false;
+    mutable float generic_search_worst_time = std::numeric_limits<float>::max();
+    mutable float generic_search_best_time  = std::numeric_limits<float>::max();
 
     inline const Handle& GetStream() const { return *stream; }
     inline void SetStream(const Handle* stream_) { stream = stream_; }
@@ -104,11 +106,11 @@ struct MIOPEN_INTERNALS_EXPORT ExecutionContext
     ExecutionContext() { DetectRocm(); }
     ExecutionContext(const Handle* stream_) : stream(stream_) { DetectRocm(); }
 
-    virtual ~ExecutionContext()               = default;
-    ExecutionContext(const ExecutionContext&) = default;
-    ExecutionContext(ExecutionContext&&)      = default;
+    virtual ~ExecutionContext()                          = default;
+    ExecutionContext(const ExecutionContext&)            = default;
+    ExecutionContext(ExecutionContext&&)                 = default;
     ExecutionContext& operator=(const ExecutionContext&) = default;
-    ExecutionContext& operator=(ExecutionContext&&) = default;
+    ExecutionContext& operator=(ExecutionContext&&)      = default;
 
 #if MIOPEN_EMBED_DB
     fs::path GetPerfDbPathEmbed(std::string_view prefix = "") const
@@ -219,7 +221,7 @@ struct MIOPEN_INTERNALS_EXPORT ExecutionContext
                     {
                         const auto fname = filepath.stem().string();
                         if(fs::is_regular_file(filepath) && filepath.extension() == ext &&
-                           fname.rfind(db_id, 0) == 0)
+                           fname.starts_with(db_id))
                         {
                             MIOPEN_LOG_I2("Checking perf db file: " << fname);
                             const auto pos = fname.find('_');

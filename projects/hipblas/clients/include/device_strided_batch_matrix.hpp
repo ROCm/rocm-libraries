@@ -70,6 +70,8 @@ public:
         if(valid_parameters)
         {
             this->m_data = this->device_vector_setup();
+            if(!this->m_data)
+                throw std::bad_alloc{};
         }
     }
 

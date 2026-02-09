@@ -23,10 +23,9 @@
 #include "common_benchmark_header.hpp"
 
 // HIP API
-#include "hipcub/block/block_adjacent_difference.hpp"
-
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_store.hpp"
+#include <hipcub/block/block_adjacent_difference.hpp>
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_store.hpp>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 128;

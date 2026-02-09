@@ -43,19 +43,13 @@ namespace rocRoller
     class AddComment
     {
     public:
-        AddComment(std::string comment)
-            : m_comment(std::move(comment))
-        {
-        }
+        AddComment(std::string comment, bool skipCommentOnly = false);
 
-        Instruction operator()(Instruction inst)
-        {
-            inst.addComment(m_comment);
-            return inst;
-        }
+        Instruction operator()(Instruction inst);
 
     private:
         std::string m_comment;
+        bool        m_skipCommentOnly;
     };
 
     /**
@@ -66,18 +60,50 @@ namespace rocRoller
     class AddControlOp
     {
     public:
-        AddControlOp(int op)
-            : m_op(op)
-        {
-        }
+        AddControlOp(int op);
 
-        Instruction operator()(Instruction inst)
-        {
-            inst.addControlOp(m_op);
-            return inst;
-        }
+        Instruction operator()(Instruction inst);
 
     private:
         int m_op;
     };
+
+    enum class SourceLocationPart
+    {
+        Function = 0,
+        File,
+        Line,
+        Column,
+        Count
+    };
+
+    inline std::string toString(SourceLocationPart part);
+
+    class AddLocation
+    {
+    public:
+        AddLocation(EnumBitset<SourceLocationPart> parts,
+                    std::source_location           loc = std::source_location::current());
+
+        AddLocation(std::source_location loc = std::source_location::current());
+
+        /**
+         * Returns a new object which will only annotate the first non-comment
+         * instruction that it encounters.
+         */
+        AddLocation onlyFirst();
+
+        std::string comment() const;
+
+        Instruction operator()(Instruction inst);
+
+    private:
+        EnumBitset<SourceLocationPart> m_parts;
+        std::source_location           m_location;
+
+        bool m_onlyFirst = false;
+        bool m_expired   = false;
+    };
 }
+
+#include <rocRoller/CodeGen/Annotate_impl.hpp>

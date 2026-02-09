@@ -27,17 +27,11 @@
 //////////////////////
 
 template <class Vector>
-void TestScalarLowerBoundDescendingSimple(void)
+void TestScalarLowerBoundDescendingSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector vec(5);
-
-  vec[0] = 8;
-  vec[1] = 7;
-  vec[2] = 5;
-  vec[3] = 2;
-  vec[4] = 0;
+  Vector vec{8, 7, 5, 2, 0};
 
   ASSERT_EQUAL_QUIET(vec.begin() + 4, thrust::lower_bound(vec.begin(), vec.end(), T{0}, thrust::greater<T>()));
   ASSERT_EQUAL_QUIET(vec.begin() + 4, thrust::lower_bound(vec.begin(), vec.end(), T{1}, thrust::greater<T>()));
@@ -53,17 +47,11 @@ void TestScalarLowerBoundDescendingSimple(void)
 DECLARE_VECTOR_UNITTEST(TestScalarLowerBoundDescendingSimple);
 
 template <class Vector>
-void TestScalarUpperBoundDescendingSimple(void)
+void TestScalarUpperBoundDescendingSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector vec(5);
-
-  vec[0] = 8;
-  vec[1] = 7;
-  vec[2] = 5;
-  vec[3] = 2;
-  vec[4] = 0;
+  Vector vec{8, 7, 5, 2, 0};
 
   ASSERT_EQUAL_QUIET(vec.begin() + 5, thrust::upper_bound(vec.begin(), vec.end(), T{0}, thrust::greater<T>()));
   ASSERT_EQUAL_QUIET(vec.begin() + 4, thrust::upper_bound(vec.begin(), vec.end(), T{1}, thrust::greater<T>()));
@@ -79,17 +67,11 @@ void TestScalarUpperBoundDescendingSimple(void)
 DECLARE_VECTOR_UNITTEST(TestScalarUpperBoundDescendingSimple);
 
 template <class Vector>
-void TestScalarBinarySearchDescendingSimple(void)
+void TestScalarBinarySearchDescendingSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector vec(5);
-
-  vec[0] = 8;
-  vec[1] = 7;
-  vec[2] = 5;
-  vec[3] = 2;
-  vec[4] = 0;
+  Vector vec{8, 7, 5, 2, 0};
 
   ASSERT_EQUAL(true, thrust::binary_search(vec.begin(), vec.end(), T{0}, thrust::greater<T>()));
   ASSERT_EQUAL(false, thrust::binary_search(vec.begin(), vec.end(), T{1}, thrust::greater<T>()));
@@ -105,17 +87,11 @@ void TestScalarBinarySearchDescendingSimple(void)
 DECLARE_VECTOR_UNITTEST(TestScalarBinarySearchDescendingSimple);
 
 template <class Vector>
-void TestScalarEqualRangeDescendingSimple(void)
+void TestScalarEqualRangeDescendingSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector vec(5);
-
-  vec[0] = 8;
-  vec[1] = 7;
-  vec[2] = 5;
-  vec[3] = 2;
-  vec[4] = 0;
+  Vector vec{8, 7, 5, 2, 0};
 
   ASSERT_EQUAL_QUIET(vec.begin() + 4, thrust::equal_range(vec.begin(), vec.end(), T{0}, thrust::greater<T>()).first);
   ASSERT_EQUAL_QUIET(vec.begin() + 4, thrust::equal_range(vec.begin(), vec.end(), T{1}, thrust::greater<T>()).first);

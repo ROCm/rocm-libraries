@@ -34,14 +34,6 @@
 #define strSUITEcmp(A, B) _stricmp(A, B)
 #endif
 
-#ifdef __cpp_lib_filesystem
-#include <filesystem>
-namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
-
 /* ============================================================================================ */
 // Return path of this executable
 std::string hipsparse_exepath()
@@ -83,6 +75,38 @@ std::string hipsparse_exepath()
 #endif
 }
 
+/* ==================================================================================== */
+// Return path where the test data file (hipsparse_test.data) is located
+std::string hipsparse_datapath()
+{
+#ifdef WIN32
+    fs::path        share_path = fs::path(hipsparse_exepath() + "../share/hipsparse/test");
+    std::error_code ec;
+    fs::path        path = fs::canonical(share_path, ec);
+    if(!ec)
+    {
+        if(fs::exists(path, ec) && !ec)
+        {
+            path += path.empty() ? "" : "/";
+            return path.string();
+        }
+    }
+#else
+    std::string pathstr;
+    std::string share_path = hipsparse_exepath() + "../share/hipsparse/test";
+    char*       path       = realpath(share_path.c_str(), 0);
+    if(path != NULL)
+    {
+        pathstr = path;
+        pathstr += "/";
+        free(path);
+        return pathstr;
+    }
+#endif
+
+    return hipsparse_exepath();
+}
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -92,7 +116,7 @@ extern "C" {
 void query_version(char* version)
 {
     int  hipsparse_ver;
-    char hipsparse_rev[64];
+    char hipsparse_rev[256];
 
     hipsparseStatus_t status;
 
@@ -126,12 +150,13 @@ void query_version(char* version)
         throw(status);
     }
 
-    sprintf(version,
-            "v%d.%d.%d-%s",
-            hipsparse_ver / 100000,
-            hipsparse_ver / 100 % 1000,
-            hipsparse_ver % 100,
-            hipsparse_rev);
+    snprintf(version,
+             512,
+             "v%d.%d.%d-%.256s",
+             hipsparse_ver / 100000,
+             hipsparse_ver / 100 % 1000,
+             hipsparse_ver % 100,
+             hipsparse_rev);
 }
 
 /* ============================================================================================ */
@@ -164,12 +189,12 @@ int query_device_property()
         {
             printf("Device ID %d : %s\n", i, props.name);
             printf("-------------------------------------------------------------------------\n");
-            printf("with %ldMB memory, clock rate %dMHz @ computing capability %d.%d \n",
+            printf("with %zuMB memory, clock rate %dMHz @ computing capability %d.%d \n",
                    props.totalGlobalMem >> 20,
-                   (int)(props.clockRate / 1000),
+                   (props.clockRate / 1000),
                    props.major,
                    props.minor);
-            printf("maxGridDimX %d, sharedMemPerBlock %ldKB, maxThreadsPerBlock %d, warpSize %d\n",
+            printf("maxGridDimX %d, sharedMemPerBlock %zuKB, maxThreadsPerBlock %d, warpSize %d\n",
                    props.maxGridSize[0],
                    props.sharedMemPerBlock >> 10,
                    props.maxThreadsPerBlock,
@@ -189,7 +214,7 @@ void set_device(int device_id)
     if(status != HIPSPARSE_STATUS_SUCCESS)
     {
         printf("Set device error: cannot set device ID %d, there may not be such device ID\n",
-               (int)device_id);
+               device_id);
     }
 }
 /* ============================================================================================ */

@@ -181,14 +181,14 @@ if(TENSILE_BUILD_TESTING)
       target_link_libraries(tensile-tests PRIVATE LLVMObjectYAML)
       target_compile_features(tensile-tests PRIVATE cxx_std_${TENSILE_CXX_STANDARD})
   endif()
-  
+
   target_include_directories(
     tensile-tests
     PRIVATE
       $<BUILD_INTERFACE:${TENSILE_SOURCE_TREE}/client/include>)
 
   # data dir needs to be parallel to tensile-tests
-  # because tensile-tests search for data/ relative 
+  # because tensile-tests search for data/ relative
   # to its location
   set(TENSILE_TEST_DATA_DIR "${CMAKE_CURRENT_BINARY_DIR}/../data")
   file(MAKE_DIRECTORY "${TEST_DATA_DIR}")

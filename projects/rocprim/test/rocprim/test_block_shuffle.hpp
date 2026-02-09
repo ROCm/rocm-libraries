@@ -82,7 +82,7 @@ typed_test_def(suite_name, name_suffix, BlockOffset)
             int offset = thread_index + distance;
             if((offset >= 0 ) && (offset < (int)block_size))
             {
-              test_utils::assert_eq(input_data[block_index*block_size + offset],output_data[block_index*block_size + thread_index]);
+              ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(input_data[block_index*block_size + offset],output_data[block_index*block_size + thread_index]));
             }
           }
         }
@@ -136,7 +136,7 @@ typed_test_def(suite_name, name_suffix, BlockRotate)
             int offset = thread_index + distance;
             if (offset >= (int)block_size)
                 offset -=      block_size;
-            test_utils::assert_eq(input_data[block_index*block_size + offset],output_data[block_index*block_size + thread_index]);
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(input_data[block_index*block_size + offset],output_data[block_index*block_size + thread_index]));
           }
         }
     }
@@ -195,7 +195,7 @@ typed_test_def(suite_name, name_suffix, BlockUp)
             {
               if(thread_index + item_index>0)
               {
-                  test_utils::assert_eq(input_data[start_offset + item_index-1],output_data[start_offset + item_index]);
+                  ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(input_data[start_offset + item_index-1],output_data[start_offset + item_index]));
               }
             }
           }
@@ -257,7 +257,7 @@ typed_test_def(suite_name, name_suffix, BlockDown)
             {
               if((thread_index!=block_size-1)&&(item_index!=ItemsPerThread-1))
               {
-                  test_utils::assert_eq(input_data[start_offset + item_index+1],output_data[start_offset + item_index]);
+                  ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(input_data[start_offset + item_index+1],output_data[start_offset + item_index]));
               }
             }
           }

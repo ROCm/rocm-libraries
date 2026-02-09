@@ -1,0 +1,73 @@
+# ########################################################################
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: hipsparse_common.yaml
+
+
+Tests:
+- name: gebsr2gebsc_bad_arg
+  category: pre_checkin
+  function: gebsr2gebsc_bad_arg
+  precision: *single_double_precisions_complex_real
+  
+- name: gebsr2gebsc
+  category: quick
+  function: gebsr2gebsc
+  precision: *single_double_precisions_complex_real
+  M: [0, 981]
+  N: [0, 1286]
+  row_block_dimA: [2, 5]
+  col_block_dimA: [3, 7]
+  action: [HIPSPARSE_ACTION_NUMERIC]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+
+- name: gebsr2gebsc_file
+  category: pre_checkin
+  function: gebsr2gebsc
+  precision: *single_double_precisions_complex_real
+  M: 1
+  row_block_dimA: [3, 7, 11]
+  col_block_dimA: [5, 9]
+  action: [HIPSPARSE_ACTION_NUMERIC]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
+
+- name: gebsr2gebsc_file
+  category: nightly
+  function: gebsr2gebsc
+  precision: *single_only_precisions
+  M: 1
+  row_block_dimA: [4]
+  col_block_dimA: [6]
+  action: [HIPSPARSE_ACTION_NUMERIC]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [mc2depi,
+             rma10,
+             scircuit]

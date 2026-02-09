@@ -433,7 +433,7 @@ struct float_bit_mask
 
 /// \par Definability
 /// * **Undefinable**: For all types.
-/// \par Overview This triat is auto matically generated.
+/// \par Overview This trait is automatically generated.
 /// \par How to use
 /// \parblock
 /// \code{.cpp}
@@ -1290,7 +1290,7 @@ struct traits::define<rocprim::half>
     using number_format
         = traits::number_format::values<traits::number_format::kind::floating_point_type>;
     /// \brief Trait `float_bit_mask` for this type
-    using float_bit_mask = traits::float_bit_mask::values<uint16_t, 0x8000, 0x7F80, 0x007F>;
+    using float_bit_mask = traits::float_bit_mask::values<uint16_t, 0x8000, 0x7C00, 0x03FF>;
 };
 
 // Type traits like std::is_integral and std::is_arithmetic may be defined for 128-bit integral

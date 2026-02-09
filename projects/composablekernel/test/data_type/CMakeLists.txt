@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # temporarily disable flaky test for all architectures
 add_definitions(-DCK_SKIP_FLAKY_F8_TEST)
 set(CK_SKIP_FLAKY_F8_TEST "ON")
@@ -53,12 +56,14 @@ if(GPU_TARGETS MATCHES "gfx950")
 
   add_gtest_executable(test_fp6 test_fp6.cpp)
   if(result EQUAL 0)
+    target_compile_options(test_fp6 PRIVATE -mavx512f)
     target_link_libraries(test_fp6 PRIVATE utility)
   endif()
   add_dependencies(test_mx_data_types test_fp6)
 
   add_gtest_executable(test_bf6 test_bf6.cpp)
   if(result EQUAL 0)
+    target_compile_options(test_bf6 PRIVATE -mavx512f)
     target_link_libraries(test_bf6 PRIVATE utility)
   endif()
   add_dependencies(test_mx_data_types test_bf6)

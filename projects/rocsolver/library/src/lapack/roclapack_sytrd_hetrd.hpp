@@ -166,7 +166,10 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
     // everything must be executed with scalars on the device
     rocblas_pointer_mode old_mode;
     rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+
+    const T minone = T(-1);
+    const T one = T(1);
 
     rocblas_int ldw = n;
     rocblas_stride strideW = n * k;
@@ -213,12 +216,12 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
             // update trailing matrix
             // A = A - V*W' - W*V'
             rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
-                           n - j - k, n - j - k, k, scalars, A, shiftA + idx2D(j + k, j, lda), lda,
-                           strideA, tmptau_W, idx2D(k, 0, ldw), ldw, strideW, scalars + 2, A,
+                           n - j - k, n - j - k, k, &minone, A, shiftA + idx2D(j + k, j, lda), lda,
+                           strideA, tmptau_W, idx2D(k, 0, ldw), ldw, strideW, &one, A,
                            shiftA + idx2D(j + k, j + k, lda), lda, strideA, batch_count, workArr);
             rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
-                           n - j - k, n - j - k, k, scalars, tmptau_W, idx2D(k, 0, ldw), ldw,
-                           strideW, A, shiftA + idx2D(j + k, j, lda), lda, strideA, scalars + 2, A,
+                           n - j - k, n - j - k, k, &minone, tmptau_W, idx2D(k, 0, ldw), ldw,
+                           strideW, A, shiftA + idx2D(j + k, j, lda), lda, strideA, &one, A,
                            shiftA + idx2D(j + k, j + k, lda), lda, strideA, batch_count, workArr);
 
             j += k;
@@ -248,11 +251,11 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
             // update trailing matrix
             // A = A - V*W' - W*V'
             rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_conjugate_transpose, j,
-                           j, k, scalars, A, shiftA + idx2D(0, j, lda), lda, strideA, tmptau_W, 0,
-                           ldw, strideW, scalars + 2, A, shiftA, lda, strideA, batch_count, workArr);
+                           j, k, &minone, A, shiftA + idx2D(0, j, lda), lda, strideA, tmptau_W, 0,
+                           ldw, strideW, &one, A, shiftA, lda, strideA, batch_count, workArr);
             rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_conjugate_transpose, j,
-                           j, k, scalars, tmptau_W, 0, ldw, strideW, A, shiftA + idx2D(0, j, lda),
-                           lda, strideA, scalars + 2, A, shiftA, lda, strideA, batch_count, workArr);
+                           j, k, &minone, tmptau_W, 0, ldw, strideW, A, shiftA + idx2D(0, j, lda),
+                           lda, strideA, &one, A, shiftA, lda, strideA, batch_count, workArr);
 
             j -= k;
         }

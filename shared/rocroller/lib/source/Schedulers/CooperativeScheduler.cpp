@@ -31,21 +31,20 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        RegisterComponent(CooperativeScheduler);
         static_assert(Component::Component<CooperativeScheduler>);
 
-        inline CooperativeScheduler::CooperativeScheduler(ContextPtr ctx, CostFunction cmp)
+        CooperativeScheduler::CooperativeScheduler(ContextPtr ctx, CostFunction cmp)
             : Scheduler{ctx}
         {
             m_cost = Component::Get<Scheduling::Cost>(cmp, m_ctx);
         }
 
-        inline bool CooperativeScheduler::Match(Argument arg)
+        bool CooperativeScheduler::Match(Argument arg)
         {
             return std::get<0>(arg) == SchedulerProcedure::Cooperative;
         }
 
-        inline std::shared_ptr<Scheduler> CooperativeScheduler::Build(Argument arg)
+        std::shared_ptr<Scheduler> CooperativeScheduler::Build(Argument arg)
         {
             if(!Match(arg))
                 return nullptr;
@@ -53,7 +52,7 @@ namespace rocRoller
             return std::make_shared<CooperativeScheduler>(std::get<2>(arg), std::get<1>(arg));
         }
 
-        inline std::string CooperativeScheduler::name() const
+        std::string CooperativeScheduler::name() const
         {
             return Name;
         }
@@ -63,7 +62,7 @@ namespace rocRoller
             return true;
         }
 
-        inline Generator<Instruction>
+        Generator<Instruction>
             CooperativeScheduler::operator()(std::vector<Generator<Instruction>>& seqs)
         {
             std::vector<Generator<Instruction>::iterator> iterators;
@@ -74,23 +73,29 @@ namespace rocRoller
             size_t numSeqs = 0;
 
             size_t idx = 0;
-            float  currentCost;
 
             while(true)
             {
                 co_yield handleNewNodes(seqs, iterators);
                 numSeqs = seqs.size();
 
+                float currentCost = 0;
+                bool  lockedOut   = false;
+
                 if(iterators[idx] != seqs[idx].end())
                 {
-                    currentCost = (*m_cost)(iterators[idx]);
+                    auto const& inst = *iterators[idx];
+
+                    lockedOut   = !m_lockstate.isSchedulable(inst, idx);
+                    currentCost = (*m_cost)(inst);
                 }
-                if(iterators[idx] == seqs[idx].end() || currentCost > 0)
+
+                if(iterators[idx] == seqs[idx].end() || lockedOut || currentCost > 0)
                 {
                     size_t origIdx    = idx;
                     float  minCost    = std::numeric_limits<float>::max();
                     int    minCostIdx = -1;
-                    if(iterators[idx] != seqs[idx].end())
+                    if(iterators[idx] != seqs[idx].end() && !lockedOut)
                     {
                         minCost    = currentCost;
                         minCostIdx = idx;
@@ -102,8 +107,10 @@ namespace rocRoller
                     {
                         if(iterators[idx] != seqs[idx].end())
                         {
-                            currentCost = (*m_cost)(iterators[idx]);
-                            if(currentCost < minCost)
+                            auto const& inst = *iterators[idx];
+                            lockedOut        = !m_lockstate.isSchedulable(inst, idx);
+                            currentCost      = (*m_cost)(inst);
+                            if(!lockedOut && currentCost < minCost)
                             {
                                 minCost    = currentCost;
                                 minCostIdx = idx;
@@ -121,10 +128,8 @@ namespace rocRoller
 
                     idx = minCostIdx;
                 }
-                co_yield yieldFromStream(iterators[idx]);
+                co_yield yieldFromStream(iterators[idx], idx);
             }
-
-            m_lockstate.isValid(false);
         }
     }
 }

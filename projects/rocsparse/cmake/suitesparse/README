@@ -1,5 +1,5 @@
 To download suitesparse matrices found in the file suitesparse_<x>.cmake, run the commands:
 
 cd rocSPARSE/cmake/suitesparse
-mkdir build && cd build && cmake .. && make && cp ./rocsparse_mtx2csr .. && cd .. && rm -r build
+mkdir build && cd build && cmake .. && cmake --build . --config Release && cd ..
 cmake -DCMAKE_MATRICES_DIR=<my_matrices_directory> -P suitesparse_<x>.cmake

@@ -79,6 +79,7 @@ option(BUILD_SHARED_LIBS "Build rocSPARSE as a shared library" ON)
 option(BUILD_CLIENTS_TESTS "Build tests (requires googletest)" OFF)
 option(BUILD_CLIENTS_BENCHMARKS "Build benchmarks" OFF)
 option(BUILD_CLIENTS_SAMPLES "Build examples" OFF)
+option(BUILD_CLIENTS_ONLY "Build only clients" OFF)
 option(BUILD_VERBOSE "Output additional build information" OFF)
 option(BUILD_CODE_COVERAGE "Build rocSPARSE with code coverage enabled" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build rocSPARSE with address sanitizer enabled" OFF)
@@ -106,12 +107,6 @@ if(BUILD_WITH_OFFLOAD_COMPRESS)
         "The option '--offload-compress' is not supported from the CXX compiler, turn off the option BUILD_WITH_OFFLOAD_COMPRESS."
     )
   endif()
-endif()
-
-#
-if(BUILD_CODE_COVERAGE)
-  add_compile_options(-fprofile-arcs -ftest-coverage)
-  add_link_options(--coverage -lgcov)
 endif()
 
 if(BUILD_COMPRESSED_DBG)
@@ -161,12 +156,12 @@ if(COMMAND rocm_check_target_ids)
         TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
     else()
       rocm_check_target_ids(DEFAULT_GPU_TARGETS
-          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201")
+          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
     endif()
 else()
     # Use target ID syntax if supported for GPU_TARGETS
     if(TARGET_ID_SUPPORT)
-        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201")
+        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
     else()
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
     endif()
@@ -197,12 +192,27 @@ endif()
 
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
+# Setup version
+set(VERSION_STRING "4.3.0")
+set(SOVERSION_STRING "1.0")
+set(MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM.")
+set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")
+
+rocm_setup_version(VERSION ${VERSION_STRING})
+set(rocsparse_SOVERSION ${SOVERSION_STRING})
+
 # Find rocprim package
 find_package(rocprim REQUIRED)
+if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_VERSION})
+  message(FATAL_ERROR "The version of rocPRIM found was incompatible. Found: ${rocprim_VERSION} Required: ${MIN_ROCPRIM_VERSION}")
+endif()
 
 # Find rocblas package
 if (BUILD_WITH_ROCBLAS)
-  find_package(rocblas 4.1.0 QUIET)
+  find_package(rocblas REQUIRED)
+  if (${rocblas_VERSION} VERSION_LESS ${MIN_ROCBLAS_VERSION})
+    message(FATAL_ERROR "The version of rocBLAS found was incompatible. Found: ${rocblas_VERSION} Required: ${MIN_ROCBLAS_VERSION}")
+  endif()
 else()
   message("-- Build rocSPARSE with rocBLAS is disabled")
 endif()
@@ -211,14 +221,7 @@ if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
   find_package( hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm )
 endif( )
 
-# Setup version
-set(VERSION_STRING "4.0.1")
-set(SOVERSION_STRING "1.0")
-
-rocm_setup_version(VERSION ${VERSION_STRING})
-set(rocsparse_SOVERSION ${SOVERSION_STRING})
-
-if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
+if( BUILD_CLIENTS_ONLY OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   set( BUILD_CLIENTS ON )
   if(NOT CLIENTS_OS)
     rocm_set_os_id(CLIENTS_OS)
@@ -273,7 +276,9 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
 endif()
 
 # rocSPARSE library
-add_subdirectory(library)
+if (NOT BUILD_CLIENTS_ONLY)
+  add_subdirectory(library)
+endif()
 
 # Trigger client builds if selected
 if(BUILD_CLIENTS)
@@ -359,36 +364,73 @@ if(BUILD_CODE_COVERAGE)
   # Run coverage analysis
   #
   add_custom_target(coverage_analysis
+    COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ./clients/staging/rocsparse-test --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocsparse-coverage_%m.profraw" ./clients/staging/rocsparse-test --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
   add_dependencies(coverage_analysis rocsparse)
 
-  #
-  # Prepare coverage output
-  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
-  #
-  add_custom_target(coverage_output
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  # Python script to filter coverage exclusion markers (LCOV_EXCL_START/LCOV_EXCL_STOP)
+  # Note: lcov and gcovr don't work for LLVM coverage since they can't re-read sources
+  # when processing lcov format files. This script reads source files and filters excluded lines.
+  set(COVERAGE_FILTER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/filter_lcov_exclusions.py")
+  find_package(Python3 COMPONENTS Interpreter)
+  find_program(GENHTML genhtml)
+  
+  if(Python3_FOUND AND EXISTS ${COVERAGE_FILTER_SCRIPT})
+    message(STATUS "Found Python3 and filter script - coverage exclusion markers will be processed")
+    set(COVERAGE_FILTER_COMMAND
+      COMMAND ${Python3_EXECUTABLE} ${COVERAGE_FILTER_SCRIPT} ./coverage-report/coverage-raw.info ./coverage-report/coverage.info
+    )
+  else()
+    message(WARNING "Python3 or filter script not found. LCOV_EXCL_START/LCOV_EXCL_STOP markers will NOT be processed.")
+    set(COVERAGE_FILTER_COMMAND
+      COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage-raw.info ./coverage-report/coverage.info
+    )
+  endif()
+
+  # Generate HTML from filtered LCOV using genhtml (respects exclusion markers)
+  # or fallback to llvm-cov show (doesn't respect exclusion markers)
+  if(GENHTML AND Python3_FOUND AND EXISTS ${COVERAGE_FILTER_SCRIPT})
+    message(STATUS "Found genhtml - HTML will be generated from filtered LCOV")
+    set(COVERAGE_HTML_COMMAND
+      COMMAND ${GENHTML} ./coverage-report/coverage.info --output-directory ./coverage-report --title rocsparse --legend --demangle-cpp --quiet
+    )
+  else()
+    message(STATUS "genhtml not found - using llvm-cov show (exclusion markers not reflected in HTML)")
+    set(COVERAGE_HTML_COMMAND
+      COMMAND ${LLVM_COV} show -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=html -output-dir=coverage-report
+    )
+  endif()
+
+  add_custom_target(
+    coverage
     DEPENDS coverage_analysis
-    COMMAND mkdir -p lcoverage
-    COMMAND echo "\\#!/bin/bash" > llvm-gcov.sh
-    COMMAND echo "\\# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
-    COMMAND printf "exec /opt/rocm/llvm/bin/llvm-cov gcov $$\\@" >> llvm-gcov.sh
-    COMMAND chmod +x llvm-gcov.sh
-    )
-
-  #
-  # Generate coverage output.
-  #
-  add_custom_command(TARGET coverage_output
-    COMMAND lcov --directory . --base-directory . --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
-    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'${CMAKE_SOURCE_DIR}/clients/*'" "'${CMAKE_SOURCE_DIR}/build/*'" "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
-    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
-    )
-
-  add_custom_target(coverage DEPENDS coverage_output)
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_*.profraw -o ./coverage-report/rocsparse.profdata
+    COMMAND ${LLVM_COV} report -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata
+    COMMAND ${LLVM_COV} export -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage-raw.info
+    ${COVERAGE_FILTER_COMMAND}
+    ${COVERAGE_HTML_COMMAND}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
 
   #
   # Coverage cleanup

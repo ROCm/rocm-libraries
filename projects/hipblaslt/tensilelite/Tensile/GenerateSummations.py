@@ -66,7 +66,7 @@ def GenerateSummations(userArgs):
     inputLogicPath = userArgs[0]
     outputPath = userArgs[1]
     isaInfoMap = assignGlobalParameters({})
-    cxxCompiler, cCompiler, enumerator = validateToolchain(ToolchainDefaults.CXX_COMPILER, 
+    cxxCompiler, cCompiler, enumerator = validateToolchain(ToolchainDefaults.CXX_COMPILER,
                                                            ToolchainDefaults.C_COMPILER,
                                                            ToolchainDefaults.DEVICE_ENUMERATOR)
 

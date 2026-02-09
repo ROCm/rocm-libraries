@@ -90,6 +90,11 @@ set(others_test_source
 
 add_executable(hipsolver-test ${others_test_source} ${hipsolverDn_test_source} ${hipsolverRf_test_source})
 
+if(BUILD_COVERAGE)
+  target_compile_options(hipsolver-test PRIVATE -g -O0 -fgenerate-instr-profile -fcoverage-mapping)
+  target_link_options(hipsolver-test PUBLIC -g -O0 -fgenerate-instr-profile)
+endif()
+
 target_include_directories(hipsolver-test
   PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
@@ -135,7 +140,7 @@ if(NOT USE_CUDA)
   endif()
 
   if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$")
-    # hip-clang needs specific flag to turn on pthread and m
+    #hip-clang needs specific flag to turn on pthread and m
     target_link_libraries(hipsolver-test PRIVATE -lpthread -lm)
   endif()
 else()
@@ -172,7 +177,7 @@ if(WIN32)
       ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/staging/
     )
   endforeach()
-  if(DEFINED $ENV{rocblas_DIR})
+  if(DEFINED ENV{rocblas_DIR})
     add_custom_command(TARGET hipsolver-test
       POST_BUILD
       COMMAND ${CMAKE_COMMAND}

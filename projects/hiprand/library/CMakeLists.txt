@@ -35,24 +35,6 @@ configure_file(
     @ONLY
 )
 
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-    rocm_wrap_header_dir(
-        "${PROJECT_SOURCE_DIR}/library/include/hiprand"
-        GUARDS SYMLINK WRAPPER
-        WRAPPER_LOCATIONS include hiprand/include
-        OUTPUT_LOCATIONS library/include library/hiprand/include
-        HEADER_LOCATION include/hiprand
-        PATTERNS *.h *.hpp
-    )
-    rocm_wrap_header_file(
-        hiprand_version.h
-        GUARDS SYMLINK WRAPPER
-        WRAPPER_LOCATIONS include hiprand/include
-        OUTPUT_LOCATIONS library/include library/hiprand/include
-        HEADER_LOCATION include/hiprand
-    )
-endif()
-
 # Build
 if (BUILD_WITH_LIB STREQUAL "CUDA")
     set_source_files_properties(${hipRAND_SRCS} PROPERTIES LANGUAGE CUDA)
@@ -120,13 +102,6 @@ else()
         DEPENDS PACKAGE rocrand
         STATIC_DEPENDS PACKAGE rocrand
         INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/hiprand-fortran-config.cmake"
-    )
-endif()
-
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-    rocm_install(
-        DIRECTORY "${PROJECT_BINARY_DIR}/library/hiprand"
-        DESTINATION "."
     )
 endif()
 

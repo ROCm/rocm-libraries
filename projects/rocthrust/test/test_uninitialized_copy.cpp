@@ -15,12 +15,14 @@
  *  limitations under the License.
  */
 
-#include <thrust/device_vector.h>
+#include <thrust/detail/nv_target.h>
+#include <thrust/device_malloc_allocator.h>
 #include <thrust/iterator/retag.h>
-#include <thrust/scatter.h>
 #include <thrust/uninitialized_copy.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(UninitializedCopyTests, FullTestsParams);
 
@@ -102,75 +104,48 @@ TEST(UninitializedCopyTests, TestUninitializedCopyNDispatchImplicit)
 TYPED_TEST(UninitializedCopyTests, TestUninitializedCopySimplePOD)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
-  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v1(5);
-  v1[0] = T(0);
-  v1[1] = T(1);
-  v1[2] = T(2);
-  v1[3] = T(3);
-  v1[4] = T(4);
+  Vector v1{0, 1, 2, 3, 4};
 
   // copy to Vector
   Vector v2(5);
-  thrust::uninitialized_copy(Policy{}, v1.begin(), v1.end(), v2.begin());
-  ASSERT_EQ(v2[0], T(0));
-  ASSERT_EQ(v2[1], T(1));
-  ASSERT_EQ(v2[2], T(2));
-  ASSERT_EQ(v2[3], T(3));
-  ASSERT_EQ(v2[4], T(4));
+  thrust::uninitialized_copy(v1.begin(), v1.end(), v2.begin());
+  Vector ref{0, 1, 2, 3, 4};
+  ASSERT_EQ(v2, ref);
 }
 
 TYPED_TEST(UninitializedCopyTests, TestUninitializedCopyNSimplePOD)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
-  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v1(5);
-  v1[0] = T(0);
-  v1[1] = T(1);
-  v1[2] = T(2);
-  v1[3] = T(3);
-  v1[4] = T(4);
+  Vector v1{0, 1, 2, 3, 4};
 
   // copy to Vector
   Vector v2(5);
-  thrust::uninitialized_copy_n(Policy{}, v1.begin(), v1.size(), v2.begin());
-  ASSERT_EQ(v2[0], T(0));
-  ASSERT_EQ(v2[1], T(1));
-  ASSERT_EQ(v2[2], T(2));
-  ASSERT_EQ(v2[3], T(3));
-  ASSERT_EQ(v2[4], T(4));
+  thrust::uninitialized_copy_n(v1.begin(), v1.size(), v2.begin());
+  Vector ref{0, 1, 2, 3, 4};
+  ASSERT_EQ(v2, ref);
 }
 
 struct CopyConstructTest
 {
-  __host__ __device__ CopyConstructTest(void)
+  THRUST_HOST_DEVICE CopyConstructTest()
       : copy_constructed_on_host(false)
       , copy_constructed_on_device(false)
   {}
 
-  __host__ __device__ CopyConstructTest(const CopyConstructTest&)
+  THRUST_HOST_DEVICE CopyConstructTest(const CopyConstructTest&)
   {
-#if defined(THRUST_HIP_DEVICE_CODE)
-    copy_constructed_on_device = true;
-    copy_constructed_on_host   = false;
-#else
-    // The original test is incorrect
-    // copy_constructed_on_device = false;
-    // copy_constructed_on_device = true;
-    copy_constructed_on_device = false;
-    copy_constructed_on_host   = true;
-#endif
+    NV_IF_TARGET(NV_IS_DEVICE,
+                 (copy_constructed_on_device = true; copy_constructed_on_host = false;),
+                 (copy_constructed_on_device = false; copy_constructed_on_host = true;));
   }
 
-  __host__ __device__ CopyConstructTest& operator=(const CopyConstructTest& x)
+  THRUST_HOST_DEVICE CopyConstructTest& operator=(const CopyConstructTest& x)
   {
     copy_constructed_on_host   = x.copy_constructed_on_host;
     copy_constructed_on_device = x.copy_constructed_on_device;
@@ -186,23 +161,25 @@ struct CopyConstructTest
  * investigate why.
 TEST(UninitializedCopyTests, TestUninitializedCopyNonPODDevice)
 {
-    using T = CopyConstructTest;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::device_vector<T> v1(5), v2(5);
+  using T = CopyConstructTest;
 
-    T x;
-    ASSERT_EQ(false, x.copy_constructed_on_device);
-    ASSERT_EQ(false, x.copy_constructed_on_host);
+  thrust::device_vector<T> v1(5), v2(5);
 
-    x = v1[0];
-    ASSERT_EQ(true, x.copy_constructed_on_device);
-    ASSERT_EQ(false, x.copy_constructed_on_host);
+  T x;
+  ASSERT_EQ(false, x.copy_constructed_on_device);
+  ASSERT_EQ(false, x.copy_constructed_on_host);
 
-    thrust::uninitialized_copy(v1.begin(), v1.end(), v2.begin());
+  x = v1[0];
+  ASSERT_EQ(false, x.copy_constructed_on_device);
+  ASSERT_EQ(false, x.copy_constructed_on_host);
 
-    x = v2[0];
-    ASSERT_EQ(true, x.copy_constructed_on_device);
-    ASSERT_EQ(false, x.copy_constructed_on_host);
+  thrust::uninitialized_copy(v1.begin(), v1.end(), v2.begin());
+
+  x = v2[0];
+  ASSERT_EQ(true, x.copy_constructed_on_device);
+  ASSERT_EQ(false, x.copy_constructed_on_host);
 }
 */
 
@@ -211,23 +188,25 @@ TEST(UninitializedCopyTests, TestUninitializedCopyNonPODDevice)
  * investigate why.
 TEST(UninitializedCopyTests, TestUninitializedCopyNNonPODDevice)
 {
-    using T = CopyConstructTest;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::device_vector<T> v1(5), v2(5);
+  using T = CopyConstructTest;
 
-    T x;
-    ASSERT_EQ(false, x.copy_constructed_on_device);
-    ASSERT_EQ(false, x.copy_constructed_on_host);
+  thrust::device_vector<T> v1(5), v2(5);
 
-    x = v1[0];
-    ASSERT_EQ(true, x.copy_constructed_on_device);
-    ASSERT_EQ(false, x.copy_constructed_on_host);
+  T x;
+  ASSERT_EQ(false, x.copy_constructed_on_device);
+  ASSERT_EQ(false, x.copy_constructed_on_host);
 
-    thrust::uninitialized_copy_n(v1.begin(), v1.size(), v2.begin());
+  x = v1[0];
+  ASSERT_EQ(false, x.copy_constructed_on_device);
+  ASSERT_EQ(false, x.copy_constructed_on_host);
 
-    x = v2[0];
-    ASSERT_EQ(true, x.copy_constructed_on_device);
-    ASSERT_EQ(false, x.copy_constructed_on_host);
+  thrust::uninitialized_copy_n(v1.begin(), v1.size(), v2.begin());
+
+  x = v2[0];
+  ASSERT_EQ(true, x.copy_constructed_on_device);
+  ASSERT_EQ(false, x.copy_constructed_on_host);
 }
 */
 

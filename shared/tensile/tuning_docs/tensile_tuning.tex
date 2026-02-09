@@ -80,7 +80,7 @@ rocBLAS is a BLAS implementation that is included as part of AMD's ROCm project 
 
 
 \subsection{How to study this document}
-This document provides general information about the Tensile project. We recommend that a new reader clone and skim the \href{https://github.com/ROCm/Tensile}{Tensile repo} before reading this document. Among the Tensile files, pay particular attention to 
+This document provides general information about the Tensile project. We recommend that a new reader clone and skim the \href{https://github.com/ROCm/Tensile}{Tensile repo} before reading this document. Among the Tensile files, pay particular attention to
 
 \begin{lstlisting}[language=bash,breaklines=true]
 <path-to-Tensile-repo>/Tensile/Common.py
@@ -126,7 +126,7 @@ $ git clone https://github.com/ROCm/Tensile.git
 # set up tuning run
 $ cd Tensile
 $ mkdir build_test
-# we perform all the tuning processes in a folder starting with build_*. Any folder like this will be ignored in the repo. 
+# we perform all the tuning processes in a folder starting with build_*. Any folder like this will be ignored in the repo.
 $ cd build_test
 # Tensile/tuning_docs/examples has some sample Tensile input configuration file. See also Tensile/Tensile/Configs
 $ cp ../tuning_docs/examples/example_vega20_tuning.yaml .
@@ -247,7 +247,7 @@ The Tensile tuning configuration defines the context which drives the tuning for
 \subsubsection{GlobalParameters}
 
 \noindent
-Below is an example of the global parameters section in the tuning configuration. 
+Below is an example of the global parameters section in the tuning configuration.
 
 \begin{minted}[
 	gobble=0,breaklines,
@@ -387,7 +387,7 @@ Note the overall structure of this section of the configuration:
 
 }
 
-\textbf{BenchmarkForkParameters, JoinParameters, BenchmarkJoinParameters} are obsolete items in this section. 
+\textbf{BenchmarkForkParameters, JoinParameters, BenchmarkJoinParameters} are obsolete items in this section.
 
 
 \subsubsection{Library Logic}
@@ -656,9 +656,9 @@ Tensile generates one library logic file for each problem type. They are named a
 $\langle architecture\_name \rangle$ refers to the GPU architecture, for example for Vega 20, the architecture name is vega20. $\langle Contraction\_Type \rangle$ refers to the Einstein tensor convention as discussed in section \ref{sec:einstein}. $\langle Data\_Type \rangle$ is based on the ProblemType in the configuration file. For example, SB refers to a Batched Single precision DataType. HSS\_BH means Half-precision for DataType (A/B), Single-precision for DestDataType (C/D), and Single-precision for ComputeDataType. Notice also that the exact same naming convention will be used in the rocBLAS library.
 
 \section{Integrating new libraries in rocBLAS}
-Once we have library logic files for new sizes, we need to merge and update rocBLAS libraries. This is a two-fold process: 
+Once we have library logic files for new sizes, we need to merge and update rocBLAS libraries. This is a two-fold process:
 \begin{itemize}
-\item First, we need to confirm that the new logic file is generating the correct results and the performance of the new library is more than the old library. We use rocblas-bench tool for this part. See the next section. 
+\item First, we need to confirm that the new logic file is generating the correct results and the performance of the new library is more than the old library. We use rocblas-bench tool for this part. See the next section.
 \item Merging the new logic file into rocBLAS using the merge tool (merge.py in Tensile). See section \ref{sec:merging}.
 \end{itemize}
 
@@ -669,7 +669,7 @@ Once we have library logic files for new sizes, we need to merge and update rocB
 \label{sec:bench}
 
 \noindent
-rocblas-bench is a tool used to perform benchmarks on the problem sizes which are being measured and to verify the correctness of the new libraries. While it is designed to measure the performance of the full set of rocBLAS library functions, our interest is in the level 3 gemm functions which---in rocBLAS--- are called into the Tensile library. 
+rocblas-bench is a tool used to perform benchmarks on the problem sizes which are being measured and to verify the correctness of the new libraries. While it is designed to measure the performance of the full set of rocBLAS library functions, our interest is in the level 3 gemm functions which---in rocBLAS--- are called into the Tensile library.
 
 
 The git repository for rocBLAS is found at \url{https://github.com/ROCm/rocBLAS}. Either the develop or master branch version may be used for testing.
@@ -1340,7 +1340,7 @@ Any library will contain a large set of parameters that are common to all the ke
 \section{Parameter Name Abbreviation Mapping}
 \begin{center}
 \begin{small}
-\begin{longtable}{ |c|c| } 
+\begin{longtable}{ |c|c| }
 \caption{Parameter names and their abbreviations. Most abbreviations are a combination of the first letters of each word in a parameter's name. Consequently, abbreviations are not guaranteed to be unique. Derived parameters are not listed. }
 \label{tab:ParameterAbbrMap} \\
  \hline

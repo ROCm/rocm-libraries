@@ -339,8 +339,8 @@ __kernel void MIOpenConvUni(const __global _FLOAT* __restrict in,
     uint y_tile_blk = iDiv_legacy(grp_id0, MLO_N_OUT_TILE_BLOCKS0);
     uint x_tile_blk = iMod(grp_id0, y_tile_blk, MLO_N_OUT_TILE_BLOCKS0);
 #else
-    uint y_tile_blk       = grp_id0 / MLO_N_OUT_TILE_BLOCKS0;
-    uint x_tile_blk       = grp_id0 & (MLO_N_OUT_TILE_BLOCKS0 - 1);
+    uint y_tile_blk = grp_id0 / MLO_N_OUT_TILE_BLOCKS0;
+    uint x_tile_blk = grp_id0 & (MLO_N_OUT_TILE_BLOCKS0 - 1);
 #endif
     uint o_pack = get_group_id(1); // block of outputs
     uint b_pack = get_group_id(2); // batch block
@@ -350,13 +350,13 @@ __kernel void MIOpenConvUni(const __global _FLOAT* __restrict in,
     uint stack        = 0;
     uint alu_stack_id = lcl_id;
 #elif MLO_ALUTILES_STACK_SZ & (MLO_ALUTILES_STACK_SZ - 1)
-    uint stack            = iDiv_legacy(lcl_id, MLO_ALUTILES_STACK_SZ); // stack
-    uint alu_stack_id     = iMod(lcl_id, stack, MLO_ALUTILES_STACK_SZ); // alu index in stack
+    uint stack        = iDiv_legacy(lcl_id, MLO_ALUTILES_STACK_SZ); // stack
+    uint alu_stack_id = iMod(lcl_id, stack, MLO_ALUTILES_STACK_SZ); // alu index in stack
 #else
     uint stack        = lcl_id / MLO_ALUTILES_STACK_SZ;       // stack
     uint alu_stack_id = lcl_id & (MLO_ALUTILES_STACK_SZ - 1); // alu index in stack
 #if MLO_ALUTILES_STACK_SZ >= 64
-    stack             = uniform(stack);
+    stack = uniform(stack);
 #endif
 #endif
 // ALU plane inside stack
@@ -365,7 +365,7 @@ __kernel void MIOpenConvUni(const __global _FLOAT* __restrict in,
     uint alu_out_id       = iMod(
         alu_stack_id, alu_out_plane_id, MLO_ALU_TILE_SZ); // alu index inside an ALU output plane
 #else
-    uint alu_out_plane_id = alu_stack_id / MLO_ALU_TILE_SZ;             // alu output plane index
+    uint alu_out_plane_id = alu_stack_id / MLO_ALU_TILE_SZ; // alu output plane index
     uint alu_out_id = alu_stack_id & (MLO_ALU_TILE_SZ - 1); // alu index inside an ALU output plane
 #endif
 // pos inside ALU tile
@@ -373,8 +373,8 @@ __kernel void MIOpenConvUni(const __global _FLOAT* __restrict in,
     uint alu_tl1 = iDiv_legacy(alu_out_id, MLO_ALU_VTILE0);
     uint alu_tl0 = iMod(alu_out_id, alu_tl1, MLO_ALU_VTILE0);
 #else
-    uint alu_tl1    = alu_out_id / MLO_ALU_VTILE0;
-    uint alu_tl0    = alu_out_id & (MLO_ALU_VTILE0 - 1);
+    uint alu_tl1 = alu_out_id / MLO_ALU_VTILE0;
+    uint alu_tl0 = alu_out_id & (MLO_ALU_VTILE0 - 1);
 #endif
 
     uint o_map_plane =
@@ -394,7 +394,7 @@ __kernel void MIOpenConvUni(const __global _FLOAT* __restrict in,
     uint wave_id     = lcl_id / MLO_N_READ_PROCS;
     uint wave_lcl_id = lcl_id & (MLO_N_READ_PROCS - 1);
 #if MLO_N_READ_PROCS >= 64
-    wave_id          = uniform(wave_id);
+    wave_id = uniform(wave_id);
 #endif
 #endif
 #endif
@@ -410,14 +410,14 @@ __kernel void MIOpenConvUni(const __global _FLOAT* __restrict in,
     uint x_in_lcl = alu_tl0 * MLO_OUT_TILE0 * MLO_FILTER_STRIDE0;
     uint y_in_lcl = alu_tl1 * MLO_OUT_TILE1 * MLO_FILTER_STRIDE1;
 #else
-    uint x_grp      = x_tile_blk * (MLO_IN_TILE0 / MLO_FILTER_STRIDE0);
-    uint y_grp      = y_tile_blk * (MLO_IN_TILE1 / MLO_FILTER_STRIDE1);
+    uint x_grp = x_tile_blk * (MLO_IN_TILE0 / MLO_FILTER_STRIDE0);
+    uint y_grp = y_tile_blk * (MLO_IN_TILE1 / MLO_FILTER_STRIDE1);
 #if MLO_LARGE_MAP == 1
-    uint x_in_grp   = x_grp - (MLO_FILTER_PAD0 / MLO_FILTER_STRIDE0);
-    uint y_in_grp   = y_grp - (MLO_FILTER_PAD1 / MLO_FILTER_STRIDE1);
+    uint x_in_grp = x_grp - (MLO_FILTER_PAD0 / MLO_FILTER_STRIDE0);
+    uint y_in_grp = y_grp - (MLO_FILTER_PAD1 / MLO_FILTER_STRIDE1);
 #endif
-    uint x_in_lcl   = alu_tl0 * (MLO_OUT_TILE0 / MLO_FILTER_STRIDE0);
-    uint y_in_lcl   = alu_tl1 * (MLO_OUT_TILE1 / MLO_FILTER_STRIDE1);
+    uint x_in_lcl = alu_tl0 * (MLO_OUT_TILE0 / MLO_FILTER_STRIDE0);
+    uint y_in_lcl = alu_tl1 * (MLO_OUT_TILE1 / MLO_FILTER_STRIDE1);
 #endif
 
     // base offset to read data from local input data
@@ -430,7 +430,7 @@ __kernel void MIOpenConvUni(const __global _FLOAT* __restrict in,
     uint wei_off    = mul24(o_map_plane, (uint)(MLO_N_INPUTS * MLO_FILTER_SZ));
     uint2 wei_offv2 = (uint2)(wei_off, wei_off + MLO_N_IN_TILES_PERSTACK * MLO_FILTER_SZ);
 #else
-    uint wei_off    = mul24(o_map_plane, (uint)MLO_FILTER_SZ);
+    uint wei_off = mul24(o_map_plane, (uint)MLO_FILTER_SZ);
     uint2 wei_offv2 =
         (uint2)(wei_off, wei_off + MLO_N_IN_TILES_PERSTACK * MLO_FILTER_SZ * MLO_N_OUTPUTS);
 #endif
@@ -602,15 +602,15 @@ __kernel void MIOpenConvUni(const __global _FLOAT* __restrict in,
             uint lcl_o = iDiv_legacy(i, (MLO_N_OUT_TILES_PERSTACK * MLO_FILTER_SZ));
             uint gbl_i = iMod(i, lcl_o, (MLO_N_OUT_TILES_PERSTACK * MLO_FILTER_SZ));
 #else
-            uint lcl_o            = i / (MLO_N_OUT_TILES_PERSTACK * MLO_FILTER_SZ);
-            uint gbl_i            = i & ((MLO_N_OUT_TILES_PERSTACK * MLO_FILTER_SZ) - 1);
+            uint lcl_o = i / (MLO_N_OUT_TILES_PERSTACK * MLO_FILTER_SZ);
+            uint gbl_i = i & ((MLO_N_OUT_TILES_PERSTACK * MLO_FILTER_SZ) - 1);
 #endif
 #if MLO_FILTER_SZ & (MLO_FILTER_SZ - 1)
             uint lcl_c = iDiv_legacy(gbl_i, MLO_FILTER_SZ);
             uint lcl_i = iMod(gbl_i, lcl_c, MLO_FILTER_SZ);
 #else
-            uint lcl_c            = gbl_i / MLO_FILTER_SZ;
-            uint lcl_i            = gbl_i & (MLO_FILTER_SZ - 1);
+            uint lcl_c = gbl_i / MLO_FILTER_SZ;
+            uint lcl_i = gbl_i & (MLO_FILTER_SZ - 1);
 #endif
 
             uint lcl_we_off = mad24(

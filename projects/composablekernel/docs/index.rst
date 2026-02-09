@@ -25,6 +25,8 @@ The Composable Kernel repository is located at `https://github.com/ROCm/composab
 
     * :doc:`Composable Kernel structure <./conceptual/Composable-Kernel-structure>`
     * :doc:`Composable Kernel mathematical basis <./conceptual/Composable-Kernel-math>`
+    * :doc:`CK Tile intrawave and interwave scheduling <../conceptual/CK-Tile-intra-inter-wave>`
+    * :doc:`CK Tile conceptual documentation <./conceptual/ck_tile/CK-tile-index>`
 
   .. grid-item-card:: Tutorials
 
@@ -36,7 +38,7 @@ The Composable Kernel repository is located at `https://github.com/ROCm/composab
     * :doc:`Composable Kernel custom types <./reference/Composable_Kernel_custom_types>`
     * :doc:`Composable Kernel vector utilities <./reference/Composable_Kernel_vector_utilities>`
     * :ref:`wrapper`    
-    * :doc:`Composable Kernel complete class list <./doxygen/html/annotated>`
+    * :doc:`Composable Kernel glossary <./reference/Composable-Kernel-Glossary>`
     
 To contribute to the documentation refer to `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 

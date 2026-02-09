@@ -53,7 +53,7 @@ def export_ptsdata(ibasename, obasename,xargs, yargs, results,verbose = False):
             tg = results[isample]["timing"]
             tg_raw_legend = ','.join(tg["raw_legend"].split())
             tg_raw = ','.join(tg["raw_data"].split())
-        
+
             if len(tg_raw_legend) != 0:
                 if verbose:
                     print('//rocsparse-bench-ptsdata  -  write pts data file : \'' + obasename + '.csv\'')
@@ -101,4 +101,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

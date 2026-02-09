@@ -168,11 +168,6 @@ Random Number Engines with Predefined Parameters
 .. doxygengroup:: predefined_random
     :inner:
 
-System
-======
-
-.. doxygengroup:: system
-
 Utility
 =======
 
@@ -182,12 +177,6 @@ Pair
 ----
 
 .. doxygengroup:: pair
-    :inner:
-
-Swap
-----
-
-.. doxygengroup:: swap
     :inner:
 
 Tuple

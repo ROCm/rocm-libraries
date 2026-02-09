@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 #include <vector>
 
 #include <rocRoller/KernelGraph/Transforms/AddDeallocate.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddDeallocate_detail.hpp>
 
 #include <rocRoller/Context.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer.hpp>
@@ -42,98 +43,204 @@ namespace rocRoller::KernelGraph
     using namespace CoordinateGraph;
     using namespace ControlGraph;
 
-    std::set<int> getContainingForLoops(std::set<int> controls, KernelGraph const& graph)
+    namespace AddDeallocateDetail
     {
-        std::set<int> rv;
-
-        for(auto control : controls)
+        std::set<int> getContainingForLoops(std::set<int> controls, KernelGraph const& graph)
         {
-            auto maybeForLoop = findContainingOperation<ForLoopOp>(control, graph);
-            if(maybeForLoop)
-                rv.insert(*maybeForLoop);
+            std::set<int> rv;
+
+            for(auto control : controls)
+            {
+                auto maybeForLoop = findContainingOperation<ForLoopOp>(control, graph);
+                if(maybeForLoop)
+                    rv.insert(*maybeForLoop);
+            }
+
+            return rv;
         }
 
-        return rv;
-    }
-
-    void simplifyDependencies(KernelGraph const& graph, std::set<int>& deps)
-    {
-        TIMER(t, "AddDeallocate::simplifyDependencies");
-
-        for(auto iterA = deps.begin(); iterA != deps.end();)
+        void simplifyDependencies(KernelGraph const& graph, std::set<int>& deps)
         {
-            bool sameA = true;
-            for(auto iterB = std::next(iterA); iterB != deps.end();)
+            TIMER(t, "AddDeallocate::simplifyDependencies");
+
+            for(auto iterA = deps.begin(); iterA != deps.end();)
             {
-                if(iterA == iterB)
-                    continue;
+                bool sameA = true;
+                for(auto iterB = std::next(iterA); iterB != deps.end();)
+                {
+                    if(iterA == iterB)
+                        continue;
 
-                auto rel = graph.control.compareNodes(UpdateCache, *iterA, *iterB);
+                    auto rel = graph.control.compareNodes(UpdateCache, *iterA, *iterB);
 
-                if(rel == NodeOrdering::LeftFirst)
-                {
-                    iterA = deps.erase(iterA);
-                    sameA = false;
-                    break;
+                    if(rel == NodeOrdering::LeftFirst)
+                    {
+                        iterA = deps.erase(iterA);
+                        sameA = false;
+                        break;
+                    }
+                    else if(rel == NodeOrdering::RightFirst)
+                    {
+                        iterB = deps.erase(iterB);
+                    }
+                    else if(rel == NodeOrdering::LeftInBodyOfRight
+                            || rel == NodeOrdering::RightInBodyOfLeft)
+                    {
+                        Throw<FatalError>("Unexpected body relationship between",
+                                          ShowValue(*iterA),
+                                          ShowValue(*iterB),
+                                          ShowValue(rel));
+                    }
+                    else
+                    {
+                        ++iterB;
+                    }
                 }
-                else if(rel == NodeOrdering::RightFirst)
+
+                if(sameA)
+                    ++iterA;
+            }
+        }
+
+        /**
+         * Sequence Deallocate nodes before any other parallel nodes.  This will
+         * ensure that if a tag is borrowed, it will be deallocated (returned)
+         * before it is borrowed again.
+         *
+         * Before:
+         * ```mermaid
+         * graph LR
+         *
+         *  NodeA ---> NodeB
+         *  NodeB ---> NodeC
+         *  NodeA ---> Deallocate
+         *  NodeB ---> Deallocate
+         * ```
+         *
+         * If we don't simplify first, we will get:
+         * ```mermaid
+         * graph LR
+         *
+         *  NodeA ---> NodeB
+         *  NodeB ---> NodeC
+         *  Deallocate ---> NodeB
+         *  Deallocate ---> NodeC
+         *  NodeA ---> Deallocate
+         *  NodeB ---> Deallocate
+         * ```
+         *
+         * which contains a cycle.
+         *
+         * So we simplify:
+         * ```mermaid
+         * graph LR
+         *
+         *  NodeA ---> NodeB
+         *  NodeB ---> NodeC
+         *  NodeB ---> Deallocate
+         * ```
+         *
+         * Then add new sequence edges:
+         * ```mermaid
+         * graph LR
+         *
+         *  NodeA ---> NodeB
+         *  NodeB ---> NodeC
+         *  NodeB ---> Deallocate
+         *  Deallocate ---> NodeC
+         * ```
+         *
+         * Then simplify again:
+         * ```mermaid
+         * graph LR
+         *
+         *  NodeA ---> NodeB
+         *  NodeB ---> Deallocate
+         *  Deallocate ---> NodeC
+         * ```
+         *
+         */
+        void sequenceDeallocatesBeforeOtherNodes(std::vector<int> const& deallocateNodes,
+                                                 KernelGraph&            graph)
+        {
+            removeRedundantSequenceEdges(graph);
+
+            /**
+             * Siblings of Deallocate nodes that are not Deallocate nodes must come
+             * after the Deallocate node.
+             */
+            for(auto deallocate : deallocateNodes)
+            {
+                for(auto parent :
+                    graph.control.getInputNodeIndices<Sequence>(deallocate).to<std::vector>())
                 {
-                    iterB = deps.erase(iterB);
-                }
-                else if(rel == NodeOrdering::LeftInBodyOfRight
-                        || rel == NodeOrdering::RightInBodyOfLeft)
-                {
-                    Throw<FatalError>("No body relationships should be here!");
-                }
-                else
-                {
-                    ++iterB;
+                    for(auto child :
+                        graph.control.getOutputNodeIndices<Sequence>(parent).to<std::vector>())
+                    {
+                        if(!graph.control.get<Deallocate>(child)
+                           && graph.control.compareNodes(UseCacheIfAvailable, deallocate, child)
+                                  != rocRoller::KernelGraph::ControlGraph::NodeOrdering::RightFirst)
+                            graph.control.chain<Sequence>(deallocate, child);
+                    }
                 }
             }
 
-            if(sameA)
-                ++iterA;
+            removeRedundantSequenceEdges(graph);
+        }
+
+        void deleteUnusedArguments(AssemblyKernelPtr                kernel,
+                                   ControlFlowArgumentTracer const& argTracer)
+        {
+            auto arguments = kernel->resetArguments();
+
+            auto const& neverReferencedArguments = argTracer.neverReferencedArguments();
+
+            if(!neverReferencedArguments.empty())
+            {
+                std::ostringstream msg;
+                msg << "Deleting never-referenced arguments: ";
+                streamJoin(msg, neverReferencedArguments, ", ");
+                Log::debug(msg.str());
+            }
+
+            auto referencedArgs = arguments | std::views::filter([&](auto const& arg) {
+                                      return !neverReferencedArguments.contains(arg.getName());
+                                  });
+
+            for(auto& arg : referencedArgs)
+            {
+                kernel->addArgument({std::move(arg.getName()),
+                                     arg.getVariableType(),
+                                     arg.getDataDirection(),
+                                     arg.getExpression()});
+            }
+
+            // Store launch-time-only args so ArgumentLoader can elide the load
+            kernel->setLaunchTimeOnlyArguments(argTracer.launchTimeOnlyArguments());
         }
     }
 
-    std::vector<int> addDataFlowTagDeallocates(KernelGraph& graph, LastRWTracer const& tracer)
+    using namespace AddDeallocateDetail;
+
+    std::vector<int> addDataFlowTagDeallocates(KernelGraph& graph)
     {
+        auto tracer    = LastRWTracer(graph);
         auto locations = tracer.lastRWLocations();
 
         // Map of <incoming Sequence edges to add, tags to deallocate>
         std::map<std::set<int>, std::vector<int>> deallocateNodesToAdd;
 
+        // Stage
         for(auto& [coordinate, controls] : locations)
         {
-            // If there is a single entry in the hot-loop set when we
-            // insert the Deallocate operation into the control graph,
-            // the Deallocate will be added after the hot loop.
-            std::set<int> hotLoop;
+            auto dependencies = controls;
 
-            // Add all containing loops of read/writes of an LDS
-            // allocation to the hot-loop set.
-            //
-            // The effect is: if all read/writes of an LDS coordinate
-            // happen in a single loop; we wait until after the loop
-            // is done before deallocating.  This avoids LDS
-            // allocation re-use within a hot-loop that may lead to
-            // undefined behaviour.
-            auto maybeLDS = graph.coordinates.get<LDS>(coordinate);
-            if(maybeLDS)
-            {
-                hotLoop = getContainingForLoops(controls, graph);
-            }
+            simplifyDependencies(graph, dependencies);
 
-            // There is a single hot-loop, add the Deallocate
-            // after it.
-            if(hotLoop.size() == 1)
-                controls = {*hotLoop.cbegin()};
-
-            simplifyDependencies(graph, controls);
-
-            deallocateNodesToAdd[controls].push_back(coordinate);
+            deallocateNodesToAdd[dependencies].push_back(coordinate);
         }
 
+        // Commit
         std::vector<int> deallocateNodes;
         deallocateNodes.reserve(deallocateNodesToAdd.size());
 
@@ -142,20 +249,20 @@ namespace rocRoller::KernelGraph
         for(auto const& [controls, coords] : deallocateNodesToAdd)
         {
             {
+                // Create a Deallocate operation
+                auto deallocate = graph.control.addElement(Deallocate());
+                deallocateNodes.push_back(deallocate);
+
                 if(logger->should_log(LogLevel::Debug))
                 {
                     std::ostringstream msg;
                     msg << "After {";
                     streamJoin(msg, controls, ", ");
-                    msg << "}, Deallocate {";
+                    msg << "}, Deallocate(" << deallocate << ") {";
                     streamJoin(msg, coords, ", ");
                     msg << "}";
                     Log::debug(msg.str());
                 }
-
-                // Create a Deallocate operation
-                auto deallocate = graph.control.addElement(Deallocate());
-                deallocateNodes.push_back(deallocate);
 
                 int idx = 0;
                 for(int coordinate : coords)
@@ -167,18 +274,27 @@ namespace rocRoller::KernelGraph
                 // are all of them are within the same body-parent.
                 for(auto src : controls)
                     graph.control.addElement(Sequence(), {src}, {deallocate});
+
+                // Add a barrier before deallocating LDS to avoid write-after-read races
+                // when different LDS allocation alias to the same LDS offset/address.
+                if(std::any_of(coords.begin(), coords.end(), [&](int coordinate) {
+                       return graph.coordinates.get<LDS>(coordinate).has_value();
+                   }))
+                {
+                    auto barrierTag = graph.control.addElement(Barrier());
+                    insertBefore(graph, barrierTag, deallocate, deallocate);
+                }
             }
         }
 
         return deallocateNodes;
     }
 
-    std::vector<int>
-        addArgumentDeallocates(KernelGraph& graph, LastRWTracer const& tracer, ContextPtr context)
+    std::vector<int> addArgumentDeallocates(KernelGraph&                     graph,
+                                            LastRWTracer const&              tracer,
+                                            ControlFlowArgumentTracer const& argTracer,
+                                            ContextPtr                       context)
     {
-
-        ControlFlowArgumentTracer argTracer(graph, context->kernel());
-
         auto locations = tracer.lastArgLocations(argTracer);
 
         std::map<std::set<int>, std::vector<std::string>> deallocateNodesToAdd;
@@ -230,132 +346,6 @@ namespace rocRoller::KernelGraph
         }
 
         return deallocateNodes;
-    }
-
-    /**
-     * Sequence Deallocate nodes before any other parallel nodes.  This will
-     * ensure that if a tag is borrowed, it will be deallocated (returned)
-     * before it is borrowed again.
-     *
-     * Before:
-     * ```mermaid
-     * graph LR
-     *
-     *  NodeA ---> NodeB
-     *  NodeB ---> NodeC
-     *  NodeA ---> Deallocate
-     *  NodeB ---> Deallocate
-     * ```
-     *
-     * If we don't simplify first, we will get:
-     * ```mermaid
-     * graph LR
-     *
-     *  NodeA ---> NodeB
-     *  NodeB ---> NodeC
-     *  Deallocate ---> NodeB
-     *  Deallocate ---> NodeC
-     *  NodeA ---> Deallocate
-     *  NodeB ---> Deallocate
-     * ```
-     *
-     * which contains a cycle.
-     *
-     * So we simplify:
-     * ```mermaid
-     * graph LR
-     *
-     *  NodeA ---> NodeB
-     *  NodeB ---> NodeC
-     *  NodeB ---> Deallocate
-     * ```
-     *
-     * Then add new sequence edges:
-     * ```mermaid
-     * graph LR
-     *
-     *  NodeA ---> NodeB
-     *  NodeB ---> NodeC
-     *  NodeB ---> Deallocate
-     *  Deallocate ---> NodeC
-     * ```
-     *
-     * Then simplify again:
-     * ```mermaid
-     * graph LR
-     *
-     *  NodeA ---> NodeB
-     *  NodeB ---> Deallocate
-     *  Deallocate ---> NodeC
-     * ```
-     *
-     */
-    void sequenceDeallocatesBeforeOtherNodes(std::vector<int> const& deallocateNodes,
-                                             KernelGraph&            graph)
-    {
-        removeRedundantSequenceEdges(graph);
-
-        /**
-         * Siblings of Deallocate nodes that are not Deallocate nodes must come
-         * after the Deallocate node.
-         */
-        for(auto deallocate : deallocateNodes)
-        {
-            for(auto parent : graph.control.getInputNodeIndices<Sequence>(deallocate))
-            {
-                for(auto child : graph.control.getOutputNodeIndices<Sequence>(parent))
-                {
-                    if(!graph.control.get<Deallocate>(child))
-                        graph.control.chain<Sequence>(deallocate, child);
-                }
-            }
-        }
-
-        removeRedundantSequenceEdges(graph);
-    }
-
-    void deleteControlNode(KernelGraph& graph, int nodeIdx)
-    {
-        {
-            auto incomingNodes
-                = graph.control.getInputNodeIndices<ControlEdge>(nodeIdx).to<std::vector>();
-            for(auto inc : incomingNodes)
-                graph.control.deleteElement(graph.control.findEdge(inc, nodeIdx).value());
-        }
-
-        {
-            auto outgoingNodes
-                = graph.control.getOutputNodeIndices<ControlEdge>(nodeIdx).to<std::vector>();
-            for(auto out : outgoingNodes)
-                graph.control.deleteElement(graph.control.findEdge(nodeIdx, out).value());
-        }
-
-        graph.control.deleteElement(nodeIdx);
-        graph.mapper.purge(nodeIdx);
-    }
-
-    template <CInputRangeOf<int> Range>
-    void mergeDeallocateNodes(KernelGraph& graph, int dstIdx, Range& srcs)
-    {
-        auto dst = graph.control.getNode<Deallocate>(dstIdx);
-
-        auto connectionIdx = graph.mapper.getConnections(dstIdx).size();
-
-        for(int srcIdx : srcs)
-        {
-            auto src = graph.control.getNode<Deallocate>(srcIdx);
-
-            dst.arguments.insert(dst.arguments.end(), src.arguments.begin(), src.arguments.end());
-
-            for(auto const& c : graph.mapper.getConnections(srcIdx))
-            {
-                graph.mapper.connect<Dimension>(dstIdx, c.coordinate, connectionIdx);
-                connectionIdx++;
-            }
-
-            deleteControlNode(graph, srcIdx);
-        }
-        graph.control.setElement(dstIdx, std::move(dst));
     }
 
     void mergeAdjacentDeallocates(KernelGraph& graph)
@@ -413,13 +403,11 @@ namespace rocRoller::KernelGraph
 
     KernelGraph AddDeallocateDataFlow::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::addDeallocateDataFlow");
         rocRoller::Log::getLogger()->debug("KernelGraph::addDeallocateDataFlow()");
 
-        auto graph  = original;
-        auto tracer = LastRWTracer(graph);
+        auto graph = original;
 
-        auto deallocateNodes = addDataFlowTagDeallocates(graph, tracer);
+        auto deallocateNodes = addDataFlowTagDeallocates(graph);
 
         sequenceDeallocatesBeforeOtherNodes(deallocateNodes, graph);
 
@@ -428,13 +416,15 @@ namespace rocRoller::KernelGraph
 
     KernelGraph AddDeallocateArguments::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::addDeallocateArguments");
         rocRoller::Log::getLogger()->debug("KernelGraph::addDeallocate()");
 
-        auto graph  = original;
-        auto tracer = LastRWTracer(graph);
+        auto graph = original;
 
-        auto deallocateNodes = addArgumentDeallocates(graph, tracer, m_context);
+        ControlFlowArgumentTracer argTracer(graph, m_context->kernel());
+        deleteUnusedArguments(m_context->kernel(), argTracer);
+
+        auto tracer          = LastRWTracer(graph);
+        auto deallocateNodes = addArgumentDeallocates(graph, tracer, argTracer, m_context);
 
         sequenceDeallocatesBeforeOtherNodes(deallocateNodes, graph);
 
@@ -443,7 +433,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph MergeAdjacentDeallocates::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::mergeAdjacentDeallocates");
         rocRoller::Log::getLogger()->debug("KernelGraph::mergeAdjacentDeallocates()");
 
         auto graph = original;

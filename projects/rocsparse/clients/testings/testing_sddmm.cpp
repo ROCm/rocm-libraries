@@ -66,6 +66,12 @@ void testing_sddmm_bad_arg(const Arguments& arg)
         exit(1);
         return;
     }
+    case rocsparse_format_sell:
+    {
+        std::cerr << "testing_sddmm not_implemented for sell format." << std::endl;
+        exit(1);
+        return;
+    }
     case rocsparse_format_bsr:
     {
         std::cerr << "testing_sddmm not_implemented for bsr format." << std::endl;
@@ -119,6 +125,13 @@ void testing_sddmm(const Arguments& arg)
         return;
     }
 
+    case rocsparse_format_sell:
+    {
+        std::cerr << "rocsparse_status_not_implemented" << std::endl;
+        exit(1);
+        return;
+    }
+
     case rocsparse_format_bsr:
     {
         std::cerr << "rocsparse_status_not_implemented" << std::endl;
@@ -159,5 +172,8 @@ INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
 INSTANTIATE_MIXED(int32_t, int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int64_t, int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, float, float);
+INSTANTIATE_MIXED(int32_t, int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_MIXED(int64_t, int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, _Float16, float);
 
 void testing_sddmm_extra(const Arguments& arg) {}

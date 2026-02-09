@@ -101,8 +101,6 @@ namespace rocRoller
         m_data.insert(m_data.begin(), bytes, 0);
     }
 
-    KernelArguments::~KernelArguments() {}
-
     void KernelArguments::reserve(size_t bytes, size_t count)
     {
         m_data.reserve(bytes);

@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <vector>
 #include <iostream>
@@ -8,6 +8,9 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha.hpp"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 #ifndef TEST_ALIBI_VERBOSE
 #define TEST_ALIBI_VERBOSE 0
@@ -213,3 +216,4 @@ int main()
     // clang-format on
     return rtn ? 0 : -1;
 }
+#pragma clang diagnostic pop

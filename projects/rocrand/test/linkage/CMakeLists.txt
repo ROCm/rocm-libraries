@@ -36,10 +36,7 @@ function(add_rocrand_link_test TEST_SOURCES)
             CUDA_STANDARD 14
         )
     endif()
-    target_include_directories(${TEST_TARGET}
-        PUBLIC
-            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src>
-    )
+
     if(TARGET GTest::GTest)
         target_link_libraries(${TEST_TARGET}
             GTest::GTest
@@ -51,9 +48,13 @@ function(add_rocrand_link_test TEST_SOURCES)
             GTest::gtest_main
         )
     endif()
-    target_link_libraries(${TEST_TARGET}
-        rocrand
-    )
+
+    if(USE_SYSTEM_LIB)
+        target_link_libraries(${TEST_TARGET} roc::rocrand)
+    else()
+        target_link_libraries(${TEST_TARGET} rocrand)
+    endif()
+
     if(HIP_COMPILER STREQUAL "clang")
         target_link_libraries(${TEST_TARGET} hip::device)
     endif()

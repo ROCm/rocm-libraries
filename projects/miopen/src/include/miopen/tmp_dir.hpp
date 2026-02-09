@@ -1,3 +1,6 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #ifndef MIOPEN_GUARD_MLOPEN_TMP_DIR_HPP
 #define MIOPEN_GUARD_MLOPEN_TMP_DIR_HPP
 
@@ -12,7 +15,7 @@ struct MIOPEN_INTERNALS_EXPORT TmpDir
     fs::path path;
     explicit TmpDir(std::string_view prefix = "");
 
-    TmpDir(TmpDir&&) = default;
+    TmpDir(TmpDir&&)            = default;
     TmpDir& operator=(TmpDir&&) = default;
 
     fs::path operator/(std::string_view other) const { return path / other; }

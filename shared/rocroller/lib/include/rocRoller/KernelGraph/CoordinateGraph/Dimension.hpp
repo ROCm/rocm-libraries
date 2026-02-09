@@ -153,8 +153,11 @@ namespace rocRoller
              *
              * @param size How many elements make up the User dimension.
              * @param offset Location of data within the scratch space
+             * @param argName Name of the argument for this scratch space
              */
-            User(Expression::ExpressionPtr size, Expression::ExpressionPtr offset);
+            User(Expression::ExpressionPtr size,
+                 Expression::ExpressionPtr offset,
+                 std::string const&        argName);
 
             std::string name() const override;
         };
@@ -263,12 +266,8 @@ namespace rocRoller
         struct LDS : public BaseDimension
         {
             static constexpr bool HasValue = false;
+
             using BaseDimension::BaseDimension;
-
-            bool isDirect2LDS = false;
-
-            LDS();
-            explicit LDS(bool const isDirect2LDS);
 
             std::string name() const override;
         };
@@ -358,6 +357,11 @@ namespace rocRoller
             std::vector<int> miTileSizes;
 
             /**
+             * Size of swizzle tile.
+             */
+            std::vector<int> swizzleTileSizes;
+
+            /**
              * Number of bytes padding each dimension.
              *
              * For example, a MxN Macrotile padded with [[x y]] requires
@@ -394,9 +398,10 @@ namespace rocRoller
              */
             MacroTile(std::vector<int> const& sizes,
                       LayoutType const        layoutType,
-                      std::vector<int> const& subTileSizes = {},
-                      MemoryType const        memoryType   = MemoryType::WAVE,
-                      std::vector<int> const& miTileSizes  = {});
+                      std::vector<int> const& subTileSizes     = {},
+                      MemoryType const        memoryType       = MemoryType::WAVE,
+                      std::vector<int> const& miTileSizes      = {},
+                      std::vector<int> const& swizzleTileSizes = {64, 64, 4, 1});
 
             /**
              * Construct MacroTile dimension that is padded.

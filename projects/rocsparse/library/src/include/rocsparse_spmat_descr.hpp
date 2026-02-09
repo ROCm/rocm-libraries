@@ -60,9 +60,58 @@ struct _rocsparse_spmat_descr
     int64_t             block_dim{};
     int64_t             ell_cols{};
     int64_t             ell_width{};
+    int64_t             sell_slice_size{};
+    int64_t             sell_colval_size{};
 
     int64_t batch_count{};
     int64_t batch_stride{};
     int64_t offsets_batch_stride{};
     int64_t columns_values_batch_stride{};
+
+    _rocsparse_spmat_descr() = default;
+    _rocsparse_spmat_descr(rocsparse_format     format,
+                           bool                 analysed,
+                           int64_t              batch_count,
+                           int64_t              m,
+                           int64_t              n,
+                           int64_t              nnz,
+                           rocsparse_datatype   val_datatype,
+                           const void*          const_val_data,
+                           void*                val_data,
+                           int64_t              val_stride,
+                           rocsparse_indextype  row_indextype,
+                           const void*          const_row_data,
+                           void*                row_data,
+                           int64_t              row_stride,
+                           rocsparse_indextype  col_indextype,
+                           const void*          const_col_data,
+                           void*                col_data,
+                           int64_t              col_stride,
+                           rocsparse_index_base base,
+                           rocsparse_mat_descr  descr,
+                           rocsparse_mat_info   info);
+
+    _rocsparse_spmat_descr(rocsparse_format     format,
+                           bool                 analysed,
+                           int64_t              batch_count,
+                           int64_t              mb,
+                           int64_t              nb,
+                           int64_t              nnzb,
+                           rocsparse_direction  block_dir,
+                           int64_t              block_dim,
+                           rocsparse_datatype   val_datatype,
+                           const void*          const_val_data,
+                           void*                val_data,
+                           int64_t              val_stride,
+                           rocsparse_indextype  row_indextype,
+                           const void*          const_row_data,
+                           void*                row_data,
+                           int64_t              row_stride,
+                           rocsparse_indextype  col_indextype,
+                           const void*          const_col_data,
+                           void*                col_data,
+                           int64_t              col_stride,
+                           rocsparse_index_base base,
+                           rocsparse_mat_descr  descr,
+                           rocsparse_mat_info   info);
 };

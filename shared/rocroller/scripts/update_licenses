@@ -27,9 +27,9 @@
 
 import argparse
 import datetime
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 
 repo_dir = Path(__file__).resolve().parent.parent
 sys.path.append(str(repo_dir / "scripts" / "lib"))

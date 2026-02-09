@@ -535,4 +535,13 @@ INSTANTIATE_HERK_SYRK_NUMERICS(true,
                                rocblas_double_complex const* const*,
                                rocblas_double_complex* const*)
 
+// instantiate for rocblas_syrk_ex missing and mixed types
+INSTANTIATE_HERK_SYRK_NUMERICS(false, rocblas_bfloat16 const*, rocblas_bfloat16*)
+INSTANTIATE_HERK_SYRK_NUMERICS(false, rocblas_bfloat16 const*, float*)
+INSTANTIATE_HERK_SYRK_NUMERICS(false, rocblas_half const*, rocblas_half*)
+INSTANTIATE_HERK_SYRK_NUMERICS(false, rocblas_half const*, float*)
+INSTANTIATE_HERK_SYRK_NUMERICS(false, float const*, double*)
+// instantiate for rocblas_herk_ex missing and mixed types
+INSTANTIATE_HERK_SYRK_NUMERICS(true, rocblas_float_complex const*, rocblas_double_complex*)
+
 #undef INSTANTIATE_HERK_SYRK_NUMERICS

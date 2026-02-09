@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -16,6 +16,9 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/joinable_thread.hpp"
 #include "ck_tile/host/ranges.hpp"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
 
@@ -378,7 +381,7 @@ struct HostTensor
     ~HostTensor() = default;
 
     HostTensor& operator=(const HostTensor&) = default;
-    HostTensor& operator=(HostTensor&&) = default;
+    HostTensor& operator=(HostTensor&&)      = default;
 
     template <typename FromT>
     explicit HostTensor(const HostTensor<FromT>& other) : HostTensor(other.template CopyAsType<T>())
@@ -408,8 +411,13 @@ struct HostTensor
         return sizeof(T) * get_element_space_size();
     }
 
-    // void SetZero() { ck_tile::ranges::fill<T>(mData, 0); }
-    void SetZero() { std::fill(mData.begin(), mData.end(), 0); }
+    void SetZero()
+    {
+        if constexpr(std::is_same_v<T, e8m0_t>)
+            std::fill(mData.begin(), mData.end(), e8m0_t{1.f});
+        else
+            std::fill(mData.begin(), mData.end(), 0);
+    }
 
     template <typename F>
     void ForEach_impl(F&& f, std::vector<size_t>& idx, size_t rank)
@@ -592,6 +600,8 @@ struct HostTensor
 
     typename Data::size_type size() const { return mData.size(); }
 
+    T max() const { return *std::max_element(mData.begin(), mData.end()); }
+
     // return a slice of this tensor
     // for simplicity we just copy the data and return a new tensor
     auto slice(std::vector<size_t> s_begin, std::vector<size_t> s_end) const
@@ -636,6 +646,51 @@ struct HostTensor
                                       size() * FromSize / ToSize};
     }
 
+    /**
+     * @brief Print only the first N elements of the tensor
+     *
+     * @param os Output stream to write to
+     * @param n Number of elements to print (default: 5)
+     * @return std::ostream& Reference to the output stream
+     */
+    std::ostream& print_first_n(std::ostream& os, std::size_t n = 5) const
+    {
+        os << mDesc;
+        os << "[";
+        for(typename Data::size_type idx = 0; idx < std::min(n, mData.size()); ++idx)
+        {
+            if(0 < idx)
+            {
+                os << ", ";
+            }
+            if constexpr(std::is_same_v<T, bf16_t> || std::is_same_v<T, fp16_t> ||
+                         std::is_same_v<T, fp8_t> || std::is_same_v<T, bf8_t>)
+            {
+                os << type_convert<float>(mData[idx]) << " #### ";
+            }
+            else if constexpr(std::is_same_v<T, ck_tile::pk_int4_t>)
+            {
+                auto unpacked = pk_int4_t_to_int8x2_t(mData[idx]);
+                os << "pk(" << static_cast<int>(unpacked[0]) << ", "
+                   << static_cast<int>(unpacked[1]) << ") #### ";
+            }
+            else if constexpr(std::is_same_v<T, int8_t>)
+            {
+                os << static_cast<int>(mData[idx]);
+            }
+            else
+            {
+                os << mData[idx];
+            }
+        }
+        if(mData.size() > n)
+        {
+            os << ", ...";
+        }
+        os << "]";
+        return os;
+    }
+
     friend std::ostream& operator<<(std::ostream& os, const HostTensor<T>& t)
     {
         os << t.mDesc;
@@ -646,9 +701,16 @@ struct HostTensor
             {
                 os << ", ";
             }
-            if constexpr(std::is_same_v<T, bf16_t> || std::is_same_v<T, fp16_t>)
+            if constexpr(std::is_same_v<T, bf16_t> || std::is_same_v<T, fp16_t> ||
+                         std::is_same_v<T, fp8_t> || std::is_same_v<T, bf8_t>)
             {
                 os << type_convert<float>(t.mData[idx]) << " #### ";
+            }
+            else if constexpr(std::is_same_v<T, ck_tile::pk_int4_t>)
+            {
+                auto unpacked = pk_int4_t_to_int8x2_t(t.mData[idx]);
+                os << "pk(" << static_cast<int>(unpacked[0]) << ", "
+                   << static_cast<int>(unpacked[1]) << ") #### ";
             }
             else
             {
@@ -800,3 +862,4 @@ auto get_default_stride(std::size_t row,
         return stride;
 }
 } // namespace ck_tile
+#pragma clang diagnostic pop

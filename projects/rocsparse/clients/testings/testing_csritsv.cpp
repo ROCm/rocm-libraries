@@ -1182,9 +1182,12 @@ void testing_csritsv(const Arguments& arg)
         CHECK_ROCSPARSE_ERROR(rocsparse_csritsv_solve_ex<T>(PARAMSX_SOLVE(h_alpha, dA, dx, dy)));
         {
             auto st = rocsparse_csritsv_zero_pivot(handle, descr, info, solve_pivot);
+            CHECK_HIP_ERROR(hipDeviceSynchronize());
+
             EXPECT_ROCSPARSE_STATUS(
                 st, (*solve_pivot != -1) ? rocsparse_status_zero_pivot : rocsparse_status_success);
         }
+
         const bool device_iterative_convergence_ex = (host_nmaxiter[0] < arg.nmaxiter);
         if(*h_analysis_pivot == -1 && *h_solve_pivot == -1)
         {
@@ -1298,7 +1301,6 @@ void testing_csritsv(const Arguments& arg)
         EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_zero_pivot(handle, descr, info, d_solve_pivot),
                                 (*h_solve_pivot != -1) ? rocsparse_status_zero_pivot
                                                        : rocsparse_status_success);
-
         h_analysis_pivot.unit_check(d_analysis_pivot);
         h_solve_pivot.unit_check(d_solve_pivot);
 

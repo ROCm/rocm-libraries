@@ -309,7 +309,7 @@ private:
         if(success)
         {
             success = (nullptr
-                       != (m_data = !this->use_HMM ? (T**)calloc(m_batch_count, sizeof(T*))
+                       != (m_data = !this->use_HMM ? (T**)host_calloc(m_batch_count, sizeof(T*))
                                                    : m_device_data));
             if(success)
             {
@@ -377,7 +377,7 @@ private:
 
             if(!this->use_HMM)
             {
-                free(m_data);
+                host_free(m_data);
             }
             // else this is just a copy of m_device_data
 

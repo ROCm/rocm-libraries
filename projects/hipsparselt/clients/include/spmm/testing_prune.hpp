@@ -412,11 +412,11 @@ void testing_prune_bad_arg(const Arguments& arg)
             HIPSPARSE_STATUS_INVALID_VALUE);
 
         EXPECT_HIPSPARSE_STATUS(
-            hipsparseLtSpMMAPrune(handle, matmul, dA, nullptr, HIPSPARSELT_PRUNE_SPMMA_STRIP, stream),
+            hipsparseLtSpMMAPrune(handle, matmul, nullptr, dA, HIPSPARSELT_PRUNE_SPMMA_STRIP, stream),
             HIPSPARSE_STATUS_INVALID_VALUE);
 
         EXPECT_HIPSPARSE_STATUS(
-            hipsparseLtSpMMAPrune(handle, matmul, nullptr, dA, HIPSPARSELT_PRUNE_SPMMA_STRIP, stream),
+            hipsparseLtSpMMAPrune(handle, matmul, dA, nullptr, HIPSPARSELT_PRUNE_SPMMA_STRIP, stream),
             HIPSPARSE_STATUS_INVALID_VALUE);
 
         EXPECT_HIPSPARSE_STATUS(
@@ -460,6 +460,13 @@ void testing_prune_bad_arg(const Arguments& arg)
             hipsparseLtSpMMAPrune2(
                 handle, matA, true, transA, nullptr, dA, HIPSPARSELT_PRUNE_SPMMA_STRIP, stream),
             HIPSPARSE_STATUS_INVALID_VALUE);
+
+        hipsparselt_local_mat_descr matA_f32(
+            hipsparselt_matrix_type_structured, handle, M, K, lda, HIP_R_32F, order);
+        EXPECT_HIPSPARSE_STATUS(
+            hipsparseLtSpMMAPrune2(
+                handle, matA_f32, true, transA, dA, dA, HIPSPARSELT_PRUNE_SPMMA_STRIP, stream),
+            HIPSPARSE_STATUS_NOT_SUPPORTED);
     }
 }
 
@@ -868,19 +875,21 @@ void testing_prune(const Arguments& arg)
 
     // copy data from CPU to device
     CHECK_HIP_ERROR(dT.transfer_from(hT));
+    if(arg.inEqualOut)
+        CHECK_HIP_ERROR(dT_pruned.transfer_from(hT));
 
     if(arg.unit_check || arg.norm_check)
     {
         if(arg.func_version == 1)
             EXPECT_HIPSPARSE_STATUS(
-                hipsparseLtSpMMAPrune(handle, matmul, dT, dT_pruned, prune_algo, stream),
+                hipsparseLtSpMMAPrune(handle, matmul, arg.inEqualOut ? dT_pruned : dT, dT_pruned, prune_algo, stream),
                 HIPSPARSE_STATUS_SUCCESS);
         else if(arg.func_version == 2)
             EXPECT_HIPSPARSE_STATUS(hipsparseLtSpMMAPrune2(handle,
                                                            arg.sparse_b ? matBv2 : matAv2,
                                                            !arg.sparse_b,
                                                            arg.sparse_b ? transB : transA,
-                                                           dT,
+                                                           arg.inEqualOut ? dT_pruned : dT,
                                                            dT_pruned,
                                                            prune_algo,
                                                            stream),

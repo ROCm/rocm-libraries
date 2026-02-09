@@ -680,7 +680,14 @@ hipError_t memstat_allocator<MODE>::free_async(void* d_, hipStream_t stream)
         {
             // Free device memory
 #if HIP_VERSION >= 50300000
-            return hipFreeAsync(d, stream);
+            if(d != nullptr)
+            {
+                return hipFreeAsync(d, stream);
+            }
+            else
+            {
+                return hipSuccess;
+            }
 #else
             return hipFree(d);
 #endif

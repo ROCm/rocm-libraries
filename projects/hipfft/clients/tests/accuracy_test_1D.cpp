@@ -81,14 +81,8 @@ static std::vector<size_t> small_1D_sizes()
     static const size_t SMALL_1D_MAX = 8192;
 
     // generate a list of sizes from 2 and up, skipping any sizes that are already covered
-    std::vector<size_t> covered_sizes;
-    std::copy(pow2_range.begin(), pow2_range.end(), std::back_inserter(covered_sizes));
-    std::copy(pow3_range.begin(), pow3_range.end(), std::back_inserter(covered_sizes));
-    std::copy(pow5_range.begin(), pow5_range.end(), std::back_inserter(covered_sizes));
-    std::copy(radX_range.begin(), radX_range.end(), std::back_inserter(covered_sizes));
-    std::copy(mix_range.begin(), mix_range.end(), std::back_inserter(covered_sizes));
-    std::copy(prime_range.begin(), prime_range.end(), std::back_inserter(covered_sizes));
-    std::sort(covered_sizes.begin(), covered_sizes.end());
+    std::vector<size_t> covered_sizes = merge_and_sort_values<size_t>(
+        {pow2_range, pow3_range, pow5_range, radX_range, mix_range, prime_range});
 
     std::vector<size_t> output;
     for(size_t i = 2; i < SMALL_1D_MAX; ++i)
@@ -319,29 +313,24 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_offset_mix_1D,
 
 // small 1D sizes just need to make sure our factorization isn't
 // completely broken, so we just check simple C2C outplace interleaved
-INSTANTIATE_TEST_SUITE_P(small_1D,
-                         accuracy_test,
-                         ::testing::ValuesIn(param_generator_base(
-                             test_prob,
-                             {fft_transform_type_complex_forward},
-                             generate_lengths({small_1D_sizes()}),
-                             {fft_precision_single},
-                             {1},
-                             [](fft_transform_type                       t,
-                                const std::vector<fft_result_placement>& place_range,
-                                const bool                               planar) {
-                                 return std::vector<type_place_io_t>{
-                                     std::make_tuple(t,
-                                                     place_range[0],
-                                                     fft_array_type_complex_interleaved,
-                                                     fft_array_type_complex_interleaved)};
-                             },
-                             stride_range,
-                             stride_range,
-                             ioffset_range_zero,
-                             ooffset_range_zero,
-                             {fft_placement_notinplace})),
-                         accuracy_test::TestName);
+const static std::vector<size_t> small_1D_lengths = small_1D_sizes();
+
+INSTANTIATE_TEST_SUITE_P(
+    small_1D,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_base(test_prob,
+                                             {fft_transform_type_complex_forward},
+                                             generate_lengths({small_1D_lengths}),
+                                             {fft_precision_single},
+                                             {1},
+                                             generate_types,
+                                             stride_range,
+                                             stride_range,
+                                             ioffset_range_zero,
+                                             ooffset_range_zero,
+                                             {fft_placement_notinplace},
+                                             false /* planar */)),
+    accuracy_test::TestName);
 
 // NB:
 // We have known non-unit strides issues for 1D:
@@ -352,7 +341,7 @@ INSTANTIATE_TEST_SUITE_P(small_1D,
 // main tests.
 //
 // The below test covers non-unit strides, pow of 2, middle sizes, which has SBCC/SBRC kernels
-// invloved.
+// involved.
 const static std::vector<size_t>              pow2_range_for_stride      = {4096, 8192, 524288};
 const static std::vector<size_t>              pow2_range_for_stride_half = {4096, 8192};
 const static std::vector<std::vector<size_t>> stride_range_for_pow2      = {{2}, {3}};
@@ -364,7 +353,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(param_generator_complex(test_prob,
                                                 generate_lengths({pow2_range_for_stride}),
                                                 precision_range_sp_dp,
-                                                batch_range_1D,
+                                                batch_range_for_stride,
                                                 stride_range_for_pow2,
                                                 stride_range_for_pow2,
                                                 ioffset_range_zero,
@@ -380,7 +369,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(param_generator_real(test_prob,
                                              generate_lengths({pow2_range_for_stride}),
                                              precision_range_sp_dp,
-                                             batch_range_1D,
+                                             batch_range_for_stride,
                                              stride_range_for_pow2,
                                              stride_range_for_pow2,
                                              ioffset_range_zero,
@@ -396,7 +385,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(param_generator_real(test_prob,
                                              generate_lengths({pow2_range_for_stride_half}),
                                              {fft_precision_half},
-                                             batch_range_1D,
+                                             batch_range_for_stride,
                                              stride_range_for_pow2,
                                              stride_range_for_pow2,
                                              ioffset_range_zero,
@@ -536,4 +525,25 @@ INSTANTIATE_TEST_SUITE_P(
                                                               ioffset_range_zero,
                                                               ooffset_range_zero,
                                                               place_range)),
+    accuracy_test::TestName);
+
+const static std::vector<size_t> lengths_for_disabled_autoalloc = merge_and_sort_values<size_t>(
+    {pow2_range, pow3_range, pow5_range, radX_range, mix_range, small_1D_lengths, prime_range},
+    128);
+
+INSTANTIATE_TEST_SUITE_P(
+    various_1D,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator(test_prob,
+                                        generate_lengths({lengths_for_disabled_autoalloc}),
+                                        precision_range_sp_dp,
+                                        batch_range_1D,
+                                        stride_range,
+                                        stride_range,
+                                        ioffset_range_zero,
+                                        ooffset_range_zero,
+                                        place_range,
+                                        false,
+                                        false,
+                                        fft_auto_allocation_off)),
     accuracy_test::TestName);

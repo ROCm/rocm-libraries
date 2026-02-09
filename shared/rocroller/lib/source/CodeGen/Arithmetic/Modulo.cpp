@@ -34,12 +34,6 @@
 
 namespace rocRoller
 {
-    // Register supported components
-    RegisterComponentTemplateSpec(ModuloGenerator, Register::Type::Scalar, DataType::Int32);
-    RegisterComponentTemplateSpec(ModuloGenerator, Register::Type::Vector, DataType::Int32);
-    RegisterComponentTemplateSpec(ModuloGenerator, Register::Type::Scalar, DataType::Int64);
-    RegisterComponentTemplateSpec(ModuloGenerator, Register::Type::Vector, DataType::Int64);
-
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::Modulo>>
         GetGenerator<Expression::Modulo>(Register::ValuePtr dst,
@@ -230,8 +224,8 @@ namespace rocRoller
         //
         // Generated code was modified to use the provided dest, lhs and rhs registers and
         // to save the result in the dest register instead of memory.
-        co_yield(Instruction::Lock(Scheduling::Dependency::SCC, "Start of Modulo64(SCC)"));
         co_yield(Instruction::Lock(Scheduling::Dependency::VCC, "Start of Modulo64(VCC)"));
+        co_yield(Instruction::Lock(Scheduling::Dependency::SCC, "Start of Modulo64(SCC)"));
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
         Register::ValuePtr l0, l1, r0, r1;
         co_yield get2DwordsScalar(l0, l1, lhs);
@@ -526,8 +520,8 @@ namespace rocRoller
                               {v_8, Register::Value::Literal(0)},
                               {},
                               "Move value"));
-        co_yield(Instruction::Unlock("End of Modulo64(VCC)"));
         co_yield(Instruction::Unlock("End of Modulo64(SCC)"));
+        co_yield(Instruction::Unlock("End of Modulo64(VCC)"));
     }
 
     template <>
@@ -560,8 +554,8 @@ namespace rocRoller
         //
         // Generated code was modified to use the provided dest, lhs and rhs registers and
         // to save the result in the dest register instead of memory.
-        co_yield(Instruction::Lock(Scheduling::Dependency::SCC, "Start of Modulo64(SCC)"));
         co_yield(Instruction::Lock(Scheduling::Dependency::VCC, "Start of Modulo64(VCC)"));
+        co_yield(Instruction::Lock(Scheduling::Dependency::SCC, "Start of Modulo64(SCC)"));
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
 
         Register::ValuePtr l0, l1, r0, r1;
@@ -882,7 +876,7 @@ namespace rocRoller
         {
             co_yield_(Instruction("s_or_b32", {EXEC}, {EXEC, s_5}, {}, ""));
         }
-        co_yield(Instruction::Unlock("End of Modulo64(VCC)"));
         co_yield(Instruction::Unlock("End of Modulo64(SCC)"));
+        co_yield(Instruction::Unlock("End of Modulo64(VCC)"));
     }
 }

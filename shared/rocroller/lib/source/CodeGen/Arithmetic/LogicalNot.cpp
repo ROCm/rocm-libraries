@@ -31,11 +31,6 @@
 
 namespace rocRoller
 {
-    // Register supported components
-    RegisterComponentTemplateSpec(LogicalNotGenerator, Register::Type::Scalar, DataType::Bool);
-    RegisterComponentTemplateSpec(LogicalNotGenerator, Register::Type::Scalar, DataType::Bool32);
-    RegisterComponentTemplateSpec(LogicalNotGenerator, Register::Type::Scalar, DataType::Bool64);
-
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::LogicalNot>>
         GetGenerator<Expression::LogicalNot>(Register::ValuePtr dst,

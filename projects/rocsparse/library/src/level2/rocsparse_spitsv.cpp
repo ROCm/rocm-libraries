@@ -339,6 +339,10 @@ try
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_initialized);
     }
+    if(mat->batch_count != 1 || x->batch_count != 1 || y->batch_count != 1)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    }
     // LCOV_EXCL_STOP
 
     // Check for matching types while we do not support mixed precision computation
@@ -350,7 +354,6 @@ try
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         // LCOV_EXCL_STOP
     }
-
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::spitsv_dynamic_dispatch(mat->row_type,
                                                                  mat->col_type,
                                                                  compute_type,

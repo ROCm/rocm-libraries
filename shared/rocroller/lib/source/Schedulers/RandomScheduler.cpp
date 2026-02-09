@@ -31,20 +31,19 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        RegisterComponent(RandomScheduler);
         static_assert(Component::Component<RandomScheduler>);
 
-        inline RandomScheduler::RandomScheduler(ContextPtr ctx)
+        RandomScheduler::RandomScheduler(ContextPtr ctx)
             : Scheduler{ctx}
         {
         }
 
-        inline bool RandomScheduler::Match(Argument arg)
+        bool RandomScheduler::Match(Argument arg)
         {
             return std::get<0>(arg) == SchedulerProcedure::Random;
         }
 
-        inline std::shared_ptr<Scheduler> RandomScheduler::Build(Argument arg)
+        std::shared_ptr<Scheduler> RandomScheduler::Build(Argument arg)
         {
             if(!Match(arg))
                 return nullptr;
@@ -52,7 +51,7 @@ namespace rocRoller
             return std::make_shared<RandomScheduler>(std::get<2>(arg));
         }
 
-        inline std::string RandomScheduler::name() const
+        std::string RandomScheduler::name() const
         {
             return Name;
         }
@@ -62,13 +61,22 @@ namespace rocRoller
             return true;
         }
 
-        inline Generator<Instruction>
+        Generator<Instruction>
             RandomScheduler::operator()(std::vector<Generator<Instruction>>& seqs)
         {
             if(seqs.empty())
                 co_return;
 
-            auto                                          random = m_ctx.lock()->random();
+            auto random = m_ctx.lock()->random();
+            auto random_from
+                = [&random](std::vector<size_t> const& vec) -> std::tuple<size_t, size_t> {
+                AssertFatal(!vec.empty());
+
+                auto max    = vec.size() - 1;
+                auto i_rand = random->next<size_t>(0, max);
+                return {vec.at(i_rand), i_rand};
+            };
+
             std::vector<Generator<Instruction>::iterator> iterators;
 
             co_yield handleNewNodes(seqs, iterators);
@@ -78,33 +86,44 @@ namespace rocRoller
 
             while(!validIterIndexes.empty())
             {
-                size_t idx;
+                auto [idx, rand] = random_from(validIterIndexes);
 
-                // Try to find a stream that doesn't cause an out of register error.
-                std::vector<size_t> iterIndexesToSearch = validIterIndexes;
-                while(!iterIndexesToSearch.empty())
+                auto validIdx = [&](size_t idx) -> bool {
+                    if(iterators[idx] == seqs[idx].end())
+                        return true;
+
+                    auto const& inst = *iterators[idx];
+
+                    if(!m_lockstate.isSchedulable(inst, idx))
+                        return false;
+
+                    auto status = m_ctx.lock()->peek(inst);
+
+                    if(status.outOfRegisters.count() != 0)
+                        return false;
+
+                    return true;
+                };
+
+                // Try to find a stream that doesn't cause an out of register
+                // error, or violate locking rules.
+                if(!validIdx(idx))
                 {
-                    size_t i_rand = random->next<size_t>(0, iterIndexesToSearch.size() - 1);
-                    idx           = iterIndexesToSearch[i_rand];
+                    auto iterIndexesToSearch = validIterIndexes;
+                    iterIndexesToSearch.erase(iterIndexesToSearch.begin() + rand);
 
-                    if(iterators[idx] != seqs[idx].end())
+                    do
                     {
-                        auto status = m_ctx.lock()->peek(*iterators[idx]);
-                        if(status.outOfRegisters.count() == 0)
-                        {
-                            break;
-                        }
-                    }
-                    else
-                    {
-                        break;
-                    }
-                    iterIndexesToSearch.erase(iterIndexesToSearch.begin() + i_rand);
+                        auto [myIdx, myRand] = random_from(iterIndexesToSearch);
+                        idx                  = myIdx;
+
+                        iterIndexesToSearch.erase(iterIndexesToSearch.begin() + myRand);
+                    } while(!validIdx(idx));
                 }
 
                 if(iterators[idx] != seqs[idx].end())
                 {
-                    co_yield yieldFromStream(iterators[idx]);
+                    co_yield yieldFromStream(iterators[idx], idx);
                 }
                 else
                 {
@@ -120,8 +139,6 @@ namespace rocRoller
                     validIterIndexes.push_back(i);
                 }
             }
-
-            m_lockstate.isValid(false);
         }
     }
 }

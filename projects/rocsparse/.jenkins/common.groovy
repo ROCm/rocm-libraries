@@ -20,7 +20,7 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg=false)
         }
     }
     def command = """#!/usr/bin/env bash
-                set -x
+                set -ex
                 cd ${project.paths.project_build_prefix}
                 ${getDependenciesCommand}
                 export LD_LIBRARY_PATH=/opt/rocm/lib/
@@ -38,8 +38,8 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
     //Temporary workaround due to bug in container
     String centos7Workaround = platform.jenkinsLabel.contains('centos7') ? 'export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib64/' : ''
 
-    def hmmTestCommand= ''
-    if (platform.jenkinsLabel.contains('gfx90a'))
+    def hmmTestCommand= """GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*"""
+    if (platform.jenkinsLabel.contains('gfx90a') || platform.jenkinsLabel.contains('gfx942'))
     {
         hmmTestCommand = """
                             HSA_XNACK=0 GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --gtest_output=xml:test_detail_hmm_xnack_off.xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*
@@ -52,7 +52,6 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
                 cd ${project.paths.project_build_prefix}/build/${dirmode}/clients/staging
                 export LD_LIBRARY_PATH=/opt/rocm/lib/
                 ${centos7Workaround}
-                GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*
                 ${hmmTestCommand}
             """
 
@@ -93,7 +92,7 @@ def runTestWithSanitizerCommand (platform, project, gfilter, String dirmode = "r
     String centos7Workaround = platform.jenkinsLabel.contains('centos7') ? 'export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib64/' : ''
 
     def command = """#!/usr/bin/env bash
-                set -x
+                set -ex
                 cd ${project.paths.project_build_prefix}/build/${dirmode}/clients/staging
 		        export ASAN_LIB_PATH=\$(/opt/rocm/llvm/bin/clang -print-file-name=libclang_rt.asan-x86_64.so)
                 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:\$(dirname "\${ASAN_LIB_PATH}")
@@ -110,27 +109,17 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
     String repoUrl
     (commitSha, repoUrl) = util.getGitHubCommitInformation(project.paths.project_src_prefix)
 
-    withCredentials([string(credentialsId: "mathlibs-codecov-token-rocsparse", variable: 'CODECOV_TOKEN')])
+    withCredentials([string(credentialsId: "mathlibs-codecov-token-rocm-libraries", variable: 'CODECOV_TOKEN')])
     {
         def command = """#!/usr/bin/env bash
-                    set -x
+                    set -ex
                     cd ${project.paths.project_build_prefix}/build/${dirmode}
                     export LD_LIBRARY_PATH=/opt/rocm/lib/
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
-                    curl -Os https://uploader.codecov.io/latest/linux/codecov
-                    chmod +x codecov
-                    ./codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file lcoverage/main_coverage.info --name rocSPARSE --sha ${commitSha}
+                    /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage.info --name rocm-libraries --flags rocSPARSE --sha ${commitSha}
                 """
 
         platform.runCommand(this, command)
-
-        publishHTML([allowMissing: false,
-                    alwaysLinkToLastBuild: false,
-                    keepAll: false,
-                    reportDir: "${project.paths.project_build_prefix}/build/${dirmode}/coverage-report",
-                    reportFiles: "index.html",
-                    reportName: "Code coverage report",
-                    reportTitles: "Code coverage report"])
     }
 
 }
@@ -152,7 +141,7 @@ def runPackageCommand(platform, project, String dirmode = "release")
         pkgInfoCommand = "for pkg in package/*.deb; do dpkg -I \$pkg; dpkg -c \$pkg; done"
     }
     command = """
-            set -x
+            set -ex
             cd ${project.paths.project_build_prefix}/build/${dirmode}
             make package
             mkdir -p package

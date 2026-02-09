@@ -28,8 +28,11 @@
 #define GUARD_RADIX_H
 
 #include <limits>
+
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
+#endif
 
 #define DEFINE_RADIX_TYPE(DTYPE, cpp_type) \
     template <>                            \

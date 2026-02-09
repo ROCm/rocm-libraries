@@ -23,8 +23,8 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/device/device_merge.hpp"
-#include "hipcub/iterator/counting_input_iterator.hpp"
+#include <hipcub/device/device_merge.hpp>
+#include <hipcub/iterator/counting_input_iterator.hpp>
 
 #include "identity_iterator.hpp"
 #include "test_utils_data_generation.hpp"
@@ -496,10 +496,9 @@ TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
         compare_function compare_op;
 
         // Generate data
-        const auto input1 = hipcub::CountingInputIterator<key_type>(key_type{0});
+        const auto input1 = rocprim::counting_iterator<key_type>(key_type{0});
         const auto input2
-            = hipcub::CountingInputIterator<key_type>(key_type{static_cast<key_type>(size1)});
-
+            = rocprim::counting_iterator<key_type>(key_type{static_cast<key_type>(size1)});
         std::vector<key_type> vec_input1(size1);
         std::vector<key_type> vec_input2(size2);
         std::iota(vec_input1.begin(), vec_input1.end(), 0);

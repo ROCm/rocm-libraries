@@ -172,7 +172,7 @@ namespace rocsparse
                 // Broadcast the update of the shift to all 64 threads for the next set of 64 columns.
                 // Choose the last lane since that it contains the size of the sparse row (even if its predicate is false).
                 //
-                shift += __shfl(static_cast<J>(count_previous_uncolored), WF_SIZE - 1);
+                shift += rocsparse::shfl(static_cast<J>(count_previous_uncolored), WF_SIZE - 1);
             }
         }
     }
@@ -317,7 +317,7 @@ namespace rocsparse
                 seq_ptr);
         }
 
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(seq_ptr));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(seq_ptr, handle->stream));
         return rocsparse_status_success;
     }
 }

@@ -39,6 +39,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
+
 namespace rocRoller
 {
     inline std::string toString(GPUWaitQueueType input)

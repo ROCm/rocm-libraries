@@ -30,7 +30,19 @@
 #include <iostream>
 #include <vector>
 
-#define HIP_CHECK(state) ASSERT_EQ(state, hipSuccess)
+// GoogleTest-compatible HIP_CHECK macro. FAIL is called to log the Google Test trace.
+// The lambda is invoked immediately as assertions that generate a fatal failure can
+// only be used in void-returning functions.
+#define HIP_CHECK(condition)                                                                \
+    {                                                                                       \
+        hipError_t error = condition;                                                       \
+        if(error != hipSuccess)                                                             \
+        {                                                                                   \
+            [error]()                                                                       \
+                { FAIL() << "HIP error " << error << ": " << hipGetErrorString(error); }(); \
+            exit(error);                                                                    \
+        }                                                                                   \
+    }
 
 #define HIP_CHECK_NON_VOID(condition)         \
 {                                    \
@@ -40,6 +52,13 @@
         exit(error); \
     } \
 }
+
+#ifdef __HIP_PLATFORM_NVCC__
+    #include <cuda/std/cmath>
+    #define POWF(...) cuda::std::powf(__VA_ARGS__)
+#else
+    #define POWF(...) std::powf(__VA_ARGS__)
+#endif
 
 #ifdef _MSC_VER
 inline bool is_environment_variable_set_to_1(const char* name)
@@ -158,6 +177,50 @@ double get_variance(const std::vector<T>& values, double mean)
         variance += x * x;
     }
     return variance / values.size();
+}
+
+// struct to represent a Emperical Distribution Function (EDF) 
+// of some sample
+struct EDF{
+    std::vector<double> sample;
+    double n;
+    EDF(const std::vector<double> & x){
+        sample = x;
+        std::sort(sample.begin(), sample.end());
+        n = static_cast<double>(sample.size());
+    }
+
+    double operator()(double x) const{
+        auto it = std::upper_bound(sample.begin(), sample.end(), x);
+        double pos = static_cast<double>(it - sample.begin());
+        return pos / n;
+    }
+};
+
+// Perform Two-Sample Kolmogorov-Smirnov Test
+bool ks_test_2(const std::vector<double> & expected, const std::vector<double> & actual, double alpha = 0.1){
+    EDF aEDF(expected);
+    EDF eEDF(actual);
+
+    double n = aEDF.n;
+    double m = eEDF.n;
+
+    double max_diff = std::numeric_limits<double>::min();
+
+    // Calculate the statistical value: the maximum difference between the two EDF.
+    for(const double & x : aEDF.sample){
+        max_diff = std::max(max_diff, std::abs(aEDF(x) - eEDF(x)));
+    }
+
+    for(const double & x : eEDF.sample){
+        max_diff = std::max(max_diff, std::abs(aEDF(x) - eEDF(x)));
+    }
+
+    // calculating the critical value
+    double c_alpha = std::sqrt(-std::log(alpha / 2) * 0.5);
+    double cv = std::sqrt((n + m) / ( n * m)) * c_alpha;
+
+    return max_diff <= cv; // <= because we reject if d > cv
 }
 
 #endif // TEST_COMMON_HPP_

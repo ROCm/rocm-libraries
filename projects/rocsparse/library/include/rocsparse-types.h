@@ -253,6 +253,22 @@ typedef struct _rocsparse_spgeam_descr* rocsparse_spgeam_descr;
  */
 typedef struct _rocsparse_spmv_descr* rocsparse_spmv_descr;
 
+/*! \ingroup types_module
+ * \brief rocsparse_sptrsv_descr is a structure holding the rocsparse sptrsv
+ * descr data. It must be initialized using
+ * the rocsparse_create_sptrsv_descr() routine. It should be destroyed at the
+ * end using rocsparse_destroy_sptrsv_descr().
+ */
+typedef struct _rocsparse_sptrsv_descr* rocsparse_sptrsv_descr;
+
+/*! \ingroup types_module
+ * \brief rocsparse_sptrsm_descr is a structure holding the rocsparse sptrsm
+ * descr data. It must be initialized using
+ * the rocsparse_create_sptrsm_descr() routine. It should be destroyed at the
+ * end using rocsparse_destroy_sptrsm_descr().
+ */
+typedef struct _rocsparse_sptrsm_descr* rocsparse_sptrsm_descr;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -554,7 +570,8 @@ typedef enum rocsparse_format_
     rocsparse_format_csc     = 3, /**< CSC sparse matrix format. */
     rocsparse_format_ell     = 4, /**< ELL sparse matrix format. */
     rocsparse_format_bell    = 5, /**< BLOCKED ELL sparse matrix format. */
-    rocsparse_format_bsr     = 6 /**< BSR sparse matrix format. */
+    rocsparse_format_bsr     = 6, /**< BSR sparse matrix format. */
+    rocsparse_format_sell    = 7 /**< SLICED ELL sparse matrix format. */
 } rocsparse_format;
 
 /*! \ingroup types_module
@@ -711,7 +728,9 @@ typedef enum rocsparse_spmv_input_
     rocsparse_spmv_input_alg, /**< Select algorithm for input on SpMV descriptor. */
     rocsparse_spmv_input_operation, /**< Select matrix transpose operation for input on SpMV descriptor. */
     rocsparse_spmv_input_scalar_datatype, /**< Select scalar  datatype for input on SpMV descriptor. */
-    rocsparse_spmv_input_compute_datatype /**< Select compute datatype for input on SpMV descriptor. */
+    rocsparse_spmv_input_compute_datatype, /**< Select compute datatype for input on SpMV descriptor. */
+    rocsparse_spmv_input_nnz_use_starting_block_ids, /**< Configure usage of starting block IDs for non-zero split. */
+    rocsparse_spmv_input_enable_extra /**< Enable/disable extra vectors computation for SpMV descriptor. */
 } rocsparse_spmv_input;
 
 /*! \ingroup types_module
@@ -757,6 +776,8 @@ typedef enum rocsparse_spmv_alg_
     rocsparse_spmv_alg_coo_atomic   = 5, /**< COO SpMV algorithm 2 (atomic) for COO matrices. */
     rocsparse_spmv_alg_bsr          = 6, /**< BSR SpMV algorithm 1 for BSR matrices. */
     rocsparse_spmv_alg_csr_lrb      = 7, /**< CSR SpMV algorithm 3 (LRB) for CSR matrices. */
+    rocsparse_spmv_alg_csr_nnzsplit = 8, /**< CSR SpMV algorithm 4 (nnzsplit) for CSR matrices. */
+    rocsparse_spmv_alg_sell         = 9, /**< SLICED ELL SpMV algorithm for SLICED ELL matrices. */
     rocsparse_spmv_alg_csr_stream [[deprecated]]
     = rocsparse_spmv_alg_csr_rowsplit /**< CSR SpMV algorithm 2 (stream) for CSR matrices. */
 } rocsparse_spmv_alg;
@@ -942,6 +963,110 @@ typedef enum rocsparse_spgemm_alg_
 {
     rocsparse_spgemm_alg_default = 0 /**< Default SpGEMM algorithm for the given format. */
 } rocsparse_spgemm_alg;
+
+/*! \ingroup types_module
+ *  \brief List of SpTRSV algorithms.
+ *
+ *  \details
+ *  This is a list of supported \ref rocsparse_sptrsv_alg types that are used to perform
+ *  triangular solve.
+ */
+typedef enum rocsparse_sptrsv_alg_
+{
+    rocsparse_sptrsv_alg_default = 0, /**< Default SpTRSV algorithm for the given format. */
+} rocsparse_sptrsv_alg;
+
+/*! \ingroup types_module
+ *  \brief List of SpTRSV stages.
+ *
+ *  \details
+ *  This is a list of possible stages during SpTRSV computation.
+ */
+typedef enum rocsparse_sptrsv_stage_
+{
+    rocsparse_sptrsv_stage_analysis, /**< Analysis. */
+    rocsparse_sptrsv_stage_compute /**< Performs the actual SpTRSV computation. */
+} rocsparse_sptrsv_stage;
+
+/*! \ingroup types_module
+ *  \brief List of inputs to SpTRSV descriptor.
+ *
+ *  \details
+ *  This is a list of possible inputs to the SpTRSV descriptor.
+ */
+typedef enum rocsparse_sptrsv_input_
+{
+    rocsparse_sptrsv_input_alg, /**< Select algorithm \ref rocsparse_sptrsv_alg for input on SpTRSV descriptor. */
+    rocsparse_sptrsv_input_operation, /**< Select matrix operation \ref rocsparse_operation for input on SpTRSV descriptor. */
+    rocsparse_sptrsv_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on SpTRSV descriptor. */
+    rocsparse_sptrsv_input_compute_datatype, /**< Select compute datatype  \ref rocsparse_datatype for input on SpTRSV descriptor. */
+    rocsparse_sptrsv_input_scalar_alpha, /**< Select scalar alpha pointer for input on SpTRSV descriptor. */
+    rocsparse_sptrsv_input_analysis_policy /**< Select the analysis policy  \ref rocsparse_analysis_policy for input on SpTRSV descriptor. */
+} rocsparse_sptrsv_input;
+
+/*! \ingroup types_module
+ *  \brief List of outputs to SpTRSV descriptor.
+ *
+ *  \details
+ *  This is a list of possible outputs to the SpTRSV descriptor.
+ */
+typedef enum rocsparse_sptrsv_output_
+{
+    rocsparse_sptrsv_output_zero_pivot_position /**< Get zero pivot int64_t based position for output from SpTRSV descriptor. */
+} rocsparse_sptrsv_output;
+
+/*! \ingroup types_module
+ *  \brief List of SpTRSM algorithms.
+ *
+ *  \details
+ *  This is a list of supported \ref rocsparse_sptrsm_alg types that are used to perform
+ *  triangular solve.
+ */
+typedef enum rocsparse_sptrsm_alg_
+{
+    rocsparse_sptrsm_alg_default = 0, /**< Default SpTRSM algorithm for the given format. */
+} rocsparse_sptrsm_alg;
+
+/*! \ingroup types_module
+ *  \brief List of SpTRSM stages.
+ *
+ *  \details
+ *  This is a list of possible stages during SpTRSM computation.
+ */
+typedef enum rocsparse_sptrsm_stage_
+{
+    rocsparse_sptrsm_stage_analysis, /**< Analysis. */
+    rocsparse_sptrsm_stage_compute /**< Performs the actual SpTRSM computation. */
+} rocsparse_sptrsm_stage;
+
+/*! \ingroup types_module
+ *  \brief List of inputs to SpTRSM descriptor.
+ *
+ *  \details
+ *  This is a list of possible inputs to the SpTRSM descriptor.
+ */
+typedef enum rocsparse_sptrsm_input_
+{
+    rocsparse_sptrsm_input_alg, /**< Select algorithm \ref rocsparse_sptrsm_alg for input on SpTRSM descriptor. */
+    rocsparse_sptrsm_input_operation_A, /**< Select matrix A operation \ref rocsparse_operation for input on SpTRSM descriptor. */
+    rocsparse_sptrsm_input_operation_X, /**< Select matrix X operation \ref rocsparse_operation  for input on SpTRSM descriptor. */
+    rocsparse_sptrsm_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on SpTRSM descriptor. */
+    rocsparse_sptrsm_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on SpTRSM descriptor. */
+    rocsparse_sptrsm_input_scalar_alpha, /**< Select scalar alpha pointer for input on SpTRSM descriptor, this datatype is used as the compute type. */
+    rocsparse_sptrsm_input_analysis_policy /**< Select the analysis policy \ref rocsparse_analysis_policy for input on SpTRSM descriptor */
+
+} rocsparse_sptrsm_input;
+
+/*! \ingroup types_module
+ *  \brief List of outputs to SpTRSM descriptor.
+ *
+ *  \details
+ *  This is a list of possible outputs to the SpTRSM descriptor.
+ */
+typedef enum rocsparse_sptrsm_output_
+{
+    rocsparse_sptrsm_output_zero_pivot_position /**< Get zero pivot int64_t based position for output from SpTRSM descriptor. */
+} rocsparse_sptrsm_output;
 
 /*! \ingroup types_module
  *  \brief List of SpGEAM stages.

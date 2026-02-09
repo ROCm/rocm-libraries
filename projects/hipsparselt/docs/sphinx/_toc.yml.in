@@ -32,7 +32,7 @@ subtrees:
 
 - caption: Examples
   entries:
-  - url: https://github.com/ROCm/hipSPARSELt/tree/develop/clients/samples
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparselt/clients/samples
     title: Client samples
 
 - caption: API Reference

@@ -87,10 +87,8 @@ namespace rocRoller
                 {
                     std::vector<key_type> keys;
                     keys.reserve(value.size());
-                    std::transform(value.begin(),
-                                   value.end(),
-                                   std::back_inserter(keys),
-                                   [](auto const& pair) { return pair.first; });
+
+                    std::ranges::copy(value | std::views::keys, std::back_inserter(keys));
 
                     std::sort(keys.begin(), keys.end());
 
@@ -207,6 +205,7 @@ namespace rocRoller
                 return v.second;
             }
         };
-
+        ROCROLLER_SERIALIZE_VECTOR(true, int);
+        ROCROLLER_SERIALIZE_VECTOR(true, unsigned int);
     } // namespace Serialization
 } // namespace rocRoller

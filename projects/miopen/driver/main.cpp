@@ -26,6 +26,7 @@
 #include "driver.hpp"
 #include "registry_driver_maker.hpp"
 
+#include "sys_info.hpp"
 #include <miopen/config.h>
 #include <miopen/stringutils.hpp>
 
@@ -65,6 +66,8 @@ int main(int argc, char* argv[])
         exit(0); // NOLINT (concurrency-mt-unsafe)
     }
 
+    drv->name = base_arg;
+
     drv->AddCmdLineArgs();
     int rc = drv->ParseCmdLineArgs(argc, argv);
     if(rc != 0)
@@ -78,6 +81,16 @@ int main(int argc, char* argv[])
     {
         std::cout << "AllocateBuffersAndCopy() FAILED, rc = " << rc << std::endl;
         return rc;
+    }
+
+    if(drv->GetInputFlags().GetValueInt("time") == 1)
+    {
+        // Print system information for ROCmPerf analysis.
+        // The ROCmPerf is a performance analysis tool based on MIOpenDirver logs.
+        size_t major, minor, patch;
+        miopenGetVersion(&major, &minor, &patch);
+        RocmPerf::SysInfo sysInfo(major, minor, patch);
+        sysInfo.ShowSysInfo();
     }
 
     int fargval =

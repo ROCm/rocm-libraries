@@ -13,7 +13,7 @@ left_nav_title = f"rocFFT {version_number} Documentation"
 # for PDF output on Read the Docs
 project = "rocFFT Documentation"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
@@ -24,7 +24,6 @@ docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
 docs_core.setup()
 
 external_projects_current_project = "rocfft"
-external_projects = []
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)

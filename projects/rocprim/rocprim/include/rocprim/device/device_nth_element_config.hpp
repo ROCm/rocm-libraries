@@ -35,40 +35,23 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// generic struct that instantiates custom configurations
-template<typename NthElementConfig, typename>
-struct wrapped_nth_element_config
+template<class Key>
+struct nth_element_config_selector
 {
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr nth_element_config_params params = NthElementConfig{};
-    };
+    // Targets can not be fully empty.
+    using targets
+        = comp_targets<comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
+    using param_type = nth_element_config_params;
+
+    param_type params;
+
+    template<class Target>
+    constexpr nth_element_config_selector(Target)
+        : params(param_type{
+            64, 64, block_radix_rank_algorithm::match, kernel_config_params{512, 8}
+    })
+    {}
 };
-
-// specialized for rocprim::default_config, which instantiates the default_nth_element_config
-template<typename Type>
-struct wrapped_nth_element_config<default_config, Type>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr nth_element_config_params params
-            = {64, 64, block_radix_rank_algorithm::match, kernel_config<512, 8>()};
-    };
-};
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<typename NthElementConfig, typename Type>
-template<target_arch Arch>
-constexpr nth_element_config_params
-    wrapped_nth_element_config<NthElementConfig, Type>::architecture_config<Arch>::params;
-
-template<typename Type>
-template<target_arch Arch>
-constexpr nth_element_config_params
-    wrapped_nth_element_config<default_config, Type>::architecture_config<Arch>::params;
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // namespace detail
 

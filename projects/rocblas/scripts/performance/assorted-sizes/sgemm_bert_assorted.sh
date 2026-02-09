@@ -20,4 +20,3 @@
 ./rocblas-bench -f gemm -r f32_r --transposeA N --transposeB N -m 3072 -n 3072 -k 1024 --alpha 1.0 --lda 3072 --ldb 1024 --beta 0.0 --ldc 3072
 ./rocblas-bench -f gemm -r f32_r --transposeA N --transposeB N -m 3072 -n 2048 -k 1024 --alpha 1.0 --lda 3072 --ldb 1024 --beta 0.0 --ldc 3072
 ./rocblas-bench -f gemm -r s --transposeA N --transposeB T -m 1024 -n 4096 -k 4096 --alpha 1.0 --lda 1024 --ldb 4096 --beta 0.0 --ldc 1024 -i 24
-

@@ -382,7 +382,7 @@ void test_shuffle()
                     // Read from device memory
                     const auto output = d_data.load();
 
-                    test_utils::assert_eq(output, expected);
+                    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
                 }
             }
         }
@@ -635,7 +635,7 @@ TEST(RocprimIntrinsicsTests, MaskedBitCount)
 
                 const auto output = d_output.load();
 
-                test_utils::assert_eq(output, expected);
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
             }
         }
     }
@@ -751,7 +751,7 @@ void warp_any_all_test()
 
             const auto output = d_output.load();
 
-            test_utils::assert_eq(output, expected);
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
         }
     }
 }
@@ -892,7 +892,7 @@ TYPED_TEST(RocprimIntrinsicsTests, WarpPermute)
 
                 const auto output = d_output.load();
 
-                test_utils::assert_eq(output, expected);
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
             }
         }
     }
@@ -1004,7 +1004,7 @@ TEST(RocprimIntrinsicsTests, MatchAny)
 
                 const auto output = d_output.load();
 
-                test_utils::assert_eq(output, expected);
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
             }
         }
     }
@@ -1092,7 +1092,7 @@ TEST(RocprimIntrinsicsTests, Ballot)
 
             const auto output = d_output.load();
 
-            test_utils::assert_eq(output, expected);
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
         }
     }
 }

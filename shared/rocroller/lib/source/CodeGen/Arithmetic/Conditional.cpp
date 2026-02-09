@@ -26,11 +26,10 @@
 
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Conditional.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
 {
-    RegisterComponent(ConditionalGenerator);
-
     template <>
     std::shared_ptr<TernaryArithmeticGenerator<Expression::Conditional>>
         GetGenerator<Expression::Conditional>(Register::ValuePtr dst,
@@ -90,7 +89,7 @@ namespace rocRoller
             }
             else
             {
-                AssertFatal(false, "Unsupported scalar size ", ShowValue(elementSize));
+                Throw<FatalError>("Unsupported scalar size ", ShowValue(elementSize));
             }
 
             if(!cond->isSCC())
@@ -123,7 +122,7 @@ namespace rocRoller
             }
             else
             {
-                AssertFatal(false, "Unsupported size ", ShowValue(elementSize));
+                Throw<FatalError>("Unsupported size ", ShowValue(elementSize));
             }
         }
     }

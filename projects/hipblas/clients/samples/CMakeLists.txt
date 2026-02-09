@@ -36,10 +36,10 @@ if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*/amd
 endif( )
 
 if(NOT WIN32)
-    add_executable( hipblas-example-sscal-fortran example_sscal_fortran.F90 $<TARGET_OBJECTS:hipblas_fortran>)
-    add_executable( hipblas-example-gemmEx-fortran example_gemm_ex_fortran.F90 $<TARGET_OBJECTS:hipblas_fortran>)
+  add_executable( hipblas-example-sscal-fortran example_sscal_fortran.F90 $<TARGET_OBJECTS:hipblas_fortran_client>)
+  add_executable( hipblas-example-gemmEx-fortran example_gemm_ex_fortran.F90 $<TARGET_OBJECTS:hipblas_fortran_client>)
 
-    set( sample_list_fortran hipblas-example-sscal-fortran hipblas-example-gemmEx-fortran )
+  set( sample_list_fortran hipblas-example-sscal-fortran hipblas-example-gemmEx-fortran )
 endif()
 
 if(HIP_PLATFORM STREQUAL amd)
@@ -56,7 +56,7 @@ target_compile_options(hipblas-example-c PRIVATE -I${HIP_INCLUDE_DIRS})
 #set_source_files_properties(example_sgemm_strided_batched.cpp PROPERTIES COMPILE_FLAGS "-std=c++11")
 
 if( NOT TARGET hipblas )
-  find_package( hipblas CONFIG PATHS ${ROCM_PATH}/hipblas )
+  find_package( hipblas CONFIG PATHS ${HIPBLAS_LIBRARY_DIR} )
   if( NOT hipblas_FOUND )
     message( FATAL_ERROR "hipBLAS is a required dependency and is not found; try adding rocblas path to CMAKE_PREFIX_PATH")
   endif( )

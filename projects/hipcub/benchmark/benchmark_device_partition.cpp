@@ -23,7 +23,7 @@
 #include "common_benchmark_header.hpp"
 
 // HIP API
-#include "hipcub/device/device_partition.hpp"
+#include <hipcub/device/device_partition.hpp>
 
 #include <chrono>
 #include <vector>

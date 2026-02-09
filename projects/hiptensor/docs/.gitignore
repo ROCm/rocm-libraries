@@ -1,0 +1,5 @@
+doxygen/html
+doxygen/xml
+sphinx/_toc.yml
+_build/
+_doxygen/

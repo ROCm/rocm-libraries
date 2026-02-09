@@ -92,7 +92,6 @@ namespace rocRoller
         public:
             VMEMObserver(ContextPtr ctx);
 
-        protected:
             bool isMEMInstruction(Instruction const& inst) const override;
             int  getWait(Instruction const& inst) const override;
         };
@@ -102,7 +101,6 @@ namespace rocRoller
         public:
             DSMEMObserver(ContextPtr ctx);
 
-        protected:
             bool isMEMInstruction(Instruction const& inst) const override;
             int  getWait(Instruction const& inst) const override;
         };

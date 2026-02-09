@@ -22,168 +22,12 @@
  *
  * ************************************************************************ */
 #include "rocsparse_init.hpp"
+#include "../include/rocsparse_host.hpp"
 #include "rocsparse_import.hpp"
 #include "rocsparse_importer_impls.hpp"
 #include "rocsparse_matrix.hpp"
 
 #include "rocsparse_clients_routine_trace.hpp"
-
-template <typename I, typename J>
-void host_coo_to_csr(J M, I nnz, const J* coo_row_ind, I* csr_row_ptr, rocsparse_index_base base)
-{
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
-
-    // Resize and initialize csr_row_ptr with zeros
-    for(size_t i = 0; i < M + 1; ++i)
-    {
-        csr_row_ptr[i] = 0;
-    }
-
-    for(size_t i = 0; i < nnz; ++i)
-    {
-        ++csr_row_ptr[coo_row_ind[i] + 1 - base];
-    }
-
-    csr_row_ptr[0] = base;
-    for(J i = 0; i < M; ++i)
-    {
-        csr_row_ptr[i + 1] += csr_row_ptr[i];
-    }
-}
-
-template <typename I, typename J>
-void host_csr_to_coo(J                     M,
-                     I                     nnz,
-                     const std::vector<I>& csr_row_ptr,
-                     std::vector<J>&       coo_row_ind,
-                     rocsparse_index_base  base)
-{
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
-
-    // Resize coo_row_ind
-    coo_row_ind.resize(nnz);
-
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic, 1024)
-#endif
-    for(J i = 0; i < M; ++i)
-    {
-        I row_begin = csr_row_ptr[i] - base;
-        I row_end   = csr_row_ptr[i + 1] - base;
-
-        for(I j = row_begin; j < row_end; ++j)
-        {
-            coo_row_ind[j] = i + base;
-        }
-    }
-}
-
-template <typename I, typename J>
-void host_csr_to_coo_aos(J                     M,
-                         I                     nnz,
-                         const std::vector<I>& csr_row_ptr,
-                         const std::vector<J>& csr_col_ind,
-                         std::vector<I>&       coo_ind,
-                         rocsparse_index_base  base)
-{
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
-
-    // Resize coo_ind
-    coo_ind.resize(2 * nnz);
-
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic, 1024)
-#endif
-    for(I i = 0; i < M; ++i)
-    {
-        I row_begin = csr_row_ptr[i] - base;
-        I row_end   = csr_row_ptr[i + 1] - base;
-
-        for(I j = row_begin; j < row_end; ++j)
-        {
-            coo_ind[2 * j]     = i + base;
-            coo_ind[2 * j + 1] = static_cast<I>(csr_col_ind[j]);
-        }
-    }
-}
-
-template <typename I, typename J, typename T>
-void host_csr_to_ell(J                     M,
-                     const std::vector<I>& csr_row_ptr,
-                     const std::vector<J>& csr_col_ind,
-                     const std::vector<T>& csr_val,
-                     std::vector<J>&       ell_col_ind,
-                     std::vector<T>&       ell_val,
-                     J&                    ell_width,
-                     rocsparse_index_base  csr_base,
-                     rocsparse_index_base  ell_base)
-{
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
-
-    // Determine ELL width
-    ell_width = 0;
-
-    for(J i = 0; i < M; ++i)
-    {
-        J row_nnz = csr_row_ptr[i + 1] - csr_row_ptr[i];
-        ell_width = std::max(row_nnz, ell_width);
-    }
-
-    // Compute ELL non-zeros
-    int64_t ell_nnz = (int64_t)ell_width * M;
-
-    size_t required_memory  = sizeof(J) * ell_nnz + sizeof(T) * ell_nnz;
-    size_t total_memory     = 0;
-    size_t available_memory = 0;
-    std::ignore             = hipMemGetInfo(&available_memory, &total_memory);
-
-    if(required_memory > available_memory)
-    {
-        std::cerr << "Error: Insufficient memory available for conversion from CSR to ELL format. "
-                     "Required: "
-                  << required_memory << " available: " << available_memory << std::endl
-                  << "Skipping matrix. (File: " << __FILE__ << " Line: " << __LINE__ << ")"
-                  << std::endl;
-        exit(1);
-    }
-
-    ell_col_ind.resize(ell_nnz);
-    ell_val.resize(ell_nnz);
-
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic, 1024)
-#endif
-    for(J i = 0; i < M; ++i)
-    {
-        J p = 0;
-
-        I row_begin = csr_row_ptr[i] - csr_base;
-        I row_end   = csr_row_ptr[i + 1] - csr_base;
-        J row_nnz   = row_end - row_begin;
-
-        // Fill ELL matrix with data
-        for(I j = row_begin; j < row_end; ++j)
-        {
-            int64_t idx = (int64_t)p * M + i;
-
-            ell_col_ind[idx] = csr_col_ind[j] - csr_base + ell_base;
-            ell_val[idx]     = csr_val[j];
-
-            ++p;
-        }
-
-        // Add padding to ELL structures
-        for(J j = row_nnz; j < ell_width; ++j)
-        {
-            int64_t idx = (int64_t)p * M + i;
-
-            ell_col_ind[idx] = -1;
-            ell_val[idx]     = static_cast<T>(0);
-
-            ++p;
-        }
-    }
-}
 
 /* ==================================================================================== */
 /*! \brief  matrix/vector initialization: */
@@ -196,7 +40,7 @@ template <typename T>
 void rocsparse_init_exact(
     T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, int a, int b)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
     {
@@ -211,10 +55,102 @@ void rocsparse_init_exact(
 }
 
 template <typename T>
-void rocsparse_init(
+void rocsparse_init_1d_array(T* A, size_t size, bool use_exact, T a, T b)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    rocsparse_init(A, size, 1, 1, use_exact, 0, 1, a, b);
+}
+
+template <typename T>
+void rocsparse_init(T*     A,
+                    size_t M,
+                    size_t N,
+                    size_t lda,
+                    bool   use_exact,
+                    size_t stride,
+                    size_t batch_count,
+                    T      a,
+                    T      b)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    if(use_exact)
+    {
+        rocsparse_init_exact<T>(
+            A, M, N, lda, stride, batch_count, static_cast<int>(a), static_cast<int>(b));
+    }
+    else
+    {
+        rocsparse_init_inexact<T>(A, M, N, lda, stride, batch_count, a, b);
+    }
+}
+
+template <>
+void rocsparse_init(rocsparse_float_complex* A,
+                    size_t                   M,
+                    size_t                   N,
+                    size_t                   lda,
+                    bool                     use_exact,
+                    size_t                   stride,
+                    size_t                   batch_count,
+                    rocsparse_float_complex  a,
+                    rocsparse_float_complex  b)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    if(use_exact)
+    {
+        rocsparse_init_exact<rocsparse_float_complex>(A,
+                                                      M,
+                                                      N,
+                                                      lda,
+                                                      stride,
+                                                      batch_count,
+                                                      static_cast<int>(std::real(a)),
+                                                      static_cast<int>(std::real(b)));
+    }
+    else
+    {
+        rocsparse_init_inexact<rocsparse_float_complex>(A, M, N, lda, stride, batch_count, a, b);
+    }
+}
+
+template <>
+void rocsparse_init(rocsparse_double_complex* A,
+                    size_t                    M,
+                    size_t                    N,
+                    size_t                    lda,
+                    bool                      use_exact,
+                    size_t                    stride,
+                    size_t                    batch_count,
+                    rocsparse_double_complex  a,
+                    rocsparse_double_complex  b)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    if(use_exact)
+    {
+        rocsparse_init_exact<rocsparse_double_complex>(A,
+                                                       M,
+                                                       N,
+                                                       lda,
+                                                       stride,
+                                                       batch_count,
+                                                       static_cast<int>(std::real(a)),
+                                                       static_cast<int>(std::real(b)));
+    }
+    else
+    {
+        rocsparse_init_inexact<rocsparse_double_complex>(A, M, N, lda, stride, batch_count, a, b);
+    }
+}
+
+template <typename T>
+void rocsparse_init_inexact(
     T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, T a, T b)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
     {
@@ -238,25 +174,49 @@ void rocsparse_init_exact(std::vector<T>& A,
                           int             a,
                           int             b)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_exact(A.data(), M, N, lda, stride, batch_count, a, b);
 }
 
 template <typename T>
-void rocsparse_init(
+void rocsparse_init_1d_array(std::vector<T>& A, size_t size, bool use_exact, T a, T b)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    rocsparse_init(A.data(), size, 1, 1, use_exact, 0, 1, a, b);
+}
+
+template <typename T>
+void rocsparse_init(std::vector<T>& A,
+                    size_t          M,
+                    size_t          N,
+                    size_t          lda,
+                    bool            use_exact,
+                    size_t          stride,
+                    size_t          batch_count,
+                    T               a,
+                    T               b)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    rocsparse_init(A.data(), M, N, lda, use_exact, stride, batch_count, a, b);
+}
+
+template <typename T>
+void rocsparse_init_inexact(
     std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, T a, T b)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-    rocsparse_init(A.data(), M, N, lda, stride, batch_count, a, b);
+    rocsparse_init_inexact(A.data(), M, N, lda, stride, batch_count, a, b);
 }
 
 // Initializes sparse index vector with nnz entries ranging from start to end
 template <typename I>
 void rocsparse_init_index(std::vector<I>& x, size_t nnz, size_t start, size_t end)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     std::vector<bool> check(end - start, false);
 
@@ -286,7 +246,7 @@ template <typename T>
 void rocsparse_init_alternating_sign(
     std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
@@ -303,7 +263,7 @@ void rocsparse_init_alternating_sign(
 template <typename T>
 void rocsparse_init_nan(T* A, size_t N)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(size_t i = 0; i < N; ++i)
         A[i] = T(rocsparse_nan_rng());
@@ -313,7 +273,7 @@ template <typename T>
 void rocsparse_init_nan(
     std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
@@ -334,7 +294,7 @@ void rocsparse_init_coo_matrix(std::vector<I>&      row_ind,
                                bool                 full_rank,
                                bool                 to_int)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(nnz == 0)
     {
@@ -552,7 +512,7 @@ void rocsparse_init_csr_laplace2d(std::vector<I>&      row_ptr,
                                   I&                   nnz,
                                   rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Do nothing
     if(dim_x == 0 || dim_y == 0)
@@ -627,7 +587,7 @@ void rocsparse_init_coo_laplace2d(std::vector<I>&      row_ind,
                                   int64_t&             nnz,
                                   rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Always load using int64 as we dont know ahead of time how many nnz exist in matrix
     std::vector<int64_t> row_ptr;
@@ -654,7 +614,7 @@ void rocsparse_init_gebsr_laplace2d(std::vector<I>&      row_ptr,
                                     J                    col_block_dim,
                                     rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_csr_laplace2d(row_ptr, col_ind, val, dim_x, dim_y, Mb, Nb, nnzb, base);
 
@@ -678,7 +638,7 @@ void rocsparse_init_ell_laplace2d(std::vector<I>&      col_ind,
                                   I&                   width,
                                   rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     I csr_nnz;
 
@@ -708,7 +668,7 @@ void rocsparse_init_csr_laplace3d(std::vector<I>&      row_ptr,
                                   I&                   nnz,
                                   rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Do nothing
     if(dim_x == 0 || dim_y == 0 || dim_z == 0)
@@ -793,7 +753,7 @@ void rocsparse_init_coo_laplace3d(std::vector<I>&      row_ind,
                                   int64_t&             nnz,
                                   rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Always load using int64 as we dont know ahead of time how many nnz exist in matrix
     std::vector<int64_t> row_ptr;
@@ -821,7 +781,7 @@ void rocsparse_init_gebsr_laplace3d(std::vector<I>&      row_ptr,
                                     J                    col_block_dim,
                                     rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_csr_laplace3d(row_ptr, col_ind, val, dim_x, dim_y, dim_z, Mb, Nb, nnzb, base);
 
@@ -845,7 +805,7 @@ void rocsparse_init_csr_mtx(const char*          filename,
                             I&                   nnz,
                             rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     I       coo_M, coo_N;
     int64_t coo_nnz;
@@ -885,7 +845,7 @@ void rocsparse_init_coo_mtx(const char*          filename,
                             int64_t&             nnz,
                             rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_matrixmarket importer(filename);
     rocsparse_status                status
@@ -907,7 +867,7 @@ void rocsparse_init_gebsr_mtx(const char*          filename,
                               J                    col_block_dim,
                               rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // this->init_csr(bsr_row_ptr, bsr_col_ind, bsr_val, Mb, Nb, nnzb, base);
     rocsparse_init_csr_mtx(filename, bsr_row_ptr, bsr_col_ind, bsr_val, Mb, Nb, nnzb, base);
@@ -932,7 +892,7 @@ void rocsparse_init_csr_smtx(const char*          filename,
                              I&                   nnz,
                              rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_mlcsr importer(filename);
     const rocsparse_status   status
@@ -958,7 +918,7 @@ void rocsparse_init_coo_smtx(const char*          filename,
                              int64_t&             nnz,
                              rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     std::vector<int64_t> csr_row_ptr;
     rocsparse_init_csr_smtx<int64_t, I, T>(
@@ -981,7 +941,7 @@ void rocsparse_init_gebsr_smtx(const char*          filename,
                                J                    col_block_dim,
                                rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_mlcsr importer(filename);
     const rocsparse_status   status = rocsparse_import_sparse_csr(
@@ -1010,7 +970,7 @@ void rocsparse_init_csr_bsmtx(const char*          filename,
                               I&                   nnz,
                               rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     std::vector<I> bsr_row_ptr;
     std::vector<J> bsr_col_ind;
@@ -1095,7 +1055,7 @@ void rocsparse_init_coo_bsmtx(const char*          filename,
                               int64_t&             nnz,
                               rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     std::vector<int64_t> csr_row_ptr;
     rocsparse_init_csr_bsmtx<int64_t, I, T>(
@@ -1118,7 +1078,7 @@ void rocsparse_init_gebsr_bsmtx(const char*          filename,
                                 J                    col_block_dim,
                                 rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_mlbsr importer(filename);
     rocsparse_direction      import_dir = {};
@@ -1153,7 +1113,7 @@ void rocsparse_init_csr_rocalution(const char*          filename,
                                    I&                   nnz,
                                    rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_rocalution importer(filename);
     rocsparse_status              status
@@ -1173,7 +1133,7 @@ void rocsparse_init_coo_rocalution(const char*          filename,
                                    int64_t&             nnz,
                                    rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     I              csr_nnz = 0;
     std::vector<I> row_ptr(M + 1);
@@ -1199,7 +1159,7 @@ void rocsparse_init_gebsr_rocalution(const char*          filename,
                                      J                    col_block_dim,
                                      rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Temporarily the file contains a CSR matrix.
     rocsparse_init_csr_rocalution(filename, row_ptr, col_ind, val, Mb, Nb, nnzb, base);
@@ -1225,7 +1185,7 @@ void rocsparse_init_csr_rocsparseio(const char*          filename,
                                     I&                   nnz,
                                     rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_rocsparseio importer(filename);
     rocsparse_status               status
@@ -1245,7 +1205,7 @@ void rocsparse_init_coo_rocsparseio(const char*          filename,
                                     int64_t&             nnz,
                                     rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_rocsparseio importer(filename);
     rocsparse_status               status
@@ -1268,7 +1228,7 @@ void rocsparse_init_gebsr_rocsparseio(const char*          filename,
                                       J                    col_block_dim,
                                       rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_direction            import_dir = {};
     rocsparse_importer_rocsparseio importer(filename);
@@ -1306,7 +1266,7 @@ void rocsparse_init_csr_random(std::vector<I>&            csr_row_ptr,
                                bool                       full_rank,
                                bool                       to_int)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(init_kind)
     {
@@ -1395,7 +1355,7 @@ void rocsparse_init_coo_random(std::vector<I>&            row_ind,
                                bool                       full_rank,
                                bool                       to_int)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(init_kind)
     {
@@ -1466,7 +1426,7 @@ void rocsparse_init_gebsr_random(std::vector<I>&            row_ptr,
                                  bool                       full_rank,
                                  bool                       to_int)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_csr_random(
         row_ptr, col_ind, val, Mb, Nb, nnzb, base, init_kind, full_rank, to_int);
@@ -1502,7 +1462,7 @@ void rocsparse_init_coo_tridiagonal(std::vector<I>&      row_ind,
                                     I                    l,
                                     I                    u)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(l >= 0 || -l >= M)
     {
@@ -1572,7 +1532,7 @@ void rocsparse_init_csr_tridiagonal(std::vector<I>&      row_ptr,
                                     J                    l,
                                     J                    u)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     int64_t        coo_nnz;
     std::vector<J> row_ind;
@@ -1609,7 +1569,7 @@ void rocsparse_init_gebsr_tridiagonal(std::vector<I>&      row_ptr,
                                       J                    l,
                                       J                    u)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_csr_tridiagonal(row_ptr, col_ind, val, Mb, Nb, nnzb, base, l, u);
 
@@ -1637,7 +1597,7 @@ void rocsparse_init_coo_pentadiagonal(std::vector<I>&      row_ind,
                                       I                    u,
                                       I                    uu)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(ll >= 0 || l >= 0 || ll >= l || -l >= M || -ll >= M)
     {
@@ -1729,7 +1689,7 @@ void rocsparse_init_csr_pentadiagonal(std::vector<I>&      row_ptr,
                                       J                    u,
                                       J                    uu)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     int64_t        coo_nnz;
     std::vector<J> row_ind;
@@ -1768,7 +1728,7 @@ void rocsparse_init_gebsr_pentadiagonal(std::vector<I>&      row_ptr,
                                         J                    u,
                                         J                    uu)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_csr_pentadiagonal(row_ptr, col_ind, val, Mb, Nb, nnzb, base, ll, l, u, uu);
     const size_t nvalues = size_t(nnzb) * row_block_dim * col_block_dim;
@@ -1783,15 +1743,15 @@ void rocsparse_init_gebsr_pentadiagonal(std::vector<I>&      row_ptr,
     template void rocsparse_init_index<TYPE>( \
         std::vector<TYPE> & x, size_t nnz, size_t start, size_t end);
 
-#define INSTANTIATE(TYPE)                                                                          \
-    template void rocsparse_init<TYPE>(TYPE * A,                                                   \
-                                       size_t M,                                                   \
-                                       size_t N,                                                   \
-                                       size_t lda,                                                 \
-                                       size_t stride,                                              \
-                                       size_t batch_count = 1,                                     \
-                                       TYPE   a           = static_cast<TYPE>(0),                  \
-                                       TYPE   b           = static_cast<TYPE>(1));                             \
+#define INSTANTIATE_COMPLEX(TYPE)                                                                  \
+    template void rocsparse_init_inexact<TYPE>(TYPE * A,                                           \
+                                               size_t M,                                           \
+                                               size_t N,                                           \
+                                               size_t lda,                                         \
+                                               size_t stride,                                      \
+                                               size_t batch_count = 1,                             \
+                                               TYPE   a           = static_cast<TYPE>(0),          \
+                                               TYPE   b           = static_cast<TYPE>(1));                     \
     template void rocsparse_init_exact<TYPE>(TYPE * A,                                             \
                                              size_t M,                                             \
                                              size_t N,                                             \
@@ -1800,14 +1760,28 @@ void rocsparse_init_gebsr_pentadiagonal(std::vector<I>&      row_ptr,
                                              size_t batch_count,                                   \
                                              int    a = 1,                                         \
                                              int    b = 10);                                          \
+    template void rocsparse_init_1d_array<TYPE>(std::vector<TYPE> & A,                             \
+                                                size_t size,                                       \
+                                                bool   use_exact,                                  \
+                                                TYPE   a = static_cast<TYPE>(0),                   \
+                                                TYPE   b = static_cast<TYPE>(1));                    \
     template void rocsparse_init<TYPE>(std::vector<TYPE> & A,                                      \
                                        size_t M,                                                   \
                                        size_t N,                                                   \
                                        size_t lda,                                                 \
+                                       bool   use_exact,                                           \
                                        size_t stride,                                              \
                                        size_t batch_count = 1,                                     \
                                        TYPE   a           = static_cast<TYPE>(0),                  \
                                        TYPE   b           = static_cast<TYPE>(1));                             \
+    template void rocsparse_init_inexact<TYPE>(std::vector<TYPE> & A,                              \
+                                               size_t M,                                           \
+                                               size_t N,                                           \
+                                               size_t lda,                                         \
+                                               size_t stride,                                      \
+                                               size_t batch_count,                                 \
+                                               TYPE   a = static_cast<TYPE>(0),                    \
+                                               TYPE   b = static_cast<TYPE>(1));                     \
     template void rocsparse_init_exact<TYPE>(std::vector<TYPE> & A,                                \
                                              size_t M,                                             \
                                              size_t N,                                             \
@@ -1826,23 +1800,22 @@ void rocsparse_init_gebsr_pentadiagonal(std::vector<I>&      row_ptr,
                                            size_t stride = 0,                                      \
                                            size_t batch_count);
 
-#define INSTANTIATE1(ITYPE, JTYPE)                                                         \
-    template void host_csr_to_coo<ITYPE, JTYPE>(JTYPE                     M,               \
-                                                ITYPE                     nnz,             \
-                                                const std::vector<ITYPE>& csr_row_ptr,     \
-                                                std::vector<JTYPE>&       coo_row_ind,     \
-                                                rocsparse_index_base      base);                \
-    template void host_coo_to_csr<ITYPE, JTYPE>(JTYPE                M,                    \
-                                                ITYPE                NNZ,                  \
-                                                const JTYPE*         coo_row_ind,          \
-                                                ITYPE*               csr_row_ptr,          \
-                                                rocsparse_index_base base);                \
-    template void host_csr_to_coo_aos<ITYPE, JTYPE>(JTYPE                     M,           \
-                                                    ITYPE                     nnz,         \
-                                                    const std::vector<ITYPE>& csr_row_ptr, \
-                                                    const std::vector<JTYPE>& csr_col_ind, \
-                                                    std::vector<ITYPE>&       coo_ind,     \
-                                                    rocsparse_index_base      base);
+#define INSTANTIATE(TYPE)                                                         \
+    template void rocsparse_init_1d_array<TYPE>(TYPE * A,                         \
+                                                size_t size,                      \
+                                                bool   use_exact,                 \
+                                                TYPE   a = static_cast<TYPE>(0),  \
+                                                TYPE   b = static_cast<TYPE>(1));   \
+    template void rocsparse_init<TYPE>(TYPE * A,                                  \
+                                       size_t M,                                  \
+                                       size_t N,                                  \
+                                       size_t lda,                                \
+                                       bool   use_exact,                          \
+                                       size_t stride,                             \
+                                       size_t batch_count = 1,                    \
+                                       TYPE   a           = static_cast<TYPE>(0), \
+                                       TYPE   b           = static_cast<TYPE>(1));            \
+    INSTANTIATE_COMPLEX(TYPE);
 
 #define INSTANTIATE2(ITYPE, TTYPE)                                                              \
     template void rocsparse_init_coo_tridiagonal<ITYPE, TTYPE>(std::vector<ITYPE> & row_ind,    \
@@ -2161,16 +2134,7 @@ void rocsparse_init_gebsr_pentadiagonal(std::vector<I>&      row_ptr,
         rocsparse_index_base       base,                                                             \
         rocsparse_matrix_init_kind init_kind,                                                        \
         bool                       full_rank,                                                        \
-        bool                       to_int);                                                                                \
-    template void host_csr_to_ell<ITYPE, JTYPE, TTYPE>(JTYPE                     M,                  \
-                                                       const std::vector<ITYPE>& csr_row_ptr,        \
-                                                       const std::vector<JTYPE>& csr_col_ind,        \
-                                                       const std::vector<TTYPE>& csr_val,            \
-                                                       std::vector<JTYPE>&       ell_col_ind,        \
-                                                       std::vector<TTYPE>&       ell_val,            \
-                                                       JTYPE&                    ell_width,          \
-                                                       rocsparse_index_base      csr_base,           \
-                                                       rocsparse_index_base      ell_base);
+        bool                       to_int);
 
 INSTANTIATEI(int32_t);
 INSTANTIATEI(int64_t);
@@ -2183,17 +2147,15 @@ INSTANTIATE(_Float16);
 INSTANTIATE(rocsparse_bfloat16);
 INSTANTIATE(float);
 INSTANTIATE(double);
-INSTANTIATE(rocsparse_float_complex);
-INSTANTIATE(rocsparse_double_complex);
-
-INSTANTIATE1(int32_t, int32_t);
-INSTANTIATE1(int64_t, int32_t);
-INSTANTIATE1(int64_t, int64_t);
+INSTANTIATE_COMPLEX(rocsparse_float_complex);
+INSTANTIATE_COMPLEX(rocsparse_double_complex);
 
 INSTANTIATE2(int32_t, int8_t);
 INSTANTIATE2(int64_t, int8_t);
 INSTANTIATE2(int32_t, _Float16);
 INSTANTIATE2(int64_t, _Float16);
+INSTANTIATE2(int32_t, rocsparse_bfloat16);
+INSTANTIATE2(int64_t, rocsparse_bfloat16);
 INSTANTIATE2(int32_t, float);
 INSTANTIATE2(int64_t, float);
 INSTANTIATE2(int32_t, double);
@@ -2209,6 +2171,9 @@ INSTANTIATE3(int64_t, int64_t, int8_t);
 INSTANTIATE3(int32_t, int32_t, _Float16);
 INSTANTIATE3(int64_t, int32_t, _Float16);
 INSTANTIATE3(int64_t, int64_t, _Float16);
+INSTANTIATE3(int32_t, int32_t, rocsparse_bfloat16);
+INSTANTIATE3(int64_t, int32_t, rocsparse_bfloat16);
+INSTANTIATE3(int64_t, int64_t, rocsparse_bfloat16);
 INSTANTIATE3(int32_t, int32_t, float);
 INSTANTIATE3(int64_t, int32_t, float);
 INSTANTIATE3(int64_t, int64_t, float);

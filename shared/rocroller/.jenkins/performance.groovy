@@ -85,7 +85,10 @@ def rocRollerGetBaseParameters() {
 ci: {
     String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
 
-    def propertyList = ["enterprise":[pipelineTriggers([cron('0 H(0-5) * * *')])]]
+    def propertyList = [
+        "enterprise":[pipelineTriggers([cron('0 H(0-5) * * *')])],
+        "rocm-libraries":[pipelineTriggers([cron('0 H(0-5) * * *')])]
+    ]
     def additionalParameters = [
         string(
             name: "ROCROLLER_AMDGPU_URL",
@@ -109,27 +112,36 @@ ci: {
             name: "Unique Docker image tag",
             defaultValue: false,
             description: "Whether to tag the built docker image with a unique tag. WARNING: Use sparingly, each unique tag costs significant storage space."
+        ),
+        booleanParam(
+            name: "Build target branch for comparison",
+            defaultValue: true,
+            description: "Clone and build the target branch for performance " +
+                         "comparison (if unchecked, will compare to latest results " +
+                         "from target branch)"
         )
     ]
 
     if(env.CHANGE_ID){
-        propertyList = ["enterprise":[pipelineTriggers([cron('0 1 * * 0')])]]
-        additionalParameters += [
-            booleanParam(
-                name: "Build target branch for comparison",
-                defaultValue: true,
-                description: "Clone and build the target branch for performance " +
-                    "comparison (if unchecked, will compare to latest results " +
-                    "from target branch)"
-            )
+        propertyList = [
+            "enterprise":[pipelineTriggers([cron('0 1 * * 0')])],
+            "rocm-libraries":[pipelineTriggers([cron('0 1 * * 0')])]
         ]
     }
 
     auxiliary.registerAdditionalParameters(additionalParameters)
     propertyList = auxiliary.appendPropertyList(propertyList)
 
-    def jobNameList = ["enterprise":(["rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
-                                  "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']])]
+    def jobNameList = [
+        "enterprise":([
+            "rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
+            "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']
+        ]),
+        "rocm-libraries":([
+            "rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
+            "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']
+        ])
+    ]
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
     propertyList.each
@@ -149,8 +161,6 @@ ci: {
     if(!jobNameList.keySet().contains(urlJobName))
     {
         properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 1 * * 6')])]))
-        stage(urlJobName) {
-            runCI(["rocroller-ubuntu20-clang":['rocroller-compile']], urlJobName)
-        }
+        runCI(["rocroller-ubuntu20-clang":['rocroller-compile']], urlJobName)
     }
 }

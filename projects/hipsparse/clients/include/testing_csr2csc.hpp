@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csr2csc_bad_arg(void)
+void testing_csr2csc_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int m         = 100;
@@ -165,7 +165,7 @@ void testing_csr2csc_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csr2csc(Arguments argus)
+void testing_csr2csc(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  m        = argus.M;
@@ -186,11 +186,8 @@ hipsparseStatus_t testing_csr2csc(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     // Allocate memory on the device
     auto dcsr_row_ptr_managed
@@ -250,43 +247,19 @@ hipsparseStatus_t testing_csr2csc(Arguments argus)
 
         // Host csr2csc conversion
         std::vector<int> hcsc_row_ind_gold(nnz);
-        std::vector<int> hcsc_col_ptr_gold(n + 1, 0);
+        std::vector<int> hcsc_col_ptr_gold(n + 1);
         std::vector<T>   hcsc_val_gold(nnz);
 
-        // Determine nnz per column
-        for(int i = 0; i < nnz; ++i)
-        {
-            ++hcsc_col_ptr_gold[hcsr_col_ind[i] + 1 - idx_base];
-        }
-
-        // Scan
-        for(int i = 0; i < n; ++i)
-        {
-            hcsc_col_ptr_gold[i + 1] += hcsc_col_ptr_gold[i];
-        }
-
-        // Fill row indices and values
-        for(int i = 0; i < m; ++i)
-        {
-            for(int j = hcsr_row_ptr[i]; j < hcsr_row_ptr[i + 1]; ++j)
-            {
-                int col = hcsr_col_ind[j - idx_base] - idx_base;
-                int idx = hcsc_col_ptr_gold[col];
-
-                hcsc_row_ind_gold[idx] = i + idx_base;
-                hcsc_val_gold[idx]     = hcsr_val[j - idx_base];
-
-                ++hcsc_col_ptr_gold[col];
-            }
-        }
-
-        // Shift column pointer array
-        for(int i = n; i > 0; --i)
-        {
-            hcsc_col_ptr_gold[i] = hcsc_col_ptr_gold[i - 1] + idx_base;
-        }
-
-        hcsc_col_ptr_gold[0] = idx_base;
+        host_csr2csc(m,
+                     n,
+                     nnz,
+                     hcsr_row_ptr.data(),
+                     hcsr_col_ind.data(),
+                     hcsr_val.data(),
+                     hcsc_col_ptr_gold.data(),
+                     hcsc_row_ind_gold.data(),
+                     hcsc_val_gold.data(),
+                     idx_base);
 
         // Unit check
         unit_check_general(1, nnz, 1, hcsc_row_ind_gold.data(), hcsc_row_ind.data());
@@ -359,8 +332,6 @@ hipsparseStatus_t testing_csr2csc(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSR2CSC_HPP

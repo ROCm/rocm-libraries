@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, bool SYTRF, typename T, typename U>
 void sytf2_sytrf_checkBadArgs(const rocblas_handle handle,
@@ -348,7 +349,7 @@ void sytf2_sytrf_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -365,12 +366,12 @@ void sytf2_sytrf_getPerfData(const rocblas_handle handle,
         sytf2_sytrf_initData<false, true, T>(handle, uplo, n, dA, lda, stA, dIpiv, stP, dInfo, bc,
                                              hA, hIpiv, hInfo, singular);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_sytf2_sytrf(STRIDED, SYTRF, handle, uplo, n, dA.data(), lda, stA, dIpiv.data(),
                               stP, dInfo.data(), bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, bool SYTRF, typename T>
@@ -497,7 +498,7 @@ void testing_sytf2_sytrf(Arguments& argus)
                                                     hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sytf2_sytrf_getPerfData<STRIDED, SYTRF, T>(
                 handle, uplo, n, dA, lda, stA, dIpiv, stP, dInfo, bc, hA, hIpiv, hInfo,
                 &gpu_time_used, &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,
@@ -541,7 +542,7 @@ void testing_sytf2_sytrf(Arguments& argus)
                                                     hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sytf2_sytrf_getPerfData<STRIDED, SYTRF, T>(
                 handle, uplo, n, dA, lda, stA, dIpiv, stP, dInfo, bc, hA, hIpiv, hInfo,
                 &gpu_time_used, &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,

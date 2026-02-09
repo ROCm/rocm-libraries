@@ -71,7 +71,7 @@ if __name__ == '__main__':
     }
 
     output_lib_path = os.path.join(output, f'hipblasltExtOpLibrary.{lib_format}')
-    
+
     if os.path.exists(output_lib_path):
         update_open_foramt = 'rb' if lib_format == 'dat' else 'r'
         with open(output_lib_path, update_open_foramt) as f:

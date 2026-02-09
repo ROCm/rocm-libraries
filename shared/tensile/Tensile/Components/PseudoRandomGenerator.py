@@ -45,7 +45,7 @@ class CustomRandomGenerator(PseudoRandomGenerator):
         #kStr += inst("v_xor_b32", "v[\\vRand]", "v[\\vRand]", "v[\\vTemp0]", "VRand = vRand ^ vTemp0")
         #kStr += inst("v_xor_b32", "v[\\vRand]", "v[\\vRand]", "v[\\vTemp1]", "VRand = vRand ^ vTemp0")
         #kStr += inst("v_xor_b32", "v[\\vRand]", "v[\\vRand]", sgpr("RNDSeed"), "VRand = vRand ^ sSeed")
-        
+
         ## New implementation (instruction scheduling to minimize the dependencies?)
         kStr += inst("v_and_b32", "v[\\vTemp0]", "0xFFFF", "\\vAcc" ,"vTemp0 = vAcc & 0xFFFF")
         kStr += inst("v_lshrrev_b32", "v[\\vTemp1]",  hex(16), "\\vAcc", "vTemp1 = vAcc >> 16")
@@ -54,7 +54,7 @@ class CustomRandomGenerator(PseudoRandomGenerator):
         kStr += inst("v_lshlrev_b32", "v[\\vTemp1]",  hex(11), "v[\\vTemp1]", "vTemp1 = vTemp1 << 11")
         kStr += inst("v_lshl_or_b32", "v[\\vTemp0]", "v[\\vTemp0]", hex(5), "v[\\vTemp1]", "vTemp0 = vTemp0 << 5 | vTemp1")
         kStr += inst("v_mul_u32_u24", "v[\\vTemp0]","0x700149" , "v[\\vTemp0]", "VTemp0 = vTemp0 * 0x700149")   # mult lower 24 bits should be enough??
-        kStr += inst("v_mul_u32_u24", "v[\\vTemp1]", 229791 , vgpr("Serial"), "VTemp1 = vTid * 229791")  # TODO: use index of C/D instead of local Tid 
+        kStr += inst("v_mul_u32_u24", "v[\\vTemp1]", 229791 , vgpr("Serial"), "VTemp1 = vTid * 229791")  # TODO: use index of C/D instead of local Tid
         kStr += inst("v_xor_b32", "v[\\vRand]", "0x1337137", "v[\\vTemp0]" , "VRand = vTemp0 ^ 0x1337137")
         kStr += inst("v_xor_b32", "v[\\vRand]", "v[\\vRand]", "v[\\vTemp1]", "VRand = vRand ^ vTemp1")
         kStr += inst("v_xor_b32", "v[\\vRand]", "v[\\vRand]", sgpr("RNDSeed"), "VRand = vRand ^ sSeed")

@@ -195,12 +195,12 @@ rocblas_status miopen_rocblas_gemm_ex3(const miopen::Handle& handle,
     return rb_status;
 #pragma clang diagnostic pop
 #else
-    std::ignore      = A;
-    std::ignore      = a_offset;
-    std::ignore      = B;
-    std::ignore      = b_offset;
-    std::ignore      = C;
-    std::ignore      = c_offset;
+    std::ignore = A;
+    std::ignore = a_offset;
+    std::ignore = B;
+    std::ignore = b_offset;
+    std::ignore = C;
+    std::ignore = c_offset;
 #endif
     MIOPEN_THROW(miopenStatusInternalError,
                  "An appropriate version of rocBLAS is required for this op");
@@ -273,6 +273,7 @@ bool IsFP8Supported(const std::string& device_name)
 #if defined(USE_ROCBLAS_GEMM_EX3) && USE_ROCBLAS_GEMM_EX3
     return device_name == "gfx942" || miopen::StartsWith(device_name, "gfx95");
 #else
+    std::ignore = device_name;
     return false;
 #endif
 }

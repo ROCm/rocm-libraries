@@ -93,7 +93,8 @@ void Arguments::init()
 
     batch_count = 1;
 
-    scan = c_scan_value; // default value disables scanning
+    scan   = c_scan_value; // member used to set multiple args set with scan_value
+    scan_2 = c_scan_value_2; // 2d scanning support
 
     // 32bit
 
@@ -160,9 +161,11 @@ void Arguments::init()
 bool Arguments::validate()
 {
 // c_scan_value must matching value in rocblas_common.yaml definition
-#define SCAN_VALUE_CHECK(arg_) \
-    if(arg_ == c_scan_value)   \
-    arg_ = scan
+#define SCAN_VALUE_CHECK(arg_)      \
+    if(arg_ == c_scan_value)        \
+        arg_ = scan;                \
+    else if(arg_ == c_scan_value_2) \
+    arg_ = scan_2
 
     if(scan != c_scan_value)
     {
@@ -207,6 +210,15 @@ static Arguments& getDefaultArgs()
 }
 static Arguments& gDefArgs = getDefaultArgs();
 
+template <typename T>
+bool member_different(const T& a, T& b)
+{
+    if constexpr(std::is_same_v<T, char[4]> || std::is_same_v<T, char[64]>)
+        return true;
+    else
+        return a != b;
+}
+
 // Function to print Arguments out to stream in YAML format
 rocblas_internal_ostream& operator<<(rocblas_internal_ostream& os, const Arguments& arg)
 {
@@ -217,8 +229,8 @@ rocblas_internal_ostream& operator<<(rocblas_internal_ostream& os, const Argumen
     };
 
     // Print each (name, value) tuple pair if not default value
-#define NAME_VALUE_PAIR(NAME)     \
-    if(arg.NAME != gDefArgs.NAME) \
+#define NAME_VALUE_PAIR(NAME)                     \
+    if(member_different(arg.NAME, gDefArgs.NAME)) \
     print_pair(#NAME, arg.NAME)
 
     // cppcheck-suppress unknownMacro

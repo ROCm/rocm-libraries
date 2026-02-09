@@ -24,6 +24,10 @@
 #  include <unittest/unittest.h>
 #  include <unittest/util_async.h>
 
+// note: there is no matching THRUST_SUPPRESS_DEPRECATED_POP, so the warning suppression leaks into more content of the
+// generated cudafe1.stub.c file.
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 ///////////////////////////////////////////////////////////////////////////////
 
 THRUST_HOST void test_event_default_constructed()
@@ -150,7 +154,7 @@ THRUST_HOST void test_event_when_all()
 
   ASSERT_EQUAL(e0_stream, e8.stream().native_handle());
 
-  e8.wait();
+  TEST_EVENT_WAIT(e8);
 
   ASSERT_EQUAL(false, e0.ready());
   ASSERT_EQUAL(false, e1.ready());

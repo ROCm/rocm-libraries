@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <set>
+
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 
 namespace rocRoller

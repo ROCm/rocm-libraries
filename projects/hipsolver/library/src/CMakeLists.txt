@@ -75,6 +75,7 @@ set(hipsolver_f90_source
 if(BUILD_FORTRAN_BINDINGS)
   # Create hipSOLVER Fortran module
   add_library(hipsolver_fortran ${hipsolver_f90_source})
+  rocm_set_soversion(hipsolver_fortran ${hipsolver_SOVERSION})
   rocm_install(TARGETS hipsolver_fortran)
 endif()
 
@@ -87,6 +88,11 @@ add_library(roc::hipsolver ALIAS hipsolver)
 target_link_libraries(hipsolver PRIVATE
   $<BUILD_INTERFACE:hipsolver-common> # https://gitlab.kitware.com/cmake/cmake/-/issues/15415
 )
+
+if(BUILD_CODE_COVERAGE)
+  target_compile_options(hipsolver PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(hipsolver PUBLIC -fprofile-instr-generate)
+endif()
 
 add_armor_flags(hipsolver "${ARMOR_LEVEL}")
 

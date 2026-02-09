@@ -20,9 +20,12 @@
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(AsyncScanTests, NumericalTestsParams)
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 enum wait_policy
 {

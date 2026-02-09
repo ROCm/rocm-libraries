@@ -159,7 +159,7 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             const size_t keys_size
-                = std::sqrt(test_utils::get_random_value<size_t>(0, size, seed_value));
+                = std::sqrt(test_utils::get_random_value<size_t>(common::use_hmm() ? 1 : 0, size, seed_value));
 
             // Starting point is an appoximate position of the first match we want to test for
             for(double starting_point : {0.0, 0.234, 0.876, 1.0, 100.0})
@@ -295,6 +295,12 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
 
 TEST(RocprimDeviceFindFirstOfTests, LargeIndices)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
+
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));

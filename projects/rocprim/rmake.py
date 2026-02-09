@@ -21,7 +21,7 @@ def parse_args():
     Checks build arguments
     """)
 
-    default_gpus = 'gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201'
+    default_gpus = 'gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1150,gfx1151,gfx1200,gfx1201'
 
     parser.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
                         help='Generate Debug build (default: False)')
@@ -41,9 +41,10 @@ def parse_args():
     parser.add_argument(      '--cmake-darg', required=False, dest='cmake_dargs', action='append', default=[],
                         help='List of additional cmake defines for builds (e.g. CMAKE_CXX_COMPILER_LAUNCHER=ccache)')
     parser.add_argument('-a', '--architecture', dest='gpu_architecture', required=False, default=default_gpus, #:sramecc+:xnack-" ) #gfx1030" ) #gfx906" ) # gfx1030" )
-                        help='Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030;gfx1100 (optional, default: all)')
+                        help='Set GPU architectures, e.g. all, gfx000, gfx906:xnack-;gfx1030;gfx1100 (optional, default: all)')
     parser.add_argument('-v', '--verbose', required=False, default=False, action='store_true',
                         help='Verbose build (default: False)')
+    parser.add_argument('--no-offload-compress', required=False, default=False, action='store_true', help='Do not apply offload compression (deafult: False)')
     return parser.parse_args()
 
 def os_detect():
@@ -176,6 +177,9 @@ def config_cmd():
 
     if args.build_clients:
         cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_BENCHMARK=ON -DBUILD_EXAMPLE=ON -DBUILD_DIR={build_dir}" )
+
+    if args.no_offload_compress:
+        cmake_options.append( f"-DBUILD_OFFLOAD_COMPRESS=OFF" )
 
     cmake_options.append( f"-DAMDGPU_TARGETS={args.gpu_architecture}" )
 

@@ -280,17 +280,17 @@ void testing_csx2dense(const Arguments& arg, FUNC1& csx2dense, FUNC2& dense2csx)
 
     if(arg.timing)
     {
-        const double gpu_time_used = rocsparse_clients::run_benchmark(arg, [&] {
-            return csx2dense(handle,
-                             M,
-                             N,
-                             descr,
-                             d_csx_val,
-                             d_csx_row_col_ptr,
-                             d_csx_col_row_ind,
-                             (T*)d_dense_val,
-                             LD);
-        });
+        const double gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                      csx2dense,
+                                                                      handle,
+                                                                      M,
+                                                                      N,
+                                                                      descr,
+                                                                      d_csx_val,
+                                                                      d_csx_row_col_ptr,
+                                                                      d_csx_col_row_ind,
+                                                                      (T*)d_dense_val,
+                                                                      LD);
 
         double gbyte_count = csx2dense_gbyte_count<DIRA, T>(M, N, nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2025 AMD ROCm(TM) Software
+ * Copyright 2019-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -58,9 +58,6 @@ namespace rocRoller
     {
         return stream << toString(dir);
     }
-
-    std::map<VariableType, DataTypeInfo> DataTypeInfo::data;
-    std::map<std::string, VariableType>  DataTypeInfo::typeNames;
 
     std::string toString(DataType d)
     {
@@ -243,6 +240,10 @@ namespace rocRoller
             return "WAVE_Direct2LDS";
         case MemoryType::WAVE_SWIZZLE:
             return "WAVE_SWIZZLE";
+        case MemoryType::WAVE_FROM_GLOBAL:
+            return "WAVE_FROM_GLOBAL";
+        case MemoryType::WAVE_LDS_FROM_GLOBAL:
+            return "WAVE_LDS_FROM_GLOBAL";
         case MemoryType::Literal:
             return "Literal";
         case MemoryType::None:
@@ -276,6 +277,27 @@ namespace rocRoller
         case LayoutType::Count:;
         }
         return "INVALID";
+    }
+
+    std::string abbrev(LayoutType t)
+    {
+        switch(t)
+        {
+        case LayoutType::SCRATCH:
+            return "SCR";
+        case LayoutType::MATRIX_A:
+            return "A";
+        case LayoutType::MATRIX_B:
+            return "B";
+        case LayoutType::MATRIX_ACCUMULATOR:
+            return "ACC";
+        case LayoutType::None:
+            return "N/A";
+        case LayoutType::Count:
+            return "MAX";
+        }
+
+        return "";
     }
 
     std::ostream& operator<<(std::ostream& stream, LayoutType l)
@@ -488,8 +510,22 @@ namespace rocRoller
         return lhs;
     }
 
+    DataTypeInfo::Data::Data()
+    {
+        registerAllTypeInfo();
+    }
+    std::map<VariableType, DataTypeInfo, CompareVariableTypesPointersEqual> const&
+        DataTypeInfo::Data::data() const
+    {
+        return m_data;
+    }
+    std::map<std::string, VariableType> const& DataTypeInfo::Data::typeNames() const
+    {
+        return m_typeNames;
+    }
+
     template <typename T>
-    void DataTypeInfo::registerTypeInfo()
+    void DataTypeInfo::Data::registerTypeInfo()
     {
         using T_Info = TypeInfo<T>;
 
@@ -513,7 +549,7 @@ namespace rocRoller
         addInfoObject(info);
     }
 
-    void DataTypeInfo::registerAllTypeInfo()
+    void DataTypeInfo::Data::registerAllTypeInfo()
     {
         registerTypeInfo<FP8>();
         registerTypeInfo<BF8>();
@@ -561,19 +597,10 @@ namespace rocRoller
         registerTypeInfo<E8M0x4>();
     }
 
-    void DataTypeInfo::registerAllTypeInfoOnce()
+    void DataTypeInfo::Data::addInfoObject(DataTypeInfo const& info)
     {
-        static int call_once = (registerAllTypeInfo(), 0);
-
-        // Use the variable to quiet the compiler.
-        if(call_once)
-            return;
-    }
-
-    void DataTypeInfo::addInfoObject(DataTypeInfo const& info)
-    {
-        data[info.variableType] = info;
-        typeNames[info.name]    = info.variableType;
+        m_data[info.variableType] = info;
+        m_typeNames[info.name]    = info.variableType;
     }
 
     DataTypeInfo const& DataTypeInfo::Get(int index)
@@ -583,10 +610,10 @@ namespace rocRoller
 
     DataTypeInfo const& DataTypeInfo::Get(DataType t)
     {
-        registerAllTypeInfoOnce();
+        auto data = Data::getInstance();
 
-        auto iter = data.find(t);
-        if(iter == data.end())
+        auto iter = data->data().find(t);
+        if(iter == data->data().end())
             throw std::runtime_error(concatenate("Invalid data type: ", static_cast<int>(t)));
 
         return iter->second;
@@ -594,8 +621,6 @@ namespace rocRoller
 
     DataTypeInfo const& DataTypeInfo::Get(VariableType const& v)
     {
-        registerAllTypeInfoOnce();
-
         if(v.isPointer())
         {
             VariableType genericPointer(v.pointerType);
@@ -603,22 +628,26 @@ namespace rocRoller
                 return Get(genericPointer);
         }
 
-        auto iter = data.find(v);
-        AssertFatal(iter != data.end(),
+        auto data = Data::getInstance();
+
+        auto iter = data->data().find(v);
+        AssertFatal(iter != data->data().end(),
                     "Invalid variable type: ",
                     static_cast<int>(v.dataType),
+                    v.dataType,
                     " ",
-                    static_cast<int>(v.pointerType));
+                    static_cast<int>(v.pointerType),
+                    v.pointerType);
 
         return iter->second;
     }
 
     DataTypeInfo const& DataTypeInfo::Get(std::string const& str)
     {
-        registerAllTypeInfoOnce();
+        auto data = Data::getInstance();
 
-        auto iter = typeNames.find(str);
-        if(iter == typeNames.end())
+        auto iter = data->typeNames().find(str);
+        if(iter == data->typeNames().end())
             throw std::runtime_error(concatenate("Invalid data type: ", str));
 
         return Get(iter->second);
@@ -626,10 +655,10 @@ namespace rocRoller
 
     std::optional<VariableType> DataTypeInfo::packedVariableType() const
     {
-        registerAllTypeInfoOnce();
+        auto data = Data::getInstance();
 
         // Finds the reverse mapping
-        for(auto const& [key, value] : data)
+        for(auto const& [key, value] : data->data())
         {
             if(variableType == value.segmentVariableType)
             {

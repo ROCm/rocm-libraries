@@ -2,7 +2,20 @@
 # Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
-cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+
+# --------------------------------------
+# Update these variables at release time
+#
+# Set the library version
+set(VERSION_STRING "4.2.0")
+# Set the minimum required rocPRIM version
+set(MIN_ROCPRIM_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
+# Set the minimum required rocRAND version
+set(MIN_ROCRAND_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocRAND to search for when ROCRAND_FETCH_METHOD is set to PACKAGE.")
+# Set download branch for dependencies rocPRIM and rocRAND
+set(ROCM_DEP_RELEASE_BRANCH "release/rocm-rel-7.2" CACHE STRING "Download branch for ROCm dependencies")
+# --------------------------------------
 
 # Install prefix
 if(WIN32)
@@ -43,18 +56,42 @@ option(BUILD_TEST "Build tests" OFF)
 option(CODE_COVERAGE "Enable code coverage" OFF)
 option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
 option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
-option(BUILD_EXAMPLES "Build examples" OFF)
-option(BUILD_BENCHMARKS "Build benchmarks" OFF)
-option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
-cmake_dependent_option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF BUILD_BENCHMARKS OFF)
-option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF)
+option(BUILD_EXAMPLE "Build example" OFF)
+option(BUILD_BENCHMARK "Build benchmark" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
+option(BUILD_OFFLOAD_COMPRESS "Build rocThrust with offload compression" ON)
 cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
-#Set the header wrapper OFF by default.
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
+cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
+option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (eg. Google Test, Google Benchmark)" OFF)
 
-check_language(HIP)
+set(DEVICE_SYSTEM_OPTIONS "HIP" "CUDA" "CPP" "OpenMP" "TBB")
+set(ROCTHRUST_DEVICE_SYSTEM "HIP" CACHE STRING "Set device system for thrust (options are ${DEVICE_SYSTEM_OPTIONS})")
+
+if(NOT ${ROCTHRUST_DEVICE_SYSTEM} IN_LIST DEVICE_SYSTEM_OPTIONS)
+  message(FATAL_ERROR "Unrecognized ROCTHRUST_DEVICE_SYSTEM option \"${ROCTHRUST_DEVICE_SYSTEM}\". Valid options are: ${DEVICE_SYSTEM_OPTIONS}")
+endif()
+
+if((BUILD_TEST OR BUILD_BENCHMARK OR BUILD_EXAMPLE) AND
+    NOT (${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP" OR $ROCTHRUST_DEVICE_SYSTEM STREQUAL "CUDA"))
+    message(FATAL_ERROR "rocThrust tests, benchmarks, and examples must be built with ROCTHRUST_DEVICE_SYSTEM=HIP|CUDA since they require device acceleration.")
+endif()
+
+if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+  check_language(HIP)
+endif()
+
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
+
+include(CheckCXXCompilerFlag)
+
+if(BUILD_OFFLOAD_COMPRESS)
+  check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+  if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
+  else()
+    message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
+  endif()
+endif()
 
 # Allow the user to optionally select offset type dispatch to fixed 32 or 64 bit types
 set(THRUST_DISPATCH_TYPE "Dynamic" CACHE STRING "Select Thrust offset type dispatch." FORCE)
@@ -110,12 +147,39 @@ else()
       )
     else()
       rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
   endif()
 endif()
+
+# Compressed offload binaries are currently not working with the SPIR-V target
+if("amdgcnspirv" IN_LIST GPU_TARGETS)
+  if(BUILD_OFFLOAD_COMPRESS)
+    message(FATAL_ERROR "Cannot combine SPIR-V and BUILD_OFFLOAD_COMPRESS")
+  endif()
+endif()
+
+# Set up options for obtaining dependencies rocPRIM and rocRAND.
+# PACKAGE: Search for an install package that contains the dependency.
+# MONOREPO: Assume this is a monorepo checkout and search for the dependency in the directory at ../../projects/.
+# DOWNLOAD: Download the dependency from the monorepo.
+set(FETCH_METHOD_OPTIONS "PACKAGE" "MONOREPO" "DOWNLOAD")
+
+set(ROCPRIM_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the rocPRIM dependency")
+set(ROCRAND_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the rocRAND dependency")
+
+# This function checks to see if the fetch method variable it's passed is defined, and contains a valid value.
+# If it does not contain a valid value, it issues a fatal failure with an error message.
+function(check_fetch_method method)
+  if (DEFINED ${method} AND NOT ${${method}} IN_LIST FETCH_METHOD_OPTIONS)
+    message(FATAL_ERROR "Unrecognized ${method}: \"${${method}}\". Valid options are: ${FETCH_METHOD_OPTIONS}.")
+  endif()
+endfunction()
+
+check_fetch_method(ROCPRIM_FETCH_METHOD)
+check_fetch_method(ROCRAND_FETCH_METHOD)
 
 # Get dependencies
 include(cmake/Dependencies.cmake)
@@ -141,7 +205,7 @@ if (NOT THRUST_HOST_SYSTEM IN_LIST THRUST_HOST_SYSTEM_OPTIONS)
     "THRUST_HOST_SYSTEM must be one of ${THRUST_HOST_SYSTEM_OPTIONS}"
   )
 endif ()
-  
+
 set(COMPILE_OPTIONS -Wall -Wextra)
 if(NOT DISABLE_WERROR)
   list(APPEND COMPILE_OPTIONS -Werror)
@@ -155,34 +219,48 @@ if (WIN32)
   add_compile_options(-xhip)
   add_compile_definitions(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
 endif()
-  
+
 # Address Sanitizer
 if(BUILD_ADDRESS_SANITIZER)
   list(APPEND COMPILE_OPTIONS -fsanitize=address -shared-libasan)
   add_link_options(-fuse-ld=lld)
 endif()
-  
+
 # Setup VERSION
-rocm_setup_version(VERSION "4.0.0")
+rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocthrust_VERSION_NUMBER "${rocthrust_VERSION_MAJOR} * 100000 + ${rocthrust_VERSION_MINOR} * 100 + ${rocthrust_VERSION_PATCH}")
-  
+
 # Thrust (with HIP backend)
 add_subdirectory(thrust)
-  
-if(BUILD_TEST OR BUILD_BENCHMARKS OR BUILD_HIPSTDPAR_TEST)
+
+if(BUILD_TEST OR BUILD_BENCHMARK OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
 endif()
 
 if(CODE_COVERAGE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -fprofile-instr-generate -fcoverage-mapping")
 endif()
-  
+
 # Tests
+if(BUILD_TEST AND USE_SYSTEM_LIB)
+  find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
+  if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_PACKAGE_VERSION})
+    message(WARNING "The installed rocprim version, ${rocprim_VERSION}, is less than the minimum required version ${MIN_ROCPRIM_PACKAGE_VERSION}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+  endif()
+  find_package(rocthrust REQUIRED CONFIG PATHS "/opt/rocm/rocthrust")
+  if (NOT ${rocthrust_VERSION} VERSION_EQUAL ${VERSION_STRING})
+    message(WARNING "The installed rocthrust version, ${rocthrust_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+  endif()
+endif()
+
 if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_client_component(tests)
   if (ENABLE_UPSTREAM_TESTS)
     enable_testing()
   endif()
+
+  # Used by tests to define their RESOURCE_GROUPS
+  set(DEFAULT_GPU_RESOURCE "gpus")
   
   # We still want the testing to be compiled to catch some errors
   #TODO: Get testing folder working with HIP on Windows
@@ -194,27 +272,15 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 endif()
 
 # Examples
-if(BUILD_EXAMPLES)
+if(BUILD_EXAMPLE)
   add_subdirectory(examples)
 endif()
 
-# Benchmarks
-if(BUILD_BENCHMARKS)
-  add_subdirectory(benchmarks)
+# Benchmark
+if(BUILD_BENCHMARK)
+  add_subdirectory(benchmark)
 endif()
 
-#Create header wrapper for backward compatibility
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_dir(
-    ${CMAKE_SOURCE_DIR}/thrust
-    PATTERNS "*.h" "*.inl" "*.cuh" "*.hpp"
-    HEADER_LOCATION include/thrust
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS rocthrust/${CMAKE_INSTALL_INCLUDEDIR}/thrust
-    OUTPUT_LOCATIONS rocthrust/wrapper/include/thrust
-  )
-endif( )
-  
 set(THRUST_OPTIONS_DEBUG ${THRUST_OPTIONS_WARNINGS})
 set(THRUST_OPTIONS_RELEASE ${THRUST_OPTIONS_WARNINGS})
 
@@ -243,7 +309,7 @@ rocm_create_package(
   MAINTAINER "rocthrust-maintainer@amd.com"
   HEADER_ONLY
 )
-  
+
 # Print configuration summary
 include(cmake/Summary.cmake)
 print_configuration_summary()

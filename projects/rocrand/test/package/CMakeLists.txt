@@ -105,7 +105,11 @@ endfunction()
 foreach(test_src ${rocrand_pkg_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
-    target_link_libraries(${test_name} PRIVATE roc::rocrand)
+    if(USE_SYSTEM_LIB)
+        target_link_libraries(${test_name} PRIVATE roc::rocrand)
+    else()
+        target_link_libraries(${test_name} PRIVATE rocrand)
+    endif()
     if(HIP_COMPILER STREQUAL "nvcc")
         # Get HIP options
         execute_process(

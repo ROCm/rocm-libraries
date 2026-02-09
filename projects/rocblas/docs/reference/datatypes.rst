@@ -49,5 +49,3 @@ rocblas_double_complex
 ----------------------
 
 .. doxygenstruct:: rocblas_double_complex
-
-

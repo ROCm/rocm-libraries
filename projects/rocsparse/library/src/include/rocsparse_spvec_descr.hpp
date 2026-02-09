@@ -43,4 +43,7 @@ struct _rocsparse_spvec_descr
     rocsparse_datatype  data_type{};
 
     rocsparse_index_base idx_base{};
+
+    int64_t batch_count{1};
+    int64_t batch_stride{0};
 };

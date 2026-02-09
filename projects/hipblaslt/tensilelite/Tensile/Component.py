@@ -264,7 +264,7 @@ class SIA(Component):
     """
     @abc.abstractmethod
     def schedIntoIteration(self, writer, kernel, tensorParametersA, tensorParametersB, \
-        localWriteEndIter, firstIter, lastLoop, lastLc, maxVmcnt, globalReadIncACode, \
+        localWriteEndIter, firstIter, lastLoop, lastLc, globalReadIncACode, \
         globalReadIncBCode):
         pass
 

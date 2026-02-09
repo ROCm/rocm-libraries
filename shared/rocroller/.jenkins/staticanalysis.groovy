@@ -47,12 +47,12 @@ def runCI =
     def compileCommand =
     {
         platform, project->
-
-        runCompileCommand(platform, project, jobName, false)
+        commonGroovy = load "${project.paths.project_src_prefix}/.jenkins/common.groovy"
+        commonGroovy.runCompileCommand(platform, project, jobName, false, false, '', true, true)
     }
 
+    // change first null to compileCommand once pytest-cmake is available
     buildProject(prj, formatCheck, nodes.dockerArray, null, null, null, staticAnalysis)
-
 }
 
 def rocRollerGetBaseParameters() {
@@ -97,7 +97,10 @@ ci: {
 
     properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 12 * * 6')])]))
 
-    def jobNameList = ["enterprise":(["ubuntu20":['rocroller-compile']])]
+    def jobNameList = [
+        "enterprise":(["ubuntu20":['rocroller-compile']]),
+        "rocm-libraries":(["ubuntu20":['rocroller-compile']])
+    ]
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
     jobNameList.each

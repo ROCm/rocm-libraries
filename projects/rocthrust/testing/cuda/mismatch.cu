@@ -31,16 +31,8 @@ mismatch_kernel(ExecutionPolicy exec, Iterator1 first1, Iterator1 last1, Iterato
 template <typename ExecutionPolicy>
 void TestMismatchDevice(ExecutionPolicy exec)
 {
-  thrust::device_vector<int> a(4);
-  thrust::device_vector<int> b(4);
-  a[0] = 1;
-  b[0] = 1;
-  a[1] = 2;
-  b[1] = 2;
-  a[2] = 3;
-  b[2] = 4;
-  a[3] = 4;
-  b[3] = 3;
+  thrust::device_vector<int> a = {1, 2, 3, 4};
+  thrust::device_vector<int> b = {1, 2, 4, 3};
 
   using pair_type =
     thrust::pair<typename thrust::device_vector<int>::iterator, typename thrust::device_vector<int>::iterator>;
@@ -96,16 +88,8 @@ void TestMismatchCudaStreams()
 {
   using Vector = thrust::device_vector<int>;
 
-  Vector a(4);
-  Vector b(4);
-  a[0] = 1;
-  b[0] = 1;
-  a[1] = 2;
-  b[1] = 2;
-  a[2] = 3;
-  b[2] = 4;
-  a[3] = 4;
-  b[3] = 3;
+  Vector a = {1, 2, 3, 4};
+  Vector b = {1, 2, 4, 3};
 
   cudaStream_t s;
   cudaStreamCreate(&s);
@@ -126,3 +110,36 @@ void TestMismatchCudaStreams()
   cudaStreamDestroy(s);
 }
 DECLARE_UNITTEST(TestMismatchCudaStreams);
+
+// see https://github.com/NVIDIA/cccl/issues/3591
+template <typename T>
+class Wrapper
+{
+public:
+  Wrapper()
+  {
+    ++my_count;
+  }
+
+  _CCCL_HOST_DEVICE bool operator==(const Wrapper& input) const
+  {
+    return true;
+  }
+
+  ~Wrapper()
+  {
+    --my_count;
+  }
+
+private:
+  static std::atomic<size_t> my_count;
+  T dummy;
+};
+
+void TestMismatchBug3591()
+{
+  using T = Wrapper<int32_t>;
+  T* p    = nullptr;
+  thrust::mismatch(thrust::device, p, p, p, cuda::std::equal_to<T>());
+}
+DECLARE_UNITTEST(TestMismatchBug3591);

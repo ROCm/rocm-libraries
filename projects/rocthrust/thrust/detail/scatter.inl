@@ -160,4 +160,3 @@ template<typename InputIterator1,
 } // end scatter_if()
 
 THRUST_NAMESPACE_END
-

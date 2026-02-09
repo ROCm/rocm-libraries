@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 /**
  * @name Enforce 'toString' naming
  * @description Finds functions named 'ToString' as they should be renamed to 'toString'.

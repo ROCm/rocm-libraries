@@ -15,14 +15,18 @@
  *  limitations under the License.
  */
 
+#include <thrust/device_free.h>
+#include <thrust/device_malloc.h>
 #include <thrust/device_ptr.h>
-#include <thrust/execution_policy.h>
 #include <thrust/for_each.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/retag.h>
-#include <thrust/memory.h>
 
-#include "test_header.hpp"
+#include <algorithm>
+
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(ForEachTests, SignedIntegerTestsParams)
 TESTS_DEFINE(ForEachVectorTests, FullTestsParams)
@@ -144,12 +148,15 @@ TYPED_TEST(ForEachTests, DevicePathSimpleTest)
   thrust::free(tag, ptr);
 }
 
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
+
 template <typename T>
 class mark_present_for_each
 {
 public:
   T* ptr;
-  __host__ __device__ void operator()(T x)
+  THRUST_HOST_DEVICE void operator()(T x)
   {
     ptr[(int) x] = 1;
   }
@@ -158,37 +165,25 @@ public:
 TYPED_TEST(ForEachVectorTests, TestForEachSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector input(5);
+  Vector input{3, 2, 3, 4, 6};
   Vector output(7, (T) 0);
-
-  input[0] = T(3);
-  input[1] = T(2);
-  input[2] = T(3);
-  input[3] = T(4);
-  input[4] = T(6);
 
   mark_present_for_each<T> f;
   f.ptr = thrust::raw_pointer_cast(output.data());
 
-  typename Vector::iterator result = thrust::for_each(Policy{}, input.begin(), input.end(), f);
+  typename Vector::iterator result = thrust::for_each(input.begin(), input.end(), f);
 
-  ASSERT_EQ(output[0], T(0));
-  ASSERT_EQ(output[1], T(0));
-  ASSERT_EQ(output[2], T(1));
-  ASSERT_EQ(output[3], T(1));
-  ASSERT_EQ(output[4], T(1));
-  ASSERT_EQ(output[5], T(0));
-  ASSERT_EQ(output[6], T(1));
+  Vector ref{0, 0, 1, 1, 1, 0, 1};
+  ASSERT_EQ(output, ref);
   ASSERT_EQ_QUIET(result, input.end());
 }
 
 template <typename InputIterator, typename Function>
-__host__ __device__ InputIterator for_each(my_system& system, InputIterator first, InputIterator, Function)
+InputIterator for_each(my_system& system, InputIterator first, InputIterator, Function)
 {
   system.validate_dispatch();
   return first;
@@ -207,7 +202,7 @@ TEST(ForEachVectorTests, TestForEachDispatchExplicit)
 }
 
 template <typename InputIterator, typename Function>
-__host__ __device__ InputIterator for_each(my_tag, InputIterator first, InputIterator, Function)
+InputIterator for_each(my_tag, InputIterator first, InputIterator, Function)
 {
   *first = 13;
   return first;
@@ -227,37 +222,25 @@ TEST(ForEachVectorTests, TestForEachDispatchImplicit)
 TYPED_TEST(ForEachVectorTests, TestForEachNSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector input(5);
+  Vector input{3, 2, 3, 4, 6};
   Vector output(7, (T) 0);
-
-  input[0] = T(3);
-  input[1] = T(2);
-  input[2] = T(3);
-  input[3] = T(4);
-  input[4] = T(6);
 
   mark_present_for_each<T> f;
   f.ptr = thrust::raw_pointer_cast(output.data());
 
-  typename Vector::iterator result = thrust::for_each_n(Policy{}, input.begin(), input.size(), f);
+  typename Vector::iterator result = thrust::for_each_n(input.begin(), input.size(), f);
 
-  ASSERT_EQ(output[0], T(0));
-  ASSERT_EQ(output[1], T(0));
-  ASSERT_EQ(output[2], T(1));
-  ASSERT_EQ(output[3], T(1));
-  ASSERT_EQ(output[4], T(1));
-  ASSERT_EQ(output[5], T(0));
-  ASSERT_EQ(output[6], T(1));
+  Vector ref{0, 0, 1, 1, 1, 0, 1};
+  ASSERT_EQ(output, ref);
   ASSERT_EQ_QUIET(result, input.end());
 }
 
 template <typename InputIterator, typename Size, typename Function>
-__host__ __device__ InputIterator for_each_n(my_system& system, InputIterator first, Size, Function)
+InputIterator for_each_n(my_system& system, InputIterator first, Size, Function)
 {
   system.validate_dispatch();
   return first;
@@ -276,7 +259,7 @@ TEST(ForEachVectorTests, TestForEachNDispatchExplicit)
 }
 
 template <typename InputIterator, typename Size, typename Function>
-__host__ __device__ InputIterator for_each_n(my_tag, InputIterator first, Size, Function)
+InputIterator for_each_n(my_tag, InputIterator first, Size, Function)
 {
   *first = 13;
   return first;
@@ -305,13 +288,8 @@ TEST(ForEachVectorTests, TestForEachSimpleAnySystem)
   thrust::counting_iterator<int> result =
     thrust::for_each(thrust::make_counting_iterator(0), thrust::make_counting_iterator(5), f);
 
-  ASSERT_EQ(output[0], 1);
-  ASSERT_EQ(output[1], 1);
-  ASSERT_EQ(output[2], 1);
-  ASSERT_EQ(output[3], 1);
-  ASSERT_EQ(output[4], 1);
-  ASSERT_EQ(output[5], 0);
-  ASSERT_EQ(output[6], 0);
+  thrust::device_vector<int> ref{1, 1, 1, 1, 1, 0, 0};
+  ASSERT_EQ(output, ref);
   ASSERT_EQ_QUIET(result, thrust::make_counting_iterator(5));
 }
 
@@ -326,13 +304,8 @@ TEST(ForEachVectorTests, TestForEachNSimpleAnySystem)
 
   thrust::counting_iterator<int> result = thrust::for_each_n(thrust::make_counting_iterator(0), 5, f);
 
-  ASSERT_EQ(output[0], 1);
-  ASSERT_EQ(output[1], 1);
-  ASSERT_EQ(output[2], 1);
-  ASSERT_EQ(output[3], 1);
-  ASSERT_EQ(output[4], 1);
-  ASSERT_EQ(output[5], 0);
-  ASSERT_EQ(output[6], 0);
+  thrust::device_vector<int> ref{1, 1, 1, 1, 1, 0, 0};
+  ASSERT_EQ(output, ref);
   ASSERT_EQ_QUIET(result, thrust::make_counting_iterator(5));
 }
 
@@ -353,7 +326,7 @@ TYPED_TEST(ForEachPrimitiveTests, TestForEach)
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
       thrust::host_vector<T> h_input =
-        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+        get_random_data<size_t>(size, get_default_limits<size_t>::min(), get_default_limits<size_t>::max(), seed);
 
       for (size_t i = 0; i < size; i++)
       {
@@ -398,7 +371,7 @@ TYPED_TEST(ForEachPrimitiveTests, TestForEachN)
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
       thrust::host_vector<T> h_input =
-        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+        get_random_data<size_t>(size, get_default_limits<size_t>::min(), get_default_limits<size_t>::max(), seed);
 
       for (size_t i = 0; i < size; i++)
       {
@@ -435,14 +408,14 @@ struct SetFixedVectorToConstant
       : exemplar(scalar)
   {}
 
-  __host__ __device__ void operator()(FixedVector<T, N>& t)
+  THRUST_HOST_DEVICE void operator()(FixedVector<T, N>& t)
   {
     t = exemplar;
   }
 };
 
 template <typename T, unsigned int N>
-void _TestForEachWithLargeTypes(void)
+void _TestForEachWithLargeTypes()
 {
   size_t n = (64 * 1024) / sizeof(FixedVector<T, N>);
 
@@ -478,11 +451,13 @@ TEST(ForEachVectorTests, TestForEachWithLargeTypes)
   _TestForEachWithLargeTypes<int, 128>();
   _TestForEachWithLargeTypes<int, 256>();
   _TestForEachWithLargeTypes<int, 512>();
+
+  // XXX parallel_for doesn't support large types
   _TestForEachWithLargeTypes<int, 1024>(); // fails on Vista 64 w/ VS2008
 }
 
 template <typename T, unsigned int N>
-void _TestForEachNWithLargeTypes(void)
+void _TestForEachNWithLargeTypes()
 {
   size_t n = (64 * 1024) / sizeof(FixedVector<T, N>);
 
@@ -518,5 +493,52 @@ TEST(ForEachVectorTests, TestForEachNWithLargeTypes)
   _TestForEachNWithLargeTypes<int, 128>();
   _TestForEachNWithLargeTypes<int, 256>();
   _TestForEachNWithLargeTypes<int, 512>();
+
+  // XXX parallel_for doesn't support large types
   _TestForEachNWithLargeTypes<int, 1024>(); // fails on Vista 64 w/ VS2008
+}
+
+THRUST_DIAG_POP
+
+struct only_set_when_expected
+{
+  unsigned long long expected;
+  bool* flag;
+
+  THRUST_DEVICE void operator()(unsigned long long x)
+  {
+    if (x == expected)
+    {
+      *flag = true;
+    }
+  }
+};
+
+void TestForEachWithBigIndexesHelper(int magnitude)
+{
+  thrust::counting_iterator<unsigned long long> begin(0);
+  thrust::counting_iterator<unsigned long long> end = begin + (1ull << magnitude);
+  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
+
+  thrust::device_ptr<bool> has_executed = thrust::device_malloc<bool>(1);
+  *has_executed                         = false;
+
+  only_set_when_expected fn = {(1ull << magnitude) - 1, thrust::raw_pointer_cast(has_executed)};
+
+  thrust::for_each(thrust::device, begin, end, fn);
+
+  bool has_executed_h = *has_executed;
+  thrust::device_free(has_executed);
+
+  ASSERT_EQ(has_executed_h, true);
+}
+
+TEST(ForEachVectorTests, TestForEachWithBigIndexes)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestForEachWithBigIndexesHelper(30);
+  TestForEachWithBigIndexesHelper(31);
+  TestForEachWithBigIndexesHelper(32);
+  TestForEachWithBigIndexesHelper(33);
 }

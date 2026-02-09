@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -137,6 +137,9 @@ TEST(EnumToStringTest, ALL)
         {MemoryType::WAVE, "WAVE"},
         {MemoryType::WAVE_LDS, "WAVE_LDS"},
         {MemoryType::WAVE_SPLIT, "WAVE_SPLIT"},
+        {MemoryType::WAVE_Direct2LDS, "WAVE_Direct2LDS"},
+        {MemoryType::WAVE_SWIZZLE, "WAVE_SWIZZLE"},
+        {MemoryType::WAVE_FROM_GLOBAL, "WAVE_FROM_GLOBAL"},
         {MemoryType::Literal, "Literal"},
         {MemoryType::None, "None"},
     });
@@ -240,18 +243,6 @@ TEST(EnumToStringTest, ALL)
         });
     }
 
-    {
-        using namespace KernelGraph::Connections;
-        verify<ComputeIndexArgument>({
-            {ComputeIndexArgument::TARGET, "TARGET"},
-            {ComputeIndexArgument::INCREMENT, "INCREMENT"},
-            {ComputeIndexArgument::BASE, "BASE"},
-            {ComputeIndexArgument::OFFSET, "OFFSET"},
-            {ComputeIndexArgument::STRIDE, "STRIDE"},
-            {ComputeIndexArgument::BUFFER, "BUFFER"},
-        });
-    }
-
     verify<Operations::RandomNumberGenerator::SeedMode>({
         {Operations::RandomNumberGenerator::SeedMode::Default, "Default"},
         {Operations::RandomNumberGenerator::SeedMode::PerThread, "PerThread"},
@@ -303,7 +294,6 @@ TEST(EnumToStringTest, ALL)
             {Dependency::SCC, "SCC"},
             {Dependency::VCC, "VCC"},
             {Dependency::Branch, "Branch"},
-            {Dependency::Unlock, "Unlock"},
             {Dependency::M0, "M0"},
         });
     }

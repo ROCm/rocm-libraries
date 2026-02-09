@@ -1,4 +1,4 @@
-- {MinimumRequiredVersion: 4.33.0}
+- {MinimumRequiredVersion: 5.0.0}
 - gfx950
 - gfx950
 - [Device 0058]
@@ -70,12 +70,12 @@
   UseE: false
   UseInitialStridesAB: false
   UseInitialStridesCD: false
-  UseScaleAB: ""
+  UseScaleAB: ''
   UseScaleAlphaVec: 1
   UseScaleCD: false
 - - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertFree0ElementMultiple: 1
     AssertFree1ElementMultiple: 1
@@ -207,78 +207,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 6
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: []
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 6
-      DataType: 8
-      DataTypeA: 8
-      DataTypeB: 8
-      DataTypeE: 6
-      DestDataType: 6
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 0
-      UseE: false
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -335,7 +263,7 @@
     _staggerStrideShift: 0
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertFree0ElementMultiple: 1
     AssertFree1ElementMultiple: 1
@@ -371,7 +299,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT32x32x64_MI16x16x1_SN_LDSB0_AFC1_GRVWB8_GSU1_LPA16_LPB16_MIWT1_1_PGR1_PLR1_WG32_8_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT32x32x64_MI16x16x1_SN_LDSB0_AFC0_GRVWB8_GSU1_LPA16_LPB16_MIWT1_1_PGR1_PLR1_WG32_8_1
     LSCA: 32
     LSCB: 32
     LSPA: 8
@@ -461,82 +389,11 @@
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 1
     PreloadKernArgs: true
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 6
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: []
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 6
-      DataType: 8
-      DataTypeA: 8
-      DataTypeB: 8
-      DestDataType: 6
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: false
-      TransposeB: true
-      UseBeta: true
-      UseBias: 0
-      UseE: false
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 1
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT32x32x64_MI16x16x1_SN_LDSB0_AFC1_GRVWB8_GSU1_LPA16_LPB16_MIWT1_1_PGR1_PLR1_WG32_8_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT32x32x64_MI16x16x1_SN_LDSB0_AFC0_GRVWB8_GSU1_LPA16_LPB16_MIWT1_1_PGR1_PLR1_WG32_8_1
     SourceSwap: 1
     StaggerU: 32
     StaggerUMapping: 0
@@ -587,7 +444,7 @@
     _staggerStrideShift: 2
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertFree0ElementMultiple: 1
     AssertFree1ElementMultiple: 1
@@ -623,7 +480,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_GRVWB8_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC0_GRVWB8_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG32_2_1
     LSCA: 32
     LSCB: 32
     LSPA: 8
@@ -713,82 +570,11 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 6
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: []
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 6
-      DataType: 8
-      DataTypeA: 8
-      DataTypeB: 8
-      DestDataType: 6
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: false
-      TransposeB: true
-      UseBeta: true
-      UseBias: 0
-      UseE: false
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 2
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_GRVWB8_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC0_GRVWB8_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG32_2_1
     SourceSwap: 1
     StaggerU: 32
     StaggerUMapping: 0
@@ -839,7 +625,7 @@
     _staggerStrideShift: 2
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertFree0ElementMultiple: 1
     AssertFree1ElementMultiple: 1
@@ -875,7 +661,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT64x64x64_MI32x32x1_SN_LDSB0_AFC1_GRVWB8_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG64_4_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT64x64x64_MI32x32x1_SN_LDSB0_AFC0_GRVWB8_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG64_4_1
     LSCA: 64
     LSCB: 64
     LSPA: 4
@@ -965,82 +751,11 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 6
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: []
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 6
-      DataType: 8
-      DataTypeA: 8
-      DataTypeB: 8
-      DestDataType: 6
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: false
-      TransposeB: true
-      UseBeta: true
-      UseBias: 0
-      UseE: false
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 3
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT64x64x64_MI32x32x1_SN_LDSB0_AFC1_GRVWB8_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG64_4_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT64x64x64_MI32x32x1_SN_LDSB0_AFC0_GRVWB8_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG64_4_1
     SourceSwap: 1
     StaggerU: 32
     StaggerUMapping: 0
@@ -1091,7 +806,7 @@
     _staggerStrideShift: 2
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertFree0ElementMultiple: 1
     AssertFree1ElementMultiple: 1
@@ -1127,7 +842,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT128x128x64_MI32x32x1_SN_LDSB0_AFC1_GRVWB8_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT128x128x64_MI32x32x1_SN_LDSB0_AFC0_GRVWB8_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
     LSCA: 128
     LSCB: 128
     LSPA: 2
@@ -1217,82 +932,11 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 6
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: []
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 6
-      DataType: 8
-      DataTypeA: 8
-      DataTypeB: 8
-      DestDataType: 6
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: false
-      TransposeB: true
-      UseBeta: true
-      UseBias: 0
-      UseE: false
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 4
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT128x128x64_MI32x32x1_SN_LDSB0_AFC1_GRVWB8_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT128x128x64_MI32x32x1_SN_LDSB0_AFC0_GRVWB8_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
     SourceSwap: 1
     StaggerU: 32
     StaggerUMapping: 0
@@ -1343,7 +987,7 @@
     _staggerStrideShift: 2
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertFree0ElementMultiple: 1
     AssertFree1ElementMultiple: 1
@@ -1379,7 +1023,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT128x128x64_MI32x32x1_SN_LDSB1_AFC1_GRVWB8_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT128x128x64_MI32x32x1_SN_LDSB1_AFC0_GRVWB8_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
     LSCA: 128
     LSCB: 128
     LSPA: 2
@@ -1469,82 +1113,11 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 6
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: []
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 6
-      DataType: 8
-      DataTypeA: 8
-      DataTypeB: 8
-      DestDataType: 6
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: false
-      TransposeB: true
-      UseBeta: true
-      UseBias: 0
-      UseE: false
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 5
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT128x128x64_MI32x32x1_SN_LDSB1_AFC1_GRVWB8_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_AI_SAV_MT128x128x64_MI32x32x1_SN_LDSB1_AFC0_GRVWB8_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
     SourceSwap: 1
     StaggerU: 32
     StaggerUMapping: 0

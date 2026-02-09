@@ -52,7 +52,7 @@ namespace rocRoller
 
             using Base = Scheduler;
 
-            static const std::string Name;
+            inline static const std::string Name = "RandomScheduler";
 
             /**
              * Returns true if `SchedulerProcedure` is Random

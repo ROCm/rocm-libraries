@@ -41,13 +41,36 @@ rocSOLVER using a package manager. For example, use these commands on Ubuntu:
 Build and install from source
 =====================================
 
-The `rocSOLVER source code <https://github.com/ROCm/rocSOLVER.git>`_ is hosted
-on GitHub. Download the code and checkout the desired branch using these commands:
+The `rocSOLVER source code <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsolver>`_ is hosted
+in the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_.
+To download the rocSOLVER source code, use either a sparse checkout or a full clone of the rocm-libraries repository,
+as follows.
+
+.. note::
+
+   To build rocSOLVER for ROCm 7.0.2 and earlier, use the rocSOLVER repository at `<https://github.com/ROCm/rocSOLVER>`_.
+   For more information, see the documentation associated with the release you want to build.
+
+To limit your local checkout to only the rocSOLVER project, configure ``sparse-checkout`` before cloning.
+This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
+Use the following commands for a sparse checkout:
 
 .. code-block:: bash
 
-    git clone -b <desired_branch_name> https://github.com/ROCm/rocSOLVER.git
-    cd rocSOLVER
+   git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries
+   git sparse-checkout init --cone
+   git sparse-checkout set projects/rocsolver # add projects/rocblas projects/rocsparse to include dependencies
+   git checkout develop # or use the branch you want to work with
+   cd projects/rocsolver
+
+To clone the entire rocm-libraries repository, use the following commands. This process takes more time,
+but is recommended if you want to work with a large number of libraries.
+
+.. code-block:: bash
+
+   git clone https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries/projects/rocsolver
 
 To build from source, external dependencies, such as CMake and Python, are required. Additionally, if 
 you are building the library clients (which are not built by default), LAPACK and GoogleTest are also required.
@@ -62,6 +85,10 @@ Using the install script
 
 The recommended method of building and installing rocSOLVER is the ``install.sh`` script.
 The ``help`` command provides detailed information on how to use the script.
+
+.. note::
+
+   Run these commands from the ``rocm-libraries/projects/rocsolver`` directory.
 
 .. code-block:: bash
 
@@ -205,6 +232,10 @@ This list provides some examples of common use cases. (See the CMake documentati
 information about the options.)
 
 This is equivalent to ``./install.sh``.
+
+.. note::
+
+   Run these commands from the ``rocm-libraries/projects/rocsolver`` directory.
 
 .. code-block:: bash
 

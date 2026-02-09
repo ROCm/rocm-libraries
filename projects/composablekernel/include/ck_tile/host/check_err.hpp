@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -17,6 +17,9 @@
 #include "ck_tile/host/ranges.hpp"
 
 namespace ck_tile {
+
+/** @brief Maximum number of error values to display when checking errors */
+constexpr int ERROR_DETAIL_LIMIT = 16;
 
 /** @brief 8-bit floating point type */
 using F8 = ck_tile::fp8_t;
@@ -49,9 +52,19 @@ template <typename ComputeDataType, typename OutDataType, typename AccDataType =
 CK_TILE_HOST double get_relative_threshold(const int number_of_accumulations = 1)
 {
 
-    static_assert(
-        is_any_of<ComputeDataType, F8, BF8, F16, BF16, F32, pk_int4_t, I8, I32, int>::value,
-        "Warning: Unhandled ComputeDataType for setting up the relative threshold!");
+    static_assert(is_any_of<ComputeDataType,
+                            F8,
+                            BF8,
+                            F16,
+                            BF16,
+                            F32,
+                            pk_fp4_t,
+                            pk_fp4_raw_t,
+                            pk_int4_t,
+                            I8,
+                            I32,
+                            int>::value,
+                  "Warning: Unhandled ComputeDataType for setting up the relative threshold!");
 
     double compute_error = 0;
     if constexpr(is_any_of<ComputeDataType, pk_int4_t, I8, I32, int>::value)
@@ -110,9 +123,19 @@ CK_TILE_HOST double get_absolute_threshold(const double max_possible_num,
                                            const int number_of_accumulations = 1)
 {
 
-    static_assert(
-        is_any_of<ComputeDataType, F8, BF8, F16, BF16, F32, pk_int4_t, I8, I32, int>::value,
-        "Warning: Unhandled ComputeDataType for setting up the absolute threshold!");
+    static_assert(is_any_of<ComputeDataType,
+                            F8,
+                            BF8,
+                            F16,
+                            BF16,
+                            F32,
+                            pk_fp4_t,
+                            pk_fp4_raw_t,
+                            pk_int4_t,
+                            I8,
+                            I32,
+                            int>::value,
+                  "Warning: Unhandled ComputeDataType for setting up the absolute threshold!");
 
     auto expo            = std::log2(std::abs(max_possible_num));
     double compute_error = 0;
@@ -280,7 +303,7 @@ check_err(const Range& out,
         {
             max_err = err > max_err ? err : max_err;
             err_count++;
-            if(err_count < 5)
+            if(err_count < ERROR_DETAIL_LIMIT)
             {
                 std::cerr << msg << std::setw(12) << std::setprecision(7) << " out[" << i
                           << "] != ref[" << i << "]: " << o << " != " << r << std::endl;
@@ -348,7 +371,7 @@ check_err(const Range& out,
         {
             max_err = err > max_err ? err : max_err;
             err_count++;
-            if(err_count < 5)
+            if(err_count < ERROR_DETAIL_LIMIT)
             {
                 std::cerr << msg << std::setw(12) << std::setprecision(7) << " out[" << i
                           << "] != ref[" << i << "]: " << o << " != " << r << std::endl;
@@ -416,7 +439,7 @@ check_err(const Range& out,
         {
             max_err = err > max_err ? err : max_err;
             err_count++;
-            if(err_count < 5)
+            if(err_count < ERROR_DETAIL_LIMIT)
             {
                 std::cerr << msg << std::setw(12) << std::setprecision(7) << " out[" << i
                           << "] != ref[" << i << "]: " << o << " != " << r << std::endl;
@@ -478,7 +501,7 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
         {
             max_err = err > max_err ? err : max_err;
             err_count++;
-            if(err_count < 5)
+            if(err_count < ERROR_DETAIL_LIMIT)
             {
                 std::cerr << msg << " out[" << i << "] != ref[" << i << "]: " << o << " != " << r
                           << std::endl;
@@ -564,7 +587,7 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
         {
             max_err = err > max_err ? err : max_err;
             err_count++;
-            if(err_count < 5)
+            if(err_count < ERROR_DETAIL_LIMIT)
             {
                 std::cerr << msg << std::setw(12) << std::setprecision(7) << " out[" << i
                           << "] != ref[" << i << "]: " << o_fp64 << " != " << r_fp64 << std::endl;
@@ -630,7 +653,7 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
         {
             max_err = err > max_err ? err : max_err;
             err_count++;
-            if(err_count < 5)
+            if(err_count < ERROR_DETAIL_LIMIT)
             {
                 std::cerr << msg << std::setw(12) << std::setprecision(7) << " out[" << i
                           << "] != ref[" << i << "]: " << o << " != " << r << std::endl;
@@ -643,6 +666,111 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
         report_error_stats(err_count, max_err, ref.size());
     }
     return res;
+}
+
+/**
+ * @brief Check errors between pk_fp4_t ranges
+ *
+ * Compares two ranges of pk_fp4_t without tolerance.
+ * This specialization handles ck_tile::pk_fp4_t type.
+ *
+ * @tparam Range Type of output range
+ * @tparam RefRange Type of reference range
+ * @param out Output range to check
+ * @param ref Reference range to check against
+ * @param msg Error message to display if check fails
+ * @return True if check passes, false otherwise
+ */
+template <typename Range, typename RefRange>
+std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_value_t<RefRange>> &&
+                  std::is_same_v<ranges::range_value_t<Range>, pk_fp4_t>),
+                 bool>
+    CK_TILE_HOST check_err(const Range& out,
+                           const RefRange& ref,
+                           const std::string& msg = "Error: Incorrect results!",
+                           double                 = 0,
+                           double                 = 0)
+{
+    if(check_size_mismatch(out, ref, msg))
+        return false;
+
+    int err_count = 0;
+
+    auto update_err = [&](pk_fp4_raw_t o, pk_fp4_raw_t r, std::size_t index) {
+        if(o != r)
+        {
+            std::cerr << msg << " out[" << index << "] != ref[" << index
+                      << "]: " << type_convert<float>(pk_fp4_t{o})
+                      << " != " << type_convert<float>(pk_fp4_t{r}) << std::endl;
+            ++err_count;
+        }
+    };
+
+    for(std::size_t i = 0; i < ref.size(); ++i)
+    {
+        const pk_fp4_t o = *std::next(std::begin(out), i);
+        const pk_fp4_t r = *std::next(std::begin(ref), i);
+        update_err(o._unpack(number<0>{}), r._unpack(number<0>{}), i * 2);
+        update_err(o._unpack(number<1>{}), r._unpack(number<1>{}), i * 2 + 1);
+    }
+    if(err_count > 0)
+    {
+        report_error_stats(err_count, numeric<pk_fp4_t>::max(), ref.size());
+    }
+    return err_count == 0;
+}
+
+/**
+ * @brief Check errors between pk_fp6x16_t ranges
+ *
+ * Compares two ranges of pk_fp6x16_t without tolerance.
+ * This specialization handles ck_tile::pk_fp6x16_t type.
+ *
+ * @tparam Range Type of output range
+ * @tparam RefRange Type of reference range
+ * @param out Output range to check
+ * @param ref Reference range to check against
+ * @param msg Error message to display if check fails
+ * @return True if check passes, false otherwise
+ */
+template <typename Range, typename RefRange>
+std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_value_t<RefRange>> &&
+                  std::is_same_v<ranges::range_value_t<Range>, pk_fp6x16_t>),
+                 bool>
+    CK_TILE_HOST check_err(const Range& out,
+                           const RefRange& ref,
+                           const std::string& msg = "Error: Incorrect results!",
+                           double                 = 0,
+                           double                 = 0)
+{
+    if(check_size_mismatch(out, ref, msg))
+        return false;
+
+    int err_count   = 0;
+    float max_err   = 0.0f;
+    auto update_err = [&](float o, float r, std::size_t index) {
+        if(std::fabs(o - r) > 1e-8)
+        {
+            std::cerr << msg << " out[" << index << "] != ref[" << index << "]: " << o
+                      << " != " << r << std::endl;
+            ++err_count;
+            max_err = max_err < std::fabs(o - r) ? o : max_err;
+        }
+    };
+    for(std::size_t i = 0; i < ref.size(); ++i)
+    {
+        const pk_fp6x16_t o = *std::next(std::begin(out), i);
+        const pk_fp6x16_t r = *std::next(std::begin(ref), i);
+        for(std::size_t j = 0; j < numeric_traits<pk_fp6x16_t>::PackedSize; j++)
+        {
+            update_err(o.unpack(j), r.unpack(j), i * numeric_traits<pk_fp6x16_t>::PackedSize + j);
+        }
+    }
+    if(err_count > 0)
+    {
+        report_error_stats(err_count, max_err, ref.size());
+    }
+    return err_count == 0;
 }
 
 } // namespace ck_tile

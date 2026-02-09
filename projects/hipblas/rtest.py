@@ -222,7 +222,7 @@ def batch(script, xml):
     global OS_info
     global args
     #
-    cwd = pathlib.os.curdir
+    cwd = os.curdir
     rtest_cwd_path = os.path.abspath( os.path.join( cwd, 'rtest.xml') )
     if os.path.isfile(rtest_cwd_path) and os.path.dirname(rtest_cwd_path).endswith( "staging" ):
         # if in a staging directory then test locally

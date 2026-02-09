@@ -35,6 +35,24 @@ hipsparseXdense2csr()
   :outline:
 .. doxygenfunction:: hipsparseZdense2csr
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_dense2csr_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]  
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_dense2csr_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXpruneDense2csr_bufferSize()
 =====================================
 
@@ -62,6 +80,24 @@ hipsparseXpruneDense2csr()
 .. doxygenfunction:: hipsparseSpruneDense2csr
   :outline:
 .. doxygenfunction:: hipsparseDpruneDense2csr
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_prune_dense2csr_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_prune_dense2csr_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXpruneDense2csrByPercentage_bufferSize()
 ===================================================
@@ -91,6 +127,24 @@ hipsparseXpruneDense2csrByPercentage()
   :outline:
 .. doxygenfunction:: hipsparseDpruneDense2csrByPercentage
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_prune_dense2csr_by_percentage_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_prune_dense2csr_by_percentage_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXdense2csc()
 ========================
 
@@ -112,6 +166,24 @@ hipsparseXcsr2dense()
 .. doxygenfunction:: hipsparseCcsr2dense
   :outline:
 .. doxygenfunction:: hipsparseZcsr2dense
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2dense_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2dense_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsc2dense()
 ========================
@@ -140,6 +212,24 @@ hipsparseXcsr2bsr()
   :outline:
 .. doxygenfunction:: hipsparseZcsr2bsr
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2bsr_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2bsr_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXnnz_compress()
 ========================
 
@@ -151,10 +241,47 @@ hipsparseXnnz_compress()
   :outline:
 .. doxygenfunction:: hipsparseZnnz_compress
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_nnz_compress_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_nnz_compress_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXcsr2coo()
 ========================
 
 .. doxygenfunction:: hipsparseXcsr2coo
+
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_coo2csr_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_coo2csr_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsr2csc()
 ========================
@@ -167,6 +294,24 @@ hipsparseXcsr2csc()
   :outline:
 .. doxygenfunction:: hipsparseZcsr2csc
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2csc_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2csc_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXcsr2cscEx2_bufferSize()
 =================================
 
@@ -176,6 +321,24 @@ hipsparseXcsr2cscEx2()
 ======================
 
 .. doxygenfunction:: hipsparseCsr2cscEx2
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2csc_ex2_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2csc_ex2_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsr2hyb()
 ========================
@@ -187,6 +350,24 @@ hipsparseXcsr2hyb()
 .. doxygenfunction:: hipsparseCcsr2hyb
   :outline:
 .. doxygenfunction:: hipsparseZcsr2hyb
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2hyb_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2hyb_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXgebsr2gebsc_bufferSize()
 ==================================
@@ -210,6 +391,24 @@ hipsparseXgebsr2gebsc()
   :outline:
 .. doxygenfunction:: hipsparseZgebsr2gebsc
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_gebsr2gebsc_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_gebsr2gebsc_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXcsr2gebsr_bufferSize()
 =================================
 
@@ -226,6 +425,25 @@ hipsparseXcsr2gebsrNnz()
 
 .. doxygenfunction:: hipsparseXcsr2gebsrNnz
 
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2gebsr_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2gebsr_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXcsr2gebsr()
 ========================
 
@@ -236,6 +454,24 @@ hipsparseXcsr2gebsr()
 .. doxygenfunction:: hipsparseCcsr2gebsr
   :outline:
 .. doxygenfunction:: hipsparseZcsr2gebsr
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2gebsr_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2gebsr_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXbsr2csr()
 ========================
@@ -248,6 +484,24 @@ hipsparseXbsr2csr()
   :outline:
 .. doxygenfunction:: hipsparseZbsr2csr
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_bsr2csr_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_bsr2csr_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXgebsr2csr()
 ========================
 
@@ -259,6 +513,24 @@ hipsparseXgebsr2csr()
   :outline:
 .. doxygenfunction:: hipsparseZgebsr2csr
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_gebsr2csr_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_gebsr2csr_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXcsr2csr_compress()
 =============================
 
@@ -269,6 +541,24 @@ hipsparseXcsr2csr_compress()
 .. doxygenfunction:: hipsparseCcsr2csr_compress
   :outline:
 .. doxygenfunction:: hipsparseZcsr2csr_compress
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2csr_compress_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csr2csr_compress_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXpruneCsr2csr_bufferSize()
 ==========================================
@@ -342,45 +632,212 @@ hipsparseXcoo2csr()
 
 .. doxygenfunction:: hipsparseXcoo2csr
 
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_coo2csr_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_coo2csr_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseCreateIdentityPermutation()
 ==========================================
 
 .. doxygenfunction:: hipsparseCreateIdentityPermutation
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_create_identity_permutation_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_create_identity_permutation_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsrsort_bufferSizeExt()
 =================================
 
 .. doxygenfunction:: hipsparseXcsrsort_bufferSizeExt
 
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csrsort_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csrsort_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXcsrsort()
 ========================
 
 .. doxygenfunction:: hipsparseXcsrsort
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csrsort_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_csrsort_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcscsort_bufferSizeExt()
 =================================
 
 .. doxygenfunction:: hipsparseXcscsort_bufferSizeExt
 
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_cscsort_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_cscsort_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXcscsort()
 ========================
 
 .. doxygenfunction:: hipsparseXcscsort
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_cscsort_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_cscsort_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcoosort_bufferSizeExt()
 =================================
 
 .. doxygenfunction:: hipsparseXcoosort_bufferSizeExt
 
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_coosort_by_row_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_coosort_by_row_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXcoosortByRow()
 ========================
 
 .. doxygenfunction:: hipsparseXcoosortByRow
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_coosort_by_row_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_coosort_by_row_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXcoosortByColumn()
 =================================
 
 .. doxygenfunction:: hipsparseXcoosortByColumn
+
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_coosort_by_column_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_coosort_by_column_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXgebsr2gebsr_bufferSize()
 ==========================================
@@ -398,6 +855,25 @@ hipsparseXgebsr2gebsrNnz()
 
 .. doxygenfunction:: hipsparseXgebsr2gebsrNnz
 
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_gebsr2gebsr_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_gebsr2gebsr_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
+
 hipsparseXgebsr2gebsr()
 ========================
 
@@ -408,6 +884,24 @@ hipsparseXgebsr2gebsr()
 .. doxygenfunction:: hipsparseCgebsr2gebsr
   :outline:
 .. doxygenfunction:: hipsparseZgebsr2gebsr
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_gebsr2gebsr_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_gebsr2gebsr_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsru2csr_bufferSizeExt()
 ==================================

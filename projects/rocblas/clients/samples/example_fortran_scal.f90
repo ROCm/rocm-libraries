@@ -165,7 +165,7 @@ program example_fortran_scal
     call ROCBLAS_CHECK(rocblas_set_pointer_mode(handle, 0))
     call ROCBLAS_CHECK(rocblas_sscal(handle, n, c_loc(alpha), dx, 1))
     call HIP_CHECK(hipDeviceSynchronize())
-    
+
     ! Stop time
     call date_and_time(values = tend)
 

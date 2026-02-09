@@ -91,11 +91,14 @@ TEST_P(MFMAUnitObserverTest, GPU_Direct)
 
 TEST_P(MFMAUnitObserverTest, GPU_InContext)
 {
-    auto agpr
-        = Register::Value::Placeholder(m_context, Register::Type::Accumulator, DataType::Float, 16);
+    auto fullyContiguous = Register::AllocationOptions::FullyContiguous();
 
-    auto v0 = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Half, 4);
-    auto v1 = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Half, 4);
+    auto agpr = Register::Value::Placeholder(
+        m_context, Register::Type::Accumulator, DataType::Float, 16, fullyContiguous);
+    auto v0 = Register::Value::Placeholder(
+        m_context, Register::Type::Vector, DataType::Half, 4, fullyContiguous);
+    auto v1 = Register::Value::Placeholder(
+        m_context, Register::Type::Vector, DataType::Half, 4, fullyContiguous);
 
     agpr->allocateNow();
     v0->allocateNow();
@@ -114,7 +117,9 @@ TEST_P(MFMAUnitObserverTest, GPU_InContext)
 
     m_context->schedule(mfmaInst);
 
-    EXPECT_EQ(latency, m_context->peek(mfmaInst).stallCycles);
+    EXPECT_EQ(Scheduling::MFMAObserver::isTargetedInstruction(mfmaInst), true);
+
+    EXPECT_EQ(latency, m_context->peek(mfmaInst).stallCycles) << mfmaInst.toString(LogLevel::Debug);
     EXPECT_EQ(0, m_context->peek(valuInst).stallCycles);
 
     m_context->schedule(valuInst);

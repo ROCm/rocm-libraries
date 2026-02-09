@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 #include <cmath>
@@ -129,6 +130,37 @@ namespace rocRoller::KernelGraph::ControlGraph
         m_descendentCache.clear();
     }
 
+    bool ControlGraph::isModificationAllowed(int index) const
+    {
+        if(not Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+            return true;
+
+        if(not m_changesRestricted)
+            return true;
+
+        auto const& el = getElement(index);
+
+        if(std::holds_alternative<Operation>(el))
+        {
+            return std::visit(
+                [](auto&& arg) {
+                    using OpType = std::decay_t<decltype(arg)>;
+                    return !(
+                        std::is_same_v<OpType, ForLoopOp> or std::is_same_v<OpType, SetCoordinate>);
+                },
+                std::get<Operation>(el));
+        }
+        else
+        {
+            //
+            // Theoretically, add/delete Body edge should be disallowed. But sometimes
+            // delete Body edges is OK (e.g., Simplify), and currently there is no way
+            // to know if this is called in a valid or invalid use case.
+            //
+            return true;
+        }
+    }
+
     void ControlGraph::populateOrderCache() const
     {
         TIMER(t, "populateOrderCache");
@@ -156,7 +188,7 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         auto it = startingNodes.begin();
         if(it == startingNodes.end())
-            return std::move(rv);
+            return rv;
 
         rv = populateOrderCache(*it);
 
@@ -166,7 +198,7 @@ namespace rocRoller::KernelGraph::ControlGraph
             rv.insert(nodes.begin(), nodes.end());
         }
 
-        return std::move(rv);
+        return rv;
     }
 
     std::set<int> ControlGraph::populateOrderCache(int startingNode) const
@@ -225,7 +257,7 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         m_descendentCache[startingNode] = allNodes;
 
-        return std::move(allNodes);
+        return allNodes;
     }
 
     template <CForwardRangeOf<int> ARange, CForwardRangeOf<int> BRange>

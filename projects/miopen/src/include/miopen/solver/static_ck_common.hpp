@@ -46,9 +46,6 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_STATIC_CK_BLOCK_SYNC_LDS_WITHOUT_SYNC_V
 #define WORKAROUND_MIOPEN_ISSUE_557 1
 #define WORKAROUND_SWDEV_413051 1
 
-// LLVM buffer intrinsics llvm.amdgcn.buffer.* have been removed in HIP 6.4
-#define WORKAROUND_SWDEV_498660 (HIP_PACKAGE_VERSION_FLAT >= 6004000000)
-
 namespace miopen {
 namespace solver {
 namespace static_ck {
@@ -61,7 +58,18 @@ static inline bool IsComposableKernelSupportedHardware(const ExecutionContext& c
            c.GetStream().GetDeviceName() == "gfx900" || c.GetStream().GetDeviceName() == "gfx906" ||
            c.GetStream().GetDeviceName() == "gfx908" || c.GetStream().GetDeviceName() == "gfx90a" ||
            c.GetStream().GetDeviceName() == "gfx942" ||
+           StartsWith(c.GetStream().GetDeviceName(), "gfx95") ||
            StartsWith(c.GetStream().GetDeviceName(), "gfx103");
+}
+
+static inline bool GfxHasMissingBf16Intrinsics(const std::string& device_name)
+{
+    return device_name == "gfx942" || StartsWith(device_name, "gfx95");
+}
+
+static inline bool GfxHasMissingFp32Intrinsics(const std::string& device_name)
+{
+    return device_name == "gfx942" || StartsWith(device_name, "gfx95");
 }
 
 static inline bool support_amd_buffer_atomic_fadd(const std::string& device_name)

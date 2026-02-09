@@ -29,6 +29,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 using namespace rocRoller;
 
@@ -60,6 +61,14 @@ namespace DataTypesTest
             CHECK(DataType::FP8 == fromString<DataType>("FP8"));
             CHECK(DataType::BF8 == fromString<DataType>("BF8"));
             CHECK(DataType::BF8 == fromString<DataType>("bf8"));
+        }
+
+        SECTION("friendlyTypeName")
+        {
+            CHECK(friendlyTypeName<float>() == "Float");
+            CHECK(friendlyTypeName<Half>() == "Half");
+            CHECK_THAT(friendlyTypeName<std::vector<int>>(),
+                       Catch::Matchers::ContainsSubstring("vector"));
         }
     }
 }

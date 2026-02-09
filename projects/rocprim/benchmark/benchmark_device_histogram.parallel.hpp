@@ -107,7 +107,7 @@ public:
     T* get_or_generate(const std::string& main_key, const std::string& additional_key, F gen)
     {
         // Experimentally determined maximum size, before the GPU runs out of memory.
-        static constexpr short max_default_bytes_count = 176;
+        static constexpr short max_default_bytes_count = 88;
         if(this->main_key != main_key)
         {
             // The main key (for example, data type) has been changed, clear the cache
@@ -164,7 +164,10 @@ std::string config_name()
            + ",ipt:" + std::to_string(config.histogram_config.items_per_thread)
            + ",max_grid_size:" + std::to_string(config.max_grid_size)
            + ",shared_impl_max_bins:" + std::to_string(config.shared_impl_max_bins)
-           + ",shared_impl_histograms:" + std::to_string(config.shared_impl_histograms) + "}";
+           + ",shared_impl_histograms:" + std::to_string(config.shared_impl_histograms)
+           + ",global_hist_bs:" + std::to_string(config.histogram_global_config.block_size)
+           + ",global_hist_ipt:" + std::to_string(config.histogram_global_config.items_per_thread)
+           + "}";
 }
 
 template<>
@@ -192,6 +195,21 @@ struct device_histogram_benchmark : public benchmark_utils::autotune_interface
             + ",cfg:" + config_name<Config>() + "}");
     }
 
+    template<class... Args>
+    void clear_other_caches()
+    {
+        (
+            [](auto u)
+            {
+                using U = decltype(u);
+                if(!std::is_same_v<T, U>)
+                {
+                    input_cache<U>::instance().clear();
+                }
+            }(Args{}),
+            ...);
+    }
+
     void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
@@ -199,7 +217,7 @@ struct device_histogram_benchmark : public benchmark_utils::autotune_interface
 
         using counter_type = unsigned int;
         using level_type   = typename std::
-            conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
+            conditional_t<rocprim::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
 
         struct case_data
         {
@@ -216,6 +234,16 @@ struct device_histogram_benchmark : public benchmark_utils::autotune_interface
                     [&]() { return generate<T>(bytes, entropy_reduction, 0, bins); });
             };
         };
+
+        // Clear caches for other types that are either empty or already done.
+        clear_other_caches<rocprim::int128_t,
+                           int64_t,
+                           int,
+                           short,
+                           int8_t,
+                           double,
+                           float,
+                           rocprim::half>();
 
         const std::size_t size = bytes / Channels;
 
@@ -321,7 +349,8 @@ struct device_histogram_benchmark_generator
                 = rocprim::histogram_config<rocprim::kernel_config<BlockSize, ItemsPerThread>,
                                             2048,
                                             2048,
-                                            SharedImplHistograms>;
+                                            SharedImplHistograms,
+                                            rocprim::kernel_config<1024, 4>>;
 
             template<unsigned int Channels,
                      unsigned int ActiveChannels,

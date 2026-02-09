@@ -31,120 +31,16 @@
 #include "handle.h"
 #include "utility.hpp"
 
-inline rocblaslt_status getOriginalSizes(hipblasOperation_t opA,
-                                         hipblasOperation_t opB,
-                                         int64_t            num_rows_a,
-                                         int64_t            num_cols_a,
-                                         int64_t            num_rows_b,
-                                         int64_t            num_cols_b,
-                                         int64_t&           m,
-                                         int64_t&           n,
-                                         int64_t&           k)
-{
-    // values of num_* are values after been transposed, redirect to before which
-    // been transposed. initialized m,n,k by NN.
-    m = num_rows_a, n = num_cols_b, k = num_cols_a;
-    if(opA == HIPBLAS_OP_T || opA == HIPBLAS_OP_C)
-    {
-        m = num_cols_a;
-        k = num_rows_a;
-    }
-    if(opB == HIPBLAS_OP_T || opB == HIPBLAS_OP_C)
-    {
-        n = num_rows_b;
-        if(k != num_cols_b)
-        {
-            std::cerr << "A, B matrix size are not matched" << std::endl;
-            return rocblaslt_status_invalid_size;
-        }
-    }
-    else if(k != num_rows_b)
-    {
-        std::cerr << "A, B matrix size are not matched" << std::endl;
-        return rocblaslt_status_invalid_size;
-    }
-
-    return rocblaslt_status_success;
-}
-
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
+       || (datatype == HIP_R_16BF && order != HIPBLASLT_ORDER_COL16_4R8)
+       || (datatype == HIP_R_8F_E4M3 && order != HIPBLASLT_ORDER_COL16_4R16)
        || (datatype == HIP_R_8F_E4M3_FNUZ && order != HIPBLASLT_ORDER_COL16_4R16))
     {
         return false;
     }
     return true;
-}
-
-/*******************************************************************************
- * Validate Matmul Descr. init Arguments - matrix init.
- ******************************************************************************/
-inline rocblaslt_status validateMatmulDescrArgs(rocblaslt_handle       handle,
-                                                hipblasOperation_t     opA,
-                                                hipblasOperation_t     opB,
-                                                int64_t                num_rows_a,
-                                                int64_t                num_cols_a,
-                                                int64_t                lda,
-                                                int64_t                num_rows_b,
-                                                int64_t                num_cols_b,
-                                                int64_t                ldb,
-                                                int64_t                num_rows_c,
-                                                int64_t                num_cols_c,
-                                                int64_t                ldc,
-                                                int64_t                num_rows_d,
-                                                int64_t                num_cols_d,
-                                                int64_t                ldd,
-                                                hipDataType            type_a,
-                                                hipDataType            type_b,
-                                                hipDataType            type_c,
-                                                hipDataType            type_d,
-                                                rocblaslt_compute_type compute_type)
-{
-    // handle must be valid
-    if(!handle)
-        return rocblaslt_status_invalid_handle;
-
-    // sizes of matrics A,B,C,D must fulfill the matrix multiplication rule.
-    // D = A x B + C
-    // values of num_* are values after been transposed, redirect to before which
-    // been transposed.
-    int64_t m, n, k;
-    auto    status
-        = getOriginalSizes(opA, opB, num_rows_a, num_cols_a, num_rows_b, num_cols_b, m, n, k);
-    if(status != rocblaslt_status_success)
-        return status;
-
-    if(m != num_rows_c || m != num_rows_d || n != num_cols_c || n != num_cols_d)
-    {
-        std::cerr << " matrix size is not valid" << std::endl;
-        return rocblaslt_status_invalid_size;
-    }
-
-    // data type of matrics must be the same
-    if(type_a != type_b || type_a != type_c || type_a != type_c)
-        return rocblaslt_status_invalid_value;
-
-    switch(type_a)
-    {
-    case HIP_R_32F:
-        if(compute_type != rocblaslt_compute_f32)
-            return rocblaslt_status_invalid_value;
-        break;
-    case HIP_R_32I:
-        if(compute_type != rocblaslt_compute_i32)
-            return rocblaslt_status_invalid_value;
-        break;
-    case HIP_R_8I:
-        if(compute_type != rocblaslt_compute_i32)
-            return rocblaslt_status_invalid_value;
-        break;
-    default:
-        return rocblaslt_status_invalid_value;
-        break;
-    }
-
-    return rocblaslt_status_success;
 }
 
 /*******************************************************************************
@@ -276,7 +172,9 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
     // sizes must not be negative
     if(batch_stride_a < 0 || batch_stride_b < 0 || batch_stride_c < 0 || batch_stride_d < 0)
     {
+#ifndef CODE_COVERAGE
         std::cerr << "matrix and stride size must be positive" << std::endl;
+#endif
         return rocblaslt_status_invalid_size;
     }
 
@@ -284,8 +182,10 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
     if(num_batches_a != num_batches_b || num_batches_a != num_batches_c
        || num_batches_a != num_batches_d || num_batches_a < 1)
     {
+#ifndef CODE_COVERAGE
         std::cerr << " number of batches of matrics A,B,C,D must be the same and negative"
                   << std::endl;
+#endif
         return rocblaslt_status_invalid_size;
     }
 
@@ -323,18 +223,14 @@ inline rocblaslt_status
                                   const void*               alpha,
                                   const RocblasltContractionProblem::ScalingFormat scaleAType,
                                   const RocblasltContractionProblem::ScalingFormat scaleBType,
-                                  const uint32_t scaleABlockRowSize,
-                                  const uint32_t scaleABlockColSize,
-                                  const uint32_t scaleBBlockRowSize,
-                                  const uint32_t scaleBBlockColSize,
-                                  void*&         E,
-                                  hipDataType&   aux_type,
-                                  int64_t&       lde,
-                                  int64_t&       batch_stride_e,
-                                  void*&         bias,
-                                  hipDataType&   bias_type,
-                                  void*&         scaleAlphaVec,
-                                  bool&          gradient)
+                                  void*&                                           E,
+                                  hipDataType&                                     aux_type,
+                                  int64_t&                                         lde,
+                                  int64_t&                                         batch_stride_e,
+                                  void*&                                           bias,
+                                  hipDataType&                                     bias_type,
+                                  void*&                                           scaleAlphaVec,
+                                  bool&                                            gradient)
 {
     // Set status
     rocblaslt_status status = rocblaslt_status_continue;
@@ -374,22 +270,6 @@ inline rocblaslt_status
     {
         log_error(__func__, "Scale A and Scale B must be both scalar, vector or block.");
         status = rocblaslt_status_invalid_value;
-    }
-    if(scaleAType == RocblasltContractionProblem::ScalingFormat::Block)
-    {
-        if(scaleABlockRowSize != 32 || scaleABlockColSize != 1)
-        {
-            log_error(__func__, "ScaleA block row and column sizes currently only support 32x1");
-            status = rocblaslt_status_invalid_value;
-        }
-    }
-    if(scaleBType == RocblasltContractionProblem::ScalingFormat::Block)
-    {
-        if(scaleBBlockRowSize != 1 || scaleBBlockColSize != 32)
-        {
-            log_error(__func__, "ScaleB block row and column sizes currently only support 1x32");
-            status = rocblaslt_status_invalid_value;
-        }
     }
     return status;
 }
@@ -517,10 +397,6 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                                          alpha,
                                                          matmul_descr->scaleAType,
                                                          matmul_descr->scaleBType,
-                                                         matmul_descr->scaleABlockRowSize,
-                                                         matmul_descr->scaleABlockColSize,
-                                                         matmul_descr->scaleBBlockRowSize,
-                                                         matmul_descr->scaleBBlockColSize,
                                                          E,
                                                          aux_type,
                                                          lde,

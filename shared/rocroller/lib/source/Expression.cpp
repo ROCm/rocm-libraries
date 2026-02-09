@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,11 +41,6 @@ namespace rocRoller
 {
     namespace Expression
     {
-        ExpressionPtr fromKernelArgument(AssemblyKernelArgument const& arg)
-        {
-            return std::make_shared<Expression>(std::make_shared<AssemblyKernelArgument>(arg));
-        }
-
         /*
          * identical
          */
@@ -54,107 +49,137 @@ namespace rocRoller
         {
             bool operator()(ScaledMatrixMultiply const& a, ScaledMatrixMultiply const& b)
             {
-                bool matA   = false;
-                bool matB   = false;
-                bool matC   = false;
-                bool scaleA = false;
-                bool scaleB = false;
+                if(a.accumulationPrecision != b.accumulationPrecision)
+                    return false;
 
-                matA = call(a.matA, b.matA);
-                if(a.matA == nullptr && b.matA == nullptr)
+                if(not call(a.matA, b.matA))
+                    return false;
+
+                if(not call(a.matB, b.matB))
+                    return false;
+
+                if(not call(a.matC, b.matC))
+                    return false;
+
+                if(not call(a.scaleA, b.scaleA))
+                    return false;
+
+                if(not call(a.scaleB, b.scaleB))
+                    return false;
+
+                return true;
+            }
+
+            bool operator()(MatrixMultiply const& a, MatrixMultiply const& b)
+            {
+                if(a.accumulationPrecision != b.accumulationPrecision)
+                    return false;
+
+                if(not call(a.lhs, b.lhs))
+                    return false;
+
+                if(not call(a.r1hs, b.r1hs))
+                    return false;
+
+                if(not call(a.r2hs, b.r2hs))
+                    return false;
+
+                return true;
+            }
+
+            template <CNary Expr>
+            bool operator()(Expr const& a, Expr const& b)
+            {
+                if(a.operands.size() != b.operands.size())
                 {
-                    matA = true;
+                    return false;
                 }
 
-                matB = call(a.matB, b.matB);
-                if(a.matB == nullptr && b.matB == nullptr)
+                for(size_t i = 0; i < a.operands.size(); ++i)
                 {
-                    matB = true;
+                    auto const& operandA = a.operands.at(i);
+                    auto const& operandB = b.operands.at(i);
+                    if(not call(operandA, operandB))
+                        return false;
                 }
-
-                matC = call(a.matC, b.matC);
-                if(a.matC == nullptr && b.matC == nullptr)
-                {
-                    matC = true;
-                }
-
-                scaleA = call(a.scaleA, b.scaleA);
-                if(a.scaleA == nullptr && b.scaleA == nullptr)
-                {
-                    scaleA = true;
-                }
-
-                scaleB = call(a.scaleB, b.scaleB);
-                if(a.scaleB == nullptr && b.scaleB == nullptr)
-                {
-                    scaleB = true;
-                }
-
-                return matA && matB && matC && scaleA && scaleB;
+                return true;
             }
 
             template <CTernary T>
             bool operator()(T const& a, T const& b)
             {
-                bool lhs  = false;
-                bool r1hs = false;
-                bool r2hs = false;
-
-                lhs = call(a.lhs, b.lhs);
-                if(a.lhs == nullptr && b.lhs == nullptr)
-                {
-                    lhs = true;
-                }
-
-                r1hs = call(a.r1hs, b.r1hs);
-                if(a.r1hs == nullptr && b.r1hs == nullptr)
-                {
-                    r1hs = true;
-                }
-
-                r2hs = call(a.r2hs, b.r2hs);
-
-                if(a.r2hs == nullptr && b.r2hs == nullptr)
-                {
-                    r2hs = true;
-                }
-                return lhs && r1hs && r2hs;
+                return call(a.lhs, b.lhs) && call(a.r1hs, b.r1hs) && call(a.r2hs, b.r2hs);
             }
 
             template <CBinary T>
             bool operator()(T const& a, T const& b)
             {
-                bool lhs = false;
-                bool rhs = false;
-
-                lhs = call(a.lhs, b.lhs);
-                if(a.lhs == nullptr && b.lhs == nullptr)
-                {
-                    lhs = true;
-                }
-
-                rhs = call(a.rhs, b.rhs);
-                if(a.rhs == nullptr && b.rhs == nullptr)
-                {
-                    rhs = true;
-                }
-
-                return lhs && rhs;
+                return call(a.lhs, b.lhs) && call(a.rhs, b.rhs);
             }
 
             template <CUnary T>
             bool operator()(T const& a, T const& b)
             {
-                if(a.arg == nullptr && b.arg == nullptr)
-                {
-                    return true;
-                }
                 return call(a.arg, b.arg);
             }
 
             constexpr bool operator()(CommandArgumentValue const& a, CommandArgumentValue const& b)
             {
                 return a == b;
+            }
+
+            bool operator()(BitfieldCombine const& a, BitfieldCombine const& b)
+            {
+                if(a.srcOffset != b.srcOffset)
+                    return false;
+
+                if(a.dstOffset != b.dstOffset)
+                    return false;
+
+                if(a.width != b.width)
+                    return false;
+
+                if(a.srcIsZero != b.srcIsZero)
+                    return false;
+
+                if(a.dstIsZero != b.dstIsZero)
+                    return false;
+
+                if(not call(a.lhs, b.lhs))
+                    return false;
+
+                if(not call(a.rhs, b.rhs))
+                    return false;
+
+                return true;
+            }
+
+            bool operator()(BitFieldExtract const& a, BitFieldExtract const& b)
+            {
+                if(a.outputDataType != b.outputDataType)
+                    return false;
+
+                if(a.offset != b.offset)
+                    return false;
+
+                if(a.width != b.width)
+                    return false;
+
+                if(not call(a.arg, b.arg))
+                    return false;
+
+                return true;
+            }
+
+            bool operator()(Convert const& a, Convert const& b)
+            {
+                return (a.destinationType == b.destinationType) && call(a.arg, b.arg);
+            }
+
+            bool operator()(Reinterpret const& a, Reinterpret const& b)
+            {
+                bool destinationType = (a.destinationType == b.destinationType);
+                return destinationType && call(a.arg, b.arg);
             }
 
             bool operator()(CommandArgumentPtr const& a, CommandArgumentPtr const& b)
@@ -173,11 +198,11 @@ namespace rocRoller
 
             bool operator()(AssemblyKernelArgumentPtr const& a, AssemblyKernelArgumentPtr const& b)
             {
-                if(a->name == b->name)
+                if(a->getName() == b->getName())
                     return true;
 
-                if((a->expression != nullptr) && (b->expression != nullptr))
-                    return call(a->expression, b->expression);
+                if((a->getExpression() != nullptr) && (b->getExpression() != nullptr))
+                    return call(a->getExpression(), b->getExpression());
 
                 return false;
             }
@@ -249,109 +274,77 @@ namespace rocRoller
 
             bool operator()(ScaledMatrixMultiply const& a, ScaledMatrixMultiply const& b)
             {
-                bool matA   = false;
-                bool matB   = false;
-                bool matC   = false;
-                bool scaleA = false;
-                bool scaleB = false;
+                if(a.accumulationPrecision != b.accumulationPrecision)
+                    return false;
 
-                matA = call(a.matA, b.matA);
-                if(a.matA == nullptr && b.matA == nullptr)
+                if(not call(a.matA, b.matA))
+                    return false;
+
+                if(not call(a.matB, b.matB))
+                    return false;
+
+                if(not call(a.matC, b.matC))
+                    return false;
+
+                if(not call(a.scaleA, b.scaleA))
+                    return false;
+
+                if(not call(a.scaleB, b.scaleB))
+                    return false;
+
+                return true;
+            }
+
+            bool operator()(MatrixMultiply const& a, MatrixMultiply const& b)
+            {
+                if(a.accumulationPrecision != b.accumulationPrecision)
+                    return false;
+
+                if(not call(a.lhs, b.lhs))
+                    return false;
+
+                if(not call(a.r1hs, b.r1hs))
+                    return false;
+
+                if(not call(a.r2hs, b.r2hs))
+                    return false;
+
+                return true;
+            }
+
+            template <CNary Expr>
+            bool operator()(Expr const& a, Expr const& b)
+            {
+                if(a.operands.size() != b.operands.size())
                 {
-                    matA = true;
+                    return false;
                 }
 
-                matB = call(a.matB, b.matB);
-                if(a.matB == nullptr && b.matB == nullptr)
+                for(size_t i = 0; i < a.operands.size(); ++i)
                 {
-                    matB = true;
+                    auto const& operandA = a.operands.at(i);
+                    auto const& operandB = b.operands.at(i);
+                    if(not call(operandA, operandB))
+                        return false;
                 }
-
-                matC = call(a.matC, b.matC);
-                if(a.matC == nullptr && b.matC == nullptr)
-                {
-                    matC = true;
-                }
-
-                scaleA = call(a.scaleA, b.scaleA);
-                if(a.scaleA == nullptr && b.scaleA == nullptr)
-                {
-                    scaleA = true;
-                }
-
-                scaleB = call(a.scaleB, b.scaleB);
-                if(a.scaleB == nullptr && b.scaleB == nullptr)
-                {
-                    scaleB = true;
-                }
-
-                return matA && matB && matC && scaleA && scaleB;
+                return true;
             }
 
             template <CTernary T>
             bool operator()(T const& a, T const& b)
             {
-                bool lhs  = false;
-                bool r1hs = false;
-                bool r2hs = false;
-
-                lhs = call(a.lhs, b.lhs);
-                if(a.lhs == nullptr && b.lhs == nullptr)
-                {
-                    lhs = true;
-                }
-
-                r1hs = call(a.r1hs, b.r1hs);
-                if(a.r1hs == nullptr && b.r1hs == nullptr)
-                {
-                    r1hs = true;
-                }
-
-                r2hs = call(a.r2hs, b.r2hs);
-
-                if(a.r2hs == nullptr && b.r2hs == nullptr)
-                {
-                    r2hs = true;
-                }
-                return lhs && r1hs && r2hs;
+                return call(a.lhs, b.lhs) && call(a.r1hs, b.r1hs) && call(a.r2hs, b.r2hs);
             }
 
             template <CBinary T>
             bool operator()(T const& a, T const& b)
             {
-                bool lhs = false;
-                bool rhs = false;
-
-                lhs = call(a.lhs, b.lhs);
-                if(a.lhs == nullptr && b.lhs == nullptr)
-                {
-                    lhs = true;
-                }
-
-                rhs = call(a.rhs, b.rhs);
-                if(a.rhs == nullptr && b.rhs == nullptr)
-                {
-                    rhs = true;
-                }
-
-                bool result = lhs && rhs;
+                bool result = call(a.lhs, b.lhs) && call(a.rhs, b.rhs);
 
                 // Test if equivalent if expression is commutative
                 if(!result && CCommutativeBinary<T> && m_properties[AlgebraicProperty::Commutative])
                 {
-                    lhs = call(a.lhs, b.rhs);
-                    if(a.lhs == nullptr && b.rhs == nullptr)
-                    {
-                        lhs = true;
-                    }
-
-                    rhs = call(a.rhs, b.lhs);
-                    if(a.rhs == nullptr && b.lhs == nullptr)
-                    {
-                        rhs = true;
-                    }
-
-                    result = lhs && rhs;
+                    result = call(a.lhs, b.rhs) && call(a.rhs, b.lhs);
                 }
 
                 return result;
@@ -360,10 +353,6 @@ namespace rocRoller
             template <CUnary T>
             bool operator()(T const& a, T const& b)
             {
-                if(a.arg == nullptr && b.arg == nullptr)
-                {
-                    return true;
-                }
                 return call(a.arg, b.arg);
             }
 
@@ -377,13 +366,78 @@ namespace rocRoller
                 return (*a) == (*b);
             }
 
+            bool operator()(BitfieldCombine const& a, BitfieldCombine const& b)
+            {
+                if(a.srcOffset != b.srcOffset)
+                    return false;
+
+                if(a.dstOffset != b.dstOffset)
+                    return false;
+
+                if(a.width != b.width)
+                    return false;
+
+                if(a.srcIsZero != b.srcIsZero)
+                    return false;
+
+                if(a.dstIsZero != b.dstIsZero)
+                    return false;
+
+                if(not call(a.lhs, b.lhs))
+                    return false;
+
+                if(not call(a.rhs, b.rhs))
+                    return false;
+
+                return true;
+            }
+
+            bool operator()(BitFieldExtract const& a, BitFieldExtract const& b)
+            {
+                if(a.outputDataType != b.outputDataType)
+                    return false;
+
+                if(a.offset != b.offset)
+                    return false;
+
+                if(a.width != b.width)
+                    return false;
+
+                if(not call(a.arg, b.arg))
+                    return false;
+
+                return true;
+            }
+
+            bool operator()(Convert const& a, Convert const& b)
+            {
+                if(a.destinationType != b.destinationType)
+                    return false;
+
+                if(not call(a.arg, b.arg))
+                    return false;
+
+                return true;
+            }
+
+            bool operator()(Reinterpret const& a, Reinterpret const& b)
+            {
+                if(a.destinationType != b.destinationType)
+                    return false;
+
+                if(not call(a.arg, b.arg))
+                    return false;
+
+                return true;
+            }
+
             bool operator()(AssemblyKernelArgumentPtr const& a, AssemblyKernelArgumentPtr const& b)
             {
-                if(a->name == b->name)
+                if(a->getName() == b->getName())
                     return true;
 
-                if((a->expression != nullptr) && (b->expression != nullptr))
-                    return call(a->expression, b->expression);
+                if((a->getExpression() != nullptr) && (b->getExpression() != nullptr))
+                    return call(a->getExpression(), b->getExpression());
 
                 return false;
             }
@@ -450,7 +504,8 @@ namespace rocRoller
             bool        throwIfNotSupported = true;
 
             template <typename Expr>
-            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr>) void operator()(Expr& expr)
+            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr> || CNary<Expr>) void
+                operator()(Expr& expr)
             {
                 expr.comment = std::move(comment);
             }
@@ -527,7 +582,7 @@ namespace rocRoller
             bool includeRegisterComments = true;
 
             template <typename Expr>
-            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr>) std::string
+            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr> || CNary<Expr>) std::string
                 operator()(Expr const& expr) const
             {
                 return expr.comment;
@@ -648,6 +703,17 @@ namespace rocRoller
                 return Expr::Complexity + call(expr.lhs) + call(expr.r1hs) + call(expr.r2hs);
             }
 
+            template <CNary Expr>
+            int operator()(Expr const& expr) const
+            {
+                auto complexity = Expr::Complexity;
+                for(auto const& operand : expr.operands)
+                {
+                    complexity = complexity + call(operand);
+                }
+                return complexity;
+            }
+
             int operator()(ScaledMatrixMultiply const& expr) const
             {
                 return ScaledMatrixMultiply::Complexity + call(expr.matA) + call(expr.matB)
@@ -684,169 +750,6 @@ namespace rocRoller
         int complexity(Expression const& expr)
         {
             return ExpressionComplexityVisitor().call(expr);
-        }
-
-        template <CExpression T>
-        struct ContainsVisitor
-        {
-            bool operator()(T const& expr)
-            {
-                return true;
-            }
-
-            template <CUnary U>
-            requires(!std::same_as<T, U>) bool operator()(U const& expr)
-            {
-                return call(expr.arg);
-            }
-
-            template <CBinary U>
-            requires(!std::same_as<T, U>) bool operator()(U const& expr)
-            {
-                return call(expr.lhs) || call(expr.rhs);
-            }
-
-            template <CTernary U>
-            requires(!std::same_as<T, U>) bool operator()(U const& expr)
-            {
-                return call(expr.lhs) || call(expr.r1hs) || call(expr.r2hs);
-            }
-
-            template <std::same_as<ScaledMatrixMultiply> U>
-            requires(!std::same_as<T, U>) bool operator()(U const& expr)
-            {
-                return call(expr.matA) || call(expr.matB) || call(expr.matC) || call(expr.scaleA)
-                       || call(expr.scaleB);
-            }
-
-            template <CValue U>
-            requires(!std::same_as<T, U>) bool operator()(U const& expr)
-            {
-                return false;
-            }
-
-            bool call(Expression const& expr)
-            {
-                return std::visit(*this, expr);
-            }
-
-            bool call(ExpressionPtr const& expr)
-            {
-                if(!expr)
-                    return false;
-
-                return call(*expr);
-            }
-        };
-
-        template <CExpression T>
-        __attribute__((noinline)) bool contains(Expression const& expr)
-        {
-            ContainsVisitor<T> v;
-            return v.call(expr);
-        }
-
-        template <CExpression T>
-        __attribute__((noinline)) bool contains(ExpressionPtr expr)
-        {
-            AssertFatal(expr != nullptr);
-
-            return contains<T>(*expr);
-        }
-
-        /**
-         * Force instantiation of contains() for every type of expression, so
-         * that it can be implemented in the .cpp file.
-         */
-        struct ContainsInstantiateVisitor
-        {
-            ExpressionPtr expr;
-
-            template <CExpression T>
-            bool operator()(T const& exprType)
-            {
-                return contains<T>(expr);
-            }
-        };
-
-        bool containsType(ExpressionPtr exprType, ExpressionPtr expr)
-        {
-            AssertFatal(exprType != nullptr);
-
-            ContainsInstantiateVisitor v{expr};
-
-            return std::visit(v, *exprType);
-        }
-
-        struct ContainsSubExpressionVisitor
-        {
-            ContainsSubExpressionVisitor(Expression const& expr)
-                : subExpr(expr)
-            {
-            }
-
-            ContainsSubExpressionVisitor(ExpressionPtr const& exprPtr)
-                : subExpr(*exprPtr)
-            {
-            }
-
-            template <CUnary U>
-            bool operator()(U const& expr) const
-            {
-                return identical(expr, subExpr) || call(expr.arg);
-            }
-
-            template <CBinary U>
-            bool operator()(U const& expr) const
-            {
-                return identical(expr, subExpr) || call(expr.lhs) || call(expr.rhs);
-            }
-
-            template <CTernary U>
-            bool operator()(U const& expr) const
-            {
-                return identical(expr, subExpr) || call(expr.lhs) || call(expr.r1hs)
-                       || call(expr.r2hs);
-            }
-
-            template <CValue U>
-            bool operator()(U const& expr) const
-            {
-                return identical(expr, subExpr);
-            }
-
-            bool operator()(ScaledMatrixMultiply const& expr) const
-            {
-                return identical(expr, subExpr) || call(expr.matA) || call(expr.matB)
-                       || call(expr.matC) || call(expr.scaleA) || call(expr.scaleB);
-            }
-
-            bool call(Expression const& expr) const
-            {
-                return std::visit(*this, expr);
-            }
-
-            bool call(ExpressionPtr const& expr) const
-            {
-                if(!expr)
-                    return false;
-
-                return call(*expr);
-            }
-
-            Expression const& subExpr;
-        };
-
-        bool containsSubExpression(ExpressionPtr const& expr, ExpressionPtr const& subExpr)
-        {
-            auto visitor = ContainsSubExpressionVisitor(subExpr);
-            return visitor.call(expr);
-        }
-
-        bool containsSubExpression(Expression const& expr, Expression const& subExpr)
-        {
-            auto visitor = ContainsSubExpressionVisitor(subExpr);
-            return visitor.call(expr);
         }
     }
 }

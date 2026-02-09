@@ -36,7 +36,7 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
       hipcub
   )
   if((HIP_COMPILER STREQUAL "nvcc"))
-    set_property(TARGET ${BENCHMARK_TARGET} PROPERTY CUDA_STANDARD 14)
+    set_property(TARGET ${BENCHMARK_TARGET} PROPERTY CUDA_STANDARD 17)
     set_source_files_properties(${BENCHMARK_SOURCE} PROPERTIES LANGUAGE CUDA)
     target_compile_options(${BENCHMARK_TARGET}
       PRIVATE

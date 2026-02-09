@@ -402,6 +402,11 @@ void testing_spsm_coo(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(rocsparse_spsm(
         handle, trans_A, trans_B, dalpha, A, B, C2, ttype, alg, preprocess, nullptr, dbuffer));
 
+    //
+    // The buffer must be be non persistent, let's put garbage in it.
+    //
+    CHECK_HIP_ERROR(hipMemset(dbuffer, 255 - 1, buffer_size));
+
     if(arg.unit_check)
     {
         // Solve on host

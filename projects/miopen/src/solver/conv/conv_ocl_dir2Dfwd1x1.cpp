@@ -56,7 +56,8 @@ bool ConvOclDirectFwd1x1::IsApplicable(const ExecutionContext& ctx,
         }
     }
 #endif
-    if(ThisSolverIsDeprecatedStatic::IsDisabled(ctx))
+    const std::string name = ctx.GetStream().GetDeviceName();
+    if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
         return false;
     if(env::disabled(MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD1X1))
         return false;
@@ -155,12 +156,12 @@ ConvSolution ConvOclDirectFwd1x1::GetSolution(const ExecutionContext& ctx,
             #define H_out                      H
             #define W_out					   W
             */
-            //#define  MLO_N_IN_GROUPS             (( MLO_N_INPUTS + MLO_N_LCL_IN_MAPS - 1) /
-            // MLO_N_LCL_IN_MAPS)
-            //#define MLO_CLOOP0                   (MLO_N_LCL_IN_MAPS/MLO_N_LCL_IN_MAPS_ONCE )
-            //#define  MLO_CLOOP2                  ((MLO_N_INPUTS -
-            // MLO_N_LCL_IN_MAPS*(MLO_N_IN_GROUPS-1)) / MLO_N_LCL_IN_MAPS_ONCE )
-            //#define MLO_N_LCL_OUT_MAPS           16
+            // #define  MLO_N_IN_GROUPS             (( MLO_N_INPUTS + MLO_N_LCL_IN_MAPS - 1) /
+            //  MLO_N_LCL_IN_MAPS)
+            // #define MLO_CLOOP0                   (MLO_N_LCL_IN_MAPS/MLO_N_LCL_IN_MAPS_ONCE )
+            // #define  MLO_CLOOP2                  ((MLO_N_INPUTS -
+            //  MLO_N_LCL_IN_MAPS*(MLO_N_IN_GROUPS-1)) / MLO_N_LCL_IN_MAPS_ONCE )
+            // #define MLO_N_LCL_OUT_MAPS           16
 
             int N_IN_GROUPS        = (C + N_LCL_IN_MAPS - 1) / N_LCL_IN_MAPS;
             int N_LCL_IN_MAPS_ONCE = 8;

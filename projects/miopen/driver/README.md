@@ -1,6 +1,6 @@
 # MIOpenDriver
 
-The `MIOpenDriver` enables the user to test the functionality of any particular 
+The `MIOpenDriver` enables the user to test the functionality of any particular
 layer in MIOpen in both the forward and backward direction. MIOpen is shipped with `MIOpenDriver` and its install directory is `miopen/bin` located in the install directory path.
 
 
@@ -20,6 +20,7 @@ The supported base arguments:
 
  * `conv` - Convolutions
  * `CBAInfer` - Convolution+Bias+Activation fusions for inference
+ * `CAInfer` - Convolution+Activation fusions for inference
  * `pool` - Pooling
  * `lrn` - Local Response Normalization
  * `activ` - Activations
@@ -28,28 +29,85 @@ The supported base arguments:
  * `rnn` - Recurrent Neural Networks (including LSTM and GRU)
  * `gemm` - General Matrix Multiplication
  * `ctc` - CTC Loss Function
+ * `dropout` - Dropout
+ * `tensorop` - Ternary Tensor Operation
+ * `reduce` - Reduce
+ * `layernorm` - Layer Normalization
+ * `groupnorm` - Group Normalization
+ * `cat` - Cat Forward Operation
+ * `addlayernorm` - Add and Layer Normalization
+ * `t5layernorm` - T5 Layer Normalization
+ * `adam` - Adam Optimizer
+ * `ampadam` - AMP Adam Optimizer
+ * `adamw` - AdamW Optimizer
+ * `ampadamw` - AMP AdamW Optimizer
+ * `transformersadamw` - Hugging Face Transformer AdamW Optimizer
+ * `transformersampaadamw` - Hugging Face Transformer AMP AdamW Optimizer
+ * `getitem` - Getitem Operation
+ * `reducecalculation` - Reduce Calculation
+ * `rope` - Rotary Position Embedding
+ * `prelu` - Parametric ReLU
+ * `kthvalue` - Kthvalue Operation
+ * `glu` - Gated Linear Unit
+ * `softmarginloss` - Softmarginloss
+ * `multimarginloss` - Multimarginloss
 
  These base arguments support fp32 float type, but some of the drivers suport further datatypes -- specifically, half precision (fp16), brain float16 (bfp16), and 8-bit integers (int8).
  To toggle half precision simpily add the suffix `fp16` to end of the base argument; e.g., `convfp16`.
  Likewise, to toggle brain float16 just add the suffix `bfp16`, and to use 8-bit integers add `int8`.
 
  Notes for this release:
-  * Only convolutions support bfp16 and int8
+  * Only convolutions support int8
+  * Only reduce supports double-precision fp64
   * RNN's support fp16 but only on the HIP backend
   * CTC loss function only supports fp32
 
 Summary of base_args meant for different datatypes and different operations:
 
-![DatatypeSupport](../docs/data/how-to/driverTableCrop.png)
-
+| base_args            | Single-Precision (fp32) | Half-Precision (fp16) | Bfloat16 (bfp16)   |
+| :------------------- | :---------------------: | :-------------------: | :----------------: |
+| conv                 | ✓ | ✓ | ✓ |
+| CBAInfer             | x | x | ✓ |
+| CAInfer              | x | x | ✓ |
+| pool                 | ✓ | ✓ | x |
+| lrn                  | ✓ | ✓ | x |
+| activ                | ✓ | ✓ | x |
+| softmax              | ✓ | ✓ | x |
+| bnorm                | ✓ | ✓ | ✓ |
+| rnn                  | ✓ | ✓ | x |
+| gemm                 | ✓ | ✓ | x |
+| ctc                  | ✓ | x | x |
+| dropout              | ✓ | ✓ | x |
+| tensorop             | ✓ | x | x |
+| reduce               | ✓ | ✓ | x |
+| layernorm            | ✓ | ✓ | ✓ |
+| groupnorm            | ✓ | ✓ | ✓ |
+| cat                  | ✓ | ✓ | ✓ |
+| addlayernorm         | ✓ | ✓ | ✓ |
+| t5layernorm          | ✓ | ✓ | ✓ |
+| adam                 | ✓ | ✓ | x |
+| ampadam              | ✓ | x | x |
+| reduceextreme        | ✓ | ✓ | ✓ |
+| adamw                | ✓ | ✓ | x |
+| ampadamw             | ✓ | x | x |
+| transformersadamw    | ✓ | ✓ | x |
+| transformersampadamw | ✓ | x | x  |
+| getitem              | ✓ | ✓ | ✓ |
+| reducecalculation    | ✓ | ✓ | ✓ |
+| rope                 | ✓ | ✓ | ✓ |
+| prelu                | ✓ | ✓ | ✓ |
+| kthvalue             | ✓ | ✓ | ✓ |
+| glu                  | ✓ | ✓ | ✓ |
+| softmarginloss       | ✓ | ✓ | ✓ |
+| multimarginloss      | ✓ | ✓ | ✓ |
 
 ## Executing MIOpenDriver
 
-To execute from the build directory: 
+To execute from the build directory:
 
 ```./bin/MIOpenDriver *base_arg* *layer_specific_args*```
 
-Or to execute the default configuration simpily run: 
+Or to execute the default configuration simpily run:
 
 ```./bin/MIOpenDriver *base_arg*```
 
@@ -57,11 +115,11 @@ MIOpenDriver example usages:
 
 - Convolution with search on:
 
-```./bin/MIOpenDriver conv -W 32 -H 32 -c 3 -k 32 -x 5 -y 5 -p 2 -q 2```   
+```./bin/MIOpenDriver conv -W 32 -H 32 -c 3 -k 32 -x 5 -y 5 -p 2 -q 2```
 
 - Forward convolution with search off:
 
-```./bin/MIOpenDriver conv -W 32 -H 32 -c 3 -k 32 -x 5 -y 5 -p 2 -q 2 -s 0 -F 1```  
+```./bin/MIOpenDriver conv -W 32 -H 32 -c 3 -k 32 -x 5 -y 5 -p 2 -q 2 -s 0 -F 1```
 
 - Convolution with half or bfloat16 input type
 
@@ -70,7 +128,7 @@ MIOpenDriver example usages:
 
 - Pooling with default parameters:
 
-```./bin/MIOpenDriver pool```  
+```./bin/MIOpenDriver pool```
 
 - LRN with default parameters and timing on:
 
@@ -78,7 +136,7 @@ MIOpenDriver example usages:
 
 - Batch normalization with spatial fwd train, saving mean and variance tensors:
 
-```./bin/MIOpenDriver bnorm -F 1 -n 32 -c 512 -H 16 -W 16 -m 1 -s 1```  
+```./bin/MIOpenDriver bnorm -F 1 -n 32 -c 512 -H 16 -W 16 -m 1 -s 1```
 
 - RNN with forward and backwards pass, no bias, bi-directional and LSTM mode
 

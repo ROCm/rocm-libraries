@@ -7,7 +7,7 @@
 Using hipRAND interfaces
 *******************************************************************
 
-The hipRAND interface is compatible with the rocRAND and the NVIDIA CUDA cuRAND-v2 APIs.
+The hipRAND interface is compatible with the rocRAND API.
 Porting a CUDA application that calls the cuRAND API to an application that calls the hipRAND API is relatively straightforward.
 
 Host API

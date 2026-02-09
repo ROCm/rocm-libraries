@@ -1,5 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+
 #pragma once
 #include "ck/utility/data_type.hpp"
 
@@ -522,8 +523,6 @@ struct NumericLimits<bf6_t>
     }
 };
 
-#endif
-
 template <>
 struct NumericLimits<e8m0_bexp_t>
 {
@@ -551,5 +550,6 @@ struct NumericLimits<e8m0_bexp_t>
         return e8m0_bexp_t(binary_142);
     }
 };
+#endif
 
 } // namespace ck

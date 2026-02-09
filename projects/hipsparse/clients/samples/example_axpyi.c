@@ -26,22 +26,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
-            fprintf(stderr, "Error: hip error in line %d", __LINE__); \
-            return -1;                                                \
-        }                                                             \
+#define HIP_CHECK(stat)                                                 \
+    {                                                                   \
+        if(stat != hipSuccess)                                          \
+        {                                                               \
+            fprintf(stderr, "Error: hip error in line %d\n", __LINE__); \
+            return -1;                                                  \
+        }                                                               \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
-            fprintf(stderr, "Error: hipsparse error in line %d", __LINE__); \
-            return -1;                                                      \
-        }                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                 \
+    {                                                                         \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                  \
+        {                                                                     \
+            fprintf(stderr, "Error: hipsparse error in line %d\n", __LINE__); \
+            return -1;                                                        \
+        }                                                                     \
     }
 
 int main()
@@ -65,9 +65,9 @@ int main()
     hipsparseIndexBase_t idxBase = HIPSPARSE_INDEX_BASE_ZERO;
 
     // Offload data to device
-    int* dxInd;
-    double*        dxVal;
-    double*        dy;
+    int*    dxInd;
+    double* dxVal;
+    double* dy;
 
     HIP_CHECK(hipMalloc((void**)&dxInd, sizeof(int) * nnz));
     HIP_CHECK(hipMalloc((void**)&dxVal, sizeof(double) * nnz));
@@ -87,7 +87,7 @@ int main()
     // Copy result back to host
     HIP_CHECK(hipMemcpy(hy, dy, sizeof(double) * 9, hipMemcpyDeviceToHost));
 
-    // Clear hipSPARSE 
+    // Clear hipSPARSE
     HIPSPARSE_CHECK(hipsparseDestroy(handle));
 
     // Clear device memory

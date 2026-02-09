@@ -29,22 +29,21 @@ Sorts a list of paths by directory and then by filename. Useful for sorting the
 file paths in CMake files.
 """
 
-import os.path
-import sys
 # import pathlib
 import collections
-
+import os.path
+import sys
 
 if __name__ == "__main__":
     for arg in sys.argv[1:]:
-        if 'help' in arg or '-h in arg':
+        if "help" in arg or "-h in arg":
             print(__doc__)
             exit()
 
     dirs = collections.defaultdict(list)
 
     for line in sorted(sys.stdin):
-        if line.strip() != '':
+        if line.strip() != "":
             path, name = os.path.split(line)
             dirs[path].append(name)
 
@@ -54,6 +53,6 @@ if __name__ == "__main__":
             print()
 
         for name in sorted(set(dirs[path])):
-            print(os.path.join(path, name), end='')
+            print(os.path.join(path, name), end="")
 
         first = False

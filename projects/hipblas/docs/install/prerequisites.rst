@@ -19,7 +19,7 @@ The hipBLAS prerequisites are different than the :doc:`rocBLAS <rocblas:index>` 
 *  The prerequisites required to use the rocBLAS backend with AMD components are as follows:
 
    * A ROCm-enabled platform. For more information, see the :doc:`Linux system requirements <rocm-install-on-linux:reference/system-requirements>`.
-   * A compatible version of `hipblas-common <https://github.com/ROCm/hipBLAS-common>`_.
+   * A compatible version of `hipblas-common <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas-common>`_.
    * A compatible version of rocBLAS.
    * For full functionality, optionally install a compatible version of :doc:`rocSOLVER <rocsolver:index>` and its :doc:`rocSPARSE <rocsparse:index>`
      and :doc:`rocPRIM <rocprim:index>` dependencies.
@@ -35,7 +35,7 @@ Prerequisites for Microsoft Windows
 *  Here are the prerequisites required to use the rocBLAS backend with AMD components:
 
    * An AMD HIP SDK-enabled platform. For more information, see :doc:`Windows system requirements <rocm-install-on-windows:reference/system-requirements>`.
-   * A compatible version of hipblas-common.
+   * A compatible version of `hipblas-common <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas-common>`_.
    * A compatible version of rocBLAS.
    * For full functionality, a compatible version of :doc:`rocSOLVER <rocsolver:index>` and its :doc:`rocSPARSE <rocsparse:index>`
      and :doc:`rocPRIM <rocprim:index>` dependencies.

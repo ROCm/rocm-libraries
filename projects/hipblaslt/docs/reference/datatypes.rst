@@ -48,6 +48,10 @@ hipblasLtMatmulPreferenceAttributes_t
 -------------------------------------
 .. doxygenenum:: hipblasLtMatmulPreferenceAttributes_t
 
+hipblasLtMatmulMatrixScale_t
+--------------------------------
+.. doxygenenum:: hipblasLtMatmulMatrixScale_t
+
 hipblasLtMatrixLayout_t
 -----------------------
 .. doxygentypedef:: hipblasLtMatrixLayout_t

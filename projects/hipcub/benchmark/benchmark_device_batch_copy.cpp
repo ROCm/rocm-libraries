@@ -24,10 +24,10 @@
 #include "cmdparser.hpp"
 #include "common_benchmark_header.hpp"
 
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_store.hpp"
-#include "hipcub/device/device_copy.hpp"
-#include "hipcub/hipcub.hpp"
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_store.hpp>
+#include <hipcub/device/device_copy.hpp>
+#include <hipcub/hipcub.hpp>
 
 #include <hip/hip_runtime.h>
 

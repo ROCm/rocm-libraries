@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 #ifdef WIN32
 #include <intrin.h>
 #endif
+#include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 
 #include "rocsparse_assert.hpp"
@@ -59,6 +60,30 @@
 namespace rocsparse
 {
 
+    template <typename T>
+    __device__ inline T* batched_pointer(uint32_t index, T* p, int64_t dist)
+    {
+        return p + dist * index;
+    }
+
+    template <typename T>
+    __device__ inline const T* batched_pointer(uint32_t index, const T* p, int64_t dist)
+    {
+        return p + dist * index;
+    }
+
+    template <typename T>
+    __device__ inline T* batched_pointer(uint32_t index, T** p, int64_t dist)
+    {
+        return *(p + dist * index);
+    }
+
+    template <typename T>
+    __device__ inline const T* batched_pointer(uint32_t index, const T** p, int64_t dist)
+    {
+        return *(p + dist * index);
+    }
+
     // find next power of 2
     __device__ __host__ __forceinline__ uint32_t fnp2(uint32_t x)
     {
@@ -74,6 +99,10 @@ namespace rocsparse
     }
 
     __device__ __forceinline__ _Float16 ldg(const _Float16* ptr)
+    {
+        return *ptr;
+    }
+    __device__ __forceinline__ rocsparse_bfloat16 ldg(const rocsparse_bfloat16* ptr)
     {
         return *ptr;
     }
@@ -109,8 +138,124 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ T fma(T p, T q, T r);
 
+    __device__ __forceinline__ int32_t shfl_up(int32_t var, int src_lane, int width = warpSize)
+    {
+        return __shfl_up(var, src_lane, width);
+    }
+    __device__ __forceinline__ int64_t shfl_up(int64_t var, int src_lane, int width = warpSize)
+    {
+        return __shfl_up(var, src_lane, width);
+    }
+    __device__ __forceinline__ float shfl_up(float var, int src_lane, int width = warpSize)
+    {
+        return __shfl_up(var, src_lane, width);
+    }
+    __device__ __forceinline__ double shfl_up(double var, int src_lane, int width = warpSize)
+    {
+        return __shfl_up(var, src_lane, width);
+    }
+    __device__ __forceinline__ rocsparse_float_complex shfl_up(rocsparse_float_complex var,
+                                                               int                     src_lane,
+                                                               int width = warpSize)
+    {
+        return rocsparse_float_complex(__shfl_up(std::real(var), src_lane, width),
+                                       __shfl_up(std::imag(var), src_lane, width));
+    }
+    __device__ __forceinline__ rocsparse_double_complex shfl_up(rocsparse_double_complex var,
+                                                                int                      src_lane,
+                                                                int width = warpSize)
+    {
+        return rocsparse_double_complex(__shfl_up(std::real(var), src_lane, width),
+                                        __shfl_up(std::imag(var), src_lane, width));
+    }
+
+    __device__ __forceinline__ int32_t shfl_down(int32_t var, int src_lane, int width = warpSize)
+    {
+        return __shfl_down(var, src_lane, width);
+    }
+    __device__ __forceinline__ int64_t shfl_down(int64_t var, int src_lane, int width = warpSize)
+    {
+        return __shfl_down(var, src_lane, width);
+    }
+    __device__ __forceinline__ float shfl_down(float var, int src_lane, int width = warpSize)
+    {
+        return __shfl_down(var, src_lane, width);
+    }
+    __device__ __forceinline__ double shfl_down(double var, int src_lane, int width = warpSize)
+    {
+        return __shfl_down(var, src_lane, width);
+    }
+    __device__ __forceinline__ rocsparse_float_complex shfl_down(rocsparse_float_complex var,
+                                                                 int                     src_lane,
+                                                                 int width = warpSize)
+    {
+        return rocsparse_float_complex(__shfl_down(std::real(var), src_lane, width),
+                                       __shfl_down(std::imag(var), src_lane, width));
+    }
+    __device__ __forceinline__ rocsparse_double_complex shfl_down(rocsparse_double_complex var,
+                                                                  int                      src_lane,
+                                                                  int width = warpSize)
+    {
+        return rocsparse_double_complex(__shfl_down(std::real(var), src_lane, width),
+                                        __shfl_down(std::imag(var), src_lane, width));
+    }
+
+    __device__ __forceinline__ _Float16 read_first_lane(_Float16 var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ float read_first_lane(float var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ double read_first_lane(double var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ int8_t read_first_lane(int8_t var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ int32_t read_first_lane(int32_t var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ int64_t read_first_lane(int64_t var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ uint8_t read_first_lane(uint8_t var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ uint32_t read_first_lane(uint32_t var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ uint64_t read_first_lane(uint64_t var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+
+    __device__ __forceinline__ int any(int predicate)
+    {
+        return __any(predicate);
+    }
+    __device__ __forceinline__ int all(int predicate)
+    {
+        return __all(predicate);
+    }
+
     template <>
     __device__ __forceinline__ _Float16 fma(_Float16 p, _Float16 q, _Float16 r)
+    {
+        return std::fma(p, q, r);
+    }
+
+    template <>
+    __device__ __forceinline__ rocsparse_bfloat16 fma(rocsparse_bfloat16 p,
+                                                      rocsparse_bfloat16 q,
+                                                      rocsparse_bfloat16 r)
     {
         return std::fma(p, q, r);
     }
@@ -137,6 +282,14 @@ namespace rocsparse
     __device__ __forceinline__ double fma(double p, double q, double r)
     {
         return std::fma(p, q, r);
+    }
+
+    template <typename T>
+    __device__ __forceinline__ T atomic_add_check(T* ptr, T val)
+    {
+        if(val != static_cast<T>(0))
+            return atomicAdd(ptr, val);
+        return *ptr;
     }
 
     template <>
@@ -265,6 +418,34 @@ namespace rocsparse
         return std::log2(val);
     }
 
+    template <>
+    __device__ __forceinline__ int64_t atomic_add_check<int64_t>(int64_t* ptr, int64_t val)
+    {
+        if(val != static_cast<int64_t>(0))
+            return atomicAdd((uint64_t*)ptr, val);
+        return *ptr;
+    }
+
+    template <>
+    __device__ __forceinline__ rocsparse_float_complex
+        atomic_add_check(rocsparse_float_complex* ptr, rocsparse_float_complex val)
+    {
+        if(std::real(val) != static_cast<float>(0) || std::imag(val) != static_cast<float>(0))
+            return rocsparse_float_complex(atomicAdd((float*)ptr, std::real(val)),
+                                           atomicAdd((float*)ptr + 1, std::imag(val)));
+        return *ptr;
+    }
+
+    template <>
+    __device__ __forceinline__ rocsparse_double_complex
+        atomic_add_check(rocsparse_double_complex* ptr, rocsparse_double_complex val)
+    {
+        if(std::real(val) != static_cast<double>(0) || std::imag(val) != static_cast<double>(0))
+            return rocsparse_double_complex(atomicAdd((double*)ptr, std::real(val)),
+                                            atomicAdd((double*)ptr + 1, std::imag(val)));
+        return *ptr;
+    }
+
     __device__ __forceinline__ rocsparse_float_complex sqrt(rocsparse_float_complex val)
     {
         float x = std::real(val);
@@ -289,6 +470,10 @@ namespace rocsparse
     }
 
     __device__ __forceinline__ _Float16 conj(const _Float16& x)
+    {
+        return x;
+    }
+    __device__ __forceinline__ rocsparse_bfloat16 conj(const rocsparse_bfloat16& x)
     {
         return x;
     }
@@ -381,6 +566,10 @@ namespace rocsparse
     {
         return *ptr;
     }
+    __device__ __forceinline__ rocsparse_bfloat16 nontemporal_load(const rocsparse_bfloat16* ptr)
+    {
+        return *ptr;
+    }
     __device__ __forceinline__ float nontemporal_load(const float* ptr)
     {
         return __builtin_nontemporal_load(ptr);
@@ -445,6 +634,15 @@ namespace rocsparse
     __device__ __forceinline__ void nontemporal_store(int64_t val, int64_t* ptr)
     {
         __builtin_nontemporal_store(val, ptr);
+    }
+    __device__ __forceinline__ void nontemporal_store(_Float16 val, _Float16* ptr)
+    {
+        ptr[0] = val;
+    }
+    __device__ __forceinline__ void nontemporal_store(rocsparse_bfloat16  val,
+                                                      rocsparse_bfloat16* ptr)
+    {
+        ptr[0] = val;
     }
 
     __device__ __forceinline__ int32_t shfl(int32_t var, int src_lane, int width = warpSize)
@@ -561,6 +759,270 @@ namespace rocsparse
     {
         return rocsparse_double_complex(atomicAdd((double*)ptr, std::real(val)),
                                         atomicAdd((double*)ptr + 1, std::imag(val)));
+    }
+
+    template <typename T1, typename T2>
+    __device__ __forceinline__ T1 atomic_add(T1* base_ptr, int64_t idx, int64_t size, T2 val)
+    {
+        return atomic_add(base_ptr + idx, static_cast<T1>(val));
+    }
+
+    template <typename T1, typename T2>
+    __device__ __forceinline__ T1 atomic_add_check(T1* base_ptr, int64_t idx, int64_t size, T2 val)
+    {
+        return atomic_add_check(base_ptr + idx, static_cast<T1>(val));
+    }
+
+    template <typename T>
+    __device__ __forceinline__ T wfreduce_sum_mask(T sum, unsigned long long int active_mask)
+    {
+        int first_active_lane = __ffsll(active_mask) - 1;
+
+        T tmp = sum;
+        for(int lane = 0; lane < 64; lane++)
+        {
+            if(lane != first_active_lane && (active_mask & (1ULL << lane)))
+            {
+                tmp += __shfl(sum, lane);
+            }
+        }
+        tmp = __shfl(tmp, first_active_lane);
+
+        return tmp;
+    }
+
+    __device__ half atomic_add_by_CAS(half* base_ptr, int64_t idx, half val, int64_t size)
+    {
+        // Spinlock for odd-sized fp16 array edge cases.
+        // Using 'static __device__' creates a persistent device variable per translation unit.
+        // This is acceptable because the spinlock is only used for synchronization within
+        // a single kernel launch, and all threads in a kernel come from the same TU.
+        static __device__ unsigned int g_fp16_lock = 0;
+
+        // Check bounds
+        if(idx >= 0 && idx < size)
+        {
+
+            half* addr      = &base_ptr[idx];
+            int   is_second = (idx & 1);
+
+            // If this is the "high" half of an odd-sized array's last element, use spinlock
+            if((size & 1) && idx == size - 1)
+            {
+                // Find the first active thread in the wavefront for this branch
+                unsigned long long int active_mask = __ballot(1);
+
+                int first_active_lane = __ffsll(active_mask) - 1;
+
+                float tmp = wfreduce_sum_mask(static_cast<float>(val), active_mask);
+
+                if(__lane_id() == first_active_lane)
+                {
+                    // Acquire spinlock
+                    while(atomicCAS(&g_fp16_lock, 0U, 1U) != 0U)
+                        ;
+
+                    // Handle unpaired last element
+                    half old_val = *addr;
+                    *addr        = __hadd(old_val, __float2half(tmp));
+
+                    // Ensure the write is visible to other threads before releasing the lock
+                    __threadfence();
+
+                    // Release spinlock
+                    atomicExch(&g_fp16_lock, 0U);
+
+                    tmp = static_cast<float>(old_val);
+                }
+                // Broadcast the old value from first_lane to all active threads
+                tmp = __shfl(tmp, first_active_lane);
+
+                return __float2half(tmp);
+            }
+
+            // Safe to do paired atomic CAS
+            unsigned int* float_addr = (unsigned int*)((uintptr_t)addr & ~3);
+            unsigned int  old        = *float_addr;
+            unsigned int  assumed;
+            unsigned int  new_val;
+
+            do
+            {
+                assumed = old;
+
+                // Extract both halves
+                half h_low  = __ushort_as_half((unsigned short)assumed);
+                half h_high = __ushort_as_half((unsigned short)(assumed >> 16));
+
+                // Add to the appropriate half
+                if(is_second)
+                {
+                    h_high = __hadd(h_high, val);
+                }
+                else
+                {
+                    h_low = __hadd(h_low, val);
+                }
+
+                // Pack back
+                new_val = ((unsigned int)__half_as_ushort(h_high) << 16)
+                          | (unsigned int)__half_as_ushort(h_low);
+
+                old = atomicCAS(float_addr, assumed, new_val);
+            } while(assumed != old);
+
+            return __ushort_as_half((unsigned short)(is_second ? (old >> 16) : old));
+        }
+        else
+        {
+            return __float2half(0.0f);
+        }
+    }
+
+    template <typename T>
+    __device__ __forceinline__ _Float16
+        atomic_add(_Float16* base_ptr, int64_t idx, int64_t size, T val)
+    {
+        return atomic_add_by_CAS(
+            reinterpret_cast<half*>(base_ptr), idx, static_cast<half>(val), size);
+    }
+
+    template <typename T>
+    __device__ __forceinline__ _Float16
+        atomic_add_check(_Float16* base_ptr, int64_t idx, int64_t size, T val)
+    {
+        if(val != static_cast<_Float16>(0))
+            return atomic_add_by_CAS(
+                reinterpret_cast<half*>(base_ptr), idx, static_cast<half>(val), size);
+        return base_ptr[idx];
+    }
+
+    __device__ rocsparse_bfloat16 atomic_add_by_CAS(rocsparse_bfloat16* base_ptr,
+                                                    int64_t             idx,
+                                                    rocsparse_bfloat16  val,
+                                                    int64_t             size)
+    {
+        // Spinlock for odd-sized bfloat16 array edge cases.
+        // Using 'static __device__' creates a persistent device variable per translation unit.
+        // This is acceptable because the spinlock is only used for synchronization within
+        // a single kernel launch, and all threads in a kernel come from the same TU.
+        static __device__ unsigned int g_bf16_lock = 0;
+
+        // Check bounds
+        if(idx >= 0 && idx < size)
+        {
+
+            rocsparse_bfloat16* addr      = &base_ptr[idx];
+            int                 is_second = (idx & 1);
+
+            // If this is the "high" half of an odd-sized array's last element, use spinlock
+            if((size & 1) && idx == size - 1)
+            {
+                // Find the first active thread in the wavefront for this branch
+                unsigned long long int active_mask = __ballot(1);
+
+                int first_active_lane = __ffsll(active_mask) - 1;
+
+                float tmp = wfreduce_sum_mask(static_cast<float>(val), active_mask);
+
+                if(__lane_id() == first_active_lane)
+                {
+                    // Acquire spinlock
+                    while(atomicCAS(&g_bf16_lock, 0U, 1U) != 0U)
+                        ;
+
+                    // Handle unpaired last element
+                    rocsparse_bfloat16 old_val = *addr;
+                    *addr = static_cast<rocsparse_bfloat16>(static_cast<float>(old_val) + tmp);
+
+                    // Ensure the write is visible to other threads before releasing the lock
+                    __threadfence();
+
+                    // Release spinlock
+                    atomicExch(&g_bf16_lock, 0U);
+
+                    tmp = static_cast<float>(old_val);
+                }
+                // Broadcast the old value from first_lane to all active threads
+                tmp = __shfl(tmp, first_active_lane);
+
+                return static_cast<rocsparse_bfloat16>(tmp);
+            }
+
+            // Safe to do paired atomic CAS
+            unsigned int* float_addr = (unsigned int*)((uintptr_t)addr & ~3);
+            unsigned int  old        = *float_addr;
+            unsigned int  assumed;
+            unsigned int  new_val;
+
+            do
+            {
+                assumed = old;
+
+                // Extract both halves (bfloat16 is stored as upper 16 bits of float representation)
+                rocsparse_bfloat16 bf_low;
+                rocsparse_bfloat16 bf_high;
+                bf_low.data  = (unsigned short)assumed;
+                bf_high.data = (unsigned short)(assumed >> 16);
+
+                // Add to the appropriate half
+                if(is_second)
+                {
+                    bf_high = static_cast<rocsparse_bfloat16>(static_cast<float>(bf_high)
+                                                              + static_cast<float>(val));
+                }
+                else
+                {
+                    bf_low = static_cast<rocsparse_bfloat16>(static_cast<float>(bf_low)
+                                                             + static_cast<float>(val));
+                }
+
+                // Pack back
+                new_val = ((unsigned int)bf_high.data << 16) | (unsigned int)bf_low.data;
+
+                old = atomicCAS(float_addr, assumed, new_val);
+            } while(assumed != old);
+
+            rocsparse_bfloat16 result;
+            result.data = (unsigned short)(is_second ? (old >> 16) : old);
+            return result;
+        }
+        else
+        {
+            return static_cast<rocsparse_bfloat16>(0.0f);
+        }
+    }
+
+    template <typename T>
+    __device__ __forceinline__ rocsparse_bfloat16
+        atomic_add(rocsparse_bfloat16* base_ptr, int64_t idx, int64_t size, T val)
+    {
+        rocsparse_bfloat16 result
+            = atomic_add_by_CAS(reinterpret_cast<rocsparse_bfloat16*>(base_ptr),
+                                idx,
+                                static_cast<rocsparse_bfloat16>(static_cast<float>(val)),
+                                size);
+        rocsparse_bfloat16 ret;
+        ret.data = result.data;
+        return ret;
+    }
+
+    template <typename T>
+    __device__ __forceinline__ rocsparse_bfloat16
+        atomic_add_check(rocsparse_bfloat16* base_ptr, int64_t idx, int64_t size, T val)
+    {
+        if(val != static_cast<T>(0))
+        {
+            rocsparse_bfloat16 result
+                = atomic_add_by_CAS(reinterpret_cast<rocsparse_bfloat16*>(base_ptr),
+                                    idx,
+                                    static_cast<rocsparse_bfloat16>(static_cast<float>(val)),
+                                    size);
+            rocsparse_bfloat16 ret;
+            ret.data = result.data;
+            return ret;
+        }
+        return base_ptr[idx];
     }
 
     template <>
@@ -1338,6 +1800,12 @@ namespace rocsparse
         return sum;
     }
 
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ _Float16 wfreduce_sum(_Float16 sum)
+    {
+        return wfreduce_sum<WFSIZE>((float)sum);
+    }
+
     // DPP-based double wavefront partial reduction
     template <uint32_t WFSIZE, uint32_t SUB_WFSIZE>
     __device__ __forceinline__ int32_t wfreduce_partial_sum(int32_t sum)
@@ -1839,6 +2307,12 @@ namespace rocsparse
         return sum;
     }
 
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ _Float16 wfreduce_sum(_Float16 sum)
+    {
+        return wfreduce_sum<WFSIZE>((float)sum);
+    }
+
     template <uint32_t WFSIZE, uint32_t SUB_WF_SIZE>
     __device__ __forceinline__ int32_t wfreduce_partial_sum(int32_t sum)
     {
@@ -1918,6 +2392,266 @@ namespace rocsparse
             rocsparse::wfreduce_partial_sum<WFSIZE, SUB_WF_SIZE>(std::imag(sum)));
     }
 
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ int32_t wfsegmented_reduce(const int32_t row, int32_t val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int32_t left_row = __shfl_up(row, j);
+            const int32_t left_val = __shfl_up(val, j);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ int32_t wfsegmented_reduce(const int64_t row, int32_t val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int64_t left_row = __shfl_up(row, j);
+            const int32_t left_val = __shfl_up(val, j);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ float wfsegmented_reduce(const int32_t row, float val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int32_t left_row = __shfl_up(row, j);
+            const float   left_val = __shfl_up(val, j);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ float wfsegmented_reduce(const int64_t row, float val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int64_t left_row = __shfl_up(row, j);
+            const float   left_val = __shfl_up(val, j);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ double wfsegmented_reduce(const int32_t row, double val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int32_t left_row = __shfl_up(row, j);
+            const double  left_val = __shfl_up(val, j);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ double wfsegmented_reduce(const int64_t row, double val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int64_t left_row = __shfl_up(row, j);
+            const double  left_val = __shfl_up(val, j);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ _Float16 wfsegmented_reduce(const int32_t row, _Float16 val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int32_t  left_row   = __shfl_up(row, j);
+            const float    left_val_f = __shfl_up(static_cast<float>(val), j);
+            const _Float16 left_val   = static_cast<_Float16>(left_val_f);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ _Float16 wfsegmented_reduce(const int64_t row, _Float16 val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int64_t  left_row   = __shfl_up(row, j);
+            const float    left_val_f = __shfl_up(static_cast<float>(val), j);
+            const _Float16 left_val   = static_cast<_Float16>(left_val_f);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ rocsparse_bfloat16 wfsegmented_reduce(const int32_t      row,
+                                                                     rocsparse_bfloat16 val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int32_t            left_row   = __shfl_up(row, j);
+            const float              left_val_f = __shfl_up(static_cast<float>(val), j);
+            const rocsparse_bfloat16 left_val   = static_cast<rocsparse_bfloat16>(left_val_f);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val = static_cast<rocsparse_bfloat16>(static_cast<float>(val)
+                                                          + static_cast<float>(left_val));
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ rocsparse_bfloat16 wfsegmented_reduce(const int64_t      row,
+                                                                     rocsparse_bfloat16 val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int64_t            left_row   = __shfl_up(row, j);
+            const float              left_val_f = __shfl_up(static_cast<float>(val), j);
+            const rocsparse_bfloat16 left_val   = static_cast<rocsparse_bfloat16>(left_val_f);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val = static_cast<rocsparse_bfloat16>(static_cast<float>(val)
+                                                          + static_cast<float>(left_val));
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ rocsparse_float_complex
+        wfsegmented_reduce(const int32_t row, rocsparse_float_complex val)
+    {
+        return rocsparse_float_complex(rocsparse::wfsegmented_reduce<WFSIZE>(row, std::real(val)),
+                                       rocsparse::wfsegmented_reduce<WFSIZE>(row, std::imag(val)));
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ rocsparse_float_complex
+        wfsegmented_reduce(const int64_t row, rocsparse_float_complex val)
+    {
+        return rocsparse_float_complex(rocsparse::wfsegmented_reduce<WFSIZE>(row, std::real(val)),
+                                       rocsparse::wfsegmented_reduce<WFSIZE>(row, std::imag(val)));
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ rocsparse_double_complex
+        wfsegmented_reduce(const int32_t row, rocsparse_double_complex val)
+    {
+        return rocsparse_double_complex(rocsparse::wfsegmented_reduce<WFSIZE>(row, std::real(val)),
+                                        rocsparse::wfsegmented_reduce<WFSIZE>(row, std::imag(val)));
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ rocsparse_double_complex
+        wfsegmented_reduce(const int64_t row, rocsparse_double_complex val)
+    {
+        return rocsparse_double_complex(rocsparse::wfsegmented_reduce<WFSIZE>(row, std::real(val)),
+                                        rocsparse::wfsegmented_reduce<WFSIZE>(row, std::imag(val)));
+    }
+
     // BSR gather functionality to permute the BSR values array
     template <uint32_t WFSIZE, uint32_t DIMY, uint32_t BSRDIM, typename I, typename T>
     ROCSPARSE_KERNEL(WFSIZE* DIMY)
@@ -1983,9 +2717,9 @@ namespace rocsparse
     }
 
     template <bool SLEEP>
-    __device__ __forceinline__ int spin_loop(int* __restrict__ done, int scope)
+    __device__ __forceinline__ int32_t spin_loop(int32_t* __restrict__ done, int scope)
     {
-        int      local_done    = __hip_atomic_load(done, __ATOMIC_RELAXED, scope);
+        int32_t  local_done    = __hip_atomic_load(done, __ATOMIC_RELAXED, scope);
         uint32_t times_through = 0;
         while(!local_done)
         {

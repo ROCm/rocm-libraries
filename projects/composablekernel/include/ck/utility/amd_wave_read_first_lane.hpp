@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -44,7 +44,8 @@ struct get_carrier<3>
 
         // replacement of host std::copy_n()
         template <typename InputIterator, typename Size, typename OutputIterator>
-        __device__ static OutputIterator copy_n(InputIterator from, Size size, OutputIterator to)
+        __device__ static OutputIterator
+        copy_n(InputIterator from, Size size, [[clang::lifetimebound]] OutputIterator to)
         {
             if(0 < size)
             {

@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -16,7 +16,7 @@ template <typename TData, index_t NSize>
 CK_TILE_HOST_DEVICE constexpr auto container_push_back(const array<TData, NSize>& a, const TData& x)
 {
     array<TData, NSize + 1> r;
-    static_for<0, NSize, 1>{}([&r, &a ](auto i) constexpr { r(i) = a[i]; });
+    static_for<0, NSize, 1>{}([&r, &a](auto i) constexpr { r(i) = a[i]; });
     r[number<NSize>{}] = x;
     return r;
 }

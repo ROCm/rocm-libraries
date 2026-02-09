@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,6 +50,24 @@ void test_generate(GenerateFunc generate_func)
 
     HIP_CHECK(hipFree(data));
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
+}
+
+template<typename T>
+void test_generate_host()
+{
+    const rocrand_rng_type rng_type = rocrand_generate_poisson_tests::GetParam();
+
+    rocrand_generator generator;
+    ROCRAND_CHECK(rocrand_create_generator_host_blocking(&generator, rng_type));
+
+    const size_t   size   = 12563;
+    double         lambda = 100.0;
+    T * data = new T[size];
+
+    ROCRAND_CHECK(rocrand_generate_poisson(generator, data, size, lambda));
+    ROCRAND_CHECK(rocrand_destroy_generator(generator));
+
+    delete [] data;
 }
 
 template<typename T, typename GenerateFunc>
@@ -143,6 +161,8 @@ TEST_P(rocrand_generate_poisson_tests, generate_test)
     test_generate<unsigned int>(
         [](rocrand_generator gen, unsigned int* data, size_t size, double lambda)
         { return rocrand_generate_poisson(gen, data, size, lambda); });
+
+    test_generate_host<unsigned int>();
 }
 
 TEST(rocrand_generate_poisson_tests, neg_test)

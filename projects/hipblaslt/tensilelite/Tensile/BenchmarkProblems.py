@@ -26,12 +26,14 @@ import os
 import shutil
 import sys
 import time
+import itertools
 
 from copy import deepcopy
+from joblib import Parallel, delayed
 from pathlib import Path
 from typing import Dict
 
-from Tensile import CUSTOM_KERNEL_PATH, ClientExecutable, SolutionLibrary, LibraryIO
+from Tensile import CUSTOM_KERNEL_PATH, SolutionLibrary, LibraryIO
 from Tensile.KernelWriter import DebugConfig
 from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
 from Tensile.Toolchain.Component import Assembler
@@ -43,7 +45,7 @@ from Tensile.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionName
 
 from .BenchmarkStructs import BenchmarkProcess, constructForkPermutations
 from .Contractions import ProblemType as ContractionsProblemType
-from .ClientWriter import runClient, writeClientConfig, writeClientConfigIni
+from .ClientWriter import runClient, writeClientConfig, writeClientConfigIni, getClientExecutablePath
 from .KernelWriterAssembly import KernelWriterAssembly
 from .TensileCreateLibrary import copyStaticFiles, writeSolutionsAndKernels
 from .CustomKernels import getCustomKernelConfig
@@ -51,29 +53,20 @@ from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
 from Tensile.Common import HR, print1, print2, IsaInfo, IsaVersion, \
         printExit, printWarning, ensurePath, tqdm, state, \
-        BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR
+        BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
 from Tensile.Common.Architectures import isaToGfx, gfxToVariants
 from Tensile.Common.GlobalParameters import globalParameters, startTime
 
 
-def _generateForkedSolutions(problemType, constantParams, forkPermutations, assembler: Assembler, \
-                            debugConfig: DebugConfig, isaInfoMap: Dict[IsaVersion, IsaInfo]):
-    """Creates a list with a Solution object for each parameter combination in forkPermutations"""
-    print1("# Enumerating Solutions")
-
-    solutions = []
-    solutionSet = set()
-    for perm in forkPermutations:
-        # Expect only a single ISA in the map for the Tensile context
-        # because the GPU has to be physically present for benchmarking
-
+def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap):
+    """Helper function to generate a single solution from a permutation."""
+    try:
         solution = {
             "ProblemType": deepcopy(problemType.state),
             "ISA": next(iter(isaInfoMap.keys()))
         }
         solution.update(constantParams)
         solution.update(perm)
-
 
         mi = solution["MatrixInstruction"]
         wavefrontSize = solution["WavefrontSize"]
@@ -97,11 +90,37 @@ def _generateForkedSolutions(problemType, constantParams, forkPermutations, asse
                 isaInfoMap
             )
             if solutionObject["Valid"]:
-                if solutionObject not in solutionSet:
-                    solutionSet.add(solutionObject)
-                    solutions.append(solutionObject)
+                return solutionObject
+            elif debugConfig.printSolutionRejectionReason:
+                print1("rejecting solution " + str(solution))
         elif debugConfig.printSolutionRejectionReason:
             print1("rejecting solution " + str(solution))
+    except Exception as e:
+        print(f"Error processing permutation {perm}: {e}")
+    return None
+
+def _generateForkedSolutions(problemType, constantParams, forkPermutations, assembler: Assembler,
+                             debugConfig: DebugConfig, isaInfoMap: Dict[IsaVersion, IsaInfo]):
+    """Creates a list with a Solution object for each parameter combination in forkPermutations using parallel processing"""
+    print1("# Enumerating Solutions (Parallel)")
+
+    forkIters = zip(
+        forkPermutations,
+        itertools.repeat(problemType),
+        itertools.repeat(constantParams),
+        itertools.repeat(assembler),
+        itertools.repeat(debugConfig),
+        itertools.repeat(isaInfoMap)
+    )
+    raw_solutions = ParallelMap2(_generate_single_solution, forkIters, "fork solutions", return_as="list")
+
+    # Filter out None and duplicates
+    solutionSet = set()
+    solutions = []
+    for sol in tqdm(raw_solutions, "Remove duplicate solutions"):
+        if sol is not None and sol not in solutionSet:
+            solutionSet.add(sol)
+            solutions.append(sol)
 
     return solutions
 
@@ -201,7 +220,8 @@ def writeBenchmarkFiles(
         debugConfig: DebugConfig,
         deviceId: int,
         gfxName: str,
-        isaInfoMap: Dict[IsaVersion, IsaInfo]
+        isaInfoMap: Dict[IsaVersion, IsaInfo],
+        probSolMap: dict
     ):
     """Write all the files needed for a given benchmarking step"""
 
@@ -248,6 +268,7 @@ def writeBenchmarkFiles(
                             kernelWriterAssembly,
                             debugConfig.splitGSU,
                             cmdLineArchs,
+                            disableAsmComments=globalParameters["DisableAsmComments"],
                             errorTolerant=True,
                             generateSourcesAndExit=globalParameters["GenerateSourcesAndExit"], # put in debug config
                             compress=False,
@@ -297,11 +318,11 @@ def writeBenchmarkFiles(
         idealProblemSizes = ProblemSizes(problemType, idealSizes)
         writeClientConfig(True, solutions, idealProblemSizes, biasTypeArgs, \
                           factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
-                          newLibrary, codeObjectFiles, True, deviceId, gfxName)
+                          newLibrary, codeObjectFiles, True, deviceId, gfxName, probSolMap=probSolMap)
     else:
         writeClientConfig(True, solutions, problemSizes, biasTypeArgs, \
                           factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
-                          newLibrary, codeObjectFiles, False, deviceId, gfxName)
+                          newLibrary, codeObjectFiles, False, deviceId, gfxName, probSolMap=probSolMap)
 
     if len(solutions) == 0:
         printExit("write solutions and kernels results 0 valid soultion.")
@@ -313,7 +334,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                          asmToolchain: AssemblyToolchain, srcToolchain: SourceToolchain, cCompiler: str,
                          buildTmpPath: Path, benchmarkProblemsPath: Path,
                          debugConfig: DebugConfig, deviceId: int,
-                         gfxName: str, isaInfoMap: Dict[str, IsaInfo]
+                         gfxName: str, isaInfoMap: Dict[str, IsaInfo], probSolMap: dict
     ):
     """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config"""
     benchmarkTestFails = 0
@@ -428,7 +449,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                     benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
                     benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
                     benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
-                    sourcePath, debugConfig, deviceId, gfxName, isaInfoMap)
+                    sourcePath, debugConfig, deviceId, gfxName, isaInfoMap, probSolMap)
             # ^ this mutates solutions
 
             # write cache data
@@ -463,7 +484,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                                  benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
                                  benchmarkStep.icacheFlushArgs, conProblemType,
                                  stepBaseDir, codeObjectFiles, resultsFileName,
-                                 outFile, deviceId)
+                                 outFile, deviceId, probSolMap=probSolMap)
 
         # I think the size portion of this yaml could be removed,
         # but for now it's needed, so we update it even in the cache case
@@ -503,10 +524,11 @@ def main(
     debugConfig: DebugConfig,
     deviceId: int,
     gfxName: str,
-    isaInfoMap: Dict[str, IsaInfo]
+    isaInfoMap: Dict[str, IsaInfo],
+    probSolMap: dict
 ):
     """Entry point for the "BenchmarkProblems" section of a Tensile config yaml"""
-    ClientExecutable.getClientExecutable(str(srcToolchain.compiler.path), cCompiler, outputPath)
+    getClientExecutablePath()
 
     if config is None:
         print(f'No config specified in {globalParameters["ConfigPath"]}, built client only')
@@ -556,7 +578,8 @@ def main(
                             debugConfig,
                             deviceId,
                             gfxName,
-                            isaInfoMap
+                            isaInfoMap,
+                            probSolMap
                         )
                 totalTestFails += benchmarkErrors
 

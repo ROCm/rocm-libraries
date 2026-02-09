@@ -26,34 +26,44 @@
 
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
+
+#include <rocRoller/AssertOpKinds.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {
-    KernelOptions::KernelOptions()
-        : m_values(std::make_unique<KernelOptionValues>())
+    static void increaseRegisterLimit(KernelOptionValues& values)
     {
         if(Settings::Get(Settings::NoRegisterLimits))
         {
-            m_values->maxACCVGPRs *= 10;
-            m_values->maxSGPRs *= 10;
-            m_values->maxVGPRs *= 10;
+            values.maxACCVGPRs *= 10;
+            values.maxSGPRs *= 10;
+            values.maxVGPRs *= 10;
         }
+    }
+
+    KernelOptions::KernelOptions()
+        : m_values(std::make_unique<KernelOptionValues>())
+    {
+        increaseRegisterLimit(*m_values);
     }
 
     KernelOptions::KernelOptions(KernelOptionValues&& other)
         : m_values(std::make_unique<KernelOptionValues>(std::forward<KernelOptionValues>(other)))
     {
+        increaseRegisterLimit(*m_values);
     }
 
     KernelOptions::KernelOptions(KernelOptions const& other)
         : m_values(std::make_unique<KernelOptionValues>(*other.m_values))
     {
+        increaseRegisterLimit(*m_values);
     }
     KernelOptions::KernelOptions(KernelOptions&& other)
         : m_values(std::move(other.m_values))
     {
+        increaseRegisterLimit(*m_values);
     }
 
     KernelOptions& KernelOptions::operator=(KernelOptions const& other)
@@ -115,47 +125,59 @@ namespace rocRoller
         return stream << *options;
     }
 
-    // KernelOptions(KernelOptions const& other);
-    // KernelOptions(KernelOptions && other);
-    // KernelOptions & operator=(KernelOptions const& other);
-    // KernelOptions & operator=(KernelOptions && other);
-
     std::ostream& operator<<(std::ostream& os, const KernelOptionValues& input)
     {
-        os << "Kernel Options:" << std::endl;
-        os << "  logLevel:\t\t\t" << input.logLevel << std::endl;
-        os << "  alwaysWaitAfterLoad:\t\t" << input.alwaysWaitAfterLoad << std::endl;
-        os << "  alwaysWaitAfterStore:\t\t" << input.alwaysWaitAfterStore << std::endl;
-        os << "  alwaysWaitBeforeBranch:\t" << input.alwaysWaitBeforeBranch << std::endl;
-        os << "  preloadKernelArguments:\t" << input.preloadKernelArguments << std::endl;
-        os << "  maxACCVGPRs:\t\t\t" << input.maxACCVGPRs << std::endl;
-        os << "  maxSGPRs:\t\t\t" << input.maxSGPRs << std::endl;
-        os << "  maxVGPRs:\t\t\t" << input.maxVGPRs << std::endl;
-        os << "  loadLocalWidth:\t\t" << input.loadLocalWidth << std::endl;
-        os << "  loadGlobalWidth:\t\t" << input.loadGlobalWidth << std::endl;
-        os << "  storeLocalWidth:\t\t" << input.storeLocalWidth << std::endl;
-        os << "  storeGlobalWidth:\t\t" << input.storeGlobalWidth << std::endl;
-        os << "  setNextFreeVGPRToMax:\t" << input.setNextFreeVGPRToMax << std::endl;
-        os << "  assertWaitCntState:\t\t" << input.assertWaitCntState << std::endl;
-        os << "  deduplicateArguments:\t\t" << input.deduplicateArguments << std::endl;
-        os << "  lazyAddArguments:\t\t" << input.lazyAddArguments << std::endl;
-        os << "  minLaunchTimeExpressionComplexity:\t\t" << input.minLaunchTimeExpressionComplexity
-           << std::endl;
-
-        return os;
+        return os << toString(input);
     }
 
     std::string KernelOptionValues::toString() const
     {
-        if(logLevel >= LogLevel::Warning)
-        {
-            std::stringstream ss;
-            ss << *this;
-            return ss.str();
-        }
-        else
-        {
-            return "";
-        }
+        return rocRoller::toString(*this);
+    }
+
+    std::string toString(KernelOptionValues const& values)
+    {
+        static_assert(sizeof(KernelOptionValues) == 72,
+                      "Edit the toString() function when adding a kernel option!");
+
+        std::string rv = "Kernel Options:\n";
+
+#define Show(name, value) rv += fmt::format("  {: <35}{: >10}\n", name ":", value)
+
+#define ShowOption(name) Show(#name, values.name)
+#define ShowString(name) Show(#name, toString(values.name))
+
+        ShowString(logLevel);
+        ShowOption(alwaysWaitAfterLoad);
+        ShowOption(alwaysWaitAfterStore);
+        ShowOption(alwaysWaitBeforeBranch);
+        ShowOption(alwaysWaitZeroBeforeBarrier);
+        ShowOption(preloadKernelArguments);
+        ShowOption(maxACCVGPRs);
+        ShowOption(maxSGPRs);
+        ShowOption(maxVGPRs);
+        ShowOption(loadLocalWidth);
+        ShowOption(loadGlobalWidth);
+        ShowOption(storeLocalWidth);
+        ShowOption(storeGlobalWidth);
+        ShowOption(assertWaitCntState);
+        ShowOption(setNextFreeVGPRToMax);
+        ShowOption(deduplicateArguments);
+        ShowOption(lazyAddArguments);
+        ShowOption(minLaunchTimeExpressionComplexity);
+        ShowOption(maxConcurrentSubExpressions);
+        Show("maxConcurrentControlOps",
+             values.maxConcurrentControlOps ? std::to_string(*values.maxConcurrentControlOps)
+                                            : "none");
+        ShowOption(enableFullDivision);
+        ShowOption(scaleSkipPermlane);
+        ShowString(assertOpKind);
+        ShowOption(removeSetCoordinate);
+
+#undef Show
+#undef ShowOption
+#undef ShowString
+
+        return rv;
     }
 }

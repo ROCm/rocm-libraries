@@ -24,7 +24,7 @@
 # ------------------------------------------------------------------------
 #
 # Usage:
-# 
+#
 # Assuming one runs the following Tensile command:
 #
 #   Tensile/bin/Tensile <yaml> tensile-out
@@ -35,8 +35,8 @@
 #
 # where TENSILE_OUT is the relative path to the tensile output directory.
 #
-# The Makefile will set the target based on the name of the co files in 
-# the library directory and sets a default wavefront flag but each of 
+# The Makefile will set the target based on the name of the co files in
+# the library directory and sets a default wavefront flag but each of
 # these can be customized as follows:
 #
 # make co TENSILE_OUT=tensile-out ARCH="gfx942:xnack-" WAVEFRONTSIZE="-mno-wavefrontsize64"

@@ -29,9 +29,6 @@
 
 namespace rocRoller
 {
-    // Register supported components
-    RegisterComponent(NegateGenerator);
-
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::Negate>> GetGenerator<Expression::Negate>(
         Register::ValuePtr dst, Register::ValuePtr arg, Expression::Negate const&)

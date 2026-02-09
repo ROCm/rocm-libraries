@@ -24,7 +24,7 @@
  *
  * ************************************************************************ */
 #include "handle.h"
-#include "kernels/matrix_transform.h"
+#include "matrix-transform/matrix_transform.h"
 #include "rocblaslt-auxiliary.h"
 #include "rocblaslt-types.h"
 #include "rocblaslt.h"
@@ -77,7 +77,7 @@ namespace
             {
                 for(auto& adp : adapters)
                 {
-                    (void)adp->initializeLazyLoading("", coFolder);
+                    adp->codeObjectDir(coFolder);
                 }
             }
             catch(const std::runtime_error& e)

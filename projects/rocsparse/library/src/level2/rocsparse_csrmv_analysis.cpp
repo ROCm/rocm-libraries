@@ -92,7 +92,13 @@ namespace rocsparse
          CSRMV_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_f16_r),
          CSRMV_ANALYSIS_CONFIG(
-             rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f16_r)}};
+             rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f16_r),
+         CSRMV_ANALYSIS_CONFIG(
+             rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_bf16_r),
+         CSRMV_ANALYSIS_CONFIG(
+             rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_bf16_r),
+         CSRMV_ANALYSIS_CONFIG(
+             rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_bf16_r)}};
 
     static rocsparse_status csrmv_analysis_find(csrmv_analysis_t*   function_,
                                                 rocsparse_indextype i_type_,

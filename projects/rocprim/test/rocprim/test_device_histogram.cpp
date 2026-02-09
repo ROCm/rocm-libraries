@@ -27,6 +27,7 @@
 #include "../../common/utils_device_ptr.hpp"
 
 // required test headers
+#include "indirect_iterator.hpp"
 #include "test_seed.hpp"
 #include "test_utils.hpp"
 #include "test_utils_data_generation.hpp"
@@ -125,20 +126,22 @@ template<class SampleType,
          unsigned int Bins,
          int          LowerLevel,
          int          UpperLevel,
-         class LevelType   = SampleType,
-         class CounterType = int,
-         class Config      = rocprim::default_config,
-         bool UseGraphs    = false>
+         class LevelType          = SampleType,
+         class CounterType        = int,
+         class Config             = rocprim::default_config,
+         bool UseIndirectIterator = false,
+         bool UseGraphs           = false>
 struct params1
 {
-    using sample_type                         = SampleType;
-    static constexpr unsigned int bins        = Bins;
-    static constexpr int          lower_level = LowerLevel;
-    static constexpr int          upper_level = UpperLevel;
-    using level_type                          = LevelType;
-    using counter_type                        = CounterType;
-    using config                              = Config;
-    static constexpr bool         use_graphs  = UseGraphs;
+    using sample_type                           = SampleType;
+    static constexpr unsigned int bins          = Bins;
+    static constexpr int          lower_level   = LowerLevel;
+    static constexpr int          upper_level   = UpperLevel;
+    using level_type                            = LevelType;
+    using counter_type                          = CounterType;
+    using config                                = Config;
+    static constexpr bool use_indirect_iterator = UseIndirectIterator;
+    static constexpr bool use_graphs            = UseGraphs;
 };
 
 template<class Params>
@@ -153,6 +156,7 @@ using Params1
     = ::testing::Types<params1<int, 10, 0, 10>,
                        params1<float, 10, 0, 10>,
                        params1<float, 10, 0, 10, float, float>,
+                       params1<int, 10, 0, 10, unsigned long, unsigned long>,
                        params1<rocprim::half, 10, 0, 10>,
                        params1<rocprim::bfloat16, 10, 0, 10>,
                        params1<int8_t, 10, 0, 10>,
@@ -165,7 +169,8 @@ using Params1
                        params1<double, 10, 0, 1000, double, double>,
                        params1<int, 123, 100, 5635, int>,
                        params1<double, 55, -123, +123, double, unsigned int, custom_config1>,
-                       params1<int, 10, 0, 10, int, int, rocprim::default_config, true>>;
+                       params1<int, 10, 0, 10, int, int, rocprim::default_config, true>,
+                       params1<int, 10, 0, 10, int, int, rocprim::default_config, false, true>>;
 
 TYPED_TEST_SUITE(RocprimDeviceHistogramEven, Params1);
 
@@ -222,10 +227,12 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using sample_type = typename TestFixture::params::sample_type;
+    using sample_type  = typename TestFixture::params::sample_type;
     using counter_type = typename TestFixture::params::counter_type;
-    using level_type = typename TestFixture::params::level_type;
-    constexpr unsigned int bins = TestFixture::params::bins;
+    using level_type   = typename TestFixture::params::level_type;
+    using config       = typename TestFixture::params::config;
+
+    constexpr unsigned int bins        = TestFixture::params::bins;
     const level_type       lower_level = static_cast<level_type>(TestFixture::params::lower_level);
     const level_type       upper_level = static_cast<level_type>(TestFixture::params::upper_level);
 
@@ -287,93 +294,48 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
                 }
             }
 
-            using config = typename TestFixture::params::config;
+            auto input_it
+                = test_utils::wrap_in_indirect_iterator<TestFixture::params::use_indirect_iterator>(
+                    d_input.get());
 
-            size_t temporary_storage_bytes = 0;
-            if(rows == 1)
-            {
-                HIP_CHECK(rocprim::histogram_even<config>(nullptr,
-                                                          temporary_storage_bytes,
-                                                          d_input.get(),
-                                                          static_cast<unsigned int>(columns),
-                                                          d_histogram.get(),
-                                                          bins + 1,
-                                                          lower_level,
-                                                          upper_level,
-                                                          stream,
-                                                          debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::histogram_even<config>(nullptr,
-                                                          temporary_storage_bytes,
-                                                          d_input.get(),
-                                                          columns,
-                                                          rows,
-                                                          row_stride_bytes,
-                                                          d_histogram.get(),
-                                                          bins + 1,
-                                                          lower_level,
-                                                          upper_level,
-                                                          stream,
-                                                          debug_synchronous));
-            }
-
-            ASSERT_GT(temporary_storage_bytes, 0U);
-
-            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(TestFixture::params::use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-
-            if(rows == 1)
-            {
-                HIP_CHECK(rocprim::histogram_even<config>(d_temporary_storage.get(),
-                                                          temporary_storage_bytes,
-                                                          d_input.get(),
-                                                          columns,
-                                                          d_histogram.get(),
-                                                          bins + 1,
-                                                          lower_level,
-                                                          upper_level,
-                                                          stream,
-                                                          debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::histogram_even<config>(d_temporary_storage.get(),
-                                                          temporary_storage_bytes,
-                                                          d_input.get(),
-                                                          columns,
-                                                          rows,
-                                                          row_stride_bytes,
-                                                          d_histogram.get(),
-                                                          bins + 1,
-                                                          lower_level,
-                                                          upper_level,
-                                                          stream,
-                                                          debug_synchronous));
-            }
-
-            if(TestFixture::params::use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream);
-            }
+            test_utils::test_kernel_wrapper(
+                [&](void* temp_storage, size_t& storage_bytes)
+                {
+                    if(rows == 1)
+                    {
+                        return rocprim::histogram_even<config>(temp_storage,
+                                                               storage_bytes,
+                                                               input_it,
+                                                               static_cast<unsigned int>(columns),
+                                                               d_histogram.get(),
+                                                               bins + 1,
+                                                               lower_level,
+                                                               upper_level,
+                                                               stream,
+                                                               debug_synchronous);
+                    }
+                    else
+                    {
+                        return rocprim::histogram_even<config>(temp_storage,
+                                                               storage_bytes,
+                                                               input_it,
+                                                               columns,
+                                                               rows,
+                                                               row_stride_bytes,
+                                                               d_histogram.get(),
+                                                               bins + 1,
+                                                               lower_level,
+                                                               upper_level,
+                                                               stream,
+                                                               debug_synchronous);
+                    }
+                },
+                stream,
+                TestFixture::params::use_graphs);
 
             const auto histogram = d_histogram.load();
 
-            for(size_t i = 0; i < bins; i++)
-            {
-                ASSERT_EQ(histogram[i], histogram_expected[i]);
-            }
-
-            if(TestFixture::params::use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-            }
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(histogram, histogram_expected, bins));
         }
     }
 
@@ -461,9 +423,11 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using sample_type = typename TestFixture::params::sample_type;
+    using sample_type  = typename TestFixture::params::sample_type;
     using counter_type = typename TestFixture::params::counter_type;
-    using level_type = typename TestFixture::params::level_type;
+    using level_type   = typename TestFixture::params::level_type;
+    using config       = typename TestFixture::params::config;
+
     constexpr unsigned int bins = TestFixture::params::bins;
 
     hipStream_t stream = 0; // default
@@ -537,96 +501,50 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
             rocprim::transform_iterator<sample_type*, transform_op<sample_type>, sample_type>
                 d_input2(d_input.get(), transform_op<sample_type>());
 
-            using config = typename TestFixture::params::config;
-
-            size_t temporary_storage_bytes = 0;
-            if(rows == 1)
-            {
-                HIP_CHECK(rocprim::histogram_range<config>(nullptr,
-                                                           temporary_storage_bytes,
-                                                           d_input2,
-                                                           columns,
-                                                           d_histogram.get(),
-                                                           bins + 1,
-                                                           d_levels.get(),
-                                                           stream,
-                                                           debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::histogram_range<config>(nullptr,
-                                                           temporary_storage_bytes,
-                                                           d_input2,
-                                                           columns,
-                                                           rows,
-                                                           row_stride_bytes,
-                                                           d_histogram.get(),
-                                                           bins + 1,
-                                                           d_levels.get(),
-                                                           stream,
-                                                           debug_synchronous));
-            }
-
-            ASSERT_GT(temporary_storage_bytes, 0U);
-
-            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(TestFixture::params::use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-
-            if(rows == 1)
-            {
-                HIP_CHECK(rocprim::histogram_range<config>(d_temporary_storage.get(),
-                                                           temporary_storage_bytes,
-                                                           d_input2,
-                                                           columns,
-                                                           d_histogram.get(),
-                                                           bins + 1,
-                                                           d_levels.get(),
-                                                           stream,
-                                                           debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::histogram_range<config>(d_temporary_storage.get(),
-                                                           temporary_storage_bytes,
-                                                           d_input2,
-                                                           columns,
-                                                           rows,
-                                                           row_stride_bytes,
-                                                           d_histogram.get(),
-                                                           bins + 1,
-                                                           d_levels.get(),
-                                                           stream,
-                                                           debug_synchronous));
-            }
-
-            if(TestFixture::params::use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream);
-            }
+            test_utils::test_kernel_wrapper(
+                [&](void* temp_storage, size_t& storage_bytes)
+                {
+                    if(rows == 1)
+                    {
+                        return rocprim::histogram_range<config>(temp_storage,
+                                                                storage_bytes,
+                                                                d_input2,
+                                                                columns,
+                                                                d_histogram.get(),
+                                                                bins + 1,
+                                                                d_levels.get(),
+                                                                stream,
+                                                                debug_synchronous);
+                    }
+                    else
+                    {
+                        return rocprim::histogram_range<config>(temp_storage,
+                                                                storage_bytes,
+                                                                d_input2,
+                                                                columns,
+                                                                rows,
+                                                                row_stride_bytes,
+                                                                d_histogram.get(),
+                                                                bins + 1,
+                                                                d_levels.get(),
+                                                                stream,
+                                                                debug_synchronous);
+                    }
+                },
+                stream,
+                TestFixture::params::use_graphs);
 
             const auto histogram = d_histogram.load();
 
-            for(size_t i = 0; i < bins; i++)
-            {
-                ASSERT_EQ(histogram[i], histogram_expected[i]);
-            }
-
-            if(TestFixture::params::use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-            }
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(histogram, histogram_expected, bins));
         }
     }
 
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
-
 
 template<class SampleType,
          unsigned int Channels,
@@ -682,10 +600,12 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using sample_type = typename TestFixture::params::sample_type;
+    using sample_type  = typename TestFixture::params::sample_type;
     using counter_type = typename TestFixture::params::counter_type;
-    using level_type = typename TestFixture::params::level_type;
-    constexpr unsigned int channels = TestFixture::params::channels;
+    using level_type   = typename TestFixture::params::level_type;
+    using config       = typename TestFixture::params::config;
+
+    constexpr unsigned int channels        = TestFixture::params::channels;
     constexpr unsigned int active_channels = TestFixture::params::active_channels;
 
     unsigned int bins[active_channels];
@@ -796,113 +716,60 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
             rocprim::transform_iterator<sample_type*, transform_op<sample_type>, sample_type>
                 d_input2(d_input.get(), transform_op<sample_type>());
 
-            using config = typename TestFixture::params::config;
-
-            size_t temporary_storage_bytes = 0;
-            if(rows == 1)
-            {
-                HIP_CHECK((rocprim::multi_histogram_even<channels, active_channels, config>(
-                    nullptr,
-                    temporary_storage_bytes,
-                    d_input2,
-                    columns,
-                    d_histogram,
-                    num_levels,
-                    lower_level,
-                    upper_level,
-                    stream,
-                    debug_synchronous)));
-            }
-            else
-            {
-                HIP_CHECK((rocprim::multi_histogram_even<channels, active_channels, config>(
-                    nullptr,
-                    temporary_storage_bytes,
-                    d_input2,
-                    columns,
-                    rows,
-                    row_stride_bytes,
-                    d_histogram,
-                    num_levels,
-                    lower_level,
-                    upper_level,
-                    stream,
-                    debug_synchronous)));
-            }
-
-            ASSERT_GT(temporary_storage_bytes, 0U);
-
-            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(TestFixture::params::use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-
-            if(rows == 1)
-            {
-                HIP_CHECK((rocprim::multi_histogram_even<channels, active_channels, config>(
-                    d_temporary_storage.get(),
-                    temporary_storage_bytes,
-                    d_input2,
-                    columns,
-                    d_histogram,
-                    num_levels,
-                    lower_level,
-                    upper_level,
-                    stream,
-                    debug_synchronous)));
-            }
-            else
-            {
-                HIP_CHECK((rocprim::multi_histogram_even<channels, active_channels, config>(
-                    d_temporary_storage.get(),
-                    temporary_storage_bytes,
-                    d_input2,
-                    columns,
-                    rows,
-                    row_stride_bytes,
-                    d_histogram,
-                    num_levels,
-                    lower_level,
-                    upper_level,
-                    stream,
-                    debug_synchronous)));
-            }
-
-            if(TestFixture::params::use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream);
-            }
+            test_utils::test_kernel_wrapper(
+                [&](void* temp_storage, size_t& storage_bytes)
+                {
+                    if(rows == 1)
+                    {
+                        return rocprim::multi_histogram_even<channels, active_channels, config>(
+                            temp_storage,
+                            storage_bytes,
+                            d_input2,
+                            columns,
+                            d_histogram,
+                            num_levels,
+                            lower_level,
+                            upper_level,
+                            stream,
+                            debug_synchronous);
+                    }
+                    else
+                    {
+                        return rocprim::multi_histogram_even<channels, active_channels, config>(
+                            temp_storage,
+                            storage_bytes,
+                            d_input2,
+                            columns,
+                            rows,
+                            row_stride_bytes,
+                            d_histogram,
+                            num_levels,
+                            lower_level,
+                            upper_level,
+                            stream,
+                            debug_synchronous);
+                    }
+                },
+                stream,
+                TestFixture::params::use_graphs);
 
             std::vector<counter_type> histogram[active_channels];
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
                 histogram[channel] = std::vector<counter_type>(bins[channel]);
-                HIP_CHECK(
-                    hipMemcpy(
-                        histogram[channel].data(), d_histogram[channel],
-                        bins[channel] * sizeof(counter_type),
-                        hipMemcpyDeviceToHost
-                    )
-                );
+                HIP_CHECK(hipMemcpy(histogram[channel].data(),
+                                    d_histogram[channel],
+                                    bins[channel] * sizeof(counter_type),
+                                    hipMemcpyDeviceToHost));
                 HIP_CHECK(hipFree(d_histogram[channel]));
             }
 
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
                 SCOPED_TRACE(testing::Message() << "with channel = " << channel);
-
-                for(size_t i = 0; i < bins[channel]; i++)
-                {
-                    ASSERT_EQ(histogram[channel][i], histogram_expected[channel][i]);
-                }
-            }
-
-            if(TestFixture::params::use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(histogram[channel],
+                                                              histogram_expected[channel],
+                                                              bins[channel]));
             }
         }
     }
@@ -966,10 +833,12 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using sample_type = typename TestFixture::params::sample_type;
+    using sample_type  = typename TestFixture::params::sample_type;
     using counter_type = typename TestFixture::params::counter_type;
-    using level_type = typename TestFixture::params::level_type;
-    constexpr unsigned int channels = TestFixture::params::channels;
+    using level_type   = typename TestFixture::params::level_type;
+    using config       = typename TestFixture::params::config;
+
+    constexpr unsigned int channels        = TestFixture::params::channels;
     constexpr unsigned int active_channels = TestFixture::params::active_channels;
 
     hipStream_t stream = 0;
@@ -1105,81 +974,40 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
                 }
             }
 
-            using config = typename TestFixture::params::config;
-
-            size_t temporary_storage_bytes = 0;
-            if(rows == 1)
-            {
-                HIP_CHECK((rocprim::multi_histogram_range<channels, active_channels, config>(
-                    nullptr,
-                    temporary_storage_bytes,
-                    d_input.get(),
-                    columns,
-                    d_histogram,
-                    num_levels,
-                    d_levels,
-                    stream,
-                    debug_synchronous)));
-            }
-            else
-            {
-                HIP_CHECK((rocprim::multi_histogram_range<channels, active_channels, config>(
-                    nullptr,
-                    temporary_storage_bytes,
-                    d_input.get(),
-                    columns,
-                    rows,
-                    row_stride_bytes,
-                    d_histogram,
-                    num_levels,
-                    d_levels,
-                    stream,
-                    debug_synchronous)));
-            }
-
-            ASSERT_GT(temporary_storage_bytes, 0U);
-
-            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(TestFixture::params::use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-
-            if(rows == 1)
-            {
-                HIP_CHECK((rocprim::multi_histogram_range<channels, active_channels, config>(
-                    d_temporary_storage.get(),
-                    temporary_storage_bytes,
-                    d_input.get(),
-                    columns,
-                    d_histogram,
-                    num_levels,
-                    d_levels,
-                    stream,
-                    debug_synchronous)));
-            }
-            else
-            {
-                HIP_CHECK((rocprim::multi_histogram_range<channels, active_channels, config>(
-                    d_temporary_storage.get(),
-                    temporary_storage_bytes,
-                    d_input.get(),
-                    columns,
-                    rows,
-                    row_stride_bytes,
-                    d_histogram,
-                    num_levels,
-                    d_levels,
-                    stream,
-                    debug_synchronous)));
-            }
-
-            if(TestFixture::params::use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream);
-            }
+            test_utils::test_kernel_wrapper(
+                [&](void* temp_storage, size_t& storage_bytes)
+                {
+                    if(rows == 1)
+                    {
+                        return rocprim::multi_histogram_range<channels, active_channels, config>(
+                            temp_storage,
+                            storage_bytes,
+                            d_input.get(),
+                            columns,
+                            d_histogram,
+                            num_levels,
+                            d_levels,
+                            stream,
+                            debug_synchronous);
+                    }
+                    else
+                    {
+                        return rocprim::multi_histogram_range<channels, active_channels, config>(
+                            temp_storage,
+                            storage_bytes,
+                            d_input.get(),
+                            columns,
+                            rows,
+                            row_stride_bytes,
+                            d_histogram,
+                            num_levels,
+                            d_levels,
+                            stream,
+                            debug_synchronous);
+                    }
+                },
+                stream,
+                TestFixture::params::use_graphs);
 
             std::vector<counter_type> histogram[active_channels];
             for(unsigned int channel = 0; channel < active_channels; channel++)
@@ -1196,19 +1024,12 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
                 HIP_CHECK(hipFree(d_histogram[channel]));
             }
 
-            if(TestFixture::params::use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-            }
-
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
                 SCOPED_TRACE(testing::Message() << "with channel = " << channel);
-
-                for(size_t i = 0; i < bins[channel]; i++)
-                {
-                    ASSERT_EQ(histogram[channel][i], histogram_expected[channel][i]);
-                }
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(histogram[channel],
+                                                              histogram_expected[channel],
+                                                              bins[channel]));
             }
         }
     }

@@ -92,10 +92,10 @@ public:
         return std::uniform_int_distribution<T>{}(t_rocblas_rng);
     }
 
-    // Random signed char
-    explicit operator signed char()
+    // Random int8_t
+    explicit operator int8_t()
     {
-        return static_cast<signed char>(std::uniform_int_distribution<int>{}(t_rocblas_rng));
+        return static_cast<int8_t>(std::uniform_int_distribution<int>{}(t_rocblas_rng));
     }
 
     // Random NaN double
@@ -376,6 +376,20 @@ template <>
 inline rocblas_bfloat16 random_hpl_generator()
 {
     return rocblas_bfloat16(std::uniform_real_distribution<float>(-0.5, 0.5)(t_rocblas_rng));
+}
+
+template <>
+inline rocblas_float_complex random_hpl_generator()
+{
+    return rocblas_float_complex{std::uniform_real_distribution<float>(-0.5, 0.5)(t_rocblas_rng),
+                                 std::uniform_real_distribution<float>(-0.5, 0.5)(t_rocblas_rng)};
+}
+
+template <>
+inline rocblas_double_complex random_hpl_generator()
+{
+    return rocblas_double_complex{std::uniform_real_distribution<double>(-0.5, 0.5)(t_rocblas_rng),
+                                  std::uniform_real_distribution<double>(-0.5, 0.5)(t_rocblas_rng)};
 }
 
 /*! \brief  generate a random ASCII string of up to length n */

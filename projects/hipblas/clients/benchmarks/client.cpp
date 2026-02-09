@@ -371,7 +371,7 @@ try
 
         ("workspace",
          value<size_t>(&arg.user_allocated_workspace)->default_value(0),
-         "Set workspace available in handle using xxblasSetWorkspace() API after handle creation"),
+         "Set workspace available in handle using xxblasSetWorkspace() API after handle creation")
 
         ("help,h", "produces this help message");
 

@@ -40,6 +40,10 @@
 #undef __RTTI_ENABLED
 #endif
 
+#ifdef __RTTI_ENABLED
+#include <typeinfo>
+#endif
+
 namespace
 {
     // TODO: It might be desirable to have a similar method implemented for

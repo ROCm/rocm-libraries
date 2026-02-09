@@ -26,7 +26,8 @@
 
 #pragma once
 
-#include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
 
 namespace rocRoller
 {
@@ -43,5 +44,24 @@ namespace rocRoller
          * @brief Get the modifier string for MFMA's input matrix types
         */
         std::string getModifier(DataType dataType);
+
+        /**
+         * Returns opsel modifiers to index byte `lhsByte` for a lhs operand and `rhsByte` for a rhs operand.
+         *
+         * This means:
+         *
+         * lhsByte and rhsByte must be in {0, 1, 2, 3}
+         *
+         * Returns
+         * "op_sel[a0, b0]", "op_sel_hi[a1, b1]"
+         *
+         * where
+         * a0 = bit 0 of lhsByte
+         * a1 = bit 1 of lhsByte
+         * b0 = bit 0 of rhsByte
+         * b1 = bit 1 of rhsByte
+         *
+         */
+        std::tuple<std::string, std::string> getOpselModifiers2xByte(uint lhsByte, uint rhsByte);
     }
 }

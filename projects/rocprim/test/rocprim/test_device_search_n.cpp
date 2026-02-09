@@ -904,12 +904,18 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_1block)
 
         for(const auto size : test_utils::get_sizes(seed_value))
         {
-            using wrapped_config = rocprim::detail::wrapped_search_n_config<config, input_type>;
-            size_t                       temp_storage_size;
-            hipStream_t                  stream = 0; // default
+            using Selector = rocprim::detail::search_n_config_selector<input_type>;
+            size_t      temp_storage_size;
+            hipStream_t stream = 0; // default
+
             rocprim::detail::target_arch target_arch;
             HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config>(target_arch);
+            rocprim::detail::gpu target_gpu;
+            HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
+
+            const rocprim::detail::target current_target(target_arch, target_gpu);
+
+            const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;
@@ -1024,12 +1030,18 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_2block)
 
         for(const auto size : test_utils::get_sizes(seed_value))
         {
-            using wrapped_config = rocprim::detail::wrapped_search_n_config<config, input_type>;
-            size_t                       temp_storage_size;
-            hipStream_t                  stream = 0; // default
+            using Selector = rocprim::detail::search_n_config_selector<input_type>;
+            size_t      temp_storage_size;
+            hipStream_t stream = 0; // default
+
             rocprim::detail::target_arch target_arch;
             HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config>(target_arch);
+            rocprim::detail::gpu target_gpu;
+            HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
+
+            const rocprim::detail::target current_target(target_arch, target_gpu);
+
+            const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;
@@ -1144,12 +1156,18 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_3block)
 
         for(const auto size : test_utils::get_sizes(seed_value))
         {
-            using wrapped_config = rocprim::detail::wrapped_search_n_config<config, input_type>;
-            size_t                       temp_storage_size;
-            hipStream_t                  stream = 0; // default
+            using Selector = rocprim::detail::search_n_config_selector<input_type>;
+            size_t      temp_storage_size;
+            hipStream_t stream = 0; // default
+
             rocprim::detail::target_arch target_arch;
             HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config>(target_arch);
+            rocprim::detail::gpu target_gpu;
+            HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
+
+            const rocprim::detail::target current_target(target_arch, target_gpu);
+
+            const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;
@@ -1264,12 +1282,18 @@ TYPED_TEST(RocprimDeviceSearchNTests, MultiResult1)
 
         for(const auto size : test_utils::get_sizes(seed_value))
         {
-            using wrapped_config = rocprim::detail::wrapped_search_n_config<config, input_type>;
-            size_t                       temp_storage_size;
-            hipStream_t                  stream = 0; // default
+            using Selector = rocprim::detail::search_n_config_selector<input_type>;
+            size_t      temp_storage_size;
+            hipStream_t stream = 0; // default
+
             rocprim::detail::target_arch target_arch;
             HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config>(target_arch);
+            rocprim::detail::gpu target_gpu;
+            HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
+
+            const rocprim::detail::target current_target(target_arch, target_gpu);
+
+            const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;
@@ -1385,12 +1409,18 @@ TYPED_TEST(RocprimDeviceSearchNTests, MultiResult2)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         for(const auto size : test_utils::get_sizes(seed_value))
         {
-            using wrapped_config = rocprim::detail::wrapped_search_n_config<config, input_type>;
-            size_t                       temp_storage_size;
-            hipStream_t                  stream = 0; // default
+            using Selector = rocprim::detail::search_n_config_selector<input_type>;
+            size_t      temp_storage_size;
+            hipStream_t stream = 0; // default
+
             rocprim::detail::target_arch target_arch;
             HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config>(target_arch);
+            rocprim::detail::gpu target_gpu;
+            HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
+
+            const rocprim::detail::target current_target(target_arch, target_gpu);
+
+            const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;

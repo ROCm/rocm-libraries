@@ -42,6 +42,12 @@ def suite(parser: argparse.ArgumentParser):
     parser.add_argument("--suite", help="Benchmark suite to run.")
 
 
+def id_filter(parser: argparse.ArgumentParser):
+    parser.add_argument(
+        "--id-filter", help="Filter benchmarks in a suite by id.", nargs="*", type=str
+    )
+
+
 def x_value(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--x_value",

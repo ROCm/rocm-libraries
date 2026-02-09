@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -89,7 +89,7 @@ def makeValidWMMA():
 def makeValidMFMA():
     validMFMA = {}
     validMFMA["H"] = [[32, 32, 16, 1], [32, 32, 4, 2], [32, 32, 8, 1], [16, 16, 32, 1], [16, 16, 4, 4], [16, 16, 16, 1], [4, 4, 4, 16]]
-    validMFMA["S"] = [[32, 32, 1, 2], [32, 32, 2, 1], [16, 16, 1, 4], [16, 16, 4, 1], [4, 4, 1, 16]]
+    validMFMA["S"] = [[32, 32, 1, 2], [32, 32, 2, 1], [16, 16, 1, 4], [16, 16, 4, 1], [4, 4, 1, 16], [16, 16, 32, 1], [32, 32, 16, 1]]
     validMFMA["B"] = [[32, 32, 16, 1], [32, 32, 2, 2], [32, 32, 4, 1], [16, 16, 32, 1], [16, 16, 2, 4], [16, 16, 8, 1], [4, 4, 2, 16]]
     validMFMA["4xi8"] = [
         [32, 32, 4, 2],
@@ -111,7 +111,7 @@ def makeValidMFMA():
         [16, 16, 16, 1],
         [4, 4, 4, 16],
     ] + [[32, 32, 16, 1], [16, 16, 32, 1],] + [[16, 16, 64, 1],[32, 32, 32, 1]]
-    validMFMA["X"] = [[32, 32, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1]]
+    validMFMA["X"] = [[32, 32, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1], [16, 16, 32, 1], [32, 32, 16, 1]]
     validMFMA["F8"] = [[32, 32, 16, 1], [16, 16, 32, 1], [32, 32, 64, 1], [16, 16, 128, 1]]
     validMFMA["B8"] = validMFMA["F8"]
     validMFMA["F8B8"] = validMFMA["F8"]
@@ -225,6 +225,12 @@ validParameters = { # we need to make sure this matches develop
     # Add an unrolled loop and NGLL loop with swapped GRA and GRB order.
     # which may change the tlb thrashing behavior.
     "UnrollLoopSwapGlobalReadOrder": [0, 1],
+    # swap global read order
+    # 0: A->B->A->B->repeat... (or swap depending on DTL and/or DTV)
+    # 1: B->A->B->A->repeat...
+    # normal/DTL/DTV should be same for A and B to swap GR order
+    # (normalA + normalB) or (DTLA + DTLB) or (DTVA + DTVB)
+    "SwapGlobalReadOrder": [0, 1],
     # PrefetchGlobalRead = 1:
     # Requires 2X LDS space, and VGPRs for buffering data on way into LDS
     #   prefetch / double-buffer reads from global memory -> vgprs -> lds.
@@ -233,13 +239,27 @@ validParameters = { # we need to make sure this matches develop
     # Do another prefetch while writing data from vgpr to lds.
     #   prefetch / double-buffer reads from global memory -> vgprs --> lds.
     #                                                              |-> prefetch reads
-    "PrefetchGlobalRead": [0, 1, 2],
+    # PrefetchGlobalRead >= 3:
+    # DirectToLds only. Do PGR times prefetch global read before main loop.
+    # Need to allocate PGR+1 or PGR LDS buffer
+    # Allocating PGR+1 LDS buffer is better for instruction scheduling.
+    "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
     # So we can schedule these localReads to the front of the loop
     "ClusterLocalRead": [0, 1],
+    # Allocating PGR+1 LDS buffer if we have enough LDS memory size
+    # Only for DirectToLdsA+B + PGR>=2
+    # -1: auto (enable this for PGR>=3)
+    #  0: disable
+    #  1: enable (force to 0 if not applicable)
+    # IF LDS size exceeds maxLDS,
+    #   PGR>=3: disable (set 0) and continue
+    #   PGR==2: reject (use -1 or 0 in that case)
+    # 1LDSBuffer will be 0 if DtlPlusLdsBuf if enabled
+    "DtlPlusLdsBuf": [-1,0,1],
     # We use double LDS buffer when PrefetchGlobalRead.
     # While it reads data from LDS[0]/[1], it prefetch global data and writes to LDS[1]/[0]
     # If we can make sure all data are read from LDS to register before writing data to LDS, we can use 1 LDS buffer to save LDS memory.
@@ -303,6 +323,13 @@ validParameters = { # we need to make sure this matches develop
     # -1 will derived an optimized value internally
     # -2 will derived an optimized value and override LWPM silently (debug only, not recommended)
     "LocalWritePerMfma": [i / 100 for i in range(1, 3200)] + [-1],
+    # This is to specify minimum number of GR inc instructions per MFMA
+    # PGR>=2 and LocalWritePerMfma==-1 case, lwStart is decided by (number of GRInc) / max(roundup(miLatencyLeft/2), 1)
+    # gfx950 MI16 case, miLatencyLeft is 2 and we can schedule only 1 GRInc per MFMA.
+    # This pushes lwStart below and ends up with very less room for GR scheduling.
+    # For mid/small MT size case, we have chance to improve Global Read scheduling by putting more GRInc instructions
+    # regardless of miLatencyLeft (overhead of GR inst is often more than the latency of GR inc inst)
+    "MinGRIncPerMfma": [-1] + list(range(1,10)),
     # Interleave alpha scale calculation with beta loads and address calcs - rather
     # than as a separate block of instructions
     "InterleaveAlpha": [0, 1],
@@ -332,7 +359,11 @@ validParameters = { # we need to make sure this matches develop
     #      GlobalReadVectorWidth = 1/2/4 (GRVW * bpe must be 4 for now)
     #      TransposeLDS = 1 for TLU=0 case
     # DirectToLds support for x1 only for now
-    "DirectToLds": [False, True],
+    #  0: no DirectToLds
+    #  1: DirectToLds A and B
+    #  2: DirectToLds A only (no DTLB)
+    #  3: DirectToLds B only (no DTLA)
+    "DirectToLds": [0, 1, 2, 3],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:
@@ -459,7 +490,8 @@ validParameters = { # we need to make sure this matches develop
     # StaggerUStride will be internally increased so it is an integer multiple of DepthU*BpeAB.
     # (the implementation requires this - the unroll iteration accesses data in steps of
     # DepthU*BPE
-    "StaggerUStride": [-1, 16, 32, 64, 128, 256, 512, 1024, 2048],
+    # StaggerUStride = 0 is valid only when StaggerU = 0
+    "StaggerUStride": [-1, 0, 16, 32, 64, 128, 256, 512, 1024, 2048],
     # How the tile assignment (wg0, wg1, wg2) controls the initial StaggerU offset:
     # 0: Use wg0
     # 1: Use wg1
@@ -509,18 +541,56 @@ validParameters = { # we need to make sure this matches develop
     "WorkGroupMapping": list(
         range(-1024, 1024 + 1)
     ),  # change a workgroup's id so that the all the workgroups on the gpu at a time are hitting L2 cache the best
+    # 0: WorkGroupMapping is predicted at runtime.
+    # 1: No mapping
     "WorkGroupMappingXCC": [
-        1,
-        2,
-        4,
-        8,
-        16,
-        32,
+        -1,
+         1,
+         2,
+         4,
+         8,
+         16,
+         32,
     ],  # change a workgroup's id so that contiguous workgroup can map on same XCC
-    # -1 : WorkGroupMappingXCCGroup will be set to CU_count at runtime. Please ensure that (CU_count % WGMXCC == 0).
+    # -1: WorkGroupMappingXCCGroup will be set dynamically at runtime. Note that this is consistent with what StreamKXCCMapping
+    # does, but the value for the mapping will be set at runtime (=num_xcc).
+    # Please ensure that (CU_count % WGMXCC == 0).
     "WorkGroupMappingXCCGroup": list(
         range(-1, 1024)
     ),  # change a workgroup's id so that contiguous workgroup can map on same XCC, remap workgroup in a group of WGMXCCG.
+    # Use Space-filling-algorithm to determine workgroup mapping
+    # Parameter is provided as a list of integers. The length of the list indicates the level depth.
+    # Each integer represents an ordering ID to denote which ordering to use at each level.
+    # An empty array means use default (old) WGM algo
+    #
+    # With multi-level orderings the WGM values contains grid dims for each level encoded as 8bit values
+    # WGM: (msb) [GridDimN_L2, GridDimM_L2, GridDimN_L1, GridDimM_L1] (lsb)
+    #
+    # Order IDS:
+    # 0 : map workgroup IDs to C based on col-major order
+    # 1 : map workgroup IDs to C based on row-major order
+    # 2 : map workgroup IDs to C tiles based on Hilbert curve
+    # 3 : map workgroup IDs to C tiles based on Morton Z-curve
+    # 4 : map workgroup IDs to C tiles based on Morton (reverseN)-curve
+    # 5 : map workgroup IDs to C tiles based on Morton U-curve
+    #
+    # Examples:
+    # [0]: Single level ordering of C tiles using column major ordering
+    # [0,1]: Double level ordering of C tiles using column major ordering, then row-major
+    # [1,1,1]: Triple level ordering of C tiles using row major ordering at each level
+    "SpaceFillingAlgo" : -1,
+    # Used to specify the grid dims for each level when using SpaceFillingAlgo. This value is directly passed into the
+    # WGM parameter. The format is
+    # WGM: (msb) [GridDimN_L2, GridDimM_L2, GridDimN_L1, GridDimM_L1] (lsb)
+    #
+    # Examples:
+    # 0x01020304
+    #  - Level1 grid dim 4x3
+    #  - Level2 grid dim 2x1 (if enabled, otherwise last 16 bit values are ignored)
+    # 0x10010820
+    #  - Level1 grid dim 32x8
+    #  - Level2 grid dim 1x16 (if enabled, otherwise last 16 bit values are ignored)
+    "SFCWGM" : -1,
     "MaxOccupancy": list(
         range(1, 40 + 1)
     ),  # wg / CU; if cache thrashing is hurting performance, this allocates extra lds to artificially limit occupancy
@@ -651,9 +721,13 @@ validParameters = { # we need to make sure this matches develop
     "StreamKAtomic": [0, 1],
     # Enables XCC-based remapping of workgroups, set the value to the number of XCCs
     # for the device/configuration being used
-    # 0: uses default workgroup assignment
+    #  0: uses default workgroup assignment
     # 2+: remaps workgroups to be contiguous within an XCC for a given number of XCCs
     "StreamKXCCMapping": [0] + list(range(2, 9)),
+    # Enables using a Tree-reduction for the fixup step of StreamK algorithm
+    # 0: use linear reduction
+    # 1: use tree reduction
+    "StreamKFixupTreeReduction": [0, 1],
     # Debug settings for stream-k kernels to disable parts of the kernel
     #   Bit 0: Don't generate fixup code
     #   Bit 1: Don't generate write to partials code
@@ -744,6 +818,7 @@ validParameters = { # we need to make sure this matches develop
     # 1  : keep LDS layout same as global fetch dimension for both A and B for NN,TN,TT, but NT would be rejected
     # 2  : coalesced dimension of lds is unroll dimension for both A and B
     "TransposeLDS": [-1, 1, 0, 2],
+    "TransposeLDSMetadata": [-1, 1, 0],
     # add gls or slc after global memory read/writes to change caching, not caching the writes is promising and improved performance a tiny bit
     # 0: none, 1: glc, 2: slc, 3: glc slc
     # For gfx942, sets sc0/sc1/nt bits
@@ -815,6 +890,32 @@ validParameters = { # we need to make sure this matches develop
     # 0  : Fetch from workgroup dim -> elements dim. (default)
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
+    # Select whether to enable CMS
+    # CMS is supported for a given solution if there exists a CMS schedule in Components/CustomSchedule.py
+    #
+    # -1 : 0 if CMS is not supported, 1 if CMS is supported
+    # 0  : disable CMS even if supported
+    # 1  : enable  CMS, is set to 0 if not supported
+    "UseCustomMainLoopSchedule" : [-1, 0, 1],
+    "AdaptiveGemm": [0, 1],
+    # Add extra latency to calculate number of MFMA to insert between local read and wait
+    # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
+    "ExtraLatencyForLR":          list(range(0,17,2)) + list(range(-80,0,10)),
+    # Add extra miLatencyLeft to improve local read scheduling
+    # Adding more room for scheduling local read instructions
+    # Tentative: setting >=0 value will invalidate miLatency/miIssueLatency adjustment for gfx950 + 2Byte
+    "ExtraMiLatencyLeft": [-1,0,1,2,3,4,6,8],
+    # TailLoop in NoLoadLoop optimization
+    # generate TailLoop code in NoLoadLoop to take advantage of prefetch and wider globalLoad plus instruction scheduling
+    # Need certain conditions to use TailloopInNll optimization
+    # - NT transpose or AssertSummationElementMultiple * bpeGR is multiple of 4 (with BufferLoad + ShiftPtr)
+    "TailloopInNll": [False, True],
+    # Schedule global read instructions over barrier sync.
+    # Only for DirectToLdsA+B + PGR>=2.
+    # -1: auto (enable this for PGR>=3)
+    #  0: disable
+    #  1: enable (force to 0 if not applicable)
+    "ScheduleGROverBarrier": [-1,0,1],
 }
 
 newMIValidParameters = {
@@ -843,6 +944,37 @@ newMIValidParameters = {
     'WorkGroup': -1,
 }
 
+def checkSpaceFillAlgoIsValid(name, value):
+    if type(value) != list:
+        msgBase = "Invalid parameter value: {} = {}\nMust be a list of values"
+        raise Exception(msgBase.format(name, value))
+    elif len(value) > 3:
+        msgBase = "Invalid parameter value: {} = {}\nOnly 3 level ordering supported"
+        raise Exception(msgBase.format(name, value))
+    else:
+        maxOrderID = 5
+        for orderId in value:
+            if orderId not in range(0,maxOrderID + 1):
+                msgBase = "Invalid parameter value: {} = {}\nOrderID out of range"
+                raise Exception(msgBase.format(name, value))
+
+def checkSpaceFillAlgoWGMIsValid(name, value):
+    if type(value) != list:
+        msgBase = "Invalid parameter value: {} = {}\nMust be a nested list of values"
+        raise Exception(msgBase.format(name, value))
+    elif len(value) > 2:
+        msgBase = "Invalid parameter value: {} = {}\nOnly 3 level ordering supported"
+        raise Exception(msgBase.format(name, value))
+    else:
+        for pair in value:
+            if len(pair) != 2:
+                msgBase = "Invalid parameter value: {} = {}\nMust be exactly 2 values per level"
+                raise Exception(msgBase.format(name, value))
+            for dim in pair:
+                if dim not in range(0,256):
+                    msgBase = "Invalid parameter value: {} = {}\nGridDim {} out of range [0,256)"
+                    raise Exception(msgBase.format(name, value, dim))
+
 
 def checkParametersAreValid(param, validParams):
     """Ensures paramaters in params exist and have valid values as specified by validParames"""
@@ -868,3 +1000,7 @@ def checkParametersAreValid(param, validParams):
                 else ""
             )
             raise Exception(msgBase.format(name, value, name, validParams[name][:32], msgExt))
+        elif name == "SpaceFillingAlgo":
+            checkSpaceFillAlgoIsValid(name, value)
+        elif name == "SFCWGM":
+            checkSpaceFillAlgoWGMIsValid(name, value)

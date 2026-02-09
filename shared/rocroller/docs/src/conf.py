@@ -31,7 +31,6 @@ import sys
 sys.path.insert(0, os.path.abspath("."))
 import sphinx_rtd_theme  # noqa: F401,E402
 
-
 # -- General configuration ------------------------------------------------
 
 # If your documentation needs a minimal Sphinx version, state it here.

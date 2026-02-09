@@ -47,10 +47,18 @@ def clone(remote: Union[str, Path], repo: Path) -> None:
         [
             "git",
             "clone",
-            "--recurse-submodules",
+            "--no-checkout",
             str(remote),
             str(repo),
         ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "sparse-checkout", "init", "--cone"], cwd=str(repo), check=True
+    )
+    subprocess.run(
+        ["git", "sparse-checkout", "set", "shared/rocroller", "shared/mxdatagenerator"],
+        cwd=str(repo),
         check=True,
     )
 
@@ -129,7 +137,15 @@ def ls_tree(repo: Path = None):
         repo = Path.cwd()
 
     p = subprocess.run(
-        ["git", "ls-tree", "--full-tree", "--full-name", "-r", "--name-only", "HEAD"],
+        [
+            "git",
+            "ls-tree",
+            "--full-tree",
+            "--full-name",
+            "-r",
+            "--name-only",
+            "HEAD:shared/rocroller",
+        ],
         cwd=str(repo),
         stdout=subprocess.PIPE,
         check=True,

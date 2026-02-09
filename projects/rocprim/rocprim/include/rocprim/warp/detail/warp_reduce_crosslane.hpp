@@ -37,10 +37,107 @@ template<class T,
          unsigned int VirtualWaveSize,
          bool         UseAllReduce,
          bool         UseDPP = ROCPRIM_DETAIL_USE_DPP>
-using warp_reduce_crosslane =
-    typename std::conditional<UseDPP,
-                              warp_reduce_dpp<T, VirtualWaveSize, UseAllReduce>,
-                              warp_reduce_shuffle<T, VirtualWaveSize, UseAllReduce>>::type;
+class warp_reduce_crosslane
+{
+private:
+    template<class F>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void dispatch(F&& f)
+    {
+        // We use a dispatch here because when we target SPIR-V, we have to know after
+        // compiling SPIR-V whether DPP is available. Therefore, this check cannot
+        // be done at the C++ constexpr-level.
+        if constexpr(UseDPP)
+        {
+            if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_DPP())
+            {
+                f(warp_reduce_dpp<T, VirtualWaveSize, UseAllReduce>{});
+            }
+            else
+            {
+                f(warp_reduce_shuffle<T, VirtualWaveSize, UseAllReduce>{});
+            }
+        }
+        else
+        {
+            f(warp_reduce_shuffle<T, VirtualWaveSize, UseAllReduce>{});
+        }
+    }
+
+public:
+    using storage_type = detail::empty_storage_type;
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void reduce(T input, T& output, BinaryFunction reduce_op)
+    {
+        dispatch([&](auto warp_reduce_impl) { warp_reduce_impl.reduce(input, output, reduce_op); });
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void reduce(T input, T& output, storage_type& storage, BinaryFunction reduce_op)
+    {
+        (void)storage; // disables unused parameter warning
+        this->reduce(input, output, reduce_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void reduce(T input, T& output, unsigned int valid_items, BinaryFunction reduce_op)
+    {
+        dispatch([&](auto warp_reduce_impl)
+                 { warp_reduce_impl.reduce(input, output, valid_items, reduce_op); });
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void reduce(T              input,
+                T&             output,
+                unsigned int   valid_items,
+                storage_type&  storage,
+                BinaryFunction reduce_op)
+    {
+        (void)storage; // disables unused parameter warning
+        this->reduce(input, output, valid_items, reduce_op);
+    }
+
+    template<class Flag, class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void head_segmented_reduce(T input, T& output, Flag flag, BinaryFunction reduce_op)
+    {
+        dispatch([&](auto warp_reduce_impl)
+                 { warp_reduce_impl.head_segmented_reduce(input, output, flag, reduce_op); });
+    }
+
+    template<class Flag, class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void head_segmented_reduce(
+        T input, T& output, Flag flag, storage_type& storage, BinaryFunction reduce_op)
+    {
+        dispatch(
+            [&](auto warp_reduce_impl)
+            { warp_reduce_impl.head_segmented_reduce(input, output, flag, storage, reduce_op); });
+    }
+
+    template<class Flag, class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void tail_segmented_reduce(T input, T& output, Flag flag, BinaryFunction reduce_op)
+    {
+        dispatch([&](auto warp_reduce_impl)
+                 { warp_reduce_impl.tail_segmented_reduce(input, output, flag, reduce_op); });
+    }
+
+    template<class Flag, class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void tail_segmented_reduce(
+        T input, T& output, Flag flag, storage_type& storage, BinaryFunction reduce_op)
+    {
+        dispatch(
+            [&](auto warp_reduce_impl)
+            { warp_reduce_impl.tail_segmented_reduce(input, output, flag, storage, reduce_op); });
+    }
+};
 
 } // end namespace detail
 

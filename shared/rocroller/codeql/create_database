@@ -40,7 +40,7 @@ export CCACHE_DISABLE=1
 
 mkdir -p "${DIR}rr-database-new"
 mkdir -p "${DIR}rr-build-new"
-cmake -G Ninja -S . -B "${DIR}rr-build-new" -DCODE_ANALYSIS=ON
+cmake --preset codeql -G Ninja -S . -B "${DIR}rr-build-new"
 
 codeql database create "${DIR}rr-database-new" --source-root="$(readlink -f .)" \
   --codescanning-config=codeql/scanning.yml \
@@ -52,6 +52,6 @@ codeql database create "${DIR}rr-database-new" --source-root="$(readlink -f .)" 
 
 # Only overwrite old dirs at end
 rm -rf "${DIR}rr-database"
-rm -rf "${DIR}rr-build" 
+rm -rf "${DIR}rr-build"
 mv -f "${DIR}rr-database-new" "${DIR}rr-database"
 mv -f "${DIR}rr-build-new" "${DIR}rr-build"

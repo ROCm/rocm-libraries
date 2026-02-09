@@ -107,7 +107,8 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  <tr><td>rocsparse_spmv_alg_csr_rowsplit</td> <td>Yes</td>       <td>Is best suited for matrices with all rows having a similar number of non-zeros. Can out perform adaptive and LRB algorithms in certain sparsity patterns. Will perform very poorly if some rows have few non-zeros and some rows have many non-zeros.</td>
 *  <tr><td>rocsparse_spmv_alg_csr_stream</td>   <td>Yes</td>       <td>[Deprecated] old name for rocsparse_spmv_alg_csr_rowsplit.</td>
 *  <tr><td>rocsparse_spmv_alg_csr_adaptive</td> <td>No</td>        <td>Generally the fastest algorithm across all matrix sparsity patterns. This includes matrices that have some rows with many non-zeros and some rows with few non-zeros. Requires a lengthy preprocessing that needs to be amortized over many subsequent sparse vector products.</td>
-*  <tr><td>rocsparse_spmv_alg_csr_lrb</td>      <td>No</td>        <td>Like adaptive algorithm, generally performs well accross all matrix sparsity patterns. Generally not as fast as adaptive algorithm, however uses a much faster pre-processing step. Good for when only a few number of sparse vector products will be performed.</td>
+*  <tr><td>rocsparse_spmv_alg_csr_lrb</td>      <td>No</td>        <td>Like adaptive algorithm, generally performs well across all matrix sparsity patterns. Generally not as fast as adaptive algorithm, however uses a much faster pre-processing step. Good for when only a few number of sparse vector products will be performed.</td>
+*  <tr><td>rocsparse_spmv_alg_csr_nnzsplit</td> <td>No</td>        <td>Like adaptive algorithm, generally performs well across all matrix sparsity patterns. Generally not as fast as adaptive algorithm but faster than LRB algorithm. It uses a much faster pre-processing step than LRB. Good for when the number of sparse vector products that will be performed is less than one hundred. If more products need to be computed, the adaptive algorithm is probably faster.</td>
 *  </table>
 *
 *  <table>
@@ -121,6 +122,12 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  <caption id="v2_spmv_ell_algorithms">ELL Algorithms</caption>
 *  <tr><th>ELL Algorithms                <th>Deterministic   <th>Notes
 *  <tr><td>rocsparse_spmv_alg_ell</td>   <td>Yes</td>        <td></td>
+*  </table>
+*
+*  <table>
+*  <caption id="v2_spmv_sell_algorithms">Sliced ELL Algorithms</caption>
+*  <tr><th>ELL Algorithms                <th>Deterministic   <th>Notes
+*  <tr><td>rocsparse_spmv_alg_sell</td>   <td>Yes</td>        <td></td>
 *  </table>
 *
 *  <table>
@@ -147,10 +154,12 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="v2_spmv_mixed">Mixed Precisions</caption>
-*  <tr><th>A / X                    <th>Y                        <th>compute_type
-*  <tr><td>rocsparse_datatype_i8_r  <td>rocsparse_datatype_i32_r <td>rocsparse_datatype_i32_r
-*  <tr><td>rocsparse_datatype_i8_r  <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
-*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
+*  <tr><th>A / X                     <th>Y                         <th>compute_type
+*  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_i32_r  <td>rocsparse_datatype_i32_r
+*  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_f32_r  <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f32_r  <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_r
 *  </table>
 *
 *  \par Mixed-regular real precisions
@@ -187,6 +196,9 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  Only the stage \ref rocsparse_v2_spmv_stage_compute
 *  supports execution in a hipGraph context. The \ref rocsparse_v2_spmv_stage_analysis stage does not support hipGraph.
 *
+*  \note
+*  This routine does not support batched computation.
+*
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.
 *  @param[in]
@@ -218,193 +230,7 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  \retval      rocsparse_status_not_implemented if \p alg is not supported or if the mixed precision configuration is not supported.
 *
 *  \par Example
-*  \code{.c}
-*   //     1 4 0 0 0 0
-*   // A = 0 2 3 0 0 0
-*   //     5 0 0 7 8 0
-*   //     0 0 9 0 6 0
-*   int m   = 4;
-*   int n   = 6;
-*
-*   std::vector<int> hcsr_row_ptr = {0, 2, 4, 7, 9};
-*   std::vector<int> hcsr_col_ind = {0, 1, 1, 2, 0, 3, 4, 2, 4};
-*   std::vector<float> hcsr_val   = {1, 4, 2, 3, 5, 7, 8, 9, 6};
-*   std::vector<float> hx(n, 1.0f);
-*   std::vector<float> hy(m, 0.0f);
-*
-*   // Scalar alpha
-*   float alpha = 3.7f;
-*
-*   // Scalar beta
-*   float beta = 0.0f;
-*
-*   int nnz = hcsr_row_ptr[m] - hcsr_row_ptr[0];
-*
-*   // Offload data to device
-*   int* dcsr_row_ptr;
-*   int* dcsr_col_ind;
-*   float* dcsr_val;
-*   float* dx;
-*   float* dy;
-*   hipMalloc((void**)&dcsr_row_ptr, sizeof(int) * (m + 1));
-*   hipMalloc((void**)&dcsr_col_ind, sizeof(int) * nnz);
-*   hipMalloc((void**)&dcsr_val, sizeof(float) * nnz);
-*   hipMalloc((void**)&dx, sizeof(float) * n);
-*   hipMalloc((void**)&dy, sizeof(float) * m);
-*
-*   hipMemcpy(dcsr_row_ptr, hcsr_row_ptr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*   hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice);
-*   hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-*   hipMemcpy(dx, hx.data(), sizeof(float) * n, hipMemcpyHostToDevice);
-*
-*   rocsparse_handle     handle;
-*   rocsparse_error      p_error[1] = {};
-*   rocsparse_spmat_descr matA;
-*   rocsparse_dnvec_descr vecX;
-*   rocsparse_dnvec_descr vecY;
-*
-*   rocsparse_indextype row_idx_type = rocsparse_indextype_i32;
-*   rocsparse_indextype col_idx_type = rocsparse_indextype_i32;
-*   rocsparse_datatype  data_type = rocsparse_datatype_f32_r;
-*   rocsparse_index_base idx_base = rocsparse_index_base_zero;
-*   rocsparse_operation trans = rocsparse_operation_none;
-*
-*   rocsparse_create_handle(&handle);
-*
-*   // Create sparse matrix A
-*   rocsparse_create_csr_descr(&matA,
-*                              m,
-*                              n,
-*                              nnz,
-*                              dcsr_row_ptr,
-*                              dcsr_col_ind,
-*                              dcsr_val,
-*                              row_idx_type,
-*                              col_idx_type,
-*                              idx_base,
-*                              data_type);
-*
-*   // Create dense vector X
-*   rocsparse_create_dnvec_descr(&vecX,
-*                                n,
-*                                dx,
-*                                data_type);
-*
-*   // Create dense vector Y
-*   rocsparse_create_dnvec_descr(&vecY,
-*                                m,
-*                                dy,
-*                                data_type);
-*
-*   rocsparse_spmv_descr spmv_descr;
-*   rocsparse_create_spmv_descr(&spmv_descr);
-*
-*   const rocsparse_spmv_alg spmv_alg = rocsparse_spmv_alg_csr_adaptive;
-*   rocsparse_spmv_set_input(handle,
-*                            spmv_descr,
-*                            rocsparse_spmv_input_alg,
-*                            &spmv_alg,
-*                            sizeof(spmv_alg),
-*                            p_error);
-*
-*   const rocsparse_operation spmv_operation = rocsparse_operation_none;
-*   rocsparse_spmv_set_input(handle,
-*                            spmv_descr,
-*                            rocsparse_spmv_input_operation,
-*                            &spmv_operation,
-*                            sizeof(spmv_operation),
-*                            p_error);
-*
-*   const rocsparse_datatype spmv_scalar_datatype = rocsparse_datatype_f32_r;
-*   rocsparse_spmv_set_input(handle,
-*                            spmv_descr,
-*                            rocsparse_spmv_input_scalar_datatype,
-*                            &spmv_scalar_datatype,
-*                            sizeof(spmv_scalar_datatype),
-*                            p_error);
-*
-*   const rocsparse_datatype spmv_compute_datatype = rocsparse_datatype_f64_r;
-*   rocsparse_spmv_set_input(handle,
-*                            spmv_descr,
-*                            rocsparse_spmv_input_compute_datatype,
-*                            &spmv_compute_datatype,
-*                            sizeof(spmv_compute_datatype),
-*                            p_error);
-*
-*   // Call spmv to get buffer size
-*   size_t buffer_size;
-*   rocsparse_v2_spmv_buffer_size(handle,
-*                                 spmv_descr,
-*                                 matA,
-*                                 vecX,
-*                                 vecY,
-*                                 rocsparse_v2_spmv_stage_analysis,
-*                                 &buffer_size,
-*                                 p_error);
-*
-*   void* buffer;
-*   hipMalloc(&buffer, buffer_size);
-*
-*   // Call spmv to perform analysis
-*   rocsparse_v2_spmv(handle,
-*                     spmv_descr,
-*                     &alpha,
-*                     matA,
-*                     vecX,
-*                     &beta,
-*                     vecY,
-*                     rocsparse_v2_spmv_stage_analysis,
-*                     buffer_size,
-*                     buffer,
-*                     p_error);
-*
-*   hipFree(buffer);
-*
-*   rocsparse_v2_spmv_buffer_size(handle,
-*                                 spmv_descr,
-*                                 matA,
-*                                 vecX,
-*                                 vecY,
-*                                 rocsparse_v2_spmv_stage_compute,
-*                                 &buffer_size,
-*                                 p_error);
-*
-*   hipMalloc(&buffer, buffer_size);
-*
-*   // Call spmv to perform computation
-*   rocsparse_v2_spmv(handle,
-*                     spmv_descr,
-*                     &alpha,
-*                     matA,
-*                     vecX,
-*                     &beta,
-*                     vecY,
-*                     rocsparse_v2_spmv_stage_compute,
-*                     buffer_size,
-*                     buffer,
-*                     p_error);
-*
-*   hipFree(buffer);
-
-*   rocsparse_destroy_error(p_error[0]);
-*   rocsparse_destroy_spmv_descr(spmv_descr);
-*
-*   // Copy result back to host
-*   hipMemcpy(hy.data(), dy, sizeof(float) * m, hipMemcpyDeviceToHost);
-*
-*   // Clear rocSPARSE
-*   rocsparse_destroy_spmat_descr(matA);
-*   rocsparse_destroy_dnvec_descr(vecX);
-*   rocsparse_destroy_dnvec_descr(vecY);
-*   rocsparse_destroy_handle(handle);
-*
-*   // Clear device memory
-*   hipFree(dcsr_row_ptr);
-*   hipFree(dcsr_col_ind);
-*   hipFree(dcsr_val);
-*   hipFree(dx);
-*   hipFree(dy);
-*  \endcode
+*  \snippet example_rocsparse_v2_spmv.cpp doc example
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
@@ -418,6 +244,83 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
                                    size_t                      buffer_size_in_bytes,
                                    void*                       buffer,
                                    rocsparse_error*            error);
+
+/*! \ingroup generic_module
+ *  \brief Set extra scalar and vector parameters for spmv
+ *
+ *  \details
+ *  \p rocsparse_spmv_set_extra sets a gamma dnvec vector and z vectors
+ *  appended to the spmv computation. The computation will be:
+ *  \f$y = \alpha * op(A) * x + \beta * y + \sum_{i=1}^{n} \gamma_i z_i\f$
+ *  where \f$n\f$ is the number of extra terms set by \p num_extras.
+ *
+ *  This feature can be used to implement residual calculations of the form
+ *  \f$r = b - A * x\f$ within the SpMV call by setting \f$\gamma = 1\f$ and \f$z = b\f$.
+ *
+ *  \par Datatype Requirements
+ *  The following datatype requirements must be satisfied:
+ *  - The \p gamma_vec datatype must match the scalar datatype set via
+ *    \ref rocsparse_spmv_set_input with \p rocsparse_spmv_input_scalar_datatype
+ *  - All \p z_vecs must have the same datatype as the compute datatype set via
+ *    \ref rocsparse_spmv_set_input with \p rocsparse_spmv_input_compute_datatype
+ *  - The size of \p gamma_vec must equal \p num_extras
+ *  - All \p z_vecs must have the same size (vector length)
+ *  - Both scalar and compute datatypes must be set on the descriptor before calling this function
+ *
+ *  @param[in]
+ *  handle          handle to the rocsparse library context queue.
+ *  @param[inout]
+ *  descr           spmv descriptor.
+ *  @param[in]
+ *  num_extras      number of extra terms (gamma/z pairs).
+ *  @param[in]
+ *  gamma_vec       dense vector descriptor containing gamma scalars. Must have datatype matching
+ *                  the scalar datatype and size equal to \p num_extras.
+ *  @param[in]
+ *  z_vecs          array of dense vector descriptors for z vectors. All vectors must have
+ *                  datatype matching the compute datatype and the same size.
+ *  @param[out]
+ *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_handle the library context was not initialized.
+ *  \retval rocsparse_status_invalid_pointer \p descr, \p gamma_vec, or \p z_vecs is invalid.
+ *  \retval rocsparse_status_invalid_value invalid parameters, including datatype mismatches
+ *          or missing scalar/compute datatype configuration.
+ *  \retval rocsparse_status_invalid_size size mismatches between \p gamma_vec and \p num_extras,
+ *          or between \p z_vecs elements.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spmv_set_extra(rocsparse_handle             handle,
+                                          rocsparse_spmv_descr         descr,
+                                          int64_t                      num_extras,
+                                          rocsparse_const_dnvec_descr  gamma_vec,
+                                          rocsparse_const_dnvec_descr* z_vecs,
+                                          rocsparse_error*             p_error);
+
+/*! \ingroup generic_module
+ *  \brief Clear extra parameters for spmv
+ *
+ *  \details
+ *  \p rocsparse_spmv_clear_extra clears the extra parameters set by
+ *  rocsparse_spmv_set_extra.
+ *
+ *  @param[in]
+ *  handle          handle to the rocsparse library context queue.
+ *  @param[inout]
+ *  descr           spmv descriptor.
+ *  @param[out]
+ *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_handle the library context was not initialized.
+ *  \retval rocsparse_status_invalid_pointer \p descr is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spmv_clear_extra(rocsparse_handle     handle,
+                                            rocsparse_spmv_descr descr,
+                                            rocsparse_error*     p_error);
+
 #ifdef __cplusplus
 }
 #endif

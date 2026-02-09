@@ -248,16 +248,15 @@ namespace rocRoller
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }
 
-    Generator<Instruction>
-        MemoryInstructions::loadAndPack(MemoryKind                        kind,
-                                        Register::ValuePtr                dest,
-                                        Register::ValuePtr                addr1,
-                                        Register::ValuePtr                offset1,
-                                        Register::ValuePtr                addr2,
-                                        Register::ValuePtr                offset2,
-                                        std::string const                 comment,
-                                        std::shared_ptr<BufferDescriptor> buffDesc,
-                                        BufferInstructionOptions          buffOpts)
+    Generator<Instruction> MemoryInstructions::loadAndPack(MemoryKind               kind,
+                                                           Register::ValuePtr       dest,
+                                                           Register::ValuePtr       addr1,
+                                                           Register::ValuePtr       offset1,
+                                                           Register::ValuePtr       addr2,
+                                                           Register::ValuePtr       offset2,
+                                                           std::string const        comment,
+                                                           Register::ValuePtr       buffDesc,
+                                                           BufferInstructionOptions buffOpts)
     {
         AssertFatal(dest && dest->regType() == Register::Type::Vector
                         && dest->variableType() == DataType::Halfx2,

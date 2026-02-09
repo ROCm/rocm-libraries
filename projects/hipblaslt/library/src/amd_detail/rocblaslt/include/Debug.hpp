@@ -96,6 +96,9 @@ namespace rocblaslt
 
         bool printLogAsMarker() const;
 
+        bool benchPrintCommand() const;
+        void setBenchPrint(bool p);
+
         bool preload() const;
 
     private:
@@ -106,6 +109,7 @@ namespace rocblaslt
         bool        m_printMarker       = false;
         bool        m_printLogAsMarker  = false;
         bool        m_preloadAllKernels = false;
+        bool        m_benchPrintCommand = false;
 
         Debug();
     };

@@ -23,6 +23,7 @@
 #pragma once
 #include <algorithm>
 #include <array>
+#include <hip/hip_runtime.h>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -39,7 +40,7 @@ inline std::string getGfxNameTuple(const IsaVersion& isaVersion)
 
     Args:
         arch: An object representing the major, minor, and step version of the ISA.
-    
+
     Returns:
         The name of the GPU architecture (e.g., 'gfx906').
     */
@@ -58,4 +59,15 @@ template <typename T>
 bool checkNotInList(const T& a, const std::vector<T> b)
 {
     return std::find(b.begin(), b.end(), a) == b.end();
+}
+
+// Helper to get device attribute from HIP runtime
+inline int getDeviceAttribute(hipDeviceAttribute_t attr, int deviceId, int defaultValue = 0)
+{
+    int value = defaultValue;
+    if(hipDeviceGetAttribute(&value, attr, deviceId) == hipSuccess)
+    {
+        return value;
+    }
+    return defaultValue;
 }

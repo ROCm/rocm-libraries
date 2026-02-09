@@ -362,7 +362,7 @@ public:
             throw std::runtime_error(std::string("Cannot open repro-db: ") + db_path);
 
         // Access to a database file may occur in parallel.
-        // Increase default sqlite timeout, so diferent process
+        // Increase default sqlite timeout, so different process
         // can wait for one another.
         sqlite3_busy_timeout(db_connection, 30000);
 

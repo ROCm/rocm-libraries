@@ -36,7 +36,7 @@ extern "C" {
 *
 *  \details
 *  \p rocsparse_bsrxmv multiplies the scalar \f$\alpha\f$ with a sparse
-*  \f$m \times n\f$ modified matrix, defined in BSR storage format, and the dense vector \f$x\f$ 
+*  \f$m \times n\f$ modified matrix, defined in BSR storage format, and the dense vector \f$x\f$
 *  and adds the result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$,
 *  such that
 *  \f[

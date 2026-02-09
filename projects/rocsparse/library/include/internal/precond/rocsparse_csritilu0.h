@@ -188,17 +188,17 @@ rocsparse_status rocsparse_csritilu0_preprocess(rocsparse_handle     handle,
 *  \f]
 *  with \f$\epsilon\f$ = \p tol. Note that the calculation of \f$R_k\f$ is performed with no fill-in.
 *
-*  Computing the above iterative incomplete LU factorization requires three steps to complete. First, 
-*  the user determines the size of the required temporary storage buffer by calling \ref rocsparse_csritilu0_buffer_size. 
-*  Once this buffer size has been determined, the user allocates the buffer and passes it to 
-*  \ref rocsparse_csritilu0_preprocess. This will perform analysis on the sparsity pattern of the matrix. Finally, 
-*  the user calls \p rocsparse_scsritilu0_compute, \p rocsparse_dcsritilu0_compute, \p rocsparse_ccsritilu0_compute, 
-*  or \p rocsparse_zcsritilu0_compute to perform the actual factorization. The calculation 
-*  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern 
-*  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls 
+*  Computing the above iterative incomplete LU factorization requires three steps to complete. First,
+*  the user determines the size of the required temporary storage buffer by calling \ref rocsparse_csritilu0_buffer_size.
+*  Once this buffer size has been determined, the user allocates the buffer and passes it to
+*  \ref rocsparse_csritilu0_preprocess. This will perform analysis on the sparsity pattern of the matrix. Finally,
+*  the user calls \p rocsparse_scsritilu0_compute, \p rocsparse_dcsritilu0_compute, \p rocsparse_ccsritilu0_compute,
+*  or \p rocsparse_zcsritilu0_compute to perform the actual factorization. The calculation
+*  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern
+*  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls
 *  to \ref rocsparse_scsritilu0_compute "rocsparse_Xcsritilu0_compute()" are complete, the temporary buffer can be deallocated.
 *
-*  \p rocsparse_csritilu0 has a number of options that can be useful for examining the convergence history, easily printing debug 
+*  \p rocsparse_csritilu0 has a number of options that can be useful for examining the convergence history, easily printing debug
 *  information, and for using COO internal format.
 *  <table>
 *  <caption id="csritilu0 options">Options</caption>
@@ -261,100 +261,7 @@ rocsparse_status rocsparse_csritilu0_preprocess(rocsparse_handle     handle,
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *
 *  \par Example
-*  \code{.c}
-*    int m = 3;
-*    int n = 3;
-*    int nnz = 7;
-*
-*    rocsparse_index_base idx_base = rocsparse_index_base_zero;
-*    rocsparse_datatype datatype = rocsparse_datatype_f32_r;
-*
-*    // 2 1 0
-*    // 1 2 1
-*    // 0 1 2
-*    std::vector<int> hcsr_row_ptr = {0, 2, 5, 7};
-*    std::vector<int> hcsr_col_ind = {0, 1, 0, 1, 2, 1, 2};
-*    std::vector<float> hcsr_val = {2.0f, 1.0f, 1.0f, 2.0f, 1.0f, 1.0f, 2.0f};
-*
-*    int* dcsr_row_ptr = nullptr;
-*    int* dcsr_col_ind = nullptr;
-*    float* dcsr_val = nullptr;
-*    float* dilu0 = nullptr;
-*    hipMalloc((void**)&dcsr_row_ptr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsr_col_ind, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsr_val, sizeof(float) * nnz);
-*    hipMalloc((void**)&dilu0, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcsr_row_ptr, hcsr_row_ptr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    hipMemset(dilu0, 0, sizeof(float) * nnz);
-*
-*    rocsparse_handle handle;
-*    rocsparse_create_handle(&handle);
-*
-*    rocsparse_itilu0_alg alg = rocsparse_itilu0_alg_async_inplace;
-*    int nmaxiter = 1000;
-*    int option = 0;
-*    float tol = 1e-7;
-*
-*    size_t buffer_size;
-*    rocsparse_csritilu0_buffer_size(handle,
-*                                    alg,
-*                                    option,
-*                                    nmaxiter,
-*                                    m,
-*                                    nnz,
-*                                    dcsr_row_ptr,
-*                                    dcsr_col_ind,
-*                                    idx_base,
-*                                    datatype,
-*                                    &buffer_size);
-*
-*    void* dbuffer = nullptr;
-*    hipMalloc((void**)&dbuffer, buffer_size);
-*
-*    rocsparse_csritilu0_preprocess(handle,
-*                                   alg,
-*                                   option,
-*                                   nmaxiter,
-*                                   m,
-*                                   nnz,
-*                                   dcsr_row_ptr,
-*                                   dcsr_col_ind,
-*                                   idx_base,
-*                                   datatype,
-*                                   buffer_size,
-*                                   dbuffer);
-*
-*    rocsparse_scsritilu0_compute(handle,
-*                                 alg,
-*                                 option,
-*                                 &nmaxiter,
-*                                 tol,
-*                                 m,
-*                                 nnz,
-*                                 dcsr_row_ptr,
-*                                 dcsr_col_ind,
-*                                 dcsr_val,
-*                                 dilu0,
-*                                 idx_base,
-*                                 buffer_size,
-*                                 dbuffer);
-*
-*    std::vector<float> hilu0(nnz);
-*    hipMemcpy(hilu0.data(), dilu0, sizeof(float) * nnz, hipMemcpyDeviceToHost);
-*
-*    rocsparse_destroy_handle(handle);
-*
-*    hipFree(dbuffer);
-*
-*    hipFree(dcsr_row_ptr);
-*    hipFree(dcsr_col_ind);
-*    hipFree(dcsr_val);
-*    hipFree(dilu0);
-*  \endcode
+*  \include example_rocsparse_csritilu0.cpp
 */
 /**@{*/
 __attribute__((deprecated("This function is deprecated and will be removed in a future release. "
@@ -588,9 +495,9 @@ rocsparse_status rocsparse_zcsritilu0_compute_ex(rocsparse_handle               
 
 /*! \ingroup precond_module
 *  \details
-*  \p rocsparse_csritilu0_history fetches convergence history data if 
-*  \ref rocsparse_itilu0_option_convergence_history has been set when calling 
-*  \ref rocsparse_scsritilu0_compute "rocsparse_Xcsritilu0_compute" or 
+*  \p rocsparse_csritilu0_history fetches convergence history data if
+*  \ref rocsparse_itilu0_option_convergence_history has been set when calling
+*  \ref rocsparse_scsritilu0_compute "rocsparse_Xcsritilu0_compute" or
 *  \ref rocsparse_scsritilu0_compute_ex "rocsparse_Xcsritilu0_compute_ex":
 *
 *  \code{.c}

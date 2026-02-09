@@ -459,6 +459,8 @@ namespace hipsparse
             return CUDA_R_32I;
         case HIP_R_16F:
             return CUDA_R_16F;
+        case HIP_R_16BF:
+            return CUDA_R_16BF;
         case HIP_R_32F:
             return CUDA_R_32F;
         case HIP_R_64F:
@@ -482,6 +484,8 @@ namespace hipsparse
             return HIP_R_32I;
         case CUDA_R_16F:
             return HIP_R_16F;
+        case CUDA_R_16BF:
+            return HIP_R_16BF;
         case CUDA_R_32F:
             return HIP_R_32F;
         case CUDA_R_64F:
@@ -525,7 +529,26 @@ namespace hipsparse
 #endif
 
     /* Generic API */
-#if(CUDART_VERSION >= 12000)
+#if(CUDART_VERSION >= 12011)
+    inline cusparseFormat_t hipFormatToCudaFormat(hipsparseFormat_t format)
+    {
+        switch(format)
+        {
+        case HIPSPARSE_FORMAT_CSR:
+            return CUSPARSE_FORMAT_CSR;
+        case HIPSPARSE_FORMAT_CSC:
+            return CUSPARSE_FORMAT_CSC;
+        case HIPSPARSE_FORMAT_COO:
+            return CUSPARSE_FORMAT_COO;
+        case HIPSPARSE_FORMAT_BLOCKED_ELL:
+            return CUSPARSE_FORMAT_BLOCKED_ELL;
+        case HIPSPARSE_FORMAT_SLICED_ELL:
+            return CUSPARSE_FORMAT_SLICED_ELLPACK; // Called CUSPARSE_FORMAT_SLICED_ELL in the cusparse docs
+        default:
+            throw "Non existent hipsparseFormat_t";
+        }
+    }
+#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12011)
     inline cusparseFormat_t hipFormatToCudaFormat(hipsparseFormat_t format)
     {
         switch(format)
@@ -578,7 +601,26 @@ namespace hipsparse
     }
 #endif
 
-#if(CUDART_VERSION >= 12000)
+#if(CUDART_VERSION >= 12011)
+    inline hipsparseFormat_t CudaFormatToHIPFormat(cusparseFormat_t format)
+    {
+        switch(format)
+        {
+        case CUSPARSE_FORMAT_CSR:
+            return HIPSPARSE_FORMAT_CSR;
+        case CUSPARSE_FORMAT_CSC:
+            return HIPSPARSE_FORMAT_CSC;
+        case CUSPARSE_FORMAT_COO:
+            return HIPSPARSE_FORMAT_COO;
+        case CUSPARSE_FORMAT_BLOCKED_ELL:
+            return HIPSPARSE_FORMAT_BLOCKED_ELL;
+        case CUSPARSE_FORMAT_SLICED_ELLPACK: // Called CUSPARSE_FORMAT_SLICED_ELL in the cusparse docs
+            return HIPSPARSE_FORMAT_SLICED_ELL;
+        default:
+            throw "Non existent cusparseFormat_t";
+        }
+    }
+#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12011)
     inline hipsparseFormat_t CudaFormatToHIPFormat(cusparseFormat_t format)
     {
         switch(format)
@@ -713,7 +755,28 @@ namespace hipsparse
     }
 #endif
 
-#if(CUDART_VERSION >= 12000)
+#if(CUDART_VERSION >= 12011)
+    inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
+    {
+        switch(alg)
+        {
+        case HIPSPARSE_SPMV_ALG_DEFAULT:
+            return CUSPARSE_SPMV_ALG_DEFAULT;
+        case HIPSPARSE_SPMV_COO_ALG1:
+            return CUSPARSE_SPMV_COO_ALG1;
+        case HIPSPARSE_SPMV_COO_ALG2:
+            return CUSPARSE_SPMV_COO_ALG2;
+        case HIPSPARSE_SPMV_CSR_ALG1:
+            return CUSPARSE_SPMV_CSR_ALG1;
+        case HIPSPARSE_SPMV_CSR_ALG2:
+            return CUSPARSE_SPMV_CSR_ALG2;
+        case HIPSPARSE_SPMV_SELL_ALG1:
+            return CUSPARSE_SPMV_SELL_ALG1;
+        default:
+            throw "Non existant hipsparseSpMVAlg_t";
+        }
+    }
+#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12011)
     inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
     {
         switch(alg)

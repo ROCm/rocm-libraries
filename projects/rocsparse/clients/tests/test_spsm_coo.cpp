@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,8 @@ TEST_ROUTINE_WITH_CONFIG(spsm_coo,
                          level3,
                          rocsparse_test_config_it,
                          arg.M,
+                         arg.N,
+                         arg.K,
                          arg.alpha,
                          arg.alphai,
                          arg.transA,
@@ -38,5 +40,7 @@ TEST_ROUTINE_WITH_CONFIG(spsm_coo,
                          arg.diag,
                          arg.uplo,
                          arg.spsm_alg,
+                         arg.orderB,
+                         arg.orderC,
                          arg.matrix,
                          arg.graph_test);

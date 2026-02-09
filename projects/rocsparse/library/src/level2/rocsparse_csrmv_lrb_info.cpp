@@ -28,6 +28,13 @@
 
 _rocsparse_lrb_info::~_rocsparse_lrb_info()
 {
+    // Due to the changes in the hipFree introduced in HIP 7.0
+    // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
+    // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
+    // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
+    // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
+    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
+
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->wg_flags));
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->rows_offsets_scratch));
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->rows_bins));
@@ -41,6 +48,13 @@ _rocsparse_lrb_info::~_rocsparse_lrb_info()
 
 void _rocsparse_lrb_info::clear()
 {
+    // Due to the changes in the hipFree introduced in HIP 7.0
+    // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
+    // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
+    // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
+    // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
+    THROW_IF_HIP_ERROR(hipDeviceSynchronize());
+
     THROW_IF_HIP_ERROR(rocsparse_hipFree(this->wg_flags));
     THROW_IF_HIP_ERROR(rocsparse_hipFree(this->rows_offsets_scratch));
     THROW_IF_HIP_ERROR(rocsparse_hipFree(this->rows_bins));

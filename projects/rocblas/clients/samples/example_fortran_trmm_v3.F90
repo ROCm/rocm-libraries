@@ -87,7 +87,7 @@ contains
                 end do
             end do
         end if
-    
+
         return
     end subroutine trmm_reference
 end module
@@ -277,7 +277,7 @@ program example_fortran_trmm
                                      c_loc(alpha), dA, lda, dB, ldb         ))
 #endif
     call HIP_CHECK(hipDeviceSynchronize())
-    
+
     ! Stop time
     call date_and_time(values = tend)
 

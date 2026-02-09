@@ -5,8 +5,10 @@
 .. _data_mov_funcs:
 
 ********************************************************************
- Data movement functions
+rocPRIM data movement functions
 ********************************************************************
+
+API reference for rocPRIM data movement functions.
 
 Direct Blocked
 ===============
@@ -66,19 +68,4 @@ Store
 ----------
 
 .. doxygengroup:: blockmodule_warp_store_functions
-   :content-only:
-
-Direct Blocked Cast
-====================
-
-Load
----------
-
-.. doxygengroup:: blockmodule_cast_load_functions
-   :content-only:
-
-Store
-----------
-
-.. doxygengroup:: blockmodule_cast_store_functions
    :content-only:

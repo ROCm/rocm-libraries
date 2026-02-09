@@ -163,6 +163,13 @@ const char* rocsparse_spsv_alg_name(rocsparse_spsv_alg value);
 /// @param[in] value value of the enumeration.
 /// @return The litteral name of the enumeration.
 ///
+const char* rocsparse_sptrsv_alg_name(rocsparse_sptrsv_alg value);
+
+///
+/// @brief Get the litteral name of the enumeration.
+/// @param[in] value value of the enumeration.
+/// @return The litteral name of the enumeration.
+///
 const char* rocsparse_spitsv_alg_name(rocsparse_spitsv_alg value);
 
 ///
@@ -171,6 +178,13 @@ const char* rocsparse_spitsv_alg_name(rocsparse_spitsv_alg value);
 /// @return The litteral name of the enumeration.
 ///
 const char* rocsparse_spsm_alg_name(rocsparse_spsm_alg value);
+
+///
+/// @brief Get the litteral name of the enumeration.
+/// @param[in] value value of the enumeration.
+/// @return The litteral name of the enumeration.
+///
+const char* rocsparse_sptrsm_alg_name(rocsparse_sptrsm_alg value);
 
 ///
 /// @brief Get the litteral name of the enumeration.
@@ -416,6 +430,16 @@ inline const char* rocsparse_enum_name(rocsparse_spsv_alg value)
 /// @param[in] value value of the enumeration.
 /// @return The litteral name of the enumeration.
 ///
+inline const char* rocsparse_enum_name(rocsparse_sptrsv_alg value)
+{
+    return rocsparse_sptrsv_alg_name(value);
+}
+
+///
+/// @brief Get the litteral name of the enumeration.
+/// @param[in] value value of the enumeration.
+/// @return The litteral name of the enumeration.
+///
 inline const char* rocsparse_enum_name(rocsparse_spitsv_alg value)
 {
     return rocsparse_spitsv_alg_name(value);
@@ -429,6 +453,16 @@ inline const char* rocsparse_enum_name(rocsparse_spitsv_alg value)
 inline const char* rocsparse_enum_name(rocsparse_spsm_alg value)
 {
     return rocsparse_spsm_alg_name(value);
+}
+
+///
+/// @brief Get the litteral name of the enumeration.
+/// @param[in] value value of the enumeration.
+/// @return The litteral name of the enumeration.
+///
+inline const char* rocsparse_enum_name(rocsparse_sptrsm_alg value)
+{
+    return rocsparse_sptrsm_alg_name(value);
 }
 
 ///

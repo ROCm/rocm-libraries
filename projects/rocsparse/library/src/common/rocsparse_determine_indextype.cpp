@@ -33,6 +33,7 @@ rocsparse_indextype rocsparse::determine_I_indextype(rocsparse_const_spmat_descr
     case rocsparse_format_ell:
     case rocsparse_format_bell:
     case rocsparse_format_bsr:
+    case rocsparse_format_sell:
     {
         return mat->row_type;
     }
@@ -53,6 +54,7 @@ rocsparse_indextype rocsparse::determine_J_indextype(rocsparse_const_spmat_descr
     case rocsparse_format_ell:
     case rocsparse_format_bell:
     case rocsparse_format_bsr:
+    case rocsparse_format_sell:
     {
         return mat->col_type;
     }

@@ -49,7 +49,7 @@
 #include <iomanip>
 
 // Run CPU emulations in hierarchical reduction mode.
-//#define MIO_HEIRARCH_SEL 0
+// #define MIO_HEIRARCH_SEL 0
 #define MIO_BN_TEST_EXPAVGFACTOR 0.1
 #define MIO_BN_TEST_EPSILON 1e-5
 #define MIO_BN_USE_MIX_PREC 1
@@ -121,7 +121,7 @@ struct verify_forward_train_3d_bn_per_activation
         auto saveInvVar = tensor<U>{1, channels, depth, height, width};
         const auto n    = double(n_batch);
 
-        par_for(channels, 1, [&](int cidx) {
+        miopen::par_for(channels, 1, [&](int cidx) {
             double mean_accum     = 0.;
             double variance_accum = 0.;
             double elemStd        = 0.;
@@ -156,8 +156,8 @@ struct verify_forward_train_3d_bn_per_activation
                                 (input(bidx, cidx, didx, row, column) -
                                  mean_accum); // (x_i - mean) //this is reused but needs recalc
                             variance_accum += elemStd * elemStd; // sum{ (x_i - mean)^2 }
-                        }                                        // end for(n)
-                        variance_accum /= n;                     // (1/N)*sum{ (x_i - mean)^2 }
+                        } // end for(n)
+                        variance_accum /= n; // (1/N)*sum{ (x_i - mean)^2 }
 
                         // #3 add epsilon for numeric stability, sqr_root, and invert
                         elemInvVar = 1.0 / double(sqrt(variance_accum + epsilon));
@@ -190,7 +190,7 @@ struct verify_forward_train_3d_bn_per_activation
                         saveInvVar(0, cidx, didx, row, column) = elemInvVar;
 
                     } // for (column)
-                }     // for (row)
+                } // for (row)
             }
         });
 
@@ -360,7 +360,7 @@ struct verify_forward_infer_3d_bn_per_activation_recalc
 
         const auto n = double(n_batch);
 
-        par_for(channels, 1, [&](int cidx) {
+        miopen::par_for(channels, 1, [&](int cidx) {
             double elemStd        = 0.;
             double elemInvVar     = 0.;
             double mean_accum     = 0.;
@@ -393,8 +393,8 @@ struct verify_forward_infer_3d_bn_per_activation_recalc
                             elemStd =
                                 input(bidx, cidx, didx, row, column) - mean_accum; // (x_i - mean)
                             variance_accum += elemStd * elemStd; // sum{ (x_i - mean)^2 }
-                        }                                        // end for(n)
-                        variance_accum /= n;                     // (1/N)*sum{ (x_i - mean)^2 }
+                        } // end for(n)
+                        variance_accum /= n; // (1/N)*sum{ (x_i - mean)^2 }
 
                         // #3 add epsilon for numeric stability, sqr_root, and invert
                         elemInvVar = 1.0 / double(sqrt(variance_accum + epsilon));
@@ -412,9 +412,9 @@ struct verify_forward_infer_3d_bn_per_activation_recalc
                                 scale(0, cidx, didx, row, column) * inhat +
                                 shift(0, cidx, didx, row, column);
                         } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
-            }             // for (depth)
+                    } // for (column)
+                } // for (row)
+            } // for (depth)
         });
 
 #if(MIO_BN_TIME_EVERYTHING == 1)
@@ -512,7 +512,7 @@ struct verify_forward_infer_3d_bn_per_activation_use_est
         auto out = tensor<T>{n_batch, channels, depth, height, width};
         std::fill(out.begin(), out.end(), 0);
 
-        par_for(channels, 1, [&](int cidx) {
+        miopen::par_for(channels, 1, [&](int cidx) {
             double elemStd    = 0.;
             double mean       = 0.;
             double variance   = 0.;
@@ -538,9 +538,9 @@ struct verify_forward_infer_3d_bn_per_activation_use_est
                                 scale(0, cidx, didx, row, column) * inhat +
                                 shift(0, cidx, didx, row, column);
                         } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
-            }             // for (depth)
+                    } // for (column)
+                } // for (row)
+            } // for (depth)
         });
 
 #if(MIO_BN_TIME_EVERYTHING == 1)
@@ -650,7 +650,7 @@ struct verify_backward_3d_bn_per_activation_use_saved
         const unsigned int in_dstride = height * width;
         const auto n                  = double(n_batch);
 
-        par_for(channels, 1, [&](int cidx) {
+        miopen::par_for(channels, 1, [&](int cidx) {
             double elemStd = 0.;
             unsigned int xhat_index;
             double mean       = 0.;
@@ -701,9 +701,9 @@ struct verify_backward_3d_bn_per_activation_use_saved
                             double tmp3                           = elemInvVar / (double(n));
                             dx_out(bidx, cidx, didx, row, column) = tmp3 * tmp2;
                         } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
-            }             // for (depth)
+                    } // for (column)
+                } // for (row)
+            } // for (depth)
         });
 
 #if(MIO_BN_TIME_EVERYTHING == 1)
@@ -839,7 +839,7 @@ struct verify_backward_3d_bn_per_activation_recalc
         const unsigned int in_dstride = height * width;
         const auto n                  = double(n_batch);
 
-        par_for(channels, 1, [&](int cidx) {
+        miopen::par_for(channels, 1, [&](int cidx) {
             double elemStd = 0.;
             unsigned int xhat_index;
             double mean       = 0.;
@@ -875,8 +875,8 @@ struct verify_backward_3d_bn_per_activation_recalc
                             // per (x-dims) channel load a block of data into LDS
                             elemStd = x_input(bidx, cidx, didx, row, column) - mean; // (x_i - mean)
                             variance += elemStd * elemStd; // sum{ (x_i - mean)^2 }
-                        }                                  // end for(n)
-                        variance /= n;                     // (1/N)*sum{ (x_i - mean)^2 }
+                        } // end for(n)
+                        variance /= n; // (1/N)*sum{ (x_i - mean)^2 }
 
                         // #3 add epsilon for numeric stability, sqr_root, and invert
                         elemInvVar = 1.0 / double(sqrt(variance + epsilon));
@@ -911,9 +911,9 @@ struct verify_backward_3d_bn_per_activation_recalc
                             double tmp3                           = elemInvVar / double(n);
                             dx_out(bidx, cidx, didx, row, column) = tmp3 * tmp2;
                         } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
-            }             // for (depth)
+                    } // for (column)
+                } // for (row)
+            } // for (depth)
         });
 #if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();

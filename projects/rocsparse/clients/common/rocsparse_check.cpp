@@ -215,6 +215,12 @@ void unit_check_enum(const rocsparse_indextype a, const rocsparse_indextype b)
     ASSERT_TRUE(a == b);
 }
 
+template <>
+void unit_check_enum(const rocsparse_status a, const rocsparse_status b)
+{
+    ASSERT_TRUE(a == b);
+}
+
 #define MAX_TOL_MULTIPLIER 4
 
 template <typename T>
@@ -234,7 +240,7 @@ void near_check_general_template(int64_t            M,
         for(int64_t i = 0; i < M; ++i)
         {
             T compare_val = std::max(rocsparse_abs(A[i + j * LDA] * tol),
-                                     10 * std::numeric_limits<T>::epsilon());
+                                     static_cast<T>(10) * std::numeric_limits<T>::epsilon());
 #ifdef GOOGLE_TEST
             if(rocsparse_isnan(A[i + j * LDA]))
             {
@@ -250,7 +256,8 @@ void near_check_general_template(int64_t            M,
                 int k;
                 for(k = 1; k <= MAX_TOL_MULTIPLIER; ++k)
                 {
-                    if(rocsparse_abs(A[i + j * LDA] - B[i + j * LDB]) <= compare_val * k)
+                    if(rocsparse_abs(A[i + j * LDA] - B[i + j * LDB])
+                       <= compare_val * static_cast<T>(k))
                     {
                         break;
                     }
@@ -267,7 +274,8 @@ void near_check_general_template(int64_t            M,
                                 << "ASSERT_NEAR(" << A[i + j * LDA] << ", " << B[i + j * LDB]
                                 << ") failed: " << rocsparse_abs(A[i + j * LDA] - B[i + j * LDB])
                                 << " exceeds permissive range [" << compare_val << ","
-                                << compare_val * MAX_TOL_MULTIPLIER << " ]" << std::endl;
+                                << compare_val * static_cast<T>(MAX_TOL_MULTIPLIER) << " ]"
+                                << std::endl;
                         }
 
                         min_passing_tol = std::max(min_passing_tol,
@@ -483,6 +491,7 @@ void near_check_general(
 
 INSTANTIATE(int32_t);
 INSTANTIATE(_Float16);
+INSTANTIATE(rocsparse_bfloat16);
 INSTANTIATE(float);
 INSTANTIATE(double);
 INSTANTIATE(rocsparse_float_complex);

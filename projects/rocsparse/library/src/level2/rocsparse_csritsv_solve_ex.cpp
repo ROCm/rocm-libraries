@@ -229,8 +229,11 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
     if(descr->diag_type == rocsparse_diag_type_unit)
     {
         rocsparse_int max = std::numeric_limits<rocsparse_int>::max();
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-            info->zero_pivot, &max, sizeof(rocsparse_int), hipMemcpyHostToDevice, stream));
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->csritsv_info->get_zero_pivot(),
+                                           &max,
+                                           sizeof(rocsparse_int),
+                                           hipMemcpyHostToDevice,
+                                           stream));
 
         // Wait for device transfer to finish
         RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
@@ -300,10 +303,11 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
         }
         else
         {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::assign_async(reinterpret_cast<rocsparse_int*>(info->zero_pivot),
-                                        (rocsparse_int)descr->base,
-                                        stream));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_async(
+                1,
+                reinterpret_cast<rocsparse_int*>(info->csritsv_info->get_zero_pivot()),
+                (rocsparse_int)descr->base,
+                stream));
             return rocsparse_status_success;
         }
     }
@@ -441,17 +445,21 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                                                                 ptr_diag,
                                                                 ptr_diag_shift,
                                                                 descr->base,
-                                                                (rocsparse_int*)info->zero_pivot));
+                                                                (rocsparse_int*)info->csritsv_info
+                                                                    ->get_zero_pivot()));
 
-        rocsparse_int zero_pivot;
-
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-            &zero_pivot, info->zero_pivot, sizeof(rocsparse_int), hipMemcpyDeviceToHost, stream));
+        int64_t zero_pivot;
+        auto    csritsv_info = info->csritsv_info;
+        auto    status       = csritsv_info->copy_zero_pivot_async(rocsparse_pointer_mode_host,
+                                                          rocsparse::get_indextype<int64_t>(),
+                                                          &zero_pivot,
+                                                          handle->stream);
         RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-        if(zero_pivot != std::numeric_limits<rocsparse_int>::max())
+        if(status == rocsparse_status_zero_pivot)
         {
             return rocsparse_status_success;
         }
+        RETURN_IF_ROCSPARSE_ERROR(status);
 
         //
         // in y out y

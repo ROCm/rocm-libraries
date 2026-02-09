@@ -7,9 +7,16 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if _CCCL_STD_VER >= 2017
 
 #  include <thrust/system/cuda/detail/execution_policy.h>
 #  include <thrust/system/cuda/pointer.h>
@@ -55,6 +62,7 @@ using thrust::system::cuda::when_all;
 
 } // namespace cuda
 
+_CCCL_SUPPRESS_DEPRECATED_PUSH
 template <typename DerivedPolicy>
 _CCCL_HOST thrust::cuda::unique_eager_event
 unique_eager_event_type(thrust::cuda::execution_policy<DerivedPolicy> const&) noexcept;
@@ -62,9 +70,10 @@ unique_eager_event_type(thrust::cuda::execution_policy<DerivedPolicy> const&) no
 template <typename T, typename DerivedPolicy>
 _CCCL_HOST thrust::cuda::unique_eager_future<T>
 unique_eager_future_type(thrust::cuda::execution_policy<DerivedPolicy> const&) noexcept;
+_CCCL_SUPPRESS_DEPRECATED_POP
 
 THRUST_NAMESPACE_END
 
 #  include <thrust/system/cuda/detail/future.inl>
 
-#endif // C++14
+#endif // C++17

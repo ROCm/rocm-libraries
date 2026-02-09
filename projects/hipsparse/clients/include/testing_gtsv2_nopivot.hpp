@@ -42,7 +42,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_gtsv2_nopivot_bad_arg(void)
+void testing_gtsv2_nopivot_bad_arg(const Arguments& argus)
 {
     // Dont do bad argument checking for cuda
 #if(!defined(CUDART_VERSION))
@@ -110,7 +110,7 @@ void testing_gtsv2_nopivot_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_gtsv2_nopivot(Arguments argus)
+void testing_gtsv2_nopivot(Arguments argus)
 {
     int m = argus.M;
     int n = argus.N;
@@ -220,8 +220,6 @@ hipsparseStatus_t testing_gtsv2_nopivot(Arguments argus)
     }
 
     CHECK_HIP_ERROR(hipFree(buffer));
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_GTSV2_NOPIVOT_HPP

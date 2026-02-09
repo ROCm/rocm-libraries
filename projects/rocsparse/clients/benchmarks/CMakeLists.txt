@@ -173,11 +173,16 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_v2_spmv_csr.cpp
 ../testings/testing_v2_spmv_csc.cpp
 ../testings/testing_v2_spmv_ell.cpp
+../testings/testing_v2_spmv_sell.cpp
 ../testings/testing_spsv_csr.cpp
 ../testings/testing_spsv_coo.cpp
+../testings/testing_sptrsv_csr.cpp
+../testings/testing_sptrsv_coo.cpp
 ../testings/testing_spitsv_csr.cpp
 ../testings/testing_spsm_csr.cpp
 ../testings/testing_spsm_coo.cpp
+../testings/testing_sptrsm_csr.cpp
+../testings/testing_sptrsm_coo.cpp
 ../testings/testing_sparse_to_dense_coo.cpp
 ../testings/testing_sparse_to_dense_csr.cpp
 ../testings/testing_sparse_to_dense_csc.cpp
@@ -214,20 +219,17 @@ target_compile_options(rocsparse-bench PRIVATE -Wno-deprecated -Wno-unused-comma
 
 # Internal common header
 target_include_directories(rocsparse-bench PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
-
-# Target link libraries
-target_link_libraries(rocsparse-bench PRIVATE roc::rocsparse hip::host hip::device)
-if (rocsparseio_FOUND)
-  target_link_libraries(rocsparse-bench PRIVATE roc::rocsparseio)
+if (BUILD_CLIENTS_ONLY)
+  target_include_directories(rocsparse-bench PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
 endif()
 
 # Add OpenMP if available
-if(OPENMP_FOUND)
-if (NOT WIN32)
-   target_link_libraries(rocsparse-bench PRIVATE OpenMP::OpenMP_CXX -Wl,-rpath=${HIP_CLANG_ROOT}/lib)
-  else()
-   target_link_libraries(rocsparse-bench PRIVATE libomp)
-  endif()
+apply_omp_settings(rocsparse-bench)
+
+# Target link libraries
+target_link_libraries(rocsparse-bench PRIVATE roc::rocsparse hip::host hip::device ${ROCSPARSE_CLIENT_LIBS})
+if (rocsparseio_FOUND)
+  target_link_libraries(rocsparse-bench PRIVATE roc::rocsparseio)
 endif()
 
 if (NOT WIN32)

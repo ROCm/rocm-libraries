@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,7 +64,6 @@ namespace rocRoller
         msg << ShowValue(prefetchMixMemOps);
 
         msg << ShowValue(streamK);
-        msg << ShowValue(streamKTwoTile);
 
         msg << "loopOverOutputTilesDimensions: ";
         streamJoin(msg, loopOverOutputTilesDimensions, ", ");
@@ -199,21 +198,21 @@ namespace rocRoller
 
         for(auto& arg : argStructs)
         {
-            auto value = Expression::evaluate(arg.expression, args);
+            auto value = Expression::evaluate(arg.getExpression(), args);
 
-            if(variableType(value) != arg.variableType)
+            if(variableType(value) != arg.getVariableType())
             {
                 throw std::runtime_error(concatenate("Evaluated argument type ",
                                                      variableType(value),
                                                      " doesn't match expected type ",
-                                                     arg.variableType,
+                                                     arg.getVariableType(),
                                                      ", Expression: ",
-                                                     toString(arg.expression),
+                                                     toString(arg.getExpression()),
                                                      ", name: ",
-                                                     arg.name));
+                                                     arg.getName()));
             }
 
-            rv.append(arg.name, value);
+            rv.append(arg.getName(), value);
         }
 
         return rv;
@@ -284,6 +283,16 @@ namespace rocRoller
         co_yield Instruction::Comment(command->argInfo());
     }
 
+    CommandArgumentPtr findArgumentByName(CommandPtr const command, std::string const& argName)
+    {
+        auto const& arguments = command->getArguments();
+        auto it = std::ranges::find_if(arguments, [&](auto x) { return x->name() == argName; });
+
+        if(it == arguments.end())
+            return nullptr;
+        return *it;
+    }
+
     void CommandKernel::generateKernelGraph(std::string name)
     {
         TIMER(t, "CommandKernel::generateKernelGraph");
@@ -318,7 +327,7 @@ namespace rocRoller
         if(!m_context->kernelOptions()->lazyAddArguments)
             m_context->kernel()->addCommandArguments(m_command->getArguments());
 
-        auto kernelGraph = KernelGraph::translate(m_command);
+        auto kernelGraph = KernelGraph::translate(m_command, m_commandParameters);
 
         if(Settings::getInstance()->get(Settings::LogGraphs))
             Log::debug("CommandKernel::generateKernel: post translate: {}",
@@ -334,6 +343,10 @@ namespace rocRoller
 
         std::vector<KernelGraph::GraphTransformPtr> transforms;
 
+        bool applyScheduleMultiplyAndLDS = m_commandParameters->prefetch
+                                           && m_commandParameters->prefetchMixMemOps
+                                           && m_commandParameters->prefetchLDSFactor == 1;
+
         transforms.push_back(std::make_shared<KernelGraph::IdentifyParallelDimensions>());
 
         transforms.push_back(std::make_shared<KernelGraph::OrderMemory>(
@@ -346,36 +359,34 @@ namespace rocRoller
         transforms.push_back(
             std::make_shared<KernelGraph::LowerTensorContraction>(m_commandParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        transforms.push_back(
+            std::make_shared<KernelGraph::AddLDSPadding>(m_context, m_commandParameters));
+        transforms.push_back(std::make_shared<KernelGraph::ConstantPropagation>());
+        transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
 
-        // TODO: simplify the condition by making ConstantPropagation and
-        // Streamk work simultaneously
-        if(!m_commandParameters->streamK)
+        if(m_commandParameters->workgroupMappingDim.has_value())
         {
-            transforms.push_back(std::make_shared<KernelGraph::ConstantPropagation>());
+            auto wgmArg = findArgumentByName(m_command, rocRoller::WGM);
+            AssertFatal(wgmArg != nullptr,
+                        "Can not find WGM Command argument required for workgroup mapping.");
+
+            transforms.push_back(std::make_shared<KernelGraph::RemapOutputTiles>(
+                m_commandParameters->workgroupMappingDim,
+                std::make_shared<Expression::Expression>(wgmArg)));
         }
 
-        transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
         if(m_commandParameters->streamK)
         {
-            Expression::ExpressionPtr numWGsExpr;
-            {
-                auto arguments = m_command->getArguments();
-                auto it        = std::find_if(arguments.cbegin(), arguments.cend(), [](auto x) {
-                    return x->name() == rocRoller::NUMWGS;
-                });
-                AssertFatal(it != arguments.cend(),
-                            "Can not find numWGs Command argument required for StreamK kernels.");
-                numWGsExpr = std::make_shared<Expression::Expression>(*it);
-            }
+            auto numWGsArg = findArgumentByName(m_command, rocRoller::NUMWGS);
+            AssertFatal(numWGsArg != nullptr,
+                        "Can not find numWGs Command argument required for StreamK kernels.");
 
             transforms.push_back(std::make_shared<KernelGraph::AddStreamK>(
-                m_commandParameters->loopOverOutputTilesDimensions,
+                m_context,
+                m_commandParameters,
                 rocRoller::XLOOP,
                 rocRoller::KLOOP,
-                m_commandParameters->streamKTwoTile,
-                numWGsExpr,
-                m_commandParameters,
-                m_context));
+                std::make_shared<Expression::Expression>(numWGsArg)));
         }
         else if(!m_commandParameters->loopOverOutputTilesDimensions.empty())
         {
@@ -386,23 +397,11 @@ namespace rocRoller
                 m_commandParameters->loopOverOutputTilesTopLoop,
                 m_context));
         }
-        if(m_commandParameters->workgroupMapping)
-        {
-            Expression::ExpressionPtr size;
-            {
-                auto arguments = m_command->getArguments();
-                auto it        = std::find_if(arguments.cbegin(), arguments.cend(), [](auto x) {
-                    return x->name() == rocRoller::WGM;
-                });
-                AssertFatal(it != arguments.cend(),
-                            "Can not find WGM Command argument required for workgroup mapping.");
-                size = std::make_shared<Expression::Expression>(*it);
-            }
-            Expression::enableDivideBy(size, m_context);
-            m_commandParameters->workgroupMapping->second = size;
-        }
-        transforms.push_back(
-            std::make_shared<KernelGraph::ConnectWorkgroups>(m_commandParameters, m_context));
+
+        transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>(m_context));
+        transforms.push_back(std::make_shared<KernelGraph::WorkgroupRemapXCC>(
+            m_context, m_commandParameters->workgroupRemapXCC));
+
         transforms.push_back(
             std::make_shared<KernelGraph::UnrollLoops>(m_commandParameters, m_context));
         if(m_commandParameters->fuseLoops)
@@ -411,6 +410,8 @@ namespace rocRoller
         }
         transforms.push_back(std::make_shared<KernelGraph::RemoveDuplicates>());
         transforms.push_back(std::make_shared<KernelGraph::OrderEpilogueBlocks>());
+        // TODO: Investigate why Simplify cannot be called BEFORE RemoveDuplicates and OrderEpilogueBlocks
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::CleanLoops>());
         transforms.push_back(
             std::make_shared<KernelGraph::SwizzleScale>(m_commandParameters, m_context));
@@ -424,19 +425,37 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AddF6LDSPadding>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::AddDirect2LDS>(m_context, m_commandParameters));
-        transforms.push_back(std::make_shared<KernelGraph::AddComputeIndex>());
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::AddPRNG>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::UpdateWavefrontParameters>(m_commandParameters));
+        transforms.push_back(
+            std::make_shared<KernelGraph::AssignIndexExpressions>(m_context, m_command));
         transforms.push_back(std::make_shared<KernelGraph::LoadPacked>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
+
+        //
+        // TODO: Turn on this transformation by default when SGPR issue gets resolved
+        //
+        if(m_context->kernelOptions()->removeSetCoordinate)
+        {
+            transforms.push_back(std::make_shared<KernelGraph::RemoveSetCoordinate>());
+            transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        }
         transforms.push_back(std::make_shared<KernelGraph::NopExtraScopes>());
-        transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
-        transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
         transforms.push_back(std::make_shared<KernelGraph::InlineInits>());
+        transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
+        if(applyScheduleMultiplyAndLDS)
+            transforms.push_back(std::make_shared<KernelGraph::RemoveImplicitScheduling>());
         transforms.push_back(std::make_shared<KernelGraph::OrderMultiplyNodes>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        if(applyScheduleMultiplyAndLDS)
+            transforms.push_back(std::make_shared<KernelGraph::ScheduleMultiplyAndLDS>());
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        transforms.push_back(std::make_shared<KernelGraph::OrderExchangeNodes>());
         transforms.push_back(std::make_shared<KernelGraph::AliasDataFlowTags>());
+        transforms.push_back(std::make_shared<KernelGraph::AddLDSBarriers>());
+        transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context, m_command));
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocateArguments>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::MergeAdjacentDeallocates>());
@@ -627,13 +646,13 @@ namespace rocRoller
         m_executableKernel->loadKernelFromCodeObjectFile(
             fileName, kernelName, m_context->targetArchitecture().target());
 
-        auto yaml   = readMetaDataFromCodeObject(fileName);
-        auto kernel = AssemblyKernels::fromYAML(yaml).kernels[0];
-
-        // XXX Instead of adding `setKernel`, should the context load from a code object?
+        auto kernels   = AssemblyKernels::fromELF(fileName).kernels;
+        auto kernel    = kernels.at(0);
         auto kernelPtr = std::make_shared<AssemblyKernel>(kernel);
         m_context->setKernel(kernelPtr);
         return kernelPtr;
+
+        // XXX Instead of adding `setKernel`, should the context load from a code object?
     }
 
     ContextPtr CommandKernel::getContext()
@@ -641,9 +660,10 @@ namespace rocRoller
         return m_context;
     }
 
-    size_t CommandKernel::scratchSpaceRequired(RuntimeArguments const& args) const
+    size_t CommandKernel::scratchSpaceRequired(Operations::ScratchPolicy policy,
+                                               RuntimeArguments const&   args) const
     {
-        auto amount = m_context->getScratchAmount();
+        auto amount = m_context->getScratchAmount(policy);
 
         auto times = evaluationTimes(amount);
         AssertFatal(times[Expression::EvaluationTime::Translate]

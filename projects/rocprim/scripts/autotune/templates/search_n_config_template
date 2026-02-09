@@ -5,15 +5,21 @@ ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_SEARCH_N_HPP_
 {%- endmacro %}
 
 {% macro kernel_configuration(measurement) -%}
-search_n_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}, {{ measurement['cfg']['threshold'] }}> { };
+search_n_config_params{ { {{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }} }, {{ measurement['cfg']['threshold'] }} }
 {%- endmacro %}
 
-{% macro general_case() -%}
-template<unsigned int arch, class data_type, class enable = void> struct default_search_n_config :
-default_search_n_config_base<data_type>::type { };
+{% macro config_picker() -%}
+template<class Target, class data_type> constexpr auto search_n_config_picker()
 {%- endmacro %}
 
-{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
-// Based on {{ based_on_type }}
-template<class data_type> struct default_search_n_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), data_type, {{ fallback_selection_criteria }}> :
+{% macro enable_if(benchmark_of_target) -%}
+{{ benchmark_of_target.get_enable_if("search_n_config_params") }}
+{%- endmacro %}
+
+{% macro default_case() -%}
+return search_n_config_params_base<data_type>();
+{%- endmacro %}
+
+{% macro fallback_config(fallback_target) -%}
+    return search_n_config_picker<comp_target<{{ fallback_target.target.as_str() }}>, data_type>();
 {%- endmacro %}

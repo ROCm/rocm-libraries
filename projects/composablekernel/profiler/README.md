@@ -1,5 +1,23 @@
 [Back to the main page](../README.md)
 # Composable Kernel profiler
+
+## Building Specific Profilers
+To reduce build time, filter which operations to compile using CMake options:
+
+```bash
+# Build all grouped_gemm variants (grouped_gemm, grouped_gemm_fastgelu, grouped_gemm_tile_loop, etc.)
+cmake -DCK_PROFILER_OP_FILTER="grouped_gemm" <other options> ..
+
+# Build ONLY base grouped_gemm (excludes variants - use exact regex match with ^ and $)
+cmake -DCK_PROFILER_OP_FILTER="^grouped_gemm$" <other options> ..
+```
+
+Both `CK_PROFILER_OP_FILTER` and `CK_PROFILER_INSTANCE_FILTER` accept regex patterns. Default builds all operations.
+
+To find the complete list of operations, run the following command:
+```bash
+find profiler/src -name "profile_*.cpp" | sed 's|profiler/src/profile_||' | sed 's|.cpp||' | sort
+```
 ## Profiler GEMM UNIVERSAL kernels
 ```bash
 # arg1: tensor operation (gemm_universal: Universal GEMM)
@@ -148,7 +166,7 @@
 #  <dilations>, (ie Dy, Dx for 2D)
 #  <left padding>, (ie LeftPy, LeftPx for 2D)
 #  <right padding>, (ie RightPy, RightPx for 2D)
-# SplitK
+# SplitK (-1 for internally computed split-K value, positive value to set k batches explicitly, or 'all' to test all internal split-K values)
 
  ################                   op   datatype  layout  verify  init  log  time  Ndims  G   N   K   C  Y  X  Hi  Wi  Sy  Sx  Dy  Dx  LeftPy  LeftPx  RightPy  RightPx  SplitK
 ./bin/ckProfiler grouped_conv_bwd_weight         1       1      0     1    0     1      2 32 256 256 512  3  3  28  28   1   1   1   1       1       0        0        0       1

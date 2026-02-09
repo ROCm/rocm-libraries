@@ -52,11 +52,11 @@ const std::string logFindConv =
     "-k 64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1";
 
 const std::string logFusionConvBiasActiv =
-    "MIOpen(" BKEND "): Command [LogCmdFusion] " MDEXE " CBAInfer -F 4 -n 128 -c 3 -H 32 "
+    "MIOpen(" BKEND "): Command [LogCmdFusion] " MDEXE " CBAInfer -J 4 -n 128 -c 3 -H 32 "
     "-W 32 -k 64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1";
 
 const std::string logBnormActiv = "MIOpen(" BKEND "): Command [LogCmdFusion] " MDEXE
-                                  " CBAInfer -F 2 -n 64 -c 64 -H 56 -W 56 -m 1";
+                                  " CBAInfer -J 2 -n 64 -c 64 -H 56 -W 56 -m 1";
 
 // Captures the std::cerr buffer and store it to a string.
 struct CerrRedirect
@@ -184,13 +184,13 @@ struct CreateBNormFusionPlan
     miopen::Allocator::ManageDataPtr estMean_dev;
     miopen::Allocator::ManageDataPtr estVariance_dev;
     miopenActivationMode_t activ_mode = miopenActivationRELU;
-    const float alpha                 = static_cast<float>(1.0f);
-    const float beta                  = static_cast<float>(0);
-    const float activ_alpha           = static_cast<double>(0.5f);
-    const float activ_beta            = static_cast<double>(0.5f);
-    const float activ_gamma           = static_cast<double>(0.5f);
-    double epsilon                    = 1.0e-5;
-    std::vector<int> input_lens       = {64, 64, 56, 56};
+    const float alpha{1.0f};
+    const float beta{0.0f};
+    const float activ_alpha{0.5f};
+    const float activ_beta{0.5f};
+    const float activ_gamma{0.5f};
+    double epsilon{1.0e-5};
+    std::vector<int> input_lens = {64, 64, 56, 56};
 
     void Init()
     {

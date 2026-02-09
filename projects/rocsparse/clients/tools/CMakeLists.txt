@@ -35,19 +35,13 @@ foreach(app ${ROCSPARSEIO_TOOLS_SOURCES})
   add_executable(${app} ${app}.cpp ${ROCSPARSEIO_SOURCES})
 
   # Internal common header
-  target_include_directories(${app} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include ${CMAKE_CURRENT_SOURCE_DIR}/../common)
+  target_include_directories(${app} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include> $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../common>)
+  if (BUILD_CLIENTS_ONLY)
+    target_include_directories(${app} PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
+  endif()
 
   # Target link libraries
-  target_link_libraries(${app} PRIVATE roc::rocsparse hip::host ${EXTRA_LIBS})
-
-  # Add OpenMP if available
-  if(OPENMP_FOUND)
-    if (NOT WIN32)
-        target_link_libraries(${app} PRIVATE OpenMP::OpenMP_CXX -Wl,-rpath=${HIP_CLANG_ROOT}/lib)
-    else()
-        target_link_libraries(${app} PRIVATE libomp)
-    endif()
-  endif()
+  target_link_libraries(${app} PRIVATE hip::host)
 
   # Set tools output directory
   set_target_properties(${app} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")

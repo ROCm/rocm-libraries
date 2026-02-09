@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -145,12 +145,18 @@ namespace rocRoller
             return 0;
 
         auto const& lastArg = m_arguments.back();
-        return lastArg.offset + lastArg.size;
+        return lastArg.getOffset() + lastArg.getSize();
     }
 
     inline int AssemblyKernel::group_segment_fixed_size() const
     {
-        return m_context.lock()->ldsAllocator()->maxUsed();
+        auto ctx = m_context.lock();
+        if(ctx)
+        {
+            return ctx->ldsAllocator()->maxUsed();
+        }
+        AssertFatal(m_group_segment_fixed_size.has_value(), "Context is null or expired");
+        return m_group_segment_fixed_size.value();
     }
 
     inline int AssemblyKernel::private_segment_fixed_size() const
@@ -162,7 +168,7 @@ namespace rocRoller
     {
         size_t rv = 8;
         for(auto const& arg : m_arguments)
-            rv = std::max(rv, DataTypeInfo::Get(arg.variableType).alignment);
+            rv = std::max(rv, DataTypeInfo::Get(arg.getVariableType()).alignment);
 
         return rv;
     }
@@ -174,17 +180,35 @@ namespace rocRoller
 
     inline int AssemblyKernel::sgpr_count() const
     {
-        return m_context.lock()->allocator(Register::Type::Scalar)->useCount();
+        auto ctx = m_context.lock();
+        if(ctx)
+        {
+            return ctx->allocator(Register::Type::Scalar)->useCount();
+        }
+        AssertFatal(m_sgprCount.has_value(), "Context is null or expired");
+        return m_sgprCount.value();
     }
 
     inline int AssemblyKernel::vgpr_count() const
     {
-        return m_context.lock()->allocator(Register::Type::Vector)->useCount();
+        auto ctx = m_context.lock();
+        if(ctx)
+        {
+            return ctx->allocator(Register::Type::Vector)->useCount();
+        }
+        AssertFatal(m_vgprCount.has_value(), "Context is null or expired");
+        return m_vgprCount.value();
     }
 
     inline int AssemblyKernel::agpr_count() const
     {
-        return m_context.lock()->allocator(Register::Type::Accumulator)->useCount();
+        auto ctx = m_context.lock();
+        if(ctx)
+        {
+            return ctx->allocator(Register::Type::Accumulator)->useCount();
+        }
+        AssertFatal(m_agprCount.has_value(), "Context is null or expired");
+        return m_agprCount.value();
     }
 
     inline int AssemblyKernel::accum_offset() const
@@ -218,6 +242,13 @@ namespace rocRoller
     inline bool AssemblyKernel::hasArgument(std::string const& name) const
     {
         return m_argumentNames.contains(name);
+    }
+
+    inline std::vector<AssemblyKernelArgument> AssemblyKernel::resetArguments()
+    {
+        m_argumentNames.clear();
+        m_argumentSize = 0;
+        return std::exchange(m_arguments, {});
     }
 
     inline void AssemblyKernel::addCommandArguments(std::vector<CommandArgumentPtr> args)

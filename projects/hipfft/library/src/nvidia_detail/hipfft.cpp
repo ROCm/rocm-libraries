@@ -735,6 +735,8 @@ catch(...)
 hipfftResult hipfftGetVersion(int* version)
 try
 {
+    if(!version)
+        return HIPFFT_INVALID_VALUE;
     return cufftResultToHipResult(cufftGetVersion(version));
 }
 catch(...)

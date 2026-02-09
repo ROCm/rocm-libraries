@@ -40,41 +40,15 @@
 #include "../shared/array_validator.h"
 #include "../shared/data_gen_device.h"
 #include "../shared/data_gen_host.h"
+#include "../shared/data_layout.h"
 #include "../shared/device_properties.h"
+#include "../shared/fft_enums.h"
 #include "../shared/gpubuf.h"
 #include "../shared/printbuffer.h"
 #include "../shared/ptrdiff.h"
 #include "../shared/rocfft_complex.h"
 
-enum fft_status
-{
-    fft_status_success,
-    fft_status_failure,
-    fft_status_invalid_arg_value,
-    fft_status_invalid_dimensions,
-    fft_status_invalid_array_type,
-    fft_status_invalid_strides,
-    fft_status_invalid_distance,
-    fft_status_invalid_offset,
-    fft_status_invalid_work_buffer,
-};
-
-enum fft_transform_type
-{
-    fft_transform_type_complex_forward,
-    fft_transform_type_complex_inverse,
-    fft_transform_type_real_forward,
-    fft_transform_type_real_inverse,
-};
-
-enum fft_precision
-{
-    fft_precision_half,
-    fft_precision_single,
-    fft_precision_double,
-};
-
-// Used for CLI11 parsing of input gen enum
+// Used for CLI11 parsing of precision enum
 static bool lexical_cast(const std::string& word, fft_precision& precision)
 {
     if(word == "half")
@@ -88,15 +62,20 @@ static bool lexical_cast(const std::string& word, fft_precision& precision)
     return true;
 }
 
-// fft_input_generator: linearly spaced sequence in [-0.5,0.5]
-// fft_input_random_generator: pseudo-random sequence in [-0.5,0.5]
-enum fft_input_generator
+// Used for CLI11 parsing of auto-allocation enum
+static bool lexical_cast(const std::string& word, fft_auto_allocation& auto_allocation)
 {
-    fft_input_random_generator_device,
-    fft_input_random_generator_host,
-    fft_input_generator_device,
-    fft_input_generator_host,
-};
+    if(word == "on")
+        auto_allocation = fft_auto_allocation_on;
+    else if(word == "off")
+        auto_allocation = fft_auto_allocation_off;
+    else if(word == "default")
+        auto_allocation = fft_auto_allocation_default;
+    else
+        throw std::runtime_error(
+            "Invalid auto-allocation behavior specified (choose \"on\", \"off\", or \"default\")");
+    return true;
+}
 
 // Used for CLI11 parsing of input gen enum
 static bool lexical_cast(const std::string& word, fft_input_generator& gen)
@@ -118,22 +97,6 @@ static bool lexical_cast(const std::string& word, fft_input_generator& gen)
 #endif
     return true;
 }
-
-enum fft_array_type
-{
-    fft_array_type_complex_interleaved,
-    fft_array_type_complex_planar,
-    fft_array_type_real,
-    fft_array_type_hermitian_interleaved,
-    fft_array_type_hermitian_planar,
-    fft_array_type_unset,
-};
-
-enum fft_result_placement
-{
-    fft_placement_inplace,
-    fft_placement_notinplace,
-};
 
 // Determine the size of the data type given the precision and type.
 template <typename Tsize>
@@ -196,6 +159,9 @@ inline void set_input(std::vector<gpubuf>&       input,
                       const Tint1&               field_contig_stride,
                       const size_t               field_contig_dist)
 {
+    if(igen == fft_input_generator_host || igen == fft_input_random_generator_host)
+        throw std::runtime_error("Host input generation is not available for gpu buffers");
+
     auto isize = count_iters(whole_length) * nbatch;
 
     switch(itype)
@@ -321,6 +287,9 @@ inline void set_input(std::vector<hostbuf>&      input,
                       const Tint1                field_contig_stride,
                       const size_t               field_contig_dist)
 {
+    if(igen == fft_input_generator_device || igen == fft_input_random_generator_device)
+        throw std::runtime_error("Device input generation is not available for host buffers");
+
     switch(itype)
     {
     case fft_array_type_complex_interleaved:
@@ -491,7 +460,7 @@ public:
     fft_input_generator igen = fft_input_random_generator_host;
 #endif
 
-    size_t workbuffersize = 0;
+    fft_auto_allocation auto_allocate = fft_auto_allocation_default;
 
     enum fft_mp_lib
     {
@@ -614,7 +583,10 @@ public:
             }
         }
 
-        assert(selected_grid[0] * selected_grid[1] * selected_grid[2] == mp_ranks);
+        if(selected_grid[0] * selected_grid[1] * selected_grid[2] != mp_ranks)
+        {
+            throw std::runtime_error("Grid dimensions do not multiply to mp_ranks.");
+        }
 
         fft_grid = {selected_grid[0], selected_grid[1], selected_grid[2]};
     }
@@ -653,7 +625,10 @@ public:
             }
         }
 
-        assert(selected_grid[0] * selected_grid[1] == mp_ranks);
+        if(selected_grid[0] * selected_grid[1] != mp_ranks)
+        {
+            throw std::runtime_error("Grid dimensions do not multiply to mp_ranks.");
+        }
 
         fft_grid = {selected_grid[0], selected_grid[1]};
     }
@@ -713,6 +688,21 @@ public:
     // optional brick decomposition of inputs/outputs
     std::vector<fft_field> ifields;
     std::vector<fft_field> ofields;
+
+    // Check that a supplied vector of callback pointers has an
+    // expected size.  Optionally also check that each pointer is
+    // non-null.  Throws an exception if a check fails.  The vector
+    // itself can be null, as callbacks are optional.
+    static void check_callback_vec(std::vector<void*>* cb, size_t expected_size, bool nonnull)
+    {
+        if(!cb)
+            return;
+        if(cb->size() != expected_size)
+            throw std::invalid_argument("expected " + std::to_string(expected_size)
+                                        + " callback pointers, got " + std::to_string(cb->size()));
+        if(nonnull && std::any_of(cb->begin(), cb->end(), [](void* p) { return p == nullptr; }))
+            throw std::invalid_argument("null callback function");
+    }
 
     // simple "multi-GPU" count, meaning the library decides on the
     // decomposition instead of it being explicit as bricks.  only
@@ -786,6 +776,16 @@ public:
         default:
             throw std::runtime_error("Invalid transform type");
         }
+    }
+
+    bool is_inverse() const
+    {
+        return is_bwd(transform_type);
+    }
+
+    bool is_forward() const
+    {
+        return is_fwd(transform_type);
     }
 
     // Convert to string for output.
@@ -1052,6 +1052,12 @@ public:
             ret += std::to_string(multiGPU);
         }
 
+        if(auto_allocate != fft_auto_allocation_default)
+        {
+            ret += "_autoallocation_";
+            ret += (auto_allocate == fft_auto_allocation_on ? "on" : "off");
+        }
+
         return ret;
     }
 
@@ -1210,6 +1216,13 @@ public:
         {
             ++pos;
             multiGPU = std::stoull(vals[pos++]);
+        }
+
+        auto_allocate = fft_auto_allocation_default; // default if unspecified
+        if(pos < vals.size() && vals[pos] == "autoallocation")
+        {
+            ++pos;
+            lexical_cast(vals[pos++], auto_allocate);
         }
     }
 
@@ -1461,7 +1474,7 @@ public:
         std::vector<size_t> ibuffer_sizes;
 
         // In-place real-to-complex transforms need to have enough space in the input buffer to
-        // accomadate the output, which is slightly larger.
+        // accommodate the output, which is slightly larger.
         if(placement == fft_placement_inplace && transform_type == fft_transform_type_real_forward)
         {
             return obuffer_sizes();
@@ -1626,7 +1639,8 @@ public:
             bool       samestride = true;
             for(unsigned int i = 0; i < stridesize; ++i)
             {
-                if(istride[i] != ostride[i])
+                // (strides are irrelevant for unit lengths)
+                if(istride[i] != ostride[i] && length[i] > 1)
                     samestride = false;
             }
             if((transform_type == fft_transform_type_complex_forward
@@ -1666,7 +1680,7 @@ public:
 
             if((transform_type == fft_transform_type_real_forward
                 || transform_type == fft_transform_type_real_inverse)
-               && (istride.back() != 1 || ostride.back() != 1))
+               && (istride.back() != 1 || ostride.back() != 1) && length.back() > 1)
             {
                 // In-place real/complex transforms require unit strides.
                 if(verbose)
@@ -1866,6 +1880,22 @@ public:
     bool is_callback() const
     {
         return run_callbacks;
+    }
+    // checks if the parameters are consistent with a "default" data layout (considering strides and distances)
+    bool is_using_default_layout() const
+    {
+        static_assert(std::is_same_v<decltype(ioffset), decltype(ooffset)>);
+        auto is_zero = [](const decltype(ioffset)::value_type& i) { return i == 0; };
+        return std::all_of(ioffset.begin(), ioffset.end(), is_zero)
+               && std::all_of(ooffset.begin(), ooffset.end(), is_zero)
+               && istride == default_strides(transform_type, placement, fft_io::fft_io_in, length)
+               && ostride == default_strides(transform_type, placement, fft_io::fft_io_out, length)
+               && idist
+                      == default_distance(
+                          transform_type, placement, fft_io::fft_io_in, length, nbatch)
+               && odist
+                      == default_distance(
+                          transform_type, placement, fft_io::fft_io_out, length, nbatch);
     }
 
     // Given a data type and dimensions, fill the buffer, imposing Hermitian symmetry if necessary.
@@ -2174,10 +2204,18 @@ public:
         }
     }
 
-    virtual fft_status set_callbacks(void* load_cb_host,
-                                     void* load_cb_data,
-                                     void* store_cb_host,
-                                     void* store_cb_data)
+    // A callback is expressed as a pair of device function pointer +
+    // device function data.
+    //
+    // Load and store callbacks are provided as vectors of those
+    // pointers, as we need a separate function+data for each device
+    // being loaded from or stored to.
+    virtual fft_status set_callbacks(std::vector<void*>* load_cb_func,
+                                     std::vector<void*>* load_cb_data,
+                                     std::vector<void*>* store_cb_func,
+                                     std::vector<void*>* store_cb_data,
+                                     size_t              load_cb_shared_mem_bytes,
+                                     size_t              store_cb_shared_mem_bytes)
     {
         return fft_status_success;
     }
@@ -2208,7 +2246,18 @@ public:
     // Tests that hit this can't fit on the GPU and should be skipped.
     struct work_buffer_alloc_failure : public std::runtime_error
     {
-        work_buffer_alloc_failure(const std::string& s)
+        const size_t attempted_size;
+        work_buffer_alloc_failure(const std::string& s, size_t _attempted_size = 0)
+            : std::runtime_error(s)
+            , attempted_size(_attempted_size)
+        {
+        }
+    };
+
+    // Specific exception type for unimplemented feature(s).
+    struct unimplemented_exception : public std::runtime_error
+    {
+        unimplemented_exception(const std::string& s)
             : std::runtime_error(s)
         {
         }
@@ -2234,20 +2283,22 @@ public:
             throw std::runtime_error("Transform type not forward.");
         }
 
-        length    = params_forward.length;
-        istride   = params_forward.ostride;
-        ostride   = params_forward.istride;
-        nbatch    = params_forward.nbatch;
-        precision = params_forward.precision;
-        placement = params_forward.placement;
-        idist     = params_forward.odist;
-        odist     = params_forward.idist;
-        itype     = params_forward.otype;
-        otype     = params_forward.itype;
-        ioffset   = params_forward.ooffset;
-        ooffset   = params_forward.ioffset;
+        length        = params_forward.length;
+        istride       = params_forward.ostride;
+        ostride       = params_forward.istride;
+        nbatch        = params_forward.nbatch;
+        precision     = params_forward.precision;
+        placement     = params_forward.placement;
+        idist         = params_forward.odist;
+        odist         = params_forward.idist;
+        itype         = params_forward.otype;
+        otype         = params_forward.itype;
+        ioffset       = params_forward.ooffset;
+        ooffset       = params_forward.ioffset;
+        auto_allocate = params_forward.auto_allocate;
 
         run_callbacks = params_forward.run_callbacks;
+        multiGPU      = params_forward.multiGPU;
 
         check_output_strides = params_forward.check_output_strides;
 
@@ -2399,6 +2450,161 @@ public:
         len.insert(len.begin(), nbatch);
         distribute_field(gpusperrank, brick_grid, ofields, len, num_ranks);
     }
+
+    // Apply load operations specified by this struct to the host-side
+    // input before we pass it to the reference FFT
+    void apply_host_load_ops(std::vector<hostbuf>& input) const
+    {
+        // Currently no load operations can be specified
+    }
+
+    // Apply store operations specified by this struct to the host-side
+    // output after we get it from the reference FFT
+    void apply_host_store_ops(std::vector<hostbuf>& output) const
+    {
+        // Store ops like result scaling are only supported on AMD
+        // backend, and CUDA implements some conflicting
+        // half-precision operators that prevent result scaling from
+        // compiling
+#ifdef __HIP_PLATFORM_AMD__
+        // Don't bother iterating over the data if we don't have to
+        if(scale_factor == 1.0)
+            return;
+#ifdef _OPENMP
+        auto partition_count = compute_partition_count(output.front().size());
+#endif
+
+        switch(otype)
+        {
+            // Reference FFT always works with complex-interleaved data even if
+            // params specifies planar
+        case fft_array_type_complex_interleaved:
+        case fft_array_type_hermitian_interleaved:
+        case fft_array_type_complex_planar:
+        case fft_array_type_hermitian_planar:
+        {
+            switch(precision)
+            {
+            case fft_precision_half:
+            {
+                const size_t elem_size = sizeof(rocfft_complex<rocfft_fp16>);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin
+                    = reinterpret_cast<rocfft_complex<rocfft_fp16>*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            case fft_precision_single:
+            {
+                const size_t elem_size = sizeof(rocfft_complex<float>);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin = reinterpret_cast<rocfft_complex<float>*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            case fft_precision_double:
+            {
+                const size_t elem_size = sizeof(rocfft_complex<double>);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin
+                    = reinterpret_cast<rocfft_complex<double>*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            }
+        }
+        break;
+        case fft_array_type_real:
+        {
+            switch(precision)
+            {
+            case fft_precision_half:
+            {
+                const size_t elem_size = sizeof(rocfft_fp16);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin = reinterpret_cast<rocfft_fp16*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            case fft_precision_single:
+            {
+                const size_t elem_size = sizeof(float);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin = reinterpret_cast<float*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            case fft_precision_double:
+            {
+                const size_t elem_size = sizeof(double);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin = reinterpret_cast<double*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            }
+        }
+        break;
+        default:
+            // this is FFTW data which should always be interleaved (if complex)
+            abort();
+        }
+#endif
+    }
 };
 
 // Used for CLI11 parsing of multi-process library enum
@@ -2414,7 +2620,7 @@ static bool lexical_cast(const std::string& word, fft_params::fft_mp_lib& mp_lib
 }
 
 // This is used with CLI11 so that the user can type an integer on the
-// command line and we store into an enum varaible
+// command line and we store into an enum variable
 template <typename _Elem, typename _Traits>
 std::basic_istream<_Elem, _Traits>& operator>>(std::basic_istream<_Elem, _Traits>& stream,
                                                fft_array_type&                     atype)
@@ -3846,8 +4052,8 @@ void init_local_input(int                                       comm_rank,
         auto contiguous_dist   = params.compute_idist();
 
         std::vector<Tbuff> bufvec(1);
-        size_t brick_size_bytes = compute_ptrdiff(brick->length(), brick->stride, 0, 0) * elem_size
-                                  / (is_planar ? 2 : 1);
+        size_t             brick_size_bytes
+            = compute_ptrdiff(brick->length(), brick->stride) * elem_size / (is_planar ? 2 : 1);
         bufvec.back() = Tbuff::make_nonowned(input_ptrs[ptr_idx], brick_size_bytes);
         // grab a second pointer for planar
         if(is_planar)

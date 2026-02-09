@@ -86,7 +86,7 @@ struct gebsx_matrix
                                                   that_.col_block_dim,
                                                   that_.base)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(transfer)
         {
@@ -104,7 +104,7 @@ struct gebsx_matrix
                                                   that_.col_block_dim,
                                                   that_.base)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(transfer)
         {
@@ -115,7 +115,7 @@ struct gebsx_matrix
     void unit_check(gebsx_matrix<memory_mode::host, direction_, T, I, J>& that,
                     bool                                                  check_values = true)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         unit_check_enum(this->block_direction, that.block_direction);
         unit_check_scalar<J>(this->mb, that.mb);
@@ -161,7 +161,7 @@ struct gebsx_matrix
     void near_check(const gebsx_matrix<THAT_MODE, direction_, T, I, J>& that_,
                     floating_data_t<T> tol = default_tolerance<T>::value) const
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         switch(MODE)
         {
@@ -228,7 +228,7 @@ struct gebsx_matrix
 
     void info() const
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         std::cout << "INFO GEBSX " << std::endl;
         std::cout << " dir            : " << direction_ << std::endl;
@@ -243,7 +243,7 @@ struct gebsx_matrix
 
     bool is_invalid() const
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(this->mb < 0)
             return true;
@@ -294,7 +294,7 @@ struct gebsx_matrix
                 J                    col_block_dim_,
                 rocsparse_index_base base_)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(block_dir_ != this->block_direction)
         {
@@ -345,7 +345,7 @@ struct gebsx_matrix
     template <memory_mode::value_t THAT_MODE>
     void transfer_from(const gebsx_matrix<THAT_MODE, direction_, T, I, J>& that)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         CHECK_HIP_THROW_ERROR((this->mb == that.mb && this->nb == that.nb && this->nnzb == that.nnzb
                                && this->block_direction == that.block_direction
@@ -386,7 +386,7 @@ struct gebsx_matrix
     gebsx_matrix<MODE, direction_, T, I, J>&
         operator()(const gebsx_matrix<THAT_MODE, direction_, T, I, J>& that, bool transfer = true)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         this->define(that.block_direction,
                      that.mb,

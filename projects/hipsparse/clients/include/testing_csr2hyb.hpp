@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,12 +41,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-#define ELL_IND_ROW(i, el, m, width) (el) * (m) + (i)
-#define ELL_IND_EL(i, el, m, width) (el) + (width) * (i)
-#define ELL_IND(i, el, m, width) ELL_IND_ROW(i, el, m, width)
-
 template <typename T>
-void testing_csr2hyb_bad_arg(void)
+void testing_csr2hyb_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int m         = 100;
@@ -119,7 +115,7 @@ void testing_csr2hyb_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csr2hyb(Arguments argus)
+void testing_csr2hyb(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                     m              = argus.M;
@@ -150,15 +146,12 @@ hipsparseStatus_t testing_csr2hyb(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     if(m == 0 || n == 0)
     {
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 
     // Allocate memory on the device
@@ -206,7 +199,7 @@ hipsparseStatus_t testing_csr2hyb(Arguments argus)
             verify_hipsparse_status_invalid_value(
                 status, "Error: user_ell_width < 0 || user_ell_width > max_ell_width");
 
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
     }
 
@@ -235,7 +228,7 @@ hipsparseStatus_t testing_csr2hyb(Arguments argus)
                                        part);
 
             verify_hipsparse_status_invalid_value(status, "ell_max_width > width_limit");
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
     }
 
@@ -297,33 +290,18 @@ hipsparseStatus_t testing_csr2hyb(Arguments argus)
     hhyb_coo_val_gold.resize(coo_nnz);
 
     // Fill HYB
-    int coo_idx = 0;
-    for(int i = 0; i < m; ++i)
-    {
-        int p = 0;
-        for(int j = hcsr_row_ptr[i] - idx_base; j < hcsr_row_ptr[i + 1] - idx_base; ++j)
-        {
-            if(p < ell_width)
-            {
-                int idx                    = ELL_IND(i, p++, m, ell_width);
-                hhyb_ell_col_ind_gold[idx] = hcsr_col_ind[j];
-                hhyb_ell_val_gold[idx]     = hcsr_val[j];
-            }
-            else
-            {
-                hhyb_coo_row_ind_gold[coo_idx] = i + idx_base;
-                hhyb_coo_col_ind_gold[coo_idx] = hcsr_col_ind[j];
-                hhyb_coo_val_gold[coo_idx]     = hcsr_val[j];
-                ++coo_idx;
-            }
-        }
-        for(int j = hcsr_row_ptr[i + 1] - hcsr_row_ptr[i]; j < ell_width; ++j)
-        {
-            int idx                    = ELL_IND(i, p++, m, ell_width);
-            hhyb_ell_col_ind_gold[idx] = -1;
-            hhyb_ell_val_gold[idx]     = make_DataType<T>(0.0);
-        }
-    }
+    host_csr2hyb(m,
+                 nnz,
+                 hcsr_row_ptr.data(),
+                 hcsr_col_ind.data(),
+                 hcsr_val.data(),
+                 ell_width,
+                 hhyb_ell_col_ind_gold.data(),
+                 hhyb_ell_val_gold.data(),
+                 hhyb_coo_row_ind_gold.data(),
+                 hhyb_coo_col_ind_gold.data(),
+                 hhyb_coo_val_gold.data(),
+                 idx_base);
 
     // Allocate verification structures
     std::vector<int> hhyb_ell_col_ind(ell_nnz);
@@ -428,8 +406,6 @@ hipsparseStatus_t testing_csr2hyb(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSR2HYB_HPP

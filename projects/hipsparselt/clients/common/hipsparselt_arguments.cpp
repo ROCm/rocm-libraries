@@ -91,6 +91,7 @@ void Arguments::init()
 
     norm_check = 0;
     unit_check = 1;
+    norm_check_assert = true;
     timing     = 0;
 
     transA = '*';
@@ -103,6 +104,9 @@ void Arguments::init()
     HMM             = false;
     search          = false;
     search_iters    = 10;
+
+    inEqualOut      = false;
+    logging         = -1;
 }
 
 // Function to print Arguments out to stream in YAML format

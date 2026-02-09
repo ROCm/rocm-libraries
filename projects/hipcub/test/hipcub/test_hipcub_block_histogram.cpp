@@ -23,7 +23,7 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/block/block_histogram.hpp"
+#include <hipcub/block/block_histogram.hpp>
 
 // Params for tests
 template<

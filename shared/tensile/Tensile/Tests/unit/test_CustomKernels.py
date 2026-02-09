@@ -74,34 +74,35 @@ def test_ReadCustomKernelConfig(objs):
 
 @pytest.mark.parametrize("objs", [("TestKernel", testKernelDir)])
 def test_CreateSolutionFromCustomKernel(objs):
-    try:
-        (
-            cxxCompiler,
-            cCompiler,
-            assembler,
-            offloadBundler,
-            hipconfig,
-            deviceEnumerator
-        ) = validateToolchain(
-            ToolchainDefaults.CXX_COMPILER,
-            ToolchainDefaults.C_COMPILER,
-            ToolchainDefaults.ASSEMBLER,
-            ToolchainDefaults.OFFLOAD_BUNDLER,
-            ToolchainDefaults.HIP_CONFIG,
-            ToolchainDefaults.DEVICE_ENUMERATOR
-        )
-        params = {
-            "CxxCompiler": cxxCompiler,
-            "CCompiler": cCompiler,
-            "Assembler": assembler,
-            "OffloadBundler": offloadBundler,
-            "HipConfig": hipconfig,
-            "ROCmAgentEnumeratorPath": deviceEnumerator,
-        }
-        assignGlobalParameters(params)
+    # try:
+    (
+        cxxCompiler,
+        cCompiler,
+        assembler,
+        offloadBundler,
+        hipconfig,
+        # deviceEnumerator
+    ) = validateToolchain(
+        ToolchainDefaults.CXX_COMPILER,
+        ToolchainDefaults.C_COMPILER,
+        ToolchainDefaults.ASSEMBLER,
+        ToolchainDefaults.OFFLOAD_BUNDLER,
+        ToolchainDefaults.HIP_CONFIG,
+        # ToolchainDefaults.DEVICE_ENUMERATOR
+    )
+    params = {
+        "CxxCompiler": cxxCompiler,
+        "CCompiler": cCompiler,
+        "Assembler": assembler,
+        "OffloadBundler": offloadBundler,
+        "HipConfig": hipconfig,
+        # "ROCmAgentEnumeratorPath": deviceEnumerator,
+    }
+    params["ROCmAgentEnumeratorPath"] = None
+    assignGlobalParameters(params)
 
-        name, directory = objs
-        solution = getCustomKernelSolutionObj(name, directory)
-        assert solution["Valid"]
-    except:
-        assert False
+    name, directory = objs
+    solution = getCustomKernelSolutionObj(name, directory)
+    assert solution["Valid"]
+    # except:
+    #     assert False

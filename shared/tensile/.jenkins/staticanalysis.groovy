@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-// This shared library is available at https://github.com/ROCmSoftwarePlatform/rocJENKINS/
+// This shared library is available at https://github.com/ROCm/rocJENKINS/
 @Library('rocJenkins@pong') _
 
 // This is file for internal AMD use.
@@ -127,8 +127,6 @@ ci: {
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
-            stage(jobName) {
-                runCI(nodeDetails, jobName)
-            }
+            runCI(nodeDetails, jobName)
     }
 }

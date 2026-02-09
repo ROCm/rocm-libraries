@@ -134,42 +134,7 @@ rocsparse_status rocsparse_csrsort_buffer_size(rocsparse_handle     handle,
 *
 *  \par Example
 *  The following example sorts a \f$3 \times 3\f$ CSR matrix.
-*  \code{.c}
-*      //     1 2 3
-*      // A = 4 5 6
-*      //     7 8 9
-*      rocsparse_int m   = 3;
-*      rocsparse_int n   = 3;
-*      rocsparse_int nnz = 9;
-*
-*      csr_row_ptr[m + 1] = {0, 3, 6, 9};                // device memory
-*      csr_col_ind[nnz]   = {2, 0, 1, 0, 1, 2, 0, 2, 1}; // device memory
-*      csr_val[nnz]       = {3, 1, 2, 4, 5, 6, 7, 9, 8}; // device memory
-*
-*      // Create permutation vector perm as the identity map
-*      rocsparse_int* perm;
-*      hipMalloc((void**)&perm, sizeof(rocsparse_int) * nnz);
-*      rocsparse_create_identity_permutation(handle, nnz, perm);
-*
-*      // Allocate temporary buffer
-*      size_t buffer_size;
-*      void* temp_buffer;
-*      rocsparse_csrsort_buffer_size(handle, m, n, nnz, csr_row_ptr, csr_col_ind, &buffer_size);
-*      hipMalloc(&temp_buffer, buffer_size);
-*
-*      // Sort the CSR matrix
-*      rocsparse_csrsort(handle, m, n, nnz, descr, csr_row_ptr, csr_col_ind, perm, temp_buffer);
-*
-*      // Gather sorted csr_val array
-*      float* csr_val_sorted;
-*      hipMalloc((void**)&csr_val_sorted, sizeof(float) * nnz);
-*      rocsparse_sgthr(handle, nnz, csr_val, csr_val_sorted, perm, rocsparse_index_base_zero);
-*
-*      // Clean up
-*      hipFree(temp_buffer);
-*      hipFree(perm);
-*      hipFree(csr_val);
-*  \endcode
+*  \snippet example_rocsparse_csrsort.cpp doc example
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_csrsort(rocsparse_handle          handle,

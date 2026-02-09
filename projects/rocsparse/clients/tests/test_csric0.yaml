@@ -163,8 +163,7 @@ Tests:
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [ASIC_320k,
-             Chebyshev4]
+  filename: [Chebyshev4]
   skip_hardware: gfx940, gfx941
 
 - name: csric0_file
@@ -221,3 +220,17 @@ Tests:
 - name: csric0_extra
   category: pre_checkin
   function: csric0_extra
+
+- name: csric0_file
+  category: stress
+  function: csric0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [ASIC_320k]
+  skip_hardware: gfx940, gfx941

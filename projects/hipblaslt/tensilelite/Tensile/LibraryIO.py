@@ -30,7 +30,7 @@ from Tensile.Common import printExit, printWarning, print2, \
                            versionIsCompatible, IsaInfo
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs import Solution, ProblemSizes
-from Tensile.SolutionStructs.Problem import ProblemType
+from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
 from typing import NamedTuple, List, Dict
 import os
@@ -128,31 +128,7 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
         for solution in solutions:
             solutionState = solution.getAttributes()
             solutionState["ProblemType"] = solutionState["ProblemType"].state
-            solutionState["ProblemType"]["DataType"] = \
-                    solutionState["ProblemType"]["DataType"].value
-            solutionState["ProblemType"]["DataTypeA"] = \
-                    solutionState["ProblemType"]["DataTypeA"].value
-            solutionState["ProblemType"]["DataTypeB"] = \
-                    solutionState["ProblemType"]["DataTypeB"].value
-            solutionState["ProblemType"]["DataTypeE"] = \
-                    solutionState["ProblemType"]["DataTypeE"].value
-            solutionState["ProblemType"]["DataTypeAmaxD"] = \
-                    solutionState["ProblemType"]["DataTypeAmaxD"].value
-            solutionState["ProblemType"]["DestDataType"] = \
-                    solutionState["ProblemType"]["DestDataType"].value
-            solutionState["ProblemType"]["ComputeDataType"] = \
-                    solutionState["ProblemType"]["ComputeDataType"].value
-            solutionState["ProblemType"]["BiasDataTypeList"] = \
-                    [btype.value for btype in solutionState["ProblemType"]["BiasDataTypeList"]]
-            solutionState["ProblemType"]["ActivationComputeDataType"] = \
-                    solutionState["ProblemType"]["ActivationComputeDataType"].value
-            solutionState["ProblemType"]["ActivationType"] = \
-                    solutionState["ProblemType"]["ActivationType"].value
-            solutionState["ProblemType"]["F32XdlMathOp"] = \
-                solutionState["ProblemType"]["F32XdlMathOp"].value
-            if "DataTypeMetadata" in solutionState["ProblemType"]:
-                solutionState["ProblemType"]["DataTypeMetadata"] = \
-                    solutionState["ProblemType"]["DataTypeMetadata"].value
+            problemTypeToEnum(solutionState["ProblemType"])
             isa = solutionState["ISA"]
             solutionState["ISA"] = [isa[0], isa[1], isa[2]]
             solutionStates.append(solutionState)
@@ -461,12 +437,21 @@ def getCUCount() -> int:
     """Return the number of CU Count in current Hardware."""
     CU = os.environ.get("CU", None)
     if CU is None:
-        res = subprocess.run("rocminfo | grep Compute", stdout=subprocess.PIPE, shell=True, env={"ROCR_VISIBLE_DEVICES":"0"})
-        CU_RE = r"Compute Unit:(?P<COMPUTE_UNIT>[\w ]+)"
-        match = re.search(CU_RE, res.stdout.decode("utf-8").split('\n')[-2])
-        if match:
-            CU = int(match.group('COMPUTE_UNIT').strip())
-    return CU
+        try:
+            res = subprocess.run("rocminfo | grep Compute", stdout=subprocess.PIPE, shell=True, env={**os.environ, "ROCR_VISIBLE_DEVICES": "0"})
+            CU_RE = r"Compute Unit:(?P<COMPUTE_UNIT>[\w ]+)"
+            lines = res.stdout.decode("utf-8").strip().split('\n')
+            if lines:
+                match = re.search(CU_RE, lines[-1])
+                if match:
+                    CU = int(match.group('COMPUTE_UNIT').strip())
+        except Exception:
+            pass
+
+    if CU is None:
+        printExit("Failed to get Compute Unit count from rocminfo or env variable 'CU'")
+
+    return int(CU)
 
 def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryType, logicTuple):
     """Creates the data for a library logic file suitable for writing to YAML."""

@@ -81,28 +81,9 @@ DECLARE_VARIABLE_UNITTEST(TestGatherDeviceDevice);
 
 void TestGatherCudaStreams()
 {
-  thrust::device_vector<int> map(5); // gather indices
-  thrust::device_vector<int> src(8); // source vector
-  thrust::device_vector<int> dst(5); // destination vector
-
-  map[0] = 6;
-  map[1] = 2;
-  map[2] = 1;
-  map[3] = 7;
-  map[4] = 2;
-  src[0] = 0;
-  src[1] = 1;
-  src[2] = 2;
-  src[3] = 3;
-  src[4] = 4;
-  src[5] = 5;
-  src[6] = 6;
-  src[7] = 7;
-  dst[0] = 0;
-  dst[1] = 0;
-  dst[2] = 0;
-  dst[3] = 0;
-  dst[4] = 0;
+  thrust::device_vector<int> map = {6, 2, 1, 7, 2}; // gather indices
+  thrust::device_vector<int> src = {0, 1, 2, 3, 4, 5, 6, 7}; // source vector
+  thrust::device_vector<int> dst = {0, 0, 0, 0, 0}; // destination vector
 
   cudaStream_t s;
   cudaStreamCreate(&s);
@@ -110,12 +91,9 @@ void TestGatherCudaStreams()
   thrust::gather(thrust::cuda::par.on(s), map.begin(), map.end(), src.begin(), dst.begin());
   cudaStreamSynchronize(s);
 
-  ASSERT_EQUAL(dst[0], 6);
-  ASSERT_EQUAL(dst[1], 2);
-  ASSERT_EQUAL(dst[2], 1);
-  ASSERT_EQUAL(dst[3], 7);
-  ASSERT_EQUAL(dst[4], 2);
+  thrust::device_vector<int> ref = {6, 2, 1, 7, 2}; // destination vector
 
+  ASSERT_EQUAL(dst, ref);
   cudaStreamDestroy(s);
 }
 DECLARE_UNITTEST(TestGatherCudaStreams);
@@ -142,7 +120,7 @@ __global__ void gather_if_kernel(
 template <typename T>
 struct is_even_gather_if
 {
-  THRUST_HOST_DEVICE bool operator()(const T i) const
+  _CCCL_HOST_DEVICE bool operator()(const T i) const
   {
     return (i % 2) == 0;
   }
@@ -220,36 +198,12 @@ void TestGatherIfDeviceDevice(const size_t n)
 DECLARE_VARIABLE_UNITTEST(TestGatherIfDeviceDevice);
 #endif
 
-void TestGatherIfCudaStreams(void)
+void TestGatherIfCudaStreams()
 {
-  thrust::device_vector<int> flg(5); // predicate array
-  thrust::device_vector<int> map(5); // gather indices
-  thrust::device_vector<int> src(8); // source vector
-  thrust::device_vector<int> dst(5); // destination vector
-
-  flg[0] = 0;
-  flg[1] = 1;
-  flg[2] = 0;
-  flg[3] = 1;
-  flg[4] = 0;
-  map[0] = 6;
-  map[1] = 2;
-  map[2] = 1;
-  map[3] = 7;
-  map[4] = 2;
-  src[0] = 0;
-  src[1] = 1;
-  src[2] = 2;
-  src[3] = 3;
-  src[4] = 4;
-  src[5] = 5;
-  src[6] = 6;
-  src[7] = 7;
-  dst[0] = 0;
-  dst[1] = 0;
-  dst[2] = 0;
-  dst[3] = 0;
-  dst[4] = 0;
+  thrust::device_vector<int> flg{0, 1, 0, 1, 0}; // predicate array
+  thrust::device_vector<int> map{6, 2, 1, 7, 2}; // gather indices
+  thrust::device_vector<int> src{0, 1, 2, 3, 4, 5, 6, 7}; // source vector
+  thrust::device_vector<int> dst(5, 0); // destination vector
 
   cudaStream_t s;
   cudaStreamCreate(&s);
@@ -257,12 +211,9 @@ void TestGatherIfCudaStreams(void)
   thrust::gather_if(thrust::cuda::par.on(s), map.begin(), map.end(), flg.begin(), src.begin(), dst.begin());
   cudaStreamSynchronize(s);
 
-  ASSERT_EQUAL(dst[0], 0);
-  ASSERT_EQUAL(dst[1], 2);
-  ASSERT_EQUAL(dst[2], 0);
-  ASSERT_EQUAL(dst[3], 7);
-  ASSERT_EQUAL(dst[4], 0);
+  thrust::device_vector<int> ref{0, 2, 0, 7, 0}; // destination vector
 
+  ASSERT_EQUAL(dst, ref);
   cudaStreamDestroy(s);
 }
 DECLARE_UNITTEST(TestGatherIfCudaStreams);

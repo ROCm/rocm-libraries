@@ -57,7 +57,7 @@ void testing_gather(const Arguments& arg)
     // Initialize data on CPU
     rocsparse_seedrand();
     rocsparse_init_index(hx_ind, nnz, base, size + base);
-    rocsparse_init<T>(hy, 1, size, 1);
+    rocsparse_init<T>(hy, 1, size, 1, arg.convert_to_int);
 
     // Allocate device memory
     device_vector<I> dx_ind(nnz);

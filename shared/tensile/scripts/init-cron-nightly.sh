@@ -77,4 +77,3 @@ else
     (crontab -l 2>/dev/null; echo "00 22 * * 0-4 $tensile_path/scripts/$script_to_run --tags=$tags | tee $cron_log") | crontab -
     echoinfo "Added cron job:\n  `crontab -l | tail -n 1`"
 fi
-

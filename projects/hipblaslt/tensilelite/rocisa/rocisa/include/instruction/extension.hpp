@@ -246,6 +246,38 @@ namespace rocisa
         return module;
     }
 
+    //////////////////////////////////////////////////////////////////////////////
+    // longBranchVccnz - 32 bit offset
+    // Conditional branch to label when VCC != 0
+    // Use when erroring out "invalid operand due to label > SIMM16"
+    // VCC != 0 executes long branch, VCC == 0 do SCBranchVCCZ to skip long branch.
+    //////////////////////////////////////////////////////////////////////////////
+    inline std::shared_ptr<Module> SCLongBranchVccnz(const Label&        label,
+                                                     ContinuousRegister& tmpSgprRes,
+                                                     const std::string&  noBranchLabelStr,
+                                                     const std::string&  positiveLabelStr,
+                                                     int                 posNeg  = 0,
+                                                     const std::string&  comment = "")
+    {
+        auto  module = std::make_shared<Module>("SCLongBranchVccnz " + label.getLabelName());
+        Label noBranchLabel(noBranchLabelStr, "");
+        module->addT<SCBranchVCCZ>(noBranchLabel.getLabelName(), "Only branch on vccz");
+        if(posNeg > 0)
+        {
+            module->add(SLongBranchPositive(label, tmpSgprRes, comment));
+        }
+        else if(posNeg < 0)
+        {
+            module->add(SLongBranchNegative(label, tmpSgprRes, comment));
+        }
+        else
+        {
+            module->add(SLongBranch(label, tmpSgprRes, positiveLabelStr, comment));
+        }
+        module->addT<Label>(noBranchLabel);
+        return module;
+    }
+
     // Perform 32-bit scalar mul and save 64-bit result in two SGPR
     // src0 and src1 are 32-bit ints in scalar sgpr or small int constants (<64?))
     // sign indicates if input and output data is signed

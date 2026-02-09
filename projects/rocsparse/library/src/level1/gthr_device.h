@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,16 +29,29 @@
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, typename I, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gthr_kernel(I nnz, const T* y, T* x_val, const I* x_ind, rocsparse_index_base idx_base)
+    ROCSPARSE_DEVICE_ILF void
+        gthr_device(I nnz, const T* y, T* x_val, const I* x_ind, rocsparse_index_base idx_base)
     {
         I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
 
-        if(idx >= nnz)
+        if(idx < nnz)
         {
-            return;
+            x_val[idx] = y[x_ind[idx] - idx_base];
         }
+    }
 
-        x_val[idx] = y[x_ind[idx] - idx_base];
+    template <uint32_t BLOCKSIZE, typename I, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gthr_kernel(I                    nnz,
+                     const T*             y,
+                     int64_t              y_stride,
+                     T*                   x_val,
+                     int64_t              x_val_stride,
+                     const I*             x_ind,
+                     rocsparse_index_base idx_base)
+    {
+        uint32_t batch_index = hipBlockIdx_y;
+        gthr_device<BLOCKSIZE, I, T>(
+            nnz, y + batch_index * y_stride, x_val + batch_index * x_val_stride, x_ind, idx_base);
     }
 }

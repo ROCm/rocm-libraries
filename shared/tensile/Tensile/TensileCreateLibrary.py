@@ -42,7 +42,7 @@ from io import TextIOWrapper
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
-from . import ClientExecutable, Common, EmbeddedData, LibraryIO, Utils
+from . import Common, EmbeddedData, LibraryIO, Utils
 from .BuildCommands import AssemblyCommands, SourceCommands
 from .Common import (
     HR,
@@ -125,7 +125,7 @@ def prepAsm(
 
     with open(assemblerFileName, "w") as assemblerFile:
         if isLinux:
-            assemblerFile.write("#!/bin/sh {log}\n".format(log="-x" if printLevel >= 3 else ""))
+            assemblerFile.write("#!/bin/sh{log}\n".format(log=" -x" if printLevel >= 3 else ""))
             assemblerFile.write("# usage: asm-new.sh kernelName(no extension) [--wave32]\n")
 
             assemblerFile.write("f=$1\n")
@@ -174,7 +174,7 @@ def prepAsm(
 
             assemblerFile.write(f"if %wave% == 32 ({cArgs32}) else ({cArgs64})\n")
             assemblerFile.write(f"{lArgs}\n")
-            assemblerFile.write("copy %f%.co ..\..\..\library\%f%_%h%.co\n")
+            assemblerFile.write("copy %f%.co ..\\..\\..\\library\\%f%_%h%.co\n")
     os.chmod(assemblerFileName, 0o777)
 
 
@@ -488,6 +488,7 @@ def writeKernels(
         os.name != "nt",
         # Use globalParameters here, not params
         Path(globalParameters["WorkingPath"]),
+        # This won't affect the ISA for code-gen, only for post-build assembly kernel compilation
         globalParameters["CurrentISA"],
         params["PrintLevel"],
     )
@@ -1523,10 +1524,6 @@ def TensileCreateLibrary():
             fullMasterLibrary.cpp_base_class,
             codeObjectFiles,
         )
-
-    if args["BuildClient"]:
-        tPrint(1, "# Building Tensile Client")
-        ClientExecutable.getClientExecutable(outputPath)
 
     if args["ClientConfig"]:
         generateClientConfig(Path(outputPath), Path(masterFile).with_suffix(ext), codeObjectFiles)

@@ -34,6 +34,7 @@
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
+#include "conv_common.hpp"
 
 #include "../test/verify.hpp"
 #include "../test/cpu_conv.hpp"
@@ -248,12 +249,11 @@ private:
     std::vector<Tref> conv_res_host;
     std::vector<Tref> bn_res_host;
     std::vector<Tref> out_host;
-    std::vector<Tgpu> scale;
-    std::vector<Tgpu> bias;
+    std::vector<float> scale;
+    std::vector<float> bias;
     std::vector<Tref> bias_host;
-    std::vector<Tgpu> runningMean;
-    std::vector<Tgpu> runningVariance;
-
+    std::vector<float> runningMean;
+    std::vector<float> runningVariance;
     int createSaveBuffers();
     int createRunningBuffers();
 
@@ -533,7 +533,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::AddCmdLineArgs()
 
     inflags.AddInputFlag(
         "fusion_mode",
-        'F',
+        'J',
         "0",
         "Fusion mode (cbna = 0, cna = 1, na = 2, cn = 3, cba = 4, ca = 5, cb = 6) (Default=cbna)",
         "int");
@@ -719,12 +719,12 @@ int CBAInferFusionDriver<Tgpu, Tref>::createRunningBuffers()
         size_t sb_sz = GetTensorSize(biasScaleTensor);
 
         // GPU allocation
-        runningMean_dev     = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(Tgpu));
-        runningVariance_dev = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(Tgpu));
+        runningMean_dev     = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
+        runningVariance_dev = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
 
         // GPU host allocation
-        runningMean     = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
-        runningVariance = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
+        runningMean     = std::vector<float>(sb_sz, 0.0f);
+        runningVariance = std::vector<float>(sb_sz, 0.0f);
 
         // Populate
         for(int i = 0; i < sb_sz; i++)
@@ -733,8 +733,8 @@ int CBAInferFusionDriver<Tgpu, Tref>::createRunningBuffers()
             runningMean[i]     = 0.;
             runningVariance[i] = 1.;
 #else
-            runningMean[i]     = prng::gen_canonical<Tgpu>();
-            runningVariance[i] = prng::gen_canonical<Tgpu>();
+            runningMean[i]     = prng::gen_canonical<float>();
+            runningVariance[i] = prng::gen_canonical<float>();
 #endif
         }
 
@@ -785,6 +785,8 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         PadBufferSize(wei_sz, sizeof(Tgpu));
     }
 
+    const Tgpu Data_scale = static_cast<Tgpu>(0.01);
+
     if(bias_mode)
     {
         size_t b_sz = GetTensorSize(biasTensor);
@@ -807,23 +809,23 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     if(useBatchNorm)
     {
-        scale       = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
-        bias        = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
+        scale       = std::vector<float>(sb_sz, 0.0f);
+        bias        = std::vector<float>(sb_sz, 0.0f);
         bn_res      = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
         bn_res_host = std::vector<Tref>(out_sz, static_cast<Tref>(0));
 
         bn_res_dev = std::make_unique<GPUMem>(ctx, out_sz, sizeof(Tgpu));
-        scale_dev  = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(Tgpu));
-        bias_dev   = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(Tgpu));
+        scale_dev  = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
+        bias_dev   = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
         // Using random beta and gamma
         for(int i = 0; i < sb_sz; i++)
         {
 #if(CBA_DEBUG_VALUES == 1)
-            scale[i] = 1.; // prng::gen_canonical<Tgpu>(); // 1.0;
+            scale[i] = 1.; // prng::gen_canonical<float>(); // 1.0;
             bias[i]  = 10.;
 #else
-            scale[i]           = prng::gen_canonical<Tgpu>();
-            bias[i]            = prng::gen_canonical<Tgpu>();
+            scale[i] = prng::gen_canonical<float>();
+            bias[i]  = prng::gen_canonical<float>();
 #endif
         }
         status |= scale_dev->ToGPU(q, scale.data());
@@ -849,9 +851,9 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         in_host[i] = static_cast<double>(rval);
         in[i]      = rval;
 #else
-        auto rval = prng::gen_canonical<Tgpu>();
+        auto rval  = prng::gen_0_to_B(Data_scale);
         in_host[i] = static_cast<double>(rval);
-        in[i] = rval;
+        in[i]      = rval;
 #endif
     }
 
@@ -865,9 +867,9 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
             wei[i]      = static_cast<double>(rval);
             wei_host[i] = rval;
 #else
-            auto rval = prng::gen_canonical<Tgpu>();
+            auto rval   = Data_scale * conv::RanGenWeights<Tgpu>();
             wei_host[i] = static_cast<double>(rval);
-            wei[i] = rval;
+            wei[i]      = rval;
 #endif
         }
         status |= wei_dev->ToGPU(q, wei.data());
@@ -917,16 +919,28 @@ void CBAInferFusionDriver<Tgpu, Tref>::runGPUBatchNormActivInference()
         exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
     }
 
+    size_t workspace_size = 0;
+    miopenFusionPlanGetWorkSpaceSize(
+        GetHandle(), fusePlanDesc, &workspace_size, miopenConvolutionFwdAlgoImplicitGEMM);
+
+    if(workspace_size > 0)
+    {
+        DEFINE_CONTEXT(ctx);
+        workspace_fwd_dev = std::make_unique<GPUMem>(ctx, workspace_size, sizeof(Tgpu));
+    }
+
     for(int it = 0; it < iters; it++)
     {
         startTiming();
-        miopenExecuteFusionPlan(GetHandle(),
-                                fusePlanDesc,
-                                inputTensor,
-                                in_dev->GetMem(),
-                                outputTensor,
-                                out_dev->GetMem(),
-                                fusionArgs);
+        miopenExecuteFusionPlan_v2(GetHandle(),
+                                   fusePlanDesc,
+                                   inputTensor,
+                                   in_dev->GetMem(),
+                                   outputTensor,
+                                   out_dev->GetMem(),
+                                   fusionArgs,
+                                   (workspace_fwd_dev) ? workspace_fwd_dev->GetMem() : nullptr,
+                                   workspace_size);
         finishTiming(it);
     }
 }
@@ -1002,16 +1016,28 @@ void CBAInferFusionDriver<Tgpu, Tref>::runGPUConvBatchNormActivInference()
         exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
     }
 
+    size_t workspace_size = 0;
+    miopenFusionPlanGetWorkSpaceSize(
+        GetHandle(), fusePlanDesc, &workspace_size, miopenConvolutionFwdAlgoImplicitGEMM);
+
+    if(workspace_size > 0)
+    {
+        DEFINE_CONTEXT(ctx);
+        workspace_fwd_dev = std::make_unique<GPUMem>(ctx, workspace_size, sizeof(Tgpu));
+    }
+
     for(int it = 0; it < iters; it++)
     {
         startTiming();
-        miopenExecuteFusionPlan(GetHandle(),
-                                fusePlanDesc,
-                                inputTensor,
-                                in_dev->GetMem(),
-                                outputTensor,
-                                out_dev->GetMem(),
-                                fusionArgs);
+        miopenExecuteFusionPlan_v2(GetHandle(),
+                                   fusePlanDesc,
+                                   inputTensor,
+                                   in_dev->GetMem(),
+                                   outputTensor,
+                                   out_dev->GetMem(),
+                                   fusionArgs,
+                                   (workspace_fwd_dev) ? workspace_fwd_dev->GetMem() : nullptr,
+                                   workspace_size);
         finishTiming(it);
     }
 }
@@ -1055,16 +1081,28 @@ void CBAInferFusionDriver<Tgpu, Tref>::runGPUConvActivInference()
         exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
     }
 
+    size_t workspace_size = 0;
+    miopenFusionPlanGetWorkSpaceSize(
+        GetHandle(), fusePlanDesc, &workspace_size, miopenConvolutionFwdAlgoImplicitGEMM);
+
+    if(workspace_size > 0)
+    {
+        DEFINE_CONTEXT(ctx);
+        workspace_fwd_dev = std::make_unique<GPUMem>(ctx, workspace_size, sizeof(Tgpu));
+    }
+
     for(int it = 0; it < iters; it++)
     {
         startTiming();
-        miopenExecuteFusionPlan(GetHandle(),
-                                fusePlanDesc,
-                                inputTensor,
-                                in_dev->GetMem(),
-                                outputTensor,
-                                out_dev->GetMem(),
-                                fusionArgs);
+        miopenExecuteFusionPlan_v2(GetHandle(),
+                                   fusePlanDesc,
+                                   inputTensor,
+                                   in_dev->GetMem(),
+                                   outputTensor,
+                                   out_dev->GetMem(),
+                                   fusionArgs,
+                                   (workspace_fwd_dev) ? workspace_fwd_dev->GetMem() : nullptr,
+                                   workspace_size);
         finishTiming(it);
     }
 }
@@ -1167,16 +1205,28 @@ void CBAInferFusionDriver<Tgpu, Tref>::runGPUFusedConvBiasInference()
         std::cerr << "ConvBiasInference plan not supported." << std::endl;
     }
 
+    size_t workspace_size = 0;
+    miopenFusionPlanGetWorkSpaceSize(
+        GetHandle(), fusePlanDesc, &workspace_size, miopenConvolutionFwdAlgoImplicitGEMM);
+
+    if(workspace_size > 0)
+    {
+        DEFINE_CONTEXT(ctx);
+        workspace_fwd_dev = std::make_unique<GPUMem>(ctx, workspace_size, sizeof(Tgpu));
+    }
+
     for(int it = 0; it < iters; it++)
     {
         startTiming();
-        miopenExecuteFusionPlan(GetHandle(),
-                                fusePlanDesc,
-                                inputTensor,
-                                in_dev->GetMem(),
-                                outputTensor,
-                                out_dev->GetMem(),
-                                fusionArgs);
+        miopenExecuteFusionPlan_v2(GetHandle(),
+                                   fusePlanDesc,
+                                   inputTensor,
+                                   in_dev->GetMem(),
+                                   outputTensor,
+                                   out_dev->GetMem(),
+                                   fusionArgs,
+                                   (workspace_fwd_dev) ? workspace_fwd_dev->GetMem() : nullptr,
+                                   workspace_size);
         finishTiming(it);
     }
 }
@@ -1254,6 +1304,16 @@ void CBAInferFusionDriver<Tgpu, Tref>::runCPUConvFwdInference()
                             miopen::deref(convDesc).GetConvStrides(),
                             miopen::deref(convDesc).GetConvDilations(),
                             miopen::deref(convDesc).GetGroupCount());
+
+    if constexpr(!std::is_same_v<Tgpu, Tref>)
+    {
+        for(size_t i = 0; i < outhost_local_host.data.size(); ++i)
+        {
+            outhost_local_host.data[i] =
+                static_cast<Tref>(static_cast<Tgpu>(outhost_local_host.data[i]));
+        }
+    }
+
     if(bias_mode)
     {
         tensor<Tref> bias_local_host(miopen::deref(biasTensor).GetLengths(),
@@ -1346,6 +1406,15 @@ int CBAInferFusionDriver<Tgpu, Tref>::RunForwardCPU()
         std::cout << "Running CPU fwd activation." << std::endl;
         runCPUActivFwdInference();
     }
+
+    if constexpr(!std::is_same_v<Tgpu, Tref>)
+    {
+        for(size_t i = 0; i < out_host.size(); ++i)
+        {
+            out_host[i] = static_cast<Tref>(static_cast<Tgpu>(out_host[i]));
+        }
+    }
+
     return miopenStatusSuccess;
 }
 
@@ -1354,16 +1423,19 @@ int CBAInferFusionDriver<Tgpu, Tref>::VerifyForward()
 {
     RunForwardCPU();
 
-    double allowedEps = std::numeric_limits<Tgpu>::epsilon() * 80;
+    const auto error = miopen::rms_range(out_host, out);
 
-    int match = miopenInferVerify(out.size(), out_host.data(), out.data(), allowedEps);
-    if(match == 0)
+    const double tolerance = std::numeric_limits<Tgpu>::epsilon() * 80;
+
+    if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Forward Activation FAILED" << std::endl;
+        std::cout << "Forward Activation FAILED: " << error << " > " << tolerance << std::endl;
         return EC_VerifyFwd;
     }
 
-    std::cout << "Forward Activation Verifies on CPU and GPU" << std::endl;
+    std::cout << "Forward Activation Verifies on CPU and GPU (" << error << " < " << tolerance
+              << ')' << std::endl;
+
     return miopenStatusSuccess;
 }
 

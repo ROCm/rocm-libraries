@@ -23,7 +23,7 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/util_device.hpp"
+#include <hipcub/util_device.hpp>
 
 template<class T>
 __global__
@@ -31,7 +31,8 @@ void alias_temporaries_kernel(T* data, size_t* temp_storage_bytes)
 {
     T*     allocations[10];
     size_t allocation_sizes[10] = {1, 2, 3, 5, 8, 13, 21, 34, 55, 89};
-    (void)hipcub::AliasTemporaries(data, *temp_storage_bytes, allocations, allocation_sizes);
+    (void)
+        hipcub::detail::AliasTemporaries(data, *temp_storage_bytes, allocations, allocation_sizes);
 }
 
 TEST(HipcubUtilDevice, AliasTemporariesDevice)
@@ -88,7 +89,8 @@ TEST(HipcubUtilDevice, AliasTemporariesHost)
     }
 
     // Determine storage size
-    HIP_CHECK(hipcub::AliasTemporaries(data, temp_storage_bytes, allocations, allocation_sizes));
+    HIP_CHECK(
+        hipcub::detail::AliasTemporaries(data, temp_storage_bytes, allocations, allocation_sizes));
 
     // Should be larger or equal to the sum of all sizes.
     ASSERT_GT(temp_storage_bytes, min_size - 1);
@@ -98,10 +100,12 @@ TEST(HipcubUtilDevice, AliasTemporariesHost)
 
     size_t zero_size = 0;
     // Check for error if it does not fit
-    hipError_t error = hipcub::AliasTemporaries(data, zero_size, allocations, allocation_sizes);
+    hipError_t error
+        = hipcub::detail::AliasTemporaries(data, zero_size, allocations, allocation_sizes);
     test_utils::assert_eq(error, hipErrorInvalidValue);
 
-    HIP_CHECK(hipcub::AliasTemporaries(data, temp_storage_bytes, allocations, allocation_sizes));
+    HIP_CHECK(
+        hipcub::detail::AliasTemporaries(data, temp_storage_bytes, allocations, allocation_sizes));
 
     test_utils::assert_eq(data, allocations[0]);
 

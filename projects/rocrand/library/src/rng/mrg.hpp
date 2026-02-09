@@ -45,81 +45,72 @@ namespace rocrand_impl::host
 {
 
 template<class Engine>
-__host__ __device__ void init_engines_mrg(dim3               block_idx,
-                                          dim3               thread_idx,
-                                          dim3               grid_dim,
-                                          dim3               block_dim,
-                                          Engine*            engines,
-                                          const unsigned int start_engine_id,
-                                          const unsigned int engines_size,
-                                          unsigned long long seed,
-                                          unsigned long long offset)
+struct init_engines_mrg
 {
-    (void)grid_dim;
-    const unsigned int engine_id = block_idx.x * block_dim.x + thread_idx.x;
-    if(engine_id < engines_size)
+    template<host::target_arch Arch = host::target_arch::unknown>
+    __host__ __device__
+    static void generate(dim3               block_idx,
+                         dim3               thread_idx,
+                         dim3               grid_dim,
+                         dim3               block_dim,
+                         Engine*            engines,
+                         const unsigned int start_engine_id,
+                         const unsigned int engines_size,
+                         unsigned long long seed,
+                         unsigned long long offset)
     {
-        engines[engine_id]
-            = Engine(seed, engine_id, offset + (engine_id < start_engine_id ? 1 : 0));
+        (void)grid_dim;
+        const unsigned int engine_id = block_idx.x * block_dim.x + thread_idx.x;
+        if(engine_id < engines_size)
+        {
+            engines[engine_id]
+                = Engine(seed, engine_id, offset + (engine_id < start_engine_id ? 1 : 0));
+        }
     }
-}
+};
 
 template<class ConfigProvider, bool IsDynamic, class Engine, class T, class Distribution>
-__host__ __device__ __forceinline__ void generate_mrg(dim3 block_idx,
-                                      dim3 thread_idx,
-                                      dim3 grid_dim,
-                                      dim3 /*block_dim*/,
-                                      Engine*            engines,
-                                      const unsigned int start_engine_id,
-                                      T*                 data,
-                                      const size_t       n,
-                                      Distribution       distribution)
+struct generate_mrg
 {
-    static_assert(is_single_tile_config<ConfigProvider, T>(IsDynamic),
-                  "This kernel should only be used with single tile configs");
-    constexpr unsigned int block_size   = get_block_size<ConfigProvider, T>(IsDynamic);
-    constexpr unsigned int input_width  = Distribution::input_width;
-    constexpr unsigned int output_width = Distribution::output_width;
-
-    using vec_type = aligned_vec_type<T, output_width>;
-
-    const unsigned int id     = block_idx.x * block_size + thread_idx.x;
-    const unsigned int stride = grid_dim.x * block_size;
-
-    const unsigned int engine_id = (id + start_engine_id) % stride;
-    Engine             engine    = engines[engine_id];
-
-    unsigned int input[input_width];
-    T            output[output_width];
-
-    const uintptr_t uintptr   = reinterpret_cast<uintptr_t>(data);
-    const size_t misalignment = (output_width - uintptr / sizeof(T) % output_width) % output_width;
-    const unsigned int head_size    = cpp_utils::min(n, misalignment);
-    const unsigned int tail_size = (n - head_size) % output_width;
-    const size_t       vec_n     = (n - head_size) / output_width;
-
-    vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
-    size_t    index    = id;
-    while(index < vec_n)
+    template<host::target_arch Arch = host::target_arch::unknown>
+    __host__ __device__ __forceinline__
+    static void generate(dim3 block_idx,
+                         dim3 thread_idx,
+                         dim3 grid_dim,
+                         dim3 /*block_dim*/,
+                         Engine*            engines,
+                         const unsigned int start_engine_id,
+                         T*                 data,
+                         const size_t       n,
+                         Distribution       distribution)
     {
-        for(unsigned int i = 0; i < input_width; i++)
-        {
-            input[i] = engine();
-        }
-        distribution(input, output);
+        static_assert(is_single_tile_config<ConfigProvider, T, Arch>(IsDynamic),
+                      "This kernel should only be used with single tile configs");
+        constexpr unsigned int block_size   = get_block_size<ConfigProvider, T, Arch>(IsDynamic);
+        constexpr unsigned int input_width  = Distribution::input_width;
+        constexpr unsigned int output_width = Distribution::output_width;
 
-        vec_data[index] = *reinterpret_cast<vec_type*>(output);
-        // Next position
-        index += stride;
-    }
+        using vec_type = aligned_vec_type<T, output_width>;
 
-    // Check if we need to save head and tail.
-    // Those numbers should be generated by the thread that would
-    // save next vec_type.
-    if(output_width > 1 && index == vec_n)
-    {
-        // If data is not aligned by sizeof(vec_type)
-        if(head_size > 0)
+        const unsigned int id     = block_idx.x * block_size + thread_idx.x;
+        const unsigned int stride = grid_dim.x * block_size;
+
+        const unsigned int engine_id = (id + start_engine_id) % stride;
+        Engine             engine    = engines[engine_id];
+
+        unsigned int input[input_width];
+        T            output[output_width];
+
+        const uintptr_t uintptr = reinterpret_cast<uintptr_t>(data);
+        const size_t    misalignment
+            = (output_width - uintptr / sizeof(T) % output_width) % output_width;
+        const unsigned int head_size = cpp_utils::min(n, misalignment);
+        const unsigned int tail_size = (n - head_size) % output_width;
+        const size_t       vec_n     = (n - head_size) / output_width;
+
+        vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
+        size_t    index    = id;
+        while(index < vec_n)
         {
             for(unsigned int i = 0; i < input_width; i++)
             {
@@ -127,36 +118,56 @@ __host__ __device__ __forceinline__ void generate_mrg(dim3 block_idx,
             }
             distribution(input, output);
 
-            for(unsigned int o = 0; o < output_width; o++)
-            {
-                if(o < head_size)
-                {
-                    data[o] = output[o];
-                }
-            }
+            vec_data[index] = *reinterpret_cast<vec_type*>(output);
+            // Next position
+            index += stride;
         }
 
-        if(tail_size > 0)
+        // Check if we need to save head and tail.
+        // Those numbers should be generated by the thread that would
+        // save next vec_type.
+        if(output_width > 1 && index == vec_n)
         {
-            for(unsigned int i = 0; i < input_width; i++)
+            // If data is not aligned by sizeof(vec_type)
+            if(head_size > 0)
             {
-                input[i] = engine();
-            }
-            distribution(input, output);
-
-            for(unsigned int o = 0; o < output_width; o++)
-            {
-                if(o < tail_size)
+                for(unsigned int i = 0; i < input_width; i++)
                 {
-                    data[n - tail_size + o] = output[o];
+                    input[i] = engine();
+                }
+                distribution(input, output);
+
+                for(unsigned int o = 0; o < output_width; o++)
+                {
+                    if(o < head_size)
+                    {
+                        data[o] = output[o];
+                    }
+                }
+            }
+
+            if(tail_size > 0)
+            {
+                for(unsigned int i = 0; i < input_width; i++)
+                {
+                    input[i] = engine();
+                }
+                distribution(input, output);
+
+                for(unsigned int o = 0; o < output_width; o++)
+                {
+                    if(o < tail_size)
+                    {
+                        data[n - tail_size + o] = output[o];
+                    }
                 }
             }
         }
-    }
 
-    // Save engine with its state
-    engines[engine_id] = engine;
-}
+        // Save engine with its state
+        engines[engine_id] = engine;
+    }
+};
 
 template<typename System, typename Engine, typename ConfigProvider>
 class mrg_generator_template : public generator_impl_base
@@ -297,6 +308,13 @@ public:
             return ROCRAND_STATUS_INTERNAL_ERROR;
         }
 
+        host::target_arch target_arch;
+        hipError_t        result = host::get_device_arch(m_stream, target_arch);
+        if(result != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+
         m_start_engine_id = m_offset % m_engines_size;
 
         if(m_engines != nullptr)
@@ -314,6 +332,7 @@ public:
 
         status = system_type::template launch<init_engines_mrg<engine_type>,
                                               static_block_size_config_provider<init_threads>>(
+            target_arch,
             dim3(init_blocks),
             dim3(init_threads),
             0,
@@ -359,6 +378,13 @@ public:
             return ROCRAND_STATUS_SUCCESS;
         }
 
+        host::target_arch target_arch;
+        hipError_t        result = host::get_device_arch(m_stream, target_arch);
+        if(result != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+
         status = dynamic_dispatch(
             m_order,
             [&, this](auto is_dynamic)
@@ -367,7 +393,8 @@ public:
                     generate_mrg<ConfigProvider, is_dynamic, engine_type, T, Distribution>,
                     ConfigProvider,
                     T,
-                    is_dynamic>(dim3(config.blocks),
+                    is_dynamic>(target_arch,
+                                dim3(config.blocks),
                                 dim3(config.threads),
                                 0,
                                 m_stream,

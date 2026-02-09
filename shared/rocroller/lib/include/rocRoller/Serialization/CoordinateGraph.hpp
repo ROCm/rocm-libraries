@@ -71,7 +71,6 @@ namespace rocRoller
             {
                 iot::mapRequired(io, "size", lds.size);
                 iot::mapRequired(io, "stride", lds.stride);
-                iot::mapRequired(io, "isDirect2LDS", lds.isDirect2LDS);
             }
 
             static void mapping(IO& io, KernelGraph::CoordinateGraph::LDS& lds)
@@ -243,8 +242,6 @@ namespace rocRoller
         {
         };
 
-        ROCROLLER_SERIALIZE_VECTOR(false, Expression::ExpressionPtr);
-
         template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::CoordinateGraph::PiecewiseAffineJoin, IO, Context>
         {
@@ -268,17 +265,20 @@ namespace rocRoller
             }
         };
 
-        template <typename IO, typename Context>
-        struct MappingTraits<KernelGraph::CoordinateGraph::Index, IO, Context>
+        template <typename T, typename IO, typename Context>
+        requires(
+            CIsAnyOf<T,
+                     KernelGraph::CoordinateGraph::Index,
+                     KernelGraph::CoordinateGraph::Segment>) struct MappingTraits<T, IO, Context>
         {
             using iot = IOTraits<IO>;
 
-            static void mapping(IO& io, KernelGraph::CoordinateGraph::Index& edge, Context& ctx)
+            static void mapping(IO& io, T& edge, Context& ctx)
             {
                 iot::mapRequired(io, "index", edge.index);
             }
 
-            static void mapping(IO& io, KernelGraph::CoordinateGraph::Index& edge)
+            static void mapping(IO& io, T& edge)
             {
                 AssertFatal((std::same_as<EmptyContext, Context>));
 

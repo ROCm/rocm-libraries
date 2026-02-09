@@ -98,8 +98,9 @@ struct block_merge_impl<
     Value,
     BlockSize,
     ItemsPerThread,
-    std::enable_if_t<!std::is_trivially_copyable<Value>::value
-                     || rocprim::is_floating_point<Value>::value || std::is_integral<Value>::value>>
+    std::enable_if_t<
+        !std::is_trivially_copyable<Value>::value || rocprim::is_floating_point<Value>::value
+        || rocprim::is_integral<Value>::value || std::is_same<Value, ::rocprim::empty_type>::value>>
 {
 
     static constexpr bool         with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
@@ -264,9 +265,9 @@ struct block_merge_impl<Key,
                         ItemsPerThread,
                         std::enable_if_t<std::is_trivially_copyable<Value>::value
                                          && !rocprim::is_floating_point<Value>::value
-                                         && !std::is_integral<Value>::value>>
+                                         && !rocprim::is_integral<Value>::value
+                                         && !std::is_same<Value, ::rocprim::empty_type>::value>>
 {
-
     static constexpr bool         with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
     static constexpr unsigned int items_per_tile = BlockSize * ItemsPerThread;
 
@@ -301,7 +302,6 @@ struct block_merge_impl<Key,
                                                               const OffsetT*       merge_partitions,
                                                               storage_type&        storage)
         {
-
             auto& keys_shared   = storage.keys.get();
             auto& values_shared = storage.values.get();
 

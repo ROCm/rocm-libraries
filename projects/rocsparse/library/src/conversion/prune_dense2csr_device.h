@@ -171,7 +171,7 @@ namespace rocsparse
 
                 // Broadcast the update of the shift to all 64 threads for the next set of 64 columns.
                 // Choose the last lane since that it contains the size of the sparse row (even if its predicate is false).
-                shift += __shfl(static_cast<int>(count_previous_nnzs), WF_SIZE - 1);
+                shift += rocsparse::shfl(static_cast<int>(count_previous_nnzs), WF_SIZE - 1);
             }
         }
     }

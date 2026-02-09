@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_csrmv_info.hpp"
+#include "rocsparse_pivot_info_t.hpp"
 
 /********************************************************************************
  * \brief rocsparse_csritsv_info is a structure holding the rocsparse csritsv
@@ -32,7 +33,7 @@
  * the create_csritsv_info() routine. It should be destroyed at the
  * end using destroy_csritsv_info().
  *******************************************************************************/
-typedef struct _rocsparse_csritsv_info
+typedef struct _rocsparse_csritsv_info : rocsparse::pivot_info_t
 {
 protected:
     rocsparse_csrmv_info m_csrmv_info{};
@@ -52,35 +53,8 @@ public:
         this->m_csrmv_info = value;
     }
 
+    void copy(const _rocsparse_csritsv_info*, hipStream_t);
     _rocsparse_csritsv_info() = default;
+    ~_rocsparse_csritsv_info();
 
-    ~_rocsparse_csritsv_info()
-    {
-        if(this->m_csrmv_info)
-        {
-            delete this->m_csrmv_info;
-        }
-    }
 } * rocsparse_csritsv_info;
-
-namespace rocsparse
-{
-    /********************************************************************************
- * \brief rocsparse_csritsv_info is a structure holding the rocsparse csritsv
- * info data gathered during csritsv_buffer_size. It must be initialized using
- * the create_csritsv_info() routine. It should be destroyed at the
- * end using destroy_csritsv_info().
- *******************************************************************************/
-    rocsparse_status create_csritsv_info(rocsparse_csritsv_info* info);
-
-    /********************************************************************************
- * \brief Copy csritsv info.
- *******************************************************************************/
-    rocsparse_status copy_csritsv_info(rocsparse_csritsv_info       dest,
-                                       const rocsparse_csritsv_info src);
-
-    /********************************************************************************
- * \brief Destroy csritsv info.
- *******************************************************************************/
-    rocsparse_status destroy_csritsv_info(rocsparse_csritsv_info info);
-}

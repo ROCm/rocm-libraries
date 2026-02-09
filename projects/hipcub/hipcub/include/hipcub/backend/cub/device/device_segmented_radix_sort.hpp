@@ -32,7 +32,6 @@
 
 #include "../../../config.hpp"
 #include "../../../util_deprecated.hpp"
-#include "hipcub/util_deprecated.hpp"
 
 #include <cub/device/device_segmented_radix_sort.cuh> // IWYU pragma: export
 

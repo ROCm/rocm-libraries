@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -90,16 +90,17 @@ namespace AliasDataFlowTagsTest
 
         graph = transform<ConstantPropagation>(graph);
         graph = transform<FuseExpressions>(graph);
-        graph = transform<ConnectWorkgroups>(graph, params, context.get());
+        graph = transform<ConnectWorkgroups>(graph, context.get());
+        graph = transform<WorkgroupRemapXCC>(graph, context.get(), params->workgroupRemapXCC);
         graph = transform<UnrollLoops>(graph, params, context.get());
         graph = transform<FuseLoops>(graph);
         graph = transform<RemoveDuplicates>(graph);
         graph = transform<OrderEpilogueBlocks>(graph);
         graph = transform<CleanLoops>(graph);
         graph = transform<AddPrefetch>(graph, params, context.get());
-        graph = transform<AddComputeIndex>(graph);
         graph = transform<AddPRNG>(graph, context.get());
         graph = transform<UpdateWavefrontParameters>(graph, params);
+        graph = transform<AssignIndexExpressions>(graph, context.get(), example.getCommand());
         graph = transform<LoadPacked>(graph, context.get());
         graph = transform<AddConvert>(graph);
         graph = transform<AddDeallocateDataFlow>(graph);

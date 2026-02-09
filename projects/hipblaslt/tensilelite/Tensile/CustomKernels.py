@@ -93,7 +93,7 @@ def getCustomKernelConfig(
     for key in internalSupportParams:
         if key not in kernelIsp:
             kernelIsp[key] = internalSupportParams[key]
-    
+
     validParameters.update(newMIValidParameters)
 
     for k, v in kernelConfig.items():

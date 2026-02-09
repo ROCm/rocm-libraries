@@ -22,6 +22,7 @@
 #include <numeric>
 #include <unordered_set>
 
+#include "arithmetic.h"
 #include "array_validator.h"
 #include "increment.h"
 
@@ -62,10 +63,11 @@ bool valid_length_stride_1d_multi(const unsigned int        idx,
         std::cout << "l0: " << l0 << "\ts0: " << s0 << std::endl;
     }
 
-    // We only need to go to the maximum pointer offset for (l1,s1).
+    // We only need to go to the maximum pointer offset for (index, s1), wherein
+    // 0 <= index < l1 (element-wise inequalities: max index values are l1 - 1):
     const auto max_offset
-        = std::accumulate(l1.begin(), l1.end(), (size_t)1, std::multiplies<size_t>())
-          - std ::inner_product(l1.begin(), l1.end(), s1.begin(), (size_t)0);
+        = std::inner_product(l1.begin(), l1.end(), s1.begin(), static_cast<size_t>(0))
+          - sum(s1.begin(), s1.end());
     std::unordered_set<size_t> a0{};
     for(size_t i = 1; i < l0; ++i)
     {
@@ -99,7 +101,8 @@ bool valid_length_stride_1d_multi(const unsigned int        idx,
     std::fill(index.begin(), index.end(), 0);
     do
     {
-        const int i = std::inner_product(index.begin(), index.end(), s1.begin(), (size_t)0);
+        const auto i
+            = std::inner_product(index.begin(), index.end(), s1.begin(), static_cast<size_t>(0));
         if(i > 0 && (i % s0 == 0))
         {
             // TODO: use an ordered set and binary search
@@ -135,15 +138,22 @@ bool valid_length_stride_multi_multi(const std::vector<size_t> l0,
 {
     std::unordered_set<size_t> a0{};
 
+    // We only need to go to the min between the max of (index0, s0) and the max
+    // of (index1, s1), wherein 0 <= index{i} < l{i} (i in {0,1}, element-wise
+    // inequalities: max index values are l{i} - 1):
     const auto max_offset
-        = std::accumulate(l1.begin(), l1.end(), (size_t)1, std::multiplies<size_t>())
-          - std::inner_product(l1.begin(), l1.end(), s1.begin(), (size_t)0);
+        = std::min(std::inner_product(l1.begin(), l1.end(), s1.begin(), static_cast<size_t>(0))
+                       - sum(s1.begin(), s1.end()),
+                   std::inner_product(l0.begin(), l0.end(), s0.begin(), static_cast<size_t>(0))
+                       - sum(s0.begin(), s0.end()));
+
     std::vector<size_t> index0(l0.size()); // TODO: check this
     std::fill(index0.begin(), index0.end(), 0);
     do
     {
-        const auto i = std::inner_product(index0.begin(), index0.end(), s0.begin(), (size_t)0);
-        if(i > max_offset)
+        const auto i
+            = std::inner_product(index0.begin(), index0.end(), s0.begin(), static_cast<size_t>(0));
+        if(i > 0 && i <= max_offset)
             a0.insert(i);
     } while(increment_rowmajor(index0, l0));
 
@@ -151,13 +161,13 @@ bool valid_length_stride_multi_multi(const std::vector<size_t> l0,
     std::fill(index1.begin(), index1.end(), 0);
     do
     {
-        const auto i = std::inner_product(index1.begin(), index1.end(), s1.begin(), (size_t)0);
-        if(i > 0)
+        const auto i
+            = std::inner_product(index1.begin(), index1.end(), s1.begin(), static_cast<size_t>(0));
+        if(i > 0 && i <= max_offset)
         {
             // TODO: use an ordered set and binary search
             if(a0.find(i) != a0.end())
             {
-
                 return false;
             }
         }
@@ -187,10 +197,10 @@ bool valid_length_stride_3d(const std::vector<size_t>& l,
     {
         if(!valid_length_stride_1d_multi(idx, l, s, verbose))
         {
+            invalid = true;
 #ifdef _OPENMP
 #pragma omp cancel for
 #endif
-            invalid = true;
         }
     }
     if(invalid)
@@ -226,10 +236,10 @@ bool valid_length_stride_4d(const std::vector<size_t>& l,
     {
         if(!valid_length_stride_1d_multi(idx0, l, s, verbose))
         {
+            invalid = true;
 #ifdef _OPENMP
 #pragma omp cancel for
 #endif
-            invalid = true;
         }
     }
     if(invalid)
@@ -255,6 +265,10 @@ bool valid_length_stride_4d(const std::vector<size_t>& l,
             std::cout << "\n";
         }
     } while(std::next_permutation(v.begin(), v.end()));
+    // TODO: permutations a and b are equivalent if they complement one another,
+    // i.e., if a + b == 1 element-wise ([l0, s0] swap roles with [l1, s1] below).
+    // Only half the permutations are not redundant, one could/should reduce the
+    // workload below by half.
 
     // Then loop over all of the permutations.
 #ifdef _OPENMP
@@ -262,10 +276,10 @@ bool valid_length_stride_4d(const std::vector<size_t>& l,
 #endif
     for(size_t iperm = 0; iperm < perms.size(); ++iperm)
     {
-        std::vector<size_t> l0(2);
-        std::vector<size_t> s0(2);
-        std::vector<size_t> l1(2);
-        std::vector<size_t> s1(2);
+        std::vector<size_t> l0;
+        std::vector<size_t> s0;
+        std::vector<size_t> l1;
+        std::vector<size_t> s1;
         for(size_t i = 0; i < l.size(); ++i)
         {
             if(perms[iperm][i] == 0)
@@ -310,10 +324,10 @@ bool valid_length_stride_4d(const std::vector<size_t>& l,
 
         if(!valid_length_stride_multi_multi(l0, s0, l1, s1))
         {
+            invalid = true;
 #ifdef _OPENMP
 #pragma omp cancel for
 #endif
-            invalid = true;
         }
     }
     if(invalid)
@@ -334,8 +348,8 @@ bool valid_length_stride_generald(const std::vector<size_t> l,
     // Recurse on d-1 hyper-faces:
     for(unsigned int idx = 0; idx < l.size(); ++idx)
     {
-        std::vector<size_t> l0{};
-        std::vector<size_t> s0{};
+        std::vector<size_t> l0;
+        std::vector<size_t> s0;
         for(size_t i = 0; i < l.size(); ++i)
         {
             if(i != idx)
@@ -392,14 +406,14 @@ bool valid_length_stride_generald(const std::vector<size_t> l,
 #endif
         for(size_t iperm = 0; iperm < perms.size(); ++iperm)
         {
-            std::vector<size_t> l0(dim0);
-            std::vector<size_t> s0(dim0);
-            std::vector<size_t> l1(dim1);
-            std::vector<size_t> s1(dim1);
+            std::vector<size_t> l0;
+            std::vector<size_t> s0;
+            std::vector<size_t> l1;
+            std::vector<size_t> s1;
 
             for(size_t i = 0; i < l.size(); ++i)
             {
-                if(v[i] == 0)
+                if(perms[iperm][i] == 0)
                 {
                     l0.push_back(l[i]);
                     s0.push_back(s[i]);
@@ -441,10 +455,10 @@ bool valid_length_stride_generald(const std::vector<size_t> l,
 
             if(!valid_length_stride_multi_multi(l0, s0, l1, s1))
             {
+                invalid = true;
 #ifdef _OPENMP
 #pragma omp cancel for
 #endif
-                invalid = true;
             }
         }
         if(invalid)

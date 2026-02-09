@@ -32,14 +32,16 @@
 
 #include "argument_model.hpp"
 #include "hipsparselt_arguments.hpp"
+#include "hipsparselt_fp8.hpp"
 #include "test_cleanup.hpp"
+#include <hip/hip_runtime.h>
+#include <hipsparselt/hipsparselt.h>
 #include <algorithm>
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <functional>
 #include <future>
-#include <hipsparselt/hipsparselt.h>
 #include <iostream>
 #include <mutex>
 #include <queue>

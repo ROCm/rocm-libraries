@@ -138,6 +138,85 @@ struct custom_type
     }
 };
 
+template<typename T, typename U = T, bool NonZero = false>
+struct custom_type_copyable
+{
+    using first_type  = T;
+    using second_type = U;
+
+    using value_type = std::conditional_t<std::is_same<T, U>::value, T, void>;
+
+    T x;
+    U y;
+
+    ROCPRIM_HOST_DEVICE constexpr inline custom_type_copyable()
+        : x(NonZero ? 12 : 0), y(NonZero ? 34 : 0)
+    {}
+
+    ROCPRIM_HOST_DEVICE inline custom_type_copyable(T x, U y) : x(x), y(y) {}
+
+    ROCPRIM_HOST_DEVICE inline custom_type_copyable(T xy) : x(xy), y(xy) {}
+
+    template<typename V, typename W>
+    ROCPRIM_HOST_DEVICE inline custom_type_copyable(
+        const custom_type_copyable<V, W, NonZero>& other)
+        : x(static_cast<T>(other.x)), y(static_cast<U>(other.y))
+    {}
+
+    ROCPRIM_HOST_DEVICE
+    inline bool
+        operator<(const custom_type_copyable& other) const
+    {
+        rocprim::less<T>     less_T;
+        rocprim::equal_to<T> equal_to_T;
+        rocprim::less<U>     less_U;
+        return (less_T(x, other.x) || (equal_to_T(x, other.x) && less_U(y, other.y)));
+    }
+
+    ROCPRIM_HOST_DEVICE
+    inline bool
+        operator>(const custom_type_copyable& other) const
+    {
+        rocprim::greater<T>  greater_T;
+        rocprim::equal_to<T> equal_to_T;
+        rocprim::greater<U>  greater_U;
+        return (greater_T(x, other.x) || (equal_to_T(x, other.x) && greater_U(y, other.y)));
+    }
+
+    ROCPRIM_HOST_DEVICE
+    inline bool
+        operator==(const custom_type_copyable& other) const
+    {
+        rocprim::equal_to<T> equal_to_T;
+        rocprim::equal_to<U> equal_to_U;
+        return (equal_to_T(x, other.x) && equal_to_U(y, other.y));
+    }
+
+    ROCPRIM_HOST_DEVICE
+    inline bool
+        operator!=(const custom_type_copyable& other) const
+    {
+        return !(*this == other);
+    }
+
+    friend inline std::ostream& operator<<(std::ostream& stream, const custom_type_copyable& value)
+    {
+        stream << "[" << value.x << "; " << value.y << "]";
+        return stream;
+    }
+};
+
+static_assert(std::is_trivially_copyable<custom_type_copyable<char, double>>::value,
+              "custom_type_copyable is not trivially copyable");
+
+template<typename T>
+struct is_custom_type_copyable : std::false_type
+{};
+
+template<typename T, typename U, bool NonZero>
+struct is_custom_type_copyable<common::custom_type_copyable<T, U, NonZero>> : std::true_type
+{};
+
 template<unsigned int Size, class T, typename U = T, bool NonZero = false>
 struct custom_huge_type : custom_type<T, U, NonZero>
 {
@@ -181,6 +260,10 @@ struct is_custom_type<common::custom_type<T, U, NonZero>> : std::true_type
 
 template<unsigned int Size, typename T, typename U, bool NonZero>
 struct is_custom_type<common::custom_huge_type<Size, T, U, NonZero>> : std::true_type
+{};
+
+template<typename T, typename U, bool NonZero>
+struct is_custom_type<common::custom_type_copyable<T, U, NonZero>> : std::true_type
 {};
 } // namespace common
 

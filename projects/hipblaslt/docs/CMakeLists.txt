@@ -34,7 +34,7 @@ rocm_add_sphinx_doc(
   VARS
     "doxyfile=${CMAKE_CURRENT_BINARY_DIR}/Doxyfile"
 )
-  
+
 install(
   DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/html"
   DESTINATION "${CMAKE_INSTALL_DOCDIR}")

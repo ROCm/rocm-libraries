@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -55,8 +55,6 @@
 
 #include <boost/range/adaptor/transformed.hpp>
 #include <ostream>
-
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_ENABLE_DEPRECATED_SOLVERS)
 
 namespace miopen {
 namespace solver {
@@ -635,10 +633,8 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     ++id; // removed batchnorm::BnCKFwdInference
     ++id; // removed batchnorm::BnCKBwdBackward
     ++id; // removed batchnorm::BnCKFwdTraining
-    Register(
-        registry, ++id, Primitive::Normalization, layernorm::Layernorm2DCKForward{}.SolverDbId());
-    Register(
-        registry, ++id, Primitive::Normalization, layernorm::Layernorm4DCKForward{}.SolverDbId());
+    ++id; // removed layernorm::Layernorm2DCKForward
+    ++id; // removed layernorm::Layernorm4DCKForward
     Register(registry, ++id, Primitive::Normalization, layernorm::LayernormForward{}.SolverDbId());
     Register(registry, ++id, Primitive::Reduce, reduce::SumForward{}.SolverDbId());
     ++id;
@@ -724,24 +720,12 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
              Primitive::Fusion,
              fusion::ConvCKIgemmGrpFwdActivFused{}.SolverDbId(),
              miopenConvolutionAlgoImplicitGEMM);
+
+    Register(registry, ++id, Primitive::Normalization, layernorm::LayernormBackward().SolverDbId());
+
+    RegisterWithSolver(registry, ++id, conv::ConvDepthwiseFwd2D{}, miopenConvolutionAlgoDirect);
     // IMPORTANT: New solvers should be added to the end of the function, and don't leave a white
     // space between this comment and the newly registered solver(s)!
-}
-
-bool ThisSolverIsDeprecatedStatic::IsDisabled(const ExecutionContext& ctx)
-{
-    const bool device_is_allowed = [&]() {
-        if(env::enabled(MIOPEN_DEBUG_ENABLE_DEPRECATED_SOLVERS))
-            return true;
-        const auto device = ctx.GetStream().GetTargetProperties().Name();
-        return device == "gfx803"                       // Fiji
-               || device == "gfx900"                    // Vega10
-               || device == "gfx906"                    // Vega20, MI50/60
-               || device == "gfx908"                    // MI100
-               || device == "gfx90a"                    // MI200
-               || miopen::StartsWith(device, "gfx103"); // Navi2x
-    }();
-    return !device_is_allowed;
 }
 
 } // namespace solver

@@ -24,42 +24,29 @@
  *
  *******************************************************************************/
 
+// This file implements AI-based heuristics for convolution solver and kernel tuning.
+// Sections:
+//   1. Includes
+//   2. Common utilities
+//   3. Immediate mode AI models
+//   4. Kernel tuning AI models (sequential prediction of kernel parameters)
+
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK || MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <fdeep/fdeep.hpp>
 #include <miopen/filesystem.hpp>
+#include <miopen/env.hpp>
+
+#include <any>
+
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
+
+// 3D AI heuristics - now declared properly in header
+// No need for local forward declarations since we include the header
 
 namespace miopen {
 namespace ai {
-namespace common {
-
-nlohmann::json LoadJSON(const fs::path& path)
-{
-    if(!fs::exists(path))
-        MIOPEN_THROW(miopenStatusInternalError, "Unable to load file: " + path);
-    return nlohmann::json::parse(std::ifstream(path));
-}
-
-template <typename U, typename V>
-std::unordered_map<V, U> ReverseMap(const std::unordered_map<U, V>& map)
-{
-    std::unordered_map<V, U> reversed_map = {};
-    for(const auto& it : map)
-        reversed_map.emplace(make_pair(it.second, it.first));
-    return reversed_map;
-}
-
-template <typename U, typename V>
-std::vector<V> LookupValues(const std::vector<U>& keys, const std::unordered_map<U, V>& map)
-{
-    std::vector<V> values = {};
-    values.reserve(keys.size());
-    std::transform(keys.begin(), keys.end(), std::back_inserter(values), [&](const U& key) {
-        return map.at(key);
-    });
-    return values;
-}
-} // namespace common
+// Common utilities now in ai_common.hpp
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 namespace immed_mode {
@@ -494,6 +481,10 @@ protected:
 
 std::unique_ptr<Model> GetModel(const std::string& device)
 {
+    // 2D models only - 3D models handled separately in PredictSolver
+    if(device == "gfx950")
+        return std::make_unique<Gfx942Model>(); // use gfx942 model for gfx950 until we have a
+                                                // gfx950 model
     if(device == "gfx942")
         return std::make_unique<Gfx942Model>();
     if(device == "gfx90a")
@@ -501,78 +492,404 @@ std::unique_ptr<Model> GetModel(const std::string& device)
     return std::make_unique<Gfx908Model>(); // default model if GPU-specific model is not available
 }
 
-std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
-                                    const ExecutionContext& ctx,
-                                    const std::string& device)
+/**
+ * @brief Retrieve cached AI heuristics results if available
+ * @param problem Convolution problem description
+ * @param device GPU device name
+ * @param is3d Whether this is a 3D convolution problem
+ * @return Cached solver IDs, or empty vector if no cache hit
+ */
+std::vector<uint64_t>
+GetCachedPrediction(const conv::ProblemDescription& problem, const std::string& device, bool is3d)
 {
-    const static std::unique_ptr<Model> model = GetModel(device);
-    if(!model || !model->IsProblemSupported(problem, ctx))
-        return {};
-
-    std::string est_name = ":memory:" + device;
+    std::string est_name = is3d ? (":memory:3d_" + device) : (":memory:" + device);
     auto& db             = AnyRamDb::GetCached(est_name);
     auto db_res          = db.FindRecord(problem);
-    if(db_res)
+
+    if(!db_res)
     {
-        MIOPEN_LOG_I2("Cached heuristic (TunaNet) result found");
-        std::vector<uint64_t> db_sol(db_res->size());
-        // cast returned record to solver ids
-        std::transform(db_res->begin(), db_res->end(), db_sol.begin(), [](boost::any id) {
-            return boost::any_cast<uint64_t>(id);
-        });
-        if(miopen::IsLogging(LoggingLevel::Info2))
-        {
-            std::stringstream ss;
-            for(auto& id : db_sol)
-                ss << solver::Id{id}.ToString() << " ID:" << id << ", ";
-            MIOPEN_LOG_I2("Cached solvers: " << ss.str());
-        }
-        return db_sol;
+        return {};
     }
 
-    MIOPEN_LOG_I2("Evaluating TunaNet");
-    std::vector<float> res = model->Forward(problem); // res[i] gives the probability that the
-                                                      // i-th solver is the fastest for given
-                                                      // problem. ( The exact name of the i-th
-                                                      // solver may be obtained as follows:
-                                                      // model->metadata.solver_map.at(i) )
+    const std::string model_type = is3d ? "3D " : "";
+    MIOPEN_LOG_I2("Cached " << model_type << "heuristic (TunaNet) result found");
 
-    // sort solvers in order of their probabilities
-    std::vector<std::pair<int, float>> sort_res(res.size());
-    for(auto idx = 0; idx < res.size(); idx++)
-        sort_res[idx] = {idx, res[idx]};
+    std::vector<uint64_t> db_sol(db_res->size());
+    std::transform(db_res->begin(), db_res->end(), db_sol.begin(), [](std::any id) {
+        return std::any_cast<uint64_t>(id);
+    });
+
+    if(miopen::IsLogging(LoggingLevel::Info2))
+    {
+        std::stringstream ss;
+        for(auto& id : db_sol)
+            ss << solver::Id{id}.ToString() << " ID:" << id << ", ";
+        MIOPEN_LOG_I2("Cached " << model_type << "solvers: " << ss.str());
+    }
+
+    return db_sol;
+}
+
+/**
+ * @brief Store AI heuristics results in cache for future use
+ * @param problem Convolution problem description
+ * @param device GPU device name
+ * @param is3d Whether this is a 3D convolution problem
+ * @param any_sol Vector of solver IDs to cache
+ */
+void StorePredictionCache(const conv::ProblemDescription& problem,
+                          const std::string& device,
+                          bool is3d,
+                          std::vector<std::any>& any_sol)
+{
+    std::string est_name = is3d ? (":memory:3d_" + device) : (":memory:" + device);
+    auto& db             = AnyRamDb::GetCached(est_name);
+    db.StoreRecord(problem, any_sol);
+}
+
+/**
+ * @brief Result structure for processed AI heuristics predictions
+ */
+struct PredictionResult
+{
+    std::vector<uint64_t> solver_ids;     ///< Sorted solver IDs by probability
+    std::vector<std::any> any_solver_ids; ///< Same IDs in std::any format for caching
+};
+
+/**
+ * @brief Process raw model predictions into sorted solver recommendations
+ * @param predictions Raw probability scores from TunaNet model
+ * @param solver_map Mapping from solver indices to solver names
+ * @param is3d Whether processing 3D or 2D predictions (for logging)
+ * @return Sorted solver IDs with highest probability first
+ */
+PredictionResult ProcessPredictions(const std::vector<float>& predictions,
+                                    const std::unordered_map<size_t, std::string>& solver_map,
+                                    bool is3d)
+{
+    // Debug: Print raw prediction probabilities
+    const std::string model_type = is3d ? "3D " : "";
+
+    // Log individual solver predictions with scores
+    if(miopen::IsLogging(LoggingLevel::Info2) && !solver_map.empty())
+    {
+        MIOPEN_LOG_I2("=== " << model_type << "Solver Predictions (Logits) ===");
+        for(size_t idx = 0; idx < predictions.size() && idx < solver_map.size(); idx++)
+        {
+            if(solver_map.find(idx) != solver_map.end())
+            {
+                MIOPEN_LOG_I2("  [" << idx << "] " << solver_map.at(idx) << " = "
+                                    << predictions[idx]);
+            }
+        }
+    }
+
+    // Sort solvers in order of their probabilities
+    std::vector<std::pair<int, float>> sort_res(predictions.size());
+    for(auto idx = 0; idx < predictions.size(); idx++)
+        sort_res[idx] = {idx, predictions[idx]};
+
     const auto cmp = [](const std::pair<int, float>& a, const std::pair<int, float>& b) -> bool {
         return a.second > b.second;
     };
     std::sort(sort_res.begin(), sort_res.end(), cmp);
 
-    // map solver idx to solver id and then to anysolver
-    std::vector<uint64_t> sol;
-    std::vector<boost::any> any_sol;
+    // Log sorted results (top solvers)
+    if(miopen::IsLogging(LoggingLevel::Info2) && !solver_map.empty())
+    {
+        MIOPEN_LOG_I2("=== " << model_type << "Top Ranked Solvers ===");
+        for(size_t i = 0; i < std::min(size_t(3), sort_res.size()); i++)
+        {
+            const auto idx   = sort_res[i].first;
+            const auto score = sort_res[i].second;
+            if(solver_map.find(idx) != solver_map.end())
+            {
+                MIOPEN_LOG_I2("  Rank " << (i + 1) << ": " << solver_map.at(idx)
+                                        << " (score: " << score << ")");
+            }
+        }
+    }
+
+    // Map solver idx to solver id and then to anysolver
+    PredictionResult result;
+
     for(const auto& kinder : sort_res)
     {
-        const auto id     = kinder.first; // index of solver in probability vector
-        const auto sol_id = solver::Id{model->metadata.solver_map.at(id)};
-        if(!sol_id.IsValid())
+        const auto id = kinder.first;
+        // const auto prob = kinder.second; // Unused for now
+
+        // Check if solver index exists in map
+        if(solver_map.find(id) == solver_map.end())
         {
-            MIOPEN_LOG_I2("Invalid solver " << model->metadata.solver_map.at(id) << " removed");
+            MIOPEN_LOG_I2("Invalid solver index " << id << " not found in solver map");
             continue;
         }
-        sol.push_back(sol_id.Value());
-        any_sol.push_back(sol_id.Value());
+
+        const auto& solver_name = solver_map.at(id);
+
+        const auto sol_id = solver::Id{solver_name};
+        if(!sol_id.IsValid())
+        {
+            MIOPEN_LOG_I2("Invalid " << model_type << "solver " << solver_name << " removed");
+            continue;
+        }
+
+        result.solver_ids.push_back(sol_id.Value());
+        result.any_solver_ids.push_back(sol_id.Value());
     }
-    db.StoreRecord(problem, any_sol);
+
+    return result;
+}
+
+/**
+ * @brief Common logic for running TunaNet prediction and caching results
+ * @param problem Convolution problem description
+ * @param device GPU device name
+ * @param is3d Whether this is a 3D or 2D problem
+ * @param predictions Raw model predictions (solver probabilities)
+ * @param solver_map Mapping from solver indices to solver names
+ * @return Sorted solver IDs with highest probability first
+ */
+static std::vector<uint64_t>
+ProcessAndCachePredictions(const conv::ProblemDescription& problem,
+                           const std::string& device,
+                           bool is3d,
+                           const std::vector<float>& predictions,
+                           const std::unordered_map<size_t, std::string>& solver_map)
+{
+    const std::string model_type = is3d ? "3D " : "";
+
+    // Process predictions (sort by probability, filter invalid solvers)
+    auto result = ProcessPredictions(predictions, solver_map, is3d);
+
+    // Cache results for future use
+    StorePredictionCache(problem, device, is3d, result.any_solver_ids);
+
+    // Log results if verbose logging enabled
     if(miopen::IsLogging(LoggingLevel::Info2))
     {
         std::stringstream ss;
-        for(auto& id : sol)
+        for(auto& id : result.solver_ids)
             ss << solver::Id{id}.ToString() << " ID:" << id << ", ";
-        MIOPEN_LOG_I2("TunaNet Result: " << ss.str());
+        MIOPEN_LOG_I2(model_type << "TunaNet Result: " << ss.str());
     }
-    return sol;
+
+    return result.solver_ids;
 }
+
+std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
+                                    const ExecutionContext& ctx,
+                                    const std::string& device)
+{
+    const bool is3d = problem.Is3d();
+
+    // Check cache FIRST - avoids expensive model creation if we have cached results
+    auto cached_result = GetCachedPrediction(problem, device, is3d);
+    if(!cached_result.empty())
+    {
+        return cached_result;
+    }
+
+    if(is3d)
+    {
+        // 3D path: Use TunaNet3D model
+        std::unique_ptr<conv3d::Model3D> model = conv3d::Get3DModel(device);
+        if(!model || !model->IsProblemSupported(problem, ctx))
+        {
+            return {}; // Fallback: empty vector
+        }
+
+        MIOPEN_LOG_I2("Evaluating 3D TunaNet");
+        std::vector<float> predictions = model->Forward(problem);
+
+        return ProcessAndCachePredictions(
+            problem, device, true, predictions, model->GetSolverMap());
+    }
+    else
+    {
+        // 2D path: Use original TunaNet model
+        std::unique_ptr<Model> model = GetModel(device);
+        if(!model || !model->IsProblemSupported(problem, ctx))
+        {
+            return {}; // Fallback: empty vector
+        }
+
+        MIOPEN_LOG_I2("Evaluating TunaNet");
+        std::vector<float> predictions = model->Forward(problem);
+
+        return ProcessAndCachePredictions(
+            problem, device, false, predictions, model->metadata.solver_map);
+    }
+}
+
 } // namespace immed_mode
+
+/**
+ * @brief 3D convolution AI heuristics namespace
+ *
+ * This namespace contains classes and functions for 3D convolution AI heuristics
+ * using TunaNet3D neural networks to predict optimal solvers for 3D convolution
+ * operations (NCDHW layout).
+ */
+namespace conv3d {
+
+// Metadata3D implementation moved to metadata_3d.cpp
+
+class TunaNet3DModel : public Model3D
+{
+private:
+    const std::string device_name; // Device name (e.g., "gfx942", "gfx950")
+
+public:
+    Metadata3D metadata;
+
+    explicit TunaNet3DModel(const std::string& device)
+        : device_name(device), metadata(Metadata3D(device))
+    {
+        MIOPEN_LOG_I2("TunaNet3DModel initialized for device: " << device_name);
+    }
+
+    std::vector<float> Forward(const conv::ProblemDescription& problem) const override
+    {
+        std::vector<float> features = ToFeatures(problem);
+        MIOPEN_LOG_I2("TunaNet3DModel: Extracted " << features.size() << " features");
+
+        // Use fdeep to run TunaNet3D inference
+        const std::string model_path = Model3DPath(device_name);
+        const auto model             = fdeep::load_model(model_path);
+
+        // Convert features to fdeep tensor
+        const auto input_tensor = fdeep::tensor(fdeep::tensor_shape(features.size()), features);
+        const auto result       = model.predict({input_tensor});
+
+        // Extract predictions from result
+        const auto predictions = result[0].to_vector();
+        MIOPEN_LOG_I2("TunaNet3DModel: TunaNet3D returned " << predictions.size()
+                                                            << " predictions");
+        return predictions;
+    }
+
+    const std::unordered_map<size_t, std::string>& GetSolverMap() const override
+    {
+        return metadata.GetSolverMap();
+    }
+
+    bool IsProblemSupported(const conv::ProblemDescription& problem,
+                            const ExecutionContext& /*ctx*/) const override
+    {
+        if(!problem.Is3d())
+        {
+            return false;
+        }
+        MIOPEN_LOG_I2("3D problem supported by TunaNet3DModel");
+        return true;
+    }
+
+protected:
+    std::vector<float> ToFeatures(const conv::ProblemDescription& problem) const override
+    {
+        const bool isFwd = problem.GetDirection() == conv::Direction::Forward;
+
+        std::vector<float> features = {
+            // Input dimensions
+            static_cast<float>(isFwd ? problem.GetInChannels()
+                                     : problem.GetOutChannels()),                     // in_channels
+            static_cast<float>(isFwd ? problem.GetInDepth() : problem.GetOutDepth()), // in_d
+            static_cast<float>(isFwd ? problem.GetInHeight() : problem.GetOutHeight()), // in_h
+            static_cast<float>(isFwd ? problem.GetInWidth() : problem.GetOutWidth()),   // in_w
+
+            // Output dimensions
+            static_cast<float>(isFwd ? problem.GetOutChannels()
+                                     : problem.GetInChannels()), // out_channels
+            static_cast<float>(isFwd ? problem.GetOutDepth() : problem.GetInDepth()),   // out_d
+            static_cast<float>(isFwd ? problem.GetOutHeight() : problem.GetInHeight()), // out_h
+            static_cast<float>(isFwd ? problem.GetOutWidth() : problem.GetInWidth()),   // out_w
+
+            // Filter dimensions
+            static_cast<float>(problem.GetWeightsDepth()),  // fil_d
+            static_cast<float>(problem.GetWeightsHeight()), // fil_h
+            static_cast<float>(problem.GetWeightsWidth()),  // fil_w
+
+            // Padding
+            static_cast<float>(problem.GetPadD()), // pad_d
+            static_cast<float>(problem.GetPadH()), // pad_h
+            static_cast<float>(problem.GetPadW()), // pad_w
+
+            // Stride
+            static_cast<float>(problem.GetKernelStrideD()), // stride_d
+            static_cast<float>(problem.GetKernelStrideH()), // stride_h
+            static_cast<float>(problem.GetKernelStrideW()), // stride_w
+
+            // Batch size
+            static_cast<float>(problem.GetOutBatchSize()), // batchsize
+
+            // Layout encodings
+            static_cast<float>(metadata.EncodeInLayout(problem.GetInLayout())),       // in_layout
+            static_cast<float>(metadata.EncodeFilLayout(problem.GetWeightsLayout())), // fil_layout
+            static_cast<float>(metadata.EncodeOutLayout(problem.GetOutLayout())),     // out_layout
+
+            // Precision encoding
+            static_cast<float>(metadata.EncodePrecision(problem.GetInDataType())), // precision
+
+            // Direction encoding
+            static_cast<float>(metadata.EncodeDirection(problem.GetDirection())), // direction
+
+            // Group count
+            static_cast<float>(problem.GetGroupCount()), // group_count
+        };
+
+        MIOPEN_LOG_I2("TunaNet3DModel: Extracted " << features.size() << " features");
+        return features;
+    }
+
+    static std::string Model3DPath(const std::string& device)
+    {
+        const auto file_path = GetSystemDbPath() / (device + "_3d.tn.model");
+        if(!fs::exists(file_path))
+        {
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "Unable to load 3D AI model file: " + file_path.string());
+        }
+        return file_path.string();
+    }
+};
+
+std::unique_ptr<Model3D> Get3DModel(const std::string& device)
+{
+    MIOPEN_LOG_I2("Get3DModel called for device: " << device);
+
+    // List of devices with 3D TunaNet models
+    // Note: gfx942 included for testing purposes (no dedicated 3D model yet)
+    if(device == "gfx942" || device == "gfx950")
+    {
+        try
+        {
+            // Pass device name to constructor - it will append "_3d" internally
+            auto model = std::make_unique<TunaNet3DModel>(device);
+            MIOPEN_LOG_I2("Successfully created 3D model for device: " << device);
+            return model;
+        }
+        catch(const std::exception& e)
+        {
+            MIOPEN_LOG_E("Exception during 3D model construction: " << e.what());
+            return nullptr;
+        }
+        catch(...)
+        {
+            MIOPEN_LOG_E("Unknown exception during 3D model construction");
+            return nullptr;
+        }
+    }
+
+    MIOPEN_LOG_I2("Device " << device << " not supported for 3D models");
+    return nullptr;
+}
+
+} // namespace conv3d
+
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 namespace tuning {
@@ -673,9 +990,14 @@ std::shared_ptr<Model> GetModel(const std::string& arch, const std::string& solv
 {
     static std::map<std::string, std::shared_ptr<Model>> models;
     auto it = models.find(solver);
+
+    auto model_arch = arch;
+    if(model_arch == "gfx950")
+        model_arch = "gfx942"; // use gfx942 model for gfx950 until we have a gfx950 model
+
     if(it == models.end())
     {
-        std::shared_ptr<Model> model = std::make_shared<Model>(arch, solver);
+        std::shared_ptr<Model> model = std::make_shared<Model>(model_arch, solver);
         models[solver]               = model;
         return model;
     }
@@ -786,6 +1108,83 @@ bool ModelSetParams(const std::string& arch,
     MIOPEN_LOG_I2("KTN ran for " << duration.count() << " micro-seconds");
     return true;
 }
+
+namespace candidate_selection {
+
+// Helper to load and cache fdeep models
+const fdeep::model& GetFdeepModel(const std::string& path, const std::string& key)
+{
+    static std::map<std::string, std::unique_ptr<fdeep::model>> models;
+    auto it = models.find(key);
+    if(it == models.end())
+    {
+        if(!fs::exists(path))
+            MIOPEN_THROW(miopenStatusInternalError, "Unable to load model file: " + path);
+        auto model =
+            std::make_unique<fdeep::model>(fdeep::load_model(path, true, fdeep::dev_null_logger));
+        auto& ref   = *model;
+        models[key] = std::move(model);
+        return ref;
+    }
+    return *it->second;
+}
+
+std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& features,
+                                                const std::string& arch,
+                                                const std::string& solver)
+{
+
+    fdeep::tensor input_tensor(fdeep::tensor_shape(features.size()), features);
+    std::string key = arch + "_" + solver + "_input_encoder";
+    std::string path =
+        (GetSystemDbPath() / (arch + "_" + solver + "_input_encoder.tn.model")).string();
+    auto tensors = GetFdeepModel(path, key).predict({input_tensor});
+    if(tensors.empty())
+        MIOPEN_THROW(miopenStatusInternalError, "Input encoder returned empty tensor list");
+    return tensors[0].to_vector();
+}
+
+std::vector<std::vector<float>>
+EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_candidates,
+                             const std::string& arch,
+                             const std::string& solver)
+{
+
+    if(encoded_candidates.empty() || encoded_candidates[0].empty())
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "Empty candidates provided to kernel config encoder");
+
+    std::string key = arch + "_" + solver + "_kernel_config_encoder";
+    std::string path =
+        (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_encoder.tn.model")).string();
+
+    const auto& model = GetFdeepModel(path, key);
+
+    // By default, use predict_multi (multi-threaded); use single-threaded loop only if env var is
+    // set
+    bool use_single = env::enabled(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT);
+
+    std::vector<std::vector<float>> result;
+    std::vector<fdeep::tensors> inputs_vec;
+    inputs_vec.reserve(encoded_candidates.size());
+    for(const auto& candidate : encoded_candidates)
+    {
+        fdeep::tensor t(fdeep::tensor_shape(candidate.size()), candidate);
+        inputs_vec.push_back(fdeep::tensors{t}); // wrap tensor in a vector
+    }
+    auto outputs = model.predict_multi(inputs_vec, !use_single); // parallelly = !use_single
+    if(outputs.size() != inputs_vec.size())
+        MIOPEN_THROW(miopenStatusInternalError, "predict_multi returned wrong number of outputs");
+    for(const auto& out : outputs)
+    {
+        if(out.empty())
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "Kernel config encoder returned empty tensor list");
+        result.push_back(out[0].to_vector());
+    }
+    return result;
+}
+} // namespace candidate_selection
 
 } // namespace tuning
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING

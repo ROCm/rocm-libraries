@@ -63,8 +63,8 @@ template<typename Config>
 std::string config_name()
 {
     const rocprim::detail::reduce_config_params config = Config();
-    return "{bs:" + std::to_string(config.reduce_config.block_size)
-           + ",ipt:" + std::to_string(config.reduce_config.items_per_thread)
+    return "{bs:" + std::to_string(config.kernel_config.block_size)
+           + ",ipt:" + std::to_string(config.kernel_config.items_per_thread)
            + ",method:" + std::string(get_reduce_method_name(config.block_reduce_method)) + "}";
 }
 

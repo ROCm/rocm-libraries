@@ -338,6 +338,23 @@ static inline void compute_buffer_hash(const std::vector<hostbuf>& ibuffer,
             hash_real,
             hash_imag);
         break;
+    case 4:
+    {
+        // treat 4D brick as 3D + batch, but this needs to be
+        // unbatched until we add 4D support for copy_buffers
+        if(nbatch != 1)
+            throw std::runtime_error("cannot copy batched 4D bricks");
+        compute_buffer_hash<Tfloat, std::tuple<size_t, size_t, size_t>, Tint>(
+            ibuffer,
+            itype,
+            std::make_tuple(ilength[1], ilength[2], ilength[3]),
+            std::make_tuple(istride[1], istride[2], istride[3]),
+            istride[0],
+            ilength[0],
+            hash_real,
+            hash_imag);
+        break;
+    }
     default:
         abort();
     }

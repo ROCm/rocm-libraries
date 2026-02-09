@@ -42,8 +42,6 @@ namespace rocRoller
 
         KernelGraph NopExtraScopes::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::nopExtraScopes");
-
             auto scopes = original.control.getNodes<Scope>().to<std::set>();
 
             std::unordered_set<int> extraScopes;

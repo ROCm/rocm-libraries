@@ -32,6 +32,7 @@
 #include "../shared/hipfft_brick.h"
 #include "hipfft/hipfft.h"
 #include "hipfft/hipfftXt.h"
+#include <random>
 
 #ifdef HIPFFT_MPI_ENABLE
 #include "hipfft/hipfftMp.h"
@@ -133,13 +134,8 @@ public:
 
     int direction;
 
-    std::vector<int> int_length;
-    std::vector<int> int_inembed;
-    std::vector<int> int_onembed;
-
+    std::vector<int>           int_length;
     std::vector<long long int> ll_length;
-    std::vector<long long int> ll_inembed;
-    std::vector<long long int> ll_onembed;
 
     struct hipLibXtDesc_deleter
     {
@@ -160,22 +156,46 @@ public:
 
     // backend library can write N worksize values for N GPUs, so
     // allocate a vector for that if necessary
-    std::vector<size_t> xt_worksize;
+    std::vector<size_t> auto_allocated_worksizes;
+    // if auto_allocate == fft_auto_allocation_off, the hipFFT plan(s)
+    // will be provided with externally-managed work area(s):
+    static std::vector<gpubuf> externally_managed_workareas;
 
-    // pointer we pass to the backend library.  By default point to the
-    // single-GPU workbuffer size.
-    size_t* workbuffersize_ptr;
-
-    hipfft_params()
+    size_t auto_allocated_extra_vram_footprint() const
     {
-        workbuffersize_ptr = &workbuffersize;
+        return std::accumulate(auto_allocated_worksizes.begin(),
+                               auto_allocated_worksizes.end(),
+                               static_cast<size_t>(0));
     }
+
+    static size_t externally_managed_extra_vram_footprint()
+    {
+        return std::accumulate(externally_managed_workareas.begin(),
+                               externally_managed_workareas.end(),
+                               static_cast<size_t>(0),
+                               [](size_t total, const gpubuf& buf) { return total + buf.size(); });
+    }
+
+    bool is_preventing_auto_allocation_at_generation() const
+    {
+        if(auto_allocate != fft_auto_allocation_off)
+            return false;
+        // Let hipFFT sometimes auto-allocate nonetheless so that tests cover its
+        // ability to free resources (allocated at generation) when/if some
+        // externally-managed workarea(s) are provided after plan generation
+        // Note: this member function must return the same result even if called
+        // more than once by a given instance, it must be stable for any instance
+        return std::hash<std::string>()(token()) % 2 == 1;
+    }
+
+    hipfft_params() = default;
 
     hipfft_params(const fft_params& p)
         : fft_params(p)
     {
-        workbuffersize_ptr = &workbuffersize;
     }
+    hipfft_params(hipfft_params&& p) = default;
+    hipfft_params& operator=(hipfft_params&& other) = default;
 
     ~hipfft_params()
     {
@@ -206,12 +226,14 @@ public:
         }
         catch(fft_params::work_buffer_alloc_failure& e)
         {
-            val += workbuffersize;
+            val += auto_allocated_extra_vram_footprint();
+            val += externally_managed_extra_vram_footprint();
             std::stringstream msg;
             msg << "Plan work buffer size (" << val << " bytes raw data) too large for device";
             throw ROCFFT_SKIP{msg.str()};
         }
-        val += workbuffersize;
+        val += auto_allocated_extra_vram_footprint();
+        val += externally_managed_extra_vram_footprint();
         return val;
     }
 
@@ -304,38 +326,29 @@ public:
             throw std::runtime_error("Invalid transform type");
         }
 
-        int_length.resize(dim());
-        int_inembed.resize(dim());
-        int_onembed.resize(dim());
+        int_length.assign(length.begin(), length.end());
+        ll_length.assign(length.begin(), length.end());
 
-        ll_length.resize(dim());
-        ll_inembed.resize(dim());
-        ll_onembed.resize(dim());
-        switch(dim())
+        try
         {
-        case 3:
-            ll_inembed[2] = istride[1] / istride[2];
-            ll_onembed[2] = ostride[1] / ostride[2];
-            [[fallthrough]];
-        case 2:
-            ll_inembed[1] = istride[0] / istride[1];
-            ll_onembed[1] = ostride[0] / ostride[1];
-            [[fallthrough]];
-        case 1:
-            ll_inembed[0] = istride[dim() - 1];
-            ll_onembed[0] = ostride[dim() - 1];
-            break;
-        default:
-            throw std::runtime_error("Invalid dimension");
+            (void)get_advanced_layout_args<int>();
+            (void)get_advanced_layout_args<long long int>();
+        }
+        catch(const ionembed_exception& e)
+        {
+            // hipFFT can't do strides that aren't {i,o}nembed-compatible
+            return fft_status_invalid_strides;
+        }
+        catch(...)
+        {
+            return fft_status_failure;
         }
 
-        for(size_t i = 0; i < dim(); ++i)
-        {
-            ll_length[i]   = length[i];
-            int_length[i]  = length[i];
-            int_inembed[i] = ll_inembed[i];
-            int_onembed[i] = ll_onembed[i];
-        }
+        // reset auto_allocated_worksizes
+        auto_allocated_worksizes.resize(get_num_used_gpus());
+        std::for_each(auto_allocated_worksizes.begin(),
+                      auto_allocated_worksizes.end(),
+                      [](decltype(auto_allocated_worksizes)::value_type& val) { val = 0; });
 
         hipfftResult ret = HIPFFT_SUCCESS;
         return fft_status_from_hipfftparams(ret);
@@ -402,17 +415,45 @@ public:
         }
         }
 
+        if(ret == HIPFFT_SUCCESS && auto_allocate == fft_auto_allocation_off)
+        {
+            ret = set_externally_managed_work_areas();
+        }
+
         // hipFFT can fail plan creation due to allocation failure -
         // tests are expecting a specific exception in that case,
         // because the test was unable to run.  Doesn't mean the test
         // case failed.
         if(ret == HIPFFT_ALLOC_FAILED)
-            throw fft_params::work_buffer_alloc_failure(
-                "plan create failed due to allocation failure");
+        {
+            if(!final_attempt_at_plan_creation && externally_managed_extra_vram_footprint() > 0)
+            {
+                final_attempt_at_plan_creation = true;
+                // device allocation(s) in externally_managed_workareas might be
+                // larger than needed or even unnecessary for the instance of interest.
+                // Free them up and try again before concluding.
+                externally_managed_workareas.clear();
+                return create_plan();
+            }
+            else
+            {
+                throw fft_params::work_buffer_alloc_failure(
+                    "plan create failed due to allocation failure",
+                    externally_managed_extra_vram_footprint()
+                        + auto_allocated_extra_vram_footprint());
+            }
+        }
 
         // store token to check if plan was already made
         current_token = token();
         return fft_status_from_hipfftparams(ret);
+    }
+
+    hipfftResult_t set_stream(hipStream_t stream)
+    {
+        if(plan == INVALID_PLAN_HANDLE)
+            throw std::runtime_error("Plan must be created before setting a desired stream");
+        return hipfftSetStream(plan, stream);
     }
 
     void validate_fields() const override
@@ -454,84 +495,99 @@ public:
         }
     }
 
-    fft_status set_callbacks(void* load_cb_host,
-                             void* load_cb_data,
-                             void* store_cb_host,
-                             void* store_cb_data) override
+    // Return the number of expected callback entries for supplied
+    // fields.
+    static size_t expected_callback_count(const std::vector<fft_field>& fields, size_t multiGPU)
+    {
+        // if library-decomposed multi-GPU transform is being done,
+        // then we need that many callback entries
+        if(multiGPU > 1)
+            return multiGPU;
+
+        // If fields are not specified, we consider the input or
+        // output to have a single brick (and thus expect a single
+        // callback entry)
+        if(fields.empty())
+            return 1;
+        return std::accumulate(fields.begin(),
+                               fields.end(),
+                               static_cast<size_t>(0),
+                               [](size_t s, const fft_field& f) { return s + f.bricks.size(); });
+    }
+    fft_status set_callbacks(std::vector<void*>* load_cb_func,
+                             std::vector<void*>* load_cb_data,
+                             std::vector<void*>* store_cb_func,
+                             std::vector<void*>* store_cb_data,
+                             size_t              load_cb_shared_mem_bytes  = 0,
+                             size_t              store_cb_shared_mem_bytes = 0) override
     {
         if(run_callbacks)
         {
             if(!hipfft_transform_type)
                 throw std::runtime_error("callbacks require a valid hipfftType");
 
+            auto expected_load_cb_count  = expected_callback_count(ifields, multiGPU);
+            auto expected_store_cb_count = expected_callback_count(ofields, multiGPU);
+            check_callback_vec(load_cb_func, expected_load_cb_count, true);
+            check_callback_vec(load_cb_data, expected_load_cb_count, false);
+            check_callback_vec(store_cb_func, expected_store_cb_count, true);
+            check_callback_vec(store_cb_data, expected_store_cb_count, false);
+
+            hipfftXtCallbackType load_type  = HIPFFT_CB_UNDEFINED;
+            hipfftXtCallbackType store_type = HIPFFT_CB_UNDEFINED;
+
             hipfftResult ret{HIPFFT_EXEC_FAILED};
             switch(*hipfft_transform_type)
             {
             case HIPFFT_R2C:
-                ret = hipfftXtSetCallback(plan, &load_cb_host, HIPFFT_CB_LD_REAL, &load_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallback(
-                    plan, &store_cb_host, HIPFFT_CB_ST_COMPLEX, &store_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
+                load_type  = HIPFFT_CB_LD_REAL;
+                store_type = HIPFFT_CB_ST_COMPLEX;
                 break;
             case HIPFFT_D2Z:
-                ret = hipfftXtSetCallback(
-                    plan, &load_cb_host, HIPFFT_CB_LD_REAL_DOUBLE, &load_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallback(
-                    plan, &store_cb_host, HIPFFT_CB_ST_COMPLEX_DOUBLE, &store_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
+                load_type  = HIPFFT_CB_LD_REAL_DOUBLE;
+                store_type = HIPFFT_CB_ST_COMPLEX_DOUBLE;
                 break;
             case HIPFFT_C2R:
-                ret = hipfftXtSetCallback(plan, &load_cb_host, HIPFFT_CB_LD_COMPLEX, &load_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallback(plan, &store_cb_host, HIPFFT_CB_ST_REAL, &store_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
+                load_type  = HIPFFT_CB_LD_COMPLEX;
+                store_type = HIPFFT_CB_ST_REAL;
                 break;
             case HIPFFT_Z2D:
-                ret = hipfftXtSetCallback(
-                    plan, &load_cb_host, HIPFFT_CB_LD_COMPLEX_DOUBLE, &load_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallback(
-                    plan, &store_cb_host, HIPFFT_CB_ST_REAL_DOUBLE, &store_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
+                load_type  = HIPFFT_CB_LD_COMPLEX_DOUBLE;
+                store_type = HIPFFT_CB_ST_REAL_DOUBLE;
                 break;
             case HIPFFT_C2C:
-                ret = hipfftXtSetCallback(plan, &load_cb_host, HIPFFT_CB_LD_COMPLEX, &load_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallback(
-                    plan, &store_cb_host, HIPFFT_CB_ST_COMPLEX, &store_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
+                load_type  = HIPFFT_CB_LD_COMPLEX;
+                store_type = HIPFFT_CB_ST_COMPLEX;
                 break;
             case HIPFFT_Z2Z:
-                ret = hipfftXtSetCallback(
-                    plan, &load_cb_host, HIPFFT_CB_LD_COMPLEX_DOUBLE, &load_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallback(
-                    plan, &store_cb_host, HIPFFT_CB_ST_COMPLEX_DOUBLE, &store_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
+                load_type  = HIPFFT_CB_LD_COMPLEX_DOUBLE;
+                store_type = HIPFFT_CB_ST_COMPLEX_DOUBLE;
                 break;
             default:
                 throw std::runtime_error("Invalid execution type");
             }
+
+            ret = hipfftXtSetCallback(plan,
+                                      load_cb_func ? load_cb_func->data() : nullptr,
+                                      load_type,
+                                      load_cb_data ? load_cb_data->data() : nullptr);
+            if(ret != HIPFFT_SUCCESS)
+                return fft_status_from_hipfftparams(ret);
+
+            ret = hipfftXtSetCallback(plan,
+                                      store_cb_func ? store_cb_func->data() : nullptr,
+                                      store_type,
+                                      store_cb_data ? store_cb_data->data() : nullptr);
+            if(ret != HIPFFT_SUCCESS)
+                return fft_status_from_hipfftparams(ret);
+
+            ret = hipfftXtSetCallbackSharedSize(plan, load_type, load_cb_shared_mem_bytes);
+            if(ret != HIPFFT_SUCCESS)
+                return fft_status_from_hipfftparams(ret);
+
+            ret = hipfftXtSetCallbackSharedSize(plan, store_type, store_cb_shared_mem_bytes);
+            if(ret != HIPFFT_SUCCESS)
+                return fft_status_from_hipfftparams(ret);
         }
         return fft_status_success;
     }
@@ -780,9 +836,10 @@ public:
     }
 
     // call the hipFFT APIs to distribute data to multiple GPUs
-    void multi_gpu_prepare(std::vector<gpubuf>& ibuffer,
-                           std::vector<void*>&  pibuffer,
-                           std::vector<void*>&  pobuffer) override
+    void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
+                           std::vector<gpubuf>&  ibuffer,
+                           std::vector<void*>&   pibuffer,
+                           std::vector<void*>&   pobuffer) override
     {
         if(multiGPU <= 1)
             return;
@@ -862,8 +919,9 @@ public:
     }
 
     // call the hipFFT APIs to gather the data back from the multiple GPUs
-    virtual void multi_gpu_finalize(std::vector<gpubuf>& obuffer,
-                                    std::vector<void*>&  pobuffer) override
+    virtual void multi_gpu_finalize(std::vector<hostbuf>& gpu_output,
+                                    std::vector<gpubuf>&  obuffer,
+                                    std::vector<void*>&   pobuffer) override
     {
         if(multiGPU <= 1)
             return;
@@ -921,13 +979,257 @@ private:
         CREATE_XT_MAKE_PLAN_MANY,
     };
 
+    // check that worksize estimates can be successfully queried with or without a valid plan
+    hipfftResult_t check_worksize_estimate()
+    {
+        hipfftResult_t ret{HIPFFT_INTERNAL_ERROR};
+        if(!hipfft_transform_type)
+        {
+            throw std::runtime_error("Estimating worksize requires a valid type of transform");
+        }
+        std::vector<size_t> worksize_estimate(get_num_used_gpus(), absurd_init_worksize_estimate);
+        switch(get_create_type())
+        {
+        case CREATE_MAKE_PLAN_Nd:
+        {
+            switch(dim())
+            {
+            case 1:
+                if(plan == INVALID_PLAN_HANDLE)
+                    ret = hipfftEstimate1d(
+                        int_length[0], *hipfft_transform_type, nbatch, worksize_estimate.data());
+                else
+                    ret = hipfftGetSize1d(plan,
+                                          int_length[0],
+                                          *hipfft_transform_type,
+                                          nbatch,
+                                          worksize_estimate.data());
+                break;
+            case 2:
+                if(plan == INVALID_PLAN_HANDLE)
+                    ret = hipfftEstimate2d(int_length[0],
+                                           int_length[1],
+                                           *hipfft_transform_type,
+                                           worksize_estimate.data());
+                else
+                    ret = hipfftGetSize2d(plan,
+                                          int_length[0],
+                                          int_length[1],
+                                          *hipfft_transform_type,
+                                          worksize_estimate.data());
+                break;
+            case 3:
+                if(plan == INVALID_PLAN_HANDLE)
+                    ret = hipfftEstimate3d(int_length[0],
+                                           int_length[1],
+                                           int_length[2],
+                                           *hipfft_transform_type,
+                                           worksize_estimate.data());
+                else
+                    ret = hipfftGetSize3d(plan,
+                                          int_length[0],
+                                          int_length[1],
+                                          int_length[2],
+                                          *hipfft_transform_type,
+                                          worksize_estimate.data());
+                break;
+            default:
+                throw std::runtime_error("invalid dim");
+            }
+            break;
+        }
+        case CREATE_MAKE_PLAN_MANY:
+        {
+            auto layout_args = get_advanced_layout_args<int>();
+            if(plan == INVALID_PLAN_HANDLE)
+                ret = hipfftEstimateMany(
+                    dim(),
+                    int_length.data(),
+                    const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+                    layout_args.istride_arg,
+                    layout_args.idist_arg,
+                    const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+                    layout_args.ostride_arg,
+                    layout_args.odist_arg,
+                    *hipfft_transform_type,
+                    nbatch,
+                    worksize_estimate.data());
+            else
+                ret = hipfftGetSizeMany(
+                    plan,
+                    dim(),
+                    int_length.data(),
+                    const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+                    layout_args.istride_arg,
+                    layout_args.idist_arg,
+                    const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+                    layout_args.ostride_arg,
+                    layout_args.odist_arg,
+                    *hipfft_transform_type,
+                    nbatch,
+                    worksize_estimate.data());
+            break;
+        }
+        case CREATE_MAKE_PLAN_MANY64:
+        {
+            if(plan == INVALID_PLAN_HANDLE)
+            {
+                // no direct equivalent in estimate-fetching APIs
+                std::for_each(worksize_estimate.begin(),
+                              worksize_estimate.end(),
+                              [](decltype(worksize_estimate)::value_type& val) { val = 0; });
+                ret = HIPFFT_SUCCESS;
+            }
+            else
+            {
+                auto layout_args = get_advanced_layout_args<long long int>();
+                ret              = hipfftGetSizeMany64(
+                    plan,
+                    dim(),
+                    ll_length.data(),
+                    const_cast<long long int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+                    layout_args.istride_arg,
+                    layout_args.idist_arg,
+                    const_cast<long long int*>(
+                        layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+                    layout_args.ostride_arg,
+                    layout_args.odist_arg,
+                    *hipfft_transform_type,
+                    nbatch,
+                    worksize_estimate.data());
+            }
+            break;
+        }
+        case CREATE_XT_MAKE_PLAN_MANY:
+        {
+            if(plan == INVALID_PLAN_HANDLE)
+            {
+                // no direct equivalent in estimate-fetching APIs
+                std::for_each(worksize_estimate.begin(),
+                              worksize_estimate.end(),
+                              [](decltype(worksize_estimate)::value_type& val) { val = 0; });
+                ret = HIPFFT_SUCCESS;
+            }
+            else
+            {
+                auto executionType = get_xt_api_execution_type();
+                auto layout_args   = get_advanced_layout_args<long long int>();
+                ret                = hipfftXtGetSizeMany(
+                    plan,
+                    dim(),
+                    ll_length.data(),
+                    const_cast<long long int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+                    layout_args.istride_arg,
+                    layout_args.idist_arg,
+                    inputType,
+                    const_cast<long long int*>(
+                        layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+                    layout_args.ostride_arg,
+                    layout_args.odist_arg,
+                    outputType,
+                    nbatch,
+                    worksize_estimate.data(),
+                    executionType);
+            }
+            break;
+        }
+        case PLAN_Nd:
+        case PLAN_MANY:
+        default:
+        {
+            // should be indirectly disabled via get_create_type()
+            return HIPFFT_INTERNAL_ERROR;
+        }
+        }
+        // check that the value(s) of worksize_estimate were actually set, assuming that
+        // setting a worksize_estimate equal to absurd_init_worksize_estimate by hipFFT
+        // cannot be considered "correct".
+        // Note: worksize_estimate value(s) are *not* guaranteed to be greater than or equal
+        // to the actual value(s) of the work area(s), queriable after plan generation via
+        // hipfftGetSize.
+        if(ret == HIPFFT_SUCCESS)
+        {
+            // the estimate can't have any knowledge about the number of GPUs being used if
+            // the plan wasn't created first
+            const size_t num_values_to_check
+                = plan == INVALID_PLAN_HANDLE ? 1 : worksize_estimate.size();
+            for(size_t idx = 0; ret == HIPFFT_SUCCESS && idx < num_values_to_check; idx++)
+            {
+                ret = worksize_estimate[idx] != absurd_init_worksize_estimate
+                          ? HIPFFT_SUCCESS
+                          : HIPFFT_INTERNAL_ERROR;
+            }
+        }
+        return ret;
+    }
+
+    // provide a work area to a successfully generated plan
+    hipfftResult_t set_externally_managed_work_areas()
+    {
+        std::vector<size_t> req_workarea_sizes(get_num_used_gpus(), absurd_init_worksize_estimate);
+        hipfftResult_t      ret = hipfftGetSize(plan, req_workarea_sizes.data());
+        if(ret != HIPFFT_SUCCESS)
+        {
+            return ret;
+        }
+        else if(std::any_of(req_workarea_sizes.begin(),
+                            req_workarea_sizes.end(),
+                            [](const decltype(req_workarea_sizes)::value_type& val) {
+                                return val == absurd_init_worksize_estimate;
+                            }))
+        {
+            return HIPFFT_INTERNAL_ERROR;
+        }
+        // req_workarea_sizes are known and validated
+        // check if the current externally_managed_workareas can be used as is or not
+        if(externally_managed_workareas.size() < get_num_used_gpus())
+            externally_managed_workareas.resize(get_num_used_gpus());
+        std::vector<void*> workareas(get_num_used_gpus(), nullptr);
+        for(size_t workarea_idx = 0; workarea_idx < get_num_used_gpus(); workarea_idx++)
+        {
+            const auto req_size = req_workarea_sizes[workarea_idx];
+            auto&      buf      = externally_managed_workareas[workarea_idx];
+            if(buf.size() < req_size)
+            {
+                // too small, free and reallocate to meet current needs
+                buf.free();
+                if(buf.alloc(req_size) != hipSuccess)
+                {
+                    return HIPFFT_ALLOC_FAILED;
+                }
+            }
+            workareas[workarea_idx] = buf.data();
+        }
+        if(get_num_used_gpus() > 1)
+        {
+            // TODO: enable below once hipfftXtSetWorkArea is enabled
+#if(0)
+            ret = hipfftXtSetWorkArea(plan, workareas.data);
+#else
+            throw unimplemented_exception(
+                "No implementation support for externally-managed work areas with multi-gpu usage");
+#endif
+        }
+        else
+        {
+            ret = hipfftSetWorkArea(plan, workareas[0]);
+        }
+        if(ret == HIPFFT_SUCCESS)
+        {
+            // the above "SetWorkArea" frees auto_allocated worksizes (if any)
+            auto_allocated_worksizes.clear();
+        }
+        return ret;
+    }
+
     // return true if we need to use hipFFT APIs that separate plan
     // allocation and plan init
     bool need_separate_create_make() const
     {
-        // scale factor and multi-GPU need API calls between create +
-        // init
-        if(scale_factor != 1.0 || multiGPU > 1 || mp_lib != fft_mp_lib_none)
+        // scale factor and multi-GPU and disabled auto-allocation need API
+        // calls between create + init
+        if(scale_factor != 1.0 || multiGPU > 1 || mp_lib != fft_mp_lib_none
+           || auto_allocate == fft_auto_allocation_off)
             return true;
         return false;
     }
@@ -996,17 +1298,19 @@ private:
     }
     hipfftResult_t create_plan_many()
     {
-        auto ret = hipfftPlanMany(&plan,
-                                  dim(),
-                                  int_length.data(),
-                                  int_inembed.data(),
-                                  istride.back(),
-                                  idist,
-                                  int_onembed.data(),
-                                  ostride.back(),
-                                  odist,
-                                  *hipfft_transform_type,
-                                  nbatch);
+        auto layout_args = get_advanced_layout_args<int>();
+        auto ret
+            = hipfftPlanMany(&plan,
+                             dim(),
+                             int_length.data(),
+                             const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+                             layout_args.istride_arg,
+                             layout_args.idist_arg,
+                             const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+                             layout_args.ostride_arg,
+                             layout_args.odist_arg,
+                             *hipfft_transform_type,
+                             nbatch);
         return ret;
     }
 
@@ -1014,7 +1318,14 @@ private:
     // relevant pre-Make APIs (scale factor, XtSetGPUs)
     hipfftResult_t create_with_pre_make()
     {
-        auto ret = hipfftCreate(&plan);
+        hipfftResult_t ret{HIPFFT_INVALID_PLAN};
+        if(auto_allocate == fft_auto_allocation_off)
+        {
+            ret = check_worksize_estimate(); // read worksize estimate before plan creation
+            if(ret != HIPFFT_SUCCESS)
+                return ret;
+        }
+        ret = hipfftCreate(&plan);
         if(ret != HIPFFT_SUCCESS)
             return ret;
         if(scale_factor != 1.0)
@@ -1026,7 +1337,8 @@ private:
         if(multiGPU > 1)
         {
             int deviceCount = 0;
-            (void)hipGetDeviceCount(&deviceCount);
+            if(hipGetDeviceCount(&deviceCount) != hipSuccess)
+                throw std::runtime_error("hipGetDeviceCount failed");
 
             // ensure that users request less than or equal to the total number of devices
             if(static_cast<int>(multiGPU) > deviceCount)
@@ -1035,9 +1347,8 @@ private:
             std::vector<int> GPUs(multiGPU);
             std::iota(GPUs.begin(), GPUs.end(), 0);
             ret = hipfftXtSetGPUs(plan, static_cast<int>(multiGPU), GPUs.data());
-
-            xt_worksize.resize(GPUs.size());
-            workbuffersize_ptr = xt_worksize.data();
+            if(ret != HIPFFT_SUCCESS)
+                return ret;
         }
         if(mp_lib == fft_mp_lib_mpi)
         {
@@ -1090,34 +1401,52 @@ private:
                                               input_stride.data(),
                                               output_stride.data());
             }
+            if(ret != HIPFFT_SUCCESS)
+                return ret;
 #else
             throw std::runtime_error("MPI is not enabled");
 #endif
         }
+        if(auto_allocate == fft_auto_allocation_off)
+        {
+            ret = check_worksize_estimate(); // read worksize estimate again after plan creation
+            if(ret != HIPFFT_SUCCESS)
+                return ret;
+        }
+        if(is_preventing_auto_allocation_at_generation())
+        {
+            ret = hipfftSetAutoAllocation(plan, 0);
+        }
+
         return ret;
     }
 
     hipfftResult_t create_make_plan_Nd()
     {
         auto ret = create_with_pre_make();
+
         if(ret != HIPFFT_SUCCESS)
             return ret;
-
+        // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
+        std::vector<size_t> tmp_worksize(get_num_used_gpus());
+        size_t*             worksize_ptr = is_preventing_auto_allocation_at_generation()
+                                               ? tmp_worksize.data()
+                                               : auto_allocated_worksizes.data();
         switch(dim())
         {
         case 1:
             return hipfftMakePlan1d(
-                plan, int_length[0], *hipfft_transform_type, nbatch, workbuffersize_ptr);
+                plan, int_length[0], *hipfft_transform_type, nbatch, worksize_ptr);
         case 2:
             return hipfftMakePlan2d(
-                plan, int_length[0], int_length[1], *hipfft_transform_type, workbuffersize_ptr);
+                plan, int_length[0], int_length[1], *hipfft_transform_type, worksize_ptr);
         case 3:
             return hipfftMakePlan3d(plan,
                                     int_length[0],
                                     int_length[1],
                                     int_length[2],
                                     *hipfft_transform_type,
-                                    workbuffersize_ptr);
+                                    worksize_ptr);
         default:
             throw std::runtime_error("invalid dim");
         }
@@ -1128,18 +1457,27 @@ private:
         auto ret = create_with_pre_make();
         if(ret != HIPFFT_SUCCESS)
             return ret;
-        return hipfftMakePlanMany(plan,
-                                  dim(),
-                                  int_length.data(),
-                                  int_inembed.data(),
-                                  istride.back(),
-                                  idist,
-                                  int_onembed.data(),
-                                  ostride.back(),
-                                  odist,
-                                  *hipfft_transform_type,
-                                  nbatch,
-                                  workbuffersize_ptr);
+        // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
+        std::vector<size_t> tmp_worksize(get_num_used_gpus());
+        size_t*             worksize_ptr = is_preventing_auto_allocation_at_generation()
+                                               ? tmp_worksize.data()
+                                               : auto_allocated_worksizes.data();
+
+        auto layout_args = get_advanced_layout_args<int>();
+
+        return hipfftMakePlanMany(
+            plan,
+            dim(),
+            int_length.data(),
+            const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+            layout_args.istride_arg,
+            layout_args.idist_arg,
+            const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+            layout_args.ostride_arg,
+            layout_args.odist_arg,
+            *hipfft_transform_type,
+            nbatch,
+            worksize_ptr);
     }
 
     hipfftResult_t create_make_plan_many64()
@@ -1147,18 +1485,49 @@ private:
         auto ret = create_with_pre_make();
         if(ret != HIPFFT_SUCCESS)
             return ret;
-        return hipfftMakePlanMany64(plan,
-                                    dim(),
-                                    ll_length.data(),
-                                    ll_inembed.data(),
-                                    istride.back(),
-                                    idist,
-                                    ll_onembed.data(),
-                                    ostride.back(),
-                                    odist,
-                                    *hipfft_transform_type,
-                                    nbatch,
-                                    workbuffersize_ptr);
+
+        // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
+        std::vector<size_t> tmp_worksize(get_num_used_gpus());
+        size_t*             worksize_ptr = is_preventing_auto_allocation_at_generation()
+                                               ? tmp_worksize.data()
+                                               : auto_allocated_worksizes.data();
+        auto                layout_args  = get_advanced_layout_args<long long int>();
+        return hipfftMakePlanMany64(
+            plan,
+            dim(),
+            ll_length.data(),
+            const_cast<long long int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+            layout_args.istride_arg,
+            layout_args.idist_arg,
+            const_cast<long long int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+            layout_args.ostride_arg,
+            layout_args.odist_arg,
+            *hipfft_transform_type,
+            nbatch,
+            worksize_ptr);
+    }
+
+    hipDataType get_xt_api_execution_type() const
+    {
+        // execution type is always complex, matching the precision
+        // of the transform
+        // Initializing as double by default
+        hipDataType ret = HIP_C_64F;
+        switch(precision)
+        {
+        case fft_precision_half:
+            ret = HIP_C_16F;
+            break;
+        case fft_precision_single:
+            ret = HIP_C_32F;
+            break;
+        case fft_precision_double:
+            ret = HIP_C_64F;
+            break;
+        default:
+            throw std::runtime_error("Invalid precision");
+        }
+        return ret;
     }
 
     hipfftResult_t create_xt_make_plan_many()
@@ -1167,37 +1536,99 @@ private:
         if(ret != HIPFFT_SUCCESS)
             return ret;
 
-        // execution type is always complex, matching the precision
-        // of the transform
-        // Initializing as double by default
-        hipDataType executionType = HIP_C_64F;
-        switch(precision)
-        {
-        case fft_precision_half:
-            executionType = HIP_C_16F;
-            break;
-        case fft_precision_single:
-            executionType = HIP_C_32F;
-            break;
-        case fft_precision_double:
-            executionType = HIP_C_64F;
-            break;
-        }
+        // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
+        std::vector<size_t> tmp_worksize(get_num_used_gpus());
+        size_t*             worksize_ptr  = is_preventing_auto_allocation_at_generation()
+                                                ? tmp_worksize.data()
+                                                : auto_allocated_worksizes.data();
+        auto                executionType = get_xt_api_execution_type();
+        auto                layout_args   = get_advanced_layout_args<long long int>();
+        return hipfftXtMakePlanMany(
+            plan,
+            dim(),
+            ll_length.data(),
+            const_cast<long long int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+            layout_args.istride_arg,
+            layout_args.idist_arg,
+            inputType,
+            const_cast<long long int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+            layout_args.ostride_arg,
+            layout_args.odist_arg,
+            outputType,
+            nbatch,
+            worksize_ptr,
+            executionType);
+    }
+    static constexpr size_t absurd_init_worksize_estimate  = std::numeric_limits<size_t>::max();
+    bool                    final_attempt_at_plan_creation = false;
 
-        return hipfftXtMakePlanMany(plan,
-                                    dim(),
-                                    ll_length.data(),
-                                    ll_inembed.data(),
-                                    istride.back(),
-                                    idist,
-                                    inputType,
-                                    ll_onembed.data(),
-                                    ostride.back(),
-                                    odist,
-                                    outputType,
-                                    nbatch,
-                                    workbuffersize_ptr,
-                                    executionType);
+    size_t get_num_used_gpus() const
+    {
+        return multiGPU > 1 ? multiGPU : 1;
+    }
+
+    template <
+        typename T,
+        std::enable_if_t<std::is_same_v<T, int> || std::is_same_v<T, long long int>, bool> = true>
+    struct advanced_layout_args
+    {
+        hipfft_ionembed_t<T> io_nembed;
+        T                    istride_arg, ostride_arg, idist_arg, odist_arg;
+    };
+
+    template <typename T>
+    advanced_layout_args<T> get_advanced_layout_args()
+    {
+        // Allow nullptr to be used for inembed and onembed ~50% of the time it can be
+        // used to ensure testing thereof.
+        // (using a hash of the token as "random" variable to avoid dependencies on
+        // externally-defined variables and repeatability)
+        std::hash<std::string> hasher;
+        // NOTES:
+        // - hipFFT requires (inembed == nullptr) == (onembed == nullptr);
+        // - {i,o}stride are ignored if (inembed == nullptr) && (onembed == nullptr).
+        //   (That is accounted for by the constructor of hipfft_ionembed_t<T> objects)
+        // - {i,o}dist are ignored if (inembed == nullptr) && (onembed == nullptr).
+        //   (That is NOT accounted for by the constructor of hipfft_ionembed_t<T> objects
+        //    which is unaware of intended distances)
+        auto       tmp = token();
+        const bool use_nullptr_for_default_nembed
+            = idist
+                  == default_distance(transform_type, placement, fft_io::fft_io_in, length, nbatch)
+              && odist
+                     == default_distance(
+                         transform_type, placement, fft_io::fft_io_out, length, nbatch)
+              && hasher(tmp) % 2 == 1;
+
+        advanced_layout_args<T> ret;
+        ret.io_nembed = hipfft_ionembed_t<T>(istride,
+                                             ostride,
+                                             length,
+                                             transform_type,
+                                             placement,
+                                             use_nullptr_for_default_nembed,
+                                             use_nullptr_for_default_nembed);
+        if(!ret.io_nembed.get_nembed(fft_io::fft_io_in)
+           && !ret.io_nembed.get_nembed(fft_io::fft_io_out))
+        {
+            // istride, ostride, idist, and odist arguments are supposed to be *ignored*
+            // by hipFFT if inembed and onembed arguments are both null.
+            // --> use completely arbitrary (positive) values to test that behavior
+            std::uniform_int_distribution<T> positive_int_distr(1, std::numeric_limits<T>::max());
+            std::mt19937                     prng(hasher(tmp));
+            ret.istride_arg = positive_int_distr(prng);
+            ret.ostride_arg = positive_int_distr(prng);
+            ret.idist_arg   = positive_int_distr(prng);
+            ret.odist_arg   = positive_int_distr(prng);
+        }
+        else
+        {
+            ret.istride_arg = ret.io_nembed.get_elementary_stride(fft_io::fft_io_in);
+            ret.ostride_arg = ret.io_nembed.get_elementary_stride(fft_io::fft_io_out);
+            ret.idist_arg   = idist;
+            ret.odist_arg   = odist;
+        }
+        return ret;
     }
 };
 

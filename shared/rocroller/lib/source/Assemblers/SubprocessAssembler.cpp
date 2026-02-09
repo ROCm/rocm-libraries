@@ -37,12 +37,7 @@
 
 namespace rocRoller
 {
-    RegisterComponent(SubprocessAssembler);
     static_assert(Component::Component<SubprocessAssembler>);
-
-    SubprocessAssembler::SubprocessAssembler() {}
-
-    SubprocessAssembler::~SubprocessAssembler() {}
 
     bool SubprocessAssembler::Match(Argument arg)
     {

@@ -49,15 +49,15 @@ def parse_args():
     """)
     parser.add_argument('-e', '--emulation', required=False, default="",
                         help='Test set to run from rtest.xml (optional, eg.smoke). At least one but not both of -e or -t must be set')
-    parser.add_argument('-t', '--test', required=False, default="", 
+    parser.add_argument('-t', '--test', required=False, default="",
                         help='Test set to run from rtest.xml (optional, e.g. osdb). At least one but not both of -e or -t must be set')
     parser.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
                         help='Test Debug build (optional, default: false)')
-    parser.add_argument('-o', '--output', type=str, required=False, default="xml", 
+    parser.add_argument('-o', '--output', type=str, required=False, default="xml",
                         help='Test output file (optional, default: test_detail.xml)')
     parser.add_argument('-a', '--argument', action=ArgAction, nargs=2, metavar=('NAME', 'VALUE'), default={},
                         help='Arguments to substitute into the xml file (optional, multiple)')
-    parser.add_argument(      '--install_dir', type=str, required=False, default="build", 
+    parser.add_argument(      '--install_dir', type=str, required=False, default="build",
                         help='Installation directory where build or release folders are (optional, default: build)')
     parser.add_argument(      '--fail_test', default=False, required=False, action='store_true',
                         help='Return as if test failed (optional, default: false)')
@@ -140,14 +140,14 @@ class TimerProcess(multiprocessing.Process):
                     cmd = ['TASKKILL', '/F', '/T', '/PID', str(self.kill_pid)]
                     proc = subprocess.Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
                 else:
-                    os.kill(self.kill_pid, signal.SIGKILL)  
+                    os.kill(self.kill_pid, signal.SIGKILL)
                 self.timed_out.set()
                 self.stop()
             pass
 
     def stop(self):
         self.quit.set()
-    
+
     def stopped(self):
         return self.timed_out.is_set()
 
@@ -204,7 +204,7 @@ def run_cmd(cmd, test = False, time_limit = 0):
     try:
         if not test:
             proc = subprocess.run(cmdline, check=True, stderr=subprocess.STDOUT, shell=True)
-            status = proc.returncode    
+            status = proc.returncode
         else:
             error = False
             timeout = False
@@ -230,12 +230,12 @@ def run_cmd(cmd, test = False, time_limit = 0):
                 p.join()
                 timeout = p.stopped()
                 print(f"timeout {timeout}")
-            if error: 
+            if error:
                 status = 1
             elif timeout:
                 status = 2
             else:
-                status = test_proc.returncode    
+                status = test_proc.returncode
     except:
         import traceback
         exc = traceback.format_exc()
@@ -256,10 +256,10 @@ def batch(script, xml):
     rtest_cwd_path = os.path.abspath( os.path.join( cwd, 'rtest.xml') )
     if os.path.isfile(rtest_cwd_path) and os.path.dirname(rtest_cwd_path).endswith( "staging" ):
         # if in a staging directory then test locally
-        test_dir = cwd 
+        test_dir = cwd
     else:
         build_type = "debug" if args.debug else "release"
-        
+
         # deal with windows pathing
         install_dir = '//'.join(args.install_dir.split('\\'))
 
@@ -393,7 +393,7 @@ def run_tests():
             #print("Failure in script. ABORTING")
             if (os.curdir != cwd):
                 os.chdir( cwd )
-            return 1       
+            return 1
     if (os.curdir != cwd):
         os.chdir( cwd )
     return 0

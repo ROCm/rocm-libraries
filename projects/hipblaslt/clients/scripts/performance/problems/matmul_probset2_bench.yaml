@@ -1,6 +1,6 @@
 ---
-include: ../../../include/hipblaslt_common.yaml
-include: ../../../gtest/matmul_common.yaml
+include: ../../../tests/data/hipblaslt_common.yaml
+include: ../../../tests/data/matmul_common.yaml
 
 Definitions:
   # - &transA_transB_range

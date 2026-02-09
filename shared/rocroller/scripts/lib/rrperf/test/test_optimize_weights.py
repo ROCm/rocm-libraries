@@ -23,18 +23,16 @@
 #
 ################################################################################
 
-import rrperf.optimize_weights as ow
-
 import argparse
 import dataclasses as dc
 import pathlib
-import pytest
-import yaml
-
-import time
 import random
-
+import time
 from types import SimpleNamespace as NS
+
+import pytest
+import rrperf.optimize_weights as ow
+import yaml
 
 
 @pytest.mark.slow
@@ -103,7 +101,7 @@ correct:         true
 rnorm:           2.5e-05
 ...
 """
-    assert cmd[0] == "bin/client/rocRoller_gemm"
+    assert cmd[0] == "client/rocroller-gemm"
     yaml_file = None
     for arg in cmd:
         if arg.startswith("--yaml"):

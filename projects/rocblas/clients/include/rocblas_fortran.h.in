@@ -6679,6 +6679,22 @@ rocblas_status ROCBLAS_FAPI(rocblas_zsyrk_strided_batched)(rocblas_handle       
                                                            rocblas_stride                stride_C,
                                                            rocblas_int batch_count);
 
+// syrk_ex
+rocblas_status ROCBLAS_FAPI(rocblas_syrk_ex)(rocblas_handle    handle,
+                                             rocblas_fill      uplo,
+                                             rocblas_operation transA,
+                                             rocblas_int       n,
+                                             rocblas_int       k,
+                                             const void*       alpha,
+                                             const void*       a,
+                                             rocblas_datatype  a_type,
+                                             rocblas_int       lda,
+                                             const void*       beta,
+                                             void*             c,
+                                             rocblas_datatype  c_type,
+                                             rocblas_int       ldc,
+                                             rocblas_datatype  compute_type);
+
 // herk
 rocblas_status ROCBLAS_FAPI(rocblas_cherk)(rocblas_handle               handle,
                                            rocblas_fill                 uplo,
@@ -6761,6 +6777,22 @@ rocblas_status ROCBLAS_FAPI(rocblas_zherk_strided_batched)(rocblas_handle       
                                                            rocblas_int                   ldc,
                                                            rocblas_stride                stride_C,
                                                            rocblas_int batch_count);
+
+// herk_ex
+rocblas_status ROCBLAS_FAPI(rocblas_herk_ex)(rocblas_handle    handle,
+                                             rocblas_fill      uplo,
+                                             rocblas_operation transA,
+                                             rocblas_int       n,
+                                             rocblas_int       k,
+                                             const void*       alpha,
+                                             const void*       a,
+                                             rocblas_datatype  a_type,
+                                             rocblas_int       lda,
+                                             const void*       beta,
+                                             void*             c,
+                                             rocblas_datatype  c_type,
+                                             rocblas_int       ldc,
+                                             rocblas_datatype  compute_type);
 
 // her2k
 rocblas_status ROCBLAS_FAPI(rocblas_cher2k)(rocblas_handle               handle,

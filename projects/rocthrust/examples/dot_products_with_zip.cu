@@ -60,7 +60,7 @@ thrust::host_vector<float> random_vector(const size_t N, unsigned int seed = thr
   return temp;
 }
 
-int main(void)
+int main()
 {
   // number of vectors
   const size_t N = 1000;
@@ -72,7 +72,7 @@ int main(void)
   // 'array of structures' (AoS) approach.  The primary reason is that structures,
   // like Float3, don't always obey the memory coalescing rules, so they are not
   // efficiently transferred to and from memory.  Another reason to prefer SoA to
-  // AoS is that we don't aways want to process all members of the structure.  For
+  // AoS is that we don't always want to process all members of the structure.  For
   // example, if we only need to look at first element of the structure then it
   // is wasteful to load the entire structure from memory.  With the SoA approach,
   // we can chose which elements of the structure we wish to read.

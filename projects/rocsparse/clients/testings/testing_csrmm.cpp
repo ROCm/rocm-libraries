@@ -360,7 +360,7 @@ void testing_csrmm(const Arguments& arg)
         double gflop_count = csrmm_gflop_count<rocsparse_int, rocsparse_int>(
             N, dA.nnz, dC.m * dC.n, *h_beta != static_cast<T>(0));
         double gpu_gflops  = get_gpu_gflops(gpu_time_used, gflop_count);
-        double gbyte_count = csrmm_gbyte_count<T, rocsparse_int, rocsparse_int>(
+        double gbyte_count = csrmm_gbyte_count<T, T, T, rocsparse_int, rocsparse_int>(
             dA.m, dA.nnz, dB.m * dB.n, dC.m * dC.n, *h_beta != static_cast<T>(0));
         double gpu_gbyte = get_gpu_gbyte(gpu_time_used, gbyte_count);
 

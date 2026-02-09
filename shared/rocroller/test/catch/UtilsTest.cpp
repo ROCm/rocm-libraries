@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
@@ -34,6 +35,62 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+
+#include <omp.h>
+
+TEST_CASE("zip function works.", "[infrastructure][generator][utils]")
+{
+    using namespace rocRoller;
+
+    std::vector<int>         a{1, 2, 3, 4, 5};
+    std::vector<std::string> b{"one", "two", "three", "four"};
+    std::vector<int>         c{4, 5, 6, 7, 8};
+
+    SECTION("Second range is shorter")
+    {
+        std::vector<std::tuple<int, std::string>> expected{
+            {1, "one"}, {2, "two"}, {3, "three"}, {4, "four"}};
+
+        CHECK(expected == zip(a, b).to<std::vector>());
+    }
+
+    SECTION("First range is shorter")
+    {
+        std::vector<std::tuple<int, std::string>> expected{{1, "one"}, {2, "two"}, {3, "three"}};
+
+        CHECK(expected == zip(take(3, a), b).to<std::vector>());
+    }
+
+    SECTION("Same size & types")
+    {
+        std::vector<std::tuple<int, int>> expected{{1, 4}, {2, 5}, {3, 6}, {4, 7}, {5, 8}};
+
+        CHECK(expected == zip(a, c).to<std::vector>());
+    }
+
+    SECTION("Unlimited")
+    {
+        std::vector<std::tuple<int, int>> expected{{1, 4}, {2, 5}, {3, 6}, {4, 7}, {5, 8}};
+
+        auto actual = zip(iota(1), iota(4)).take(5).to<std::vector>();
+
+        CHECK(expected == actual);
+    }
+
+    SECTION("Three ranges")
+    {
+        std::vector<std::tuple<int, int, int>> expected{{1, 10, 4}, {2, 12, 5}, {3, 14, 6}};
+
+        CHECK(expected == zip(a, iota(10, 15, 2), c).to<std::vector>());
+    }
+
+    SECTION("One range")
+    {
+        std::vector<std::tuple<int>> expected{{1}, {2}, {3}, {4}, {5}};
+
+        CHECK(expected == zip(a).to<std::vector>());
+    }
+}
 
 TEST_CASE("concatenate_join joins different types", "[infrastructure][utils]")
 {
@@ -204,4 +261,146 @@ TEST_CASE("mergeSets benchmark", "[infrastructure][utils][!benchmark]")
 
         return rocRoller::mergeSets(std::move(input));
     };
+}
+
+namespace
+{
+    using TestArgument = unsigned;
+
+    struct TestComponentBase
+    {
+        using Argument = std::shared_ptr<TestArgument>;
+        static const std::string Basename;
+        virtual unsigned         getValue() = 0;
+    };
+
+    const std::string TestComponentBase::Basename = "TestComponentBase";
+
+    static_assert(rocRoller::Component::ComponentBase<TestComponentBase>);
+
+    template <unsigned ID>
+    struct TestComponent : TestComponentBase
+    {
+        using Base = TestComponentBase;
+        static const std::string Name;
+
+        static bool Match(Argument arg)
+        {
+            return *arg == ID;
+        }
+
+        static std::shared_ptr<TestComponentBase> Build(Argument arg)
+        {
+            if(!Match(arg))
+                return nullptr;
+            return std::make_shared<TestComponent<ID>>();
+        }
+
+        virtual unsigned getValue() override
+        {
+            return ID;
+        }
+    };
+
+    template <unsigned ID>
+    const std::string TestComponent<ID>::Name = fmt::format("TestComponent{}", ID);
+
+    static_assert(rocRoller::Component::Component<TestComponent<0>>);
+    static_assert(rocRoller::Component::Component<TestComponent<1>>);
+
+    unsigned const COMPONENT_TEST_COMPONENT_COUNT = 100;
+    unsigned const COMPONENT_TEST_THREAD_COUNT    = 4;
+}
+
+namespace rocRoller::Component
+{
+    template <unsigned ID>
+    struct RegisterTestComponent
+    {
+        template <typename Factory>
+        void operator()(Factory&& factory)
+        {
+            factory.template registerComponent<TestComponent<ID>>();
+            RegisterTestComponent<ID - 1>{}(factory);
+        }
+    };
+
+    template <>
+    struct RegisterTestComponent<0>
+    {
+        template <typename Factory>
+        void operator()(Factory&& factory)
+        {
+            factory.template registerComponent<TestComponent<0>>();
+        }
+    };
+
+    template <>
+    void ComponentFactory<TestComponentBase>::registerImplementations()
+    {
+        RegisterTestComponent<COMPONENT_TEST_COMPONENT_COUNT>{}(*this);
+    }
+}
+
+TEST_CASE("ComponentFactory tests", "[infrastructure][utils]")
+{
+    using namespace rocRoller::Component;
+    using Factory = rocRoller::Component::ComponentFactory<TestComponentBase>;
+
+    SECTION("ComponentFactory single thread test")
+    {
+        Factory::Instance().emptyCache();
+        unsigned expectedResult = 0;
+        unsigned actualResult   = 0;
+
+        std::vector<std::shared_ptr<TestArgument>> args{std::make_shared<TestArgument>(0),
+                                                        std::make_shared<TestArgument>(1),
+                                                        std::make_shared<TestArgument>(2)};
+
+        for(size_t i = 0; i < args.size(); ++i)
+        {
+            expectedResult += *args[i];
+            actualResult += Get<TestComponentBase>(args[i])->getValue();
+        }
+
+        CHECK(expectedResult == actualResult);
+    }
+
+    SECTION("ComponentFactory concurrent test")
+    {
+        Factory::Instance().emptyCache();
+        unsigned expectedResult = 0;
+        unsigned actualResult   = 0;
+
+        std::vector<std::shared_ptr<TestArgument>> args;
+        args.reserve(COMPONENT_TEST_COMPONENT_COUNT);
+
+        for(unsigned i = 0; i < COMPONENT_TEST_COMPONENT_COUNT; ++i)
+        {
+            args.push_back(std::make_shared<TestArgument>(i));
+            expectedResult += +i;
+        }
+
+        std::array<unsigned, 64> primes{
+            2,   3,   5,   7,   11,  13,  17,  19,  23,  29,  31,  37,  41,  43,  47,  53,
+            59,  61,  67,  71,  73,  79,  83,  89,  97,  101, 103, 107, 109, 113, 127, 131,
+            137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191, 193, 197, 199, 211, 223,
+            227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281, 283, 293, 307, 311};
+        static_assert(COMPONENT_TEST_THREAD_COUNT < primes.size());
+
+#pragma omp parallel for reduction(+ : actualResult) num_threads(COMPONENT_TEST_THREAD_COUNT)
+        for(size_t i = 0; i < COMPONENT_TEST_COMPONENT_COUNT; ++i)
+        {
+            auto component = Get<TestComponentBase>(args[i]);
+            actualResult += component->getValue();
+
+            auto threadId = omp_get_thread_num();
+            if((i + 1) % primes[threadId] == 0)
+            {
+                Factory::Instance().emptyCache();
+            }
+        }
+
+        CHECK(expectedResult == actualResult);
+    }
 }

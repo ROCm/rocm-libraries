@@ -110,8 +110,8 @@ auto segmented_scan_block_scan(T (&input)[ItemsPerThread],
 }
 
 template<
+    class ArchConfig,
     bool Exclusive,
-    class Config,
     class ResultType,
     class InputIterator,
     class OutputIterator,
@@ -127,7 +127,7 @@ void segmented_scan(InputIterator input,
                     InitValueType initial_value,
                     BinaryFunction scan_op)
 {
-    static constexpr scan_config_params params = device_params<Config>();
+    static constexpr scan_config_params params = ArchConfig::params;
 
     constexpr auto         block_size       = params.kernel_config.block_size;
     constexpr auto         items_per_thread = params.kernel_config.items_per_thread;

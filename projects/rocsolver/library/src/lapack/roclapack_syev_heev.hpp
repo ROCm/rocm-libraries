@@ -35,54 +35,12 @@
 #include "auxiliary/rocauxiliary_orgtr_ungtr.hpp"
 #include "auxiliary/rocauxiliary_steqr.hpp"
 #include "auxiliary/rocauxiliary_sterf.hpp"
+#include "lib_device_helpers.hpp"
 #include "rocblas.hpp"
 #include "roclapack_sytrd_hetrd.hpp"
 #include "rocsolver/rocsolver.h"
 
 ROCSOLVER_BEGIN_NAMESPACE
-
-/** Set results for the scalar case (n=1) **/
-template <typename T, typename U, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
-ROCSOLVER_KERNEL void scalar_case(const rocblas_evect evect,
-                                  U AA,
-                                  const rocblas_stride strideA,
-                                  T* DD,
-                                  const rocblas_stride strideD,
-                                  rocblas_int bc)
-{
-    int b = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-
-    if(b < bc)
-    {
-        T* A = load_ptr_batch<T>(AA, b, 0, strideA);
-        T* D = DD + b * strideD;
-        D[0] = std::real(A[0]);
-
-        if(evect == rocblas_evect_original)
-            A[0] = T(1);
-    }
-}
-
-template <typename T, typename S, typename U, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
-ROCSOLVER_KERNEL void scalar_case(const rocblas_evect evect,
-                                  U AA,
-                                  const rocblas_stride strideA,
-                                  S* DD,
-                                  const rocblas_stride strideD,
-                                  rocblas_int bc)
-{
-    int b = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-
-    if(b < bc)
-    {
-        T* A = load_ptr_batch<T>(AA, b, 0, strideA);
-        S* D = DD + b * strideD;
-        D[0] = A[0].real();
-
-        if(evect == rocblas_evect_original)
-            A[0] = T(1);
-    }
-}
 
 /** Helper to calculate workspace sizes **/
 template <bool BATCHED, typename T, typename S>
@@ -223,8 +181,8 @@ rocblas_status rocsolver_syev_heev_template(rocblas_handle handle,
     // quick return for n = 1 (scalar case)
     if(n == 1)
     {
-        ROCSOLVER_LAUNCH_KERNEL(scalar_case<T>, gridReset, threads, 0, stream, evect, A, strideA, D,
-                                strideD, batch_count);
+        ROCSOLVER_LAUNCH_KERNEL(syev_scalar_case<T>, gridReset, threads, 0, stream, evect, A,
+                                strideA, D, strideD, batch_count);
         return rocblas_status_success;
     }
 

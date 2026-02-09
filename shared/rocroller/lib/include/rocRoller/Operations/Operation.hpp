@@ -45,6 +45,8 @@ namespace rocRoller
             OperationTag getTag() const;
             void         setTag(OperationTag tag);
 
+            std::strong_ordering operator<=>(BaseOperation const&) const;
+
         protected:
             OperationTag           m_tag;
             std::weak_ptr<Command> m_command;

@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/device_free.h>
 #include <thrust/device_malloc.h>
 #include <thrust/device_ptr.h>
@@ -32,12 +39,13 @@
 
 THRUST_NAMESPACE_BEGIN
 
-/// forward declaration to WAR circular \#includes
+// forward declarations to WAR circular #includes
+#ifndef THRUST_DOXYGEN_INVOKED // Do not document
 template <typename>
 class device_ptr;
-/// forward declaration
 template <typename T>
 device_ptr<T> device_malloc(const std::size_t n);
+#endif // THRUST_DOXYGEN_INVOKED
 
 /*! \addtogroup allocators Allocators
  *  \ingroup memory_management
@@ -88,7 +96,7 @@ public:
   template <typename U>
   struct rebind
   {
-    /*! The typedef \p other gives the type of the rebound \p device_malloc_allocator.
+    /*! The alias \p other gives the type of the rebound \p device_malloc_allocator.
      */
     using other = device_malloc_allocator<U>;
   }; // end rebind

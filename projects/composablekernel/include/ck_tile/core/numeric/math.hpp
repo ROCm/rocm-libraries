@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -31,25 +31,31 @@ struct scales
     CK_TILE_HOST_DEVICE constexpr explicit scales(Scale lhs) : lhs_(lhs) {}
 
     template <typename Right>
-    CK_TILE_HOST_DEVICE constexpr auto operator()(const Right& rhs) const
-        -> decltype(std::declval<const Scale&>() * rhs)
+    CK_TILE_HOST_DEVICE constexpr auto
+    operator()(const Right& rhs) const -> decltype(std::declval<const Scale&>() * rhs)
     {
         return lhs_ * rhs;
+    }
+
+    template <typename OtherScale>
+    CK_TILE_HOST_DEVICE constexpr auto operator*(OtherScale other) const
+    {
+        auto new_scale = lhs_ * other;
+        return scales<std::decay_t<decltype(new_scale)>>(new_scale);
     }
 
     private:
     Scale lhs_;
 };
 
-/// FIXME: create macro to replace '__host__ __device__' and nothing more
 template <typename Scale>
-__host__ __device__ scales(Scale)->scales<Scale>;
+scales(Scale) -> scales<Scale>;
 
 template <typename Left = void, typename Right = Left>
 struct plus
 {
-    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs, const Right& rhs) const
-        -> decltype(lhs + rhs)
+    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs,
+                                                  const Right& rhs) const -> decltype(lhs + rhs)
     {
         return lhs + rhs;
     }
@@ -59,21 +65,18 @@ template <>
 struct plus<void, void>
 {
     template <typename Left, typename Right>
-    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs, const Right& rhs) const
-        -> decltype(lhs + rhs)
+    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs,
+                                                  const Right& rhs) const -> decltype(lhs + rhs)
     {
         return lhs + rhs;
     }
 };
 
-/// FIXME: create macro to replace '__host__ __device__' and nothing more
-__host__ __device__ plus()->plus<void, void>;
-
 template <typename Left = void, typename Right = Left>
 struct minus
 {
-    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs, const Right& rhs) const
-        -> decltype(lhs - rhs)
+    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs,
+                                                  const Right& rhs) const -> decltype(lhs - rhs)
     {
         return lhs - rhs;
     }
@@ -83,21 +86,18 @@ template <>
 struct minus<void, void>
 {
     template <typename Left, typename Right>
-    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs, const Right& rhs) const
-        -> decltype(lhs - rhs)
+    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs,
+                                                  const Right& rhs) const -> decltype(lhs - rhs)
     {
         return lhs - rhs;
     }
 };
 
-/// FIXME: create macro to replace '__host__ __device__' and nothing more
-__host__ __device__ minus()->minus<void, void>;
-
 template <typename Left = void, typename Right = Left>
 struct multiplies
 {
-    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs, const Right& rhs) const
-        -> decltype(lhs * rhs)
+    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs,
+                                                  const Right& rhs) const -> decltype(lhs * rhs)
     {
         return lhs * rhs;
     }
@@ -107,15 +107,12 @@ template <>
 struct multiplies<void, void>
 {
     template <typename Left, typename Right>
-    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs, const Right& rhs) const
-        -> decltype(lhs * rhs)
+    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs,
+                                                  const Right& rhs) const -> decltype(lhs * rhs)
     {
         return lhs * rhs;
     }
 };
-
-/// FIXME: create macro to replace '__host__ __device__' and nothing more
-__host__ __device__ multiplies()->multiplies<void, void>;
 
 template <typename T>
 struct maximize
@@ -327,8 +324,8 @@ CK_TILE_HOST_DEVICE constexpr auto lcm(X x, Ys... ys)
 template <typename Left = void, typename Right = Left>
 struct equal
 {
-    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs, const Right& rhs) const
-        -> decltype(lhs == rhs)
+    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs,
+                                                  const Right& rhs) const -> decltype(lhs == rhs)
     {
         return lhs == rhs;
     }
@@ -338,15 +335,12 @@ template <>
 struct equal<void, void>
 {
     template <typename Left, typename Right>
-    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs, const Right& rhs) const
-        -> decltype(lhs == rhs)
+    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs,
+                                                  const Right& rhs) const -> decltype(lhs == rhs)
     {
         return lhs == rhs;
     }
 };
-
-/// FIXME: create macro to replace '__host__ __device__' and nothing more
-__host__ __device__ equal()->equal<void, void>;
 
 template <>
 struct equal<float, float>
@@ -369,8 +363,8 @@ struct equal<double, double>
 template <typename Left = void, typename Right = Left>
 struct less
 {
-    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs, const Right& rhs) const
-        -> decltype(lhs < rhs)
+    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs,
+                                                  const Right& rhs) const -> decltype(lhs < rhs)
     {
         return lhs < rhs;
     }
@@ -380,21 +374,18 @@ template <>
 struct less<void, void>
 {
     template <typename Left, typename Right>
-    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs, const Right& rhs) const
-        -> decltype(lhs < rhs)
+    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs,
+                                                  const Right& rhs) const -> decltype(lhs < rhs)
     {
         return lhs < rhs;
     }
 };
 
-/// FIXME: create macro to replace '__host__ __device__' and nothing more
-__host__ __device__ less()->less<void, void>;
-
 template <typename Left = void, typename Right = Left>
 struct less_equal
 {
-    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs, const Right& rhs) const
-        -> decltype(lhs <= rhs)
+    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs,
+                                                  const Right& rhs) const -> decltype(lhs <= rhs)
     {
         return lhs <= rhs;
     }
@@ -404,15 +395,12 @@ template <>
 struct less_equal<void, void>
 {
     template <typename Left, typename Right>
-    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs, const Right& rhs) const
-        -> decltype(lhs <= rhs)
+    CK_TILE_HOST_DEVICE constexpr auto operator()(const Left& lhs,
+                                                  const Right& rhs) const -> decltype(lhs <= rhs)
     {
         return lhs <= rhs;
     }
 };
-
-/// FIXME: create macro to replace '__host__ __device__' and nothing more
-__host__ __device__ less_equal()->less_equal<void, void>;
 
 template <>
 struct less_equal<float, float>

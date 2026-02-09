@@ -22,6 +22,9 @@
 #include <thrust/random.h>
 
 #include <limits>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 namespace unittest
 {
@@ -54,9 +57,7 @@ struct generate_random_integer<
 };
 
 template <typename T>
-struct generate_random_integer<
-  T,
-  typename THRUST_NS_QUALIFIER::detail::enable_if<THRUST_NS_QUALIFIER::detail::is_non_bool_integral<T>::value>::type>
+struct generate_random_integer<T, _THRUST_STD::enable_if_t<THRUST_NS_QUALIFIER::detail::is_non_bool_integral<T>::value>>
 {
   T operator()(unsigned int i) const
   {
@@ -68,9 +69,7 @@ struct generate_random_integer<
 };
 
 template <typename T>
-struct generate_random_integer<
-  T,
-  typename THRUST_NS_QUALIFIER::detail::enable_if<THRUST_NS_QUALIFIER::detail::is_floating_point<T>::value>::type>
+struct generate_random_integer<T, typename _THRUST_STD::enable_if_t<_THRUST_STD::is_floating_point<T>::value>>
 {
   T operator()(unsigned int i) const
   {

@@ -111,14 +111,14 @@ public:
     template <memory_mode::value_t THAT_MODE>
     inline dense_matrix_view& operator=(const dense_matrix_view<THAT_MODE, T, I>& that)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
         this->transfer_from(that);
         return *this;
     }
 
     inline dense_matrix_view& operator=(const dense_matrix_view& that)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
         this->transfer_from(that);
         return *this;
     }
@@ -151,7 +151,7 @@ public:
         , ld(ld_)
         , order(order_)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         switch(order_)
         {
@@ -196,7 +196,7 @@ public:
 
     void info() const
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         std::cout << "m:    " << this->m << std::endl;
         std::cout << "n:    " << this->n << std::endl;
@@ -207,7 +207,7 @@ public:
     template <memory_mode::value_t THAT_MODE>
     void transfer_from(const dense_matrix_view<THAT_MODE, T, I>& that_)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         CHECK_HIP_THROW_ERROR((this->m == that_.m && this->n == that_.n) ? hipSuccess
                                                                          : hipErrorInvalidValue);
@@ -243,7 +243,7 @@ public:
     template <memory_mode::value_t THAT_MODE>
     void unit_check(const dense_matrix_view<THAT_MODE, T, I>& that_) const
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         switch(MODE)
         {
@@ -298,7 +298,7 @@ public:
     void near_check(const dense_matrix_view<THAT_MODE, T, I>& that_,
                     floating_data_t<T> tol = default_tolerance<T>::value) const
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         switch(MODE)
         {
@@ -370,7 +370,7 @@ public:
     {
         if(this->data() != nullptr)
         {
-            ROCSPARSE_CLIENTS_ROUTINE_TRACE
+            ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
 #ifdef GOOGLE_TEST
             allocator::check_guards(this->data(), size_t(this->m) * size_t(this->n));
@@ -382,7 +382,7 @@ public:
     template <memory_mode::value_t THAT_MODE>
     inline dense_matrix& operator=(const dense_matrix_view<THAT_MODE, T, I>& that)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         this->transfer_from(that);
         return *this;
@@ -396,7 +396,7 @@ public:
                                         (that.order == rocsparse_order_column) ? that.m : that.n,
                                         that.order)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(transfer)
         {
@@ -419,7 +419,7 @@ public:
                                         (that.order == rocsparse_order_column) ? that.m : that.n,
                                         that.order)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(transfer)
         {
@@ -436,7 +436,7 @@ public:
                                         (that.order == rocsparse_order_column) ? that.m : that.n,
                                         that.order)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(transfer)
         {
@@ -448,7 +448,7 @@ public:
 template <memory_mode::value_t MODE, typename T, typename I>
 void dense_matrix_view<MODE, T, I>::print() const
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(MODE)
     {

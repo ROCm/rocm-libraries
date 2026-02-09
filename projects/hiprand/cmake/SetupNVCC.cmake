@@ -58,6 +58,24 @@ function(hip_cuda_detect_lowest_cc out_variable)
 
     if(__nvcc_res EQUAL 0)
         set(HIP_CUDA_lowest_cc ${__nvcc_out} CACHE INTERNAL "The lowest CC of installed NV GPUs" FORCE)
+    else()
+        # fallback method which uses nvidia-smi to get min CC; requires CUDA Toolkit 11.6 or newer
+        execute_process(
+            COMMAND nvidia-smi "--query-gpu=compute_cap" "--format=csv,noheader"
+            RESULT_VARIABLE __nvsmi_res OUTPUT_VARIABLE __nvsmi_out
+        )
+
+        if(__nvsmi_res EQUAL 0)
+            message(STATUS "nvidia-smi reported CCs: ${__nvsmi_out}")
+            string(REPLACE "." "" __nvsmi_out_nodot ${__nvsmi_out})
+            string(REPLACE "\n" " " __nvsmi_out_formatted ${__nvsmi_out_nodot})
+            separate_arguments(__cc_list NATIVE_COMMAND ${__nvsmi_out_formatted})
+            list(SORT __cc_list ORDER ASCENDING)
+            list(GET __cc_list 0 __min_cc)
+            set(HIP_CUDA_lowest_cc ${__min_cc} CACHE INTERNAL "The lowest CC of installed NV GPUs" FORCE)
+        else()
+            message(STATUS "nvidia-smi command returned error code ${__nvsmi_res}.  Defaulting to cc_35")
+        endif()
     endif()
 
     if(NOT HIP_CUDA_lowest_cc)

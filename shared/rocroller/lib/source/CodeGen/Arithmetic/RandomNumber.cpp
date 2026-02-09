@@ -31,8 +31,6 @@
 
 namespace rocRoller
 {
-    RegisterComponent(RandomNumberGenerator);
-
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::RandomNumber>>
         GetGenerator<Expression::RandomNumber>(Register::ValuePtr dst,

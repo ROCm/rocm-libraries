@@ -6,7 +6,16 @@
 hipCUB installation overview 
 *********************************
 
-The hipCUB source code is available from the `hipCUB GitHub Repository <https://github.com/ROCmSoftwarePlatform/hipCUB>`_. 
+The hipCUB source code is available from the `ROCm libraries GitHub Repository <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipcub>`_. Use sparse checkout when cloning the hipCUB project:
+
+.. code::
+
+  git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+  cd rocm-libraries
+  git sparse-checkout init --cone
+  git sparse-checkout set projects/hipcub
+
+Then use ``git checkout`` to check out the branch you need.
 
 The develop branch is the default branch. The develop branch is intended for users who want to preview new features or contribute to the hipCUB code base.
 

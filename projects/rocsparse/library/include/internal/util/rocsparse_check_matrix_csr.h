@@ -34,7 +34,7 @@ extern "C" {
 
 /*! \ingroup utility_module
 *  \details
-*  \p rocsparse_check_matrix_csr_buffer_size computes the required buffer size needed when calling 
+*  \p rocsparse_check_matrix_csr_buffer_size computes the required buffer size needed when calling
 *  \ref rocsparse_scheck_matrix_csr "rocsparse_Xcheck_matrix_csr()".
 *
 *  \note
@@ -139,11 +139,11 @@ rocsparse_status rocsparse_zcheck_matrix_csr_buffer_size(rocsparse_handle       
 *  \brief Check matrix to see if it is valid.
 *
 *  \details
-*  \p rocsparse_check_matrix_csr checks if the input CSR matrix is valid. It performs basic sanity checks on the input 
+*  \p rocsparse_check_matrix_csr checks if the input CSR matrix is valid. It performs basic sanity checks on the input
 *  matrix and tries to detect issues in the data. This includes looking for 'nan' or 'inf' values in the data arrays,
-*  invalid column indices or row offsets, whether the matrix is triangular or not, whether there are duplicate 
-*  indices or whether the column indices are not sorted when they should be. If an issue is found, it is written to the 
-*  \p data_status parameter. 
+*  invalid column indices or row offsets, whether the matrix is triangular or not, whether there are duplicate
+*  indices or whether the column indices are not sorted when they should be. If an issue is found, it is written to the
+*  \p data_status parameter.
 *
 *  Performing the above checks involves two steps. First the user calls \p rocsparse_Xcheck_matrix_csr_buffer_size in order
 *  to determine the required buffer size. The user then allocates this buffer and passes it to \p rocsparse_Xcheck_matrix_csr.
@@ -230,7 +230,7 @@ rocsparse_status rocsparse_zcheck_matrix_csr_buffer_size(rocsparse_handle       
 *   size_t buffer_size;
 *   rocsparse_scheck_matrix_csr_buffer_size(handle, m, n, nnz, dcsr_val, dcsr_row_ptr, dcsr_col_ind,
 *       idx_base, matrix_type, fill_mode, storage_mode, &buffer_size);
-*   
+*
 *   void* dbuffer = nullptr;
 *   hipMalloc((void**)&dbuffer, buffer_size);
 *

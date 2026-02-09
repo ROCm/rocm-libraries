@@ -1,0 +1,519 @@
+# Cursor Rules for rocBLAS Project
+
+## About These Rules
+
+These rules help AI agents understand rocBLAS conventions, architecture, and best practices. **If you notice inconsistencies between these rules and the actual codebase, or identify improvements that should be made to these rules, please suggest updates.** The rules should evolve with the project.
+
+## Project Overview & Architecture
+
+rocBLAS is the AMD ROCm Basic Linear Algebra Subprograms (BLAS) library, implemented in HIP and optimized for AMD GPUs.
+
+### Key Documentation
+- **[README](./README.md)** - Project overview and requirements
+- **[Linux Install Guide](./docs/install/Linux_Install_Guide.rst)** - Linux build and installation
+- **[Windows Install Guide](./docs/install/Windows_Install_Guide.rst)** - Windows build and installation
+- **[Programmer's Guide](./docs/how-to/Programmers_Guide.rst)** - API usage and programming guide
+- **[Design Notes](./docs/conceptual/rocblas-design-notes.rst)** - Architecture and design decisions
+
+### Component Architecture
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| **Library** (`library/`) | Core implementation | BLAS operations (Level 1, 2, 3, Extensions) |
+| **Clients** (`clients/`) | Testing & benchmarking | Test suite (gtest), benchmarks, samples |
+| **Tensile** (`library/src/blas3/`) | GEMM kernels | Optimized matrix multiplication kernels |
+| **Dependencies** (`deps/`) | External deps | GTest, LAPACK dependencies |
+| **Scripts** (`scripts/`) | Utilities | Performance testing, YAML generation |
+
+---
+
+## Building & Testing Quickstart
+
+### Linux Build Commands
+
+```bash
+cd <workspace>/projects/rocblas
+
+# Install dependencies (one-time or after dependency changes)
+./install.sh -d
+
+# Build library only (fast iteration)
+./install.sh
+
+# Build with clients (tests + benchmarks)
+./install.sh -c
+
+# Build for specific architecture (recommended for faster builds)
+./install.sh -c --architecture auto
+
+# Build with AOCL-BLAS support (for enhanced testing)
+./install.sh -c --architecture auto  # AOCL auto-detected if installed
+
+# Skip AOCL dependency
+./install.sh -c --skip-aocl --architecture auto
+
+# Debug build
+./install.sh -g -c --architecture auto
+
+# Clean build
+./install.sh -c --clean-deps --architecture auto
+```
+
+### Windows Build Commands
+
+```powershell
+cd <workspace>\projects\rocblas
+
+# Set HIP_PATH environment variable (required)
+$env:HIP_PATH = "C:\Program Files\AMD\ROCm\<version>"
+
+# Install dependencies (one-time)
+python rmake.py -d
+
+# Build library only
+python rmake.py
+
+# Build with clients
+python rmake.py -c
+
+# Build for specific architecture
+python rmake.py -c --architecture auto
+```
+
+**Prerequisites for Windows:**
+- HIP SDK installed (typically in `C:\Program Files\AMD\ROCm\`)
+- Python 3.x
+- Visual Studio 2022 or later
+- CMake (via Visual Studio or standalone)
+
+### Testing Commands
+
+```bash
+cd <workspace>/projects/rocblas
+
+# Quick smoke tests (5-10 minutes)
+python3 rtest.py -t smoke
+
+# Pre-submit tests for PR validation (30-60 minutes)
+python3 rtest.py -t psdb
+
+# Nightly regression tests (~1.5-2 hours)
+python3 rtest.py -t osdb
+
+# Complete Quality Engineering tests (~3-3.5 hours)
+python3 rtest.py -t cqe
+
+# Run specific test filter
+./build/release/clients/staging/rocblas-test --gtest_filter=*gemm*
+
+# Run quick tests only
+./build/release/clients/staging/rocblas-test --gtest_filter=*quick*
+
+# Run with YAML configuration
+./build/release/clients/staging/rocblas-test --yaml clients/gtest/rocblas_smoke.yaml
+```
+
+### Test Binaries
+
+After building with `-c` flag, binaries are located in `build/release/clients/staging/`:
+
+| Binary | Purpose | Typical Use |
+|--------|---------|-------------|
+| `rocblas-test` | GTest test suite | Comprehensive testing with filters |
+| `rocblas-bench` | Performance benchmarking | Performance measurement and tuning |
+| `example_*` | Sample programs | Usage examples for various operations |
+
+### When Modifying Code
+
+**Only build or run tests if explicitly requested in the user's prompt.** Do not proactively run builds or tests unless asked.
+
+When requested to build/test:
+1. Use `./install.sh` (Linux) or `python rmake.py` (Windows) with appropriate flags
+2. Run relevant tests using `rtest.py` or direct `rocblas-test` with `--gtest_filter`
+3. For quick iteration, use `--architecture auto` to build only for detected GPU
+
+---
+
+## C++ Code Style
+
+### Naming Conventions
+
+- Use snake_case for functions and variables (e.g., `rocblas_gemm`, `matrix_size`)
+- Use SCREAMING_SNAKE_CASE for macros and constants (e.g., `ROCBLAS_API_CALL`)
+- Use PascalCase for class and struct names when appropriate
+- Prefix internal/private functions with underscore or place in detail namespace
+
+### File Headers
+
+- Add copyright header to all source files:
+  ```cpp
+  /* ************************************************************************
+   * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+   *
+   * Permission is hereby granted, free of charge, to any person obtaining a copy
+   * of this software and associated documentation files (the "Software"), to deal
+   * in the Software without restriction, including without limitation the rights
+   * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+   * ies of the Software, and to permit persons to whom the Software is furnished
+   * to do so, subject to the following conditions:
+   *
+   * The above copyright notice and this permission notice shall be included in all
+   * copies or substantial portions of the Software.
+   *
+   * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+   * PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+   * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+   * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+   * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+   * CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+   *
+   * ************************************************************************ */
+  ```
+- For header files (.h, .hpp), use `#pragma once` for include guards
+
+### Code Practices
+
+- Follow BLAS naming conventions for API functions (e.g., `rocblas_sgemm`, `rocblas_daxpy`)
+- Use explicit type conversions with `static_cast<>` where needed
+- Prefer const correctness for function parameters
+- **Never use hipMalloc/hipFree** - use `handle->device_malloc()` for device memory
+- Use other HIP functions as needed (hipMemcpy, hipStreamSynchronize, etc.)
+- Always check return codes from rocBLAS API calls in client code
+- Use braces for all control flow statements, even single-line bodies
+- Use RAII patterns for resource management (memory, pointer mode changes, etc.)
+
+### Device Memory Allocation
+
+**Critical:** rocBLAS code must NOT call `hipMalloc()` or `hipFree()` - they are synchronizing APIs.
+
+Use the rocBLAS device memory manager:
+
+```cpp
+// Allocate device memory using RAII wrapper
+auto w_mem = handle->device_malloc(dev_bytes);
+if(!w_mem)
+    return rocblas_status_memory_error;
+
+// Use the memory
+void* workspace = static_cast<void*>(w_mem);
+// Memory automatically freed when w_mem goes out of scope
+```
+
+**Key requirements:**
+- Allocate all device memory upfront at function level
+- Use RAII pattern with `rocblas_device_malloc`
+- Lower-level kernels receive pre-allocated memory from higher-level routines
+- Use variable names like `w_mem`, `workspace`, or `w_` prefix
+
+### Implementation Patterns
+
+rocBLAS uses `_impl`/`_launcher` separation for functions needing device memory:
+
+```cpp
+// _launcher: Fast computation only
+template <typename API_INT, typename T>
+rocblas_status rocblas_<operation>_launcher(..., void* workspace)
+{
+    // Launch kernels, no error checking or allocation
+}
+
+// _impl: Error checking, logging, memory allocation
+template <typename API_INT, typename T>
+rocblas_status rocblas_<operation>_impl(rocblas_handle handle, ...)
+{
+    // Check arguments
+    if(!handle) return rocblas_status_invalid_handle;
+    
+    // Allocate memory
+    auto w_mem = handle->device_malloc(dev_bytes);
+    if(!w_mem) return rocblas_status_memory_error;
+    
+    // Call launcher
+    return rocblas_<operation>_launcher<API_INT, T>(..., w_mem);
+}
+```
+
+### Pointer Mode Patterns
+
+```cpp
+// Temporarily switch to host pointer mode (RAII)
+auto saved_mode = handle->push_pointer_mode(rocblas_pointer_mode_host);
+
+// Get scalar value regardless of mode
+T alpha_h;
+if(saved_mode == rocblas_pointer_mode_host)
+    alpha_h = *alpha;
+else
+    RETURN_IF_HIP_ERROR(hipMemcpy(&alpha_h, alpha, sizeof(T), hipMemcpyDeviceToHost));
+
+// Use load_scalar() in kernels for dual pointer/value support
+template <typename U>
+__global__ void kernel(U alpha_device_host, ...)
+{
+    auto alpha = load_scalar(alpha_device_host);  // Works with both
+}
+```
+
+### Template Ordering
+
+**Always place non-type parameters before type parameters:**
+
+```cpp
+// Correct: Non-type (NB) before type (T)
+template <rocblas_int NB, typename T>
+rocblas_status func(...)  // T can be auto-deduced
+
+// Wrong: Type before non-type
+template <typename T, rocblas_int NB>  // ❌
+```
+
+### Build System
+
+- Use CMake for all build configuration
+- Dependencies managed via `install.sh` (Linux) or `rdeps.py` (Windows)
+- Tensile integration handled automatically during build
+- For new dependencies, update `deps/CMakeLists.txt` and dependency scripts
+
+### Testing
+
+- Use Google Test (gtest) framework for all C/C++ tests
+- Test files located in `clients/gtest/`
+- YAML test configurations in `clients/gtest/*.yaml`
+- Use `TEST()` or `TEST_P()` macros for parameterized tests
+- Test naming: `<operation>_<variant>_<datatype>` (e.g., `gemm_strided_batched_float`)
+
+### Example Code Structure
+
+```cpp
+/* ************************************************************************
+ * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * ... (full copyright header)
+ * ************************************************************************ */
+
+#pragma once
+
+#include "rocblas.h"
+
+// API function following BLAS naming conventions
+rocblas_status rocblas_sgemm(rocblas_handle handle,
+                             rocblas_operation transA,
+                             rocblas_operation transB,
+                             rocblas_int m,
+                             rocblas_int n,
+                             rocblas_int k,
+                             const float* alpha,
+                             const float* A,
+                             rocblas_int lda,
+                             const float* B,
+                             rocblas_int ldb,
+                             const float* beta,
+                             float* C,
+                             rocblas_int ldc);
+```
+
+### Test File Example
+
+```cpp
+/* ************************************************************************
+ * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * ... (full copyright header)
+ * ************************************************************************ */
+
+#include "rocblas_test.hpp"
+#include <gtest/gtest.h>
+
+template <typename T>
+void testing_gemm(const Arguments& arg)
+{
+    // Test implementation
+    rocblas_int m = arg.M;
+    rocblas_int n = arg.N;
+    rocblas_int k = arg.K;
+    
+    // Allocate and test
+    // ...
+}
+
+TEST(gemm_gtest, float)
+{
+    Arguments arg;
+    arg.M = 128;
+    arg.N = 128;
+    arg.K = 128;
+    testing_gemm<float>(arg);
+}
+```
+
+---
+
+## Development Workflow
+
+### Test Levels and CI Equivalents
+
+| Test Level | Command | Duration | Purpose |
+|------------|---------|----------|---------|
+| **Smoke** | `rtest.py -t smoke` | 5-10 min | Quick sanity check |
+| **Pre-Submit (PSDB)** | `rtest.py -t psdb` | 30-60 min | PR validation |
+| **Nightly (OSDB)** | `rtest.py -t osdb` | 1.5-2 hrs | Regression testing |
+| **Code Coverage** | `rtest.py -t code_coverage` | 8-12 hrs | Coverage analysis |
+| **Complete QE (CQE)** | `rtest.py -t cqe` | 3-3.5 hrs | Release validation |
+
+### Common Build Scenarios
+
+| Scenario | Flags | Purpose |
+|----------|-------|---------|
+| Dependencies only | `-d --architecture auto` | Install dependencies without building |
+| Basic build | `--architecture auto` | Build library only (fast) |
+| Build with clients | `-c --architecture auto` | Full build with tests and benchmarks |
+| Build without AOCL | `-c --skip-aocl --architecture auto` | Build without AOCL dependency |
+| Clean build | `-c --clean-deps --architecture auto` | Clean rebuild with dependencies |
+| Debug build | `-g -c --architecture auto` | Debug configuration with clients |
+
+---
+
+## Platform-Specific Notes
+
+### Linux (Primary Development Platform)
+
+- Use `install.sh` for all build operations
+- Dependencies installed via system package manager + custom builds
+- AOCL-BLAS auto-detected if installed in standard locations
+- ROCm required (typically `/opt/rocm`)
+- Supports Ubuntu, RHEL, SLES, OpenSUSE
+
+### Windows
+
+- Set `HIP_PATH` environment variable before building
+- Use `rmake.py` for build operations (Python wrapper around CMake)
+- Dependencies managed via vcpkg (`rdeps.py`)
+- HIP SDK required (typically `C:\Program Files\AMD\ROCm\`)
+- Visual Studio 2022 or later recommended
+- AOCL-BLAS can be used for enhanced client testing if available
+
+### Environment Variables
+
+Key environment variables for rocBLAS:
+
+- `ROCBLAS_LAYER` - Enable logging (1=trace, 2=bench, 4=profile)
+- `ROCBLAS_CHECK_NUMERICS` - Enable numerical checks (1-4)
+- `HIP_PATH` - HIP SDK location (Windows)
+- `VCPKG_PATH` - vcpkg location (Windows)
+- `OPENBLAS_DIR` - Custom OpenBLAS/AOCL location
+
+---
+
+## Common Tasks
+
+### Adding a New BLAS Operation
+
+1. Add function declaration to `library/include/rocblas.h`
+2. Implement in appropriate `library/src/blas{1,2,3}/` directory
+3. Add tests in `clients/gtest/`
+4. Add YAML test cases in `clients/gtest/*.yaml`
+5. Add benchmark support in `clients/benchmarks/`
+6. Update documentation in `docs/reference/`
+
+### Modifying Tensile Kernels
+
+1. Tensile YAML configurations in `library/src/blas3/Tensile/Logic/`
+2. Build with Tensile: `./install.sh -c --architecture auto`
+3. Tensile generates optimized kernels during build
+4. Test with: `rocblas-bench -f gemm -r <precision> -m <size>`
+
+### Running Performance Benchmarks
+
+```bash
+# GEMM benchmark
+./build/release/clients/staging/rocblas-bench -f gemm -r f32_r -m 4096 -n 4096 -k 4096
+
+# GEMV benchmark
+./build/release/clients/staging/rocblas-bench -f gemv -r f32_r -m 8192 -n 8192
+
+# Load from YAML
+./build/release/clients/staging/rocblas-bench --yaml scripts/performance/gemm_nn.yaml
+```
+
+### Debugging Tips
+
+```bash
+# Enable verbose logging
+export ROCBLAS_LAYER=1
+
+# Enable numerical checks
+export ROCBLAS_CHECK_NUMERICS=1
+
+# Run single test with verbose output
+./build/release/clients/staging/rocblas-test --gtest_filter=*gemm* --gtest_also_run_disabled_tests
+
+# Debug build
+./install.sh -g -c --architecture auto
+gdb ./build/debug/clients/staging/rocblas-test
+```
+
+---
+
+## Key Files and Locations
+
+### Build Scripts
+- `install.sh` - Main Linux build script
+- `rmake.py` - Main Windows build script (Python wrapper)
+- `rdeps.py` - Windows dependency management
+- `rtest.py` - Test orchestration script
+
+### Configuration Files
+- `CMakeLists.txt` - Root CMake configuration
+- `rtest.xml` - Test suite definitions
+- `rdeps.xml` - Windows dependency definitions
+
+### Test Configurations
+- `clients/gtest/rocblas_smoke.yaml` - Quick smoke tests
+- `clients/gtest/rocblas_extras.yaml` - Extended tests
+- `clients/gtest/rocblas_common.yaml` - Common configurations
+
+### Documentation
+- `docs/` - Sphinx documentation source
+- `README.md` - Project overview
+- `CHANGELOG.md` - Version history
+
+---
+
+## Notes
+
+- **Architecture Flag:** Always use `--architecture auto` for faster local builds (builds only for detected GPU)
+- **Test Duration:** Times listed are for MI300X hardware but can vary significantly by GPU model
+- **AOCL Integration:** AOCL-BLAS 5.1+ provides enhanced BLAS reference for testing
+- **Tensile:** Kernel generation happens during build; can take significant time for `--architecture all`
+- **Windows Limitations:** Some features (e.g., Fortran) may have limited support on Windows
+
+---
+
+## Contributing
+
+When making changes:
+
+1. Follow the existing code style and naming conventions
+2. Add tests for new functionality in `clients/gtest/`
+3. Run at least `rtest.py -t smoke` before submitting
+4. Update documentation in `docs/` if adding new APIs
+5. Check that changes work on both Linux and Windows if applicable
+
+### Improving These Rules
+
+**Help keep these rules accurate and useful:**
+
+- If you find a pattern in the codebase that contradicts these rules, suggest a rule update
+- If you discover a critical pattern not documented here, propose adding it
+- If an example is outdated or misleading, recommend a better one
+- If you see repeated questions that these rules should answer, suggest additions
+
+Example: "I notice the codebase uses X pattern in 50+ files, but the rules document Y. Should we update `.cursorrules` section Z to reflect the actual pattern?"
+
+---
+
+## Questions or Issues?
+
+- **Documentation:** See `docs/` directory
+- **Build Issues:** Check `docs/install/` guides
+- **Testing:** See `../rocBlasScripting/USAGE_GUIDE.md` for comprehensive testing
+- **Performance:** Use `rocblas-bench` and scripts in `scripts/performance/`
+

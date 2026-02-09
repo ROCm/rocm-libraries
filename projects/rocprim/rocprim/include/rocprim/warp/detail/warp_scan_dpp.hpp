@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -75,30 +75,53 @@ public:
             if(row_lane_id >= 8)
                 output = scan_op(t, output);
         }
-#ifdef ROCPRIM_DETAIL_HAS_DPP_BROADCAST
-        if(VirtualWaveSize > 16)
+
+        // Check for __builtin_amdgcn_permlane16; if it exists, the DPP equivalent is not available.
+        // Swizzle is kept instead of __builtin_amdgcn_permlanex16, as the latter can be slower in some cases.
+        if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_PERMLANE())
         {
-            T t = warp_move_dpp<T, 0x142>(output); // row_bcast:15
-            if(lane_id % 32 >= 16)
-                output = scan_op(t, output);
-        }
-        if(VirtualWaveSize > 32)
-        {
-            T t = warp_move_dpp<T, 0x143>(output); // row_bcast:31
-            if(lane_id >= 32)
-                output = scan_op(t, output);
-        }
-        static_assert(VirtualWaveSize <= 64, "VirtualWaveSize > 64 is not supported");
-#else
-        if(VirtualWaveSize > 16)
-        {
-            T t = warp_swizzle<T, 0x1e0>(output); // row_bcast:15
-            if(lane_id % 32 >= 16)
-                output = scan_op(t, output);
-        }
-        static_assert(VirtualWaveSize <= 32,
-                      "VirtualWaveSize > 32 is not supported without DPP broadcasts");
+            if(VirtualWaveSize > 16)
+            {
+                T t = warp_swizzle<T, 0x1e0>(output); // row_bcast:15
+                if(lane_id % 32 >= 16)
+                    output = scan_op(t, output);
+            }
+
+#if !ROCPRIM_TARGET_SPIRV
+            if constexpr(!ROCPRIM_IS_GENERIC())
+            {
+                static_assert(VirtualWaveSize <= 32,
+                              "VirtualWaveSize > 32 is not supported without DPP broadcasts");
+            }
+            else
 #endif
+            {
+                if constexpr(VirtualWaveSize > 32)
+                {
+                    ROCPRIM_PRINT_ERROR_ONCE(
+                        "VirtualWaveSize > 32 is not supported without DPP broadcasts");
+                    return;
+                }
+            }
+        }
+        else
+        {
+            if(VirtualWaveSize > 16)
+            {
+                T t = warp_move_dpp<T, 0x142>(output); // row_bcast:15
+                if(lane_id % 32 >= 16)
+                    output = scan_op(t, output);
+            }
+            if(VirtualWaveSize > 32)
+            {
+                T t = warp_move_dpp<T, 0x143>(output); // row_bcast:31
+                if(lane_id >= 32)
+                    output = scan_op(t, output);
+            }
+#if !ROCPRIM_TARGET_SPIRV
+            static_assert(VirtualWaveSize <= 64, "VirtualWaveSize > 64 is not supported");
+#endif
+        }
     }
 
     template<class BinaryFunction>

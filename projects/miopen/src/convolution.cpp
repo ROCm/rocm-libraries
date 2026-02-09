@@ -409,7 +409,7 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
     ctx.do_search             = false;
     ctx.disable_perfdb_access = true;
 
-    while(findMode.IsFast(ctx) || findMode.IsHybrid(ctx))
+    while(findMode.IsFast(ctx) || (findMode.IsHybrid(ctx) && !findMode.IsTrustVerify(ctx)))
     {
         /// \section ffind_gwss_why_not_0
         /// Basically we can return 0 here because
@@ -422,9 +422,9 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
         /// (using size returned by *this* call) and then re-use
         /// the same workspace for Run phase. That is why we shall return
         /// actually required workspace here.
-        auto fallback        = bool{};
+        auto fallback        = FallbackPath();
         const auto solutions = GetSolutions(ctx, problem, 1, &fallback);
-        if(solutions.empty() || ((findMode.IsHybrid(ctx) && fallback) &&
+        if(solutions.empty() || ((findMode.IsHybrid(ctx) && fallback != FallbackPath::None) &&
                                  !env::enabled(MIOPEN_DEBUG_FORCE_IMMED_MODE_FALLBACK)))
         {
             ctx.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
@@ -466,6 +466,16 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
 
     MIOPEN_LOG_I(workspace_size);
     return workspace_size;
+}
+
+bool ConvolutionDescriptor::EnableTF32() const
+{
+    // TODO:(LYM) change back to && when TF32 is fully supported
+    if((miopen::EnvEnableTF32() ||
+        (static_cast<miopenMathType_t>(attribute.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE)) ==
+         miopenMathDefault)))
+        return true;
+    return false;
 }
 
 std::ostream& operator<<(std::ostream& stream, const ConvolutionDescriptor& c)
@@ -540,6 +550,18 @@ void ConvolutionAttribute::Set(miopenConvolutionAttrib_t attr, int value)
         }
         fp8rounding_mode.rounding_mode = rounding_mode;
     }
+    else if(attr == MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE)
+    {
+        const auto math_type_ = static_cast<miopenMathType_t>(value);
+        if(math_type_ != miopenMathDefault && math_type_ != miopenMathPedantic)
+        {
+            MIOPEN_THROW(miopenStatusBadParm,
+                         "[Set conv attribute] Error: Attempt to set invalid value for "
+                         "MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE: " +
+                             std::to_string(value));
+        }
+        math_type.value = math_type_;
+    }
     else
     {
         MIOPEN_THROW(miopenStatusBadParm,
@@ -556,6 +578,8 @@ int ConvolutionAttribute::Get(miopenConvolutionAttrib_t attr) const
         return static_cast<int>(fp8rounding_mode.rounding_mode);
     else if(attr == MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC)
         return deterministic.value;
+    else if(attr == MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE)
+        return math_type.value;
     MIOPEN_THROW(miopenStatusBadParm,
                  "[Get conv attribute] Error: Attribute [" +
                      std::to_string(static_cast<int>(attr)) + "] does not exist.");

@@ -33,6 +33,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+#include <thrust/detail/attributes.h>
 #include <thrust/detail/use_default.h>
 #include <thrust/iterator/detail/iterator_adaptor_base.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -75,7 +83,7 @@ THRUST_NAMESPACE_BEGIN
  *        Iterator
  *      >;
  *
- *      THRUST_HOST_DEVICE
+ *      __host__ __device__
  *      repeat_iterator(const Iterator &x, int n) : super_t(x), begin(x), n(n) {}
  *
  *      // befriend thrust::iterator_core_access to allow it access to the private interface below
@@ -89,7 +97,7 @@ THRUST_NAMESPACE_BEGIN
  *      const Iterator begin;
  *
  *      // it is private because only thrust::iterator_core_access needs access to it
- *      THRUST_HOST_DEVICE
+ *      __host__ __device__
  *      typename super_t::reference dereference() const
  *      {
  *        return *(begin + (this->base() - begin) / n);
@@ -119,13 +127,13 @@ template <typename Derived,
           typename Traversal  = use_default,
           typename Reference  = use_default,
           typename Difference = use_default>
-class iterator_adaptor
+class THRUST_DECLSPEC_EMPTY_BASES iterator_adaptor
     : public detail::iterator_adaptor_base<Derived, Base, Value, System, Traversal, Reference, Difference>::type
 {
   /*! \cond
    */
 
-  friend class thrust::iterator_core_access;
+  friend class iterator_core_access;
 
 protected:
   using super_t =

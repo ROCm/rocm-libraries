@@ -20,7 +20,13 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/unique.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(array)
+#endif
 
 TESTS_DEFINE(UniqueTests, FullTestsParams);
 
@@ -101,10 +107,47 @@ TEST(UniqueTests, TestUniqueCopyDispatchImplicit)
   ASSERT_EQ(13, vec.front());
 }
 
+template <typename ForwardIterator>
+typename thrust::iterator_traits<ForwardIterator>::difference_type
+unique_count(my_system& system, ForwardIterator, ForwardIterator)
+{
+  system.validate_dispatch();
+  return 0;
+}
+
+TEST(UniqueTests, TestUniqueCountDispatchExplicit)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> vec(1);
+
+  my_system sys(0);
+  thrust::unique_count(sys, vec.begin(), vec.begin());
+
+  ASSERT_EQ(true, sys.is_valid());
+}
+
+template <typename ForwardIterator>
+typename thrust::iterator_traits<ForwardIterator>::difference_type unique_count(my_tag, ForwardIterator, ForwardIterator)
+{
+  return 13;
+}
+
+TEST(UniqueTests, TestUniqueCountDispatchImplicit)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> vec(1);
+
+  auto result = thrust::unique_count(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()));
+
+  ASSERT_EQ(13, result);
+}
+
 template <typename T>
 struct is_equal_div_10_unique
 {
-  __host__ __device__ bool operator()(const T x, const T& y) const
+  THRUST_HOST_DEVICE bool operator()(const T x, const T& y) const
   {
     return ((int) x / 10) == ((int) y / 10);
   }
@@ -113,42 +156,28 @@ struct is_equal_div_10_unique
 TYPED_TEST(UniqueTests, TestUniqueSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(10);
-  data[0] = 11;
-  data[1] = 11;
-  data[2] = 12;
-  data[3] = 20;
-  data[4] = 29;
-  data[5] = 21;
-  data[6] = 21;
-  data[7] = 31;
-  data[8] = 31;
-  data[9] = 37;
+  Vector data{11, 11, 12, 20, 29, 21, 21, 31, 31, 37};
 
   typename Vector::iterator new_last;
 
-  new_last = thrust::unique(Policy{}, data.begin(), data.end());
+  new_last = thrust::unique(data.begin(), data.end());
 
   ASSERT_EQ(new_last - data.begin(), 7);
-  ASSERT_EQ(data[0], 11);
-  ASSERT_EQ(data[1], 12);
-  ASSERT_EQ(data[2], 20);
-  ASSERT_EQ(data[3], 29);
-  ASSERT_EQ(data[4], 21);
-  ASSERT_EQ(data[5], 31);
-  ASSERT_EQ(data[6], 37);
+  data.resize(7);
+  Vector ref{11, 12, 20, 29, 21, 31, 37};
+  ASSERT_EQ(data, ref);
 
-  new_last = thrust::unique(Policy{}, data.begin(), new_last, is_equal_div_10_unique<T>());
+  new_last = thrust::unique(data.begin(), new_last, is_equal_div_10_unique<T>());
 
   ASSERT_EQ(new_last - data.begin(), 3);
-  ASSERT_EQ(data[0], 11);
-  ASSERT_EQ(data[1], 20);
-  ASSERT_EQ(data[2], 31);
+  ref.resize(3);
+  data.resize(3);
+  ref = {11, 20, 31};
+  ASSERT_EQ(data, ref);
 }
 
 TYPED_TEST(UniqueIntegralTests, TestUnique)
@@ -188,44 +217,29 @@ TYPED_TEST(UniqueIntegralTests, TestUnique)
 TYPED_TEST(UniqueTests, TestUniqueCopySimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(10);
-  data[0] = 11;
-  data[1] = 11;
-  data[2] = 12;
-  data[3] = 20;
-  data[4] = 29;
-  data[5] = 21;
-  data[6] = 21;
-  data[7] = 31;
-  data[8] = 31;
-  data[9] = 37;
-
+  Vector data{11, 11, 12, 20, 29, 21, 21, 31, 31, 37};
   Vector output(10, -1);
 
   typename Vector::iterator new_last;
 
-  new_last = thrust::unique_copy(Policy{}, data.begin(), data.end(), output.begin());
+  new_last = thrust::unique_copy(data.begin(), data.end(), output.begin());
 
   ASSERT_EQ(new_last - output.begin(), 7);
-  ASSERT_EQ(output[0], 11);
-  ASSERT_EQ(output[1], 12);
-  ASSERT_EQ(output[2], 20);
-  ASSERT_EQ(output[3], 29);
-  ASSERT_EQ(output[4], 21);
-  ASSERT_EQ(output[5], 31);
-  ASSERT_EQ(output[6], 37);
+  output.resize(7);
+  Vector ref{11, 12, 20, 29, 21, 31, 37};
+  ASSERT_EQ(output, ref);
 
-  new_last = thrust::unique_copy(Policy{}, output.begin(), new_last, data.begin(), is_equal_div_10_unique<T>());
+  new_last = thrust::unique_copy(output.begin(), new_last, data.begin(), is_equal_div_10_unique<T>());
 
   ASSERT_EQ(new_last - data.begin(), 3);
-  ASSERT_EQ(data[0], 11);
-  ASSERT_EQ(data[1], 20);
-  ASSERT_EQ(data[2], 31);
+  ref.resize(3);
+  data.resize(3);
+  ref = {11, 20, 31};
+  ASSERT_EQ(data, ref);
 }
 
 TYPED_TEST(UniqueIntegralTests, TestUniqueCopy)
@@ -288,7 +302,6 @@ TYPED_TEST(UniqueIntegralTests, TestUniqueCopyToDiscardIterator)
 
       thrust::discard_iterator<> reference(h_unique.size());
 
-      typename thrust::host_vector<T>::iterator h_new_last;
       typename thrust::device_vector<T>::iterator d_new_last;
 
       thrust::discard_iterator<> h_result =
@@ -306,26 +319,17 @@ TYPED_TEST(UniqueIntegralTests, TestUniqueCopyToDiscardIterator)
 TYPED_TEST(UniqueTests, TestUniqueCountSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
-  Vector data(10);
-  data[0] = 11;
-  data[1] = 11;
-  data[2] = 12;
-  data[3] = 20;
-  data[4] = 29;
-  data[5] = 21;
-  data[6] = 21;
-  data[7] = 31;
-  data[8] = 31;
-  data[9] = 37;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  int count = thrust::unique_count(Policy{}, data.begin(), data.end());
+  Vector data{11, 11, 12, 20, 29, 21, 21, 31, 31, 37};
+
+  int count = thrust::unique_count(data.begin(), data.end());
 
   ASSERT_EQ(count, 7);
 
-  int div_10_count = thrust::unique_count(Policy{}, data.begin(), data.end(), is_equal_div_10_unique<T>());
+  int div_10_count = thrust::unique_count(data.begin(), data.end(), is_equal_div_10_unique<T>());
 
   ASSERT_EQ(div_10_count, 3);
 }
@@ -340,21 +344,53 @@ TYPED_TEST(UniqueIntegralTests, TestUniqueCount)
   {
     SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-    for (auto seed : get_seeds())
+    thrust::host_vector<T> h_data   = random_integers<bool>(size);
+    thrust::device_vector<T> d_data = h_data;
+
+    int h_count{};
+    int d_count{};
+
+    h_count = thrust::unique_count(h_data.begin(), h_data.end());
+    d_count = thrust::unique_count(d_data.begin(), d_data.end());
+
+    ASSERT_EQ(h_count, d_count);
+  }
+}
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+template <typename T, std::size_t N>
+using DeviceArray = _THRUST_STD::array<T, N>;
+#else // !_THRUST_HAS_DEVICE_SYSTEM_STD
+template <typename T, std::size_t N>
+struct DeviceArray
+{
+  T data[N];
+
+  // Host and device-compatible equality operator
+  __host__ __device__ bool operator==(const DeviceArray& other) const
+  {
+    for (std::size_t i = 0; i < N; ++i)
     {
-      thrust::host_vector<T> h_data   = get_random_data<bool>(size, false, true, seed);
-      thrust::device_vector<T> d_data = h_data;
-
-      int h_count{};
-      int d_count{};
-
-      h_count = thrust::unique_count(h_data.begin(), h_data.end());
-      d_count = thrust::unique_count(d_data.begin(), d_data.end());
-
-      ASSERT_EQ(h_count, d_count);
+      if (data[i] != other.data[i])
+      {
+        return false;
+      }
     }
+    return true;
   }
 };
+#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
+
+TYPED_TEST(UniqueTests, TestUniqueMemoryAccess)
+{
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<DeviceArray<T, 100>> v(10);
+  thrust::unique(v.begin(), v.end());
+}
 
 __global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void UniqueKernel(int const N, int* in_array, int* out_size)
 {

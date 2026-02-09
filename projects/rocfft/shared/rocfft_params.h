@@ -25,6 +25,7 @@
 #include "../shared/gpubuf.h"
 #include "../shared/precision_type.h"
 #include "rocfft/rocfft.h"
+#include "rocfft_enums_vs_fft_enums.h"
 
 #ifdef ROCFFT_MPI_ENABLE
 #include <mpi.h>
@@ -67,99 +68,6 @@ static std::string rocfft_status_to_string(const rocfft_status ret)
     }
 }
 
-inline fft_status fft_status_from_rocfftparams(const rocfft_status val)
-{
-    switch(val)
-    {
-    case rocfft_status_success:
-        return fft_status_success;
-    case rocfft_status_failure:
-        return fft_status_failure;
-    case rocfft_status_invalid_arg_value:
-        return fft_status_invalid_arg_value;
-    case rocfft_status_invalid_dimensions:
-        return fft_status_invalid_dimensions;
-    case rocfft_status_invalid_array_type:
-        return fft_status_invalid_array_type;
-    case rocfft_status_invalid_strides:
-        return fft_status_invalid_strides;
-    case rocfft_status_invalid_distance:
-        return fft_status_invalid_distance;
-    case rocfft_status_invalid_offset:
-        return fft_status_invalid_offset;
-    case rocfft_status_invalid_work_buffer:
-        return fft_status_invalid_work_buffer;
-    default:
-        throw std::runtime_error("Invalid status");
-    }
-}
-
-inline rocfft_precision rocfft_precision_from_fftparams(const fft_precision val)
-{
-    switch(val)
-    {
-    case fft_precision_single:
-        return rocfft_precision_single;
-    case fft_precision_double:
-        return rocfft_precision_double;
-    case fft_precision_half:
-        return rocfft_precision_half;
-    default:
-        throw std::runtime_error("Invalid precision");
-    }
-}
-
-inline rocfft_array_type rocfft_array_type_from_fftparams(const fft_array_type val)
-{
-    switch(val)
-    {
-    case fft_array_type_complex_interleaved:
-        return rocfft_array_type_complex_interleaved;
-    case fft_array_type_complex_planar:
-        return rocfft_array_type_complex_planar;
-    case fft_array_type_real:
-        return rocfft_array_type_real;
-    case fft_array_type_hermitian_interleaved:
-        return rocfft_array_type_hermitian_interleaved;
-    case fft_array_type_hermitian_planar:
-        return rocfft_array_type_hermitian_planar;
-    case fft_array_type_unset:
-        return rocfft_array_type_unset;
-    }
-    return rocfft_array_type_unset;
-}
-
-inline rocfft_transform_type rocfft_transform_type_from_fftparams(const fft_transform_type val)
-{
-    switch(val)
-    {
-    case fft_transform_type_complex_forward:
-        return rocfft_transform_type_complex_forward;
-    case fft_transform_type_complex_inverse:
-        return rocfft_transform_type_complex_inverse;
-    case fft_transform_type_real_forward:
-        return rocfft_transform_type_real_forward;
-    case fft_transform_type_real_inverse:
-        return rocfft_transform_type_real_inverse;
-    default:
-        throw std::runtime_error("Invalid transform type");
-    }
-}
-
-inline rocfft_result_placement
-    rocfft_result_placement_from_fftparams(const fft_result_placement val)
-{
-    switch(val)
-    {
-    case fft_placement_inplace:
-        return rocfft_placement_inplace;
-    case fft_placement_notinplace:
-        return rocfft_placement_notinplace;
-    default:
-        throw std::runtime_error("Invalid result placement");
-    }
-}
-
 template <typename Funcs>
 class rocfft_params_base : public fft_params
 {
@@ -170,6 +78,7 @@ public:
     rocfft_execution_info   info = nullptr;
     rocfft_plan_description desc = nullptr;
     gpubuf_t<void>          wbuffer;
+    size_t                  workbuffersize = 0;
 
     explicit rocfft_params_base() = default;
 
@@ -410,7 +319,8 @@ public:
         {
             return ret;
         }
-        if(workbuffersize > 0)
+        // default behavior is to feed rocfft with a work area if it needs one
+        if(workbuffersize > 0 && auto_allocate != fft_auto_allocation_on)
         {
             hipError_t hip_status = hipSuccess;
             hip_status            = wbuffer.alloc(workbuffersize);
@@ -429,7 +339,7 @@ public:
                 {
                     oss << "hipMemGetInfo also failed";
                 }
-                throw work_buffer_alloc_failure(oss.str());
+                throw work_buffer_alloc_failure(oss.str(), workbuffersize);
             }
 
             auto rocret
@@ -443,20 +353,66 @@ public:
         return ret;
     }
 
-    fft_status set_callbacks(void* load_cb_host,
-                             void* load_cb_data,
-                             void* store_cb_host,
-                             void* store_cb_data) override
+    // Return the number of expected callback entries for supplied
+    // fields.
+    size_t expected_callback_count(const std::vector<fft_field>& fields)
+    {
+        // If fields are not specified, we consider the input or
+        // output to have a single brick (and thus expect a single
+        // callback entry)
+        if(fields.empty())
+            return 1;
+
+        int mpi_rank = 0;
+#ifdef ROCFFT_MPI_ENABLE
+        if(mp_lib == fft_mp_lib_mpi)
+        {
+            MPI_Comm_rank(*static_cast<MPI_Comm*>(mp_comm), &mpi_rank);
+        }
+#endif
+
+        // count the number of bricks on this rank
+        size_t expected_callbacks = 0;
+        for(const auto& f : fields)
+        {
+            for(const auto& b : f.bricks)
+            {
+                if(b.rank == mpi_rank)
+                    ++expected_callbacks;
+            }
+        }
+        return expected_callbacks;
+    }
+
+    fft_status set_callbacks(std::vector<void*>* load_cb_func,
+                             std::vector<void*>* load_cb_data,
+                             std::vector<void*>* store_cb_func,
+                             std::vector<void*>* store_cb_data,
+                             size_t              load_cb_shared_mem_bytes  = 0,
+                             size_t              store_cb_shared_mem_bytes = 0) override
     {
         if(run_callbacks)
         {
-            auto roc_status
-                = rocfft.execution_info_set_load_callback(info, &load_cb_host, &load_cb_data, 0);
+            auto expected_load_cb_count  = expected_callback_count(ifields);
+            auto expected_store_cb_count = expected_callback_count(ofields);
+            check_callback_vec(load_cb_func, expected_load_cb_count, true);
+            check_callback_vec(load_cb_data, expected_load_cb_count, false);
+            check_callback_vec(store_cb_func, expected_store_cb_count, true);
+            check_callback_vec(store_cb_data, expected_store_cb_count, false);
+
+            auto roc_status = rocfft.execution_info_set_load_callback(
+                info,
+                load_cb_func ? load_cb_func->data() : nullptr,
+                load_cb_data ? load_cb_data->data() : nullptr,
+                load_cb_shared_mem_bytes);
             if(roc_status != rocfft_status_success)
                 return fft_status_from_rocfftparams(roc_status);
 
-            roc_status
-                = rocfft.execution_info_set_store_callback(info, &store_cb_host, &store_cb_data, 0);
+            roc_status = rocfft.execution_info_set_store_callback(
+                info,
+                store_cb_func ? store_cb_func->data() : nullptr,
+                store_cb_data ? store_cb_data->data() : nullptr,
+                store_cb_shared_mem_bytes);
             if(roc_status != rocfft_status_success)
                 return fft_status_from_rocfftparams(roc_status);
         }
@@ -490,7 +446,7 @@ public:
 
             for(const auto& b : field.bricks)
             {
-                const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride, 0, 0);
+                const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride);
                 const size_t brick_size_bytes = brick_size_elems * elem_size_bytes;
 
                 // set device for the alloc, but we want to return to the
@@ -582,7 +538,7 @@ public:
         {
             const auto& b = ofields.front().bricks[i];
 
-            const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride, 0, 0);
+            const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride);
             const size_t brick_size_bytes = brick_size_elems * elem_size_bytes;
 
             // get this brick's starting offset in the field

@@ -23,10 +23,10 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/device/device_adjacent_difference.hpp"
-#include "hipcub/iterator/counting_input_iterator.hpp"
-#include "hipcub/iterator/discard_output_iterator.hpp"
-#include "hipcub/iterator/transform_input_iterator.hpp"
+#include <hipcub/device/device_adjacent_difference.hpp>
+#include <hipcub/iterator/counting_input_iterator.hpp>
+#include <hipcub/iterator/discard_output_iterator.hpp>
+#include <hipcub/iterator/transform_input_iterator.hpp>
 
 #include "test_utils.hpp"
 #include "test_utils_data_generation.hpp"
@@ -481,11 +481,8 @@ TYPED_TEST(HipcubDeviceAdjacentDifferenceLargeTests, LargeIndicesAndOpOnce)
             HIP_CHECK(hipMemset(d_counter, 0, sizeof(*d_counter)));
 
             OutputIterator output(d_incorrect_flag, d_counter);
-
-            const auto input = hipcub::CountingInputIterator<T>(T{0});
-
+            const auto            input    = rocprim::counting_iterator<T>(T{0});
             static constexpr auto left_tag = std::integral_constant<bool, left>{};
-
             static constexpr auto copy_tag = std::integral_constant<bool, copy>{};
 
             FocusIndex<left> op;

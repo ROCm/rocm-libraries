@@ -10,6 +10,7 @@
 - Added master solution library documentation
 - Added compiler version dependent assembler and architecture capabilities
 - Added documentation from GitHub Wiki to ROCm docs
+- Added support for gfx1150
 
 ### Changed
 
@@ -17,7 +18,7 @@
 - Introduced 4-tuple targets for bundler invocations
 - Introduced PATHEXT extensions on Windows when searching for toolchain components
 - Enabled passing fully qualified paths to toolchain components
-- Enabled environment variable overrides when searching for a ROCm stack 
+- Enabled environment variable overrides when searching for a ROCm stack
 - Improved default toolchain configuration
 - Ignored f824 flake errors
 

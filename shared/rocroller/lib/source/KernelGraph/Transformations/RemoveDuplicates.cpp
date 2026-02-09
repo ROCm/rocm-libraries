@@ -148,7 +148,7 @@ namespace rocRoller
                     if(!maybeForLoop)
                         continue;
                     auto forLoop = *graph.control.get<ControlGraph::ForLoopOp>(*maybeForLoop);
-                    if(forLoop.loopName != rocRoller::KLOOP)
+                    if(not forLoop.loopName.starts_with(rocRoller::KLOOP))
                         continue;
 
                     // If LoadTiled, don't consider when loading directly
@@ -186,7 +186,7 @@ namespace rocRoller
                     if(!maybeForLoop)
                         continue;
                     auto forLoop = *graph.control.get<ControlGraph::ForLoopOp>(*maybeForLoop);
-                    if(forLoop.loopName != rocRoller::KLOOP)
+                    if(not forLoop.loopName.starts_with(rocRoller::KLOOP))
                         continue;
 
                     // If LoadTiled, only consider when loading directly
@@ -211,7 +211,7 @@ namespace rocRoller
                 {
                     auto forLoopOp = *graph.control.get<ControlGraph::ForLoopOp>(forLoopOpTag);
 
-                    if(forLoopOp.loopName != rocRoller::KLOOP)
+                    if(not forLoopOp.loopName.starts_with(rocRoller::KLOOP))
                     {
                         auto [forLoopCoord, _ignore] = getForLoopCoords(forLoopOpTag, graph);
                         auto maybeUnroll             = findUnrollNeighbour(graph, forLoopCoord);
@@ -241,10 +241,12 @@ namespace rocRoller
              * associated with a JammedWaveTileNumber is squashed (set
              * to zero) when comparing unroll colouring.
              */
-            std::map<int, std::unordered_set<int>> findDuplicates(KernelGraph const&     graph,
-                                                                  UnrollColouring const& colouring,
-                                                                  auto const&            candidates,
-                                                                  bool squashJammedColours)
+            std::map<int, std::unordered_set<int>>
+                findDuplicates(KernelGraph const&                  graph,
+                               UnrollColouring const&              colouring,
+                               auto const&                         candidates,
+                               bool                                squashJammedColours,
+                               std::unordered_map<int, int> const& nodeOrders)
             {
                 using namespace LoadStoreSpecification;
 
@@ -258,9 +260,8 @@ namespace rocRoller
                     if(opSpecs.contains(spec))
                     {
                         auto originalOp = opSpecs[spec];
-                        auto ordering
-                            = graph.control.compareNodes(rocRoller::UpdateCache, op, originalOp);
-                        if(ordering == ControlGraph::NodeOrdering::LeftFirst)
+
+                        if(nodeOrders.at(originalOp) < nodeOrders.at(op))
                             opSpecs[spec] = op;
                     }
                     else
@@ -358,44 +359,115 @@ namespace rocRoller
                     }
                 }
 
+                // Collapse reindexing chains in expressionReindexer.coordinates.
+                // If there are mappings like A -> B and B -> C, ensure A maps directly to C.
+                // This prevents intermediate mappings from leaving dangling references.
+                for(auto& [tag, mappedTag] : expressionReindexer.coordinates)
+                {
+                    while(expressionReindexer.coordinates.contains(mappedTag) and mappedTag != tag)
+                    {
+                        auto nextTag = expressionReindexer.coordinates.at(mappedTag);
+                        if(nextTag == mappedTag)
+                            break;
+                        mappedTag = nextTag;
+                    }
+                    // Update the mapping to point directly to the final target.
+                    expressionReindexer.coordinates[tag] = mappedTag;
+                }
+
                 // Update tile references
                 auto kernel = *graph.control.roots().begin();
                 reindexExpressions(graph, kernel, expressionReindexer);
 
                 // Update tile connections and remove old tiles
-                for(auto [oldTag, newTag] : expressionReindexer.coordinates)
+                for(auto [tag, mappedTag] : expressionReindexer.coordinates)
                 {
-                    auto connections = graph.mapper.getCoordinateConnections(oldTag);
-                    graph.mapper.purgeMappingsTo(oldTag);
+                    auto connections = graph.mapper.getCoordinateConnections(tag);
+                    graph.mapper.purgeMappingsTo(tag);
                     for(auto conn : connections)
                     {
-                        conn.coordinate = newTag;
+                        conn.coordinate = mappedTag;
                         graph.mapper.connect(conn);
                     }
 
-                    AssertFatal(newTag == oldTag
-                                || graph.mapper.getCoordinateConnections(oldTag).empty());
+                    AssertFatal(mappedTag == tag
+                                || graph.mapper.getCoordinateConnections(tag).empty());
 
-                    if(graph.mapper.getCoordinateConnections(oldTag).empty())
+                    if(graph.mapper.getCoordinateConnections(tag).empty())
                     {
-                        for(auto const& child : graph.coordinates.getLocation(oldTag).incoming)
+                        for(auto const& child : graph.coordinates.getLocation(tag).incoming)
                             graph.coordinates.deleteElement(child);
-                        for(auto const& child : graph.coordinates.getLocation(oldTag).outgoing)
+                        for(auto const& child : graph.coordinates.getLocation(tag).outgoing)
                             graph.coordinates.deleteElement(child);
-                        graph.coordinates.deleteElement(oldTag);
+                        graph.coordinates.deleteElement(tag);
                     }
                 }
                 return graph;
             }
         }
 
+        template <typename... OperationTypes>
+        static void collectOrderedNodes(KernelGraph const&       graph,
+                                        std::unordered_set<int>& visited,
+                                        int                      tag,
+                                        std::vector<int>&        result)
+        {
+            // cppcheck-suppress internalAstError
+            auto traverse = [&]<typename EdgeType>() {
+                for(auto child : graph.control.getOutputNodeIndices<EdgeType>(tag))
+                {
+                    if(not visited.contains(child))
+                    {
+                        visited.insert(child);
+                        collectOrderedNodes<OperationTypes...>(graph, visited, child, result);
+                    }
+                }
+            };
+            traverse.template operator()<ControlGraph::Sequence>();
+            traverse.template operator()<ControlGraph::ForLoopIncrement>();
+            traverse.template operator()<ControlGraph::Else>();
+            traverse.template operator()<ControlGraph::Body>();
+            traverse.template operator()<ControlGraph::Initialize>();
+
+            bool const isTargetOperation
+                = (graph.control.get<OperationTypes>(tag).has_value() || ...);
+
+            if(isTargetOperation)
+            {
+                result.push_back(tag);
+            }
+        }
+
+        template <typename... OperationTypes>
+        std::vector<int> getOrderedNodes(KernelGraph const& graph)
+        {
+            auto roots = graph.control.roots().to<std::vector>();
+
+            std::vector<int> result;
+            if(roots.empty())
+                return result;
+
+            std::unordered_set<int> visited;
+            for(auto const& node : roots)
+            {
+                visited.insert(node);
+                collectOrderedNodes<OperationTypes...>(graph, visited, node, result);
+            }
+            return result;
+        }
+
         KernelGraph RemoveDuplicates::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::RemoveDuplicates");
-
             auto colouring = colourByUnrollValue(original);
             auto graph     = original;
             removeRedundantSequenceEdges(graph);
+
+            auto                         orderedNodes = getOrderedNodes<ControlGraph::LoadTiled,
+                                                ControlGraph::StoreLDSTile,
+                                                ControlGraph::LoadLDSTile>(graph);
+            std::unordered_map<int, int> nodeOrders;
+            for(int i = 0; i < orderedNodes.size(); i++)
+                nodeOrders.emplace(orderedNodes[i], i);
 
             // Two passes:
             //   1. Workgroup (LoadTiled and StoreLDSTile) and
@@ -409,16 +481,18 @@ namespace rocRoller
             Log::debug("RemoveDuplicates Workgroup pass");
             {
                 auto candidates = RD::getWGCandidates(original);
-                auto duplicates = RD::findDuplicates(original, colouring, candidates, true);
-                graph           = RD::removeDuplicates(graph, duplicates);
+                auto duplicates
+                    = RD::findDuplicates(original, colouring, candidates, true, nodeOrders);
+                graph = RD::removeDuplicates(graph, duplicates);
             }
 
             // LoadLDSTile operation on Wave tiles
             Log::debug("RemoveDuplicates Wave pass");
             {
                 auto candidates = RD::getWaveCandidates(original);
-                auto duplicates = RD::findDuplicates(original, colouring, candidates, false);
-                graph           = RD::removeDuplicates(graph, duplicates);
+                auto duplicates
+                    = RD::findDuplicates(original, colouring, candidates, false, nodeOrders);
+                graph = RD::removeDuplicates(graph, duplicates);
             }
 
             removeRedundantNOPs(graph);

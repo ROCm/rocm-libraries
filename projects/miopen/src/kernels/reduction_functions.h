@@ -1,3 +1,6 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #ifndef GUARD_REDUCTION_FUNCTIONS_H
 #define GUARD_REDUCTION_FUNCTIONS_H
 
@@ -12,9 +15,11 @@ static inline void lds_reduce2(_FLOAT_ACCUM* x,
     lcl_data_x[lid] = (_FLOAT_ACCUM)*x;
     lcl_data_y[lid] = (_FLOAT_ACCUM)*y;
     barrier(CLK_LOCAL_MEM_FENCE);
-    for(unsigned int red = (MIO_BN_LDS_SIZE >> 1); red > 0; red >>= 1)
+    for(unsigned int red = (1 << (unsigned int)(ceil(log2((double)(MIO_BN_LDS_SIZE))))) >> 1;
+        red > 0;
+        red >>= 1)
     {
-        if(lid < red)
+        if(lid < red && lid + red < MIO_BN_LDS_SIZE)
         {
             lcl_data_x[lid] += lcl_data_x[lid + red];
             lcl_data_y[lid] += lcl_data_y[lid + red];

@@ -85,6 +85,7 @@ TEST_F(GPUInstructionInfoTest, LDS)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -103,6 +104,8 @@ TEST_F(GPUInstructionInfoTest, LDS)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::LDS);
     }
 
     for(auto inst : {"ds_read_b128", "ds_read2_b64", "ds_read_b8"})
@@ -114,6 +117,7 @@ TEST_F(GPUInstructionInfoTest, LDS)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -132,6 +136,8 @@ TEST_F(GPUInstructionInfoTest, LDS)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::LDS);
     }
 }
 
@@ -146,6 +152,7 @@ TEST_F(GPUInstructionInfoTest, Scalar)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, true);
         EXPECT_CATEGORY_EQ(inst, isSMEM, true);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -163,6 +170,8 @@ TEST_F(GPUInstructionInfoTest, Scalar)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::Scalar);
     }
 
     for(auto inst : {"s_lshl_b64", "s_add_i32", "s_max_u32", "s_and_b64"})
@@ -174,6 +183,7 @@ TEST_F(GPUInstructionInfoTest, Scalar)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, true);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, true);
 
@@ -191,6 +201,8 @@ TEST_F(GPUInstructionInfoTest, Scalar)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::Scalar);
     }
 
     for(auto inst : {"s_cbranch_vccz", "s_cbranch_vccnz"})
@@ -202,6 +214,7 @@ TEST_F(GPUInstructionInfoTest, Scalar)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, true);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, true);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -219,6 +232,39 @@ TEST_F(GPUInstructionInfoTest, Scalar)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::Scalar);
+    }
+
+    for(auto inst : {"s_barrier", "s_barrier_wait"})
+    {
+        EXPECT_CATEGORY_EQ(inst, isDLOP, false);
+        EXPECT_CATEGORY_EQ(inst, isMFMA, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
+
+        EXPECT_CATEGORY_EQ(inst, isScalar, true);
+        EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, true);
+        EXPECT_CATEGORY_EQ(inst, isSControl, true);
+        EXPECT_CATEGORY_EQ(inst, isSALU, false);
+
+        EXPECT_CATEGORY_EQ(inst, isVector, false);
+        EXPECT_CATEGORY_EQ(inst, isVALU, false);
+        EXPECT_CATEGORY_EQ(inst, isDGEMM, false);
+        EXPECT_CATEGORY_EQ(inst, isVMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isVMEMRead, false);
+        EXPECT_CATEGORY_EQ(inst, isVMEMWrite, false);
+        EXPECT_CATEGORY_EQ(inst, isFlat, false);
+
+        EXPECT_CATEGORY_EQ(inst, isLDS, false);
+        EXPECT_CATEGORY_EQ(inst, isLDSRead, false);
+        EXPECT_CATEGORY_EQ(inst, isLDSWrite, false);
+
+        EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
+        EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::Scalar);
     }
 }
 
@@ -234,6 +280,7 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -251,6 +298,8 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::VALU);
     }
 
     for(auto inst : {"buffer_load_dword", "buffer_load_dwordx4", "buffer_load_short_d16"})
@@ -262,6 +311,7 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -280,6 +330,8 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::VMEM);
     }
 
     for(auto inst : {"buffer_store_dword", "buffer_store_dwordx4", "buffer_store_short"})
@@ -291,6 +343,7 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -309,6 +362,8 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::VMEM);
     }
 
     for(auto inst : {"v_dot2c_f32_f16", "v_dot4c_i32_i8"})
@@ -320,6 +375,7 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -338,6 +394,8 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::XDL);
     }
 
     for(auto inst : {"flat_load_dword", "flat_load_dwordx2"})
@@ -349,6 +407,7 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -367,6 +426,8 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::VMEM);
     }
 
     for(auto inst : {"v_cmpx_ge_i32_e64", "v_cmpx_le_u64_e64"})
@@ -378,6 +439,7 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -396,6 +458,8 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::VALU);
     }
 }
 
@@ -410,6 +474,7 @@ TEST_F(GPUInstructionInfoTest, AccMFMA)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -428,6 +493,8 @@ TEST_F(GPUInstructionInfoTest, AccMFMA)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, true);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::VALU);
     }
 
     for(auto inst : {"v_accvgpr_write_b32"})
@@ -439,6 +506,7 @@ TEST_F(GPUInstructionInfoTest, AccMFMA)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -457,9 +525,14 @@ TEST_F(GPUInstructionInfoTest, AccMFMA)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, true);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::VALU);
     }
 
-    for(auto inst : {"v_mfma_f32_16x16x16bf16", "v_mfma_f32_16x16x1f32", "v_mfma_f32_32x32x8f16"})
+    for(auto inst : {"v_mfma_f32_16x16x16bf16",
+                     "v_mfma_f32_16x16x1f32",
+                     "v_mfma_f32_32x32x8f16",
+                     "v_mfma_f32_16x16x128_f8f6f4"})
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, true);
@@ -468,6 +541,7 @@ TEST_F(GPUInstructionInfoTest, AccMFMA)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -486,6 +560,8 @@ TEST_F(GPUInstructionInfoTest, AccMFMA)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::XDL);
     }
 
     for(auto inst : {"v_mfma_f64_16x16x4f64", "v_mfma_f64_4x4x4f64"})
@@ -497,6 +573,7 @@ TEST_F(GPUInstructionInfoTest, AccMFMA)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -515,6 +592,40 @@ TEST_F(GPUInstructionInfoTest, AccMFMA)
 
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::XDL);
+    }
+
+    for(auto inst : {"v_mfma_scale_f32_16x16x128_f8f6f4"})
+    {
+        EXPECT_CATEGORY_EQ(inst, isDLOP, false);
+        EXPECT_CATEGORY_EQ(inst, isMFMA, true);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
+
+        EXPECT_CATEGORY_EQ(inst, isScalar, false);
+        EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
+        EXPECT_CATEGORY_EQ(inst, isSControl, false);
+        EXPECT_CATEGORY_EQ(inst, isSALU, false);
+
+        EXPECT_CATEGORY_EQ(inst, isVector, true);
+        EXPECT_CATEGORY_EQ(inst, isVALU, false);
+        EXPECT_CATEGORY_EQ(inst, isDGEMM, false);
+
+        EXPECT_CATEGORY_EQ(inst, isVMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isVMEMRead, false);
+        EXPECT_CATEGORY_EQ(inst, isVMEMWrite, false);
+        EXPECT_CATEGORY_EQ(inst, isFlat, false);
+
+        EXPECT_CATEGORY_EQ(inst, isLDS, false);
+        EXPECT_CATEGORY_EQ(inst, isLDSRead, false);
+        EXPECT_CATEGORY_EQ(inst, isLDSWrite, false);
+
+        EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
+        EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::XDL_Scale);
     }
 }
 
@@ -524,12 +635,16 @@ TEST_F(GPUInstructionInfoTest, Signed)
     {
         EXPECT_CATEGORY_EQ(inst, isUIntInst, true);
         EXPECT_CATEGORY_EQ(inst, isIntInst, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::VALU);
     }
 
     for(auto inst : {"v_add_i32", "v_add_i32_e32"})
     {
         EXPECT_CATEGORY_EQ(inst, isUIntInst, false);
         EXPECT_CATEGORY_EQ(inst, isIntInst, true);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::VALU);
     }
 }
 
@@ -542,6 +657,8 @@ TEST_F(GPUInstructionInfoTest, LaneInstructions)
         EXPECT_CATEGORY_EQ(inst, isVReadlane, true);
         EXPECT_CATEGORY_EQ(inst, isVWritelane, false);
         EXPECT_CATEGORY_EQ(inst, isVPermlane, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::VALU);
     }
 
     for(auto inst : {"v_writelane_b32"})
@@ -551,6 +668,8 @@ TEST_F(GPUInstructionInfoTest, LaneInstructions)
         EXPECT_CATEGORY_EQ(inst, isVReadlane, false);
         EXPECT_CATEGORY_EQ(inst, isVWritelane, true);
         EXPECT_CATEGORY_EQ(inst, isVPermlane, false);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::VALU);
     }
 
     for(auto const& inst : {"v_permlane16_swap_b32", "v_permlane32_swap_b32"})
@@ -560,5 +679,7 @@ TEST_F(GPUInstructionInfoTest, LaneInstructions)
         EXPECT_CATEGORY_EQ(inst, isVReadlane, false);
         EXPECT_CATEGORY_EQ(inst, isVWritelane, false);
         EXPECT_CATEGORY_EQ(inst, isVPermlane, true);
+
+        EXPECT_EQ(GPUInstructionInfo::getCoexecCategory(inst), CoexecCategory::VALU);
     }
 }

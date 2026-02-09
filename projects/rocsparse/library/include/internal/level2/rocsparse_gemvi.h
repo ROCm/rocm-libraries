@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup level2_module
  *  \details
  *  \p rocsparse_gemvi_buffer_size returns the size of the temporary storage buffer
- *  required by \ref rocsparse_sgemvi "rocsparse_Xgemvi()". The temporary storage 
+ *  required by \ref rocsparse_sgemvi "rocsparse_Xgemvi()". The temporary storage
  *  buffer must be allocated by the user.
  *
  *  \note
@@ -119,9 +119,9 @@ rocsparse_status rocsparse_zgemvi_buffer_size(rocsparse_handle    handle,
  *    \right.
  *  \f]
  *
- *  Performing the above operation involves two steps. First, the user calls 
- *  \ref rocsparse_sgemvi_buffer_size "rocsparse_Xgemvi_buffer_size()" in order to determine the size of 
- *  the temporary storage buffer. Next, the user allocates this temporary buffer and passes it to 
+ *  Performing the above operation involves two steps. First, the user calls
+ *  \ref rocsparse_sgemvi_buffer_size "rocsparse_Xgemvi_buffer_size()" in order to determine the size of
+ *  the temporary storage buffer. Next, the user allocates this temporary buffer and passes it to
  *  \p rocsparse_gemvi to complete the computation. Once all calls to \p rocsparse_gemvi are complete the
  *  temporary storage buffer can be freed.
  *
@@ -175,82 +175,7 @@ rocsparse_status rocsparse_zgemvi_buffer_size(rocsparse_handle    handle,
  *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
  *
  *  \par Example
- *  \code{.c}
- *      // rocSPARSE handle
- *      rocsparse_handle handle;
- *      rocsparse_create_handle(&handle);
- *
- *      rocsparse_mat_descr descr;
- *      rocsparse_create_mat_descr(&descr);
- *
- *      // Number of rows and columns
- *      rocsparse_int m = 3;
- *      rocsparse_int n = 5;
- *
- *      // Dense matrix A in column-major
- *      rocsparse_int lda    = m;
- *      double        hA[15] = {9, 14, 19, 10, 15, 20, 11, 16, 21, 12, 17, 22, 13, 18, 23};
- *
- *      // Number of non-zero entries
- *      rocsparse_int nnz = 3;
- *
- *      // Vector x indices
- *      rocsparse_int hx_ind[3] = {0, 1, 3};
- *
- *      // Vector x values
- *      double hx_val[3] = {1, 2, 3};
- *
- *      // Vector y values
- *      double hy[3] = {4, 5, 6};
- *
- *      // Scalar alpha and beta
- *      double alpha = 3.7;
- *      double beta  = 1.3;
- *
- *      // Matrix operation
- *      rocsparse_operation trans = rocsparse_operation_none;
- *
- *      // Index base
- *      rocsparse_index_base base = rocsparse_index_base_zero;
- *
- *      // Offload data to device
- *      double*        dA;
- *      rocsparse_int* dx_ind;
- *      double*        dx_val;
- *      double*        dy;
- *      hipMalloc((void**)&dA, sizeof(double) * m * n);
- *      hipMalloc((void**)&dx_ind, sizeof(rocsparse_int) * nnz);
- *      hipMalloc((void**)&dx_val, sizeof(double) * nnz);
- *      hipMalloc((void**)&dy, sizeof(double) * m);
- *
- *      hipMemcpy(dA, hA, sizeof(double) * m * n, hipMemcpyHostToDevice);
- *      hipMemcpy(dx_ind, hx_ind, sizeof(rocsparse_int) * nnz, hipMemcpyHostToDevice);
- *      hipMemcpy(dx_val, hx_val, sizeof(double) * nnz, hipMemcpyHostToDevice);
- *      hipMemcpy(dy, hy, sizeof(double) * m, hipMemcpyHostToDevice);
- *
- *      // Obtain buffer size
- *      size_t buffer_size;
- *      rocsparse_dgemvi_buffer_size(handle, trans, m, n, nnz, &buffer_size);
- *
- *      void* buffer;
- *      hipMalloc(&buffer, buffer_size);
- *
- *      // Call dgemvi
- *      rocsparse_dgemvi(handle, trans, m, n, &alpha, dA, lda, nnz, dx_val, dx_ind, &beta, dy, base, buffer);
- *
- *      // Copy result back to host
- *      hipMemcpy(hy, dy, sizeof(double) * m, hipMemcpyDeviceToHost);
- *
- *      // Clear rocSPARSE
- *      rocsparse_destroy_handle(handle);
- *
- *      // Clear device memory
- *      hipFree(dA);
- *      hipFree(dx_ind);
- *      hipFree(dx_val);
- *      hipFree(dy);
- *      hipFree(buffer);
- *  \endcode
+ *  \snippet example_rocsparse_gemvi.cpp doc example
  */
 /**@{*/
 ROCSPARSE_EXPORT

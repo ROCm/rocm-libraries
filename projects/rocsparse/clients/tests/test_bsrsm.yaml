@@ -198,8 +198,27 @@ Tests:
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos2,
-             nos4,
-             nos6,
+             nos4]
+
+- name: bsrsm_file
+  category: quick
+  function: bsrsm
+  precision: *single_double_precisions
+  M: 1
+  K: [63, 316]
+  block_dim: [4, 27, 52]
+  alpha_alphai: *alpha_range_quick
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  convert_to_int: true
+  filename: [nos6,
              nos7]
 
 - name: bsrsm_file

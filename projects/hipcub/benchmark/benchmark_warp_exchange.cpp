@@ -23,7 +23,7 @@
 #include "common_benchmark_header.hpp"
 
 // HIP API
-#include "hipcub/warp/warp_exchange.hpp"
+#include <hipcub/warp/warp_exchange.hpp>
 
 #include <type_traits>
 

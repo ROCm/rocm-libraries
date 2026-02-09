@@ -57,7 +57,7 @@ namespace rocsparse
 
         if(temp_alloc)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFree(temp_storage_ptr));
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(temp_storage_ptr, handle->stream));
         }
 
         return rocsparse_status_success;

@@ -62,5 +62,3 @@ BenchmarkProblems:
           - Exact: [ 292, 768, 64, 7, 192] # make HW a multiple of 4
 # inception:
 # 4 ./bin/MIOpenDriver conv -n 32 -c 192 -H 17 -W 17 -k 192 -y 7 -x 1 -p 3 -q 0 -u 1 -v 1 -l 1 -j 1 -t 1
-
-

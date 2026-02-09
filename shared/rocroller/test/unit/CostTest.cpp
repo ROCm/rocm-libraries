@@ -85,7 +85,7 @@ namespace rocRollerTest
             co_yield_(Instruction("v_or_b32", {v[2]}, {v[0], v[1]}, {}, ""));
         };
         auto generator_one = [&]() -> Generator<Instruction> {
-            co_yield_(Instruction("unrelated_op_2", {}, {}, {}, ""));
+            co_yield_(Instruction("s_add_u32", {}, {}, {}, ""));
             co_yield_(Instruction("v_mfma_f32_16x16x4f32", {a[0]}, {v[0], v[2], a[0]}, {}, ""));
         };
         auto generator_two = [&]() -> Generator<Instruction> {
@@ -172,7 +172,7 @@ namespace rocRollerTest
             co_yield_(Instruction("v_or_b32", {v[2]}, {v[0], v[1]}, {}, ""));
         };
         auto generator_one = [&]() -> Generator<Instruction> {
-            co_yield_(Instruction("unrelated_op_2", {}, {}, {}, ""));
+            co_yield_(Instruction("s_add_u32", {}, {}, {}, ""));
             co_yield_(Instruction("v_mfma_f32_16x16x4f32", {a[0]}, {v[0], v[2], a[0]}, {}, ""));
         };
         auto generator_two = [&]() -> Generator<Instruction> {
@@ -213,6 +213,14 @@ namespace rocRollerTest
         EXPECT_THROW(cost
                      = Component::Get<Scheduling::Cost>(Scheduling::CostFunction::None, m_context),
                      FatalError);
+    }
+
+    TEST_F(CostTest, LinearWeightedSimple)
+    {
+        Component::ComponentFactoryBase::ClearAllCaches();
+        EXPECT_NE(Component::Get<Scheduling::Cost>(Scheduling::CostFunction::LinearWeightedSimple,
+                                                   m_context),
+                  nullptr);
     }
 
     TEST_F(CostTest, NonexistentSchedulerWeightsFile)

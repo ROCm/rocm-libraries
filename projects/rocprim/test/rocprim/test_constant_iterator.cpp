@@ -60,6 +60,92 @@ using RocprimConstantIteratorTestsParams
 
 TYPED_TEST_SUITE(RocprimConstantIteratorTests, RocprimConstantIteratorTestsParams);
 
+TYPED_TEST(RocprimConstantIteratorTests, Basic)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T          = typename TestFixture::input_type;
+    using Iterator   = rocprim::constant_iterator<T>;
+    using value_type = typename Iterator::value_type;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        T        value = test_utils::get_random_value<T>(1, 100, seed_value);
+        Iterator begin = rocprim::make_constant_iterator<T>(value, 0);
+        Iterator mid   = begin + 5;
+        Iterator end   = begin + 10;
+
+        // Pre-increment
+        Iterator it = begin;
+        ++it;
+        ASSERT_EQ(*it, value);
+
+        // Post-increment
+        Iterator post = it++;
+        ASSERT_EQ(*post, value);
+        ASSERT_EQ(*it, value);
+
+        // Pre-decrement
+        --it;
+        ASSERT_EQ(*it, value);
+
+        // Post-decrement
+        post = it--;
+        ASSERT_EQ(*post, value);
+        ASSERT_EQ(*it, value);
+
+        // operator+
+        Iterator plus_it = begin + 3;
+        ASSERT_EQ(*plus_it, value);
+        Iterator plus_it_rev = 3 + begin;
+        ASSERT_EQ(*plus_it_rev, value);
+
+        // operator-
+        Iterator minus_it = end - 3;
+        ASSERT_EQ(*minus_it, value);
+
+        // compound assignment +=
+        Iterator a = begin;
+        a += 4;
+        ASSERT_EQ(*a, value);
+
+        // compound assignment -=
+        a -= 2;
+        ASSERT_EQ(*a, value);
+
+        // Subtraction of iterators (distance)
+        ASSERT_EQ(end - begin, 10);
+        ASSERT_EQ(mid - begin, 5);
+        ASSERT_EQ(begin - mid, -5);
+
+        // Indexing operator[]
+        for(int i = 0; i < 10; i++)
+        {
+            ASSERT_EQ(begin[i], value);
+        }
+
+        // Comparisons
+        ASSERT_TRUE(begin == begin);
+        ASSERT_TRUE(begin != end);
+        ASSERT_TRUE(begin < end);
+        ASSERT_TRUE(end > begin);
+        ASSERT_TRUE(begin <= begin);
+        ASSERT_TRUE(begin <= end);
+        ASSERT_TRUE(end >= begin);
+        ASSERT_TRUE(end >= end);
+
+        // Arrow operator
+        const value_type* ptr = begin.operator->();
+        ASSERT_EQ(*ptr, value);
+    }
+}
+
 template<class T>
 struct transform
 {

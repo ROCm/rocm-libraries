@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -41,7 +42,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_csr2coo_bad_arg(void)
+template <typename T>
+void testing_csr2coo_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int                  m         = 100;
@@ -49,8 +51,7 @@ void testing_csr2coo_bad_arg(void)
     int                  safe_size = 100;
     hipsparseIndexBase_t idx_base  = HIPSPARSE_INDEX_BASE_ZERO;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto csr_row_ptr_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
@@ -72,15 +73,14 @@ void testing_csr2coo_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csr2coo(Arguments argus)
+void testing_csr2coo(Arguments argus)
 {
     int                  m        = argus.M;
     int                  n        = argus.N;
     hipsparseIndexBase_t idx_base = argus.baseA;
     std::string          filename = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     srand(12345ULL);
 
@@ -91,11 +91,8 @@ hipsparseStatus_t testing_csr2coo(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     // Allocate memory on the device
     auto dcsr_row_ptr_managed
@@ -112,7 +109,7 @@ hipsparseStatus_t testing_csr2coo(Arguments argus)
     if(argus.unit_check)
     {
         CHECK_HIPSPARSE_ERROR(
-            hipsparseXcsr2coo(handle, dcsr_row_ptr, nnz, m, dcoo_row_ind, idx_base));
+            testing::hipsparseXcsr2coo(handle, dcsr_row_ptr, nnz, m, dcoo_row_ind, idx_base));
 
         // Copy output from device to host
         std::vector<int> hcoo_row_ind(nnz);
@@ -121,16 +118,7 @@ hipsparseStatus_t testing_csr2coo(Arguments argus)
 
         // CPU conversion to COO
         std::vector<int> hcoo_row_ind_gold(nnz);
-        for(int i = 0; i < m; ++i)
-        {
-            int row_begin = hcsr_row_ptr[i] - idx_base;
-            int row_end   = hcsr_row_ptr[i + 1] - idx_base;
-
-            for(int j = row_begin; j < row_end; ++j)
-            {
-                hcoo_row_ind_gold[j] = i + idx_base;
-            }
-        }
+        host_csr2coo(m, nnz, hcsr_row_ptr.data(), hcoo_row_ind_gold.data(), idx_base);
 
         // Unit check
         unit_check_general(1, nnz, 1, hcoo_row_ind_gold.data(), hcoo_row_ind.data());
@@ -145,7 +133,7 @@ hipsparseStatus_t testing_csr2coo(Arguments argus)
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
             CHECK_HIPSPARSE_ERROR(
-                hipsparseXcsr2coo(handle, dcsr_row_ptr, nnz, m, dcoo_row_ind, idx_base));
+                testing::hipsparseXcsr2coo(handle, dcsr_row_ptr, nnz, m, dcoo_row_ind, idx_base));
         }
 
         double gpu_time_used = get_time_us();
@@ -154,7 +142,7 @@ hipsparseStatus_t testing_csr2coo(Arguments argus)
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
             CHECK_HIPSPARSE_ERROR(
-                hipsparseXcsr2coo(handle, dcsr_row_ptr, nnz, m, dcoo_row_ind, idx_base));
+                testing::hipsparseXcsr2coo(handle, dcsr_row_ptr, nnz, m, dcoo_row_ind, idx_base));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
@@ -173,8 +161,6 @@ hipsparseStatus_t testing_csr2coo(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSR2COO_HPP

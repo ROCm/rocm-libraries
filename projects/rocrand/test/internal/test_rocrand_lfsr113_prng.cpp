@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -59,6 +59,35 @@ INSTANTIATE_TYPED_TEST_SUITE_P(lfsr113_generator,
 INSTANTIATE_TYPED_TEST_SUITE_P(lfsr113_generator,
                                generator_prng_offset_tests,
                                lfsr113_generator_prng_offset_tests_types);
+
+#ifdef CODE_COVERAGE_ENABLED
+#include "test_rocrand_host_prng.hpp"
+
+using rocrand_impl::host::lfsr113_generator_host;
+using lfsr113_generator_prng_host_tests_types
+    = ::testing::Types<generator_prng_host_tests_params<lfsr113_generator_host<true>,
+                                                        ROCRAND_ORDERING_PSEUDO_DEFAULT>>;
+
+using lfsr113_generator_prng_offset_host_tests_types
+    = ::testing::Types<generator_prng_offset_host_tests_params<unsigned int,
+                                                               lfsr113_generator_host<true>,
+                                                               ROCRAND_ORDERING_PSEUDO_DEFAULT>,
+                       generator_prng_offset_host_tests_params<float,
+                                                               lfsr113_generator_host<true>,
+                                                               ROCRAND_ORDERING_PSEUDO_DEFAULT>>;
+
+INSTANTIATE_TYPED_TEST_SUITE_P(lfsr113_host_generator,
+                               generator_prng_host_tests,
+                               lfsr113_generator_prng_host_tests_types);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(lfsr113_host_generator,
+                               generator_prng_continuity_host_tests,
+                               lfsr113_generator_prng_host_tests_types);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(lfsr113_host_generator,
+                               generator_prng_offset_host_tests,
+                               lfsr113_generator_prng_offset_host_tests_types);
+#endif //CODE_COVERAGE_ENABLED
 
 // lfsr113-specific generator API tests
 template<class Params>

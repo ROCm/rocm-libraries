@@ -3,6 +3,8 @@
 
 *:*/*_cmrc*/*
 *:*/_deps/*
+*:*/isa_spec_manager/*
+*:*/llvm/*
 *:/usr/*
 
 

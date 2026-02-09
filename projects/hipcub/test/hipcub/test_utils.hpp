@@ -27,10 +27,10 @@
 
 // hipCUB API
 #ifdef __HIP_PLATFORM_AMD__
-    #include "hipcub/backend/rocprim/util_ptx.hpp"
+    #include <hipcub/backend/rocprim/util_ptx.hpp>
 #elif defined(__HIP_PLATFORM_NVIDIA__)
-    #include "hipcub/config.hpp"
     #include <cub/util_ptx.cuh>
+    #include <hipcub/config.hpp>
 #endif
 
 #include "test_utils_assertions.hpp"

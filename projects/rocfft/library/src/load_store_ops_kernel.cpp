@@ -48,6 +48,8 @@ void StoreOps::append_args(RTCKernelArgs& kargs, TreeNode& node) const
 
 void append_load_store_args(RTCKernelArgs& kargs, TreeNode& node)
 {
-    node.loadOps.append_args(kargs, node);
-    node.storeOps.append_args(kargs, node);
+    if(node.loadOps)
+        node.loadOps->append_args(kargs, node);
+    if(node.storeOps)
+        node.storeOps->append_args(kargs, node);
 }

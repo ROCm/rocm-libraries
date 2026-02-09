@@ -28,15 +28,27 @@
 
 namespace layernorm {
 
-struct GPU_LayerNormTest_FP32 : LayerNormTest<float>
+struct GPU_LayerNormTest_FP32 : LayerNormFwdTest<float>
 {
 };
 
-struct GPU_LayerNormTest_FP16 : LayerNormTest<half_float::half>
+struct GPU_LayerNormTest_FP16 : LayerNormFwdTest<half_float::half>
 {
 };
 
-struct GPU_LayerNormTest_BFP16 : LayerNormTest<bfloat16>
+struct GPU_LayerNormTest_BFP16 : LayerNormFwdTest<bfloat16>
+{
+};
+
+struct GPU_LayerNormBwdTest_FP32 : LayerNormBwdTest<float>
+{
+};
+
+struct GPU_LayerNormBwdTest_FP16 : LayerNormBwdTest<half_float::half>
+{
+};
+
+struct GPU_LayerNormBwdTest_BFP16 : LayerNormBwdTest<bfloat16>
 {
 };
 
@@ -45,49 +57,49 @@ using namespace layernorm;
 
 TEST_P(GPU_LayerNormTest_FP32, LayerNormTestFw)
 {
-    const auto& handle = get_handle();
-    if(handle.GetDeviceName() == "gfx908" || handle.GetDeviceName() == "gfx90a" ||
-       handle.GetDeviceName() == "gfx942")
-    {
-        RunTest();
-        Verify();
-    }
-    else
-    {
-        GTEST_SKIP();
-    }
+    RunTest();
+    Verify();
 };
 
 TEST_P(GPU_LayerNormTest_FP16, LayerNormTestFw)
 {
-    const auto& handle = get_handle();
-    if(handle.GetDeviceName() == "gfx908" || handle.GetDeviceName() == "gfx90a" ||
-       handle.GetDeviceName() == "gfx942")
-    {
-        RunTest();
-        Verify();
-    }
-    else
-    {
-        GTEST_SKIP();
-    }
+    RunTest();
+    Verify();
 };
 
 TEST_P(GPU_LayerNormTest_BFP16, LayerNormTestFw)
 {
-    const auto& handle = get_handle();
-    if(handle.GetDeviceName() == "gfx908" || handle.GetDeviceName() == "gfx90a" ||
-       handle.GetDeviceName() == "gfx942")
-    {
-        RunTest();
-        Verify();
-    }
-    else
-    {
-        GTEST_SKIP();
-    }
+    RunTest();
+    Verify();
+};
+
+TEST_P(GPU_LayerNormBwdTest_FP32, LayerNormTestBw)
+{
+    RunTest();
+    Verify();
+};
+
+TEST_P(GPU_LayerNormBwdTest_FP16, LayerNormTestBw)
+{
+    RunTest();
+    Verify();
+};
+
+TEST_P(GPU_LayerNormBwdTest_BFP16, LayerNormTestBw)
+{
+    RunTest();
+    Verify();
 };
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LayerNormTest_FP32, testing::ValuesIn(LayerNormTestConfigs()));
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LayerNormTest_FP16, testing::ValuesIn(LayerNormTestConfigs()));
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LayerNormTest_BFP16, testing::ValuesIn(LayerNormTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_LayerNormBwdTest_FP32,
+                         testing::ValuesIn(LayerNormTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_LayerNormBwdTest_FP16,
+                         testing::ValuesIn(LayerNormTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_LayerNormBwdTest_BFP16,
+                         testing::ValuesIn(LayerNormTestConfigs()));
