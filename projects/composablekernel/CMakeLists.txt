@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.21)
 if(POLICY CMP0140)
   # policies CMP0140 not known to CMake until 3.25
   cmake_policy(SET CMP0140 NEW)
@@ -31,15 +31,17 @@ endif()
 # Default installation path
 if(NOT WIN32)
     set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
+else()
+    set(CMAKE_INSTALL_PREFIX "C:/dist/TheRock" CACHE PATH "")
 endif()
 
 set(version 1.2.0)
-# Check support for CUDA/HIP in Cmake
-project(composable_kernel VERSION ${version} LANGUAGES CXX HIP)
+project(composable_kernel VERSION ${version} LANGUAGES CXX)
 include(CTest)
 
 option(ENABLE_CLANG_CPP_CHECKS "Enables clang tidy, cppcheck" ON)
 option(MIOPEN_REQ_LIBS_ONLY "Build only the MIOpen required libraries" OFF)
+option(HIPTENSOR_REQ_LIBS_ONLY "Build only the HipTensor required libraries" OFF)
 option(CK_EXPERIMENTAL_BUILDER "Enable experimental builder" OFF)
 option(BUILD_MHA_LIB "Build the static library for flash attention" OFF)
 option(FORCE_DISABLE_XDL "Skip compiling XDL specific instances (even if supported GPUs are included in GPU_TARGETS)" OFF)
@@ -92,6 +94,10 @@ if (DTYPES)
         add_definitions(-DCK_ENABLE_FP32)
         set(CK_ENABLE_FP32 "ON")
     endif()
+    if (DTYPES MATCHES "tf32")
+        # definition will be added based on the GPU target in the following section
+        set(CK_ENABLE_TF32 "ON")
+    endif()
     if (DTYPES MATCHES "fp64")
         add_definitions(-DCK_ENABLE_FP64)
         set(CK_ENABLE_FP64 "ON")
@@ -106,6 +112,7 @@ else()
     set(CK_ENABLE_INT8 "ON")
     set(CK_ENABLE_FP16 "ON")
     set(CK_ENABLE_FP32 "ON")
+    set(CK_ENABLE_TF32 "ON")
     set(CK_ENABLE_FP64 "ON")
     set(CK_ENABLE_BF16 "ON")
     set(CK_ENABLE_FP8 "ON")
@@ -157,7 +164,13 @@ execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD OUTPUT_VARIABLE COMMI
 configure_file(include/ck/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/include/ck/version.h)
 
 set(ROCM_SYMLINK_LIBS OFF)
-find_package(ROCM REQUIRED PATHS /opt/rocm)
+
+if (WIN32)
+    find_package(ROCmCMakeBuildTools REQUIRED PATHS C:/dist/TheRock)
+    set(HIP_PLATFORM "amd" CACHE STRING "HIP platform")
+else()
+    find_package(ROCM REQUIRED PATHS /opt/rocm)
+endif()
 
 include(ROCMInstallTargets)
 include(ROCMPackageConfigHelpers)
@@ -184,7 +197,10 @@ if(GPU_TARGETS)
 else()
     set(USER_GPU_TARGETS 0)
 endif()
+
 find_package(hip REQUIRED)
+enable_language(HIP)
+
 # No assumption that HIP kernels are launched with uniform block size for backward compatibility
 # SWDEV-413293 and https://reviews.llvm.org/D155213
 math(EXPR hip_VERSION_FLAT "(${hip_VERSION_MAJOR} * 1000 + ${hip_VERSION_MINOR}) * 100000 + ${hip_VERSION_PATCH}")
@@ -244,6 +260,11 @@ if ((SUPPORTED_GPU_TARGETS MATCHES "gfx94" OR SUPPORTED_GPU_TARGETS MATCHES "gfx
     add_definitions(-DCK_USE_GFX94)
     set(CK_USE_GFX94 "ON")
 endif()
+if (SUPPORTED_GPU_TARGETS MATCHES "gfx950" AND NOT FORCE_DISABLE_XDL)
+    message(STATUS "Enabling XDL FP8 gemms on gfx950")
+    add_definitions(-DCK_USE_GFX950)
+    set(CK_USE_GFX950 "ON")
+endif()
 
 # new macro CK_TILE_USE_WMMA in order to separately compile examples for MFMA/WMMA
 set(CK_TILE_USE_WMMA 0)
@@ -280,6 +301,15 @@ if (SUPPORTED_GPU_TARGETS MATCHES "gfx950")
     set(CK_USE_NATIVE_MX_SUPPORT "ON")
     add_definitions(-DCK_GFX950_SUPPORT)
     set(CK_GFX950_SUPPORT "ON")
+endif()
+
+if ((SUPPORTED_GPU_TARGETS MATCHES "gfx942" OR SUPPORTED_GPU_TARGETS MATCHES "gfx95") AND CK_ENABLE_TF32)
+    add_definitions(-DCK_ENABLE_TF32)
+    set(CK_ENABLE_TF32 "ON")
+else()
+    message(STATUS "Disabling TF32 instances")
+    remove_definitions(-DCK_ENABLE_TF32)
+    set(CK_ENABLE_TF32 "OFF")
 endif()
 
 option(CK_USE_FP8_ON_UNSUPPORTED_ARCH "Enable FP8 GEMM instances on older architectures" OFF)
@@ -619,7 +649,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERS
     add_compile_options(-fdiagnostics-color=always)
 endif()
 
-if(NOT MIOPEN_REQ_LIBS_ONLY)
+if(NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
     # make check runs the entire set of examples and tests
     add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR} USES_TERMINAL)
     # make smoke runs the tests and examples that runs within 30 seconds on gfx90a
@@ -630,7 +660,9 @@ endif()
 
 
 
-file(GLOB_RECURSE INSTANCE_FILES "${PROJECT_SOURCE_DIR}/*/device_*_instance.cpp")
+# Optimization: Search only in library/src where all instance files actually live
+# (was searching entire source tree, taking ~40s instead of <1s)
+file(GLOB_RECURSE INSTANCE_FILES "${PROJECT_SOURCE_DIR}/library/src/*/device_*_instance.cpp")
 file(GLOB dir_list RELATIVE ${PROJECT_SOURCE_DIR}/library/src/tensor_operation_instance/gpu ${PROJECT_SOURCE_DIR}/library/src/tensor_operation_instance/gpu/*)
 set(CK_DEVICE_INSTANCES)
 FOREACH(subdir_path ${dir_list})
@@ -649,6 +681,9 @@ IF(IS_DIRECTORY "${PROJECT_SOURCE_DIR}/library/src/tensor_operation_instance/gpu
         set(add_inst 1)
     endif()
     if(("${cmake_instance}" MATCHES "fp32" OR "${cmake_instance}" MATCHES "_f32") AND DTYPES MATCHES "fp32")
+        set(add_inst 1)
+    endif()
+    if(("${cmake_instance}" MATCHES "tf32" OR "${cmake_instance}" MATCHES "_tf32") AND DTYPES MATCHES "tf32")
         set(add_inst 1)
     endif()
     if(("${cmake_instance}" MATCHES "fp64" OR "${cmake_instance}" MATCHES "_f64") AND DTYPES MATCHES "fp64")
@@ -672,12 +707,18 @@ ENDFOREACH()
 add_custom_target(instances DEPENDS utility;${CK_DEVICE_INSTANCES}  SOURCES ${INSTANCE_FILES})
 
 option(MIOPEN_REQ_LIBS_ONLY "Build only the MIOpen required libraries" OFF)
+option(HIPTENSOR_REQ_LIBS_ONLY "Build only the HipTensor required libraries" OFF)
 option(DISABLE_OFFLOAD_COMPRESS "Disable offload compress compiler flag when building instances" OFF)
 option(BUILD_MHA_LIB "Build the static library for flash attention" OFF)
 
 add_subdirectory(library)
 
-if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY)
+if (CK_EXPERIMENTAL_BUILDER)
+  add_subdirectory(experimental/builder)
+  add_subdirectory(experimental/grouped_convolution_tile_instances)
+endif()
+
+if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
    rocm_package_setup_component(tests
         LIBRARY_NAME composablekernel
         PACKAGE_NAME tests # Prevent -static suffix on package name
@@ -700,16 +741,12 @@ if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY)
    endif()
 endif()
 
-if (NOT MIOPEN_REQ_LIBS_ONLY)
+if (NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
     rocm_package_setup_component(profiler
         LIBRARY_NAME composablekernel
         PACKAGE_NAME ckprofiler
     )
     add_subdirectory(profiler)
-endif()
-
-if (CK_EXPERIMENTAL_BUILDER)
-  add_subdirectory(experimental/builder)
 endif()
 
 if(CK_USE_CODEGEN AND (SUPPORTED_GPU_TARGETS MATCHES "gfx9" OR GPU_ARCHS))
@@ -749,6 +786,9 @@ if(CK_EXPERIMENTAL_BUILDER)
         ${PROJECT_SOURCE_DIR}/experimental/builder/include/ck_tile/builder
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ck_tile
     )
+
+    set(CK_TILE_SRC_FOLDER ${CMAKE_SOURCE_DIR}/include/ck_tile/)
+    rocm_install(DIRECTORY ${CK_TILE_SRC_FOLDER} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ck_tile)
 endif()
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")

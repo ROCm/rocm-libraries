@@ -38,7 +38,7 @@
 
 struct _rocblaslt_attribute
 {
-    _rocblaslt_attribute(){};
+    _rocblaslt_attribute() {};
 
     ~_rocblaslt_attribute();
 
@@ -138,9 +138,9 @@ struct _rocblaslt_matrix_layout
 struct _rocblaslt_matmul_desc
 {
     // constructor
-    _rocblaslt_matmul_desc(){};
+    _rocblaslt_matmul_desc() {};
     // destructor
-    ~_rocblaslt_matmul_desc(){};
+    ~_rocblaslt_matmul_desc() {};
 
     // operation applied to the matrix A
     hipblasOperation_t op_A = HIPBLAS_OP_N;
@@ -167,19 +167,15 @@ struct _rocblaslt_matmul_desc
     //
     rocblaslt_compute_type compute_type;
     rocblaslt_compute_type compute_type_original;
-    hipDataType            compute_input_typeA;
-    hipDataType            compute_input_typeB;
-    hipDataType            scale_type = HIPBLASLT_DATATYPE_INVALID;
+    hipDataType            compute_input_typeA = HIPBLASLT_DATATYPE_INVALID;
+    hipDataType            compute_input_typeB = HIPBLASLT_DATATYPE_INVALID;
+    hipDataType            scale_type          = HIPBLASLT_DATATYPE_INVALID;
 
     RocblasltContractionProblem::ScalingFormat scaleAType
         = RocblasltContractionProblem::ScalingFormat::None;
     RocblasltContractionProblem::ScalingFormat scaleBType
         = RocblasltContractionProblem::ScalingFormat::None;
 
-    uint32_t scaleABlockRowSize = 0;
-    uint32_t scaleABlockColSize = 0;
-    uint32_t scaleBBlockRowSize = 0;
-    uint32_t scaleBBlockColSize = 0;
     float act0 = 0.f;
     float act1 = 0.f;
 
@@ -198,10 +194,6 @@ struct _rocblaslt_matmul_desc
         this->scaleE                = src.scaleE;
         this->scaleAType            = src.scaleAType;
         this->scaleBType            = src.scaleBType;
-        this->scaleABlockRowSize    = src.scaleABlockRowSize;
-        this->scaleABlockColSize    = src.scaleABlockColSize;
-        this->scaleBBlockRowSize    = src.scaleBBlockRowSize;
-        this->scaleBBlockColSize    = src.scaleBBlockColSize;
         this->pointermode           = src.pointermode;
         this->amaxD                 = src.amaxD;
         this->bias_type             = src.bias_type;
@@ -228,9 +220,9 @@ struct _rocblaslt_matmul_desc
 struct _rocblaslt_matmul_preference
 {
     // constructor
-    _rocblaslt_matmul_preference(){};
+    _rocblaslt_matmul_preference() {};
     // destructor
-    ~_rocblaslt_matmul_preference(){};
+    ~_rocblaslt_matmul_preference() {};
     //
     uint32_t search_mode         = 0;
     uint64_t max_workspace_bytes = 0;

@@ -3,13 +3,13 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
 #include <limits>
 #include <vector>
 
 // using namespace hipdnn_frontend::graph;
-using namespace hipdnn_sdk::data_objects;
+using namespace hipdnn_data_sdk::data_objects;
 
 constexpr float PI_FLOAT = 3.14159265358979323846f;
 constexpr double PI_DOUBLE = 3.14159265358979323846;
@@ -109,13 +109,13 @@ TEST(TestTensorValueAttributes, PackUnpackHalfValue)
     EXPECT_EQ(fbTensor->value_type(), TensorValue::Float16Value);
     auto hval = fbTensor->value_as_Float16Value();
     ASSERT_NE(hval, nullptr);
-    EXPECT_EQ(hval->value(), 1.0_h);
+    EXPECT_EQ(half(hval->value()), 1.0_h);
 
     auto unpacked = std::unique_ptr<TensorAttributesT>(fbTensor->UnPack());
     ASSERT_EQ(unpacked->value.type, TensorValue::Float16Value);
     auto* halfVal = unpacked->value.AsFloat16Value();
     ASSERT_NE(halfVal, nullptr);
-    EXPECT_EQ(halfVal->value(), 1.0_h);
+    EXPECT_EQ(half(halfVal->value()), 1.0_h);
 }
 
 TEST(TestTensorValueAttributes, PackUnpackBFloat1Value)

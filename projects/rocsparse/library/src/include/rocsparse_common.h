@@ -30,6 +30,7 @@
 #include "rocsparse_dense_transpose_back.hpp"
 #include "rocsparse_valset.hpp"
 
+//
 namespace rocsparse
 {
     template <typename I, typename T>

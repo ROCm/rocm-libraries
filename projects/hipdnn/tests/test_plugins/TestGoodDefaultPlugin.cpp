@@ -5,7 +5,7 @@
 #include "TestPluginEngineIdMap.hpp"
 // NOLINTNEXTLINE
 thread_local char
-    hipdnn_plugin::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
+    hipdnn_plugin_sdk::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
     = "";
 
 class GoodDefaultPlugin : public TestPluginBase
@@ -13,7 +13,7 @@ class GoodDefaultPlugin : public TestPluginBase
 public:
     const char* getPluginName() const override
     {
-        return COMPONENT_NAME;
+        return HIPDNN_COMPONENT_NAME;
     }
     const char* getPluginVersion() const override
     {

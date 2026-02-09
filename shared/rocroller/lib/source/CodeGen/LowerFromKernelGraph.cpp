@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -287,15 +287,14 @@ namespace rocRoller
                                 auto arg = m_context->kernel()->findArgument(argName);
 
                                 msg += fmt::format(
-                                    "\n\t- {}: {}\n", argName, toString(arg.expression));
+                                    "\n\t- {}: {}\n", argName, toString(arg.getExpression()));
                             }
 
-                            AssertFatal(false,
-                                        msg,
-                                        ShowValue(expectedArgs),
-                                        ShowValue(extraArgs),
-                                        ShowValue(m_context->kernel()->arguments()),
-                                        ShowValue(operation));
+                            Throw<FatalError>(msg,
+                                              ShowValue(expectedArgs),
+                                              ShowValue(extraArgs),
+                                              ShowValue(m_context->kernel()->arguments()),
+                                              ShowValue(operation));
                         }
 
                         if(!extraArgs.empty())
@@ -665,16 +664,20 @@ namespace rocRoller
                         }
 
                         Log::debug("  immediate: count {}", assign.valueCount);
+
                         if(assign.regType == Register::Type::Accumulator
                            || assign.regType == Register::Type::Vector)
                         {
+                            auto const& typeInfo              = DataTypeInfo::Get(varType);
+                            int         physicalRegisterCount = valueCount * typeInfo.registerCount;
+
                             dest = m_context->registerTagManager()->getRegister(
                                 dimTag,
                                 assign.regType,
                                 varType,
                                 valueCount,
                                 Register::AllocationOptions{.contiguousChunkWidth
-                                                            = static_cast<int>(valueCount)});
+                                                            = physicalRegisterCount});
                         }
                         else
                         {
@@ -719,17 +722,17 @@ namespace rocRoller
                 for(auto const& c : m_graph->mapper.getConnections(tag))
                 {
                     auto srcTag = c.coordinate;
-                    auto reg    = m_context->registerTagManager()->getRegister(srcTag);
-                    srcs.push_back(std::move(reg));
+                    // Barriers that are connected to coordinates without allocated
+                    // register values are legal but do not require waits as they
+                    // are used to sync threads across loop iterations.
+                    if(m_context->registerTagManager()->hasRegister(srcTag))
+                    {
+                        auto reg = m_context->registerTagManager()->getRegister(srcTag);
+                        srcs.push_back(std::move(reg));
+                    }
                 }
 
                 co_yield m_context->mem()->barrier(srcs);
-            }
-
-            Generator<Instruction> operator()(int tag, ComputeIndex const& ci)
-            {
-                co_yield m_loadStoreTileGenerator.genComputeIndex(
-                    tag, ci, m_graph->buildTransformer(tag));
             }
 
             Generator<Instruction> operator()(int tag, SetCoordinate const& setCoordinate)

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -306,7 +306,8 @@ namespace rocRoller
             auto strideX = sizeY;
             auto strideY = literal(1u);
 
-            auto globalScratch    = newScratchCoordinate(simplify(sizeX * sizeY), varType, context);
+            auto globalScratch = newScratchCoordinate(
+                simplify(sizeX * sizeY), varType, Operations::ScratchPolicy::None, context);
             auto globalScratchTag = graph.coordinates.addElement(globalScratch);
 
             std::vector<unsigned int> jammedSizes = {loopInfo.xLoopSize, loopInfo.yLoopSize};
@@ -427,9 +428,10 @@ namespace rocRoller
          *       StoreTile()
          *       WaitZero()
          *       Barrier()
-         *       flag = Assign(SGPR, 1u);
-         *       StoreSGPR(flag)
-         *       WaitZero()
+         *       if wave0:
+         *          flag = Assign(SGPR, 1u);
+         *          StoreSGPR(flag)
+         *          WaitZero()
          */
         SendInfo sendTile(KernelGraph&                           graph,
                           ExpressionPtr                          sendTileExpr,
@@ -491,33 +493,49 @@ namespace rocRoller
 
             // TODO: Improve setting of arch-specific buffer options
             BufferInstructionOptions bufOpts{.glc = true};
+
             auto storeFlagTag = graph.control.addElement(StoreSGPR(DataType::UInt32, bufOpts));
             graph.mapper.connect<User>(storeFlagTag, flagsScratchTag);
             graph.mapper.connect<VGPR>(storeFlagTag, flagRegister);
 
+            // Create workitem coordinate and expression for wave 0 check
+            // Only workitem 0 (wave 0) should write to the flag
+            auto workitemTag = graph.coordinates.addElement(Workitem(0));
+            auto workitemDF  = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{workitemTag, Register::Type::Vector, DataType::UInt32});
+            auto isWave0Expr = (workitemDF == Expression::literal(0u));
+            auto wave0FlagStoreTag
+                = graph.control.addElement(ConditionalOp{isWave0Expr, "Wave0 Store Flag"});
+
             // Add to control
-            auto preWaitZeroTag  = graph.control.addElement(WaitZero());
-            auto postWaitZeroTag = graph.control.addElement(WaitZero());
+            auto preWaitZeroTag = graph.control.addElement(WaitZero());
 
             graph.control.addElement(Sequence(), {preWaitZeroTag}, {sendTileTag});
             graph.control.addElement(Body(), {sendTileTag}, {forX});
-            graph.control.chain<Sequence>(
-                forX, waitZeroTag, barrierTag, assignFlagTag, storeFlagTag, postWaitZeroTag);
+            graph.control.chain<Sequence>(forX, waitZeroTag, barrierTag, wave0FlagStoreTag);
+            graph.control.addElement(Body(), {wave0FlagStoreTag}, {assignFlagTag});
+            auto waitAfterStoreFlagTag = graph.control.addElement(WaitZero());
+            graph.control.chain<Sequence>(assignFlagTag, storeFlagTag, waitAfterStoreFlagTag);
 
             return {preWaitZeroTag, sendTileTag};
         }
 
         /**
-         * Create send-tile block, which is roughly:
+         * Create receive-tile block, which is roughly:
          *
          *     WaitZero()
          *     if receiveTileExpr:
-         *       for (i = 0; i < numFixupsExpr; i++)
+         *       for each partial result (loop created externally)
          *          nextWG = WG + 1 + i
          *          Assert nextWG < numScratch
          *          do:
          *          LoadSGPR(flag[nextWG])
          *          while flag[nextWG] == 0
+         *          Barrier()
+         *          if wave0:
+         *              Assign(flag[nextWG] = 0)
+         *              StoreSGPR(flag[nextWG])
+         *              WaitZero()
          *          partiallyAccumulatedTile = LoadTiled()
          *          fullyAccumulatedTile = Assign(localPartiallyAccumulatedTile)
          *          fullyAccumulatedTile = Assign(fullyAccumulatedTile + partiallyAccumulatedTile)
@@ -529,7 +547,6 @@ namespace rocRoller
          */
         RecvInfo receiveTile(KernelGraph&                           graph,
                              ExpressionPtr                          receiveTileExpr,
-                             ExpressionPtr                          numFixupsExpr,
                              int                                    scratchTileTag,
                              std::vector<DeferredConnection> const& loadConnections,
                              int                                    flagsScratchTag,
@@ -579,10 +596,75 @@ namespace rocRoller
 
             graph.mapper.connect<User>(loadFlagTag, flagsScratchTag);
             graph.mapper.connect<VGPR>(loadFlagTag, flagRegister);
+
+            // TODO: See if the ControlFlowRWTracer can discover this dependency without this explicit connection.
+            // This is currently needed for InlineIncrements to work correctly.
+            graph.mapper.connect<ForLoop>(loadFlagTag, forReceiveTileLoopCoord);
+
             graph.coordinates.addElement(PassThrough(), {flagsScratchTag}, {nextWorkgroupTag});
 
             auto doWhileTag = graph.control.addElement(
                 DoWhileOp{(DF(flagRegister) == zero), "Global sync spin loop"});
+
+            // The coordinate graph for load, store, and reset flags:
+            //
+            //     Workgroup
+            //           |
+            //      PassThrough
+            //          |
+            //          v
+            //   flagsScratchTag <-Duplicate-- resetFlagsScratchTag
+            //          |                             ^
+            //     PassThrough                   PassThrough
+            //          |                             |
+            //          v                      resetNextWorkgroupTag
+            //   nextWorkgroupTag                     ^
+            //          |                            Join
+            //        Split                        /  |  \
+            //       /  |  \                      /   |   \
+            //      v   v   v                    /    |    \
+            //   Workgroup  plusOne  forReceiveTileLoop
+            //
+            // Note: nextWorkgroupTag and resetNextWorkgroupTag both connect to the same
+            // neighbors (Workgroup, plusOne, forReceiveTileLoop) but in opposite directions
+            // (Split vs Join). This allows loading flags from WG+1+i and resetting flags
+            // at the same index.
+
+            // Create coordinate to indicate flag index to reset
+            auto resetNextWorkgroupTag = graph.coordinates.addElement(Linear(nullptr, one));
+            graph.coordinates.addElement(
+                Join(), {workgroup, plusOneTag, forReceiveTileLoopCoord}, {resetNextWorkgroupTag});
+
+            // Duplicate flags scratch coordinate for reset operation
+            auto resetFlagsScratchTag
+                = graph.coordinates.addElement(*graph.coordinates.get<User>(flagsScratchTag));
+            graph.coordinates.addElement(Duplicate(), {resetFlagsScratchTag}, {flagsScratchTag});
+            graph.coordinates.addElement(
+                PassThrough(), {resetNextWorkgroupTag}, {resetFlagsScratchTag});
+
+            // Reset flag operations
+            auto assignResetFlagTag
+                = graph.control.addElement(Assign{Register::Type::Scalar, zero});
+            graph.mapper.connect(assignResetFlagTag, flagRegister, NaryArgument::DEST);
+
+            auto resetFlagTag = graph.control.addElement(StoreSGPR(DataType::UInt32, bufOpts));
+            graph.mapper.connect<User>(resetFlagTag, resetFlagsScratchTag);
+            graph.mapper.connect<VGPR>(resetFlagTag, flagRegister);
+
+            // TODO: See if the ControlFlowRWTracer can discover this dependency without this explicit connection.
+            // This is currently needed for InlineIncrements to work correctly.
+            graph.mapper.connect<ForLoop>(resetFlagTag, forReceiveTileLoopCoord);
+
+            // Create workitem coordinate and expression for wave 0 check
+            // Only workitem 0 (wave 0) should write to the flag
+            auto workitemTag = graph.coordinates.addElement(Workitem(0));
+            auto workitemDF  = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{workitemTag, Register::Type::Vector, DataType::UInt32});
+            auto isWave0Expr = (workitemDF == Expression::literal(0u));
+            auto wave0ResetFlagTag
+                = graph.control.addElement(ConditionalOp{isWave0Expr, "Wave0 Reset Flag"});
+
+            auto barrierBeforeResetTag = graph.control.addElement(Barrier());
 
             auto accumulatorTile = graph.coordinates.get<MacroTile>(accumulatorTileTag);
             uint numRegisters    = accumulatorTile->elements()
@@ -642,7 +724,12 @@ namespace rocRoller
             graph.control.addElement(Sequence(), {boundsCheckTag}, {doWhileTag});
             graph.control.addElement(Body(), {doWhileTag}, {loadFlagTag});
 
-            graph.control.chain<Sequence>(doWhileTag, loadAddForX, postWaitZeroTag);
+            graph.control.chain<Sequence>(doWhileTag, barrierBeforeResetTag, wave0ResetFlagTag);
+            graph.control.addElement(Body(), {wave0ResetFlagTag}, {assignResetFlagTag});
+            auto waitAfterRestFlagStoreTag = graph.control.addElement(WaitZero());
+            graph.control.chain<Sequence>(
+                assignResetFlagTag, resetFlagTag, waitAfterRestFlagStoreTag);
+            graph.control.chain<Sequence>(wave0ResetFlagTag, loadAddForX, postWaitZeroTag);
 
             return {preWaitZeroTag, receiveTileTag, setPlusOneTag};
         }
@@ -973,13 +1060,16 @@ namespace rocRoller
             int dpTopLoop, dpAccumLoop;
             if(params->streamK.isTwoTileMode())
             {
-                // We disable duplication here so that the fix-up pass
-                // uses the correct registers.
+                // Keep the accumulator tile shared between SK and DP sections
+                // so that the fix-up pass uses the correct registers.
+                auto accumTile = accumInfo.accumulatorTile;
                 auto reindexer = std::make_shared<GraphReindexer>();
                 dpTopLoop
-                    = only(duplicateControlNodes(graph, reindexer, {loopInfo.topLoopOp}, [](int x) {
-                          return true;
-                      })).value();
+                    = only(duplicateControlNodes(graph,
+                                                 reindexer,
+                                                 {loopInfo.topLoopOp},
+                                                 [accumTile](int x) { return x == accumTile; }))
+                          .value();
                 dpAccumLoop = reindexer->control[loopInfo.accumulatorLoopOp];
 
                 // Duplicate the epilogue.  We enable duplication here
@@ -1124,12 +1214,24 @@ namespace rocRoller
                 graph.mapper.connect(assignCurrentTile, currentTile, NaryArgument::DEST);
             }
 
+            // Compute the starting K tile index within the current output tile.
+            // firstAccumTile = currentTile % numAccumTiles gives which K tile (0 to numAccumTiles-1)
+            // we begin processing within this (M, N) output tile.
+            int assignFirstAccumTile;
+            {
+                auto firstAccumTileExpr = DF(currentTile) % numAccumTiles;
+                assignFirstAccumTile
+                    = graph.control.addElement(Assign{Register::Type::Scalar, firstAccumTileExpr});
+                graph.mapper.connect(assignFirstAccumTile, firstAccumTile, NaryArgument::DEST);
+            }
+
             int assignNumAccumTilesProcessed;
             {
-                auto sameNonAccumTileBound
-                    = conditionalSubtract((DF(currentTile) / numAccumTiles + one) * numAccumTiles,
-                                          DF(currentTile),
-                                          numTilesVarType.dataType);
+                // Compute how many K tiles to process in this iteration.
+                // sameNonAccumTileBound = numAccumTiles - firstAccumTile is the number of K tiles
+                // remaining in the current output tile. We take the minimum of this and other bounds.
+                auto sameNonAccumTileBound = conditionalSubtract(
+                    numAccumTiles, DF(firstAccumTile), numTilesVarType.dataType);
                 auto numSKTilesPerWGBound = conditionalSubtract(
                     argInfo.numSKTilesPerWG, DF(forTileIncr), numTilesVarType.dataType);
                 auto numSKTilesExprBound = conditionalSubtract(
@@ -1142,18 +1244,13 @@ namespace rocRoller
                     assignNumAccumTilesProcessed, numAccumTilesProcessed, NaryArgument::DEST);
             }
 
-            int assignFirstAccumTile;
-            {
-                auto firstAccumTileExpr = DF(currentTile) % numAccumTiles;
-                assignFirstAccumTile
-                    = graph.control.addElement(Assign{Register::Type::Scalar, firstAccumTileExpr});
-                graph.mapper.connect(assignFirstAccumTile, firstAccumTile, NaryArgument::DEST);
-            }
-
             int assignLastAccumTile;
             {
-                auto lastAccumTileExpr
-                    = (DF(currentTile) + DF(numAccumTilesProcessed) - one) % numAccumTiles;
+                // Compute the last K tile index processed within this output tile.
+                // Since numAccumTilesProcessed <= numAccumTiles - firstAccumTile (bounded by
+                // sameNonAccumTileBound to stay within the same output tile), the result is
+                // guaranteed to be in range [0, numAccumTiles - 1].
+                auto lastAccumTileExpr = DF(firstAccumTile) + DF(numAccumTilesProcessed) - one;
                 assignLastAccumTile
                     = graph.control.addElement(Assign{Register::Type::Scalar, lastAccumTileExpr});
                 graph.mapper.connect(assignLastAccumTile, lastAccumTile, NaryArgument::DEST);
@@ -1173,19 +1270,48 @@ namespace rocRoller
             int         postAccumulationCond;
             if(accumInfo.accumulatorTile != -1)
             {
-                auto remainAccumTiles = numAccumTiles - DF(lastAccumTile) + one;
-                auto numRemainPartialResults
-                    = (remainAccumTiles + argInfo.numSKTilesPerWG - one) / argInfo.numSKTilesPerWG;
+                auto remainAccumTiles = numAccumTiles - DF(lastAccumTile) - one;
 
-                // For loop that sums up all the partial result
-                auto [forReceiveTileLoopCoord, forReceiveTileLoopOp]
-                    = rangeFor(graph,
-                               numRemainPartialResults,
-                               rocRoller::RECEIVE,
-                               resultVariableType(numRemainPartialResults));
+                // For loop that receives and accumulates partial results from other workgroups.
+                // The loop iterates ceil(remainAccumTiles / numSKTilesPerWG) times.
+                // Using the equivalence: i < ceil(a/b) iff i*b < a (for a >= 0, b > 0),
+                // we express the loop condition as a multiplication to avoid runtime division.
+                auto iteratorCoord = graph.coordinates.addElement(Linear(numAccumTiles, one));
+                auto forReceiveTileLoopCoord
+                    = graph.coordinates.addElement(ForLoop(numAccumTiles, one));
+                graph.coordinates.addElement(
+                    DataFlow(), {iteratorCoord}, {forReceiveTileLoopCoord});
+
+                auto iterator = std::make_shared<Expression::Expression>(Expression::DataFlowTag{
+                    iteratorCoord, Register::Type::Scalar, numTilesVarType});
+
+                // Loop condition: iterates while iterator * numSKTilesPerWG < remainAccumTiles
+                // This is equivalent to iterator < ceil(remainAccumTiles / numSKTilesPerWG)
+                auto loopCondition = iterator * argInfo.numSKTilesPerWG < remainAccumTiles;
+
+                auto forReceiveTileLoopOp
+                    = graph.control.addElement(ForLoopOp{loopCondition, rocRoller::RECEIVE});
+                graph.mapper.connect(forReceiveTileLoopOp, iteratorCoord, NaryArgument::DEST);
+                graph.mapper.connect<ForLoop>(forReceiveTileLoopOp, forReceiveTileLoopCoord);
+
+                auto initialAssign = graph.control.addElement(
+                    Assign{Register::Type::Scalar, Expression::literal(0, numTilesVarType)});
+                graph.mapper.connect(initialAssign, iteratorCoord, NaryArgument::DEST);
+
+                auto incrementAssign
+                    = graph.control.addElement(Assign{Register::Type::Scalar, iterator + one});
+                graph.mapper.connect(incrementAssign, iteratorCoord, NaryArgument::DEST);
+
+                graph.control.addElement(Initialize(), {forReceiveTileLoopOp}, {initialAssign});
+                graph.control.addElement(
+                    ForLoopIncrement(), {forReceiveTileLoopOp}, {incrementAssign});
 
                 // Create scratch space for flags
-                auto flagsScratch = newScratchCoordinate(argInfo.numWGs, DataType::UInt32, context);
+                auto flagsScratch
+                    = newScratchCoordinate(argInfo.numWGs,
+                                           DataType::UInt32,
+                                           Operations::ScratchPolicy::ZeroedBeforeAndAfter,
+                                           context);
                 auto flagsScratchTag = graph.coordinates.addElement(flagsScratch);
 
                 // Create scratch space for partially accumulated tiles
@@ -1217,7 +1343,6 @@ namespace rocRoller
 
                 receiveInfo = receiveTile(graph,
                                           hasFirstAccumTile && doesntHaveLastAccumTile,
-                                          numRemainPartialResults,
                                           scratchTileInfo.load,
                                           loadConnections,
                                           flagsScratchTag,
@@ -1279,9 +1404,11 @@ namespace rocRoller
             graph.control.chain<Body>(
                 receiveInfo.setPlusOne, scratchTileInfo.setPlusOne, forTileSKOp);
             graph.control.chain<Body>(forTileSKOp, assignCurrentTile);
+            // Order: currentTile -> firstAccumTile -> numAccumTilesProcessed -> lastAccumTile
+            // (firstAccumTile must come before numAccumTilesProcessed since we reuse it for sameNonAccumTileBound)
             graph.control.chain<Sequence>(assignCurrentTile,
-                                          assignNumAccumTilesProcessed,
                                           assignFirstAccumTile,
+                                          assignNumAccumTilesProcessed,
                                           assignLastAccumTile,
                                           loopInfo.topLoopOp,
                                           sendInfo.preWaitZero);

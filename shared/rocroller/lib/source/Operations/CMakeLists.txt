@@ -8,6 +8,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/Command.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Operation.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RandomNumberGenerator.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Scratch.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorScalar.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/T_LoadStore.cpp"
 )

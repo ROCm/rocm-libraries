@@ -97,6 +97,30 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
     label_skipWGMXCC = Label(label="skip_WGMXCC", comment="skip WGMXCC if no enough WGs to remap")
 
     if(kernel["StreamK"] != 0 and kernel["WorkGroupMappingXCC"] == -1):
+        # We need to get WGMXCC from WGM
+        # This value will be used as number of XCCs for both chunked and non-chunked remapping
+        SgprWGMXCC = writer.sgprPool.checkOut(1)
+        module.add(SLShiftRightB32(dst=sgpr(SgprWGMXCC), shiftHex=hex(16), src=sgpr(sgprWGM), comment="Get WGMXCC"))
+        module.add(SAndB32(dst=sgpr(SgprWGMXCC), src0=sgpr(SgprWGMXCC), src1=hex(63), comment="Get WGMXCC"))
+        module.add(SCmpGtU32(src0=sgpr(SgprWGMXCC), src1=1, comment="No mapping if WGMXCC <= 1"))
+        module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
+        label_skipWGMCHUNK = Label(label="skip_WGMCHUNK", comment="skip WGMCHUNK if no enough WGs to remap")
+        """
+        Use chiplet_transform_chunk, skip classic wgmxcc remapping
+        """        
+        SgprIndex = "WorkGroup0"
+        SgprChunkSize = writer.sgprPool.checkOut(1)
+        module.add(SLShiftRightB32(dst=sgpr(SgprChunkSize), shiftHex=hex(22), src=sgpr(sgprWGM), comment="Get WGMCHUNK"))
+        module.add(SAndB32(dst=sgpr(SgprChunkSize), src0=sgpr(SgprChunkSize), src1=hex(1023), comment="Get WGMCHUNK"))
+        module.addComment0("remap WGs if WGMCHUNK > 1")
+        module.add(SCmpGtU32(src0=sgpr(SgprChunkSize), src1=1))
+        module.add(SCBranchSCC0(label_skipWGMCHUNK.getLabelName()))
+        module.add(chiplet_transform_chunked(writer, kernel, SgprWGMXCC, SgprIndex, tmpSgprNumWorkGroups, SgprChunkSize))
+        writer.sgprPool.checkIn(SgprChunkSize)
+        module.add(SBranch(label_skipWGMXCC.getLabelName()))
+        module.add(label_skipWGMCHUNK)
+
+
         """
         Formula:
         x, g   = divmod(old_wg, WGMXCC)
@@ -106,7 +130,6 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
         new    = x + offset + g * group
         """
         with writer.allocTmpSgpr(6, 2) as tmpSgprRes:
-            SgprWGMXCC = tmpSgprRes.idx
             SgprX      = tmpSgprRes.idx + 1
             SgprG      = tmpSgprRes.idx + 2
             SgprQ      = tmpSgprRes.idx + 3
@@ -115,16 +138,10 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             # Reuse some sgprs
             tmpSgpr = SgprWGMXCC
             group   = SgprQ
-            # offset  = SgprR
-            
+
             tmpVgpr     = writer.vgprPool.checkOutAligned(4,2)
             tmpVgprRes  = ContinuousRegister(tmpVgpr, 4)
 
-            module.add(SLShiftRightB32(dst=sgpr(SgprWGMXCC), shiftHex=hex(16), src=sgpr(sgprWGM), comment="Get WGMXCC"))
-            module.add(SAndB32(dst=sgpr(SgprWGMXCC), src0=sgpr(SgprWGMXCC), src1=hex(63), comment="Get WGMXCC"))
-            module.addComment0("remap WGs if WGMXCC > 1")
-            module.add(SCmpGtU32(src0=sgpr(SgprWGMXCC), src1=1))
-            module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
             module.addComment0("divmod(old_wg, WGMXCC)")
             module.add(scalarUInt24DivideAndRemainder(qReg=SgprX, rReg=SgprG, dReg="WorkGroup0", divReg=SgprWGMXCC, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
             module.add(SWaitCnt(kmcnt=0, comment="wait for args to load"))
@@ -140,8 +157,9 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr(SgprX), src1=sgpr(SgprO)))
             module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(SgprG), src1=sgpr(group)))
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr)))
-
-            module.add(label_skipWGMXCC)
+        # Skip
+        writer.sgprPool.checkIn(SgprWGMXCC)
+        module.add(label_skipWGMXCC)
     else:
         with writer.allocTmpSgpr(6, 2) as tmpSgprRes:
             tmpSgpr      = tmpSgprRes.idx
@@ -283,6 +301,56 @@ def DefaultWGM(writer, kernel, sgprWGM):
 
     writer.sgprPool.checkIn(tmpWGM)
     tmpVgprRes = None
+    writer.vgprPool.checkIn(tmpVgpr)
+
+    return module
+
+def chiplet_transform_chunked(writer, kernel, sgprNumXCC, sgprIndex, sgprNumWG, sgprChunkSize):
+    module = Module()
+
+    sgprTmp  = writer.sgprPool.checkOut(1, preventOverflow=False)
+    sgprTmp2 = writer.sgprPool.checkOut(1, preventOverflow=False)
+
+    sgprLocalId = writer.sgprPool.checkOut(1, preventOverflow=False)
+    sgprChunkId = writer.sgprPool.checkOut(1, preventOverflow=False)
+    sgprPosInChunk = writer.sgprPool.checkOut(1, preventOverflow=False)
+    sgprXCC = writer.sgprPool.checkOut(1, preventOverflow=False)
+
+    tmpVgpr = writer.vgprPool.checkOutAligned(6,2,"tmpVgpr")
+    tmpVgprRes = ContinuousRegister(tmpVgpr, 6)
+
+    labelEnd = Label(writer.labels.getUniqueNamePrefix("ChipletTransformChunkEnd"), comment="")
+    module.addComment0("Chiplet Transform Chunked")
+
+    # Compute sgprTmp = numWG, sgprTmp2 = numXCC * chunk_size
+    module.add(SMulI32(dst=sgpr(sgprTmp2), src0=sgpr(sgprNumXCC), src1=sgpr(sgprChunkSize), comment="Compute total number of tiles"))
+    # compute (numWG // (numXCC * chunkSize)) and localId = index // numXCC, note: sgprPosInChunk is not used
+    module.add(scalarUInt24DivideAndRemainderPair(qReg=[sgprLocalId,sgprTmp], dReg=[sgprIndex,sgprNumWG], \
+                                                  divReg=[sgprNumXCC,sgprTmp2], rReg=[sgprXCC, sgprPosInChunk], tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
+    # (numWG // (numXCC * chunkSize)) * (numXCC * chunkSize)
+    module.add(SMulI32(dst=sgpr(sgprTmp), src0=sgpr(sgprTmp), src1=sgpr(sgprTmp2), comment=""))
+    # check,     if index > (num_workgroups // (num_xcds * chunk_size)) * (num_xcds * chunk_size)
+    module.add(SCmpGtU32(src0=sgpr(sgprIndex), src1=sgpr(sgprTmp), comment=""))
+    module.add(SCBranchSCC1(labelEnd.getLabelName()))
+
+    # Calculate: index = chunk_idx * num_xcds * chunk_size + xcd * chunk_size + pos_in_chunk
+    # chunk ID, pos_in_chunk
+    module.add(scalarUInt24DivideAndRemainder(qReg=sgprChunkId, dReg=sgprLocalId, divReg=sgprChunkSize, rReg=sgprPosInChunk, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
+    # xcc * chunk_size
+    module.add(SMulI32(dst=sgpr(sgprTmp), src0=sgpr(sgprXCC), src1=sgpr(sgprChunkSize), comment=""))
+    # chunkId * numxcc * chunk_size
+    module.add(SMulI32(dst=sgpr(sgprTmp2), src0=sgpr(sgprChunkId), src1=sgpr(sgprTmp2), comment=""))
+    module.add(SAddU32(dst=sgpr(sgprTmp), src0=sgpr(sgprTmp), src1=sgpr(sgprPosInChunk), comment=""))
+    module.add(SAddU32(dst=sgpr(sgprIndex), src0=sgpr(sgprTmp), src1=sgpr(sgprTmp2), comment=""))
+
+    module.add(labelEnd)
+
+    writer.sgprPool.checkIn(sgprXCC)
+    writer.sgprPool.checkIn(sgprPosInChunk)
+    writer.sgprPool.checkIn(sgprChunkId)
+    writer.sgprPool.checkIn(sgprLocalId)
+    writer.sgprPool.checkIn(sgprTmp)
+    writer.sgprPool.checkIn(sgprTmp2)
     writer.vgprPool.checkIn(tmpVgpr)
 
     return module

@@ -237,6 +237,7 @@ namespace rocRoller
                 auto tensor = m_command->getOperation<Operations::Tensor>(tload.getSrcTag());
 
                 auto const sizes          = tensor.sizes();
+                auto const literalSizes   = tensor.literalSizes();
                 auto const strides        = tensor.strides();
                 auto const literalStrides = tensor.literalStrides();
 
@@ -248,8 +249,15 @@ namespace rocRoller
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
                 {
-                    auto sizeExpr = std::make_shared<Expression::Expression>(sizes[i]);
-                    std::shared_ptr<Expression::Expression> strideExpr;
+                    std::shared_ptr<Expression::Expression> sizeExpr, strideExpr;
+                    if(literalSizes.size() > i && literalSizes[i] > 0)
+                    {
+                        sizeExpr = std::make_shared<Expression::Expression>(literalSizes[i]);
+                    }
+                    else
+                    {
+                        sizeExpr = std::make_shared<Expression::Expression>(sizes[i]);
+                    }
                     if(literalStrides.size() > i && literalStrides[i] > 0)
                     {
                         strideExpr = std::make_shared<Expression::Expression>(literalStrides[i]);
@@ -774,6 +782,11 @@ namespace rocRoller
             }
 
             void operator()(Operations::SubTileTranspose const& t) {}
+
+            void operator()(Operations::Scratch const& t)
+            {
+                rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::Scratch");
+            }
 
             void operator()(Operations::Literal const& literal)
             {

@@ -31,8 +31,7 @@
 #include <miopen/solver_id.hpp>
 #include <miopen/miopen.h>
 
-#include <boost/optional.hpp>
-
+#include <optional>
 #include <ostream>
 
 namespace miopen {
@@ -46,11 +45,6 @@ MIOPEN_EXPORT extern bool
     FindEnforceDisable; // NOLINT (cppcoreguidelines-avoid-non-const-global-variables)
 
 } // namespace debug
-
-class FindEnforce;
-class FindMode;
-
-MIOPEN_INTERNALS_EXPORT bool IsValidCombination(const FindEnforce& enforce, const FindMode& mode);
 
 enum class FindEnforceAction
 {
@@ -80,8 +74,6 @@ private:
 public:
     FindEnforce();
     explicit FindEnforce(FindEnforceAction action_) : action(action_) {}
-
-    FindEnforceAction GetAction() const { return action; }
 
     template <class Context>
     bool IsDbClean(const Context& context) const
@@ -113,7 +105,7 @@ public:
     MIOPEN_INTERNALS_EXPORT friend std::ostream& operator<<(std::ostream&, const FindEnforce&);
 };
 
-MIOPEN_INTERNALS_EXPORT boost::optional<std::vector<solver::Id>> GetEnvFindOnlySolver();
+MIOPEN_INTERNALS_EXPORT std::optional<std::vector<solver::Id>> GetEnvFindOnlySolver();
 
 class MIOPEN_INTERNALS_EXPORT FindMode
 {
@@ -138,27 +130,17 @@ private:
     template <class Context>
     bool IsEnabled(const Context& context) const
     {
-        FindEnforce enforce{};
-
-        // If no enforcement is active, always allow
-        if(!enforce.IsSomethingEnforced(context))
-            return true;
-
-        // Check if the combination is valid/safe
-        if(IsValidCombination(enforce, *this))
+        if(FindEnforce{}.IsSomethingEnforced(context))
         {
-            MIOPEN_LOG_I("Allowing MIOPEN_FIND_MODE with MIOPEN_FIND_ENFORCE combination");
-            return true;
+            MIOPEN_LOG_NQI("MIOPEN_FIND_MODE is set to NORMAL due to MIOPEN_FIND_ENFORCE");
+            return false;
         }
-
-        // Unsafe combination - force Normal mode
-        MIOPEN_LOG_NQI(
-            "MIOPEN_FIND_MODE is set to NORMAL due to unsafe combination with MIOPEN_FIND_ENFORCE");
-        return false;
+        return true;
     }
 
 public:
-    FindMode();
+    // Todo: remove default value of primitive
+    FindMode(solver::Primitive primitive = solver::Primitive::Convolution);
     Values Get() const { return value; }
     void Set(Values const v) { value = v; }
 

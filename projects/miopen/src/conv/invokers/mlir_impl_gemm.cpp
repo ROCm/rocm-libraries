@@ -34,7 +34,6 @@
 
 #include <Miir.h>
 
-#include <boost/any.hpp>
 #include <boost/range/adaptors.hpp>
 
 #if MIIR_VERSION_FLAT >= 6
@@ -256,12 +255,12 @@ void SetMlirConvArgsPtr(ConstData_t in, ConstData_t out, ConstData_t w, MlirConv
     args.input  = input;
     args.output = output;
 #else
-    args.filter.basePtr    = filter;
-    args.filter.data       = filter;
-    args.input.basePtr     = input;
-    args.input.data        = input;
-    args.output.basePtr    = output;
-    args.output.data       = output;
+    args.filter.basePtr = filter;
+    args.filter.data    = filter;
+    args.input.basePtr  = input;
+    args.input.data     = input;
+    args.output.basePtr = output;
+    args.output.data    = output;
 #endif
 }
 

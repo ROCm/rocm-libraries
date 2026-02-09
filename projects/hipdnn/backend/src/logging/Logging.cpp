@@ -2,18 +2,21 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Logging.hpp"
+#include "ComponentFormatter.hpp"
+#include "PlatformUtils.hpp"
 
-#include <hipdnn_sdk/logging/ComponentFormatter.hpp>
-#include <hipdnn_sdk/logging/LoggingUtils.hpp>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <iostream>
 
-#include <hipdnn_sdk/logging/CallbackTypes.h>
 #include <spdlog/async.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <hip/hip_runtime.h>
 #include <mutex>
 
 namespace hipdnn_backend
@@ -32,6 +35,54 @@ const std::string S_CALLBACK_RECEIVER_LOGGER_NAME = "hipdnn_callback_receiver";
 
 } // namespace
 
+void logSystemInfo()
+{
+    auto logger = getBackendLogger();
+    if(!logger)
+    {
+        return;
+    }
+
+    logger->info(platform_utilities::getSystemInfo());
+}
+
+void logHipDeviceInfo(hipStream_t stream)
+{
+    auto logger = getBackendLogger();
+    if(!logger)
+    {
+        return;
+    }
+
+    int deviceId = 0;
+    hipError_t err = hipStreamGetDevice(stream, &deviceId);
+    if(err != hipSuccess)
+    {
+        logger->warn("Failed to get device from stream: {}", hipGetErrorString(err));
+        return;
+    }
+
+    hipDeviceProp_t props;
+    err = hipGetDeviceProperties(&props, deviceId);
+    if(err != hipSuccess)
+    {
+        logger->warn(
+            "Failed to get properties for device {}: {}", deviceId, hipGetErrorString(err));
+        return;
+    }
+
+    logger->info(
+        "HIP Device Information: {{Device: {}, Name: {}, Global Mem: {} bytes, Compute: {}.{}, "
+        "MPs: {}, Clock: {} kHz}}",
+        deviceId,
+        props.name,
+        props.totalGlobalMem,
+        props.major,
+        props.minor,
+        props.multiProcessorCount,
+        props.clockRate);
+}
+
 void initialize()
 {
     try
@@ -42,8 +93,16 @@ void initialize()
             return;
         }
 
+        // Initialize the log level from environment variable
+        hipdnn_data_sdk::logging::initializeLogLevel();
+
+        // Register the global callback so non-backend components can send logs to the backend
+        hipdnn_data_sdk::logging::registerLoggingCallback(hipdnnLoggingCallback);
+
+        std::string logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
+
         // It doesn't need to return if logLevel == off, but it avoids unnecessary initialization
-        if(!hipdnn_sdk::logging::isLoggingEnabled())
+        if(logLevel == "off")
         {
             s_loggingInitialized = true;
             return;
@@ -54,8 +113,7 @@ void initialize()
             spdlog::init_thread_pool(8192, 1);
         }
 
-        std::string logLevel = hipdnn_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
-        std::string logFilePath = hipdnn_sdk::utilities::getEnv("HIPDNN_LOG_FILE");
+        std::string logFilePath = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_FILE");
 
         std::shared_ptr<spdlog::sinks::sink> sharedSink;
         if(!logFilePath.empty())
@@ -73,16 +131,23 @@ void initialize()
         // In spdlog, the formatting is a property of the underlying sink, not the logger.
         // However, we need one destination sink for thread safety because the mutex is attached to the sink.
         // Therefore, we implement a custom formatter to have distinct formatting for the backend, which does not use a callback sink.
-        backendLogger->set_formatter(std::make_unique<hipdnn_sdk::logging::ComponentFormatter>());
+        backendLogger->set_formatter(
+            std::make_unique<hipdnn::backend::logging::ComponentFormatter>());
         spdlog::register_logger(backendLogger);
 
         auto callbackReceiverLogger = std::make_shared<spdlog::async_logger>(
             S_CALLBACK_RECEIVER_LOGGER_NAME, sharedSink, spdlog::thread_pool());
+        // Use ComponentFormatter which detects "hipdnn_callback_receiver" and applies appropriate formatting
+        callbackReceiverLogger->set_formatter(
+            std::make_unique<hipdnn::backend::logging::ComponentFormatter>());
         spdlog::register_logger(callbackReceiverLogger);
 
         setLogLevel(logLevel);
 
         s_loggingInitialized = true;
+
+        logSystemInfo();
+        logHipDeviceInfo(nullptr);
 
         return;
     }

@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -59,8 +60,7 @@ void testing_bsrmm_bad_arg(const Arguments& argus)
     hipsparseOperation_t transA    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
     hipsparseOperation_t transB    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -404,7 +404,7 @@ void testing_bsrmm_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_bsrmm(const Arguments& argus)
+void testing_bsrmm(const Arguments& argus)
 {
     int                  m         = argus.M;
     int                  n         = argus.N;
@@ -418,22 +418,13 @@ hipsparseStatus_t testing_bsrmm(const Arguments& argus)
     hipsparseIndexBase_t idx_base  = argus.baseA;
     std::string          filename  = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
 
     // Set matrix index base
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idx_base));
-
-    if(m == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        // cusparse does not support m == 0 for csr2bsr
-        return HIPSPARSE_STATUS_SUCCESS;
-#endif
-    }
 
     srand(12345ULL);
 
@@ -444,11 +435,8 @@ hipsparseStatus_t testing_bsrmm(const Arguments& argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, k, nnz, csr_row_ptr, csr_col_ind, csr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, k, nnz, csr_row_ptr, csr_col_ind, csr_val, idx_base));
 
     // m and k can be modifed if we read in a matrix from a file
     int mb = (m + block_dim - 1) / block_dim;
@@ -576,47 +564,47 @@ hipsparseStatus_t testing_bsrmm(const Arguments& argus)
     {
         // Testing using host pointer mode
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-        CHECK_HIPSPARSE_ERROR(hipsparseXbsrmm(handle,
-                                              dirA,
-                                              transA,
-                                              transB,
-                                              mb,
-                                              n,
-                                              kb,
-                                              nnzb,
-                                              &h_alpha,
-                                              descr,
-                                              dbsr_valA,
-                                              dbsr_row_ptrA,
-                                              dbsr_col_indA,
-                                              block_dim,
-                                              dB,
-                                              ldb,
-                                              &h_beta,
-                                              dC_1,
-                                              ldc));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseXbsrmm<T>(handle,
+                                                          dirA,
+                                                          transA,
+                                                          transB,
+                                                          mb,
+                                                          n,
+                                                          kb,
+                                                          nnzb,
+                                                          &h_alpha,
+                                                          descr,
+                                                          dbsr_valA,
+                                                          dbsr_row_ptrA,
+                                                          dbsr_col_indA,
+                                                          block_dim,
+                                                          dB,
+                                                          ldb,
+                                                          &h_beta,
+                                                          dC_1,
+                                                          ldc));
 
         // Testing using device pointer mode
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-        CHECK_HIPSPARSE_ERROR(hipsparseXbsrmm(handle,
-                                              dirA,
-                                              transA,
-                                              transB,
-                                              mb,
-                                              n,
-                                              kb,
-                                              nnzb,
-                                              d_alpha,
-                                              descr,
-                                              dbsr_valA,
-                                              dbsr_row_ptrA,
-                                              dbsr_col_indA,
-                                              block_dim,
-                                              dB,
-                                              ldb,
-                                              d_beta,
-                                              dC_2,
-                                              ldc));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseXbsrmm<T>(handle,
+                                                          dirA,
+                                                          transA,
+                                                          transB,
+                                                          mb,
+                                                          n,
+                                                          kb,
+                                                          nnzb,
+                                                          d_alpha,
+                                                          descr,
+                                                          dbsr_valA,
+                                                          dbsr_row_ptrA,
+                                                          dbsr_col_indA,
+                                                          block_dim,
+                                                          dB,
+                                                          ldb,
+                                                          d_beta,
+                                                          dC_2,
+                                                          ldc));
 
         // Copy output from device to host
         CHECK_HIP_ERROR(hipMemcpy(hC_1.data(), dC_1, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
@@ -656,25 +644,25 @@ hipsparseStatus_t testing_bsrmm(const Arguments& argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseXbsrmm(handle,
-                                                  dirA,
-                                                  transA,
-                                                  transB,
-                                                  mb,
-                                                  n,
-                                                  kb,
-                                                  nnzb,
-                                                  &h_alpha,
-                                                  descr,
-                                                  dbsr_valA,
-                                                  dbsr_row_ptrA,
-                                                  dbsr_col_indA,
-                                                  block_dim,
-                                                  dB,
-                                                  ldb,
-                                                  &h_beta,
-                                                  dC_1,
-                                                  ldc));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseXbsrmm<T>(handle,
+                                                              dirA,
+                                                              transA,
+                                                              transB,
+                                                              mb,
+                                                              n,
+                                                              kb,
+                                                              nnzb,
+                                                              &h_alpha,
+                                                              descr,
+                                                              dbsr_valA,
+                                                              dbsr_row_ptrA,
+                                                              dbsr_col_indA,
+                                                              block_dim,
+                                                              dB,
+                                                              ldb,
+                                                              &h_beta,
+                                                              dC_1,
+                                                              ldc));
         }
 
         double gpu_time_used = get_time_us();
@@ -682,25 +670,25 @@ hipsparseStatus_t testing_bsrmm(const Arguments& argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseXbsrmm(handle,
-                                                  dirA,
-                                                  transA,
-                                                  transB,
-                                                  mb,
-                                                  n,
-                                                  kb,
-                                                  nnzb,
-                                                  &h_alpha,
-                                                  descr,
-                                                  dbsr_valA,
-                                                  dbsr_row_ptrA,
-                                                  dbsr_col_indA,
-                                                  block_dim,
-                                                  dB,
-                                                  ldb,
-                                                  &h_beta,
-                                                  dC_1,
-                                                  ldc));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseXbsrmm<T>(handle,
+                                                              dirA,
+                                                              transA,
+                                                              transB,
+                                                              mb,
+                                                              n,
+                                                              kb,
+                                                              nnzb,
+                                                              &h_alpha,
+                                                              descr,
+                                                              dbsr_valA,
+                                                              dbsr_row_ptrA,
+                                                              dbsr_col_indA,
+                                                              block_dim,
+                                                              dB,
+                                                              ldb,
+                                                              &h_beta,
+                                                              dC_1,
+                                                              ldc));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
@@ -744,8 +732,6 @@ hipsparseStatus_t testing_bsrmm(const Arguments& argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_BSRMM_HPP

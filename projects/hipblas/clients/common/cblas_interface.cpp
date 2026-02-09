@@ -255,6 +255,50 @@ void zsymv_(char*                 uplo,
 
 #endif
 
+// helpers
+
+template <typename T, typename U>
+void cast_to_buffer(
+    hipblasOperation_t transA, int64_t m, int64_t k, int64_t lda, const T* A_t, host_vector<U>& A_u)
+{
+    size_t colsA = (transA == HIPBLAS_OP_N ? k : m);
+    size_t rowsA = (transA == HIPBLAS_OP_N ? m : k);
+
+    size_t sizeA = colsA * lda;
+
+    A_u.resize(sizeA);
+
+    for(size_t i = 0; i < colsA; i++)
+    {
+        size_t   offset = i * lda;
+        const T* src    = A_t + offset;
+        U*       dst    = A_u + offset;
+        for(size_t j = 0; j < rowsA; j++)
+        {
+            if constexpr(std::is_same_v<T, hipblasBfloat16> && std::is_same_v<U, float>)
+                *dst++ = bfloat16_to_float(*src++);
+            else
+                *dst++ = static_cast<U>(*src++);
+        }
+    }
+}
+
+template <typename T, typename U>
+void cast_from_buffer(int64_t m, int64_t n, int64_t ldc, const host_vector<T>& C_t, U* C_u)
+{
+    for(size_t i = 0; i < n; i++)
+    {
+        size_t offset = i * ldc;
+        for(size_t j = 0; j < m; j++)
+        {
+            if constexpr(std::is_same_v<U, hipblasBfloat16> && std::is_same_v<T, float>)
+                C_u[j + offset] = float_to_bfloat16(C_t[j + offset]);
+            else
+                C_u[j + offset] = static_cast<U>(C_t[j + offset]);
+        }
+    }
+}
+
 /*
  * ===========================================================================
  *    level 1 BLAS
@@ -3591,6 +3635,128 @@ void ref_syrk(hipblasFillMode_t     uplo,
                 C,
                 ldc);
 }
+
+// syrk_ex
+template <typename T, typename U, typename Tc>
+void ref_syrk_ex(hipblasFillMode_t  uplo,
+                 hipblasOperation_t transA,
+                 int64_t            n,
+                 int64_t            k,
+                 Tc                 alpha,
+                 const T*           A,
+                 int64_t            lda,
+                 Tc                 beta,
+                 U*                 C,
+                 int64_t            ldc)
+{
+    if constexpr(!std::is_same_v<Tc, double>)
+    {
+        float alpha_float = alpha;
+        float beta_float  = beta;
+
+        host_vector<float> A_float, C_float;
+
+        cast_to_buffer(transA, n, k, lda, A, A_float);
+        cast_to_buffer(HIPBLAS_OP_N, n, n, ldc, C, C_float);
+
+        ref_syrk(
+            uplo, transA, n, k, alpha_float, A_float.data(), lda, beta_float, C_float.data(), ldc);
+
+        cast_from_buffer(n, n, ldc, C_float, C);
+    }
+    else
+    {
+        double alpha_double = alpha;
+        double beta_double  = beta;
+
+        host_vector<double> A_double, C_double;
+
+        cast_to_buffer(transA, n, k, lda, A, A_double);
+        cast_to_buffer(HIPBLAS_OP_N, n, n, ldc, C, C_double);
+
+        ref_syrk(uplo,
+                 transA,
+                 n,
+                 k,
+                 alpha_double,
+                 A_double.data(),
+                 lda,
+                 beta_double,
+                 C_double.data(),
+                 ldc);
+
+        cast_from_buffer(n, n, ldc, C_double, C);
+    }
+}
+
+#define INSTANTIATE_SYRK_EX_TEMPLATE(T_, U_, Tc_)                     \
+    template void ref_syrk_ex<T_, U_, Tc_>(hipblasFillMode_t  uplo,   \
+                                           hipblasOperation_t transA, \
+                                           int64_t            n,      \
+                                           int64_t            k,      \
+                                           Tc_                alpha,  \
+                                           const T_*          A,      \
+                                           int64_t            lda,    \
+                                           Tc_                beta,   \
+                                           U_*                C,      \
+                                           int64_t            ldc);
+
+INSTANTIATE_SYRK_EX_TEMPLATE(hipblasHalf, hipblasHalf, float)
+INSTANTIATE_SYRK_EX_TEMPLATE(hipblasHalf, float, float)
+INSTANTIATE_SYRK_EX_TEMPLATE(hipblasBfloat16, hipblasBfloat16, float)
+INSTANTIATE_SYRK_EX_TEMPLATE(hipblasBfloat16, float, float)
+INSTANTIATE_SYRK_EX_TEMPLATE(float, float, double)
+INSTANTIATE_SYRK_EX_TEMPLATE(float, double, double)
+
+// herk_ex
+template <typename T, typename U, typename Tc>
+void ref_herk_ex(hipblasFillMode_t  uplo,
+                 hipblasOperation_t transA,
+                 int64_t            n,
+                 int64_t            k,
+                 Tc                 alpha,
+                 const T*           A,
+                 int64_t            lda,
+                 Tc                 beta,
+                 U*                 C,
+                 int64_t            ldc)
+{
+    double alpha_double = alpha;
+    double beta_double  = beta;
+
+    host_vector<std::complex<double>> A_double, C_double;
+
+    cast_to_buffer(transA, n, k, lda, A, A_double);
+    cast_to_buffer(HIPBLAS_OP_N, n, n, ldc, C, C_double);
+
+    ref_herk(uplo,
+             transA,
+             n,
+             k,
+             alpha_double,
+             (std::complex<double>*)A_double.data(),
+             lda,
+             beta_double,
+             (std::complex<double>*)C_double.data(),
+             ldc);
+
+    cast_from_buffer(n, n, ldc, C_double, C);
+}
+
+#define INSTANTIATE_HERK_EX_TEMPLATE(T_, U_, Tc_)                     \
+    template void ref_herk_ex<T_, U_, Tc_>(hipblasFillMode_t  uplo,   \
+                                           hipblasOperation_t transA, \
+                                           int64_t            n,      \
+                                           int64_t            k,      \
+                                           Tc_                alpha,  \
+                                           const T_*          A,      \
+                                           int64_t            lda,    \
+                                           Tc_                beta,   \
+                                           U_*                C,      \
+                                           int64_t            ldc);
+
+INSTANTIATE_HERK_EX_TEMPLATE(std::complex<float>, std::complex<float>, double)
+INSTANTIATE_HERK_EX_TEMPLATE(std::complex<float>, std::complex<double>, double)
 
 // syr2k
 template <>

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -198,21 +198,21 @@ namespace rocRoller
 
         for(auto& arg : argStructs)
         {
-            auto value = Expression::evaluate(arg.expression, args);
+            auto value = Expression::evaluate(arg.getExpression(), args);
 
-            if(variableType(value) != arg.variableType)
+            if(variableType(value) != arg.getVariableType())
             {
                 throw std::runtime_error(concatenate("Evaluated argument type ",
                                                      variableType(value),
                                                      " doesn't match expected type ",
-                                                     arg.variableType,
+                                                     arg.getVariableType(),
                                                      ", Expression: ",
-                                                     toString(arg.expression),
+                                                     toString(arg.getExpression()),
                                                      ", name: ",
-                                                     arg.name));
+                                                     arg.getName()));
             }
 
-            rv.append(arg.name, value);
+            rv.append(arg.getName(), value);
         }
 
         return rv;
@@ -343,6 +343,10 @@ namespace rocRoller
 
         std::vector<KernelGraph::GraphTransformPtr> transforms;
 
+        bool applyScheduleMultiplyAndLDS = m_commandParameters->prefetch
+                                           && m_commandParameters->prefetchMixMemOps
+                                           && m_commandParameters->prefetchLDSFactor == 1;
+
         transforms.push_back(std::make_shared<KernelGraph::IdentifyParallelDimensions>());
 
         transforms.push_back(std::make_shared<KernelGraph::OrderMemory>(
@@ -355,6 +359,8 @@ namespace rocRoller
         transforms.push_back(
             std::make_shared<KernelGraph::LowerTensorContraction>(m_commandParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        transforms.push_back(
+            std::make_shared<KernelGraph::AddLDSPadding>(m_context, m_commandParameters));
         transforms.push_back(std::make_shared<KernelGraph::ConstantPropagation>());
         transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
 
@@ -419,10 +425,12 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AddF6LDSPadding>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::AddDirect2LDS>(m_context, m_commandParameters));
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::AddPRNG>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::UpdateWavefrontParameters>(m_commandParameters));
-        transforms.push_back(std::make_shared<KernelGraph::AddComputeIndex>());
+        transforms.push_back(
+            std::make_shared<KernelGraph::AssignIndexExpressions>(m_context, m_command));
         transforms.push_back(std::make_shared<KernelGraph::LoadPacked>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
 
@@ -434,13 +442,19 @@ namespace rocRoller
             transforms.push_back(std::make_shared<KernelGraph::RemoveSetCoordinate>());
             transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         }
-        transforms.push_back(std::make_shared<KernelGraph::AssignComputeIndex>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::NopExtraScopes>());
         transforms.push_back(std::make_shared<KernelGraph::InlineInits>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
+        if(applyScheduleMultiplyAndLDS)
+            transforms.push_back(std::make_shared<KernelGraph::RemoveImplicitScheduling>());
         transforms.push_back(std::make_shared<KernelGraph::OrderMultiplyNodes>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        if(applyScheduleMultiplyAndLDS)
+            transforms.push_back(std::make_shared<KernelGraph::ScheduleMultiplyAndLDS>());
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        transforms.push_back(std::make_shared<KernelGraph::OrderExchangeNodes>());
         transforms.push_back(std::make_shared<KernelGraph::AliasDataFlowTags>());
+        transforms.push_back(std::make_shared<KernelGraph::AddLDSBarriers>());
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context, m_command));
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocateArguments>(m_context));
@@ -632,13 +646,13 @@ namespace rocRoller
         m_executableKernel->loadKernelFromCodeObjectFile(
             fileName, kernelName, m_context->targetArchitecture().target());
 
-        auto yaml   = readMetaDataFromCodeObject(fileName);
-        auto kernel = AssemblyKernels::fromYAML(yaml).kernels[0];
-
-        // XXX Instead of adding `setKernel`, should the context load from a code object?
+        auto kernels   = AssemblyKernels::fromELF(fileName).kernels;
+        auto kernel    = kernels.at(0);
         auto kernelPtr = std::make_shared<AssemblyKernel>(kernel);
         m_context->setKernel(kernelPtr);
         return kernelPtr;
+
+        // XXX Instead of adding `setKernel`, should the context load from a code object?
     }
 
     ContextPtr CommandKernel::getContext()
@@ -646,9 +660,10 @@ namespace rocRoller
         return m_context;
     }
 
-    size_t CommandKernel::scratchSpaceRequired(RuntimeArguments const& args) const
+    size_t CommandKernel::scratchSpaceRequired(Operations::ScratchPolicy policy,
+                                               RuntimeArguments const&   args) const
     {
-        auto amount = m_context->getScratchAmount();
+        auto amount = m_context->getScratchAmount(policy);
 
         auto times = evaluationTimes(amount);
         AssertFatal(times[Expression::EvaluationTime::Translate]

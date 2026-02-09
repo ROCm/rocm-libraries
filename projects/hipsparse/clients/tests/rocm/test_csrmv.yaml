@@ -1,0 +1,103 @@
+# ########################################################################
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: hipsparse_common.yaml
+
+Tests:
+- name: csrmv_bad_arg
+  category: pre_checkin
+  function: csrmv_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: csrmv
+  category: quick
+  function: csrmv
+  precision: *single_double_precisions_complex_real
+  M: [0, 500, 7111]
+  N: [0, 842, 4441]
+  alpha: [3.0]
+  alphai: [-0.2]
+  beta: [1.0]
+  betai: [1.7]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: csrmv
+  category: pre_checkin
+  function: csrmv
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  alpha: [3.0]
+  alphai: [-0.2]
+  beta: [1.0]
+  betai: [1.7]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7,
+             Chebyshev4,
+             sme3Dc]
+
+- name: csrmv
+  category: nightly
+  function: csrmv
+  precision: *double_only_precisions_complex_real
+  M: 1
+  N: 1
+  alpha: [1.0]
+  alphai: [-1.2]
+  beta: [0.7]
+  betai: [0.5]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [shipsec1,
+             webbase-1M,
+             bmwcra_1,
+             rma10,
+             mc2depi,
+             ASIC_320k,
+             bibd_22_8,
+             webbase-1M]
+
+- name: csrmv
+  category: pre_checkin
+  function: csrmv
+  precision: *double_only_precisions_complex_real
+  M: 1
+  N: 1
+  alpha: [-2.0]
+  alphai: [-1.2]
+  beta: [1.5]
+  betai: [1.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [nos7,
+             mc2depi]
+  graph_test: [true]

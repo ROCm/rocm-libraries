@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,10 +37,17 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
-    // Params are: A & B type, M tile size, (transA, transB), DirectLDS A & B
+    class GEMMDirectLDSTestBasicGPU : public BaseGEMMContextFixture<>
+    {
+    };
+
+    // Params are: A & B type, M tile size, (transA, transB), load A Path, load B Path
     class GEMMDirectLDSTestGPU
-        : public BaseGEMMContextFixture<
-              std::tuple<rocRoller::DataType, int, std::pair<std::string, std::string>, bool, bool>>
+        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                   int,
+                                                   std::pair<std::string, std::string>,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath>>
     {
     };
 
@@ -204,11 +211,61 @@ namespace GEMMTests
                         problem.workgroupSizeX * problem.workgroupSizeY);
     }
 
+    TEST_P(GEMMDirectLDSTestBasicGPU, GPU_BasicGEMMFP32D2L)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        GEMMProblem gemm;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
+        gemm.transA    = "T";
+        gemm.transB    = "N";
+        gemm.m         = 3072;
+        gemm.n         = 4096;
+        gemm.k         = 4096;
+        basicGEMM<float>(gemm);
+    }
+
+    TEST_P(GEMMDirectLDSTestBasicGPU, GPU_BasicGEMMFP32D2LPadded)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
+        GEMMProblem gemm;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
+        gemm.storeLDSD = false;
+        gemm.transA    = "T";
+        gemm.transB    = "N";
+        gemm.m         = 3072;
+        gemm.n         = 4096;
+        gemm.k         = 4096;
+
+        // This kernel uses 32bit buffer_load instructions; and
+        // therefore each workgroup loads 1024 bytes per instruction
+        gemm.padA = {1024, 64};
+        gemm.padB = {1024, 96};
+        basicGEMM<float>(gemm);
+
+        auto instructions    = m_context->instructions()->toString();
+        auto ldsWriteStrides = direct2LDSWriteStrides(instructions);
+
+        std::set<int> expectedLDSWriteStrides;
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWiderDirectToLds))
+        {
+            expectedLDSWriteStrides = {4 * (1024 + 64), 4 * (1024 + 96)};
+        }
+        else
+        {
+            expectedLDSWriteStrides = {1024 + 64, 1024 + 96};
+        }
+        EXPECT_EQ(ldsWriteStrides, expectedLDSWriteStrides);
+    }
+
     TEST_P(GEMMDirectLDSTestGPU, GPU_BasicGEMMFP32)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
 
-        auto [typeAB, tileSizeM, transOp, directLDSA, directLDSB] = std::get<1>(GetParam());
+        auto [typeAB, tileSizeM, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
         AssertFatal(typeAB == DataType::Float,
                     fmt::format("Expected A & B type to be Float but got {}.", toString(typeAB)));
 
@@ -216,15 +273,13 @@ namespace GEMMTests
         gemm.macM      = tileSizeM;
         gemm.transA    = transOp.first;
         gemm.transB    = transOp.second;
-        gemm.loadPathA = directLDSA ? SolutionParams::LoadPath::BufferToLDS
-                                    : SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.loadPathB = directLDSB ? SolutionParams::LoadPath::BufferToLDS
-                                    : SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathA = loadPathA;
+        gemm.loadPathB = loadPathB;
         gemm.storeLDSD = false;
 
         basicGEMM<float>(gemm);
 
-        if(directLDSA && directLDSB)
+        if(SolutionParams::IsBufferToLDS(loadPathA) && SolutionParams::IsBufferToLDS(loadPathB))
         {
             auto generatedCode = m_context->instructions()->toString();
             EXPECT_EQ(generatedCode.find("ds_write"), std::string::npos);
@@ -363,10 +418,36 @@ namespace GEMMTests
         }
     }
 
+    template <typename DirectLDSTestType>
+    static auto FilterOutNonDirectLDSParamValues(
+        ::testing::internal::ParamGenerator<DirectLDSTestType>&& inputParamGenerator)
+    {
+        using LP = SolutionParams::LoadPath;
+        using SM = rocRoller::Operations::ScaleMode;
+
+        std::vector<DirectLDSTestType> filtered;
+        for(auto const& inputParam : inputParamGenerator)
+        {
+            auto const& params = std::get<1>(inputParam);
+
+            auto const& loadPathA = std::get<3>(params);
+            auto const& loadPathB = std::get<4>(params);
+
+            if(SolutionParams::IsBufferToLDS(loadPathA) || SolutionParams::IsBufferToLDS(loadPathB))
+            {
+                filtered.push_back(inputParam);
+            }
+        }
+
+        return ::testing::ValuesIn(filtered);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(GEMMDirectLDSTestBasic, GEMMDirectLDSTestBasicGPU, currentGPUISA());
+
     INSTANTIATE_TEST_SUITE_P(
         GEMMDirectLDSTest,
         GEMMDirectLDSTestGPU,
-        ::testing::Combine(
+        FilterOutNonDirectLDSParamValues<GEMMDirectLDSTestGPU::ParamType>(::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(::testing::Values(rocRoller::DataType::Float),
                                ::testing::Values(64, 128),
@@ -374,8 +455,14 @@ namespace GEMMTests
                                                  std::pair<std::string, std::string>("N", "T"),
                                                  std::pair<std::string, std::string>("T", "N"),
                                                  std::pair<std::string, std::string>("T", "T")),
-                               ::testing::Values(true, false),
-                               ::testing::Values(true, false))));
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDS,
+                                                 SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDS,
+                                                 SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR)))));
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMDirectLDSTest,

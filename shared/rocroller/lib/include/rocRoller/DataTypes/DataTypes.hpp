@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2025 AMD ROCm(TM) Software
+ * Copyright 2019-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -161,6 +161,8 @@ namespace rocRoller
         WAVE_SPLIT,
         WAVE_Direct2LDS,
         WAVE_SWIZZLE,
+        WAVE_FROM_GLOBAL,
+        WAVE_LDS_FROM_GLOBAL,
         Literal,
         None,
         Count
@@ -183,6 +185,7 @@ namespace rocRoller
     };
 
     std::string   toString(LayoutType l);
+    std::string   abbrev(LayoutType t);
     std::ostream& operator<<(std::ostream& stream, LayoutType l);
 
     enum class NaryArgument : int

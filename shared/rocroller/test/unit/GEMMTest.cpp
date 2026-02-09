@@ -41,11 +41,39 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
-    class GEMMTestGPU : public BaseGEMMContextFixture<>
+    std::set<int> nonZeroDSReadOffsets(std::string const& instruction, std::string const& s)
     {
-    };
+        std::regex ds_read_offset(instruction + ".*offset:(\\d+)");
 
-    class GEMMF8TestGPU : public BaseGEMMContextFixture<>
+        auto begin = std::sregex_iterator(s.begin(), s.end(), ds_read_offset);
+        auto end   = std::sregex_iterator();
+
+        std::set<int> rv;
+        for(auto i = begin; i != end; ++i)
+        {
+            auto m = (*i)[1].str();
+            rv.insert(std::stoi(m));
+        }
+        return rv;
+    }
+
+    std::set<int> direct2LDSWriteStrides(std::string const& s)
+    {
+        std::regex m0_stride_pattern("s_add_u32 m0, m0, (\\d+)");
+
+        auto begin = std::sregex_iterator(s.begin(), s.end(), m0_stride_pattern);
+        auto end   = std::sregex_iterator();
+
+        std::set<int> rv;
+        for(auto i = begin; i != end; ++i)
+        {
+            auto m = (*i)[1].str();
+            rv.insert(std::stoi(m));
+        }
+        return rv;
+    }
+
+    class GEMMTestGPU : public BaseGEMMContextFixture<>
     {
     };
 
@@ -103,6 +131,33 @@ namespace GEMMTests
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
         basicGEMM<float>(gemm);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMPadLDS)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        GEMMProblem gemm;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.transA    = "T";
+        gemm.transB    = "N";
+
+        // This kernel uses 128bit buffer_load and ds_write
+        // instructions; so each wave loads 16 * 64 bytes per
+        // instruction.
+        gemm.padA = {32 * 64, 4};
+        gemm.padB = {16 * 64, 4};
+        basicGEMM<float>(gemm);
+
+        auto instructions = m_context->instructions()->toString();
+        auto ldsOffsets   = nonZeroDSReadOffsets("ds_read_b32", instructions);
+
+        // With no padding in A, the LDS buffer for B would start at
+        //
+        //   B[0] = WGTS M * WGTS K * sizeof(float)
+        //
+        // so make sure this isn't in the read offsets!
+        EXPECT_FALSE(ldsOffsets.contains(gemm.macM * gemm.macK * sizeof(float)));
     }
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMapping)
@@ -295,10 +350,10 @@ namespace GEMMTests
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadPathA     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.loadPathB     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.loadLDSScaleA = false;
-        gemm.loadLDSScaleB = false;
+        gemm.loadPathA      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadScalePathA = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadScalePathB = SolutionParams::LoadPath::BufferToVGPR;
 
         gemm.unrollK           = 2;
         gemm.prefetch          = true;
@@ -526,21 +581,6 @@ namespace GEMMTests
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
 
-        auto nonZeroDSReadOffsets = [](auto s) {
-            std::regex ds_read_offset("ds_read_b128.*offset:(\\d+)");
-
-            auto begin = std::sregex_iterator(s.begin(), s.end(), ds_read_offset);
-            auto end   = std::sregex_iterator();
-
-            std::set<int> rv;
-            for(auto i = begin; i != end; ++i)
-            {
-                auto m = (*i)[1].str();
-                rv.insert(std::stoi(m));
-            }
-            return rv;
-        };
-
         gemm.m = 256;
         gemm.n = 512;
         gemm.k = 64;
@@ -561,12 +601,12 @@ namespace GEMMTests
         gemm.splitStoreTileIntoWaveBlocks = true;
         basicGEMM<Half>(gemm);
         auto instructions0 = output();
-        EXPECT_EQ(nonZeroDSReadOffsets(instructions0), std::set<int>{1024});
+        EXPECT_EQ(nonZeroDSReadOffsets("ds_read_b128", instructions0), std::set<int>{1024});
 
         gemm.splitStoreTileIntoWaveBlocks = false;
         basicGEMM<Half>(gemm);
         auto instructions1 = output();
-        EXPECT_EQ(nonZeroDSReadOffsets(instructions1), std::set<int>{64});
+        EXPECT_EQ(nonZeroDSReadOffsets("ds_read_b128", instructions1), std::set<int>{64});
     }
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16AllLDSDebug)
@@ -610,10 +650,10 @@ namespace GEMMTests
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadPathA     = SolutionParams::LoadPath::BufferToVGPR;
-        gemm.loadPathB     = SolutionParams::LoadPath::BufferToVGPR;
-        gemm.loadLDSScaleA = true;
-        gemm.loadLDSScaleB = true;
+        gemm.loadPathA      = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadPathB      = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadScalePathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadScalePathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
         gemm.scaleAMode = Operations::ScaleMode::Separate;
         gemm.scaleBMode = Operations::ScaleMode::Separate;

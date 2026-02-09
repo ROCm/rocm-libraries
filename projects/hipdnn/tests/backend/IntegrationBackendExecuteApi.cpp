@@ -7,7 +7,7 @@
 #include "hipdnn_backend.h"
 #include <test_plugins/TestPluginConstants.hpp>
 
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 #include <gtest/gtest.h>
 

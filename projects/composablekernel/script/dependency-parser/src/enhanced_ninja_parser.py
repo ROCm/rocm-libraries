@@ -99,7 +99,7 @@ class EnhancedNinjaDependencyParser:
             print("No object files found - skipping dependency extraction")
             return
 
-        max_workers = min(16, len(object_files))  # Limit concurrent processes
+        max_workers = min(128, len(object_files))  # Limit concurrent processes
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all object files for processing
@@ -191,17 +191,17 @@ class EnhancedNinjaDependencyParser:
         if any(
             file_path.startswith(prefix)
             for prefix in [
-                "include/",
-                "library/",
-                "test/",
-                "example/",
-                "src/",
-                "profiler/",
-                "build/include/",
-                "build/_deps/gtest",
-                "client_example",
-                "codegen",
-                "tile_engine",
+                "projects/composablekernel/include/",
+                "projects/composablekernel/library/",
+                "projects/composablekernel/test/",
+                "projects/composablekernel/example/",
+                "projects/composablekernel/src/",
+                "projects/composablekernel/profiler/",
+                "projects/composablekernel/build/include/",
+                "projects/composablekernel/build/_deps/gtest",
+                "projects/composablekernel/client_example",
+                "projects/composablekernel/codegen",
+                "projects/composablekernel/tile_engine",
             ]
         ):
             return True

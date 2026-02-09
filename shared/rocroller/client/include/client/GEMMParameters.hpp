@@ -33,11 +33,10 @@
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
-#include <rocRoller/Utilities/Utils.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 
 #include "client/BenchmarkSolution.hpp"
-#include <DataGenerator.hpp>
-#include <common/SourceMatcher.hpp>
+#include <mxDataGenerator/DataGenerator.hpp>
 
 namespace rocRoller
 {
@@ -71,6 +70,12 @@ namespace rocRoller
                 int m, k, n, l;
             };
 
+            struct KernelNames
+            {
+                std::string fullName;
+                std::string shortName;
+            };
+
             std::string toString(TransposeType trans);
 
             struct TypeParameters
@@ -92,6 +97,9 @@ namespace rocRoller
                 int scaleBlockSize = -1;
 
                 bool scaleSkipPermlane = false;
+
+                std::vector<size_t> scalePretileA;
+                std::vector<size_t> scalePretileB;
 
                 // Order: M/N, K tile, K subtile
                 std::vector<size_t> scaleShuffleTileA;
@@ -156,8 +164,10 @@ namespace rocRoller
                 // Datatype of inputs and outputs
                 TypeParameters types;
 
-                bool loadLDSScaleA = false;
-                bool loadLDSScaleB = false;
+                Parameters::Solution::LoadPath loadPathAScale{
+                    Parameters::Solution::LoadPath::BufferToVGPR};
+                Parameters::Solution::LoadPath loadPathBScale{
+                    Parameters::Solution::LoadPath::BufferToVGPR};
 
                 bool      swizzleScale    = false;
                 MKNLTuple swizzleTileSize = {0, 0, 0, 0};
@@ -169,6 +179,9 @@ namespace rocRoller
                 Parameters::Solution::LoadPath loadPathB{
                     Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
                 bool storeLDSD = true;
+
+                std::pair<int, int> padLDSA = {0, 0};
+                std::pair<int, int> padLDSB = {0, 0};
 
                 bool prefetch          = false;
                 int  prefetchInFlight  = 2;
@@ -184,14 +197,13 @@ namespace rocRoller
                 std::string schedulerCost;
                 bool        matchMemoryAccess;
 
-                // TODO Use StreamKConfig
-                bool streamK               = false;
-                bool streamKTwoTile        = false;
-                bool streamKTwoTileDPFirst = false;
+                bool tailLoops = true;
+
+                StreamKMode streamK = StreamKMode::None;
 
                 std::string version;
 
-                std::string generateKernelName() const;
+                KernelNames generateKernelName() const;
             };
 
             struct Result
@@ -216,6 +228,11 @@ namespace rocRoller::Client::GEMMClient::CLI
 {
     constexpr bool PARSE_SUCCESS = true;
     constexpr bool PARSE_FAILURE = false;
+
+    /**
+     * @brief Parse an XxY pair.
+     */
+    bool ParseIntPair(const std::string& arg, std::pair<int, int>& x);
 
     /**
      * @brief Parse an MxNxK or MxNxKxB tuple from a string.

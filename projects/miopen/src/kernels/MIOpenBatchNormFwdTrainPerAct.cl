@@ -44,10 +44,11 @@ __kernel void MIOpenBatchNormFwdTrainPerActivation(
     const __global _FLOAT_PREC* __restrict scale, /* gamma 1xCxHxW */
     const __global _FLOAT_PREC* __restrict bias,  /* beta 1xCxHxW */
 #if(MIO_RUNNING_RESULT == 1)
-    double expAvgFactor, /* input momentum */
-    __global
-        _FLOAT_PREC* __restrict resultRunningMean, /*input and output, same descriptor as bias*/
-    __global _FLOAT_PREC* __restrict resultRunningVariance, /*input and output*/
+    double expAvgFactor,                                          /* input momentum */
+    const __global _FLOAT_PREC* __restrict prevResultRunningMean, /*same descriptor as bias*/
+    const __global _FLOAT_PREC* __restrict prevResultRunningVariance,
+    __global _FLOAT_PREC* __restrict nextResultRunningMean, /*same descriptor as bias*/
+    __global _FLOAT_PREC* __restrict nextResultRunningVariance,
 #endif
     double epsilon /* input fuzz param > 0 */
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
@@ -99,8 +100,14 @@ __kernel void MIOpenBatchNormFwdTrainPerActivation(
         pvt_bias    = *(bias + adjIndex);
 
 #if(MIO_RUNNING_RESULT == 1)
-        running_stash_pa(
-            resultRunningMean, resultRunningVariance, expAvgFactor, mean, variance, adjIndex);
+        running_stash_pa(prevResultRunningMean,
+                         prevResultRunningVariance,
+                         nextResultRunningMean,
+                         nextResultRunningVariance,
+                         expAvgFactor,
+                         mean,
+                         variance,
+                         adjIndex);
 #endif
 
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
@@ -113,7 +120,7 @@ __kernel void MIOpenBatchNormFwdTrainPerActivation(
             inhat      = (FLOAT2FLOATPREC(in[index]) - mean) * invVariance;
             out[index] = FLOATPREC2FLOAT(mad(pvt_scale, inhat, pvt_bias));
         } // end for(n)
-    }     // end for(img_offset) //image mini_batch is processed
+    } // end for(img_offset) //image mini_batch is processed
 }
 
 // Restore warnings

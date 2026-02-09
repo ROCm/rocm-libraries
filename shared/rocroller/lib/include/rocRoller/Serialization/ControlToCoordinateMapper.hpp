@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -138,26 +138,6 @@ namespace rocRoller
             }
 
             static void mapping(IO& io, KernelGraph::Connections::TypeAndNaryArgument& x)
-            {
-                AssertFatal((std::same_as<EmptyContext, Context>));
-
-                Context ctx;
-                mapping(io, x, ctx);
-            }
-        };
-
-        template <typename IO, typename Context>
-        struct MappingTraits<KernelGraph::Connections::ComputeIndex, IO, Context>
-        {
-            using iot = IOTraits<IO>;
-
-            static void mapping(IO& io, KernelGraph::Connections::ComputeIndex& x, Context& ctx)
-            {
-                iot::mapRequired(io, "argument", x.argument);
-                iot::mapRequired(io, "index", x.index);
-            }
-
-            static void mapping(IO& io, KernelGraph::Connections::ComputeIndex& x)
             {
                 AssertFatal((std::same_as<EmptyContext, Context>));
 

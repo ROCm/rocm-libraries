@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -40,10 +41,6 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-#define ELL_IND_ROW(i, el, m, width) (el) * (m) + (i)
-#define ELL_IND_EL(i, el, m, width) (el) + (width) * (i)
-#define ELL_IND(i, el, m, width) ELL_IND_ROW(i, el, m, width)
-
 template <typename T>
 void testing_hybmv_bad_arg(const Arguments& argus)
 {
@@ -53,8 +50,7 @@ void testing_hybmv_bad_arg(const Arguments& argus)
     T                    beta      = make_DataType<T>(0.2);
     hipsparseOperation_t transA    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -98,7 +94,7 @@ void testing_hybmv_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_hybmv(Arguments argus)
+void testing_hybmv(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                     m              = argus.M;
@@ -111,11 +107,7 @@ hipsparseStatus_t testing_hybmv(Arguments argus)
     int                     user_ell_width = argus.ell_width;
     std::string             filename       = argus.filename;
 
-    T zero = make_DataType<T>(0.0);
-    T one  = make_DataType<T>(1.0);
-
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -135,11 +127,8 @@ hipsparseStatus_t testing_hybmv(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcol_ind, hval, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcol_ind, hval, idx_base));
 
     std::vector<T> hx(n);
     std::vector<T> hy_1(m);
@@ -208,7 +197,7 @@ hipsparseStatus_t testing_hybmv(Arguments argus)
         if(ell_max_width > width_limit)
         {
             verify_hipsparse_status_invalid_value(status, "ell_max_width > width_limit");
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
     }
 
@@ -249,69 +238,33 @@ hipsparseStatus_t testing_hybmv(Arguments argus)
         // HIPSPARSE pointer mode host
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
         CHECK_HIPSPARSE_ERROR(
-            hipsparseXhybmv(handle, transA, &h_alpha, descr, hyb, dx, &h_beta, dy_1));
+            testing::hipsparseXhybmv<T>(handle, transA, &h_alpha, descr, hyb, dx, &h_beta, dy_1));
 
         // HIPSPARSE pointer mode device
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
         CHECK_HIPSPARSE_ERROR(
-            hipsparseXhybmv(handle, transA, d_alpha, descr, hyb, dx, d_beta, dy_2));
+            testing::hipsparseXhybmv<T>(handle, transA, d_alpha, descr, hyb, dx, d_beta, dy_2));
 
         // copy output from device to CPU
         CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * m, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
 
         // CPU
-        // ELL part
-        if(ell_nnz > 0)
-        {
-            for(int i = 0; i < m; ++i)
-            {
-                T sum = zero;
-                for(int p = 0; p < dhyb->ell_width; ++p)
-                {
-                    int idx = ELL_IND(i, p, m, dhyb->ell_width);
-                    int col = hell_col[idx] - idx_base;
-
-                    if(col >= 0 && col < n)
-                    {
-                        sum = sum + testing_mult(hell_val[idx], hx[col]);
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-
-                if(h_beta != zero)
-                {
-                    hy_gold[i] = testing_mult(h_beta, hy_gold[i]) + testing_mult(h_alpha, sum);
-                }
-                else
-                {
-                    hy_gold[i] = testing_mult(h_alpha, sum);
-                }
-            }
-        }
-
-        // COO part
-        if(coo_nnz >= 0)
-        {
-            T coo_beta = (ell_nnz > 0) ? one : h_beta;
-
-            for(int i = 0; i < m; ++i)
-            {
-                hy_gold[i] = testing_mult(hy_gold[i], coo_beta);
-            }
-
-            for(int i = 0; i < coo_nnz; ++i)
-            {
-                int row = hcoo_row[i] - idx_base;
-                int col = hcoo_col[i] - idx_base;
-
-                hy_gold[row]
-                    = hy_gold[row] + testing_mult(h_alpha, testing_mult(hcoo_val[i], hx[col]));
-            }
-        }
+        host_hybmv(m,
+                   n,
+                   h_alpha,
+                   ell_nnz,
+                   dhyb->ell_width,
+                   hell_col.data(),
+                   hell_val.data(),
+                   coo_nnz,
+                   hcoo_row.data(),
+                   hcoo_col.data(),
+                   hcoo_val.data(),
+                   hx.data(),
+                   h_beta,
+                   hy_gold.data(),
+                   idx_base);
 
         unit_check_near(1, m, 1, hy_gold.data(), hy_1.data());
         unit_check_near(1, m, 1, hy_gold.data(), hy_2.data());
@@ -327,8 +280,8 @@ hipsparseStatus_t testing_hybmv(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(
-                hipsparseXhybmv(handle, transA, &h_alpha, descr, hyb, dx, &h_beta, dy_1));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseXhybmv<T>(
+                handle, transA, &h_alpha, descr, hyb, dx, &h_beta, dy_1));
         }
 
         double gpu_time_used = get_time_us();
@@ -336,8 +289,8 @@ hipsparseStatus_t testing_hybmv(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(
-                hipsparseXhybmv(handle, transA, &h_alpha, descr, hyb, dx, &h_beta, dy_1));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseXhybmv<T>(
+                handle, transA, &h_alpha, descr, hyb, dx, &h_beta, dy_1));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
@@ -365,7 +318,6 @@ hipsparseStatus_t testing_hybmv(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_HYBMV_HPP

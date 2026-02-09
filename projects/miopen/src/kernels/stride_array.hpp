@@ -45,10 +45,10 @@ public:
 
     __host__ T& operator[](unsigned i) { return data_[i]; }
 
-    __host__ __device__ MyArray()                   = default;
-    __host__ __device__ MyArray(const MyArray&)     = default;
-    __host__ __device__ MyArray(MyArray&&) noexcept = default;
-    __host__ __device__ MyArray& operator=(const MyArray&) = default;
+    __host__ __device__ MyArray()                              = default;
+    __host__ __device__ MyArray(const MyArray&)                = default;
+    __host__ __device__ MyArray(MyArray&&) noexcept            = default;
+    __host__ __device__ MyArray& operator=(const MyArray&)     = default;
     __host__ __device__ MyArray& operator=(MyArray&&) noexcept = default;
     __host__ __device__ ~MyArray()                             = default;
 };

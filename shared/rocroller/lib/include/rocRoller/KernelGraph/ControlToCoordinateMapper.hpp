@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -112,42 +112,8 @@ namespace rocRoller::KernelGraph
             return a.id < b.id;
         }
 
-        enum class ComputeIndexArgument : int
-        {
-            TARGET = 0,
-            INCREMENT,
-            BASE,
-            OFFSET,
-            STRIDE,
-            BUFFER,
-
-            Count
-        };
-
-        std::string   toString(ComputeIndexArgument cia);
-        std::ostream& operator<<(std::ostream&, ComputeIndexArgument const&);
-
-        struct ComputeIndex
-        {
-            ComputeIndexArgument argument;
-            int                  index = 0;
-
-            bool operator==(ComputeIndex const& other) const
-            {
-                return this->index == other.index && this->argument == other.argument;
-            }
-        };
-
-        bool inline operator<(ComputeIndex const& a, ComputeIndex const& b)
-        {
-            if(a.argument == b.argument)
-                return a.index < b.index;
-            return a.argument < b.argument;
-        }
-
         using ConnectionSpec = std::variant<std::monostate,
                                             JustNaryArgument,
-                                            ComputeIndex,
                                             TypeAndSubDimension,
                                             TypeAndNaryArgument,
                                             UnrollStride,
@@ -157,6 +123,7 @@ namespace rocRoller::KernelGraph
         std::string   toString(ConnectionSpec const& cs);
         std::ostream& operator<<(std::ostream& stream, ConnectionSpec const& cs);
 
+        NaryArgument getNaryArgument(Connections::ConnectionSpec const& conn);
     }
 
     struct DeferredConnection
@@ -329,6 +296,8 @@ namespace rocRoller::KernelGraph
     };
 
     std::string toString(ControlToCoordinateMapper::Connection const& conn);
+
+    NaryArgument getNaryArgument(ControlToCoordinateMapper::Connection const& conn);
 
 }
 

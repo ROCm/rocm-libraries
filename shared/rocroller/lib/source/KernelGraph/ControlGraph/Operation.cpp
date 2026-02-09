@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -221,7 +221,6 @@ namespace rocRoller::KernelGraph::ControlGraph
 
     RR_CLASS_NAME_IMPL(AssertOp);
     RR_CLASS_NAME_IMPL(Assign);
-    RR_CLASS_NAME_IMPL(ComputeIndex);
     RR_CLASS_NAME_IMPL(ConditionalOp);
     RR_CLASS_NAME_IMPL(Deallocate);
     RR_CLASS_NAME_IMPL(DoWhileOp);

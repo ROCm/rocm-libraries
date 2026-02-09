@@ -7,8 +7,14 @@
    - Follow the instructions in [Building.md](../docs/Building.md) to install the needed dependencies, compilers, and libraries for building hipDNN projects. Specifically:
      * CMake
      * Ninja
-     * ROCm / TheRock
+     * ROCm / TheRock (includes AMD Clang compiler)
    - A ROCm-compatible GPU is required to run the samples
+
+> [!IMPORTANT]
+> **AMD Clang++ Requirement for Samples**
+> **AMD Clang++ is required** to compile hipDNN samples and tests. These components utilize `Tensor.hpp` and reference validation implementations that depend on HIP device headers for GPU buffer allocation.
+>
+> **Note for API Consumers:** This requirement **does not** apply to standard usage of the `hipDNN` Frontend. Projects consuming the library API without using these specific `data_sdk` utilities for validation & GPU memory allocation do not require AMD Clang++.
 
 2. **Build Samples:** From this `samples` directory:
    ```bash
@@ -59,6 +65,16 @@ All samples are templated for mixed-precision execution with Fp32, Fp16, and Bfp
 
 The current samples include:
 
+
+### [**`BnInferenceWithVariance`**](./batchnorm/BnInferenceWithVariance.cpp)
+
+Executes a single-node batch normalization inference with variance graph on a 4D input tensor.
+
+- It normalizes each dimension of the input tensor `x` of shape `(N, C, H, W)`, using pre-calculated population statistics. The result is then transformed by the learned parameters `scale` and `bias`, each with shape `(1, C, 1, 1)` to enable broadcasting over the batch (N) and spatial (H, W) dimensions. At a high-level, the following element-wise linear transformation is broadcast over the batch and spatial dimensions:
+    ```python
+    y = scale * ((x - mean) / sqrt(variance + epsilon)) + bias
+    ```
+
 ### [**`BnTraining`**](./batchnorm/BnTraining.cpp)
 
 Executes the forward pass of a batch normalization training graph on a 4D input tensor.
@@ -69,6 +85,27 @@ Executes the forward pass of a batch normalization training graph on a 4D input 
     next_running_variance = (1 - momentum) * prev_running_variance + momentum * batch_variance
     ```
 - The graph outputs the normalized tensor `y`, along with the batch mean/variance (`mean`, `inv_variance`) required for the backward pass, and the updated population statistics (`next_running_mean`, `next_running_variance`) required for inference.
+
+### [**`FusedBnTrainingActiv`**](./batchnorm/FusedBnTrainingActiv.cpp)
+
+Executes a fused batch normalization training and activation graph.
+
+The fused graph consists of two operations:
+
+1. **Batchnorm Training**: Normalizes input `x` using batch statistics, updates running statistics (optional), and outputs saved mean and inverse variance.
+   ```python
+   y_bn = scale * ((x - mean) * inv_variance) + bias
+   ```
+
+2. **Activation (ReLU)**: Applies ReLU activation
+   ```python
+   y = relu(y_bn) = max(y_bn, 0)
+   ```
+
+**Key Features:**
+- Demonstrates fusion of batch normalization training and activation
+- Supports both full training (updating running stats) and batch-stats-only modes
+- Uses `CpuReferenceGraphExecutor` for validation
 
 ### [**`BnBackward`**](./batchnorm/BnBackward.cpp)
 
@@ -124,6 +161,46 @@ Inputs: x, dy, scale, bias, mean, inv_variance
         ↓
 Outputs: dx, dscale, dbias
 ```
+
+### [**`FusedBnInferenceActiv`**](./batchnorm/FusedBnInferenceActiv.cpp)
+
+Executes a fused batch normalization inference and activation graph.
+
+The fused graph consists of two operations:
+
+1. **Batchnorm Inference**: Normalizes input `x` using saved statistics (mean and inverse variance)
+   ```python
+   bn_y = scale * ((x - mean) * inv_variance) + bias
+   ```
+
+2. **Activation (ReLU)**: Applies ReLU activation
+   ```python
+   y = relu(bn_y) = max(bn_y, 0)
+   ```
+
+**Key Features:**
+- Demonstrates fusion of batch normalization inference and activation
+- Uses `CpuReferenceGraphExecutor` for validation
+
+### [**`FusedBnInferenceVarianceActiv`**](./batchnorm/FusedBnInferenceVarianceActiv.cpp)
+
+Executes a fused batch normalization inference (with variance) and activation graph.
+
+The fused graph consists of two operations:
+
+1. **Batchnorm Inference (with Variance)**: Normalizes input `x` using saved statistics (mean and variance)
+   ```python
+   bn_y = scale * ((x - mean) / sqrt(variance + epsilon)) + bias
+   ```
+
+2. **Activation (ReLU)**: Applies ReLU activation
+   ```python
+   y = relu(bn_y) = max(bn_y, 0)
+   ```
+
+**Key Features:**
+- Demonstrates fusion of batch normalization inference (using variance input) and activation
+- Uses `CpuReferenceGraphExecutor` for validation
 
 ### [**`ConvFprop`**](./convolution/ConvFprop.cpp)
 

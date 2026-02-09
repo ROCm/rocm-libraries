@@ -100,8 +100,8 @@ struct GEMMProblem
 
     bool splitStoreTileIntoWaveBlocks = false;
 
-    bool loadLDSScaleA = false;
-    bool loadLDSScaleB = false;
+    SolutionParams::LoadPath loadScalePathA{SolutionParams::LoadPath::BufferToVGPR};
+    SolutionParams::LoadPath loadScalePathB{SolutionParams::LoadPath::BufferToVGPR};
 
     int  workgroupMappingDim   = -1;
     int  workgroupMappingValue = -1;
@@ -114,6 +114,10 @@ struct GEMMProblem
     rocRoller::DataType scaleTypeB = rocRoller::DataType::None;
 
     int scaleBlockSize = -1;
+
+    // LDS padding for MATRIX_A and MATRIX_B; default no padding
+    std::pair<int, int> padA = {0, 0};
+    std::pair<int, int> padB = {0, 0};
 
     auto operator<=>(GEMMProblem const& rhs) const = default;
 };

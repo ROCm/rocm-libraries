@@ -28,6 +28,7 @@
 #include <charconv>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <unordered_map>
 
@@ -45,6 +46,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_MP_BD_WINOGRAD_F6X3)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_MPASS_F3X4)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_MPASS_F3X5)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_MPASS_F3X6)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CHECK_SUB_BUFFER_OOB_MEMORY_ACCESS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT)
@@ -58,11 +60,14 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V4R1_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_WINOGRAD)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEBUG_FIND_ONLY_SOLVER)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_WORKAROUND_ISSUE_2492)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LOGGING)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LOGGING_CMD)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LOGGING_ELAPSED_TIME)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_FIND_ENFORCE)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_FIND_MODE)
+MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_FIND_MODE_FUSION)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_USER_DB_PATH)
+MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_CUSTOM_CACHE_DIR)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_LOG_LEVEL)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS)
 
@@ -79,8 +84,8 @@ template <class T>
 constexpr bool is_type_int = (std::is_integral_v<T> && !is_type_bool<T>);
 
 template <class T>
-constexpr bool is_type_str = (std::is_same_v<T, std::string> ||
-                              std::is_same_v<T, std::string_view>);
+constexpr bool is_type_str =
+    (std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view>);
 
 struct LibEnvVar
 {
@@ -94,7 +99,7 @@ struct LibEnvVar
 private:
     struct LibEnvVarBase
     {
-        virtual ~LibEnvVarBase(){};
+        virtual ~LibEnvVarBase() {};
         virtual std::optional<std::string> Get() const    = 0;
         virtual void Update(std::string_view value) const = 0;
         virtual void Clear() const                        = 0;
@@ -107,12 +112,12 @@ private:
         static_assert(is_type_bool<value_type> || is_type_int<value_type> ||
                       is_type_str<value_type>);
 
-        LibEnvVarImpl(const T& var_in) : var(var_in){};
+        LibEnvVarImpl(const T& var_in) : var(var_in) {};
 
         std::optional<std::string> Get() const override
         {
             if(!var)
-                return std::nullopt;
+                return {};
 
             const auto value = miopen::env::value(var);
 
@@ -178,6 +183,7 @@ const LibEnvVar& FindEnvVariable(std::string_view name)
         {MIOPEN_DEBUG_AMD_WINOGRAD_MPASS_F3X4.GetName(), MIOPEN_DEBUG_AMD_WINOGRAD_MPASS_F3X4},
         {MIOPEN_DEBUG_AMD_WINOGRAD_MPASS_F3X5.GetName(), MIOPEN_DEBUG_AMD_WINOGRAD_MPASS_F3X5},
         {MIOPEN_DEBUG_AMD_WINOGRAD_MPASS_F3X6.GetName(), MIOPEN_DEBUG_AMD_WINOGRAD_MPASS_F3X6},
+        {MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1.GetName(), MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1},
         {MIOPEN_DEBUG_CHECK_SUB_BUFFER_OOB_MEMORY_ACCESS.GetName(), MIOPEN_DEBUG_CHECK_SUB_BUFFER_OOB_MEMORY_ACCESS},
         {MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW.GetName(), MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW},
         {MIOPEN_DEBUG_CONV_DIRECT.GetName(), MIOPEN_DEBUG_CONV_DIRECT},
@@ -193,12 +199,15 @@ const LibEnvVar& FindEnvVariable(std::string_view name)
         {MIOPEN_DEBUG_FIND_ONLY_SOLVER.GetName(), MIOPEN_DEBUG_FIND_ONLY_SOLVER},
         {MIOPEN_DEBUG_TUNING_ITERATIONS_MAX.GetName(), MIOPEN_DEBUG_TUNING_ITERATIONS_MAX},
         {MIOPEN_DEBUG_WORKAROUND_ISSUE_2492.GetName(), MIOPEN_DEBUG_WORKAROUND_ISSUE_2492},
+        {MIOPEN_ENABLE_LOGGING.GetName(), MIOPEN_ENABLE_LOGGING},
         {MIOPEN_ENABLE_LOGGING_CMD.GetName(), MIOPEN_ENABLE_LOGGING_CMD},
         {MIOPEN_ENABLE_LOGGING_ELAPSED_TIME.GetName(), MIOPEN_ENABLE_LOGGING_ELAPSED_TIME},
         {MIOPEN_FIND_ENFORCE.GetName(), MIOPEN_FIND_ENFORCE},
         {MIOPEN_FIND_MODE.GetName(), MIOPEN_FIND_MODE},
+        {MIOPEN_FIND_MODE_FUSION.GetName(), MIOPEN_FIND_MODE_FUSION},
         {MIOPEN_LOG_LEVEL.GetName(), MIOPEN_LOG_LEVEL},
         {MIOPEN_USER_DB_PATH.GetName(), MIOPEN_USER_DB_PATH},
+        {MIOPEN_CUSTOM_CACHE_DIR.GetName(), MIOPEN_CUSTOM_CACHE_DIR},
         {MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS.GetName(), MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS}
         // clang-format on
     };

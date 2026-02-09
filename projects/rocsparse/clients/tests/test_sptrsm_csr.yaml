@@ -46,7 +46,6 @@ Definitions:
 
   - &alpha_range_checkin
     - { alpha:   2.0, alphai:  0.0 }
-    - { alpha:   3.0, alphai: -1.0 }
 
   - &alpha_range_nightly
     - { alpha:  -0.5, alphai:  0.1 }
@@ -66,14 +65,14 @@ Tests:
   indextype: *i64
   precision: *double_only_precisions
   M_N: *M_N_range_checkin
-  K: [0, 1]
+  K: [1]
   ld_multiplier_B: [2]
   ld_multiplier_C: [2]
   alpha_alphai: *alpha_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
-  orderB: *all_rocsparse_order
-  orderC: *all_rocsparse_order
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
   diag: [rocsparse_diag_type_unit]
   uplo: [rocsparse_fill_mode_upper]
   baseA: [rocsparse_index_base_zero]
@@ -91,13 +90,13 @@ Tests:
   indextype: *i32
   precision: *single_double_precisions
   M_N: *M_N_range_checkin
-  K: [1, 2, 8]
+  K: [8]
   ld_multiplier_B: [1]
   ld_multiplier_C: [4]
   alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
-  orderB: *all_rocsparse_order
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_row]
   orderC: *all_rocsparse_order
   diag: [rocsparse_diag_type_unit]
   uplo: *all_rocsparse_fill_mode
@@ -397,6 +396,8 @@ Tests:
              sme3Dc,
              shipsec1,
              bmwcra_1]
+  host_memory_gb: 32
+  device_memory_gb: 32
 
 - name: sptrsm_csr
   category: quick

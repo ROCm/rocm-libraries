@@ -60,8 +60,6 @@
 #include <cstddef>
 #include <memory>
 
-namespace po = boost::program_options;
-
 namespace TensileLite
 {
     namespace Client
@@ -335,11 +333,16 @@ namespace TensileLite
                                                                                       "comment in library update "
                                                                                       "file.")
 
+                ("a-ops",                    vector_default_empty<TensorOp>(), "Operations applied to A.")
+                ("b-ops",                    vector_default_empty<TensorOp>(), "Operations applied to B.")
+                ("c-ops",                    vector_default_empty<TensorOp>(), "Operations applied to C.")
+                ("d-ops",                    vector_default_empty<TensorOp>(), "Operations applied to D.")
 
                 ("exit-on-error",            po::value<bool>()->default_value(false), "Exit run early on failed kernels or other errors.")
                 ("selection-only",           po::value<bool>()->default_value(false), "Don't run any solutions, only print kernel selections.")
                 ("max-workspace-size",       po::value<size_t>()->default_value(32*1024*1024), "Max workspace for training")
                 ("granularity-threshold",    po::value<double>()->default_value(0.0), "Don't run a solution if total granularity is below")
+                ("prediction-threshold",     po::value<double>()->default_value(2.0), "Don't run a solution if predicted performance is low")
 
                 ("activation-type",           po::value<ActivationType>()->default_value(ActivationType::None), "An activation type")
                 ("activation-hpa",            po::value<bool>()->default_value(false), "Use the same data type as high precision accumulate.")
@@ -523,7 +526,6 @@ namespace TensileLite
             {
                 auto vec         = split_nums<T>(str);
                 outValue[vec[0]] = vec[1];
-                // std::cout << "map: [" << vec[0] << "," << vec[1] << "]" << std::endl;
             }
 
             boost::any v(outValue);
@@ -625,7 +627,11 @@ int main(int argc, const char* argv[])
     auto        hardware = GetHardware(args);
     hipStream_t stream   = GetStream(args);
 
-    auto                              library = LoadSolutionLibrary(args);
+    std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library
+        = LoadSolutionLibrary(args);
+    if(!library)
+        throw std::runtime_error("Failed to load solution library");
+
     TensileLite::hip::SolutionAdapter adapter;
     LoadCodeObjects(args, adapter);
 

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -941,6 +941,14 @@ namespace rocRoller
                 co_yield generateOp<BitFieldExtract>(dest, arg, expr);
             }
 
+            Generator<Instruction> operator()(Register::ValuePtr& dest, Reinterpret const& expr)
+            {
+                co_yield call(dest, expr.arg);
+                AssertFatal(dest != nullptr,
+                            "Reinterpret expression must have a destination register.");
+                dest->setVariableType(expr.destinationType);
+            }
+
             Generator<Instruction> operator()(Register::ValuePtr& dest, ScaledMatrixMultiply expr)
             {
 
@@ -1110,7 +1118,7 @@ namespace rocRoller
             Generator<Instruction> operator()(Register::ValuePtr&              dest,
                                               AssemblyKernelArgumentPtr const& expr)
             {
-                co_yield m_context->argLoader()->getValue(expr->name, dest);
+                co_yield m_context->argLoader()->getValue(expr->getName(), dest);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr&         dest,
@@ -1300,7 +1308,6 @@ namespace rocRoller
                    && getConsolidationCount(tree) == 0))
             {
                 // Don't use CSE in this case
-
                 tree.resize(0);
                 co_yield v.call(dest, expr);
             }

@@ -127,6 +127,9 @@ namespace rocRoller::Serialization
 
             iot::mapRequired(io, "scaleShuffleTileA", params.scaleShuffleTileA);
             iot::mapRequired(io, "scaleShuffleTileB", params.scaleShuffleTileB);
+
+            iot::mapRequired(io, "scalePreTileA", params.scalePretileA);
+            iot::mapRequired(io, "scalePreTileB", params.scalePretileB);
         }
 
         static void mapping(IO& io, Client::GEMMClient::TypeParameters& params, EmptyContext& ctx)
@@ -249,6 +252,8 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "unroll_y", params.unrollY);
             iot::mapRequired(io, "load_A", params.loadPathA);
             iot::mapRequired(io, "load_B", params.loadPathB);
+            iot::mapRequired(io, "padLDS_A", params.padLDSA);
+            iot::mapRequired(io, "padLDS_B", params.padLDSB);
             iot::mapRequired(io, "storeLDS_D", params.storeLDSD);
             iot::mapRequired(io, "prefetch", params.prefetch);
             iot::mapRequired(io, "prefetchInFlight", params.prefetchInFlight);
@@ -259,17 +264,17 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "schedulerCost", params.schedulerCost);
             iot::mapRequired(io, "matchMemoryAccess", params.matchMemoryAccess);
 
+            iot::mapRequired(io, "tailLoops", params.tailLoops);
+
             iot::mapRequired(io, "types", params.types);
 
-            iot::mapRequired(io, "loadLDSScale_A", params.loadLDSScaleA);
-            iot::mapRequired(io, "loadLDSScale_B", params.loadLDSScaleB);
+            iot::mapRequired(io, "loadScale_A", params.loadPathAScale);
+            iot::mapRequired(io, "loadScale_B", params.loadPathBScale);
             iot::mapRequired(io, "swizzleScale", params.swizzleScale);
             iot::mapRequired(io, "swizzleTileSize", params.swizzleTileSize);
             iot::mapRequired(io, "prefetchScale", params.prefetchScale);
 
             iot::mapRequired(io, "streamK", params.streamK);
-            iot::mapRequired(io, "streamKTwoTile", params.streamKTwoTile);
-            iot::mapRequired(io, "streamKTwoTileDPFirst", params.streamKTwoTileDPFirst);
 
             iot::mapOptional(io, "version", params.version);
         }

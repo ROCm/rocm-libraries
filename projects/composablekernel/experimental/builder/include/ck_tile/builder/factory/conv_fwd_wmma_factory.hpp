@@ -8,13 +8,12 @@
 #include "ck_tile/builder/conv_algorithm_concepts.hpp"
 #include "ck_tile/builder/conv_algorithm_limits.hpp"
 #include "ck_tile/builder/builder_utils.hpp"
-#include "ck_tile/builder/conv_signature_utils.hpp"
-#include "ck_tile/builder/factory/helpers/conv_tensor_layout.hpp"
-#include "ck_tile/builder/factory/helpers/conv_tensor_type.hpp"
-#include "ck_tile/builder/factory/helpers/conv_elementwise_op.hpp"
-#include "ck_tile/builder/factory/helpers/conv_tuning_params.hpp"
-#include "ck_tile/builder/factory/helpers/conv_block_transfer.hpp"
-#include "ck_tile/builder/factory/helpers/conv_thread_block.hpp"
+#include "ck_tile/builder/factory/helpers/ck/conv_tensor_layout.hpp"
+#include "ck_tile/builder/factory/helpers/ck/conv_tensor_type.hpp"
+#include "ck_tile/builder/factory/helpers/ck/conv_elementwise_op.hpp"
+#include "ck_tile/builder/factory/helpers/ck/conv_tuning_params.hpp"
+#include "ck_tile/builder/factory/helpers/ck/conv_block_transfer.hpp"
+#include "ck_tile/builder/factory/helpers/ck/conv_thread_block.hpp"
 
 namespace ck_tile::builder::factory {
 
@@ -27,12 +26,10 @@ template <ConvSignatureDescriptor auto SIGNATURE,
 struct ConvFwdWmmaFactory
 {
     static constexpr size_t SPATIAL_DIM = SIGNATURE.spatial_dim;
-    using Layouts                       = decltype(internal::GetTensorLayout<SIGNATURE.layout,
-                                                                             SPATIAL_DIM,
-                                                                             ConvDirection::FORWARD>());
-    using Types                         = internal::ConvTensorTypes<SIGNATURE.data_type>;
-    using Ops           = internal::ElementwiseOps<get_elementwise_operation<SIGNATURE>()>;
-    using AlgorithmType = decltype(ALGORITHM);
+    using Layouts                       = internal::ConvTensorLayouts<SIGNATURE>;
+    using Types                         = internal::ConvTensorDataTypes<SIGNATURE>;
+    using Ops                           = internal::ConvElementwiseOps<SIGNATURE>;
+    using AlgorithmType                 = decltype(ALGORITHM);
 
     static constexpr auto FWD_CONV_SPECIALIZATION = internal::SetFwdConvSpecialization<ALGORITHM>();
     static constexpr auto GEMM_SPECIALIZATION     = internal::SetGemmSpecialization<ALGORITHM>();
@@ -51,31 +48,73 @@ struct ConvFwdWmmaFactory
     static constexpr auto C_BLOCK_TRANSFER = internal::SetCBlockTransfer<SIGNATURE, ALGORITHM>();
 
     // Check limits for the algorithm parameters.
-    // TODO: Add more limits checks as needed.
-    static_assert(InputVectorTransferLimits<A_BLOCK_TRANSFER>);
-    static_assert(InputVectorTransferLimits<B_BLOCK_TRANSFER>);
-    static_assert(OutputVectorTransferLimits<C_BLOCK_TRANSFER>);
-    static_assert(AccessOrderLimits<A_BLOCK_TRANSFER.thread_cluster_order>);
-    static_assert(AccessOrderLimits<B_BLOCK_TRANSFER.thread_cluster_order>);
-    static_assert(AccessOrderLimits<A_BLOCK_TRANSFER.src_access_order>);
-    static_assert(AccessOrderLimits<B_BLOCK_TRANSFER.src_access_order>);
+    static_assert(ValidABlockTransfer<A_BLOCK_TRANSFER,
+                                      typename Types::InDataType,
+                                      BLOCK.block_size,
+                                      BLOCK.per_block>);
+    static_assert(ValidBBlockTransfer<B_BLOCK_TRANSFER,
+                                      typename Types::WeiDataType,
+                                      BLOCK.block_size,
+                                      BLOCK.per_block>);
+    static_assert(ValidCBlockTransfer<C_BLOCK_TRANSFER,
+                                      typename Types::OutDataType,
+                                      BLOCK.block_size,
+                                      BLOCK.per_block>);
+    // TODO: verify Ds transfer as well
+
+    // Layout validations (same as DeviceGroupedConvFwdMultipleD_Wmma_CShuffle)
+    using enum TensorLayout;
+    static_assert(IsValidLayout<SIGNATURE.input.config.layout,
+                                G_NW_C_strided,
+                                G_NHW_C_strided,
+                                G_NDHW_C_strided,
+                                GNWC,
+                                GNHWC,
+                                GNDHWC,
+                                NWGC,
+                                NHWGC,
+                                NDHWGC> &&
+                  A_BLOCK_TRANSFER.src_vector_dim == 2);
+
+    static_assert(IsValidLayout<SIGNATURE.weight.config.layout,
+                                G_K_X_C_strided,
+                                G_K_YX_C_strided,
+                                G_K_ZYX_C_strided,
+                                GKXC,
+                                GKYXC,
+                                GKZYXC,
+                                KXGC,
+                                KYXGC,
+                                KZYXGC> &&
+                  B_BLOCK_TRANSFER.src_vector_dim == 2);
+
+    static_assert(IsValidLayout<SIGNATURE.output.config.layout,
+                                G_NW_K_strided,
+                                G_NHW_K_strided,
+                                G_NDHW_K_strided,
+                                GNWK,
+                                GNHWK,
+                                GNDHWK,
+                                NWGK,
+                                NHWGK,
+                                NDHWGK>);
 
     // The forward convolution kernel class instance.
     using Instance = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<
         SPATIAL_DIM,
-        typename Layouts::ALayout,
-        typename Layouts::BLayout,
+        typename Layouts::InLayout,
+        typename Layouts::WeiLayout,
         typename Layouts::DsLayout,
-        typename Layouts::ELayout,
-        typename Types::ADataType,
-        typename Types::BDataType,
+        typename Layouts::OutLayout,
+        typename Types::InDataType,
+        typename Types::WeiDataType,
         typename Types::AccDataType,
-        typename Types::CShuffleDataType,
-        typename Types::DsDataTypes,
-        typename Types::EDataType,
-        typename Ops::AElementwiseOp,
-        typename Ops::BElementwiseOp,
-        typename Ops::CDEElementwiseOp,
+        typename Types::OutComputeType,
+        typename Types::DsDataType,
+        typename Types::OutDataType,
+        typename Ops::InElementwiseOp,
+        typename Ops::WeiElementwiseOp,
+        typename Ops::OutElementwiseOp,
         SPECIALIZATION.conv_spec,
         SPECIALIZATION.gemm_spec,
         ALGORITHM.num_gemm_k_prefetch_stages,

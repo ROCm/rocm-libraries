@@ -58,10 +58,13 @@ hipDNN is organized into several key components. For detailed architecture descr
 |-----------|-------------|
 | **[Backend](./backend/)** | Core shared library providing C API for operation graphs and managing plugins |
 | **[Frontend](./frontend/)** | Header-only C++ API wrapper around the backend |
-| **[SDK](./sdk/)** | Header-only library for plugin development and utilities |
-| **[Plugins](./plugins/)** | Plugin implementations, including [MIOpen Legacy Plugin](./plugins/miopen_legacy_plugin/) |
+| **[Data SDK](./data_sdk/)** | Header-only library with data objects, utilities, and logging |
+| **[Plugin SDK](./plugin_sdk/)** | Header-only library for plugin development |
 | **[Samples](./samples/)** | Example implementations demonstrating hipDNN usage |
 | **[Tests](./tests/)** | Tests for the public API (incl. frontend integration tests) |
+
+> [!NOTE]
+> Official hipDNN plugins can be found in the [dnn-providers](../../../dnn-providers/) folder (e.g., [MIOpen Plugin](../../../dnn-providers/miopen-provider/)).
 
 ### Docker Support
 See [Docker README](./dockerfiles/README.md) for containerized development environments.

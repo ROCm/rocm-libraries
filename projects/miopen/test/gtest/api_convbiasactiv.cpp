@@ -109,9 +109,9 @@ protected:
         int n, c, h, w;
         miopenGetConvolutionForwardOutputDim(conv_desc, &input.desc, &weights.desc, &n, &c, &h, &w);
         output  = tensor<float>{static_cast<size_t>(n),
-                               static_cast<size_t>(c),
-                               static_cast<size_t>(h),
-                               static_cast<size_t>(w)};
+                                static_cast<size_t>(c),
+                                static_cast<size_t>(h),
+                                static_cast<size_t>(w)};
         ref_out = tensor<float>{static_cast<size_t>(n),
                                 static_cast<size_t>(c),
                                 static_cast<size_t>(h),

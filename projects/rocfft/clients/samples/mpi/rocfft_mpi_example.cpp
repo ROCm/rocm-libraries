@@ -356,7 +356,7 @@ int main(int argc, char** argv)
     {
         if(fftrc == rocfft_status_success)
         {
-            std::cout << "The FFT was succesful....\n";
+            std::cout << "The FFT was successful....\n";
         }
         else
         {

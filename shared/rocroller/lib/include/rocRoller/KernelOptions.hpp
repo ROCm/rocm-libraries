@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@
 #include <string>
 
 #include <rocRoller/AssertOpKinds_fwd.hpp>
+#include <rocRoller/Operations/Scratch_fwd.hpp>
 #include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/Settings_fwd.hpp>
 
@@ -43,11 +44,21 @@ namespace rocRoller
     const std::string KLOOP   = "KLoop";
     const std::string RECEIVE = "ReceiveTileLoop";
 
+    const int XLOOP_UNROLL = 0;
+    const int YLOOP_UNROLL = 1;
+    const int KLOOP_UNROLL = 2;
+
     const std::string KLOOPTAIL = KLOOP + "Tail";
 
     const std::string SCRATCH = "SCRATCH";
     const std::string NUMWGS  = "numWGs";
     const std::string WGM     = "WGM";
+
+    // Helper to get scratch argument name for a specific policy
+    inline std::string getScratchName(Operations::ScratchPolicy policy)
+    {
+        return rocRoller::SCRATCH + "_" + Operations::toString(policy);
+    }
 
     class KernelOptions
     {

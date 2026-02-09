@@ -334,7 +334,78 @@ namespace rocRoller
 
                         tree.back().reg = reg;
                     }
+                    else if(depTypeInfo.isIntegral && expTypeInfo.isIntegral
+                            && depTypeInfo.elementBits == 64 && expTypeInfo.elementBits == 32)
+                    {
+                        std::vector<int> indices;
+                        for(int i = 0; i < depTypeInfo.registerCount;
+                            i += depTypeInfo.elementBits / Register::bitsPerRegister)
+                        {
+                            indices.push_back(i);
+                        }
+                        auto reg = dep.reg->subset(indices);
+                        reg->setVariableType(expr.destinationType);
+                        auto regWithName = tree.back().reg ? tree.back().reg : reg;
+                        reg->setName(regWithName->name() + " convertForwardSubset");
+                        tree.back().reg = reg;
+                    }
                 }
+
+                return tree;
+            }
+
+            ExpressionTree operator()(Reinterpret const& expr) const
+            {
+                auto tree = callUnary(expr);
+                if(tree.empty())
+                {
+                    // Bail
+                    return {};
+                }
+
+                AssertFatal(tree.back().deps.size() == 1);
+                auto        depIdx = *tree.back().deps.begin();
+                auto const& dep    = tree.at(depIdx);
+
+                auto depTypeInfo = DataTypeInfo::Get(dep.reg->variableType());
+                auto expTypeInfo = DataTypeInfo::Get(expr.destinationType);
+
+                AssertFatal(depTypeInfo.elementBytes == expTypeInfo.elementBytes,
+                            "Reinterpret requires same size types: source type ",
+                            toString(dep.reg->variableType().dataType),
+                            " (",
+                            depTypeInfo.elementBytes,
+                            " bytes) != destination type ",
+                            toString(expr.destinationType),
+                            " (",
+                            expTypeInfo.elementBytes,
+                            " bytes)");
+
+                auto registerCount = dep.reg->registerCount();
+                AssertFatal(registerCount == expTypeInfo.registerCount,
+                            "Reinterpret requires same number of registers: source type ",
+                            toString(dep.reg->variableType().dataType),
+                            " (",
+                            registerCount,
+                            " registers) != destination type ",
+                            toString(expr.destinationType),
+                            " (",
+                            expTypeInfo.registerCount,
+                            " registers)");
+
+                // Sets the destination register for Reinterpret as the argument register
+                // but with the reinterpreted type
+                Register::ValuePtr reg
+                    = std::make_shared<Register::Value>(dep.reg->allocation(),
+                                                        dep.reg->regType(),
+                                                        expr.destinationType,
+                                                        dep.reg->allocationCoord());
+                tree.back().reg = reg;
+
+                dep.reg->setName(dep.reg->name() + " reinterpret");
+                Log::trace("Reinterpreting {} to {}",
+                           dep.reg->description(),
+                           tree.back().reg->description());
 
                 return tree;
             }
@@ -345,7 +416,7 @@ namespace rocRoller
                 if(tree.empty())
                     return {};
 
-                AssertFatal(tree.back().deps.size() == 1);
+                AssertFatal(tree.back().deps.size() == 1, ShowValue(tree.back().deps.size()));
 
                 auto        deps               = tree.back().deps;
                 auto        consolidationCount = tree.back().consolidationCount;

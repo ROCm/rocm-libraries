@@ -108,13 +108,24 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             ylocalsize = max_localsize;
             ygridsize  = AlignUp(size_t{in_cstride / vectorsize}, ylocalsize);
         }
-        zlocalsize = 1;
-        zgridsize  = 1;
 
         // HIP runtime does not support non-uniform blocks
         // Adjust the global worker sizes accordingly
         xgridsize = AlignUp(xgridsize, xlocalsize);
         ygridsize = AlignUp(ygridsize, ylocalsize);
+
+        zlocalsize                = 1;
+        size_t active_threads_xy  = xgridsize * ygridsize;
+        size_t max_active_threads = handle.GetMaxComputeUnits() * 32 *
+                                    handle.GetWavefrontWidth(); // considering max 32 waves per CU
+        if(active_threads_xy < max_active_threads)
+        {
+            zgridsize = std::min(size_t{(max_active_threads / active_threads_xy)}, size_t{n});
+        }
+        else
+        {
+            zgridsize = 1;
+        }
 
         auto kernel = KernelInfo{};
 
@@ -124,11 +135,19 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         { // SPATIAL kernels
             kernel.kernel_file += "SpatialHIP.cpp";
             kernel.kernel_name += "SpatialEst";
+            if(problem.isInverseVariance())
+            {
+                kernel.kernel_name += "InvVar";
+            }
         }
         else
         { // PER ACTIVATION
             kernel.kernel_file += "PerActHIP.cpp";
             kernel.kernel_name += "PerActivationEst";
+            if(problem.isInverseVariance())
+            {
+                kernel.kernel_name += "InvVar";
+            }
         }
 
         const auto build_params = KernelBuildParameters{
@@ -176,39 +195,79 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
 
             if(params.xDesc->GetLayout_t() == miopenTensorNHWC)
             {
-                kernel(params.x,
-                       params.y,
-                       params.estimatedMean,
-                       params.estimatedVariance,
-                       params.bnScale,
-                       params.bnBias,
-                       params.epsilon,
-                       c_,
-                       h_ * w_,
-                       n_,
-                       1,           // cStride
-                       c_,          // hwStride
-                       in_nstride_, // batchStride
-                       alpha_activ,
-                       beta_activ);
+                if(problem.isInverseVariance())
+                {
+                    kernel(params.x,
+                           params.y,
+                           params.estimatedMean,
+                           params.estimatedVariance,
+                           params.bnScale,
+                           params.bnBias,
+                           c_,
+                           h_ * w_,
+                           n_,
+                           1,           // cStride
+                           c_,          // hwStride
+                           in_nstride_, // batchStride
+                           alpha_activ,
+                           beta_activ);
+                }
+                else
+                {
+                    kernel(params.x,
+                           params.y,
+                           params.estimatedMean,
+                           params.estimatedVariance,
+                           params.bnScale,
+                           params.bnBias,
+                           params.epsilon,
+                           c_,
+                           h_ * w_,
+                           n_,
+                           1,           // cStride
+                           c_,          // hwStride
+                           in_nstride_, // batchStride
+                           alpha_activ,
+                           beta_activ);
+                }
             }
             else
             {
-                kernel(params.x,
-                       params.y,
-                       params.estimatedMean,
-                       params.estimatedVariance,
-                       params.bnScale,
-                       params.bnBias,
-                       params.epsilon,
-                       c_,
-                       h_ * w_,
-                       n_,
-                       h_ * w_,     // cStride
-                       1,           // hwStride
-                       in_nstride_, // batchStride
-                       alpha_activ,
-                       beta_activ);
+                if(problem.isInverseVariance())
+                {
+                    kernel(params.x,
+                           params.y,
+                           params.estimatedMean,
+                           params.estimatedVariance,
+                           params.bnScale,
+                           params.bnBias,
+                           c_,
+                           h_ * w_,
+                           n_,
+                           h_ * w_,     // cStride
+                           1,           // hwStride
+                           in_nstride_, // batchStride
+                           alpha_activ,
+                           beta_activ);
+                }
+                else
+                {
+                    kernel(params.x,
+                           params.y,
+                           params.estimatedMean,
+                           params.estimatedVariance,
+                           params.bnScale,
+                           params.bnBias,
+                           params.epsilon,
+                           c_,
+                           h_ * w_,
+                           n_,
+                           h_ * w_,     // cStride
+                           1,           // hwStride
+                           in_nstride_, // batchStride
+                           alpha_activ,
+                           beta_activ);
+                }
             }
         };
     };

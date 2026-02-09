@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -56,8 +57,7 @@ void testing_csrsm2_bad_arg(const Arguments& argus)
     hipsparseOperation_t   transB    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
     hipsparseSolvePolicy_t policy    = HIPSPARSE_SOLVE_POLICY_USE_LEVEL;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -580,7 +580,7 @@ void testing_csrsm2_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csrsm2(Arguments argus)
+void testing_csrsm2(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                    m        = argus.M;
@@ -594,8 +594,7 @@ hipsparseStatus_t testing_csrsm2(Arguments argus)
     T                      h_alpha  = make_DataType<T>(argus.alpha);
     std::string            filename = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -621,11 +620,8 @@ hipsparseStatus_t testing_csrsm2(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     int ldb = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : nrhs;
 
@@ -673,23 +669,23 @@ hipsparseStatus_t testing_csrsm2(Arguments argus)
 
     // Obtain csrsm2 buffer size
     size_t bufferSize;
-    CHECK_HIPSPARSE_ERROR(hipsparseXcsrsm2_bufferSizeExt(handle,
-                                                         0,
-                                                         transA,
-                                                         transB,
-                                                         m,
-                                                         nrhs,
-                                                         nnz,
-                                                         &h_alpha,
-                                                         descr,
-                                                         dval,
-                                                         dptr,
-                                                         dcol,
-                                                         dB_1,
-                                                         ldb,
-                                                         info,
-                                                         policy,
-                                                         &bufferSize));
+    CHECK_HIPSPARSE_ERROR(testing::hipsparseXcsrsm2_bufferSizeExt<T>(handle,
+                                                                     0,
+                                                                     transA,
+                                                                     transB,
+                                                                     m,
+                                                                     nrhs,
+                                                                     nnz,
+                                                                     &h_alpha,
+                                                                     descr,
+                                                                     dval,
+                                                                     dptr,
+                                                                     dcol,
+                                                                     dB_1,
+                                                                     ldb,
+                                                                     info,
+                                                                     policy,
+                                                                     &bufferSize));
 
     // Allocate buffer on the device
     auto dbuffer_managed
@@ -764,23 +760,23 @@ hipsparseStatus_t testing_csrsm2(Arguments argus)
     {
         // csrsm2 solve - host mode
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-        CHECK_HIPSPARSE_ERROR(hipsparseXcsrsm2_solve(handle,
-                                                     0,
-                                                     transA,
-                                                     transB,
-                                                     m,
-                                                     nrhs,
-                                                     nnz,
-                                                     &h_alpha,
-                                                     descr,
-                                                     dval,
-                                                     dptr,
-                                                     dcol,
-                                                     dB_1,
-                                                     ldb,
-                                                     info,
-                                                     policy,
-                                                     dbuffer));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseXcsrsm2_solve<T>(handle,
+                                                                 0,
+                                                                 transA,
+                                                                 transB,
+                                                                 m,
+                                                                 nrhs,
+                                                                 nnz,
+                                                                 &h_alpha,
+                                                                 descr,
+                                                                 dval,
+                                                                 dptr,
+                                                                 dcol,
+                                                                 dB_1,
+                                                                 ldb,
+                                                                 info,
+                                                                 policy,
+                                                                 dbuffer));
 
         // Get pivot
         status_solve_1 = hipsparseXcsrsm2_zeroPivot(handle, info, &h_solve_pivot_1);
@@ -792,23 +788,23 @@ hipsparseStatus_t testing_csrsm2(Arguments argus)
 
         // csrsm2 solve - device mode
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-        CHECK_HIPSPARSE_ERROR(hipsparseXcsrsm2_solve(handle,
-                                                     0,
-                                                     transA,
-                                                     transB,
-                                                     m,
-                                                     nrhs,
-                                                     nnz,
-                                                     d_alpha,
-                                                     descr,
-                                                     dval,
-                                                     dptr,
-                                                     dcol,
-                                                     dB_2,
-                                                     ldb,
-                                                     info,
-                                                     policy,
-                                                     dbuffer));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseXcsrsm2_solve<T>(handle,
+                                                                 0,
+                                                                 transA,
+                                                                 transB,
+                                                                 m,
+                                                                 nrhs,
+                                                                 nnz,
+                                                                 d_alpha,
+                                                                 descr,
+                                                                 dval,
+                                                                 dptr,
+                                                                 dcol,
+                                                                 dB_2,
+                                                                 ldb,
+                                                                 info,
+                                                                 policy,
+                                                                 dbuffer));
 
         // Get pivot
         status_solve_2 = hipsparseXcsrsm2_zeroPivot(handle, info, d_solve_pivot_2);
@@ -869,23 +865,23 @@ hipsparseStatus_t testing_csrsm2(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseXcsrsm2_solve(handle,
-                                                         0,
-                                                         transA,
-                                                         transB,
-                                                         m,
-                                                         nrhs,
-                                                         nnz,
-                                                         &h_alpha,
-                                                         descr,
-                                                         dval,
-                                                         dptr,
-                                                         dcol,
-                                                         dB_1,
-                                                         ldb,
-                                                         info,
-                                                         policy,
-                                                         dbuffer));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseXcsrsm2_solve<T>(handle,
+                                                                     0,
+                                                                     transA,
+                                                                     transB,
+                                                                     m,
+                                                                     nrhs,
+                                                                     nnz,
+                                                                     &h_alpha,
+                                                                     descr,
+                                                                     dval,
+                                                                     dptr,
+                                                                     dcol,
+                                                                     dB_1,
+                                                                     ldb,
+                                                                     info,
+                                                                     policy,
+                                                                     dbuffer));
         }
 
         double gpu_time_used = get_time_us();
@@ -893,23 +889,23 @@ hipsparseStatus_t testing_csrsm2(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseXcsrsm2_solve(handle,
-                                                         0,
-                                                         transA,
-                                                         transB,
-                                                         m,
-                                                         nrhs,
-                                                         nnz,
-                                                         &h_alpha,
-                                                         descr,
-                                                         dval,
-                                                         dptr,
-                                                         dcol,
-                                                         dB_1,
-                                                         ldb,
-                                                         info,
-                                                         policy,
-                                                         dbuffer));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseXcsrsm2_solve<T>(handle,
+                                                                     0,
+                                                                     transA,
+                                                                     transB,
+                                                                     m,
+                                                                     nrhs,
+                                                                     nnz,
+                                                                     &h_alpha,
+                                                                     descr,
+                                                                     dval,
+                                                                     dptr,
+                                                                     dcol,
+                                                                     dB_1,
+                                                                     ldb,
+                                                                     info,
+                                                                     policy,
+                                                                     dbuffer));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
@@ -946,8 +942,6 @@ hipsparseStatus_t testing_csrsm2(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSRSM2_HPP
