@@ -973,9 +973,7 @@ namespace TensileLite
 
         // Dynamically pick the values
         if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
-           && sizeMapping.workGroupMappingXCC == -1
-           && sizeMapping.nonTemporalA < 4 /* Exclude NTs for now till we fix libs */
-           && sizeMapping.nonTemporalB < 4 /* Exclude NTs for now till we fix libs */)
+           && sizeMapping.workGroupMappingXCC == -1)
         {
             int32_t c_wgm = 0;
             uint32_t c_wgmxcc = 0;
@@ -3497,6 +3495,54 @@ namespace TensileLite
         pp.CUs         = NumCUs;
 
         return pp;
+    }
+
+    double ContractionSolution::calculateDimensionM(Problem const&  problem) const
+    {
+        double M = 1.0;
+        if(problem.freeIndicesA().size() > 1 || sizeMapping.packBatchDims & 0x1)
+        {
+            std::vector<size_t> packedIndices
+                = generatePackedIndicesA(problem, sizeMapping.packBatchDims);
+            for(auto pi = packedIndices.begin(); pi != packedIndices.end(); pi++)
+                M *= problem.a().sizes()[*pi];
+        }
+        else
+        {
+            M = problem.freeSizeA(0);
+        }
+        return M;
+    }
+
+    double ContractionSolution::calculateDimensionN(Problem const&  problem) const
+    {
+        double N = 1.0;
+        if(problem.freeIndicesB().size() > 1 || sizeMapping.packBatchDims & 0x2)
+        {
+            std::vector<size_t> packedIndices
+                = generatePackedIndicesB(problem, sizeMapping.packBatchDims);
+            for(auto pi = packedIndices.begin(); pi != packedIndices.end(); pi++)
+                N *= problem.b().sizes()[*pi];
+        }
+        else
+            N = problem.freeSizeB(0);
+        return N;
+    }
+
+    double ContractionSolution::calculateNumBatches(Problem const&  problem) const
+    {
+        double NumBatches = 1;
+        if(sizeMapping.packBatchDims == 0)
+        {
+            for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                NumBatches *= problem.batchSize(i);
+        }
+        return NumBatches;
+    }
+
+    origami::data_type_t ContractionSolution::getOrigamiDatatype(Problem const&  problem) const
+    {
+        return datatypeToAnalyticalDatatype(problem.computeInputType());
     }
 
     std::ostream& operator<<(std::ostream&                                      stream,
