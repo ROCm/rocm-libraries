@@ -14,6 +14,7 @@ using RowMajor      = ck_tile::tensor_layout::gemm::RowMajor;
 using ColumnMajor   = ck_tile::tensor_layout::gemm::ColumnMajor;
 using FP8           = ck_tile::fp8_t;
 using BF8           = ck_tile::bf8_t;
+using FP16          = ck_tile::fp16_t;
 using BF16          = ck_tile::bf16_t;
 using Half          = ck_tile::half_t;
 using PkInt4        = ck_tile::pk_int4_t;
@@ -27,18 +28,23 @@ using GroupSize64   = ck_tile::QuantGroupShape<ck_tile::sequence<1, 1, 64>>;
 // QuantType, GemmConfig, QuantGroupSize>
 // clang-format off
 using BQuant1D64Types = ::testing::Types<
-    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF8,  BF8,    float, Half, BQuantGrouped, GemmConfigBase,  GroupSize64>,
-    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, FP8,  PkInt4, FP8,   Half, BQuantGrouped, GemmConfigBase,  GroupSize64>,
-    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF8,  PkInt4, BF8,   Half, BQuantGrouped, GemmConfigBase,  GroupSize64>,
-    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16, PkFP4,  E8M0,  BF16, BQuantGrouped, GemmConfigMx,    GroupSize64>,
-    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16, BF8,    E8M0,  BF16, BQuantGrouped, GemmConfigMx,    GroupSize64>,
-    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16, BF16,   E8M0,  BF16, BQuantGrouped, GemmConfigMx,    GroupSize64>,
-    std::tuple<ColumnMajor, ColumnMajor, RowMajor, ColumnMajor, BF16, BF16,   E8M0,  BF16, BQuantGrouped, GemmConfigMx,    GroupSize64>,
-    std::tuple<ColumnMajor, ColumnMajor, RowMajor, ColumnMajor, BF16, BF8,    E8M0,  BF16, BQuantGrouped, GemmConfigMx,    GroupSize64>,
-    std::tuple<   RowMajor,    RowMajor, RowMajor, ColumnMajor, BF16, BF8,    E8M0,  BF16, BQuantGrouped, GemmConfigMx,    GroupSize64>,
-    std::tuple<ColumnMajor, ColumnMajor, RowMajor, ColumnMajor, BF16, PkFP4,  E8M0,  BF16, BQuantGrouped, GemmConfigMx,    GroupSize64>,
-    std::tuple<   RowMajor, ColumnMajor, RowMajor,    RowMajor, BF16, BF8,    E8M0,  BF16, BQuantGrouped, GemmConfigMx,    GroupSize64>,
-    std::tuple<   RowMajor,    RowMajor, RowMajor,    RowMajor, BF16, BF16,   E8M0,  BF16, BQuantGrouped, GemmConfigMx,    GroupSize64>
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor,  BF8,    BF8, float, Half, BQuantGrouped, GemmConfigBase,  GroupSize64>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor,  FP8, PkInt4,   FP8, Half, BQuantGrouped, GemmConfigBase,  GroupSize64>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor,  BF8, PkInt4,   BF8, Half, BQuantGrouped, GemmConfigBase,  GroupSize64>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,  PkFP4,  E8M0, BF16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,    BF8,  E8M0, BF16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,   BF16,  E8M0, BF16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
+    std::tuple<ColumnMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,   BF16,  E8M0, BF16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
+    std::tuple<ColumnMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,    BF8,  E8M0, BF16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
+    std::tuple<   RowMajor,    RowMajor, RowMajor, ColumnMajor, BF16,    BF8,  E8M0, BF16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
+    std::tuple<ColumnMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,  PkFP4,  E8M0, BF16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor,    RowMajor, BF16,    BF8,  E8M0, BF16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
+    std::tuple<   RowMajor,    RowMajor, RowMajor,    RowMajor, BF16,   BF16,  E8M0, BF16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, FP16,   FP16,  E8M0, FP16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,    FP8,  E8M0, BF16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, FP16,    FP8,  E8M0, FP16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, FP16,    BF8,  E8M0, FP16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, FP16,  PkFP4,  E8M0, FP16, BQuantGrouped,   GemmConfigMx,  GroupSize64>
     // std::tuple<   RowMajor,    RowMajor, RowMajor, ColumnMajor, BF16, BF16,   E8M0,  BF16, BQuantGrouped, GemmConfigMx, GroupSize64>, // not supported with CastBeforeLDSWrite
     // std::tuple<   RowMajor,    RowMajor, RowMajor, ColumnMajor, BF16, PkFP4,  E8M0,  BF16, BQuantGrouped, GemmConfigMx, GroupSize64> // not supported
 >;

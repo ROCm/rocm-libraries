@@ -178,14 +178,14 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {
-        using BlockWarps = typename Problem::BlockGemmShape::BlockWarps;
-        using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
+        using BlockWarps      = typename Problem::BlockGemmShape::BlockWarps;
+        using WarpTile        = typename Problem::BlockGemmShape::WarpTile;
+        using ComputeDataType = typename Problem::ComputeDataType;
 
         static_assert(Problem::BQuantGroupSize::kK % WarpTile::at(I2) == 0,
                       "KPerWarpGemm must be a multiple of QuantGroupSize!");
 
-        constexpr index_t vector_size =
-            DS_READ_TR_SIZE() / sizeof(typename Problem::ComputeDataType);
+        constexpr index_t vector_size     = DS_READ_TR_SIZE() / sizeof(ComputeDataType);
         constexpr index_t thread_elements = WarpTile::at(I1) * WarpTile::at(I2) / get_warp_size();
         constexpr bool use_load_tr_inst =
             (Base::template is_a_load_tr<Problem> || Base::template is_b_load_tr<Problem>);
@@ -196,8 +196,8 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
             : vector_size * 4 == thread_elements ? WGAttrNumAccessEnum::Quad
                                                  : WGAttrNumAccessEnum::Invalid;
 
-        using WarpGemm = WarpGemmDispatcher<typename Problem::ComputeDataType,
-                                            typename Problem::ComputeDataType,
+        using WarpGemm = WarpGemmDispatcher<ComputeDataType,
+                                            ComputeDataType,
                                             typename Problem::CDataType,
                                             WarpTile::at(I0),
                                             WarpTile::at(I1),
@@ -206,9 +206,7 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
                                             false,
                                             false,
                                             wg_attr_num_access>;
-        static_assert(std::is_same_v<typename Problem::ComputeDataType, fp8_t> ||
-                      std::is_same_v<typename Problem::ComputeDataType, bf8_t> ||
-                      std::is_same_v<typename Problem::ComputeDataType, bf16_t>);
+        static_assert(is_any_of<ComputeDataType, fp8_t, bf8_t, bf16_t, fp16_t>::value);
         static_assert(std::is_same_v<typename Problem::CDataType, float>);
 
         using BlockGemmPolicy = BlockGemmASmemBSmemCRegV1CustomPolicy<
