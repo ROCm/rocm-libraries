@@ -3,7 +3,7 @@
 
 #include <algorithm>
 #include <gtest/gtest.h>
-#include <hipdnn_frontend/detail/TopologicalSortingUtils.hpp>
+#include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::detail;

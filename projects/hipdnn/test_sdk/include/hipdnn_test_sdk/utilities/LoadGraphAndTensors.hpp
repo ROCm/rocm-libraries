@@ -11,10 +11,10 @@
 #include <hipdnn_data_sdk/utilities/Visitor.hpp>
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_test_sdk/detail/FlatbufferTensorAttributesUtils.hpp>
-#include <hipdnn_test_sdk/detail/TensorFileUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/TensorFileUtils.hpp>
 #include <type_traits>
 #include <variant>
 

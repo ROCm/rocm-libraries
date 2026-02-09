@@ -7,15 +7,15 @@
 #include <ostream>
 #include <variant>
 
-#include <hipdnn_test_sdk/detail/BatchnormBwdSignatureKey.hpp>
-#include <hipdnn_test_sdk/detail/BatchnormFwdInferenceSignatureKey.hpp>
-#include <hipdnn_test_sdk/detail/BatchnormFwdInferenceWithVarianceSignatureKey.hpp>
-#include <hipdnn_test_sdk/detail/BatchnormTrainSignatureKey.hpp>
-#include <hipdnn_test_sdk/detail/ConvolutionBwdSignatureKey.hpp>
-#include <hipdnn_test_sdk/detail/ConvolutionFwdSignatureKey.hpp>
-#include <hipdnn_test_sdk/detail/ConvolutionWrwSignatureKey.hpp>
-#include <hipdnn_test_sdk/detail/MatmulSignatureKey.hpp>
-#include <hipdnn_test_sdk/detail/PointwiseSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormBwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceWithVarianceSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormTrainSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionWrwSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwiseSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::detail
 {

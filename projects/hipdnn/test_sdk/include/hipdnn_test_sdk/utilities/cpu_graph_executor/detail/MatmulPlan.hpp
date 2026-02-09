@@ -4,12 +4,12 @@
 #pragma once
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_test_sdk/detail/FlatbufferTensorAttributesUtils.hpp>
-#include <hipdnn_test_sdk/detail/IGraphNodePlanBuilder.hpp>
-#include <hipdnn_test_sdk/detail/IGraphNodePlanExecutor.hpp>
-#include <hipdnn_test_sdk/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 namespace hipdnn_test_sdk::detail
 {

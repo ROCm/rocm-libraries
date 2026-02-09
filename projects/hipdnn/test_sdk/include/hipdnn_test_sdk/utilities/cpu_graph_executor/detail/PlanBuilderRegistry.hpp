@@ -6,15 +6,15 @@
 #include <functional>
 #include <variant>
 
-#include <hipdnn_test_sdk/detail/BatchnormBwdPlan.hpp>
-#include <hipdnn_test_sdk/detail/BatchnormFwdInferencePlan.hpp>
-#include <hipdnn_test_sdk/detail/BatchnormFwdInferenceWithVariancePlan.hpp>
-#include <hipdnn_test_sdk/detail/BatchnormTrainPlan.hpp>
-#include <hipdnn_test_sdk/detail/ConvolutionBwdPlan.hpp>
-#include <hipdnn_test_sdk/detail/ConvolutionFwdPlan.hpp>
-#include <hipdnn_test_sdk/detail/MatmulPlan.hpp>
-#include <hipdnn_test_sdk/detail/PlanRegistrySignatureKey.hpp>
-#include <hipdnn_test_sdk/detail/PointwisePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormBwdPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferencePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceWithVariancePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormTrainPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanRegistrySignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <sstream>

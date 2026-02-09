@@ -8,29 +8,29 @@
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_test_sdk/detail/FlatbufferTensorAttributesUtils.hpp>
-#include <hipdnn_test_sdk/detail/IGraphNodePlanBuilder.hpp>
-#include <hipdnn_test_sdk/detail/IGraphNodePlanExecutor.hpp>
-#include <hipdnn_test_sdk/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 namespace hipdnn_test_sdk::detail
 {
 
-struct ConvolutionWrwParams
+struct ConvolutionBwdParams
 {
-    ConvolutionWrwParams() = default;
-    ConvolutionWrwParams(const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
-                         const hipdnn_data_sdk::data_objects::TensorAttributes& dwAttributes,
+    ConvolutionBwdParams() = default;
+    ConvolutionBwdParams(const hipdnn_data_sdk::data_objects::TensorAttributes& dxAttributes,
+                         const hipdnn_data_sdk::data_objects::TensorAttributes& wAttributes,
                          const hipdnn_data_sdk::data_objects::TensorAttributes& dyAttributes,
                          const std::vector<int64_t>& prePadding,
                          const std::vector<int64_t>& postPadding,
                          const std::vector<int64_t>& stride,
                          const std::vector<int64_t>& dilation,
                          const hipdnn_data_sdk::data_objects::ConvMode convolutionMode)
-        : xTensor(unpackTensorAttributes(xAttributes))
-        , dwTensor(unpackTensorAttributes(dwAttributes))
+        : dxTensor(unpackTensorAttributes(dxAttributes))
+        , wTensor(unpackTensorAttributes(wAttributes))
         , dyTensor(unpackTensorAttributes(dyAttributes))
         , prePadding(prePadding)
         , postPadding(postPadding)
@@ -40,8 +40,8 @@ struct ConvolutionWrwParams
     {
     }
 
-    hipdnn_data_sdk::data_objects::TensorAttributesT xTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT dwTensor;
+    hipdnn_data_sdk::data_objects::TensorAttributesT dxTensor;
+    hipdnn_data_sdk::data_objects::TensorAttributesT wTensor;
     hipdnn_data_sdk::data_objects::TensorAttributesT dyTensor;
     std::vector<int64_t> prePadding;
     std::vector<int64_t> postPadding;
@@ -50,31 +50,31 @@ struct ConvolutionWrwParams
     hipdnn_data_sdk::data_objects::ConvMode convMode;
 };
 
-template <typename XDataType,
-          typename DyDataType,
+template <typename DyDataType,
+          typename WDataType,
           typename OutputDataType,
           typename ComputeDataType>
-class ConvolutionWrwPlan : public IGraphNodePlanExecutor
+class ConvolutionBwdPlan : public IGraphNodePlanExecutor
 {
 public:
-    ConvolutionWrwPlan(ConvolutionWrwParams&& params)
+    ConvolutionBwdPlan(ConvolutionBwdParams&& params)
         : _params(std::move(params))
     {
     }
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowXTensor
-            = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
+        auto shallowDXTensor = createShallowTensor<OutputDataType>(
+            _params.dxTensor, variantPack.at(_params.dxTensor.uid));
 
-        auto shallowDWTensor = createShallowTensor<OutputDataType>(
-            _params.dwTensor, variantPack.at(_params.dwTensor.uid));
+        auto shallowWTensor
+            = createShallowTensor<WDataType>(_params.wTensor, variantPack.at(_params.wTensor.uid));
 
         auto shallowDYTensor = createShallowTensor<DyDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
-        utilities::CpuFpReferenceConvolution::wgrad(*shallowXTensor,
-                                                    *shallowDWTensor,
+        utilities::CpuFpReferenceConvolution::dgrad(*shallowDXTensor,
+                                                    *shallowWTensor,
                                                     *shallowDYTensor,
                                                     _params.stride,
                                                     _params.dilation,
@@ -83,18 +83,18 @@ public:
     }
 
 private:
-    ConvolutionWrwParams _params;
+    ConvolutionBwdParams _params;
 };
 
-template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType DyDataTypeEnum,
+template <hipdnn_data_sdk::data_objects::DataType DyDataTypeEnum,
+          hipdnn_data_sdk::data_objects::DataType WDataTypeEnum,
           hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum,
           hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
-class ConvolutionWrwPlanBuilder : public IGraphNodePlanBuilder
+class ConvolutionBwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using XDataType = utilities::DataTypeToNative<XDataTypeEnum>;
     using DyDataType = utilities::DataTypeToNative<DyDataTypeEnum>;
+    using WDataType = utilities::DataTypeToNative<WDataTypeEnum>;
     using OutputDataType = utilities::DataTypeToNative<OutputDataTypeEnum>;
     using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
 
@@ -103,18 +103,18 @@ public:
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
-        const auto* nodeAttributes = node.attributes_as_ConvolutionWrwAttributes();
+        const auto* nodeAttributes = node.attributes_as_ConvolutionBwdAttributes();
         if(nodeAttributes == nullptr)
         {
             return false;
         }
 
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dw_tensor_uid());
+        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dx_tensor_uid());
+        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->w_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dy_tensor_uid());
 
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dw_tensor_uid(), OutputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dx_tensor_uid(), OutputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->w_tensor_uid(), WDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), DyDataTypeEnum);
 
         return true;
@@ -124,15 +124,15 @@ public:
         buildNodePlan(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
                       const hipdnn_data_sdk::data_objects::Node& node) const override
     {
-        const auto* nodeAttributes = node.attributes_as_ConvolutionWrwAttributes();
+        const auto* nodeAttributes = node.attributes_as_ConvolutionBwdAttributes();
         if(nodeAttributes == nullptr)
         {
-            throw std::runtime_error("Node attributes are not of type ConvolutionWrwAttributes");
+            throw std::runtime_error("Node attributes are not of type ConvolutionBwdAttributes");
         }
 
         const auto& tensorMap = graph.getTensorMap();
-        ConvolutionWrwParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
-                                    *tensorMap.at(nodeAttributes->dw_tensor_uid()),
+        ConvolutionBwdParams params(*tensorMap.at(nodeAttributes->dx_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->w_tensor_uid()),
                                     *tensorMap.at(nodeAttributes->dy_tensor_uid()),
                                     hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(
                                         nodeAttributes->pre_padding()),
@@ -145,7 +145,7 @@ public:
                                     nodeAttributes->conv_mode());
 
         return std::make_unique<
-            ConvolutionWrwPlan<XDataType, DyDataType, OutputDataType, ComputeDataType>>(
+            ConvolutionBwdPlan<DyDataType, WDataType, OutputDataType, ComputeDataType>>(
             std::move(params));
     }
 };

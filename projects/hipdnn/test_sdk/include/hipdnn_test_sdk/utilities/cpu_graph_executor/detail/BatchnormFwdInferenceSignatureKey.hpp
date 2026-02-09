@@ -7,24 +7,24 @@
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
-#include <hipdnn_test_sdk/detail/BatchnormFwdInferenceWithVariancePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferencePlan.hpp>
 #include <ostream>
 
 namespace hipdnn_test_sdk::detail
 {
 
-struct BatchnormFwdInferenceWithVarianceSignatureKey
+struct BatchnormFwdInferenceSignatureKey
 {
     const hipdnn_data_sdk::data_objects::NodeAttributes nodeType
-        = hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt;
+        = hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
     hipdnn_data_sdk::data_objects::DataType xDataType;
     hipdnn_data_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_data_sdk::data_objects::DataType meanVarianceDataType;
     hipdnn_data_sdk::data_objects::DataType outputDataType;
     hipdnn_data_sdk::data_objects::DataType computeDataType;
 
-    BatchnormFwdInferenceWithVarianceSignatureKey() = default;
-    constexpr BatchnormFwdInferenceWithVarianceSignatureKey(
+    BatchnormFwdInferenceSignatureKey() = default;
+    constexpr BatchnormFwdInferenceSignatureKey(
         hipdnn_data_sdk::data_objects::DataType x,
         hipdnn_data_sdk::data_objects::DataType scaleBias,
         hipdnn_data_sdk::data_objects::DataType meanVariance,
@@ -38,16 +38,16 @@ struct BatchnormFwdInferenceWithVarianceSignatureKey
     {
     }
 
-    BatchnormFwdInferenceWithVarianceSignatureKey(
+    BatchnormFwdInferenceSignatureKey(
         const hipdnn_data_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap)
     {
-        const auto* nodeAttributes = node.attributes_as_BatchnormInferenceAttributesVarianceExt();
+        const auto* nodeAttributes = node.attributes_as_BatchnormInferenceAttributes();
         if(nodeAttributes == nullptr)
         {
             throw std::runtime_error(
-                "Node attributes could not be cast to BatchnormInferenceAttributesVarianceExt");
+                "Node attributes could not be cast to BatchnormInferenceAttributes");
         }
 
         auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
@@ -69,7 +69,7 @@ struct BatchnormFwdInferenceWithVarianceSignatureKey
         outputDataType = yTensorAttr->data_type();
     }
 
-    std::size_t operator()(const BatchnormFwdInferenceWithVarianceSignatureKey& k) const noexcept
+    std::size_t operator()(const BatchnormFwdInferenceSignatureKey& k) const noexcept
     {
         return k.hashSelf();
     }
@@ -84,7 +84,7 @@ struct BatchnormFwdInferenceWithVarianceSignatureKey
                ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 20);
     }
 
-    bool operator==(const BatchnormFwdInferenceWithVarianceSignatureKey& other) const noexcept
+    bool operator==(const BatchnormFwdInferenceSignatureKey& other) const noexcept
     {
         return nodeType == other.nodeType && xDataType == other.xDataType
                && scaleBiasDataType == other.scaleBiasDataType
@@ -93,14 +93,14 @@ struct BatchnormFwdInferenceWithVarianceSignatureKey
                && computeDataType == other.computeDataType;
     }
 
-    static std::unordered_map<BatchnormFwdInferenceWithVarianceSignatureKey,
+    static std::unordered_map<BatchnormFwdInferenceSignatureKey,
                               std::unique_ptr<IGraphNodePlanBuilder>,
-                              BatchnormFwdInferenceWithVarianceSignatureKey>
+                              BatchnormFwdInferenceSignatureKey>
         getPlanBuilders()
     {
-        std::unordered_map<BatchnormFwdInferenceWithVarianceSignatureKey,
+        std::unordered_map<BatchnormFwdInferenceSignatureKey,
                            std::unique_ptr<IGraphNodePlanBuilder>,
-                           BatchnormFwdInferenceWithVarianceSignatureKey>
+                           BatchnormFwdInferenceSignatureKey>
             map;
 
         addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::FLOAT,
@@ -147,31 +147,28 @@ struct BatchnormFwdInferenceWithVarianceSignatureKey
               hipdnn_data_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
               hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum,
               hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
-    static void
-        addPlanBuilder(std::unordered_map<BatchnormFwdInferenceWithVarianceSignatureKey,
-                                          std::unique_ptr<IGraphNodePlanBuilder>,
-                                          BatchnormFwdInferenceWithVarianceSignatureKey>& map)
+    static void addPlanBuilder(std::unordered_map<BatchnormFwdInferenceSignatureKey,
+                                                  std::unique_ptr<IGraphNodePlanBuilder>,
+                                                  BatchnormFwdInferenceSignatureKey>& map)
     {
-        map[BatchnormFwdInferenceWithVarianceSignatureKey(XDataTypeEnum,
-                                                          ScaleBiasDataTypeEnum,
-                                                          MeanVarianceDataTypeEnum,
-                                                          OutputDataTypeEnum,
-                                                          ComputeDataTypeEnum)]
-            = std::make_unique<
-                BatchnormFwdInferenceWithVariancePlanBuilder<XDataTypeEnum,
-                                                             ScaleBiasDataTypeEnum,
-                                                             MeanVarianceDataTypeEnum,
-                                                             OutputDataTypeEnum,
-                                                             ComputeDataTypeEnum>>();
+        map[BatchnormFwdInferenceSignatureKey(XDataTypeEnum,
+                                              ScaleBiasDataTypeEnum,
+                                              MeanVarianceDataTypeEnum,
+                                              OutputDataTypeEnum,
+                                              ComputeDataTypeEnum)]
+            = std::make_unique<BatchnormFwdInferencePlanBuilder<XDataTypeEnum,
+                                                                ScaleBiasDataTypeEnum,
+                                                                MeanVarianceDataTypeEnum,
+                                                                OutputDataTypeEnum,
+                                                                ComputeDataTypeEnum>>();
     }
 };
 
-inline std::ostream& operator<<(std::ostream& os,
-                                const BatchnormFwdInferenceWithVarianceSignatureKey& key)
+inline std::ostream& operator<<(std::ostream& os, const BatchnormFwdInferenceSignatureKey& key)
 {
-    os << "BatchnormFwdInferenceWithVariance(x=" << key.xDataType
-       << ", scale=" << key.scaleBiasDataType << ", mean=" << key.meanVarianceDataType
-       << ", y=" << key.outputDataType << ", compute=" << key.computeDataType << ")";
+    os << "BatchnormFwdInference(x=" << key.xDataType << ", scale=" << key.scaleBiasDataType
+       << ", mean=" << key.meanVarianceDataType << ", y=" << key.outputDataType
+       << ", compute=" << key.computeDataType << ")";
     return os;
 }
 

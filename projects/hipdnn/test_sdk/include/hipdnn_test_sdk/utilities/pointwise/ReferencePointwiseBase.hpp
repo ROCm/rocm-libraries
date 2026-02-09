@@ -5,8 +5,8 @@
 
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/detail/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/PointwiseOperationFunctors.hpp>
 #include <stdexcept>
 #include <tuple>

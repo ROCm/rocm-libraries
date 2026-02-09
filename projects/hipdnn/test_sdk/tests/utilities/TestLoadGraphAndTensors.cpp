@@ -5,11 +5,11 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_test_sdk/detail/ScopedExecute.hpp>
-#include <hipdnn_test_sdk/detail/TensorFileUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/detail/ScopedExecute.hpp>
+#include <hipdnn_test_sdk/utilities/detail/TensorFileUtils.hpp>
 
 using namespace hipdnn_data_sdk;
 using namespace hipdnn_data_sdk::utilities;

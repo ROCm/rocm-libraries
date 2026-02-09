@@ -9,7 +9,7 @@
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
-#include <hipdnn_test_sdk/detail/PointwisePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
 #include <ostream>
 
 namespace hipdnn_test_sdk::detail

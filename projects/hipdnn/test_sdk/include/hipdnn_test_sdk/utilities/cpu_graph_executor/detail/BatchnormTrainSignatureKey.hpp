@@ -7,30 +7,29 @@
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
-#include <hipdnn_test_sdk/detail/BatchnormFwdInferencePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormTrainPlan.hpp>
 #include <ostream>
 
 namespace hipdnn_test_sdk::detail
 {
 
-struct BatchnormFwdInferenceSignatureKey
+struct BatchnormTrainSignatureKey
 {
     const hipdnn_data_sdk::data_objects::NodeAttributes nodeType
-        = hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
+        = hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes;
     hipdnn_data_sdk::data_objects::DataType xDataType;
     hipdnn_data_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_data_sdk::data_objects::DataType meanVarianceDataType;
     hipdnn_data_sdk::data_objects::DataType outputDataType;
     hipdnn_data_sdk::data_objects::DataType computeDataType;
 
-    BatchnormFwdInferenceSignatureKey() = default;
-    constexpr BatchnormFwdInferenceSignatureKey(
-        hipdnn_data_sdk::data_objects::DataType x,
-        hipdnn_data_sdk::data_objects::DataType scaleBias,
-        hipdnn_data_sdk::data_objects::DataType meanVariance,
-        hipdnn_data_sdk::data_objects::DataType output,
-        hipdnn_data_sdk::data_objects::DataType compute)
-        : xDataType(x)
+    BatchnormTrainSignatureKey() = default;
+    constexpr BatchnormTrainSignatureKey(hipdnn_data_sdk::data_objects::DataType input,
+                                         hipdnn_data_sdk::data_objects::DataType scaleBias,
+                                         hipdnn_data_sdk::data_objects::DataType meanVariance,
+                                         hipdnn_data_sdk::data_objects::DataType output,
+                                         hipdnn_data_sdk::data_objects::DataType compute)
+        : xDataType(input)
         , scaleBiasDataType(scaleBias)
         , meanVarianceDataType(meanVariance)
         , outputDataType(output)
@@ -38,24 +37,23 @@ struct BatchnormFwdInferenceSignatureKey
     {
     }
 
-    BatchnormFwdInferenceSignatureKey(
+    BatchnormTrainSignatureKey(
         const hipdnn_data_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap)
     {
-        const auto* nodeAttributes = node.attributes_as_BatchnormInferenceAttributes();
+        const auto* nodeAttributes = node.attributes_as_BatchnormAttributes();
         if(nodeAttributes == nullptr)
         {
-            throw std::runtime_error(
-                "Node attributes could not be cast to BatchnormInferenceAttributes");
+            throw std::runtime_error("Node attributes could not be cast to BatchnormAttributes");
         }
 
         auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
+        auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
         auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
-        auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid());
         auto yTensorAttr = tensorMap.at(nodeAttributes->y_tensor_uid());
 
-        if(xTensorAttr == nullptr || scaleTensorAttr == nullptr || meanTensorAttr == nullptr
+        if(xTensorAttr == nullptr || meanTensorAttr == nullptr || scaleTensorAttr == nullptr
            || yTensorAttr == nullptr)
         {
             throw std::runtime_error("One or more tensor attributes could not be found in the map, "
@@ -69,7 +67,7 @@ struct BatchnormFwdInferenceSignatureKey
         outputDataType = yTensorAttr->data_type();
     }
 
-    std::size_t operator()(const BatchnormFwdInferenceSignatureKey& k) const noexcept
+    std::size_t operator()(const BatchnormTrainSignatureKey& k) const noexcept
     {
         return k.hashSelf();
     }
@@ -84,7 +82,7 @@ struct BatchnormFwdInferenceSignatureKey
                ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 20);
     }
 
-    bool operator==(const BatchnormFwdInferenceSignatureKey& other) const noexcept
+    bool operator==(const BatchnormTrainSignatureKey& other) const noexcept
     {
         return nodeType == other.nodeType && xDataType == other.xDataType
                && scaleBiasDataType == other.scaleBiasDataType
@@ -93,37 +91,17 @@ struct BatchnormFwdInferenceSignatureKey
                && computeDataType == other.computeDataType;
     }
 
-    static std::unordered_map<BatchnormFwdInferenceSignatureKey,
+    static std::unordered_map<BatchnormTrainSignatureKey,
                               std::unique_ptr<IGraphNodePlanBuilder>,
-                              BatchnormFwdInferenceSignatureKey>
+                              BatchnormTrainSignatureKey>
         getPlanBuilders()
     {
-        std::unordered_map<BatchnormFwdInferenceSignatureKey,
+        std::unordered_map<BatchnormTrainSignatureKey,
                            std::unique_ptr<IGraphNodePlanBuilder>,
-                           BatchnormFwdInferenceSignatureKey>
+                           BatchnormTrainSignatureKey>
             map;
 
         addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_data_sdk::data_objects::DataType::FLOAT,
                        hipdnn_data_sdk::data_objects::DataType::FLOAT,
                        hipdnn_data_sdk::data_objects::DataType::FLOAT,
@@ -138,6 +116,26 @@ struct BatchnormFwdInferenceSignatureKey
                        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_data_sdk::data_objects::DataType::BFLOAT16>(map);
+        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_data_sdk::data_objects::DataType::HALF,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
 
         return map;
     }
@@ -147,28 +145,27 @@ struct BatchnormFwdInferenceSignatureKey
               hipdnn_data_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
               hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum,
               hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
-    static void addPlanBuilder(std::unordered_map<BatchnormFwdInferenceSignatureKey,
+    static void addPlanBuilder(std::unordered_map<BatchnormTrainSignatureKey,
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
-                                                  BatchnormFwdInferenceSignatureKey>& map)
+                                                  BatchnormTrainSignatureKey>& map)
     {
-        map[BatchnormFwdInferenceSignatureKey(XDataTypeEnum,
-                                              ScaleBiasDataTypeEnum,
-                                              MeanVarianceDataTypeEnum,
-                                              OutputDataTypeEnum,
-                                              ComputeDataTypeEnum)]
-            = std::make_unique<BatchnormFwdInferencePlanBuilder<XDataTypeEnum,
-                                                                ScaleBiasDataTypeEnum,
-                                                                MeanVarianceDataTypeEnum,
-                                                                OutputDataTypeEnum,
-                                                                ComputeDataTypeEnum>>();
+        map[BatchnormTrainSignatureKey(XDataTypeEnum,
+                                       ScaleBiasDataTypeEnum,
+                                       MeanVarianceDataTypeEnum,
+                                       OutputDataTypeEnum,
+                                       ComputeDataTypeEnum)]
+            = std::make_unique<BatchnormTrainPlanBuilder<XDataTypeEnum,
+                                                         ScaleBiasDataTypeEnum,
+                                                         MeanVarianceDataTypeEnum,
+                                                         OutputDataTypeEnum,
+                                                         ComputeDataTypeEnum>>();
     }
 };
 
-inline std::ostream& operator<<(std::ostream& os, const BatchnormFwdInferenceSignatureKey& key)
+inline std::ostream& operator<<(std::ostream& os, const BatchnormTrainSignatureKey& key)
 {
-    os << "BatchnormFwdInference(x=" << key.xDataType << ", scale=" << key.scaleBiasDataType
-       << ", mean=" << key.meanVarianceDataType << ", y=" << key.outputDataType
-       << ", compute=" << key.computeDataType << ")";
+    os << "BatchnormTrain(x=" << key.xDataType << ", scale=" << key.scaleBiasDataType
+       << ", y=" << key.outputDataType << ", compute=" << key.computeDataType << ")";
     return os;
 }
 

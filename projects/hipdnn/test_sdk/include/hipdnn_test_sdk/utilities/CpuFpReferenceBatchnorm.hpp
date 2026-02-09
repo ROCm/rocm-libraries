@@ -8,7 +8,7 @@
 #include <hipdnn_data_sdk/utilities/StaticCast.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_test_sdk/detail/CpuFpReferenceUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <numeric>
 #include <vector>
 

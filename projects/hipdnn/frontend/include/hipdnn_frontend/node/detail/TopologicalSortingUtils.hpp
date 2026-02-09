@@ -8,7 +8,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_frontend/detail/Utilities.hpp>
+#include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::detail
 {

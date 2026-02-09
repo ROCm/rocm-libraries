@@ -9,7 +9,7 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_frontend/detail/Utilities.hpp>
+#include <hipdnn_frontend/node/detail/Utilities.hpp>
 #include <numeric>
 
 namespace hipdnn_frontend::graph

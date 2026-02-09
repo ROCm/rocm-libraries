@@ -9,7 +9,7 @@
 
 using namespace hipdnn_frontend::detail;
 
-using hipdnn_frontend::streamStatus;
+using hipdnn_frontend::detail::streamStatus;
 
 TEST(TestBackendLoggingHelpers, ToStringAllStatusValues)
 {
