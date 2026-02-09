@@ -149,6 +149,12 @@ namespace origami
             uint32_t LocalReadConflictMultiplierB128;
             uint32_t LocalReadConflictMultiplierB64;
             uint32_t LocalReadConflictMultiplierB32;
+            uint32_t LocalWriteBaseLatencyB128;
+            uint32_t LocalWriteBaseLatencyB64;
+            uint32_t LocalWriteBaseLatencyB32;
+            uint32_t LocalWriteConflictMultiplierB128;
+            uint32_t LocalWriteConflictMultiplierB64;
+            uint32_t LocalWriteConflictMultiplierB32;
             hardware_t::architecture_t architecture;
 
             void print() const {
@@ -679,8 +685,10 @@ namespace origami
          * @param fifo FIFO queue
          * @param bpr Bytes per read operation
          * @param bankConflict Bank conflict rate
+         * @param isLocalRead Whether this is a local read operation
+         * @param numPreviousLRs Number of previous local reads
          */
-        void pushLocalReadWrite(int currentCycle, std::queue<int>& fifo, int bpr, double bankConflict);
+        void pushLocalReadWrite(int currentCycle, std::queue<int>& fifo, int bpr, double bankConflict, bool isLocalRead, int numPreviousLRs);
         
         /**
          * @brief Push a local read operation into FIFO

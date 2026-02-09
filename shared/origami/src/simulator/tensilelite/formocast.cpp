@@ -845,9 +845,9 @@ namespace origami
 
         int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, int lrStallLatencyBuffer)
         {
-            int wavesPerFifo = 16 / numWaves;
+            int lengthOfQueuePerWave = 16 / numWaves;
             int finalCycle = currentCycle + lrStallLatencyBuffer;
-            if (fifo.size() < wavesPerFifo) {
+            if (fifo.size() < lengthOfQueuePerWave) {
                 fifo.push(finalCycle);
                 return currentCycle;
             } else {
@@ -858,7 +858,7 @@ namespace origami
                     return currentCycle;
                 } else {
                     // stall happens
-                    int stallCycles = safe_ceil_div(lrStallLatencyBuffer, wavesPerFifo);
+                    int stallCycles = safe_ceil_div(lrStallLatencyBuffer, lengthOfQueuePerWave);
                     currentCycle = std::max(currentCycle + stallCycles, oldCycle);
                     finalCycle = currentCycle + lrStallLatencyBuffer;
                     fifo.pop();
@@ -878,6 +878,19 @@ namespace origami
         int getLocalReadLatency(int baseLatency, int conflictMultiplier, double bankConflict)
         {
             int conflictPenalty = (bankConflict - 1) * conflictMultiplier;
+            return baseLatency + conflictPenalty;
+        }
+
+        /**
+         * @brief Calculate local write latency based on base latency, conflict multiplier, and bank conflicts
+         * @param baseLatency Base latency for local write operation (from HardwareConstants: LocalWriteBaseLatencyB128/B64/B32)
+         * @param conflictMultiplier Multiplier applied to bank conflict penalty (from HardwareConstants: LocalWriteConflictMultiplierB128/B64/B32)
+         * @param bankConflict Bank conflict factor (typically 1.0 for no conflict, >1.0 for conflicts)
+         * @return Calculated latency in cycles (baseLatency + conflict penalty based on bank conflicts)
+         */
+        int getLocalWriteLatency(int baseLatency, int conflictMultiplier, double bankConflict)
+        {
+            int conflictPenalty = bankConflict * conflictMultiplier;
             return baseLatency + conflictPenalty;
         }
 

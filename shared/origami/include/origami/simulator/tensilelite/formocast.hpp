@@ -319,6 +319,15 @@ namespace origami
          * @return Total latency including bank conflict penalty
          */
         int getLocalReadLatency(int baseLatency, int conflictMultiplier, double bankConflict);
+
+        /**
+         * @brief Calculate local write latency considering bank conflicts
+         * @param baseLatency Base latency without conflicts
+         * @param conflictMultiplier Multiplier for bank conflict penalty
+         * @param bankConflict Bank conflict rate
+         * @return Total latency including bank conflict penalty
+         */
+         int getLocalWriteLatency(int baseLatency, int conflictMultiplier, double bankConflict);
         
         /**
          * @brief Analyze bank conflicts from VGPR state

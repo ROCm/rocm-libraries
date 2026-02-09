@@ -785,7 +785,7 @@ namespace rocisa
         std::queue<int> lgkmLRFIFO;
         std::queue<int> hwGRFIFO;
         bool isEndOfLoop  = false;
-        bool isPreviousLR = false;
+        int numPreviousLRs = 0;
         bool isPreviousMFMA = false;
 
         // Find vgprLocalReadAddrA and vgprLocalReadAddrB names
@@ -885,7 +885,7 @@ namespace rocisa
                     // no stall
                     //heck LR fifo
                     auto currCycles = cycles + dsReadInst->issueLatency();
-                    if(isPreviousLR && bpr >= 4) { // two wave share same lds interface (gfx9)
+                    if(numPreviousLRs > 0 && bpr >= 4) { // two wave share same lds interface (gfx9)
                         currCycles += dsReadInst->issueLatency();
                     }
                     else if(isPreviousMFMA && rocIsa::getInstance().getKernel().isaVersion == std::array<int, 3>{9, 5, 0}) {
@@ -896,7 +896,7 @@ namespace rocisa
                 } else {
                     cycles = stallcycle;
                 }
-                formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, bpr, bankConflict);
+                formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, bpr, bankConflict, true, numPreviousLRs);
             }
             else if(auto rwInst = std::dynamic_pointer_cast<ReadWriteInstruction>(item))
             {
@@ -918,7 +918,7 @@ namespace rocisa
                     else
                         cycles += wInst->issueLatency();
                     previousLW = cycles;
-                    formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, 4, 1.0); //Fixme: Local write is not implemented yet
+                    formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, 16, 1.0, false, 0);
                 }
                 else if(auto wInst = std::dynamic_pointer_cast<DSStoreB64>(item))
                 {
@@ -927,7 +927,7 @@ namespace rocisa
                     else
                         cycles += wInst->issueLatency();
                     previousLW = cycles;
-                    formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, 4, 1.0); //Fixme: Local write is not implemented yet
+                    formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, 8, 1.0, false, 0);
                 }
                 else if(auto wInst = std::dynamic_pointer_cast<DSStoreB32>(item))
                 {
@@ -936,7 +936,25 @@ namespace rocisa
                     else
                         cycles += wInst->issueLatency();
                     previousLW = cycles;
-                    formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, 4, 1.0); //Fixme: Local write is not implemented yet
+                    formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, 4, 1.0, false, 0);
+                }
+                else if(auto wInst = std::dynamic_pointer_cast<DSStoreB16>(item))
+                {
+                    if(previousLW + wInst->issueLatency() >= cycles && numWaves == 4)
+                        cycles += wInst->issueLatency() * 2;
+                    else
+                        cycles += wInst->issueLatency();
+                    previousLW = cycles;
+                    formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, 2, 1.0, false, 0);
+                }
+                else if(auto wInst = std::dynamic_pointer_cast<DSStoreB8>(item))
+                {
+                    if(previousLW + wInst->issueLatency() >= cycles && numWaves == 4)
+                        cycles += wInst->issueLatency() * 2;
+                    else
+                        cycles += wInst->issueLatency();
+                    previousLW = cycles;
+                    formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, 1, 1.0, false, 0);
                 }
                 else
                 {
@@ -967,25 +985,25 @@ namespace rocisa
             {
                 cycles += 1;
             }
-            //if(auto instruction = std::dynamic_pointer_cast<Instruction>(item))
-            //{
+            // if(auto instruction = std::dynamic_pointer_cast<Instruction>(item))
+            // {
             //    instruction->comment = instruction->comment + " <This is " + std::to_string(cycles) + "-cycle>"; // for debug
-            //}
+            // }
 
             // Set Flags
             if(auto mfmaInst = std::dynamic_pointer_cast<MFMAInstruction>(item))
             {
                 isPreviousMFMA = true;
-                isPreviousLR = false;
+                numPreviousLRs = 0;
             }
             else if(auto lrInst = std::dynamic_pointer_cast<DSLoadInstruction>(item))
             {
-                isPreviousLR = true;
+                numPreviousLRs++;
                 isPreviousMFMA = false;
             }
             else
             {
-                isPreviousLR = false;
+                numPreviousLRs = 0;
                 isPreviousMFMA = false;
             }
         }

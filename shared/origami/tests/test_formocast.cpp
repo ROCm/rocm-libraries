@@ -609,7 +609,7 @@ TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
     SECTION("Push local read write with bank conflict") {
         std::queue<int> fifo;
 
-        simulator.pushLocalReadWrite(100, fifo, 8, 1.5);
+        simulator.pushLocalReadWrite(100, fifo, 8, 1.5, true, 0);
         
         REQUIRE(fifo.size() == 1);
         REQUIRE(fifo.front() == 111); // 100 + 11
@@ -618,7 +618,7 @@ TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
     SECTION("Push local read write without bank conflict") {
         std::queue<int> fifo;
 
-        simulator.pushLocalReadWrite(100, fifo, 8, 1.0);
+        simulator.pushLocalReadWrite(100, fifo, 8, 1.0, true, 0);
         
         REQUIRE(fifo.size() == 1);
         REQUIRE(fifo.front() == 110); // 100 + 10
