@@ -1741,7 +1741,7 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
             3,  SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 for the remaining main loop"),
 
             # GRB must wait for LRB0 (interleave LRA0 + GRB safely)
-            15, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete to start GRB"),
+            15, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete to start GRB"),
             15, SBarrier(comment=""),
 
             # GRA must wait for LRA0; LRB1 can be interleaved with GRA after this fence
