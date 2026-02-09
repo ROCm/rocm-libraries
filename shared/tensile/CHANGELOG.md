@@ -2,10 +2,6 @@
 
 ## Tensile 4.45.0 for ROCm 7.2.0
 
-### Changed
-
-- Enabled rocBLAS and Tensile for gfx1030
-
 ### Removed
 
 - `op_sel` modifiers for `v_dot4` from Tensile codegen
