@@ -9,7 +9,7 @@
 
 // MIT License
 //
-// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Modifications Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -103,8 +103,8 @@ int main(int, char**)
 
 #if _LIBCUDACXX_HAS_NVFP16()
   test<__half>();
-// NOTE(HIP/AMD): for specific ROCm versions the optimization causes test failures for __half (https://github.com/ROCm/libhipcxx/issues/13)
-#if !defined(__OPTIMIZE__) || (defined(ROCM_VERSION_MAJOR) and defined(ROCM_VERSION_MINOR) and (ROCM_VERSION_MAJOR < 7 or ROCM_VERSION_MINOR < 2 and ROCM_VERSION_MAJOR == 7))
+// NOTE(HIP/AMD): for ROCm 7.2+ the optimization causes test failures for __half (https://github.com/ROCm/libhipcxx/issues/13)
+#if !defined(__OPTIMIZE__) || MAXIMUM_ROCM_VERSION(7, 1)
   test_edges<__half>();
 #endif
 #endif // _LIBCUDACXX_HAS_NVFP16()

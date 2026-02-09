@@ -147,7 +147,10 @@ __host__ __device__ void test_tgamma(T val)
   assert(cuda::std::isnan(cuda::std::tgamma(-2)));
 
   // Some characteristic value
+  // NOTE(HIP/AMD): tgamma(2.0) returns a slightly incorrect version for ROCm versions below 7.2
+#if MINIMUM_ROCM_VERSION(7,2,0)
   assert(eq(cuda::std::tgamma(T(2.0)), T(1.0)));
+#endif
 
   // If the argument is ±0, ±∞ is returned.
   assert(eq(cuda::std::tgamma(val), cuda::std::numeric_limits<ret>::infinity()));
@@ -260,10 +263,7 @@ __global__ void test_global_kernel(float* val)
 
 int main(int, char**)
 {
-// NOTE(HIP/AMD): for specific ROCm versions the optimization causes test failures for __half (https://github.com/ROCm/libhipcxx/issues/13)
-#if !defined(__OPTIMIZE__) || (defined(ROCM_VERSION_MAJOR) and defined(ROCM_VERSION_MINOR) and (ROCM_VERSION_MAJOR > 7 or (ROCM_VERSION_MINOR > 1 and ROCM_VERSION_MAJOR == 7)))
   volatile float val = 0.0f;
   test(val);
-#endif
   return 0;
 }
