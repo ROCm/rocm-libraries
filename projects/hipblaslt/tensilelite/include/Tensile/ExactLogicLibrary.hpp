@@ -187,16 +187,22 @@ namespace TensileLite
         // Helper to check if a predicate match is a fallback match
         // Uses SFINAE to handle predicates with and without isFallbackMatch method
         template <typename Pred>
-        auto isPredicateFallback(Pred const& pred, Hardware const& hardware) const
+        auto isPredicateFallbackImpl(Pred const& pred, Hardware const& hardware, int) const
             -> decltype(pred.isFallbackMatch(hardware), bool())
         {
             return pred.isFallbackMatch(hardware);
         }
 
         template <typename Pred>
-        bool isPredicateFallback(...) const
+        bool isPredicateFallbackImpl(Pred const&, Hardware const&, ...) const
         {
             return false; // If no isFallbackMatch method, assume not a fallback
+        }
+
+        template <typename Pred>
+        bool isPredicateFallback(Pred const& pred, Hardware const& hardware) const
+        {
+            return isPredicateFallbackImpl(pred, hardware, 0);
         }
 
     public:
