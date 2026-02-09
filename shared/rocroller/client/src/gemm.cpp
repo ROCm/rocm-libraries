@@ -852,7 +852,7 @@ namespace rocRoller::Client::GEMMClient
 
         auto const& arch = context->targetArchitecture().target();
 
-        if(solution.streamK)
+        if(solution.streamK != StreamKMode::None)
         {
             if(context->targetArchitecture().HasCapability(GPUCapability::ArchAccUnifiedRegs))
             {
@@ -987,7 +987,7 @@ namespace rocRoller::Client::GEMMClient
             HIP_CHECK(hipSetDevice(benchmark.device));
         }
 
-        if(willRunOnGPU && solution.streamK)
+        if(willRunOnGPU && solution.streamK != StreamKMode::None)
         {
             if(run.numWGs == 0)
             {
@@ -996,7 +996,6 @@ namespace rocRoller::Client::GEMMClient
                             == (hipError_t)HIP_SUCCESS);
                 run.numWGs = deviceProperties.multiProcessorCount;
             }
-            AssertFatal(!solution.streamKTwoTile || solution.streamK);
         }
 
         if(doGenerate)
@@ -1262,9 +1261,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--schedulerCost", &SolutionParameters::schedulerCost),
         std::make_pair("--matchMemoryAccess", &SolutionParameters::matchMemoryAccess),
         std::make_pair("--tailLoops", &SolutionParameters::tailLoops),
-        std::make_pair("--streamK", &SolutionParameters::streamK),
-        std::make_pair("--streamKTwoTile", &SolutionParameters::streamKTwoTile),
-        std::make_pair("--streamKTwoTileDPFirst", &SolutionParameters::streamKTwoTileDPFirst));
+        std::make_pair("--streamK", &SolutionParameters::streamK));
 
     template <typename T, typename U>
     std::string getSolutionParameterArgumentName(U T::*member_ptr)
@@ -1465,8 +1462,6 @@ namespace rocRoller::Client::GEMMClient::CLI
         // StreamK
 
         update(SN(&SP::streamK), solution.streamK);
-        update(SN(&SP::streamKTwoTile), solution.streamKTwoTile);
-        update(SN(&SP::streamKTwoTileDPFirst), solution.streamKTwoTileDPFirst);
 
         // Other
 
@@ -1546,9 +1541,7 @@ int main(int argc, const char* argv[])
 
         .tailLoops = true,
 
-        .streamK               = false,
-        .streamKTwoTile        = false,
-        .streamKTwoTileDPFirst = false,
+        .streamK = StreamKMode::None,
 
         .version = rocRoller::Version::Git(),
     };
@@ -1776,10 +1769,9 @@ int main(int argc, const char* argv[])
                    "Prefetch 1/prefetchLDSFactor of MacroTile from LDS");
     app.add_flag(SN(&SP::prefetchMixMemOps),
                  "Mix global and LDS memory operations during prefetching.");
-    app.add_flag(SN(&SP::streamK), "Enable StreamK algorithm.");
-    app.add_flag(SN(&SP::streamKTwoTile), "Enable two-tile StreamK algorithm.");
-    app.add_flag(SN(&SP::streamKTwoTileDPFirst),
-                 "Execute data-parallel loop first in the two-tile StreamK algorithm.");
+    app.add_option(SN(&SP::streamK),
+                   "StreamK mode (None, Standard, TwoTile, TwoTileDPFirst). Default: None")
+        ->check(CLI::IsMember(rocRoller::enumStrings<StreamKMode>()));
 
     app.add_option(SN(&SP::loadPathAScale),
                    "How to load AScale (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: "

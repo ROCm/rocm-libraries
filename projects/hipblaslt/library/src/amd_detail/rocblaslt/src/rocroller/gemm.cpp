@@ -168,7 +168,7 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
         }
     }
 
-    if(gemm->streamK)
+    if(gemm->streamK != StreamKMode::None)
     {
         rv << "SK_";
     }
@@ -398,7 +398,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
     }
 
-    if(gemm->streamK)
+    if(gemm->streamK != StreamKMode::None)
     {
         tagSKGrid = command->allocateTag();
         command->allocateArgument(DataType::UInt32,
@@ -591,12 +591,9 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         params->workgroupRemapXCC = 8;
     }
 
-    if(gemm->streamK)
+    if(gemm->streamK != StreamKMode::None)
     {
-        StreamKMode streamKMode = StreamKMode::Standard;
-        if(gemm->streamKTwoTile)
-            streamKMode = StreamKMode::TwoTile;
-        params->streamK = streamKMode;
+        params->streamK = gemm->streamK;
 
         params->loopOverOutputTilesDimensions = {0, 1};
     }
@@ -671,9 +668,12 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 
 size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob)
 {
+    if (gemm->isCustomKernel())
+        return 0;
+
     CommandArguments commandArgs = gemm->command->createArguments();
 
-    if(gemm->params->streamK)
+    if(gemm->params->streamK != StreamKMode::None)
     {
         commandArgs.setArgument(
             gemm->tagSKGrid, ArgumentType::Value, chooseStreamKGridSize(gemm, prob));
@@ -683,6 +683,28 @@ size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContra
 
     // Only return scratch space for ScratchPolicy::None (uses prob.workspace)
     return gemm->commandKernel->scratchSpaceRequired(Operations::ScratchPolicy::None, runtimeArgs);
+}
+
+bool isSupportedProblem(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob)
+{
+    auto workSpaceRequired = workspaceRequired(gemm, prob);
+
+    if(workSpaceRequired > prob.workspaceSize)
+        return false;
+
+    if (gemm->isCustomKernel())
+    {
+        return (prob.m % gemm->params->workgroupTile.m == 0 &&
+                prob.n % gemm->params->workgroupTile.n == 0 &&
+                prob.k % gemm->params->workgroupTile.k == 0);
+    }
+    else
+    {
+        auto commandArgs = createCommandArguments(gemm, prob, DEFAULT_WGM);
+        auto runtimeArgs = commandArgs.runtimeArguments();
+
+        return gemm->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error);
+    }
 }
 
 CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
@@ -798,7 +820,7 @@ CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
         commandArgs.setArgument(gemm->tagWGM, ArgumentType::Value, wgm);
     }
 
-    if(gemm->params->streamK)
+    if(gemm->params->streamK != StreamKMode::None)
     {
         commandArgs.setArgument(
             gemm->tagSKGrid, ArgumentType::Value, chooseStreamKGridSize(gemm, prob));
@@ -826,7 +848,7 @@ rocblaslt_status runGemmKernel(std::shared_ptr<GemmKernel>        gemm,
     }
     auto commandArgs = createCommandArguments(gemm, prob, DEFAULT_WGM);
 
-    if(gemm->params->streamK)
+    if(gemm->params->streamK != StreamKMode::None)
     {
         auto runtimeArgs = commandArgs.runtimeArguments();
 

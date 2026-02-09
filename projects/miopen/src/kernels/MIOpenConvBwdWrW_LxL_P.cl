@@ -56,7 +56,7 @@
 
 #define DBG_OUT_OF_RNGE 0
 // number of filter taps in the processing wk_item
-//#define MLO_WEI_WKITEM 5
+// #define MLO_WEI_WKITEM 5
 
 #define MLO_N_OUT_HORIZ_READS (MLO_ALIGNED_OUT_SCAN_LN)
 #define MLO_OUT_HORIZ_PIX_SZ (MLO_N_OUT_HORIZ_READS * MLO_READ_UNIT)
@@ -594,7 +594,7 @@ MIOpenCvBwdWrW(const __global _FLOAT* __restrict top_df,
                                 i_vals[w] = i_vals[w + (MLO_FILTER_STRIDE0 / MLO_WEI_BLK_SZ0)];
                             }
                         } // for (uint i = 0; i < MLO_OUT_WEI_SCAN_BLK; ++i)
-                    }     // for (uint j = 0; j < MLO_N_ALIGNED_OUT_SCAN_BLK; ++j)
+                    } // for (uint j = 0; j < MLO_N_ALIGNED_OUT_SCAN_BLK; ++j)
                 }
 #else
                 for(uint o = 0; o < MLO_N_LCL_OUT_MAPS; ++o)
@@ -633,7 +633,7 @@ MIOpenCvBwdWrW(const __global _FLOAT* __restrict top_df,
 
         } // for (uint ob = 0; ob < MLO_N_OUT_BLK; ++ob, in_y += (MLO_IN_LCL_HEIGHT -
           // MLO_FILTER_SIZE1 + 1), out_y += MLO_N_ALIGNED_OUT_SCAN_BLK)
-    }     // for (uint b = 0;
+    } // for (uint b = 0;
 
 #endif
 

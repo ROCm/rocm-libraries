@@ -1135,17 +1135,36 @@ struct GroupedConvolutionBackwardDataKernel
 
         // allocate LDS
         __shared__ char smem_ptr[GetSmemSize()];
-        RunGemm(a_ptr,
-                b_ptr,
-                kargs.ds_ptr,
-                c_ptr,
-                smem_ptr,
-                kargs,
-                splitted_k,
-                i_m,
-                i_n,
-                i_k,
-                group_id);
+        if constexpr(GemmPipeline_::Async)
+        {
+#if defined(__gfx950__)
+            RunGemm(a_ptr,
+                    b_ptr,
+                    kargs.ds_ptr,
+                    c_ptr,
+                    smem_ptr,
+                    kargs,
+                    splitted_k,
+                    i_m,
+                    i_n,
+                    i_k,
+                    group_id);
+#endif
+        }
+        else
+        {
+            RunGemm(a_ptr,
+                    b_ptr,
+                    kargs.ds_ptr,
+                    c_ptr,
+                    smem_ptr,
+                    kargs,
+                    splitted_k,
+                    i_m,
+                    i_n,
+                    i_k,
+                    group_id);
+        }
     }
 };
 
