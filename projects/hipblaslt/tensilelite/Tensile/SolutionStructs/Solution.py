@@ -1527,11 +1527,8 @@ class Solution(collections.abc.Mapping):
 
     # Complex datatype restrictions.
     if state["ProblemType"]["DataType"].isComplex():
-      if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) and (state["GlobalSplitUAlgorithm"] != "MultipleBuffer"):
-        reject(state, printRejectionReason, "Complex datatype kernel currently only supports MultiBuffer GSU.")
-        return
-      if state["MIArchVgpr"]:
-        reject(state, printRejectionReason, "Complex datatype kernel does not support MIArchVgpr yet.")
+      if state["MIArchVgpr"] and state["StreamK"] != 0:
+        reject(state, printRejectionReason, "Complex datatype kernel does not support StreamK with MIArchVgpr yet.")
         return
 
 
