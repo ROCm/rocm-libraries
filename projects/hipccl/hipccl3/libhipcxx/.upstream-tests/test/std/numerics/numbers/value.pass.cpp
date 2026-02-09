@@ -7,6 +7,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // <cuda/std/numbers>
 
 #include <cuda/std/cassert>
@@ -90,6 +112,8 @@ __host__ __device__ void test_ext_fp()
   // MSVC errors here because of "error: A __device__ variable template cannot have a const qualified type on Windows"
 #  if _LIBCUDACXX_HAS_NVFP16()
   // __half constants
+// NOTE(HIP/AMD): for ROCm 7.10 and earlier constexpression setting of __half values is not possible
+#    if MINIMUM_ROCM_VERSION(7, 11, 0)
   assert(cuda::std::numbers::e_v<__half> == __half{2.71875});
   assert(cuda::std::numbers::log2e_v<__half> == __half{1.4423828125});
   assert(cuda::std::numbers::log10e_v<__half> == __half{0.434326171875});
@@ -103,6 +127,7 @@ __host__ __device__ void test_ext_fp()
   assert(cuda::std::numbers::inv_sqrt3_v<__half> == __half{0.5771484375});
   assert(cuda::std::numbers::egamma_v<__half> == __half{0.5771484375});
   assert(cuda::std::numbers::phi_v<__half> == __half{1.6181640625});
+#    endif
 #  endif // _LIBCUDACXX_HAS_NVFP16()
 
 #  if _LIBCUDACXX_HAS_NVBF16()

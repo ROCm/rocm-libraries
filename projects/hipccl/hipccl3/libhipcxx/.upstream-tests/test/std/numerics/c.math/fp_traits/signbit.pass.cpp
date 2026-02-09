@@ -10,7 +10,7 @@
 
 // MIT License
 //
-// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Modifications Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -122,7 +122,10 @@ __host__ __device__ constexpr bool test()
   test_type<long double>();
 #endif // _CCCL_HAS_LONG_DOUBLE()
 #if _CCCL_HAS_NVFP16()
+// NOTE(HIP/AMD): for ROCm 7.10 and earlier constexpression setting of __half values is not possible
+#  if MINIMUM_ROCM_VERSION(7, 11, 0)
   test_type<__half>();
+#  endif
 #endif // _CCCL_HAS_NVFP16()
 #if _CCCL_HAS_NVBF16()
   test_type<__nv_bfloat16>();
@@ -167,7 +170,10 @@ __host__ __device__ constexpr bool test()
 __host__ __device__ constexpr bool test_constexpr()
 {
 #if _CCCL_HAS_NVFP16()
+// NOTE(HIP/AMD): for ROCm 7.10 and earlier constexpression setting of __half values is not possible
+#  if MINIMUM_ROCM_VERSION(7, 11, 0)
   test_type<__half>();
+#  endif
 #endif // _CCCL_HAS_NVFP16()
 #if _CCCL_HAS_NVBF16()
   test_type<__nv_bfloat16>();
