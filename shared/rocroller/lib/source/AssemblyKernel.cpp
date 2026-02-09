@@ -111,6 +111,8 @@ namespace rocRoller
             m_workitemIndex[2]->setName("Workitem Index Z");
             co_yield m_workitemIndex[2]->allocate();
         }
+    
+        ctx->argLoader()->releasePreloadedBlock();
     }
 
     Generator<Instruction> AssemblyKernel::preamble()

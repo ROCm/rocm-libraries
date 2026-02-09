@@ -307,31 +307,31 @@ namespace rocRoller::KernelGraph
             }
 
             // Now propagate indirect references (args referenced by other args' expressions)
-            do
-            {
-                any = false;
+            // do
+            // {
+            //     any = false;
 
-                for(auto& [node, referencedArgs] : m_referencedArgs)
-                {
-                    std::unordered_set<std::string> additions;
+            //     for(auto& [node, referencedArgs] : m_referencedArgs)
+            //     {
+            //         std::unordered_set<std::string> additions;
 
-                    for(auto const& arg : referencedArgs)
-                    {
-                        auto iter = m_subReferencedArgs.find(arg);
-                        if(iter != m_subReferencedArgs.end())
-                        {
-                            additions.insert(iter->second.begin(), iter->second.end());
-                        }
-                    }
+            //         for(auto const& arg : referencedArgs)
+            //         {
+            //             auto iter = m_subReferencedArgs.find(arg);
+            //             if(iter != m_subReferencedArgs.end())
+            //             {
+            //                 additions.insert(iter->second.begin(), iter->second.end());
+            //             }
+            //         }
 
-                    auto beforeSize = referencedArgs.size();
-                    referencedArgs.insert(additions.begin(), additions.end());
-                    auto afterSize = referencedArgs.size();
+            //         auto beforeSize = referencedArgs.size();
+            //         referencedArgs.insert(additions.begin(), additions.end());
+            //         auto afterSize = referencedArgs.size();
 
-                    if(afterSize > beforeSize)
-                        any = true;
-                }
-            } while(any);
+            //         if(afterSize > beforeSize)
+            //             any = true;
+            //     }
+            // } while(any);
         }
 
         // Arguments directly used in control flow (before propagation)

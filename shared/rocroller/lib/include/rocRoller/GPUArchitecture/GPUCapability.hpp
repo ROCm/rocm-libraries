@@ -175,7 +175,11 @@ namespace rocRoller
             HasXCC,
             DefaultRemapXCCValue,
 
-            HasKernargPreloading,
+            /**
+             * The maximum number of SGPRs that can be preloaded with kernel
+             * arguments at the beginning of the kernel.
+             */
+            MaxPreloadedKernargs,
 
             Count,
         };

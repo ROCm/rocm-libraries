@@ -41,7 +41,8 @@ namespace rocRoller
                && dataDirection == rhs.dataDirection //
                && equivalent(expression, rhs.expression) //
                && offset == rhs.offset //
-               && size == rhs.size;
+               && size == rhs.size
+               && preloaded == rhs.preloaded;
     }
 
     std::string AssemblyKernelArgument::toString() const

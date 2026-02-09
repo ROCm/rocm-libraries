@@ -44,6 +44,8 @@ namespace rocRoller
         int offset = -1;
         int size   = -1;
 
+        bool preloaded = false;
+
         bool operator==(AssemblyKernelArgument const&) const;
 
         std::string toString() const;

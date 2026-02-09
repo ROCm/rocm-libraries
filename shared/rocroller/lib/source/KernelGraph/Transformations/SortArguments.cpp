@@ -30,6 +30,7 @@
 #include <rocRoller/KernelGraph/TopoVisitor.hpp>
 
 #include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer.hpp>
 // #include <rocRoller/CommandSolution.hpp>
 // #include <rocRoller/Expression.hpp>
@@ -133,10 +134,12 @@ namespace rocRoller
 
             auto launchTimeOnlyArguments = m_context->kernel()->launchTimeOnlyArguments();
 
-            auto arguments = [&]() -> std::deque<AssemblyKernelArgument> {
-                auto tmp = m_context->kernel()->resetArguments();
-                return {tmp.begin(), tmp.end()};
-            }();
+            // auto arguments = [&]() -> std::deque<AssemblyKernelArgument> {
+            //     auto tmp = m_context->kernel()->resetArguments();
+            //     return {tmp.begin(), tmp.end()};
+            // }();
+
+            auto arguments = m_context->kernel()->resetArguments();
 
             Log::critical("Arguments Before:");
             for(auto const& arg : arguments)
@@ -155,8 +158,11 @@ namespace rocRoller
                 return visitor.argumentFirstUse(a.name) < visitor.argumentFirstUse(b.name);
             });
 
-            auto newArguments = FillAlignmentGaps(arguments, launchTimeOnlyArguments);
-            // std::vector<AssemblyKernelArgument> newArguments{arguments.begin(), arguments.end()};
+            m_context->argLoader()->decidePreloadedKernargs(arguments);
+
+
+            // auto newArguments = FillAlignmentGaps(arguments, launchTimeOnlyArguments);
+            std::vector<AssemblyKernelArgument> newArguments{arguments.begin(), arguments.end()};
 
             Log::critical("Arguments After:");
             for(auto const& arg : newArguments)

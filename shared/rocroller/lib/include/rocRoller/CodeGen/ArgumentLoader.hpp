@@ -84,8 +84,26 @@ namespace rocRoller
             loadRange(int offset, int sizeBytes, Register::ValuePtr& value) const;
 
         Generator<Instruction>
-             getPreloadedRegisters(Register::ValuePtr& regs, int& offset, int& count);
-        void splitOutArgs(Register::ValuePtr rawRegs, int beginOffset);
+            getPreloadedRegisters(Register::ValuePtr& regs, int& offset, int& count);
+
+        /**
+         * Returns true if we need to request the kernel argument pointer in the initial kernel
+         * execution state (this would be false if we can preload every single kernel argument).
+         */
+        bool needsKernargPointer( std::vector<AssemblyKernelArgument> const& args) const;
+
+        /**
+         * Splits all the kernel arguments from `original` into either `preloaded` or `nonPreloaded` based on whether they will fit into the maximum number of preloaded kernel arguments.
+         * 
+         * The first priority is to pick the earliest arguments from `original` first, but it will also pick out-of-order arguments.
+         */
+        void decidePreloadedKernargs(std::vector<AssemblyKernelArgument>& args);
+
+        /**
+         * Splits the block allocations of kernel arguments into individual registers and clears
+         * the block allocations so that individual kernel arguments can be deallocated individually. 
+         */
+        void splitOutArgumentRegisters();
 
     private:
         friend class rocRollerTest::ArgumentLoaderTest_loadArgExtra_Test;
@@ -100,7 +118,11 @@ namespace rocRoller
         /// Call the one from the AssemblyKernel instead.
         Register::ValuePtr argumentPointer() const;
 
+        Generator<Instruction> splitOutArgs(Register::ValuePtr rawRegs, int beginOffset);
+
         std::unordered_map<std::string, Register::ValuePtr> m_loadedValues;
+
+        Register::ValuePtr m_preloadedBlock;
     };
 
     /**

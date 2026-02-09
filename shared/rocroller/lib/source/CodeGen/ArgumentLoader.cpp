@@ -31,6 +31,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
+// #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -68,7 +69,7 @@ namespace rocRoller
 
         int numUserSGPRs = ctx->allocator(Register::Type::Scalar)->useCount();
 
-        int maxArchPreloadedRegs = 16 - numUserSGPRs;
+        int maxArchPreloadedRegs = 31 - numUserSGPRs;
 
         if(maxPreloadedRegs < 0)
         {
@@ -99,10 +100,18 @@ namespace rocRoller
         co_yield regs->allocate();
 
         Log::debug("Splitting out preloaded args:");
-        splitOutArgs(regs, 0);
+        co_yield splitOutArgs(regs, 0);
+
+        m_preloadedBlock = regs;
+
+        co_yield Instruction::Comment("Here!");
 
         count = preloadedRegs;
     }
+    // void ArgumentLoader::releasePreloadedBlock()
+    // {
+    //     m_preloadedBlock.reset();
+    // }
 
     Generator<Instruction>
         ArgumentLoader::loadRange(int offset, int endOffset, Register::ValuePtr& value) const
@@ -158,7 +167,87 @@ namespace rocRoller
         }
     }
 
-    void ArgumentLoader::splitOutArgs(Register::ValuePtr rawRegs, int beginOffset)
+    void ArgumentLoader::decidePreloadedKernargs(std::vector<AssemblyKernelArgument>& args)
+    {
+        auto ctx = m_context.lock();
+
+        auto archPreloadedSGPRs
+            = ctx->targetArchitecture().GetCapability(GPUCapability::MaxPreloadedKernargs);
+        auto optionPreloadedSGPRs = ctx->kernelOptions()->systemPreloadedKernelArguments;
+
+        auto getArgSGPRs
+            = [](AssemblyKernelArgument const& arg) { return std::max(arg.size / 4, 1); };
+
+        auto totalArgSGPRs = [&]() {
+            auto view = args | std::views::transform(getArgSGPRs);
+            return std::reduce(view.begin(), view.end());
+        }();
+
+        // Start with arch defined amount
+        auto maxPreloadedSGPRs = archPreloadedSGPRs;
+
+        // If we need to manually load any args, we need 2 SGPRs for the pointer.
+        if(totalArgSGPRs > maxPreloadedSGPRs)
+            maxPreloadedSGPRs -= 2;
+
+        // Apply the kernel option limit if it was specified.
+        if(optionPreloadedSGPRs > 0)
+            maxPreloadedSGPRs = std::min(maxPreloadedSGPRs, optionPreloadedSGPRs);
+
+        int totalAssignedSGPRs = 0;
+
+        // Take the first args first, but if one doesn't fit, try to find a later one.
+        for(auto & arg: args)
+        {
+            auto argSGPRs = getArgSGPRs(arg);
+
+            if(totalAssignedSGPRs + argSGPRs <= maxPreloadedSGPRs)
+            {
+                arg.preloaded = true;
+                totalAssignedSGPRs += argSGPRs;
+            }
+            else
+            {
+                arg.preloaded = false;
+            }
+        }
+
+        auto isPreloaded = [](AssemblyKernelArgument const& arg){
+            return arg.preloaded;
+        };
+
+        auto firstNonPreloaded = std::stable_partition(args.begin(), args.end(), isPreloaded);
+
+        auto largestArgFirst = [&totalArgSGPRs](AssemblyKernelArgument const& a, AssemblyKernelArgument const& b)
+        {
+            return a.size > b.size;
+        };
+
+        std::stable_sort(args.begin(), firstNonPreloaded, largestArgFirst);
+        std::stable_sort(firstNonPreloaded, args.end(), largestArgFirst);
+
+        int offset = 0;
+        bool startedNonPreloaded = false;
+
+        for(auto & arg: args)
+        {
+            if(arg.preloaded && !startedNonPreloaded)
+            {
+                startedNonPreloaded = true;
+                AssertFatal(offset / 4 == (firstNonPreloaded - args.begin()));
+                arg.offset = RoundUpToMultiple(offset, arg.size);
+            }
+            else
+            {
+                AssertFatal(offset % arg.size == 0, "No bubbles allowed in either segment!", ShowValue(offset), ShowValue(arg.size));
+                arg.offset = offset;
+            }
+
+            offset += arg.size;
+        }
+    }
+
+    Generator<Instruction> ArgumentLoader::splitOutArgs(Register::ValuePtr rawRegs, int beginOffset)
     {
         AssertFatal(rawRegs->variableType() == DataType::Raw32, ShowValue(rawRegs->variableType()));
         AssertFatal(rawRegs->allocationState() == Register::AllocationState::Allocated,
@@ -216,9 +305,12 @@ namespace rocRoller
             auto subReg = valueRegs[valIdx];
             subReg->setName(arg.name);
             subReg->setVariableType(arg.variableType);
+            subReg->allocation()->setOptions(Register::AllocationOptions::FullyContiguous());
 
-            if(!launchTimeOnly.contains(arg.name))
-                m_loadedValues[arg.name] = subReg;
+            co_yield Instruction::Comment(subReg->description());
+
+            // if(!launchTimeOnly.contains(arg.name))
+            m_loadedValues[arg.name] = subReg;
         }
     }
 
@@ -257,7 +349,7 @@ namespace rocRoller
         co_yield loadRange(beginOffset, endOffset, allArgs);
 
         Log::critical("Splitting out manually loaded args:");
-        splitOutArgs(allArgs, beginOffset);
+        co_yield splitOutArgs(allArgs, beginOffset);
     }
 
 #else
