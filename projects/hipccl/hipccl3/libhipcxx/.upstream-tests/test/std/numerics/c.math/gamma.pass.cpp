@@ -148,7 +148,7 @@ __host__ __device__ void test_tgamma(T val)
 
   // Some characteristic value
   // NOTE(HIP/AMD): tgamma(2.0) returns a slightly incorrect version for ROCm versions below 7.2
-#if MINIMUM_ROCM_VERSION(7,2,0)
+#if LIBHIPCXX_ROCM_VERSION_GE(7,2,0)
   assert(eq(cuda::std::tgamma(T(2.0)), T(1.0)));
 #endif
 

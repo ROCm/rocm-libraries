@@ -113,7 +113,7 @@ __host__ __device__ void test_ext_fp()
 #  if _LIBCUDACXX_HAS_NVFP16()
   // __half constants
 // NOTE(HIP/AMD): for ROCm 7.10 and earlier constexpression setting of __half values is not possible
-#    if MINIMUM_ROCM_VERSION(7, 11, 0)
+#    if LIBHIPCXX_ROCM_VERSION_GE(7, 11, 0)
   assert(cuda::std::numbers::e_v<__half> == __half{2.71875});
   assert(cuda::std::numbers::log2e_v<__half> == __half{1.4423828125});
   assert(cuda::std::numbers::log10e_v<__half> == __half{0.434326171875});

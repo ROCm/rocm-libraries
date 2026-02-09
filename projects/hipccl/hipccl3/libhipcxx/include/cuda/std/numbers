@@ -130,7 +130,7 @@ _CCCL_DIAG_POP
 
 #if _LIBCUDACXX_HAS_NVFP16()
 // NOTE(HIP/AMD): for ROCm 7.10 and earlier constexpression setting of __half values is not possible
-#  if MINIMUM_ROCM_VERSION(7, 11, 0)
+#  if LIBHIPCXX_ROCM_VERSION_GE(7, 11, 0)
 template <>
 struct __numbers<__half>
 {
@@ -226,7 +226,7 @@ struct __numbers<__half>
     return __half_raw{.x = 0x3e79u};
   }
 };
-#  endif // MINIMUM_ROCM_VERSION(7, 11, 0)
+#  endif // LIBHIPCXX_ROCM_VERSION_GE(7, 11, 0)
 #endif // _LIBCUDACXX_HAS_NVFP16()
 
 #if _LIBCUDACXX_HAS_NVBF16()
@@ -322,7 +322,7 @@ inline constexpr _Tp phi_v = __numbers<_Tp>::__phi();
 // MSVC errors here because of "error: A __device__ variable template cannot have a const qualified type on Windows"
 #  if _LIBCUDACXX_HAS_NVFP16()
 // NOTE(HIP/AMD): for ROCm 7.10 and earlier constexpression setting of __half values is not possible
-#    if MINIMUM_ROCM_VERSION(7, 11, 0)
+#    if LIBHIPCXX_ROCM_VERSION_GE(7, 11, 0)
 template <>
 _CCCL_GLOBAL_CONSTANT __half e_v<__half> = __numbers<__half>::__e();
 template <>
@@ -349,7 +349,7 @@ template <>
 _CCCL_GLOBAL_CONSTANT __half egamma_v<__half> = __numbers<__half>::__egamma();
 template <>
 _CCCL_GLOBAL_CONSTANT __half phi_v<__half> = __numbers<__half>::__phi();
-#    endif // MINIMUM_ROCM_VERSION(7, 11, 0)
+#    endif // LIBHIPCXX_ROCM_VERSION_GE(7, 11, 0)
 #  endif // _LIBCUDACXX_HAS_NVFP16()
 
 #  if _LIBCUDACXX_HAS_NVBF16()

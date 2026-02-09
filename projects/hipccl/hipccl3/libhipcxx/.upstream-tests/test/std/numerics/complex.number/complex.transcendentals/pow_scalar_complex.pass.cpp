@@ -104,7 +104,7 @@ int main(int, char**)
 #if _LIBCUDACXX_HAS_NVFP16()
   test<__half>();
 // NOTE(HIP/AMD): for ROCm 7.2+ the optimization causes test failures for __half (https://github.com/ROCm/libhipcxx/issues/13)
-#if !defined(__OPTIMIZE__) || MAXIMUM_ROCM_VERSION(7, 1)
+#if !defined(__OPTIMIZE__) || LIBHIPCXX_ROCM_VERSION_LE(7, 1)
   test_edges<__half>();
 #endif
 #endif // _LIBCUDACXX_HAS_NVFP16()
