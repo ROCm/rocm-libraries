@@ -153,7 +153,8 @@ void warp_exchange_kernel(T* d_input, T* d_output)
 
         using warp_exchange_type = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
         constexpr unsigned int num_warps = ::rocprim::arch::wavefront::max_size() / LogicalWarpSize;
-        ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[num_warps];
+        ROCPRIM_SHARED_MEMORY
+        typename warp_exchange_type::storage_type storage[num_warps];
 
         const unsigned int warp_id = threadIdx.x / LogicalWarpSize;
         if constexpr(InPlace)
@@ -314,7 +315,8 @@ void warp_exchange_scatter_kernel(T* d_input, T* d_output, OffsetT* d_ranks)
         using warp_exchange_type = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
 
         constexpr unsigned int num_warps = ::rocprim::arch::wavefront::max_size() / LogicalWarpSize;
-        ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[num_warps];
+        ROCPRIM_SHARED_MEMORY
+        typename warp_exchange_type::storage_type storage[num_warps];
 
         T       thread_data[ItemsPerThread];
         OffsetT thread_ranks[ItemsPerThread];
