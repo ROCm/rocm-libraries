@@ -351,23 +351,27 @@ struct ProblemTensorTransposeDescriptor
     {
         const auto& desc_from = (src.*cdescriptor)();
         auto& desc_to         = (dest.*descriptor)();
-        
+
         // Log before transpose
         const auto& from_strides = desc_from.GetStrides();
-        MIOPEN_LOG_I("ProblemTensorTransposeDescriptor::Transpose: target='" << to 
-                     << "', is_input=" << is_input
-                     << ", from_strides=" << (from_strides.size() >= 4 
-                         ? std::to_string(from_strides[0]) + "," + std::to_string(from_strides[1]) + "," 
-                           + std::to_string(from_strides[2]) + "," + std::to_string(from_strides[3]) : "?"));
-        
+        MIOPEN_LOG_I("ProblemTensorTransposeDescriptor::Transpose: target='"
+                     << to << "', is_input=" << is_input << ", from_strides="
+                     << (from_strides.size() >= 4 ? std::to_string(from_strides[0]) + "," +
+                                                        std::to_string(from_strides[1]) + "," +
+                                                        std::to_string(from_strides[2]) + "," +
+                                                        std::to_string(from_strides[3])
+                                                  : "?"));
+
         desc_to = Transpose(desc_from);
-        
+
         // Log after transpose
         const auto& to_strides = desc_to.GetStrides();
-        MIOPEN_LOG_I("ProblemTensorTransposeDescriptor::Transpose: to_strides=" 
-                     << (to_strides.size() >= 4 
-                         ? std::to_string(to_strides[0]) + "," + std::to_string(to_strides[1]) + "," 
-                           + std::to_string(to_strides[2]) + "," + std::to_string(to_strides[3]) : "?"));
+        MIOPEN_LOG_I("ProblemTensorTransposeDescriptor::Transpose: to_strides="
+                     << (to_strides.size() >= 4
+                             ? std::to_string(to_strides[0]) + "," + std::to_string(to_strides[1]) +
+                                   "," + std::to_string(to_strides[2]) + "," +
+                                   std::to_string(to_strides[3])
+                             : "?"));
     }
 
     inline void Transpose(const InvokeParams& src, InvokeParams& dest) const
@@ -520,10 +524,7 @@ struct TransposingSolver : Base
         return any_params.CastTo<InvokeParams>();
     }
 
-    static AnyInvokeParams ConvertForInnerSolver(const InvokeParams& params)
-    {
-        return params;
-    }
+    static AnyInvokeParams ConvertForInnerSolver(const InvokeParams& params) { return params; }
 
     static std::vector<AnyTransposePseudoSolver> GetTransposeSolvers()
     {
@@ -560,7 +561,8 @@ struct TransposingSolver : Base
 
             if(layout == to)
             {
-                MIOPEN_LOG_I("TransposingSolver::IsApplicable: Layout matches target, no transpose needed");
+                MIOPEN_LOG_I(
+                    "TransposingSolver::IsApplicable: Layout matches target, no transpose needed");
                 continue;
             }
 
@@ -604,26 +606,29 @@ struct TransposingSolver : Base
             if(transpose_solver != transpose_solvers.end() &&
                transpose_solver->second->IsApplicable(transpose_problem))
             {
-                MIOPEN_LOG_I("TransposingSolver::IsApplicable: Found universal *-* transpose solver");
+                MIOPEN_LOG_I(
+                    "TransposingSolver::IsApplicable: Found universal *-* transpose solver");
                 continue;
             }
 
             // No applicable transpose solver found
-            MIOPEN_LOG_I("TransposingSolver::IsApplicable: No applicable transpose solver found for '"
-                         << specific_pair << "'");
+            MIOPEN_LOG_I(
+                "TransposingSolver::IsApplicable: No applicable transpose solver found for '"
+                << specific_pair << "'");
             return false;
         }
 
         if(!any_difference)
         {
-            MIOPEN_LOG_I("TransposingSolver::IsApplicable: No layout difference detected, solver not applicable");
+            MIOPEN_LOG_I("TransposingSolver::IsApplicable: No layout difference detected, solver "
+                         "not applicable");
             return false;
         }
 
         // Use Derived::Transpose to allow derived classes to override (CRTP pattern)
         const auto transposed_problem = Derived::Transpose(problem);
 
-        const bool inner_applicable   = Inner{}.IsApplicable(ctx, transposed_problem);
+        const bool inner_applicable = Inner{}.IsApplicable(ctx, transposed_problem);
 
         MIOPEN_LOG_I("TransposingSolver::IsApplicable: Inner solver ("
                      << Inner{}.SolverDbId() << ") IsApplicable=" << inner_applicable);
@@ -648,7 +653,8 @@ struct TransposingSolver : Base
             const auto& descriptor = (transposed_problem.*(transpose.cdescriptor))();
             const auto e_size      = get_data_size(descriptor.GetType());
             const auto tensor_size = descriptor.GetElementSpace() * e_size;
-            MIOPEN_LOG_I2("TransposingSolver::GetWorkspaceSize: adding tensor_size = " << tensor_size);
+            MIOPEN_LOG_I2(
+                "TransposingSolver::GetWorkspaceSize: adding tensor_size = " << tensor_size);
             ws_size += tensor_size;
         }
 
@@ -776,7 +782,7 @@ struct TransposingSolver : Base
                 return [invoker, in_transpose_invokers, out_transpose_invokers, ws_size](
                            const Handle& handle, const AnyInvokeParams& any_params) {
                     const auto invoke_params = Derived::ConvertFromApiParams(any_params);
-                    auto transposed_params    = invoke_params;
+                    auto transposed_params   = invoke_params;
 
                     handle.ResetKernelTime();
 
