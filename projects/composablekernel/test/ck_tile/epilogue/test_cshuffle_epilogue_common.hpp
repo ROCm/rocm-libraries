@@ -84,7 +84,8 @@ void verify_permutation_output(const std::vector<float>& sorted_vals)
         ASSERT_FALSE(std::isnan(sorted_vals[i])) << "NaN at index " << i;
     }
 
-    // Count unique values using bit-exact comparison (sorted fp32 values from fp16 should be distinct)
+    // Count unique values using bit-exact comparison (sorted fp32 values from fp16 should be
+    // distinct)
     size_t num_unique = 1;
     for(size_t i = 1; i < sorted_vals.size(); ++i)
     {
@@ -96,8 +97,8 @@ void verify_permutation_output(const std::vector<float>& sorted_vals)
     }
 
     // Verify exact permutation: all input values should appear exactly once in output
-    EXPECT_EQ(num_unique, expected_size)
-        << "Expected exact permutation with " << expected_size << " unique values, got " << num_unique;
+    EXPECT_EQ(num_unique, expected_size) << "Expected exact permutation with " << expected_size
+                                         << " unique values, got " << num_unique;
 }
 
 // Type-parameterized test fixture
@@ -119,9 +120,8 @@ TYPED_TEST_P(CShuffleEpilogueTypedTest, BasicTest)
     using TestProblem                     = MakeProblem<Config>;
     constexpr ck_tile::index_t kBlockSize = TestProblem::kBlockSize;
 
-    auto host_output =
-        ck_tile::run_cshuffle_epilogue_test<TestProblem, kMPerBlock, kNPerBlock>(
-            ck_tile::ScaleType::None);
+    auto host_output = ck_tile::run_cshuffle_epilogue_test<TestProblem, kMPerBlock, kNPerBlock>(
+        ck_tile::ScaleType::None);
 
     // Convert output to sorted vector and verify using existing helper
     auto output_vals = ck_tile::convert_and_sort_output(host_output);

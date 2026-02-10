@@ -6,8 +6,8 @@
 using namespace ck_tile;
 
 namespace {
-constexpr float kScaleEpsilon = 0.001F;
-constexpr float kTestScaleFactor = 2.0F;
+constexpr float kScaleEpsilon              = 0.001F;
+constexpr float kTestScaleFactor           = 2.0F;
 constexpr ck_tile::index_t kScaledColIndex = 1;
 } // namespace
 

@@ -70,7 +70,7 @@ test_cshuffle_epilogue_kernel(const typename Problem::AccDataType* __restrict__ 
         c_block_outer_dstr_encoding, typename WG::CWarpDstrEncoding{});
 
     constexpr auto acc_distribution = make_static_tile_distribution(acc_distribution_encode);
-    auto acc_tile = make_static_distributed_tensor<AccDataType>(acc_distribution);
+    auto acc_tile                   = make_static_distributed_tensor<AccDataType>(acc_distribution);
 
     // Create input tensor view for loading from global memory
     // Note: cast away const since buffer_view infrastructure doesn't support const pointers,
@@ -90,7 +90,7 @@ test_cshuffle_epilogue_kernel(const typename Problem::AccDataType* __restrict__ 
         make_tile_window(input_tensor_view,
                          make_tuple(number<Problem::kMPerBlock>{}, number<Problem::kNPerBlock>{}),
                          {0, 0},
-                         acc_distribution);  // Use GEMM acc distribution, not LDS distribution
+                         acc_distribution); // Use GEMM acc distribution, not LDS distribution
 
     // Load input data from global memory into acc_tile
     load_tile(acc_tile, input_tile_window);
@@ -249,15 +249,15 @@ constexpr std::array<uint16_t, N> generate_fp16_bit_patterns()
     static_assert(N <= 61440, "N exceeds available unique normal fp16 values");
 
     std::array<uint16_t, N> result{};
-    constexpr uint16_t kPosStart = 0x0400;
-    constexpr uint16_t kNegStart = 0x8400;
+    constexpr uint16_t kPosStart         = 0x0400;
+    constexpr uint16_t kNegStart         = 0x8400;
     constexpr size_t kMaxPositiveNormals = 30720;
 
     for(size_t i = 0; i < N; ++i)
     {
         result[i] = (i < kMaxPositiveNormals)
-            ? static_cast<uint16_t>(kPosStart + i)
-            : static_cast<uint16_t>(kNegStart + (i - kMaxPositiveNormals));
+                        ? static_cast<uint16_t>(kPosStart + i)
+                        : static_cast<uint16_t>(kNegStart + (i - kMaxPositiveNormals));
     }
     return result;
 }
@@ -270,7 +270,7 @@ std::array<float, N> convert_fp16_bits(const std::array<uint16_t, N>& bits)
     std::array<float, N> result;
     for(size_t i = 0; i < N; ++i)
     {
-        half_t h = bit_cast<half_t>(bits[i]);
+        half_t h  = bit_cast<half_t>(bits[i]);
         result[i] = type_convert<float>(h);
     }
     return result;
@@ -284,7 +284,7 @@ HostTensor<AccDataType> generate_unique_fp16_input()
     constexpr size_t N = static_cast<size_t>(Rows * Cols);
 
     constexpr auto bits = generate_fp16_bit_patterns<N>();
-    auto values = convert_fp16_bits(bits);
+    auto values         = convert_fp16_bits(bits);
 
     HostTensor<AccDataType> host_input({Rows, Cols});
     for(index_t m = 0; m < Rows; ++m)
@@ -375,7 +375,7 @@ template <typename Problem, index_t M, index_t N, ScaleType ScaleMode>
 auto run_scale_comparison_test()
 {
     auto unscaled_output = run_cshuffle_epilogue_test<Problem, M, N>(ScaleType::None);
-    auto scaled_output = run_cshuffle_epilogue_test<Problem, M, N>(ScaleMode);
+    auto scaled_output   = run_cshuffle_epilogue_test<Problem, M, N>(ScaleMode);
 
     return std::make_pair(std::move(unscaled_output), std::move(scaled_output));
 }
