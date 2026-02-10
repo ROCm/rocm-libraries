@@ -56,7 +56,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto bnY
         = graph->batchnorm_inference(x, savedMean, savedInvVariance, scale, bias, bnInfAttributes);
     bnY->set_name("bn_y");
-    bnY->set_data_type(inputType);
 
     // Step 2: Activation Backward (ReLU backward)
     auto activBwdAttributes = graph::PointwiseAttributes();
@@ -65,7 +64,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     auto dxDrelu = graph->pointwise(bnY, dy, activBwdAttributes);
     dxDrelu->set_name("dx_drelu");
-    dxDrelu->set_data_type(inputType);
 
     // Step 3: Batchnorm Backward
     auto bnBwdAttributes = graph::BatchnormBackwardAttributes();
@@ -214,13 +212,12 @@ int main(int argc, char* argv[])
 
     initializeFrontendLogging();
 
-    auto backend = hipdnnBackend();
     hipdnnHandle_t handle;
-    HIPDNN_CHECK(backend->create(&handle));
+    HIPDNN_CHECK(hipdnnCreate(&handle));
 
     bool allPassed = run(SampleRunner{handle, config});
 
-    HIPDNN_CHECK(backend->destroy(handle));
+    HIPDNN_CHECK(hipdnnDestroy(handle));
 
     if(allPassed)
     {

@@ -46,10 +46,10 @@ private:
     using TensorDescriptor::GetLayout_t;
 
 public:
-    Tensor() noexcept         = default;
-    Tensor(const Tensor&)     = default;
-    Tensor(Tensor&&) noexcept = default;
-    Tensor& operator=(const Tensor&) = default;
+    Tensor() noexcept                    = default;
+    Tensor(const Tensor&)                = default;
+    Tensor(Tensor&&) noexcept            = default;
+    Tensor& operator=(const Tensor&)     = default;
     Tensor& operator=(Tensor&&) noexcept = default;
     Tensor(const TensorDescriptor& other, int64_t id, bool isVirtual)
         : TensorDescriptor(other), mId(id), mVirtual(isVirtual)

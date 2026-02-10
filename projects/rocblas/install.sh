@@ -313,8 +313,10 @@ build_aocl_5_2( )
         return 1
     fi
     cd aocl
-    CXX=${cxx} CC=${cc} ${cmake_executable} -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DENABLE_ILP64=ON -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_AOCL_LAPACK=OFF -DENABLE_MULTITHREADING=ON -DOpenMP_libomp_LIBRARY="" -DCMAKE_INSTALL_PREFIX=$PWD/install_package
-    elevate_if_not_root ${cmake_executable} --build build --config release -j --target install
+    # Guard against CMAKE_CONFIGURATION_TYPES=Debug performance issue (see https://github.com/amd/aocl/issues/6)
+    # Explicitly set CMAKE_CONFIGURATION_TYPES=Release to prevent debug builds with multi-config generators (Ninja Multi-Config, Visual Studio)
+    CXX=${cxx} CC=${cc} ${cmake_executable} -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CONFIGURATION_TYPES=Release -DBUILD_SHARED_LIBS=OFF -DENABLE_ILP64=ON -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_AOCL_LAPACK=OFF -DENABLE_MULTITHREADING=ON -DOpenMP_libomp_LIBRARY="" -DCMAKE_INSTALL_PREFIX=$PWD/install_package
+    elevate_if_not_root ${cmake_executable} --build build --config Release -j --target install
     printf "\033[32m✓ AOCL 5.2 successfully built with ILP64 support (static)\033[0m\n"
     printf "\033[32m  Location: \033[33m${build_dir}/deps/aocl/install_package/lib/libaocl.a\033[0m\n"
     popd

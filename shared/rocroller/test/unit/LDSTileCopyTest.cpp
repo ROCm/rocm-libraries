@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -269,6 +269,8 @@ namespace LDSCopyTest
 
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
+
+        kgraph = kgraph.transform(std::make_shared<AddLDSBarriers>());
 
         auto command = std::make_shared<rocRoller::Command>();
         command->allocateArgument({DataType::UInt32, PointerType::PointerGlobal},

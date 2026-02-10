@@ -81,8 +81,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto [y, savedMean, savedInvVariance, nextRunningMean, nextRunningVariance]
         = graph->batchnorm(x, scale, bias, bnAttributes);
 
-    y->set_data_type(inputType);
-
     // Step 2: Pointwise ReLU Activation
     auto pwAttributes = graph::PointwiseAttributes();
     pwAttributes.set_name("activation_node");
@@ -293,13 +291,12 @@ int main(int argc, char* argv[])
 
     initializeFrontendLogging();
 
-    auto backend = hipdnnBackend();
     hipdnnHandle_t handle;
-    HIPDNN_CHECK(backend->create(&handle));
+    HIPDNN_CHECK(hipdnnCreate(&handle));
 
     bool allPassed = run(SampleRunner{handle, config});
 
-    HIPDNN_CHECK(backend->destroy(handle));
+    HIPDNN_CHECK(hipdnnDestroy(handle));
 
     if(allPassed)
     {

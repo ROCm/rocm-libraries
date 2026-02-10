@@ -1319,7 +1319,7 @@ BenchmarkProblems:
       - PrefetchGlobalRead: [2]
       - SourceSwap: [1]
       - TransposeLDS: [1]
-      - UseCustomMainLoopSchedule: [true]
+      - UseCustomMainLoopSchedule: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
       - ProblemSizes:
