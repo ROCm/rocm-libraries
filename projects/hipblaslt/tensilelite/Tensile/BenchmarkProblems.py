@@ -22,11 +22,13 @@
 #
 ################################################################################
 
+import logging
 import os
 import shutil
 import sys
 import time
 import itertools
+from contextlib import contextmanager
 
 from copy import deepcopy
 from joblib import Parallel, delayed
@@ -56,6 +58,29 @@ from Tensile.Common import HR, print1, print2, IsaInfo, IsaVersion, \
         BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
 from Tensile.Common.Architectures import isaToGfx, gfxToVariants
 from Tensile.Common.GlobalParameters import globalParameters, startTime
+
+_timing_logger = logging.getLogger("tensile.timing")
+if not _timing_logger.handlers:
+    _h = logging.StreamHandler(sys.stderr)
+    _h.setFormatter(logging.Formatter("%(message)s"))
+    _timing_logger.addHandler(_h)
+    _timing_logger.setLevel(logging.INFO)
+    _timing_logger.propagate = False
+
+
+@contextmanager
+def timing_context(category_name):
+    """Context manager for timing instrumentation."""
+    if globalParameters.get("TimingInstrumentation", False):
+        # Using time_ns() for better precision: https://docs.python.org/3/library/time.html#time.time
+        start = time.time_ns()
+        try:
+            yield
+        finally:
+            elapsed_ms = (time.time_ns() - start) / 1_000_000
+            _timing_logger.info(f"TIMING:{category_name}:{elapsed_ms:.3f}")
+    else:
+        yield
 
 
 def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap):
@@ -410,20 +435,21 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
 
         if not cacheValid:
             # enumerate benchmark permutations and create resulting solution objects
-            forkPermutations = constructForkPermutations(benchmarkStep.forkParams, \
-                    benchmarkStep.paramGroups) if problemSizeGroupConfig["ForkParameters"] else []
-            maxPossibleSolutions = len(forkPermutations)
+            with timing_context("python_solution_generation"):
+                forkPermutations = constructForkPermutations(benchmarkStep.forkParams, \
+                        benchmarkStep.paramGroups) if problemSizeGroupConfig["ForkParameters"] else []
+                maxPossibleSolutions = len(forkPermutations)
 
-            regSolutions = _generateForkedSolutions(benchmarkProcess.problemType, \
-                    benchmarkStep.constantParams, forkPermutations, asmToolchain.assembler, \
-                        debugConfig, isaInfoMap)
-            kcSolutions = _generateCustomKernelSolutions(benchmarkProcess.problemType, \
-                    benchmarkStep.customKernels, benchmarkStep.internalSupportParams, \
-                    not benchmarkStep.customKernelWildcard, asmToolchain.assembler, debugConfig, \
-                        isaInfoMap)
+                regSolutions = _generateForkedSolutions(benchmarkProcess.problemType, \
+                        benchmarkStep.constantParams, forkPermutations, asmToolchain.assembler, \
+                            debugConfig, isaInfoMap)
+                kcSolutions = _generateCustomKernelSolutions(benchmarkProcess.problemType, \
+                        benchmarkStep.customKernels, benchmarkStep.internalSupportParams, \
+                        not benchmarkStep.customKernelWildcard, asmToolchain.assembler, debugConfig, \
+                            isaInfoMap)
 
-            maxPossibleSolutions += len(kcSolutions)
-            solutions = regSolutions + kcSolutions
+                maxPossibleSolutions += len(kcSolutions)
+                solutions = regSolutions + kcSolutions
 
             print1("# Actual Solutions: {} / {} after SolutionStructs\n" \
                 .format(len(solutions), maxPossibleSolutions))
@@ -443,13 +469,14 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                 print2("#    ({}:{}) {}".format(0, 0, getSolutionNameMin(solution, debugConfig.splitGSU)))
             print2(HR)
 
-            # write benchmarkFiles
+            # write benchmarkFiles (kernel generation and compilation)
             prevCount = len(solutions)
-            codeObjectFiles = writeBenchmarkFiles(stepBaseDir, solutions, \
-                    benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
-                    benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
-                    benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
-                    sourcePath, debugConfig, deviceId, gfxName, isaInfoMap, probSolMap)
+            with timing_context("python_kernel_compilation"):
+                codeObjectFiles = writeBenchmarkFiles(stepBaseDir, solutions, \
+                        benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
+                        benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
+                        benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
+                        sourcePath, debugConfig, deviceId, gfxName, isaInfoMap, probSolMap)
             # ^ this mutates solutions
 
             # write cache data
