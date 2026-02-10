@@ -23,14 +23,6 @@ TEST(TestEngineOrdering, SingleElement)
     EXPECT_EQ(engineIds[0], MIOPEN_ENGINE_ID);
 }
 
-TEST(TestEngineOrdering, OnlyMiopenEngine)
-{
-    std::vector<int64_t> engineIds = {MIOPEN_ENGINE_ID};
-    sortEngineIds(engineIds);
-    ASSERT_EQ(engineIds.size(), 1u);
-    EXPECT_EQ(engineIds[0], MIOPEN_ENGINE_ID);
-}
-
 TEST(TestEngineOrdering, OnlyMiopenEngineDeterministic)
 {
     std::vector<int64_t> engineIds = {MIOPEN_ENGINE_DETERMINISTIC_ID};

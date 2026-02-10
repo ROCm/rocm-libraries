@@ -30,7 +30,7 @@ namespace
 
 bool isApplicableFwd(const HipdnnEnginePluginHandle& handle,
                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                     bool deterministicEnabled = false)
+                     bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
@@ -67,7 +67,7 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle,
 
 bool isApplicableBwd(const HipdnnEnginePluginHandle& handle,
                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                     bool deterministicEnabled = false)
+                     bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
@@ -104,7 +104,7 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle,
 
 bool isApplicableWrw(const HipdnnEnginePluginHandle& handle,
                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                     bool deterministicEnabled = false)
+                     bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
@@ -142,7 +142,7 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle,
 
 size_t getWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
                            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                           bool deterministicEnabled = false)
+                           bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
@@ -160,7 +160,7 @@ size_t getWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
 
 size_t getWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
                            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                           bool deterministicEnabled = false)
+                           bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
@@ -180,7 +180,7 @@ size_t getWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
 
 size_t getWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
                            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                           bool deterministicEnabled = false)
+                           bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
