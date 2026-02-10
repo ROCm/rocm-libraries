@@ -608,10 +608,10 @@ struct is_valid_sequence_map : is_same<typename arithmetic_sequence_gen<0, SeqMa
 // Each "->" is a new type the compiler must create, track, and manage. For N elements, that's
 // N template types, each with overhead (name mangling, debug info, symbol table entries).
 //
-// This implementation uses O(N) direct assignment with a fold expression:
-// For input Sequence<2,0,1>, the fold expression ((result[Is] = pos++), ...) expands to:
-//   result[2]=0, result[0]=1, result[1]=2
-// This builds the inverse permutation in a single pass without any searching.
+// This implementation uses a constexpr for loop to build the inverse in O(N) operations:
+// For input Sequence<2,0,1>, the loop sets result[input[pos]] = pos for each position:
+//   pos=0: result[2]=0, pos=1: result[0]=1, pos=2: result[1]=2
+// This builds the inverse permutation in a single pass with O(1) template instantiation depth.
 //
 template <index_t... Is>
 struct sequence_map_inverse<Sequence<Is...>>
@@ -625,8 +625,11 @@ struct sequence_map_inverse<Sequence<Is...>>
     static constexpr auto build_inverse()
     {
         InverseArray result{};
-        index_t pos = 0;
-        ((result.data[Is] = pos++), ...);
+        constexpr index_t input[] = {Is...};
+        for(index_t pos = 0; pos < static_cast<index_t>(sizeof...(Is)); ++pos)
+        {
+            result.data[input[pos]] = pos;
+        }
         return result;
     }
 
