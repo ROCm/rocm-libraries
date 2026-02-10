@@ -33,6 +33,7 @@
 #include <optional>
 
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/StoreOption.hpp>
 #include <rocRoller/Parameters/Solution/StreamK.hpp>
 
 /**
@@ -63,7 +64,8 @@ struct SolutionParameters
     rocRoller::Parameters::Solution::LoadPath loadPathB
         = rocRoller::Parameters::Solution::LoadPath::BufferToLDS;
 
-    bool storeLDSD = false;
+    rocRoller::Parameters::Solution::StorePath storePath
+        = rocRoller::Parameters::Solution::StorePath::VGPRToGlobalMemoryWithBuffer;
 
     bool prefetch          = true;
     int  prefetchInFlight  = 2;

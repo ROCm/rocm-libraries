@@ -1249,7 +1249,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--load_B", &SolutionParameters::loadPathB),
         std::make_pair("--padLDS_A", &SolutionParameters::padLDSA),
         std::make_pair("--padLDS_B", &SolutionParameters::padLDSB),
-        std::make_pair("--storeLDS_D", &SolutionParameters::storeLDSD),
+        std::make_pair("--store", &SolutionParameters::storePath),
         std::make_pair("--prefetch", &SolutionParameters::prefetch),
         std::make_pair("--prefetchInFlight", &SolutionParameters::prefetchInFlight),
         std::make_pair("--prefetchLDSFactor", &SolutionParameters::prefetchLDSFactor),
@@ -1388,14 +1388,14 @@ namespace rocRoller::Client::GEMMClient::CLI
             if(arg.find('B') != std::string::npos)
                 solution.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
-            solution.storeLDSD = false;
+            solution.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
             if(arg.find('D') != std::string::npos)
-                solution.storeLDSD = true;
+                solution.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
         }
 
         update(SN(&SP::loadPathA), solution.loadPathA);
         update(SN(&SP::loadPathB), solution.loadPathB);
-        update(SN(&SP::storeLDSD), solution.storeLDSD);
+        update(SN(&SP::storePath), solution.storePath);
 
         if(app.get_option("--d2lds")->count())
         {
@@ -1521,7 +1521,7 @@ int main(int argc, const char* argv[])
 
         .loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR,
         .loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR,
-        .storeLDSD = true,
+        .storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer,
 
         .padLDSA = {0u, 0u},
         .padLDSB = {0u, 0u},
@@ -1744,7 +1744,11 @@ int main(int argc, const char* argv[])
     app.add_option(
         SN(&SP::loadPathB),
         "How to load B (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: BufferToLDS");
-    app.add_flag(SN(&SP::storeLDSD), "Use LDS when storing D.");
+    app.add_option(SN(&SP::storePath),
+                   "How to store D (VGPRToGlobalMemoryWithBuffer, VGPRToGlobal, "
+                   "VGPRToGlobalMemoryViaLDSWithBuffer, "
+                   "VGPRToGlobalMemoryViaLDSWithGlobal). Default: "
+                   "VGPRToGlobalMemoryViaLDSWithBuffer");
     app.add_option("--lds", "Use LDS for A/B/D.");
     app.add_option("--d2lds", "Use direct-to-LDS for A/B.");
 
