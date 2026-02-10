@@ -12,7 +12,7 @@
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class MiopenConvFwdBiasActivPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder
@@ -26,19 +26,20 @@ public:
     MiopenConvFwdBiasActivPlanBuilder& operator=(const MiopenConvFwdBiasActivPlanBuilder&) = delete;
 
     bool isApplicable(const HipdnnEnginePluginHandle& handle,
-                      const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
-    size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                               const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+    size_t getMaxWorkspaceSize(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
     void buildPlan(const HipdnnEnginePluginHandle& handle,
-                   const hipdnn_plugin_sdk::IGraph& opGraph,
-                   [[maybe_unused]] const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                   const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
                    HipdnnEnginePluginExecutionContext& executionContext) const override;
 
     std::vector<hipdnn_data_sdk::data_objects::KnobT>
         getCustomKnobs(const HipdnnEnginePluginHandle& handle,
-                       const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 };
 
 }

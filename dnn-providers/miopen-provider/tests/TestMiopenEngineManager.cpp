@@ -16,7 +16,7 @@
 #include "mocks/MockEngine.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_plugin_sdk;
 using ::testing::Return;
@@ -110,10 +110,10 @@ TEST(TestMiopenEngineManager, ReturnsEngineDetails)
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(1));
     EXPECT_CALL(*mockEngine, getDetails(::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&engineDetails](HipdnnEnginePluginHandle& handle,
-                                   const hipdnn_plugin_sdk::IGraph& opGraph,
+                                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
                                    hipdnnPluginConstData_t& out) {
             (void)handle;
-            (void)opGraph;
+            (void)graph;
             out.ptr = engineDetails.ptr;
             out.size = engineDetails.size;
         });

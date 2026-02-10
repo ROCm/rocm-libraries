@@ -117,6 +117,26 @@ namespace testing
 
     /*
     * ===========================================================================
+    *    level 3 SPARSE
+    * ===========================================================================
+    */
+    TESTING_COMPUTE_TEMPLATE(bsrmm)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+    TESTING_COMPUTE_TEMPLATE(bsrsm2_bufferSize)
+    TESTING_COMPUTE_TEMPLATE(bsrsm2_solve)
+#endif
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+    TESTING_COMPUTE_TEMPLATE(csrsm2_bufferSizeExt)
+    TESTING_COMPUTE_TEMPLATE(csrsm2_solve)
+    TESTING_COMPUTE_TEMPLATE(gemmi)
+#endif
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+    // TESTING_COMPUTE_TEMPLATE(csrmm)
+    TESTING_COMPUTE_TEMPLATE(csrmm2)
+#endif
+
+    /*
+    * ===========================================================================
     *    generic SPARSE
     * ===========================================================================
     */

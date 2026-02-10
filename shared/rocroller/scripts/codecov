@@ -137,6 +137,14 @@ else
         ${build_path} \
         --profile codecov
 
+    # Now do pytests etc
+    OMP_NUM_THREADS=2 LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw ctest \
+        -j $(($(nproc)/2)) \
+        --test-dir ${build_path} \
+        --output-on-failure \
+        -LE "GTEST|CATCH" \
+        ${ctest_re_flag} "${ctest_re}"
+
     # this combines them back together.
     /opt/rocm/lib/llvm/bin/llvm-profdata merge \
         --sparse \

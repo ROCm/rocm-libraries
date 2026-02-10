@@ -18,7 +18,7 @@ namespace hipdnn_sdk_test_utils
 struct BatchnormFwdTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBundle
 {
     BatchnormFwdTensorBundle(
-        const hipdnn_plugin_sdk::INodeWrapper& node,
+        const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& node,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap,
         unsigned int seed)
@@ -38,7 +38,7 @@ struct BatchnormFwdTensorBundle : public hipdnn_test_sdk::utilities::GraphTensor
 struct BatchnormFwdWithVarianceTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBundle
 {
     BatchnormFwdWithVarianceTensorBundle(
-        const hipdnn_plugin_sdk::INodeWrapper& node,
+        const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& node,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap,
         unsigned int seed)

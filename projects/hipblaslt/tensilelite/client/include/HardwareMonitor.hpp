@@ -33,31 +33,28 @@
 #include <tuple>
 #include <vector>
 
+#include <amd_smi/amdsmi.h>
 #include <hip/hip_runtime.h>
-#include <rocm_smi/rocm_smi.h>
-#include <rocm_smi/rocm_smi64Config.h>
 
 namespace TensileLite
 {
     namespace Client
     {
         /**
- * Monitors properties of a particular GPU in a separate thread.
- *
- * The thread is manually managed because the thread creation overhead is too
- * high to create a thread every time.
- *
- * The interface to this class is not thread-safe.
- */
+        * Monitors properties of a particular GPU in a separate thread.
+        *
+        * The thread is manually managed because the thread creation overhead is too
+        * high to create a thread every time.
+        *
+        * The interface to this class is not thread-safe.
+        */
         class HardwareMonitor
         {
         public:
-            /** Translates the Hip device index into the corresponding device index for
-   * ROCm-SMI. */
-            static uint32_t GetROCmSMIIndex(int hipDeviceIndex);
+            /** Translates the Hip device index into the corresponding device index for AMD-SMI. */
+            uint32_t GetAMDSMIIndex(int hipDeviceIndex);
 
-            using rsmi_temperature_type_t = int;
-            using clock                   = std::chrono::steady_clock;
+            using clock = std::chrono::steady_clock;
 
             // Monitor at the maximum possible rate.
             HardwareMonitor(int hipDeviceIndex);
@@ -66,14 +63,15 @@ namespace TensileLite
 
             ~HardwareMonitor();
 
-            void addTempMonitor(rsmi_temperature_type_t   sensorType = 0,
-                                rsmi_temperature_metric_t metric     = RSMI_TEMP_CURRENT);
-            void addClockMonitor(rsmi_clk_type_t clockType);
+            void addTempMonitor(amdsmi_temperature_type_t sensorType = AMDSMI_TEMPERATURE_TYPE_EDGE,
+                                amdsmi_temperature_metric_t metric   = AMDSMI_TEMP_CURRENT);
+            void addClockMonitor(amdsmi_clk_type_t clockType);
             void addFanSpeedMonitor(uint32_t sensorIndex = 0);
 
-            double getAverageTemp(rsmi_temperature_type_t   sensorIndex = 0,
-                                  rsmi_temperature_metric_t metric      = RSMI_TEMP_CURRENT);
-            double getAverageClock(rsmi_clk_type_t clockType);
+            double getAverageTemp(amdsmi_temperature_type_t sensorIndex
+                                  = AMDSMI_TEMPERATURE_TYPE_EDGE,
+                                  amdsmi_temperature_metric_t metric = AMDSMI_TEMP_CURRENT);
+            double getAverageClock(amdsmi_clk_type_t clockType);
             double getAverageFanSpeed(uint32_t sensorIndex = 0);
             int    getDeviceIndex()
             {
@@ -87,7 +85,9 @@ namespace TensileLite
             double getMaxGfxFreqValues()
             {
                 if(m_hasInvalidGpuFreqStatus || !has_maxFreqValues)
+                {
                     return std::numeric_limits<double>::quiet_NaN();
+                }
                 return static_cast<double>(m_maxFreqValues);
             }
 
@@ -109,7 +109,7 @@ namespace TensileLite
             void wait();
 
         private:
-            static void InitROCmSMI();
+            static void InitAMDSMI();
 
             void assertActive();
             void assertNotActive();
@@ -145,11 +145,12 @@ namespace TensileLite
 
             uint16_t m_XCDCount;
 
-            std::vector<std::tuple<rsmi_temperature_type_t, rsmi_temperature_metric_t>> m_tempMetrics;
-            std::vector<int64_t>                                                        m_tempValues;
+            std::vector<std::tuple<amdsmi_temperature_type_t, amdsmi_temperature_metric_t>>
+                                 m_tempMetrics;
+            std::vector<int64_t> m_tempValues;
 
-            std::vector<rsmi_clk_type_t> m_clockMetrics;
-            std::vector<uint64_t>        m_clockValues;
+            std::vector<amdsmi_clk_type_t> m_clockMetrics;
+            std::vector<uint64_t>          m_clockValues;
 
             std::vector<uint32_t> m_fanMetrics;
             std::vector<int64_t>  m_fanValues;
@@ -161,6 +162,9 @@ namespace TensileLite
             // Reserved for further performance check.
             std::vector<uint64_t>              m_SYSCLK_sum;
             std::vector<std::vector<uint64_t>> m_SYSCLK_array;
+
+            std::vector<amdsmi_socket_handle>    m_socketHandles;
+            std::vector<amdsmi_processor_handle> m_processorHandles;
         };
     } // namespace Client
 } // namespace TensileLite

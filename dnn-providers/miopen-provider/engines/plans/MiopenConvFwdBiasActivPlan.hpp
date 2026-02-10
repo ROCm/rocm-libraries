@@ -18,7 +18,7 @@
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class ConvFwdBiasActivParams
@@ -83,4 +83,4 @@ private:
     bool _benchmarkingEnabled;
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

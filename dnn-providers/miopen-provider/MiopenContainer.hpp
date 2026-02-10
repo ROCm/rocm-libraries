@@ -7,13 +7,13 @@
 #include <memory>
 #include <vector>
 
-namespace hipdnn_plugin_sdk
+namespace miopen_legacy_plugin
 {
 class IEngine;
 class EngineManager;
 }
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 /*

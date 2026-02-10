@@ -12,7 +12,7 @@
 struct MockHipdnnEnginePluginExecutionContext : public HipdnnEnginePluginExecutionContext
 {
     MockHipdnnEnginePluginExecutionContext()
-        : mockPlan(std::make_unique<miopen_legacy_plugin::MockPlan>())
+        : mockPlan(std::make_unique<miopen_plugin::MockPlan>())
     {
     }
 
@@ -21,5 +21,5 @@ struct MockHipdnnEnginePluginExecutionContext : public HipdnnEnginePluginExecuti
         return *mockPlan;
     }
 
-    std::unique_ptr<miopen_legacy_plugin::MockPlan> mockPlan;
+    std::unique_ptr<miopen_plugin::MockPlan> mockPlan;
 };

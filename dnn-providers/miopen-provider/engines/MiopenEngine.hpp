@@ -10,7 +10,7 @@
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class MiopenEngine : public hipdnn_plugin_sdk::IEngine
@@ -21,17 +21,18 @@ public:
     int64_t id() const override;
 
     bool isApplicable(HipdnnEnginePluginHandle& handle,
-                      const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
     void getDetails(HipdnnEnginePluginHandle& handle,
-                    const hipdnn_plugin_sdk::IGraph& opGraph,
+                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                     hipdnnPluginConstData_t& detailsOut) const override;
-    size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                               const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+    size_t getMaxWorkspaceSize(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
     void initializeExecutionContext(
         const HipdnnEnginePluginHandle& handle,
-        const hipdnn_plugin_sdk::IGraph& opGraph,
-        const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         HipdnnEnginePluginExecutionContext& executionContext) const override;
 
     void addPlanBuilder(std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder> planBuilder);

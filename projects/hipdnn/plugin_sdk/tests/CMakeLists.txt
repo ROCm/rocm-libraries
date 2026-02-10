@@ -22,9 +22,11 @@ add_executable(hipdnn_plugin_sdk_tests
     TestEngineManager.cpp
     TestEnginePluginContainer.cpp
     TestKnobSettingFactory.cpp
+    TestSdkLogging.cpp
 )
 
 target_compile_options(hipdnn_plugin_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+
 target_link_libraries(
     hipdnn_plugin_sdk_tests
     GTest::gtest

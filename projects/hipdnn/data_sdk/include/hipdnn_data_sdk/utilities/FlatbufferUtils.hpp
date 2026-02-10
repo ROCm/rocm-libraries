@@ -9,6 +9,7 @@
 #include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace hipdnn_data_sdk::utilities

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -877,6 +877,35 @@ namespace rocRoller
                 cpy.matC                 = call(expr.matC);
                 cpy.scaleA               = call(expr.scaleA);
                 cpy.scaleB               = call(expr.scaleB);
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr operator()(Conditional const& expr) const
+            {
+                // Check if the condition can be evaluated at Translate time or not.
+                bool const eval_lhs = evaluationTimes(expr.lhs)[EvaluationTime::Translate];
+                if(eval_lhs)
+                {
+                    bool const condFalse = std::visit(
+                        [](auto&& arg) {
+                            using T = std::decay_t<decltype(arg)>;
+                            if constexpr(std::is_pointer_v<T>)
+                                return arg == nullptr;
+                            else
+                                return arg == T();
+                        },
+                        evaluate(expr.lhs));
+
+                    if(condFalse)
+                        return call(expr.r2hs);
+                    else
+                        return call(expr.r1hs);
+                }
+
+                auto cpy = expr;
+                cpy.lhs  = call(expr.lhs);
+                cpy.r1hs = call(expr.r1hs);
+                cpy.r2hs = call(expr.r2hs);
                 return std::make_shared<Expression>(cpy);
             }
 

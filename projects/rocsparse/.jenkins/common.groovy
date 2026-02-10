@@ -39,7 +39,7 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
     String centos7Workaround = platform.jenkinsLabel.contains('centos7') ? 'export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib64/' : ''
 
     def hmmTestCommand= """GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*"""
-    if (platform.jenkinsLabel.contains('gfx90a') || platform.jenkinsLabel.contains('gfx942') || platform.jenkinsLabel.contains('gfx950'))
+    if (platform.jenkinsLabel.contains('gfx90a') || platform.jenkinsLabel.contains('gfx942'))
     {
         hmmTestCommand = """
                             HSA_XNACK=0 GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --gtest_output=xml:test_detail_hmm_xnack_off.xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*

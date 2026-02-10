@@ -9,7 +9,7 @@
 
 #include "HipdnnEnginePluginHandle.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class MockPlan : public hipdnn_plugin_sdk::IPlan

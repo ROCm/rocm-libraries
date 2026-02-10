@@ -15,6 +15,7 @@ set(TEST_DUPLICATE_ID_B_PLUGIN_NAME "test_duplicate_id_b_plugin")
 set(TEST_INCOMPLETE_API_PLUGIN_NAME "test_incomplete_api_plugin")
 set(TEST_GOOD_DEFAULT_PLUGIN_NAME "test_good_default_plugin")
 set(TEST_KNOBS_PLUGIN_NAME "test_knobs_plugin")
+set(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME "test_knob_constraint_validation_plugin")
 
 # Function to create a test plugin with common configuration
 function(add_test_plugin target_name)
@@ -23,7 +24,7 @@ function(add_test_plugin target_name)
     add_library(${target_name} SHARED ${source_files})
 
     target_compile_definitions(
-        ${target_name} PRIVATE COMPONENT_NAME="${target_name}" __HIP_PLATFORM_AMD__
+        ${target_name} PRIVATE HIPDNN_COMPONENT_NAME="${target_name}" __HIP_PLATFORM_AMD__
     )
 
     target_include_directories(${target_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -39,13 +40,12 @@ function(add_test_plugin target_name)
     endif()
 
     set_target_properties(
-        ${target_name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
-    )
-    set_target_properties(
-        ${target_name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
-    )
-    set_target_properties(
-        ${target_name} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
+        ${target_name}
+        PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
+            RUNTIME_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
+            ARCHIVE_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
+            THEROCK_INSTALL_RPATH_ORIGIN "${${target_name}_INSTALL_DIR}"
     )
 
     install(TARGETS ${target_name} LIBRARY DESTINATION "${${target_name}_INSTALL_DIR}"
@@ -79,6 +79,9 @@ add_test_plugin(${TEST_INCOMPLETE_API_PLUGIN_NAME} TestIncompleteApiPlugin.cpp)
 # test_knobs_plugin is a plugin that exposes engine configuration knobs
 add_test_plugin(${TEST_KNOBS_PLUGIN_NAME} TestKnobsPlugin.cpp)
 
+# test_knob_constraint_validation_plugin is a plugin that validates knob constraint types
+add_test_plugin(${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME} TestKnobConstraintValidationPlugin.cpp)
+
 # Create the default plugin in test_plugins/default
 set(test_good_default_plugin_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/default")
 set(test_good_default_plugin_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/default")
@@ -98,3 +101,4 @@ set(TEST_DUPLICATE_ID_B_PLUGIN_NAME "${TEST_DUPLICATE_ID_B_PLUGIN_NAME}" PARENT_
 set(TEST_INCOMPLETE_API_PLUGIN_NAME "${TEST_INCOMPLETE_API_PLUGIN_NAME}" PARENT_SCOPE)
 set(TEST_GOOD_DEFAULT_PLUGIN_NAME "${TEST_GOOD_DEFAULT_PLUGIN_NAME}" PARENT_SCOPE)
 set(TEST_KNOBS_PLUGIN_NAME "${TEST_KNOBS_PLUGIN_NAME}" PARENT_SCOPE)
+set(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME "${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}" PARENT_SCOPE)

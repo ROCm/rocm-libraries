@@ -8,11 +8,11 @@
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
 
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 // ============================================================================
@@ -99,7 +99,7 @@ uint32_t
 
 MiopenContainer::MiopenContainer()
 {
-    HIPDNN_LOG_INFO("Creating MiopenContainer");
+    HIPDNN_PLUGIN_LOG_INFO("Creating MiopenContainer");
 
     _engineManager = std::make_unique<hipdnn_plugin_sdk::EngineManager>();
 
@@ -111,7 +111,7 @@ MiopenContainer::MiopenContainer()
 
 MiopenContainer::~MiopenContainer()
 {
-    HIPDNN_LOG_INFO("Destroying MiopenContainer");
+    HIPDNN_PLUGIN_LOG_INFO("Destroying MiopenContainer");
 }
 
 hipdnn_plugin_sdk::EngineManager& MiopenContainer::getEngineManager()
@@ -119,4 +119,4 @@ hipdnn_plugin_sdk::EngineManager& MiopenContainer::getEngineManager()
     return *_engineManager;
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

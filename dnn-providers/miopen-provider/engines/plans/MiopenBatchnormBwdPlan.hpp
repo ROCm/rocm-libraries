@@ -15,7 +15,7 @@
 #include "MiopenActivationDescriptor.hpp"
 #include "MiopenTensor.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class BatchnormBwdParams
@@ -90,4 +90,4 @@ private:
     bool _benchmarkingEnabled;
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

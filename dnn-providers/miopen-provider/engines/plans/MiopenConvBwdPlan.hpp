@@ -15,7 +15,7 @@
 #include "MiopenConvDescriptor.hpp"
 #include "MiopenTensor.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class ConvBwdParams
@@ -76,4 +76,4 @@ private:
     bool _benchmarkingEnabled;
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

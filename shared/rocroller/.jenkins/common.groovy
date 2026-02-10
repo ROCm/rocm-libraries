@@ -7,6 +7,15 @@ def getPrComments(pullRequest) {
   return comments
 }
 
+def truncateLongResults(results, maxLength = 60000) {
+    def truncatedMessage = "\n```\n\n**Results truncated, see full report in workspace**"
+    if (results.length() > maxLength) {
+        def truncateIndex = results.lastIndexOf('\n', maxLength)
+        return results.substring(0, truncateIndex) + truncatedMessage
+    }
+    return results
+}
+
 def withSSH(platform, pipeline) {
     withCredentials(
         [
@@ -72,7 +81,7 @@ def runTestCommand (platform, project)
 {
     String testExclude = platform.jenkinsLabel.contains('compile') ? '--gtest_filter=-*GPU*' : ''
 
-    def numThreads = 8
+    def numCTest = 4
 
     def command = """#!/usr/bin/env bash
                 set -ex
@@ -82,7 +91,7 @@ def runTestCommand (platform, project)
                 scripts/run-tests-sharded build "${testExclude}"
 
                 pushd build
-                OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 ctest --parallel ${numThreads} --output-on-failure -LE "GTEST|CATCH"
+                OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 ctest --parallel ${numCTest} --output-on-failure -LE "GTEST|CATCH"
                 popd
             """
 
@@ -337,6 +346,8 @@ def runPerformanceCommand (platform, project)
             def perfCommentTitle = "# Performance Report for ${platform.gpu}"
             def perfCommentString = "${perfCommentTitle}\n\n"
             def perfResults = readFile("${project.paths.project_build_prefix}/performance_comparison_${platform.gpu}.md").trim()
+            perfResults = truncateLongResults(perfResults)
+
             def estimateString = masterCompare ? "" : " (estimated due to skipped ${env.CHANGE_TARGET} build)"
             perfCommentString += "## Results${estimateString}\n\n"
             perfCommentString += "<details open>\n\n${perfResults}\n</details>\n"
@@ -361,14 +372,7 @@ def runPerformanceCommand (platform, project)
             def resCommentTitle = "# Resource Report for ${platform.gpu}"
             def resCommentString = "${resCommentTitle}\n\n"
             def resResults = readFile("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md").trim()
-
-            def maxResultsLength = 60000
-            def truncatedMessage = "\n```\n\n**Results truncated, see full report in workspace**"
-
-            if (resResults.length() > maxResultsLength) {
-                def truncateIndex = resResults.lastIndexOf('\n', maxResultsLength)
-                resResults = resResults.substring(0, truncateIndex) + truncatedMessage
-            }
+            resResults = truncateLongResults(resResults)
 
             resCommentString += "## Results${estimateString}\n\n"
             resCommentString += "<details open>\n\n${resResults}\n</details>\n"
