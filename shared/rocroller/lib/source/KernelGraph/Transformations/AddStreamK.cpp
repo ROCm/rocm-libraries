@@ -840,7 +840,8 @@ namespace rocRoller
                                    LoopInfo const&        loopInfo,
                                    AccumulatorInfo const& accumInfo,
                                    ArgumentInfo const&    argInfo,
-                                   ExpressionPtr          numTotalTiles)
+                                   ExpressionPtr          numTotalTiles,
+                                   bool                   dpFirst)
         {
             // Create forward/reverse tile-numbers for each dimension
             // and attach to all staged tile-number coordinates
@@ -882,13 +883,29 @@ namespace rocRoller
             if(forward)
             {
                 graph.coordinates.addElement(Flatten(), tileNumbers, std::vector<int>{tileSpace});
-                graph.coordinates.addElement(
-                    Sunder(), {tileSpace}, {tileSpaceSK, tileSpaceDP, selector});
+                if(dpFirst)
+                {
+                    graph.coordinates.addElement(
+                        Sunder(), {tileSpace}, {tileSpaceDP, tileSpaceSK, selector});
+                }
+                else
+                {
+                    graph.coordinates.addElement(
+                        Sunder(), {tileSpace}, {tileSpaceSK, tileSpaceDP, selector});
+                }
             }
             else
             {
-                graph.coordinates.addElement(
-                    Sunder(), {tileSpaceSK, tileSpaceDP, selector}, {tileSpace});
+                if(dpFirst)
+                {
+                    graph.coordinates.addElement(
+                        Sunder(), {tileSpaceDP, tileSpaceSK, selector}, {tileSpace});
+                }
+                else
+                {
+                    graph.coordinates.addElement(
+                        Sunder(), {tileSpaceSK, tileSpaceDP, selector}, {tileSpace});
+                }
                 graph.coordinates.addElement(Tile(), std::vector<int>{tileSpace}, tileNumbers);
             }
 
@@ -1084,10 +1101,12 @@ namespace rocRoller
             //
             // Add forward/reverse tile-space coordinate transforms
             //
+
+            bool dpFirst = params->streamK == StreamKMode::TwoTileDPFirst;
             auto forwardInfo
-                = addTileSpaceCT(graph, true, loopInfo, accumInfo, argInfo, numTotalTiles);
-            auto reverseInfo
-                = addTileSpaceCT(graph, false, loopInfo, accumInfo, argInfo, numTotalTiles);
+                = addTileSpaceCT(graph, true, loopInfo, accumInfo, argInfo, numTotalTiles, dpFirst);
+            auto reverseInfo = addTileSpaceCT(
+                graph, false, loopInfo, accumInfo, argInfo, numTotalTiles, dpFirst);
 
             //
             // Add local-tile and accumulator for-loop dimensions and iterators
@@ -1375,76 +1394,63 @@ namespace rocRoller
             }
             graph.control.addElement(Sequence(), {receiveInfo.receiveCond}, {postAccumulationCond});
 
-            //
-            // Add definitions to the Scope
-            //
-            auto lastInit = initializeCoordinates(graph,
-                                                  scope,
-                                                  {forwardForAccumIdx,
-                                                   reverseForAccumIdx,
-                                                   forwardInfo.selector,
-                                                   reverseInfo.selector},
-                                                  zero,
-                                                  {forTileIncr,
-                                                   forAccumIncr,
-                                                   currentTile,
-                                                   numAccumTilesProcessed,
-                                                   firstAccumTile,
-                                                   lastAccumTile},
-                                                  zero);
-
-            //
-            // Add local-tile loop
-            //
-            graph.control.addElement(Sequence(), {lastInit}, {receiveInfo.setPlusOne});
-
-            //
-            // Add accumulator loop; send and receive after
-            //
-            graph.control.chain<Body>(
-                receiveInfo.setPlusOne, scratchTileInfo.setPlusOne, forTileSKOp);
-            graph.control.chain<Body>(forTileSKOp, assignCurrentTile);
-            // Order: currentTile -> firstAccumTile -> numAccumTilesProcessed -> lastAccumTile
-            // (firstAccumTile must come before numAccumTilesProcessed since we reuse it for sameNonAccumTileBound)
-            graph.control.chain<Sequence>(assignCurrentTile,
-                                          assignFirstAccumTile,
-                                          assignNumAccumTilesProcessed,
-                                          assignLastAccumTile,
-                                          loopInfo.topLoopOp,
-                                          sendInfo.preWaitZero);
-
-            graph.control.chain<Sequence>(sendInfo.sendCond, receiveInfo.preWaitZero);
+            // Add local-tile loop and accumulator loop
             if(params->streamK.isTwoTileMode())
             {
                 int scopeSK = graph.control.addElement(Scope());
                 int scopeDP = graph.control.addElement(Scope());
 
-                if(params->streamK == StreamKMode::TwoTileDPFirst)
+                // Connect scopes in the appropriate order.
+                if(dpFirst)
                 {
-                    scopeDP = replaceWith(graph, forTileSKOp, scopeDP, false);
+                    graph.control.addElement(Sequence(), {scope}, {scopeDP});
                     graph.control.addElement(Sequence(), {scopeDP}, {scopeSK});
                 }
                 else
                 {
-                    scopeSK = replaceWith(graph, forTileSKOp, scopeSK, false);
+                    graph.control.addElement(Sequence(), {scope}, {scopeSK});
                     graph.control.addElement(Sequence(), {scopeSK}, {scopeDP});
                 }
 
-                graph.control.addElement(Body(), {scopeSK}, {forTileSKOp});
+                auto skSelectorValue = dpFirst ? one : zero;
+                auto dpSelectorValue = dpFirst ? zero : one;
 
-                //
-                // Set SK/DP selectors to select DP
-                //
-                auto lastInit = initializeCoordinates(graph,
-                                                      scopeDP,
-                                                      {forwardInfo.selector, reverseInfo.selector},
-                                                      one,
-                                                      {forTileIncr, forAccumIncr},
-                                                      zero);
+                // Initialize SK section: selector, loop variables, and SK-specific state
+                auto skInit = initializeCoordinates(graph,
+                                                    scopeSK,
+                                                    {forwardInfo.selector, reverseInfo.selector},
+                                                    skSelectorValue,
+                                                    {forTileIncr,
+                                                     forAccumIncr,
+                                                     currentTile,
+                                                     numAccumTilesProcessed,
+                                                     firstAccumTile,
+                                                     lastAccumTile},
+                                                    zero);
 
-                //
+                // Chain SK-specific setup inside scopeSK
+                graph.control.chain<Sequence>(skInit, receiveInfo.setPlusOne);
+                graph.control.chain<Body>(
+                    receiveInfo.setPlusOne, scratchTileInfo.setPlusOne, forTileSKOp);
+                graph.control.chain<Body>(forTileSKOp, assignCurrentTile);
+                graph.control.chain<Sequence>(assignCurrentTile,
+                                              assignFirstAccumTile,
+                                              assignNumAccumTilesProcessed,
+                                              assignLastAccumTile,
+                                              loopInfo.topLoopOp,
+                                              sendInfo.preWaitZero);
+
+                graph.control.chain<Sequence>(sendInfo.sendCond, receiveInfo.preWaitZero);
+
+                // Initialize DP section: selector and loop variables
+                auto dpInit = initializeCoordinates(graph,
+                                                    scopeDP,
+                                                    {forwardInfo.selector, reverseInfo.selector},
+                                                    dpSelectorValue,
+                                                    {forTileIncr, forAccumIncr},
+                                                    zero);
+
                 // Create DP tile loop.
-                //
                 int forTileDPOp;
                 {
                     auto numDPTilesPerWGBound = argInfo.numDPTilesPerWG;
@@ -1464,7 +1470,7 @@ namespace rocRoller
                                                  numTilesVarType);
                 }
 
-                graph.control.addElement(Sequence(), {lastInit}, {forTileDPOp});
+                graph.control.addElement(Sequence(), {dpInit}, {forTileDPOp});
                 graph.control.addElement(Body(), {forTileDPOp}, {dpTopLoop});
 
                 auto forAccumOp      = *graph.control.get<ForLoopOp>(dpAccumLoop);
@@ -1472,6 +1478,35 @@ namespace rocRoller
                 graph.control.setElement(dpAccumLoop, forAccumOp);
 
                 graph.mapper.connect<ForLoop>(dpAccumLoop, forwardForAccumIdx);
+            }
+            else
+            {
+                // Standard mode
+                auto standardInit
+                    = initializeCoordinates(graph,
+                                            scope,
+                                            {forwardInfo.selector, reverseInfo.selector},
+                                            zero,
+                                            {forTileIncr,
+                                             forAccumIncr,
+                                             currentTile,
+                                             numAccumTilesProcessed,
+                                             firstAccumTile,
+                                             lastAccumTile},
+                                            zero);
+
+                graph.control.chain<Sequence>(standardInit, receiveInfo.setPlusOne);
+                graph.control.chain<Body>(
+                    receiveInfo.setPlusOne, scratchTileInfo.setPlusOne, forTileSKOp);
+                graph.control.chain<Body>(forTileSKOp, assignCurrentTile);
+                graph.control.chain<Sequence>(assignCurrentTile,
+                                              assignFirstAccumTile,
+                                              assignNumAccumTilesProcessed,
+                                              assignLastAccumTile,
+                                              loopInfo.topLoopOp,
+                                              sendInfo.preWaitZero);
+
+                graph.control.chain<Sequence>(sendInfo.sendCond, receiveInfo.preWaitZero);
             }
 
             //
@@ -1551,12 +1586,12 @@ namespace rocRoller
             // numSKTilesPerWG: Computed on host:
             //
             //   for basic StreamK:   (numTiles0 * numTiles1 * numTilesAcc + numWGs - 1) / numWGs
-            //   fro 2-tile StreamK:  ((numTilesAcc * ((numTiles0 * numTiles1) % numWGs + numWGs) + numWGs - 1) / numWGs
+            //   for 2-tile StreamK:  ((numTilesAcc * ((numTiles0 * numTiles1) % numWGs + numWGs) + numWGs - 1) / numWGs
             //
             // numDPTilesPerWG: Computed on host:
             //
             //   for basic StreamK:   0
-            //   fro 2-tile StreamK:  ((numTiles0 * numTiles1) / numWGs - 1) * numTilesAcc
+            //   for 2-tile StreamK:  ((numTiles0 * numTiles1) / numWGs - 1) * numTilesAcc
             //
             for(auto d : loopInfo.dimensionIndices)
             {
