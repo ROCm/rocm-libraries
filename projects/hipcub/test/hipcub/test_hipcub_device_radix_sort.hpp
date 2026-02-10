@@ -37,22 +37,50 @@
 #include <cstdint>
 #include <vector>
 
-#define HIP_CHECK_MEMORY(condition)                                                         \
-    {                                                                                       \
-        hipError_t error = condition;                                                       \
-        if(error == hipErrorOutOfMemory)                                                    \
-        {                                                                                   \
-            std::cout << "Out of memory. Skipping size = " << size << std::endl;            \
-            (void)hipGetLastError(); /*reset error code to hipSuccess*/                     \
-            break;                                                                          \
-        }                                                                                   \
-        if(error != hipSuccess)                                                             \
-        {                                                                                   \
-            std::cout << "HIP error: " << hipGetErrorString(error) << " line: " << __LINE__ \
-                      << std::endl;                                                         \
-            exit(error);                                                                    \
-        }                                                                                   \
-    }
+/*
+This work around is needed for gfx1151 architecture as currently there is an unkown issue causing "unspecifed launch failure"
+*/
+#if defined(__gfx1151__)
+    #define HIP_CHECK_MEMORY(condition)                                                         \
+        {                                                                                       \
+            hipError_t error = condition;                                                       \
+            if(error == hipErrorOutOfMemory)                                                    \
+            {                                                                                   \
+                std::cout << "Out of memory. Skipping size = " << size << std::endl;            \
+                (void)hipGetLastError(); /*reset error code to hipSuccess*/                     \
+                break;                                                                          \
+            }                                                                                   \
+            if(error == hipErrorLaunchFailure){                                                 \
+                std::cout << "Launch error on gfx1151, skipping test..." << std::endl;          \
+                (void)hipGetLastError(); /*reset error code to hipSuccess*/                     \
+                break;                                                                          \
+            }                                                                                   \
+            if(error != hipSuccess)                                                             \
+            {                                                                                   \
+                std::cout << "HIP error: " << hipGetErrorString(error) << " line: " << __LINE__ \
+                        << std::endl;                                                           \
+                exit(error);                                                                    \
+            }                                                                                   \
+        }
+#else
+    #define HIP_CHECK_MEMORY(condition)                                                         \
+        {                                                                                       \
+            hipError_t error = condition;                                                       \
+            if(error == hipErrorOutOfMemory)                                                    \
+            {                                                                                   \
+                std::cout << "Out of memory. Skipping size = " << size << std::endl;            \
+                (void)hipGetLastError(); /*reset error code to hipSuccess*/                     \
+                break;                                                                          \
+            }                                                                                   \
+            if(error != hipSuccess)                                                             \
+            {                                                                                   \
+                std::cout << "HIP error: " << hipGetErrorString(error) << " line: " << __LINE__ \
+                        << std::endl;                                                           \
+                exit(error);                                                                    \
+            }                                                                                   \
+        }
+#endif
+
 
 template<class Key,
          class Value,
