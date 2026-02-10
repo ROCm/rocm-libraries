@@ -76,7 +76,6 @@ struct UniversalGemmBasePolicy
     template <typename Problem>
     static constexpr bool is_b_load_tr = []() {
         using BDataType              = remove_cvref_t<typename Problem::BDataType>;
-        using ComputeDataType        = remove_cvref_t<typename Problem::ComputeDataType>;
         using WarpTile               = typename Problem::BlockGemmShape::WarpTile;
         constexpr index_t kKWarpTile = WarpTile::at(number<2>{});
         // Max K warp tile for transpose load based on data type size
@@ -84,9 +83,6 @@ struct UniversalGemmBasePolicy
         if constexpr(std::is_same_v<BDataType, pk_int4_t>)
             return false;
         else if constexpr(kKWarpTile > kMaxKWarpTile)
-            return false;
-        else if constexpr(!std::is_same_v<BDataType, ComputeDataType> &&
-                          !IsBCastPolicyBeforeLDSWrite_v<Problem>)
             return false;
         else
             return std::is_same_v<remove_cvref_t<typename Problem::BLayout>,

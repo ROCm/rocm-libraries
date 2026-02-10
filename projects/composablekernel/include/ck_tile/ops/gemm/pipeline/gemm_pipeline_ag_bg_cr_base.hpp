@@ -70,9 +70,6 @@ struct GemmPipelineAgBgCrImplBase
             return false;
         else if constexpr(kKWarpTile > kMaxKWarpTile)
             return false;
-        else if constexpr(!std::is_same_v<BDataType, ComputeDataType> &&
-                          !IsBCastPolicyBeforeLDSWrite)
-            return false;
         else
             return std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
     }();

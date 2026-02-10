@@ -175,26 +175,49 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
         }
     }
 
+    template <typename DataType, bool UseLoadTranspose, index_t ThreadElements>
+    static constexpr auto GetAttrNumAccess(bool_constant<UseLoadTranspose>, number<ThreadElements>)
+    {
+        constexpr index_t vector_size = DS_READ_TR_SIZE() / sizeof(DataType);
+
+        return !UseLoadTranspose                   ? WGAttrNumAccessEnum::Single
+               : vector_size == ThreadElements     ? WGAttrNumAccessEnum::Single
+               : vector_size * 2 == ThreadElements ? WGAttrNumAccessEnum::Double
+               : vector_size * 4 == ThreadElements ? WGAttrNumAccessEnum::Quad
+                                                   : WGAttrNumAccessEnum::Invalid;
+    };
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {
         using BlockWarps      = typename Problem::BlockGemmShape::BlockWarps;
         using WarpTile        = typename Problem::BlockGemmShape::WarpTile;
         using ComputeDataType = typename Problem::ComputeDataType;
+        using LDSADataType    = typename Problem::ADataType;
+        using LDSBDataType = std::conditional_t<Problem::BCastPolicy == CastPolicy::BeforeLDSWrite,
+                                                ComputeDataType,
+                                                typename Problem::BDataType>;
 
         static_assert(Problem::BQuantGroupSize::kK % WarpTile::at(I2) == 0,
                       "KPerWarpGemm must be a multiple of QuantGroupSize!");
 
-        constexpr index_t vector_size     = DS_READ_TR_SIZE() / sizeof(ComputeDataType);
-        constexpr index_t thread_elements = WarpTile::at(I1) * WarpTile::at(I2) / get_warp_size();
-        constexpr bool use_load_tr_inst =
-            (Base::template is_a_load_tr<Problem> || Base::template is_b_load_tr<Problem>);
-        constexpr auto wg_attr_num_access =
-            !use_load_tr_inst                    ? WGAttrNumAccessEnum::Single
-            : vector_size == thread_elements     ? WGAttrNumAccessEnum::Single
-            : vector_size * 2 == thread_elements ? WGAttrNumAccessEnum::Double
-            : vector_size * 4 == thread_elements ? WGAttrNumAccessEnum::Quad
-                                                 : WGAttrNumAccessEnum::Invalid;
+        constexpr auto thread_elements =
+            number<WarpTile::at(I1) * WarpTile::at(I2) / get_warp_size()>{};
+
+        constexpr auto is_a_load_tr_v = bool_constant<Base::template is_a_load_tr<Problem>>{};
+        constexpr auto is_b_load_tr_v = bool_constant<Base::template is_b_load_tr<Problem>>{};
+        constexpr auto is_any_load_tr = is_a_load_tr_v || is_b_load_tr_v;
+
+        constexpr auto wg_attr_num_access_compute =
+            GetAttrNumAccess<ComputeDataType>(is_any_load_tr, thread_elements);
+        constexpr auto wg_attr_num_accessA =
+            std::is_same_v<LDSADataType, LDSBDataType>
+                ? wg_attr_num_access_compute
+                : GetAttrNumAccess<LDSADataType>(is_a_load_tr_v, thread_elements);
+        constexpr auto wg_attr_num_accessB =
+            std::is_same_v<LDSADataType, LDSBDataType>
+                ? wg_attr_num_access_compute
+                : GetAttrNumAccess<LDSBDataType>(is_b_load_tr_v, thread_elements);
 
         using WarpGemm = WarpGemmDispatcher<ComputeDataType,
                                             ComputeDataType,
@@ -205,7 +228,8 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
                                             Problem::TransposeC,
                                             false,
                                             false,
-                                            wg_attr_num_access>;
+                                            wg_attr_num_accessA,
+                                            wg_attr_num_accessB>;
         static_assert(is_any_of<ComputeDataType, fp8_t, bf8_t, bf16_t, fp16_t>::value);
         static_assert(std::is_same_v<typename Problem::CDataType, float>);
 

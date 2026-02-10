@@ -18,12 +18,17 @@ enum class WGAttrNumAccessEnum
 };
 
 template <typename WarpGemmAttributeMfmaImpl_,
-          WGAttrNumAccessEnum AttrNumAccess_ = WGAttrNumAccessEnum::Single>
+          WGAttrNumAccessEnum AttrNumAccessA_ = WGAttrNumAccessEnum::Single,
+          WGAttrNumAccessEnum AttrNumAccessB_ = AttrNumAccessA_>
 struct WarpGemmAttributeMfma
 {
-    using Impl                           = remove_cvref_t<WarpGemmAttributeMfmaImpl_>;
-    static constexpr auto AttrNumAccess  = AttrNumAccess_;
-    static constexpr auto AttrNumAccessV = static_cast<index_t>(AttrNumAccess);
+    using Impl                            = remove_cvref_t<WarpGemmAttributeMfmaImpl_>;
+    static constexpr auto AttrNumAccessA  = AttrNumAccessA_;
+    static constexpr auto AttrNumAccessAV = static_cast<index_t>(AttrNumAccessA);
+    static constexpr auto AttrNumAccessB  = AttrNumAccessB_;
+    static constexpr auto AttrNumAccessBV = static_cast<index_t>(AttrNumAccessB);
+
+    static constexpr bool UsePackNumAccess = AttrNumAccessAV != AttrNumAccessBV;
 
     using ADataType = typename Impl::ADataType;
     using BDataType = typename Impl::BDataType;
@@ -44,12 +49,13 @@ struct WarpGemmAttributeMfma
     static_assert(Impl::kAMBlock == 1 && Impl::kBNBlock == 1,
                   "Multi-block WarpGemmAttributeMfmaImpl is not supported");
 
-    template <index_t kMNLane>
+    template <index_t kMNLane, index_t AttrNumAccessV_>
     static constexpr auto get_warp_dstr_encoding()
     {
-        static_assert(kKPerThread % AttrNumAccessV == 0,
+        static_assert(kKPerThread % AttrNumAccessV_ == 0,
                       "kKPerThread must be divisible by NumAccess");
-        if constexpr(AttrNumAccessV == 1)
+        if constexpr(AttrNumAccessV_ == 1)
+        {
             return tile_distribution_encoding<
                 sequence<>,
                 tuple<sequence<kMNLane>, sequence<Impl::kABKLane, Impl::kABKPerLane>>,
@@ -57,18 +63,48 @@ struct WarpGemmAttributeMfma
                 tuple<sequence<0, 0>>,
                 sequence<2>,
                 sequence<1>>{};
+        }
         else
-            return tile_distribution_encoding<
-                sequence<>,
-                tuple<sequence<kMNLane>,
-                      sequence<AttrNumAccessV, Impl::kABKLane, Impl::kABKPerLane / AttrNumAccessV>>,
-                tuple<sequence<2, 1>>,
-                tuple<sequence<1, 0>>,
-                sequence<2, 2>,
-                sequence<0, 2>>{};
+        {
+            // AttrNumAccess splits the kABKPerLane
+            // We can split them but still have them contiguous (packed) or have them interleaved.
+            // The reason to split the dimension but still have it packed is to match load transpose
+            // encoding when A and B use different AttrNumAccess (they have different types in LDS)
+            // Example
+            // A: 16bit, B: 8bit
+            // Load transpose B: lane0 -> K=0..7 (only 1 instruction)
+            // Load transpose A: lane0 -> K=0..3 first instruction, K=4..7 second instruction
+            // In this way the data in register are consistent between A and B
+            if constexpr(UsePackNumAccess)
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<kMNLane>,
+                          sequence<Impl::kABKLane,
+                                   AttrNumAccessV_,
+                                   Impl::kABKPerLane / AttrNumAccessV_>>,
+                    tuple<sequence<2, 1>>,
+                    tuple<sequence<0, 0>>,
+                    sequence<2, 2>,
+                    sequence<1, 2>>{};
+            }
+            else
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<kMNLane>,
+                          sequence<AttrNumAccessV_,
+                                   Impl::kABKLane,
+                                   Impl::kABKPerLane / AttrNumAccessV_>>,
+                    tuple<sequence<2, 1>>,
+                    tuple<sequence<1, 0>>,
+                    sequence<2, 2>,
+                    sequence<0, 2>>{};
+            }
+        }
     }
-    using AWarpDstrEncoding = decltype(get_warp_dstr_encoding<Impl::kAMLane>());
-    using BWarpDstrEncoding = decltype(get_warp_dstr_encoding<Impl::kBNLane>());
+    using AWarpDstrEncoding = decltype(get_warp_dstr_encoding<Impl::kAMLane, AttrNumAccessAV>());
+    using BWarpDstrEncoding = decltype(get_warp_dstr_encoding<Impl::kBNLane, AttrNumAccessBV>());
 
     using CWarpDstrEncoding = tile_distribution_encoding<
         sequence<>,
