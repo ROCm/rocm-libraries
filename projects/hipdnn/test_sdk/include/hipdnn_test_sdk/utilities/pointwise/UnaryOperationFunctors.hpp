@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <limits>
 #include <type_traits>
 

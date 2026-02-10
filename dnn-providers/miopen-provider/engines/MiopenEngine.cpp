@@ -6,10 +6,10 @@
 
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace miopen_plugin
 {
@@ -117,7 +117,7 @@ void MiopenEngine::initializeExecutionContext(
             }
             else
             {
-                HIPDNN_LOG_WARN(
+                HIPDNN_PLUGIN_LOG_WARN(
                     "Benchmarking knob setting value is not an integer. Type: {}",
                     hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
             }
@@ -125,7 +125,7 @@ void MiopenEngine::initializeExecutionContext(
     }
     else
     {
-        HIPDNN_LOG_WARN("Engine config is invalid");
+        HIPDNN_PLUGIN_LOG_WARN("Engine config is invalid");
     }
 
     for(const auto& planBuilder : _planBuilders)
