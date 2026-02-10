@@ -434,11 +434,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgecon_64(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief LASWP performs a series of row interchanges on the matrix A.
+    \brief The LASWP functions perform a series of row interchanges on the matrix ``A``.
 
     \details
-    Row interchanges are done one by one. If \f$\text{ipiv}[k_1 + (j - k_1) \cdot \text{abs}(\text{incx})] = r\f$, then the j-th row of A
-    will be interchanged with the r-th row of A, for \f$j = k_1,k_1+1,\dots,k_2\f$. Indices \f$k_1\f$ and \f$k_2\f$ are 1-based indices.
+    Row interchanges are done one by one. If \f$\text{ipiv}[k_1 + (j - k_1) \cdot \text{abs}(\text{incx})] = r\f$, then the j-th row of ``A``
+    will be interchanged with the r-th row of ``A``, for \f$j = k_1,k_1+1,\dots,k_2\f$. Indices \f$k_1\f$ and \f$k_2\f$ are 1-based indices.
 
     @param[in]
     handle      rocblas_handle.
