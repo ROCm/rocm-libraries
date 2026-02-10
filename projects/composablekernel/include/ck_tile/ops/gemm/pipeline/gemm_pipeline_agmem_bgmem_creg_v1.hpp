@@ -32,7 +32,11 @@ struct BaseGemmPipelineAGmemBGmemCRegV1
     template <typename RunFunction>
     CK_TILE_HOST_DEVICE static auto TailHandler(const RunFunction& run_func, bool has_hot_loop)
     {
-        if(has_hot_loop)
+        // Use amd_wave_read_first_lane to avoid higher resource usage.
+        // Compiler cannot deduce if one path is used for all threads
+        const bool has_hot_loop_first_lane = amd_wave_read_first_lane(has_hot_loop);
+
+        if(has_hot_loop_first_lane)
         {
             return run_func(ck_tile::bool_constant<true>{});
         }

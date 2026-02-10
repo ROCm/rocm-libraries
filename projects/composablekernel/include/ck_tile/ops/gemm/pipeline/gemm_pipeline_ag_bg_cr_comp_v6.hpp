@@ -43,15 +43,19 @@ struct BaseGemmPipelineAgBgCrCompV6
     CK_TILE_HOST_DEVICE static auto
     TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_number)
     {
+        // Use amd_wave_read_first_lane to avoid higher resource usage.
+        // Compiler cannot deduce if one path is used for all threads
+        const bool has_hot_loop_first_lane      = amd_wave_read_first_lane(has_hot_loop);
+        const TailNumber tail_number_first_lane = amd_wave_read_first_lane(tail_number);
         // Handle all the valid cases.
-        if(has_hot_loop)
+        if(has_hot_loop_first_lane)
         {
-            if(tail_number == TailNumber::Odd)
+            if(tail_number_first_lane == TailNumber::Odd)
             {
                 return run_func(bool_constant<true>{},
                                 integral_constant<TailNumber, TailNumber::Odd>{});
             }
-            else if(tail_number == TailNumber::Even)
+            else if(tail_number_first_lane == TailNumber::Even)
             {
                 return run_func(bool_constant<true>{},
                                 integral_constant<TailNumber, TailNumber::Even>{});
@@ -59,12 +63,12 @@ struct BaseGemmPipelineAgBgCrCompV6
         }
         else
         {
-            if(tail_number == TailNumber::Odd)
+            if(tail_number_first_lane == TailNumber::Odd)
             {
                 return run_func(bool_constant<false>{},
                                 integral_constant<TailNumber, TailNumber::Odd>{});
             }
-            else if(tail_number == TailNumber::Even)
+            else if(tail_number_first_lane == TailNumber::Even)
             {
                 return run_func(bool_constant<false>{},
                                 integral_constant<TailNumber, TailNumber::Even>{});
