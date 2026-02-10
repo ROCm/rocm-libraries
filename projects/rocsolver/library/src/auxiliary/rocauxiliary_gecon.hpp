@@ -211,6 +211,7 @@ rocblas_status rocsolver_gecon_template(rocblas_handle handle,
     std::vector<S> h_anorm(batch_count);
     HIP_CHECK(hipMemcpyAsync(h_anorm.data(), anorm, sizeof(S) * batch_count, hipMemcpyDeviceToHost,
                              stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
     for(I batch = 0; batch < batch_count; batch++)
     {
         // if anorm is zero for this batch, rcond is zero
