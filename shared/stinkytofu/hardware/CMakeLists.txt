@@ -6,9 +6,9 @@ set(GFX_SOURCES
     InstDefDSL.cpp
 )
 
-# Add all STINKYTOFU_ARCHS cpp files to GFX_SOURCES
+# Add all STINKYTOFU_ARCHS cpp files to GFX_SOURCES (each in its own Gfx***/ folder)
 foreach(arch ${STINKYTOFU_ARCHS_TO_BUILD})
-    list(APPEND GFX_SOURCES "${arch}.cpp")
+    list(APPEND GFX_SOURCES "${arch}/${arch}.cpp")
 endforeach()
 
 list(TRANSFORM GFX_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/src/gfx/")

@@ -23,7 +23,7 @@
 
 #include <gtest/gtest.h>
 
-#include "ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 
 using namespace stinkytofu;
 

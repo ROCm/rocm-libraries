@@ -22,7 +22,7 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
-#include "stinkytofu.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 
 using namespace stinkytofu;
 

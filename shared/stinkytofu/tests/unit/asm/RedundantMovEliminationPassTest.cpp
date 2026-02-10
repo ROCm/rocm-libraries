@@ -22,11 +22,11 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
-#include "ir/asm/DeadCodeEliminationPass.hpp"
-#include "ir/asm/RedundantMovEliminationPass.hpp"
-#include "ir/asm/StinkyAsmIR.hpp"
-#include "ir/asm/StinkyAsmPrinter.hpp"
-#include "stinkytofu.hpp"
+#include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 
 #include <optional>
 #include <sstream>

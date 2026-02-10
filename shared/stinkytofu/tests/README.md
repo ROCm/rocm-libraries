@@ -106,7 +106,7 @@ Unit tests verify individual components in isolation:
 1. Create your test file in `tests/unit/`:
    ```cpp
    #include <gtest/gtest.h>
-   #include "stinkytofu.hpp"
+   #include "stinkytofu/core/stinkytofu.hpp"
 
    TEST(MyNewTest, BasicTest) {
        // Your test code
@@ -120,7 +120,7 @@ Unit tests verify individual components in isolation:
        unit/PassManagerTest.cpp
        unit/IntrusiveListTest.cpp
        unit/ConfigurableWaitCntPassTest.cpp
-       unit/StinkyAsmEmitterTest.cpp
+       unit/asm/StinkyAsmEmitterTest.cpp
        unit/MyNewTest.cpp  # Add your new test here
    )
    ```

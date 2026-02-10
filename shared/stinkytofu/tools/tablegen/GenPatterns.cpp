@@ -32,7 +32,7 @@ namespace stinkytofu
 {
 
     //===----------------------------------------------------------------------===//
-    // NOTE: Pattern parsing is now handled by PatternParser (ir/asm/PatternParser.cpp)
+    // NOTE: Pattern parsing is now handled by PatternParser (stinkytofu/serialization/asm)
     // This file only contains code generation logic.
     //===----------------------------------------------------------------------===//
 
@@ -91,7 +91,7 @@ namespace stinkytofu
 
 #pragma once
 
-#include "ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -167,7 +167,7 @@ public:
 
 #pragma once
 
-#include "ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -944,7 +944,7 @@ public:
     {
         std::cout << "Parsing patterns from: " << patternFile << "\n";
 
-        // Use the PatternParser from ir/asm/PatternParser.hpp
+        // Use the PatternParser from stinkytofu/serialization/asm/PatternParser.hpp
         auto patterns = parsePatternFile(patternFile);
 
         if(patterns.empty())

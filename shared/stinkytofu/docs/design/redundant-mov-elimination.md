@@ -640,8 +640,8 @@ This pass was originally called `DuplicateEliminationPass` and attempted general
 
 ## References
 
-- **Source:** `src/ir/asm/RedundantMovEliminationPass.cpp`
-- **Header:** `include/ir/asm/RedundantMovEliminationPass.hpp`
+- **Source:** `src/transforms/asm/RedundantMovEliminationPass.cpp`
+- **Header:** `include/stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp`
 - **Tests:** `tests/unit/asm/RedundantMovEliminationPassTest.cpp`
 - **Related:** `mustPreserveInstruction()` in `StinkyAsmIR.hpp`
 - **Related:** Dummy registers defined in `StinkyAsmIR.hpp` (lines 231-253)

@@ -356,7 +356,7 @@ loop:
 ## Configuration
 
 '''cpp
-#include "stinkytofu.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 
 using namespace stinkytofu;
 

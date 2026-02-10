@@ -33,7 +33,7 @@
 
 #include <gtest/gtest.h>
 
-#include "ir/asm/PatternParser.hpp"
+#include "stinkytofu/serialization/asm/PatternParser.hpp"
 
 #include <fstream>
 #include <sstream>

@@ -59,7 +59,7 @@ std::cerr << "Error code: " << errorValue << "\n";
 ### Example: Complete Error Handling
 
 '''cpp
-#include "stinkytofu.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 
 using namespace stinkytofu;
 

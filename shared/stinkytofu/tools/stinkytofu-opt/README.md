@@ -142,8 +142,8 @@ The tool generates debug output files in the same directory as the input:
 
 `stinkytofu-opt` is built using a modular pass-based architecture inspired by LLVM:
 
-1. **IRLexer**: Tokenizes the input IR text into a token stream
-2. **IRParser**: Parses tokens into `StinkyInstruction` objects
+1. **IRLexer**: Tokenizes the input IR text into a token stream (`stinkytofu/serialization/asm/`, impl in `src/serialization/asm/IRLexer.cpp`)
+2. **IRParser**: Parses tokens into `StinkyInstruction` objects (`stinkytofu/serialization/asm/IRParser.hpp`, impl in `src/serialization/asm/IRParser.cpp`)
 3. **PassManager**: Orchestrates the execution of optimization passes
 4. **Passes**: Individual optimization transformations on the IR
 

@@ -22,7 +22,11 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
+#include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
 #include <functional>
 #include <vector>

@@ -29,7 +29,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "isa/gfx/GfxIsa.hpp"
+#include "stinkytofu/hardware/GfxIsa.hpp"
 
 namespace stinkytofu
 {
@@ -51,7 +51,7 @@ namespace stinkytofu
 #define MACRO(flagName) \
     case flagName:      \
         return #flagName;
-#include "isa/gfx/Flags.def"
+#include "stinkytofu/hardware/Flags.def"
 
 #undef MACRO
             default:

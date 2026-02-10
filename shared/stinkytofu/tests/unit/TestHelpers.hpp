@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace stinkytofu
 {

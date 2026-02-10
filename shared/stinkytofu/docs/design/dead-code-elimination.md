@@ -544,8 +544,8 @@ For the gfx1250_mfma kernel:
 
 ## References
 
-- **Source:** `src/ir/asm/DeadCodeEliminationPass.cpp`
-- **Header:** `include/ir/asm/DeadCodeEliminationPass.hpp`
+- **Source:** `src/transforms/asm/DeadCodeEliminationPass.cpp`
+- **Header:** `include/stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp`
 - **Tests:** `tests/unit/asm/DeadCodeEliminationPassTest.cpp`
 - **Related:** `mustPreserveInstruction()` in `StinkyAsmIR.hpp`
 - **Related:** Dummy registers defined in `StinkyAsmIR.hpp` (lines 231-253)

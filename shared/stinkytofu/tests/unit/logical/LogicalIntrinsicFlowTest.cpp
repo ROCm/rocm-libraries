@@ -32,8 +32,8 @@
  *   4. Verifying intrinsic metadata
  */
 
-#include "ir/IntrinsicCall.hpp"
-#include "ir/IntrinsicLibrary.hpp"
+#include "stinkytofu/ir/logical/IntrinsicCall.hpp"
+#include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
 #include <cstring>
 #include <fstream>
 #include <gtest/gtest.h>

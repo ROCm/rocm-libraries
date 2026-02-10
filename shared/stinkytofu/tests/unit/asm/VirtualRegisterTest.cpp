@@ -27,7 +27,7 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-#include "ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 using namespace stinkytofu;
 

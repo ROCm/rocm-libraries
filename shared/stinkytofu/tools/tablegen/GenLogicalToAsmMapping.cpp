@@ -46,7 +46,7 @@ namespace
     bool genLogicalToAsmMappingsImpl(GpuArchManager& manager, const std::string& outdir)
     {
         std::filesystem::path path
-            = std::filesystem::path(outdir) / "ir/LogicalToAsmMappings_generated.inc";
+            = std::filesystem::path(outdir) / "stinkytofu/ir/LogicalToAsmMappings_generated.inc";
 
         std::ofstream os(path);
         if(!os)

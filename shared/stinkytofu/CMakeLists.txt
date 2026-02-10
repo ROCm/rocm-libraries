@@ -49,8 +49,8 @@ endforeach(arch)
 
 message(STATUS "Using archs: ${STINKYTOFU_ARCHS}")
 
-configure_file(hardware/include/Config/Archs.def.in include/Config/Archs.def @ONLY)
-configure_file(include/Config.h.in include/Config/Config.h)
+configure_file(hardware/hardware.def.in include/Config/Archs.def @ONLY)
+configure_file(include/stinkytofu/Config.h.in include/stinkytofu/Config/Config.h)
 
 # Note: Stinkytofu library should be built with:
 # (1) No RTTI
@@ -59,39 +59,39 @@ configure_file(include/Config.h.in include/Config/Config.h)
 # => clang/gcc: -fno-rtti -fno-exceptions
 # => MSVC: /GR- /EHs-c-
 set(STINKYTOFU_SOURCE_FILES
-    stinkytofu.cpp
-    ir/python/PyLogicalModule.cpp
+    core/stinkytofu.cpp
+    core/PyLogicalModule.cpp
+    core/StinkyAsmModule.cpp
     ir/logical/LogicalToFunctionConverter.cpp
     ir/logical/LogicalOpcode.cpp
-    ir/IRSerializer.cpp
-    ir/IntrinsicLibrary.cpp
-    ir/IntrinsicRegistry.cpp
-    ir/IntrinsicPatternConverter.cpp
-    ir/passes/IntrinsicExpansionPass.cpp
-    ir/logical/passes/ToStinkyAsmPass.cpp
-    ir/logical/passes/CompositeInstructionLoweringPass.cpp
-    ir/logical/passes/LogicalPeepholePass.cpp
-    ir/asm/CFGBuilderPass.cpp
-    ir/asm/PeepholeOptimizationPass.cpp
-    ir/asm/DeadCodeEliminationPass.cpp
-    ir/asm/RedundantMovEliminationPass.cpp
-    ir/asm/DelayAluInsertionPass.cpp
-    ir/asm/LegalizationUtils.cpp
-    ir/asm/OptimizationPipeline.cpp
-    ir/asm/ScheduleLastLRsPass.cpp
-    ir/asm/StinkyDAGSchedulerPass.cpp
-    ir/asm/StinkyConfigurableWaitCntPass.cpp
-    ir/asm/ScheduleFirstLRsPass.cpp
+    serialization/logical/IRSerializer.cpp
+    ir/logical/IntrinsicLibrary.cpp
+    ir/logical/IntrinsicRegistry.cpp
+    ir/logical/IntrinsicPatternConverter.cpp
+    transforms/logical/IntrinsicExpansionPass.cpp
+    transforms/logical/ToStinkyAsmPass.cpp
+    transforms/logical/CompositeInstructionLoweringPass.cpp
+    transforms/logical/LogicalPeepholePass.cpp
+    transforms/asm/CFGBuilderPass.cpp
+    transforms/asm/PeepholeOptimizationPass.cpp
+    transforms/asm/DeadCodeEliminationPass.cpp
+    transforms/asm/RedundantMovEliminationPass.cpp
+    transforms/asm/DelayAluInsertionPass.cpp
+    transforms/asm/LegalizationUtils.cpp
+    pipeline/OptimizationPipeline.cpp
+    transforms/asm/ScheduleLastLRsPass.cpp
+    transforms/asm/StinkyDAGSchedulerPass.cpp
+    transforms/asm/StinkyConfigurableWaitCntPass.cpp
+    transforms/asm/ScheduleFirstLRsPass.cpp
     ir/asm/StinkyAsmIR.cpp
-    ir/asm/StinkyAsmPrinter.cpp
-    ir/asm/StinkyAsmEmitter.cpp
+    serialization/asm/StinkyAsmPrinter.cpp
+    serialization/asm/StinkyAsmEmitter.cpp
     ir/asm/StinkySignature.cpp
-    ir/asm/StinkyAsmModule.cpp
-    ir/asm/IRLexer.cpp
-    ir/asm/IRParser.cpp
-    ir/asm/PatternParser.cpp
-    ir/asm/AsmVerifierPass.cpp
-    ir/IRVerifierPass.cpp
+    serialization/asm/IRLexer.cpp
+    serialization/asm/IRParser.cpp
+    serialization/asm/PatternParser.cpp
+    analysis/asm/AsmVerifierPass.cpp
+    analysis/logical/IRVerifierPass.cpp
     hardware/ArchHelper.cpp
 )
 
@@ -104,8 +104,8 @@ list(TRANSFORM STINKYTOFU_SOURCE_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/src/
 # (1) stinkytofu designs a new rocisa IR to replace the original ones, or
 # (2) stinkytofu completely replaces rocisa IR with stinkyAsm IR.
 set(ROCISA_TO_STINKYTOFU_SOURCE_FILES
-    ir/rocisa/AllHwMappings.cpp
-    ir/rocisa/ToStinkyTofuUtils.cpp
+    conversion/rocisa/AllHwMappings.cpp
+    conversion/rocisa/ToStinkyTofuUtils.cpp
 )
 list(TRANSFORM ROCISA_TO_STINKYTOFU_SOURCE_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/src/")
 
@@ -145,7 +145,7 @@ endif()
 # Now create stinkytofu library which depends on tablegen_generated
 # Add generated source files
 set(STINKYTOFU_GENERATED_SOURCES
-    "${TABLEGEN_OUTPUT_DIR}/ir/logical/LogicalOpcode.cpp"
+    "${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/logical/LogicalOpcode.cpp"
 )
 
 # Mark generated files so CMake knows they will be created during build
@@ -160,7 +160,6 @@ target_include_directories(stinkytofu
         # Make the generated files' directories available to the library
         # This allows source files to #include the generated .inc files
         "${TABLEGEN_OUTPUT_DIR}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hardware/include"
 )
 
 # Make stinkytofu depend on the generated ISA definition files from tablegen
@@ -168,7 +167,7 @@ target_include_directories(stinkytofu
 add_dependencies(stinkytofu tablegen_generated)
 
 # Backend-related sources are added by the backend subdirectory
-add_subdirectory(src/ir/asm/backend)
+add_subdirectory(src/pipeline/backend)
 
 ##===----------------------------------------------------------------------===##
 # Intrinsic Compiler Tool
@@ -198,6 +197,6 @@ install(DIRECTORY include/
 
 # Install generated header files
 install(FILES
-    ${PROJECT_BINARY_DIR}/ir/logical/LogicalInstructions_generated.hpp
+    ${PROJECT_BINARY_DIR}/stinkytofu/ir/logical/LogicalInstructions_generated.hpp
     DESTINATION include/stinkytofu/ir/logical
 )

@@ -30,7 +30,7 @@
 
 #include <gtest/gtest.h>
 
-#include "ir/asm/IRLexer.hpp"
+#include "IRLexer.hpp"
 
 #include <fstream>
 #include <sstream>

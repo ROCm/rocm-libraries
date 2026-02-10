@@ -87,7 +87,7 @@ int main(int argc, char** argv)
 
     // Test Gfx1250
     {
-        std::string inputDir = sourceDir + "/hardware/defs";
+        std::string inputDir = sourceDir + "/hardware/src/gfx";
         std::string arch     = "Gfx1250";
 
         std::cout << "\nTesting " << arch << "...\n";

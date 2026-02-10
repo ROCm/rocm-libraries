@@ -22,12 +22,12 @@
  * ************************************************************************ */
 
 #include "TestHelpers.hpp"
-#include "ir/logical/LogicalInstructions.hpp"
-#include "ir/logical/LogicalToFunctionConverter.hpp"
-#include "ir/logical/passes/CompositeInstructionLoweringPass.hpp"
-#include "ir/logical/passes/ToStinkyAsmPass.hpp"
-#include "ir/python/PyLogicalModule.hpp"
-#include "stinkytofu.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/ir/logical/LogicalToFunctionConverter.hpp"
+#include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
+#include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
+#include "stinkytofu/core/PyLogicalModule.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 #include <gtest/gtest.h>
 #include <memory>
 

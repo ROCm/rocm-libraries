@@ -443,7 +443,7 @@ pattern SubFMAFusion_F32 { ... }
 |------|---------|
 | 'lib/Dialect/Transforms/PeepholePatterns.pattern' | **Your patterns go here** |
 | 'build/PeepholePatterns.inc' | Generated C++ code (auto) |
-| 'src/ir/asm/PeepholeOptimizationPass.cpp' | Generic pass (never edit) |
+| 'src/transforms/asm/PeepholeOptimizationPass.cpp' | Generic pass (never edit) |
 | 'tools/tablegen/GenPatterns.cpp' | Code generator (rarely edit) |
 
 ---

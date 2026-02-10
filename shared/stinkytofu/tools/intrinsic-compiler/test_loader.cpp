@@ -31,7 +31,7 @@
  *   3. Query and display intrinsic definitions
  */
 
-#include "ir/IntrinsicLibrary.hpp"
+#include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
 #include <iomanip>
 #include <iostream>
 

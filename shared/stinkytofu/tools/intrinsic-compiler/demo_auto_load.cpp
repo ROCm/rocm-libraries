@@ -29,7 +29,7 @@
  * path specification, similar to LLVM's device libraries.
  */
 
-#include "ir/IntrinsicRegistry.hpp"
+#include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include <iostream>
 
 using namespace stinkytofu;

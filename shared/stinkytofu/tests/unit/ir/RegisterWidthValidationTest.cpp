@@ -3,9 +3,10 @@
  * ************************************************************************ */
 
 #include "TestHelpers.hpp"
-#include "ir/asm/AsmVerifierPass.hpp"
-#include "ir/logical/LogicalInstructions.hpp"
-#include "stinkytofu.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
 
 #include <gtest/gtest.h>
 

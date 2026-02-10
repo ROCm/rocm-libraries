@@ -108,7 +108,6 @@ Desktop.ini
 *.rej
 
 # Core dumps
-core
 core.*
 vgcore.*
 

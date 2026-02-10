@@ -22,8 +22,8 @@
  * ************************************************************************ */
 
 #include "TestHelpers.hpp"
-#include "ir/logical/LogicalInstructions.hpp"
-#include "ir/python/PyLogicalModule.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/core/PyLogicalModule.hpp"
 #include <gtest/gtest.h>
 
 using namespace stinkytofu;

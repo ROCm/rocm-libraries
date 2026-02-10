@@ -24,11 +24,11 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-#include "ir/asm/StinkyAsmIR.hpp"
-#include "ir/asm/StinkyAsmPrinter.hpp"
-#include "ir/asm/StinkyConfigurableWaitCntPass.hpp"
-#include "isa/ArchHelper.hpp"
-#include "stinkytofu.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 
 using namespace stinkytofu;
 

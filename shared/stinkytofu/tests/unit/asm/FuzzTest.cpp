@@ -9,8 +9,8 @@
  * Think of this as "manual fuzzing" - we test patterns a fuzzer would find.
  */
 
-#include "ir/asm/IRParser.hpp"
-#include "ir/asm/PatternParser.hpp"
+#include "stinkytofu/serialization/asm/IRParser.hpp"
+#include "stinkytofu/serialization/asm/PatternParser.hpp"
 #include <cstdio>
 #include <fstream>
 #include <gtest/gtest.h>

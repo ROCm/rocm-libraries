@@ -21,7 +21,7 @@
  *
  * ************************************************************************ */
 
-#include "ir/logical/LogicalOpcode.hpp"
+#include "stinkytofu/ir/logical/LogicalOpcode.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstring>

@@ -8,9 +8,9 @@
 
 set(SOURCES
     intrinsic-compiler.cpp
-    ../../src/ir/asm/IRLexer.cpp
-    ../../src/ir/asm/PatternParser.cpp
-    ../../src/ir/IRSerializer.cpp
+    ../../src/serialization/asm/IRLexer.cpp
+    ../../src/serialization/asm/PatternParser.cpp
+    ../../src/serialization/logical/IRSerializer.cpp
 )
 
 add_executable(intrinsic-compiler "${SOURCES}")
@@ -20,7 +20,7 @@ target_link_libraries(intrinsic-compiler PRIVATE stinkytofu)
 
 target_include_directories(intrinsic-compiler PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../src/ir/asm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../src/serialization/asm"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/include"
     "${PROJECT_BINARY_DIR}"          # For generated files like hardware/gfxIsa.inc
     "${PROJECT_BINARY_DIR}/include"  # For other generated files
@@ -28,7 +28,7 @@ target_include_directories(intrinsic-compiler PRIVATE
 
 # Custom command to compile intrinsics to .st.bc
 # This runs AFTER the main library is built
-set(INTRINSIC_DEF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/Intrinsics/Intrinsics.intrinsic")
+set(INTRINSIC_DEF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../src/ir/logical/Intrinsics.intrinsic")
 set(INTRINSIC_BC_FILE "${CMAKE_BINARY_DIR}/intrinsics.st.bc")
 
 add_custom_command(

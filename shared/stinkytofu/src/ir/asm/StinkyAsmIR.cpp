@@ -26,10 +26,10 @@
 
 #include <iostream> // TODO: don't use iostream.
 
-#include "ErrorHandling.hpp"
-#include "ir/asm/StinkyAsmIR.hpp"
-#include "ir/asm/StinkyAsmPrinter.hpp"
-#include "isa/ArchHelper.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 
 namespace stinkytofu
 {

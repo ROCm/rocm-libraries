@@ -20,9 +20,9 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "isa/ArchHelper.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 
-#include <Config/Config.h>
+#include "stinkytofu/Config/Config.h"
 
 #include <unordered_map>
 
