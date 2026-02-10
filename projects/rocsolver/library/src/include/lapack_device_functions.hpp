@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -2971,6 +2971,103 @@ __device__ rocblas_int seq_solve_ext(const rocblas_int dd,
 
     *ev = x;
     return converged ? 0 : 1;
+}
+
+// -----------------------------
+// Initialize matrix
+// motivated by xLASET in LAPACK
+//
+// matrix A is m by n
+//
+// uplo_c == 'U' : assign to upper triangular matrix
+// uplo_c == 'L' : assign to lower triangular matrix
+// uplo_c == 'G' : assign to entire matrix
+//
+// assign beta to diagonal
+// assign alpha to off-diagonal
+// -----------------------------
+
+template <typename T, typename I, typename UA>
+__global__ static void laset_kernel(const rocblas_fill uplo,
+                                    const I m,
+                                    const I n,
+                                    const T alpha,
+                                    const T beta,
+                                    UA AA,
+                                    const rocblas_stride shiftA,
+                                    const I lda,
+                                    const rocblas_stride strideA,
+                                    const I batch_count)
+{
+    I const bid_start = blockIdx.z;
+    I const bid_inc = gridDim.z;
+
+    I const i_start = threadIdx.x + blockIdx.x * blockDim.x;
+    I const i_inc = blockDim.x * gridDim.x;
+
+    I const j_start = threadIdx.y + blockIdx.y * blockDim.y;
+    I const j_inc = blockDim.y * gridDim.y;
+
+    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
+    {
+        T* const A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+
+        if(uplo == rocblas_fill_lower)
+        {
+            // ---------------------------------
+            // assign to lower triangular matrix
+            // ---------------------------------
+            for(I j = 0 + j_start; j < n; j += j_inc)
+            {
+                for(I i = j + i_start; i < m; i += i_inc)
+                {
+                    bool const is_diagonal = (i == j);
+                    auto const ij = idx2D(i, j, lda);
+                    auto const aij = (is_diagonal) ? beta : alpha;
+
+                    A[ij] = aij;
+                }
+            }
+        }
+        else if(uplo == rocblas_fill_upper)
+        {
+            // ---------------------------------
+            // assign to upper triangular matrix
+            // ---------------------------------
+
+            for(I j = 0 + j_start; j < n; j += j_inc)
+            {
+                for(I i = 0 + i_start; i < std::min(m, j + 1); i += i_inc)
+                {
+                    bool const is_diagonal = (i == j);
+                    auto const ij = idx2D(i, j, lda);
+                    auto const aij = (is_diagonal) ? beta : alpha;
+
+                    A[ij] = aij;
+                }
+            }
+        }
+        else
+        {
+            // ------------------------
+            // assign to entire matrix
+            // ------------------------
+
+            for(I j = 0 + j_start; j < n; j += j_inc)
+            {
+                for(I i = 0 + i_start; i < m; i += i_inc)
+                {
+                    bool const is_diagonal = (i == j);
+                    auto const ij = idx2D(i, j, lda);
+                    auto const aij = (is_diagonal) ? beta : alpha;
+
+                    A[ij] = aij;
+                }
+            }
+        }
+
+        __syncthreads();
+    }
 }
 
 /** This local gemm adapts rocblas_gemm to multiply complex*real, and

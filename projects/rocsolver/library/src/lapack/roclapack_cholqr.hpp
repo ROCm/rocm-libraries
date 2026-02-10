@@ -33,56 +33,13 @@
 
 #pragma once
 
+#include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
 #include "roclapack_potrf.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
 bool constexpr use_syrk = true;
-
-static inline void adjust_for_alignment(size_t& size_work)
-{
-    constexpr size_t ialign = 256;
-
-    size_work = ceildiv(size_work, ialign) * ialign;
-}
-
-static inline void adjust_for_alignment(size_t* p_size_work)
-{
-    size_t size_work = *p_size_work;
-
-    adjust_for_alignment(size_work);
-
-    *p_size_work = size_work;
-}
-
-#ifndef IS_POINTER_BATCHED
-#define IS_POINTER_BATCHED(A, T) \
-    (std::is_pointer_v<std::remove_cv_t<std::remove_cv_t<std::remove_reference_t<decltype((A)[0])>>>>)
-#endif
-
-#ifndef MEM_CHECK
-#define MEM_CHECK(pfree)                                        \
-    {                                                           \
-        bool const is_mem_ok_ = (pfree <= (pwork + size_work)); \
-        if(!is_mem_ok_)                                         \
-        {                                                       \
-            return (rocblas_status_memory_error);               \
-        }                                                       \
-    }
-#endif
-
-#ifndef MEM_CHECK_THROW
-#define MEM_CHECK_THROW(pfree)                                  \
-    {                                                           \
-        bool const is_mem_ok_ = (pfree <= (pwork + size_work)); \
-        if(!is_mem_ok_)                                         \
-        {                                                       \
-            istat = rocblas_status_memory_error;                \
-            throw(istat);                                       \
-        }                                                       \
-    }
-#endif
 
 static int get_num_cu(int deviceId = 0)
 {
@@ -131,53 +88,6 @@ __device__ static T reduce_sum_shfl_wsize(I const wsize, T val)
         }
     }
     return val; // note: only thread 0 will return full sum
-}
-
-// -----------------------------------------------------
-// convert from strided batched storage to pointer batch
-//
-// launch as <<< dim3( nbx, 1, 1), dim3(nx,1,1), 0, stream >>>
-// where nbx = ceildiv( batch_count, nx )
-// -----------------------------------------------------
-template <typename T, typename I, typename Istride>
-__global__ static void copy_array_to_ptrs_kernel(I batch_count,
-
-                                                 T* const B,
-                                                 Istride const shiftB,
-                                                 I const ldb,
-                                                 Istride const strideB,
-
-                                                 T** const B_ptr)
-{
-    I const bid_start = threadIdx.x + blockIdx.x * blockDim.x;
-    I const bid_inc = blockDim.x * gridDim.x;
-
-    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
-    {
-        B_ptr[bid] = load_ptr_batch(B, bid, shiftB, strideB);
-    }
-}
-
-template <typename T, typename I, typename Istride>
-static void copy_array_to_ptr(hipStream_t stream,
-
-                              I const batch_count,
-
-                              T* const B,
-                              Istride const shiftB,
-                              I const ldb,
-                              Istride const strideB,
-
-                              T** const B_ptr)
-{
-    // -----------------------------------------------
-    // convert from strided batched to pointer batched
-    // -----------------------------------------------
-    I const nx = 64;
-    I const nbx = ceildiv(batch_count, nx);
-
-    copy_array_to_ptrs_kernel<T, I, Istride><<<dim3(nbx, 1, 1), dim3(nx, 1, 1), 0, stream>>>(
-        batch_count, B, shiftB, ldb, strideB, B_ptr);
 }
 
 // kernel to compute the square of g-norm
@@ -422,15 +332,6 @@ static __global__ void scale_kernel(I const batch_count, S const dscale, S* cons
 //
 // where u is machine epsilon
 // ---------------------------------------
-
-template <typename T, typename I>
-static void cal_sigma_getMemorySize(I const m, I const n, I const batch_count, size_t* p_size_work)
-{
-    size_t size_work = 0;
-
-    *p_size_work = size_work;
-}
-
 template <typename T, typename I, typename Istride, typename UA, typename S = decltype(std::real(T{}))>
 static rocblas_status cal_sigma(hipStream_t stream,
                                 I const m,
@@ -476,7 +377,6 @@ static rocblas_status cal_sigma(hipStream_t stream,
 // kernel to perform B <- B + sigma * identity
 //
 // launch as dim3(nbx,1,batch_count), dim3(nx,1,1)
-//
 // ---------------------------------
 template <typename T, typename I, typename Istride, typename UB, typename S = decltype(std::real(T{}))>
 static __global__ void add_shift_kernel(I const m,
@@ -487,9 +387,7 @@ static __global__ void add_shift_kernel(I const m,
                                         UB B,
                                         Istride const shiftB,
                                         I const ldb,
-                                        Istride const strideB
-
-)
+                                        Istride const strideB)
 {
     {
         // -------------------------------------------------
@@ -594,66 +492,39 @@ static void add_shift(hipStream_t stream,
 // laset is used by adjusting the indices by 1 for
 // the lower and upper case
 // ----------------------------------------------------
-template <typename T, typename I, typename Istride, typename UA>
+template <typename T, typename I, typename U>
 static void set_triangular(rocblas_handle handle,
-                           char const uplo,
-                           I const m,
-                           I const n,
-                           T const alpha,
-
-                           UA A_arg,
-                           Istride const shiftA,
-                           I const lda,
-                           Istride const strideA,
-                           I const batch_count)
+                           const rocblas_fill uplo,
+                           const I m,
+                           const I n,
+                           const T alpha,
+                           U A,
+                           const rocblas_stride shiftA,
+                           const I lda,
+                           const rocblas_stride strideA,
+                           const I batch_count)
 {
-    {
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return;
-        }
-    }
-
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    I const max_threads = 1024;
+    rocblas_stride const offset = (uplo == rocblas_fill_lower) ? idx2D(1, 0, lda)
+        : (uplo == rocblas_fill_upper)                         ? idx2D(0, 1, lda)
+                                                               : 0;
+
+    I const mm = (uplo != rocblas_fill_full) ? m - 1 : m;
+    I const nn = (uplo != rocblas_fill_full) ? n - 1 : n;
+
+    I const max_threads = 256;
     I const nx = (m <= 32) ? 32 : 64;
     I const ny = max_threads / nx;
 
-    I const max_blocks = get_num_cu();
+    I const max_blocks = 1024;
     I const nbx = std::min(max_blocks, ceildiv(m, nx));
     I const nby = std::min(max_blocks, ceildiv(n, ny));
     I const nbz = std::min(max_blocks, batch_count);
 
-    {
-        bool const use_lower = (uplo == 'L') || (uplo == 'l');
-        bool const use_upper = (uplo == 'U') || (uplo == 'u');
-        bool const use_full = (uplo == 'G') || (uplo == 'g'); // 'GE' general full matrix
-
-        {
-            bool const isvalid_uplo = (use_lower || use_upper || use_full);
-            assert(isvalid_uplo);
-        }
-
-        Istride const offset = (use_lower) ? idx2D(1, 0, lda)
-            : (use_upper)                  ? idx2D(0, 1, lda)
-            : (use_full)                   ? idx2D(0, 0, lda)
-                                           : 0;
-
-        T const lalpha = alpha;
-        T const lbeta = alpha;
-
-        I const mm = (use_lower || use_upper) ? m - 1 : m;
-        I const nn = (use_lower || use_upper) ? n - 1 : n;
-
-        laset(handle, uplo, mm, nn, lalpha, lbeta,
-
-              A_arg, shiftA + offset, lda, strideA,
-
-              batch_count);
-    }
+    ROCSOLVER_LAUNCH_KERNEL((laset_kernel<T>), dim3(nbx, nby, nbx), dim3(nx, ny, 1), 0, stream, uplo,
+                            mm, nn, alpha, alpha, A, shiftA + offset, lda, strideA, batch_count);
 }
 
 template <typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
@@ -1016,7 +887,7 @@ static rocblas_status rocsolver_cholqr2_template(rocblas_handle handle,
         work1, work2, work3, work4, pivots, iinfo + batch_count, workArr, optim_mem));
 
     // set strictly lower triangular part of R to be zero
-    set_triangular(handle, 'L', n, n, zero, R, shiftR, ldr, strideR, batch_count);
+    set_triangular(handle, rocblas_fill_lower, n, n, zero, R, shiftR, ldr, strideR, batch_count);
 
     // R <- R * R1
     ROCBLAS_CHECK(rocblasCall_trmm<T>(handle, rocblas_side_right, rocblas_fill_upper,
@@ -1110,7 +981,7 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
         optim_mem));
 
     // (i) set strictly lower triangular part of R be zero
-    set_triangular(handle, 'L', n, n, zero, R, shiftR, ldr, strideR, batch_count);
+    set_triangular(handle, rocblas_fill_lower, n, n, zero, R, shiftR, ldr, strideR, batch_count);
 
     // R <- R * R1
     ROCBLAS_CHECK(rocblasCall_trmm<T>(handle, rocblas_side_right, rocblas_fill_upper,
@@ -1211,7 +1082,4 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
     return (istat);
 }
 
-#undef IS_POINTER_BATCHED
-#undef MEM_CHECK
-#undef MEM_CHECK_THROW
 ROCSOLVER_END_NAMESPACE
