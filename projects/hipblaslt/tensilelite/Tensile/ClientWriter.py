@@ -23,10 +23,12 @@
 ################################################################################
 
 import inspect
+import logging
 import os
 import subprocess
 import shlex
 import shutil
+import sys
 
 from pathlib import Path
 from enum import Enum
@@ -47,6 +49,14 @@ from Tensile.Common.GlobalParameters import globalParameters
 from .TensileCreateLibrary import copyStaticFiles
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
+
+_timing_logger = logging.getLogger("tensile.timing")
+if not _timing_logger.handlers:
+    _h = logging.StreamHandler(sys.stderr)
+    _h.setFormatter(logging.Formatter("%(message)s"))
+    _timing_logger.addHandler(_h)
+    _timing_logger.setLevel(logging.INFO)
+    _timing_logger.propagate = False
 
 class DataInitName(Enum):
   Zero = 0
@@ -214,13 +224,23 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
 
 
 def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, outputPath, configPaths=None):
+  import time
 
   buildPath = ensurePath(outputPath / "build")
 
   runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
+
+  timingEnabled = globalParameters.get("TimingInstrumentation", False)
+  # Using time_ns() for better precision: https://docs.python.org/3/library/time.html#time.time
+  startTime = time.time_ns()
+
   with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
     process = subprocess.Popen(runScriptName, cwd=buildPath)
     process.communicate()
+
+  if timingEnabled:
+    elapsed = (time.time_ns() - startTime) / 1_000_000
+    _timing_logger.info(f"TIMING:python_client_execution:{elapsed:.3f}")
 
   if process.returncode:
     printWarning("ClientWriter Benchmark Process exited with code %u" % process.returncode)
@@ -298,8 +318,9 @@ def writeRunScript(path, forBenchmark, enableTileSelection, cxxCompiler: str, cC
     runScriptFile.write("ERR1=0\n")
 
     clientExe = getClientExecutablePath()
+    timingFlag = " --timing-instrumentation" if globalParameters["TimingInstrumentation"] else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {}\n".format(clientExe, configFile))
+      runScriptFile.write("{} --config-file {}{}\n".format(clientExe, configFile, timingFlag))
     runScriptFile.write("ERR2=$?\n\n")
 
     runScriptFile.write("""
