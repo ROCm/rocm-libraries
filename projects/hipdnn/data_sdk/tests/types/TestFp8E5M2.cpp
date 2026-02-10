@@ -476,23 +476,43 @@ TEST_F(TestFp8E5M2, NumericLimitsMax)
 {
     fp8_e5m2 maxVal = std::numeric_limits<fp8_e5m2>::max();
     EXPECT_TRUE(isfinite(maxVal));
-    EXPECT_GT(static_cast<float>(maxVal), 0.0f);
-    // E5M2 max is 57344
-    EXPECT_TRUE(nearEqual(static_cast<float>(maxVal), 57344.0f, 1000.0f));
+    // E5M2 max is 0x7B = (1 + 3/4) * 2^15 = 1.75 * 32768 = 57344.0
+    auto maxFloat = static_cast<float>(maxVal);
+    EXPECT_EQ(maxFloat, 57344.0f);
+    // Verify bit pattern
+    EXPECT_EQ(maxVal.data, 0x7B);
 }
 
 TEST_F(TestFp8E5M2, NumericLimitsMin)
 {
     fp8_e5m2 minVal = std::numeric_limits<fp8_e5m2>::min();
     EXPECT_TRUE(isfinite(minVal));
-    EXPECT_GT(static_cast<float>(minVal), 0.0f);
+    // E5M2 min (smallest positive normal) is 0x04 = 2^(1-15) = 2^-14 ≈ 6.1035e-5
+    auto minFloat = static_cast<float>(minVal);
+    EXPECT_GT(minFloat, 6.0e-5f);
+    EXPECT_LT(minFloat, 6.2e-5f);
+    // Verify bit pattern
+    EXPECT_EQ(minVal.data, 0x04);
 }
 
 TEST_F(TestFp8E5M2, NumericLimitsLowest)
 {
     fp8_e5m2 lowestVal = std::numeric_limits<fp8_e5m2>::lowest();
     EXPECT_TRUE(isfinite(lowestVal));
-    EXPECT_LT(static_cast<float>(lowestVal), 0.0f);
+    // E5M2 lowest is -max = 0xFB = -57344.0
+    auto lowestFloat = static_cast<float>(lowestVal);
+    EXPECT_EQ(lowestFloat, -57344.0f);
+    // Verify bit pattern
+    EXPECT_EQ(lowestVal.data, 0xFB);
+}
+
+TEST_F(TestFp8E5M2, NumericLimitsEpsilon)
+{
+    fp8_e5m2 eps = std::numeric_limits<fp8_e5m2>::epsilon();
+    EXPECT_TRUE(isfinite(eps));
+    // E5M2 epsilon is 2^-2 = 0.25 (2 mantissa bits)
+    auto epsFloat = static_cast<float>(eps);
+    EXPECT_EQ(epsFloat, 0.25f);
 }
 
 // ============================================================================

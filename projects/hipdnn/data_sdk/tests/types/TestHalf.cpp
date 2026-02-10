@@ -523,23 +523,45 @@ TEST_F(TestHalf, NumericLimitsMax)
 {
     half maxVal = std::numeric_limits<half>::max();
     EXPECT_TRUE(isfinite(maxVal));
-    EXPECT_GT(static_cast<float>(maxVal), 0.0f);
-    // half max is approximately 65504
-    EXPECT_TRUE(nearEqual(static_cast<float>(maxVal), 65504.0f, 10.0f));
+    // half max is 0x7BFF = (2 - 2^-10) * 2^15 = 65504.0 exactly
+    auto maxFloat = static_cast<float>(maxVal);
+    EXPECT_EQ(maxFloat, 65504.0f);
+    // Verify bit pattern
+    EXPECT_EQ(maxVal.data, 0x7BFF);
 }
 
 TEST_F(TestHalf, NumericLimitsMin)
 {
     half minVal = std::numeric_limits<half>::min();
     EXPECT_TRUE(isfinite(minVal));
-    EXPECT_GT(static_cast<float>(minVal), 0.0f);
+    // half min (smallest positive normal) is 0x0400 = 2^-14 ≈ 6.1035e-5
+    auto minFloat = static_cast<float>(minVal);
+    EXPECT_GT(minFloat, 6.0e-5f);
+    EXPECT_LT(minFloat, 6.2e-5f);
+    // Verify bit pattern
+    EXPECT_EQ(minVal.data, 0x0400);
 }
 
 TEST_F(TestHalf, NumericLimitsLowest)
 {
     half lowestVal = std::numeric_limits<half>::lowest();
     EXPECT_TRUE(isfinite(lowestVal));
-    EXPECT_LT(static_cast<float>(lowestVal), 0.0f);
+    // half lowest is -max = 0xFBFF = -65504.0 exactly
+    auto lowestFloat = static_cast<float>(lowestVal);
+    EXPECT_EQ(lowestFloat, -65504.0f);
+    // Verify bit pattern
+    EXPECT_EQ(lowestVal.data, 0xFBFF);
+}
+
+TEST_F(TestHalf, NumericLimitsEpsilon)
+{
+    half eps = std::numeric_limits<half>::epsilon();
+    EXPECT_TRUE(isfinite(eps));
+    // half epsilon is 2^-10 ≈ 0.0009765625
+    auto epsFloat = static_cast<float>(eps);
+    EXPECT_TRUE(nearEqual(epsFloat, 0.0009765625f, 0.0001f));
+    // Verify bit pattern (2^-10: exp = 15 - 10 = 5, mant = 0 -> 0x1400)
+    EXPECT_EQ(eps.data, 0x1400);
 }
 
 // ============================================================================

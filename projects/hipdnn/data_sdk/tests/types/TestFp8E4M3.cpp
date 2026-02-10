@@ -449,23 +449,42 @@ TEST_F(TestFp8E4M3, NumericLimitsMax)
 {
     fp8_e4m3 maxVal = std::numeric_limits<fp8_e4m3>::max();
     EXPECT_TRUE(isfinite(maxVal));
-    EXPECT_GT(static_cast<float>(maxVal), 0.0f);
-    // E4M3 max is 448
-    EXPECT_TRUE(nearEqual(static_cast<float>(maxVal), 448.0f, 10.0f));
+    // E4M3 OCP max is 0x7E = (1 + 6/8) * 2^8 = 1.75 * 256 = 448.0
+    auto maxFloat = static_cast<float>(maxVal);
+    EXPECT_EQ(maxFloat, 448.0f);
+    // Verify bit pattern
+    EXPECT_EQ(maxVal.data, 0x7E);
 }
 
 TEST_F(TestFp8E4M3, NumericLimitsMin)
 {
     fp8_e4m3 minVal = std::numeric_limits<fp8_e4m3>::min();
     EXPECT_TRUE(isfinite(minVal));
-    EXPECT_GT(static_cast<float>(minVal), 0.0f);
+    // E4M3 min (smallest positive normal) is 0x08 = 2^(1-7) = 2^-6 = 0.015625
+    auto minFloat = static_cast<float>(minVal);
+    EXPECT_EQ(minFloat, 0.015625f);
+    // Verify bit pattern
+    EXPECT_EQ(minVal.data, 0x08);
 }
 
 TEST_F(TestFp8E4M3, NumericLimitsLowest)
 {
     fp8_e4m3 lowestVal = std::numeric_limits<fp8_e4m3>::lowest();
     EXPECT_TRUE(isfinite(lowestVal));
-    EXPECT_LT(static_cast<float>(lowestVal), 0.0f);
+    // E4M3 lowest is -max = 0xFE = -448.0
+    auto lowestFloat = static_cast<float>(lowestVal);
+    EXPECT_EQ(lowestFloat, -448.0f);
+    // Verify bit pattern
+    EXPECT_EQ(lowestVal.data, 0xFE);
+}
+
+TEST_F(TestFp8E4M3, NumericLimitsEpsilon)
+{
+    fp8_e4m3 eps = std::numeric_limits<fp8_e4m3>::epsilon();
+    EXPECT_TRUE(isfinite(eps));
+    // E4M3 epsilon is 2^-3 = 0.125 (3 mantissa bits)
+    auto epsFloat = static_cast<float>(eps);
+    EXPECT_EQ(epsFloat, 0.125f);
 }
 
 // ============================================================================

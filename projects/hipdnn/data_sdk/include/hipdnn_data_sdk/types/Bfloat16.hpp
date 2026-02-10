@@ -20,6 +20,21 @@ struct fp8_e4m3;
 struct fp8_e5m2;
 // NOLINTEND(readability-identifier-naming)
 
+// ============================================================================
+// Bfloat16 Rounding Mode
+// ============================================================================
+
+/// Rounding mode for bfloat16 float-to-bfloat16 conversions
+enum class Bfloat16RoundingMode
+{
+    /// Round-to-nearest-even (default, matches half and fp8 types)
+    // NOLINTNEXTLINE(readability-identifier-naming) - RNE is an industry-standard acronym
+    RNE,
+    /// Simple truncation (faster, matches some HIP implementations)
+    // NOLINTNEXTLINE(readability-identifier-naming) - CamelCase for enum values
+    Truncate
+};
+
 namespace detail
 {
 
@@ -87,13 +102,70 @@ constexpr uint16_t BFLOAT16_ROUND_ERROR = 0x3F00;
 
 // NOLINTBEGIN(readability-identifier-naming) - using snake_case for internal detail functions
 
-// Convert float to bfloat16 bits using truncation (matches HIP behavior)
-inline uint16_t float_to_bfloat16_bits(float f) noexcept
+// Convert float to bfloat16 bits using simple truncation
+// This is faster than RNE and matches some HIP implementations
+inline uint16_t float_to_bfloat16_bits_truncate(float f) noexcept
 {
     uint32_t bits;
     std::memcpy(&bits, &f, sizeof(float));
-    // Truncate lower 16 bits (simple truncation, no rounding)
     return static_cast<uint16_t>(bits >> 16);
+}
+
+// Convert float to bfloat16 bits using round-to-nearest-even (RNE)
+// This matches the rounding behavior of half and fp8 types
+inline uint16_t float_to_bfloat16_bits_rne(float f) noexcept
+{
+    uint32_t bits;
+    std::memcpy(&bits, &f, sizeof(float));
+
+    // Extract upper 16 bits (this will be the result before rounding)
+    auto upper = static_cast<uint16_t>(bits >> 16);
+
+    // Check for NaN: if exponent is all 1s and mantissa is non-zero, preserve NaN
+    // NaN bit patterns have exponent 0xFF and non-zero mantissa in the full float
+    uint32_t exp = (bits >> 23) & 0xFF;
+    uint32_t mant = bits & 0x007FFFFF;
+    if(exp == 0xFF && mant != 0)
+    {
+        // Preserve NaN - ensure mantissa is non-zero in bfloat16
+        // Set the quiet NaN bit if needed
+        return upper | 0x0040; // Ensure at least quiet NaN bit is set
+    }
+
+    // Extract lower 16 bits (the bits being truncated)
+    auto lower = static_cast<uint16_t>(bits & 0xFFFF);
+
+    // Round-to-nearest-even:
+    // - Round up if remainder > 0.5 (lower > 0x8000)
+    // - Round up if remainder == 0.5 and result LSB is 1 (tie-break to even)
+    if(lower > 0x8000 || (lower == 0x8000 && (upper & 1) != 0))
+    {
+        upper++;
+        // Note: overflow from 0x7F7F to 0x7F80 produces infinity, which is correct
+        // Overflow from 0xFF7F to 0xFF80 produces -infinity, also correct
+    }
+
+    return upper;
+}
+
+// Templated conversion function that selects rounding mode at compile time
+template <Bfloat16RoundingMode Mode>
+inline uint16_t float_to_bfloat16_bits(float f) noexcept
+{
+    if constexpr(Mode == Bfloat16RoundingMode::Truncate)
+    {
+        return float_to_bfloat16_bits_truncate(f);
+    }
+    else
+    {
+        return float_to_bfloat16_bits_rne(f);
+    }
+}
+
+// Default conversion uses RNE for consistency with half and fp8 types
+inline uint16_t float_to_bfloat16_bits(float f) noexcept
+{
+    return float_to_bfloat16_bits_rne(f);
 }
 
 // Convert bfloat16 bits to float
@@ -110,61 +182,94 @@ inline float bfloat16_bits_to_float(uint16_t bits) noexcept
 } // namespace detail
 
 /**
- * @brief Custom bfloat16 type for hipDNN
+ * @brief Custom bfloat16 type for hipDNN with configurable rounding mode
  *
  * This type provides a portable bfloat16 implementation that does not require
  * the __HIPCC__ macro. Both constructors from float/double and conversions TO
  * float/double are explicit to prevent silent precision loss and overload ambiguity.
  *
  * Binary layout is compatible with hip_bfloat16 (16-bit, same bit representation).
+ *
+ * @tparam RoundMode The rounding mode used when converting from float/double.
+ *                   Default is RNE (round-to-nearest-even) for consistency with
+ *                   half and fp8 types. Use Bfloat16RoundingMode::Truncate for
+ *                   faster conversion that matches some HIP implementations.
+ *
+ * Example usage:
+ * @code
+ *   using namespace hipdnn_data_sdk::types;
+ *
+ *   // Default RNE rounding (recommended)
+ *   bfloat16 a(3.14f);
+ *
+ *   // Explicit truncation rounding (faster, HIP-compatible)
+ *   bfloat16_truncate b(3.14f);
+ *
+ *   // Both types have the same binary representation and can be mixed
+ *   float sum = static_cast<float>(a) + static_cast<float>(b);
+ * @endcode
  */
+template <Bfloat16RoundingMode RoundMode = Bfloat16RoundingMode::RNE>
 // NOLINTNEXTLINE(readability-identifier-naming) - lowercase to match hip_bfloat16 convention
-struct bfloat16
+struct bfloat16_t
 {
     uint16_t data;
 
+    /// The rounding mode used by this type
+    // NOLINTNEXTLINE(readability-identifier-naming) - snake_case for public static member
+    static constexpr Bfloat16RoundingMode rounding_mode = RoundMode;
+
     // Default constructor - value-initialized to zero for constexpr support
-    constexpr bfloat16() noexcept
+    constexpr bfloat16_t() noexcept
         : data(0)
     {
     }
 
     // Copy/move constructors - implicit
-    bfloat16(const bfloat16&) = default;
-    bfloat16(bfloat16&&) noexcept = default;
-    bfloat16& operator=(const bfloat16&) = default;
-    bfloat16& operator=(bfloat16&&) noexcept = default;
+    bfloat16_t(const bfloat16_t&) = default;
+    bfloat16_t(bfloat16_t&&) noexcept = default;
+    bfloat16_t& operator=(const bfloat16_t&) = default;
+    bfloat16_t& operator=(bfloat16_t&&) noexcept = default;
+
+    // Constructor from other rounding mode - implicit conversion allowed
+    // since the binary representation is identical
+    template <Bfloat16RoundingMode OtherMode, typename = std::enable_if_t<OtherMode != RoundMode>>
+    // NOLINTNEXTLINE(google-explicit-constructor) - intentionally implicit for same-representation types
+    constexpr bfloat16_t(bfloat16_t<OtherMode> other) noexcept
+        : data(other.data)
+    {
+    }
 
     // EXPLICIT constructor from float
-    explicit bfloat16(float f) noexcept
-        : data(detail::float_to_bfloat16_bits(f))
+    explicit bfloat16_t(float f) noexcept
+        : data(detail::float_to_bfloat16_bits<RoundMode>(f))
     {
     }
 
     // EXPLICIT constructor from double (via float)
-    explicit bfloat16(double d) noexcept
-        : data(detail::float_to_bfloat16_bits(static_cast<float>(d)))
+    explicit bfloat16_t(double d) noexcept
+        : data(detail::float_to_bfloat16_bits<RoundMode>(static_cast<float>(d)))
     {
     }
 
     // EXPLICIT constructor from integral types
     template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
-    explicit bfloat16(T value) noexcept
-        : data(detail::float_to_bfloat16_bits(static_cast<float>(value)))
+    explicit bfloat16_t(T value) noexcept
+        : data(detail::float_to_bfloat16_bits<RoundMode>(static_cast<float>(value)))
     {
     }
 
     // EXPLICIT constructors from other custom types (via float)
     // These are defined inline but require forward declarations above
-    inline explicit bfloat16(half h) noexcept;
-    inline explicit bfloat16(fp8_e4m3 f) noexcept;
-    inline explicit bfloat16(fp8_e5m2 f) noexcept;
+    inline explicit bfloat16_t(half h) noexcept;
+    inline explicit bfloat16_t(fp8_e4m3 f) noexcept;
+    inline explicit bfloat16_t(fp8_e5m2 f) noexcept;
 
     // Factory for raw bits
     // NOLINTNEXTLINE(readability-identifier-naming) - using snake_case for factory function
-    static constexpr bfloat16 from_bits(uint16_t bits) noexcept
+    static constexpr bfloat16_t from_bits(uint16_t bits) noexcept
     {
-        bfloat16 val;
+        bfloat16_t val;
         val.data = bits;
         return val;
     }
@@ -182,166 +287,192 @@ struct bfloat16
     }
 
     // Unary negation - XOR sign bit
-    bfloat16 operator-() const noexcept
+    bfloat16_t operator-() const noexcept
     {
         return from_bits(data ^ detail::BFLOAT16_SIGN_MASK);
     }
 
     // Unary plus
-    bfloat16 operator+() const noexcept
+    bfloat16_t operator+() const noexcept
     {
         return *this;
     }
 
-    // Arithmetic operators (compute in float, return bfloat16)
-    friend bfloat16 operator+(bfloat16 a, bfloat16 b) noexcept
+    // Arithmetic operators (compute in float, return bfloat16_t with same rounding mode)
+    friend bfloat16_t operator+(bfloat16_t a, bfloat16_t b) noexcept
     {
-        return bfloat16(static_cast<float>(a) + static_cast<float>(b));
+        return bfloat16_t(static_cast<float>(a) + static_cast<float>(b));
     }
 
-    friend bfloat16 operator-(bfloat16 a, bfloat16 b) noexcept
+    friend bfloat16_t operator-(bfloat16_t a, bfloat16_t b) noexcept
     {
-        return bfloat16(static_cast<float>(a) - static_cast<float>(b));
+        return bfloat16_t(static_cast<float>(a) - static_cast<float>(b));
     }
 
-    friend bfloat16 operator*(bfloat16 a, bfloat16 b) noexcept
+    friend bfloat16_t operator*(bfloat16_t a, bfloat16_t b) noexcept
     {
-        return bfloat16(static_cast<float>(a) * static_cast<float>(b));
+        return bfloat16_t(static_cast<float>(a) * static_cast<float>(b));
     }
 
-    friend bfloat16 operator/(bfloat16 a, bfloat16 b) noexcept
+    friend bfloat16_t operator/(bfloat16_t a, bfloat16_t b) noexcept
     {
-        return bfloat16(static_cast<float>(a) / static_cast<float>(b));
+        return bfloat16_t(static_cast<float>(a) / static_cast<float>(b));
     }
 
     // Compound assignment operators
-    bfloat16& operator+=(bfloat16 other) noexcept
+    bfloat16_t& operator+=(bfloat16_t other) noexcept
     {
         *this = *this + other;
         return *this;
     }
 
-    bfloat16& operator-=(bfloat16 other) noexcept
+    bfloat16_t& operator-=(bfloat16_t other) noexcept
     {
         *this = *this - other;
         return *this;
     }
 
-    bfloat16& operator*=(bfloat16 other) noexcept
+    bfloat16_t& operator*=(bfloat16_t other) noexcept
     {
         *this = *this * other;
         return *this;
     }
 
-    bfloat16& operator/=(bfloat16 other) noexcept
+    bfloat16_t& operator/=(bfloat16_t other) noexcept
     {
         *this = *this / other;
         return *this;
     }
 
     // Comparison operators (compare via float conversion)
-    friend bool operator==(bfloat16 a, bfloat16 b) noexcept
+    friend bool operator==(bfloat16_t a, bfloat16_t b) noexcept
     {
         return static_cast<float>(a) == static_cast<float>(b);
     }
 
-    friend bool operator!=(bfloat16 a, bfloat16 b) noexcept
+    friend bool operator!=(bfloat16_t a, bfloat16_t b) noexcept
     {
         return static_cast<float>(a) != static_cast<float>(b);
     }
 
-    friend bool operator<(bfloat16 a, bfloat16 b) noexcept
+    friend bool operator<(bfloat16_t a, bfloat16_t b) noexcept
     {
         return static_cast<float>(a) < static_cast<float>(b);
     }
 
-    friend bool operator>(bfloat16 a, bfloat16 b) noexcept
+    friend bool operator>(bfloat16_t a, bfloat16_t b) noexcept
     {
         return static_cast<float>(a) > static_cast<float>(b);
     }
 
-    friend bool operator<=(bfloat16 a, bfloat16 b) noexcept
+    friend bool operator<=(bfloat16_t a, bfloat16_t b) noexcept
     {
         return static_cast<float>(a) <= static_cast<float>(b);
     }
 
-    friend bool operator>=(bfloat16 a, bfloat16 b) noexcept
+    friend bool operator>=(bfloat16_t a, bfloat16_t b) noexcept
     {
         return static_cast<float>(a) >= static_cast<float>(b);
     }
 
     // Stream output
-    friend std::ostream& operator<<(std::ostream& os, bfloat16 val)
+    friend std::ostream& operator<<(std::ostream& os, bfloat16_t val)
     {
         return os << static_cast<float>(val);
     }
 };
 
+// ============================================================================
+// Type Aliases
+// ============================================================================
+
+/// Default bfloat16 type using round-to-nearest-even (recommended)
+// NOLINTNEXTLINE(readability-identifier-naming) - lowercase to match hip_bfloat16 convention
+using bfloat16 = bfloat16_t<Bfloat16RoundingMode::RNE>;
+
+/// Bfloat16 type using truncation rounding (faster, HIP-compatible)
+// NOLINTNEXTLINE(readability-identifier-naming) - lowercase to match type naming convention
+using bfloat16_truncate = bfloat16_t<Bfloat16RoundingMode::Truncate>;
+
 // Static assertions for binary compatibility
 static_assert(sizeof(bfloat16) == sizeof(uint16_t), "bfloat16 must be 2 bytes");
 static_assert(std::is_trivially_copyable_v<bfloat16>, "bfloat16 must be trivially copyable");
 static_assert(std::is_standard_layout_v<bfloat16>, "bfloat16 must be standard layout");
+static_assert(sizeof(bfloat16_truncate) == sizeof(uint16_t), "bfloat16_truncate must be 2 bytes");
+static_assert(std::is_trivially_copyable_v<bfloat16_truncate>,
+              "bfloat16_truncate must be trivially copyable");
+static_assert(std::is_standard_layout_v<bfloat16_truncate>,
+              "bfloat16_truncate must be standard layout");
 
-// User-defined literal
+// User-defined literal (uses default RNE rounding)
 inline bfloat16 operator""_bf(long double val)
 {
     return bfloat16(static_cast<float>(val));
 }
 
 // ============================================================================
-// Math functions for bfloat16 (in hipdnn_data_sdk::types namespace)
+// Math functions for bfloat16_t (in hipdnn_data_sdk::types namespace)
 // ============================================================================
 // These are defined in our namespace to enable ADL (Argument Dependent Lookup).
 // Use unqualified calls like: fabs(x), isnan(x), etc.
+// All math functions work with any rounding mode since they operate on bit patterns.
 // ============================================================================
 
 // Basic math functions
-inline bfloat16 abs(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> abs(bfloat16_t<M> x)
 {
-    return bfloat16::from_bits(x.data & detail::BFLOAT16_ABS_MASK);
+    return bfloat16_t<M>::from_bits(x.data & detail::BFLOAT16_ABS_MASK);
 }
 
-inline bfloat16 fabs(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> fabs(bfloat16_t<M> x)
 {
-    return bfloat16::from_bits(x.data & detail::BFLOAT16_ABS_MASK);
+    return bfloat16_t<M>::from_bits(x.data & detail::BFLOAT16_ABS_MASK);
 }
 
-inline bool isnan(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bool isnan(bfloat16_t<M> x)
 {
     // NaN: exponent all 1s and non-zero mantissa
     return (x.data & detail::BFLOAT16_EXP_MASK) == detail::BFLOAT16_EXP_MASK
            && (x.data & detail::BFLOAT16_MANT_MASK) != 0;
 }
 
-inline bool isinf(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bool isinf(bfloat16_t<M> x)
 {
     // Inf: exponent all 1s and zero mantissa
     return (x.data & detail::BFLOAT16_ABS_MASK) == detail::BFLOAT16_POS_INF;
 }
 
-inline bool signbit(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bool signbit(bfloat16_t<M> x)
 {
     return (x.data & detail::BFLOAT16_SIGN_MASK) != 0;
 }
 
-inline bool isfinite(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bool isfinite(bfloat16_t<M> x)
 {
     return !isnan(x) && !isinf(x);
 }
 
-inline bfloat16 copysign(bfloat16 x, bfloat16 y)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> copysign(bfloat16_t<M> x, bfloat16_t<M> y)
 {
     uint16_t xBits = x.data & detail::BFLOAT16_ABS_MASK;
     uint16_t ySign = y.data & detail::BFLOAT16_SIGN_MASK;
-    return bfloat16::from_bits(xBits | ySign);
+    return bfloat16_t<M>::from_bits(xBits | ySign);
 }
 
 // Min/max with NaN handling
-inline bfloat16 max(bfloat16 a, bfloat16 b)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> max(bfloat16_t<M> a, bfloat16_t<M> b)
 {
     if(isnan(a) && isnan(b))
     {
-        return bfloat16::from_bits(detail::BFLOAT16_CANONICAL_NAN);
+        return bfloat16_t<M>::from_bits(detail::BFLOAT16_CANONICAL_NAN);
     }
     if(isnan(a))
     {
@@ -354,11 +485,12 @@ inline bfloat16 max(bfloat16 a, bfloat16 b)
     return a > b ? a : b;
 }
 
-inline bfloat16 min(bfloat16 a, bfloat16 b)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> min(bfloat16_t<M> a, bfloat16_t<M> b)
 {
     if(isnan(a) && isnan(b))
     {
-        return bfloat16::from_bits(detail::BFLOAT16_CANONICAL_NAN);
+        return bfloat16_t<M>::from_bits(detail::BFLOAT16_CANONICAL_NAN);
     }
     if(isnan(a))
     {
@@ -372,139 +504,164 @@ inline bfloat16 min(bfloat16 a, bfloat16 b)
 }
 
 // Rounding functions
-inline bfloat16 floor(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> floor(bfloat16_t<M> x)
 {
-    return bfloat16(std::floor(static_cast<float>(x)));
+    return bfloat16_t<M>(std::floor(static_cast<float>(x)));
 }
 
-inline bfloat16 ceil(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> ceil(bfloat16_t<M> x)
 {
-    return bfloat16(std::ceil(static_cast<float>(x)));
+    return bfloat16_t<M>(std::ceil(static_cast<float>(x)));
 }
 
-inline bfloat16 round(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> round(bfloat16_t<M> x)
 {
-    return bfloat16(std::round(static_cast<float>(x)));
+    return bfloat16_t<M>(std::round(static_cast<float>(x)));
 }
 
-inline bfloat16 trunc(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> trunc(bfloat16_t<M> x)
 {
-    return bfloat16(std::trunc(static_cast<float>(x)));
+    return bfloat16_t<M>(std::trunc(static_cast<float>(x)));
 }
 
 // Exponential and logarithmic functions
-inline bfloat16 exp(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> exp(bfloat16_t<M> x)
 {
-    return bfloat16(std::exp(static_cast<float>(x)));
+    return bfloat16_t<M>(std::exp(static_cast<float>(x)));
 }
 
-inline bfloat16 exp2(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> exp2(bfloat16_t<M> x)
 {
-    return bfloat16(std::exp2(static_cast<float>(x)));
+    return bfloat16_t<M>(std::exp2(static_cast<float>(x)));
 }
 
-inline bfloat16 log(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> log(bfloat16_t<M> x)
 {
-    return bfloat16(std::log(static_cast<float>(x)));
+    return bfloat16_t<M>(std::log(static_cast<float>(x)));
 }
 
-inline bfloat16 log2(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> log2(bfloat16_t<M> x)
 {
-    return bfloat16(std::log2(static_cast<float>(x)));
+    return bfloat16_t<M>(std::log2(static_cast<float>(x)));
 }
 
-inline bfloat16 log10(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> log10(bfloat16_t<M> x)
 {
-    return bfloat16(std::log10(static_cast<float>(x)));
+    return bfloat16_t<M>(std::log10(static_cast<float>(x)));
 }
 
 // Power functions
-inline bfloat16 sqrt(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> sqrt(bfloat16_t<M> x)
 {
-    return bfloat16(std::sqrt(static_cast<float>(x)));
+    return bfloat16_t<M>(std::sqrt(static_cast<float>(x)));
 }
 
-inline bfloat16 rsqrt(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> rsqrt(bfloat16_t<M> x)
 {
-    return bfloat16(1.0f / std::sqrt(static_cast<float>(x)));
+    return bfloat16_t<M>(1.0f / std::sqrt(static_cast<float>(x)));
 }
 
-inline bfloat16 pow(bfloat16 x, bfloat16 y)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> pow(bfloat16_t<M> x, bfloat16_t<M> y)
 {
-    return bfloat16(std::pow(static_cast<float>(x), static_cast<float>(y)));
+    return bfloat16_t<M>(std::pow(static_cast<float>(x), static_cast<float>(y)));
 }
 
 // Trigonometric functions
-inline bfloat16 sin(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> sin(bfloat16_t<M> x)
 {
-    return bfloat16(std::sin(static_cast<float>(x)));
+    return bfloat16_t<M>(std::sin(static_cast<float>(x)));
 }
 
-inline bfloat16 cos(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> cos(bfloat16_t<M> x)
 {
-    return bfloat16(std::cos(static_cast<float>(x)));
+    return bfloat16_t<M>(std::cos(static_cast<float>(x)));
 }
 
-inline bfloat16 tan(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> tan(bfloat16_t<M> x)
 {
-    return bfloat16(std::tan(static_cast<float>(x)));
+    return bfloat16_t<M>(std::tan(static_cast<float>(x)));
 }
 
-inline bfloat16 asin(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> asin(bfloat16_t<M> x)
 {
-    return bfloat16(std::asin(static_cast<float>(x)));
+    return bfloat16_t<M>(std::asin(static_cast<float>(x)));
 }
 
-inline bfloat16 acos(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> acos(bfloat16_t<M> x)
 {
-    return bfloat16(std::acos(static_cast<float>(x)));
+    return bfloat16_t<M>(std::acos(static_cast<float>(x)));
 }
 
-inline bfloat16 atan(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> atan(bfloat16_t<M> x)
 {
-    return bfloat16(std::atan(static_cast<float>(x)));
+    return bfloat16_t<M>(std::atan(static_cast<float>(x)));
 }
 
 // Hyperbolic functions
-inline bfloat16 sinh(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> sinh(bfloat16_t<M> x)
 {
-    return bfloat16(std::sinh(static_cast<float>(x)));
+    return bfloat16_t<M>(std::sinh(static_cast<float>(x)));
 }
 
-inline bfloat16 cosh(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> cosh(bfloat16_t<M> x)
 {
-    return bfloat16(std::cosh(static_cast<float>(x)));
+    return bfloat16_t<M>(std::cosh(static_cast<float>(x)));
 }
 
-inline bfloat16 tanh(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> tanh(bfloat16_t<M> x)
 {
-    return bfloat16(std::tanh(static_cast<float>(x)));
+    return bfloat16_t<M>(std::tanh(static_cast<float>(x)));
 }
 
 // Error function
-inline bfloat16 erf(bfloat16 x)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> erf(bfloat16_t<M> x)
 {
-    return bfloat16(std::erf(static_cast<float>(x)));
+    return bfloat16_t<M>(std::erf(static_cast<float>(x)));
 }
 
 // Floating-point manipulation
-inline bfloat16 fmod(bfloat16 x, bfloat16 y)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> fmod(bfloat16_t<M> x, bfloat16_t<M> y)
 {
-    return bfloat16(std::fmod(static_cast<float>(x), static_cast<float>(y)));
+    return bfloat16_t<M>(std::fmod(static_cast<float>(x), static_cast<float>(y)));
 }
 
 // Fused multiply-add
-inline bfloat16 fma(bfloat16 x, bfloat16 y, bfloat16 z)
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> fma(bfloat16_t<M> x, bfloat16_t<M> y, bfloat16_t<M> z)
 {
-    return bfloat16(std::fma(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)));
+    return bfloat16_t<M>(
+        std::fma(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)));
 }
 
 } // namespace hipdnn_data_sdk::types
 
-// std::numeric_limits specialization
+// std::numeric_limits specialization for bfloat16_t template
 // NOLINTBEGIN(readability-identifier-naming) - standard library names must match exactly
-template <>
-class std::numeric_limits<hipdnn_data_sdk::types::bfloat16>
+template <hipdnn_data_sdk::types::Bfloat16RoundingMode M>
+class std::numeric_limits<hipdnn_data_sdk::types::bfloat16_t<M>>
 {
 public:
     static constexpr bool is_specialized = true;
@@ -531,57 +688,57 @@ public:
     static constexpr bool traps = false;
     static constexpr bool tinyness_before = false;
 
-    static constexpr hipdnn_data_sdk::types::bfloat16 min() noexcept
+    static constexpr hipdnn_data_sdk::types::bfloat16_t<M> min() noexcept
     {
-        return hipdnn_data_sdk::types::bfloat16::from_bits(
+        return hipdnn_data_sdk::types::bfloat16_t<M>::from_bits(
             hipdnn_data_sdk::types::detail::BFLOAT16_MIN_NORMAL);
     }
 
-    static constexpr hipdnn_data_sdk::types::bfloat16 lowest() noexcept
+    static constexpr hipdnn_data_sdk::types::bfloat16_t<M> lowest() noexcept
     {
-        return hipdnn_data_sdk::types::bfloat16::from_bits(
+        return hipdnn_data_sdk::types::bfloat16_t<M>::from_bits(
             hipdnn_data_sdk::types::detail::BFLOAT16_LOWEST);
     }
 
-    static constexpr hipdnn_data_sdk::types::bfloat16 max() noexcept
+    static constexpr hipdnn_data_sdk::types::bfloat16_t<M> max() noexcept
     {
-        return hipdnn_data_sdk::types::bfloat16::from_bits(
+        return hipdnn_data_sdk::types::bfloat16_t<M>::from_bits(
             hipdnn_data_sdk::types::detail::BFLOAT16_MAX);
     }
 
-    static constexpr hipdnn_data_sdk::types::bfloat16 epsilon() noexcept
+    static constexpr hipdnn_data_sdk::types::bfloat16_t<M> epsilon() noexcept
     {
-        return hipdnn_data_sdk::types::bfloat16::from_bits(
+        return hipdnn_data_sdk::types::bfloat16_t<M>::from_bits(
             hipdnn_data_sdk::types::detail::BFLOAT16_EPSILON);
     }
 
-    static constexpr hipdnn_data_sdk::types::bfloat16 round_error() noexcept
+    static constexpr hipdnn_data_sdk::types::bfloat16_t<M> round_error() noexcept
     {
-        return hipdnn_data_sdk::types::bfloat16::from_bits(
+        return hipdnn_data_sdk::types::bfloat16_t<M>::from_bits(
             hipdnn_data_sdk::types::detail::BFLOAT16_ROUND_ERROR);
     }
 
-    static constexpr hipdnn_data_sdk::types::bfloat16 infinity() noexcept
+    static constexpr hipdnn_data_sdk::types::bfloat16_t<M> infinity() noexcept
     {
-        return hipdnn_data_sdk::types::bfloat16::from_bits(
+        return hipdnn_data_sdk::types::bfloat16_t<M>::from_bits(
             hipdnn_data_sdk::types::detail::BFLOAT16_POS_INF);
     }
 
-    static constexpr hipdnn_data_sdk::types::bfloat16 quiet_NaN() noexcept
+    static constexpr hipdnn_data_sdk::types::bfloat16_t<M> quiet_NaN() noexcept
     {
-        return hipdnn_data_sdk::types::bfloat16::from_bits(
+        return hipdnn_data_sdk::types::bfloat16_t<M>::from_bits(
             hipdnn_data_sdk::types::detail::BFLOAT16_QNAN);
     }
 
-    static constexpr hipdnn_data_sdk::types::bfloat16 signaling_NaN() noexcept
+    static constexpr hipdnn_data_sdk::types::bfloat16_t<M> signaling_NaN() noexcept
     {
-        return hipdnn_data_sdk::types::bfloat16::from_bits(
+        return hipdnn_data_sdk::types::bfloat16_t<M>::from_bits(
             hipdnn_data_sdk::types::detail::BFLOAT16_SNAN);
     }
 
-    static constexpr hipdnn_data_sdk::types::bfloat16 denorm_min() noexcept
+    static constexpr hipdnn_data_sdk::types::bfloat16_t<M> denorm_min() noexcept
     {
-        return hipdnn_data_sdk::types::bfloat16::from_bits(
+        return hipdnn_data_sdk::types::bfloat16_t<M>::from_bits(
             hipdnn_data_sdk::types::detail::BFLOAT16_DENORM_MIN);
     }
 };

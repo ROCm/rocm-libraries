@@ -15,7 +15,9 @@ namespace hipdnn_data_sdk::types
 
 // Forward declarations for cross-type conversions
 // NOLINTBEGIN(readability-identifier-naming) - lowercase to match type definitions
-struct bfloat16;
+enum class Bfloat16RoundingMode;
+template <Bfloat16RoundingMode>
+struct bfloat16_t;
 struct half;
 struct fp8_e4m3;
 // NOLINTEND(readability-identifier-naming)
@@ -284,7 +286,8 @@ struct fp8_e5m2
 
     // EXPLICIT constructors from other custom types (via float)
     // These are defined inline but require forward declarations above
-    inline explicit fp8_e5m2(bfloat16 b) noexcept;
+    template <Bfloat16RoundingMode M>
+    inline explicit fp8_e5m2(bfloat16_t<M> b) noexcept;
     inline explicit fp8_e5m2(half h) noexcept;
     inline explicit fp8_e5m2(fp8_e4m3 f) noexcept;
 
