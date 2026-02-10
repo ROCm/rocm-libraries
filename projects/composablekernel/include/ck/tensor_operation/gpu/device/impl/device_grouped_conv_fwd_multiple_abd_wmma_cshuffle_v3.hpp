@@ -104,20 +104,30 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                    decltype(b_grid_desc_bk0_n_bk1),
                                    DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock,
                                    EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                   typename GridwiseGemm::EmptyType,
+                                   typename GridwiseGemm::EmptyType,
                                    ComputePtrOffset,
                                    ComputePtrOffset,
+                                   0,
                                    HasMainKBlockLoop,
                                    EGlobalMemoryDataOperation,
-                                   TailNum>(p_shared,
-                                            a_grid_desc_ak0_m_ak1,
-                                            b_grid_desc_bk0_n_bk1,
-                                            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-                                            e_grid_desc_mblock_mperblock_nblock_nperblock,
-                                            compute_ptr_offset_of_batch,
-                                            compute_ptr_offset_of_n,
-                                            num_k_per_block,
-                                            karg,
-                                            epilogue_args);
+                                   InMemoryDataOperationEnum::Set,
+                                   false,
+                                   TailNum,
+                                   decltype(epilogue_args)>(
+            p_shared,
+            a_grid_desc_ak0_m_ak1,
+            b_grid_desc_bk0_n_bk1,
+            ds_grid_desc_mblock_mperblock_nblock_nperblock, // bwd, fwd
+            e_grid_desc_mblock_mperblock_nblock_nperblock,  // bwd, fwd
+            GridwiseGemm::emptyArgument,                    // generic
+            GridwiseGemm::emptyArgument,                    // bwd
+            compute_ptr_offset_of_batch,
+            compute_ptr_offset_of_n, // bwd, fwd
+            num_k_per_block,
+            karg,
+            epilogue_args);
+
 #if defined(__gfx11__)
     }
 #endif

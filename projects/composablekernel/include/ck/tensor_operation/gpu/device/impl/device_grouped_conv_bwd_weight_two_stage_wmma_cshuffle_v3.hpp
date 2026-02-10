@@ -7,6 +7,7 @@
 #include <numeric>
 #include <sstream>
 
+#include "ck/ck.hpp"
 #include "ck/utility/common_header.hpp"
 #include "ck/utility/env.hpp"
 #include "ck/tensor_description/tensor_descriptor.hpp"
@@ -75,19 +76,32 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 
         GridwiseGemm::template Run<AGridDesc_AK0_M_K1,
                                    BGridDesc_BK0_N_K1,
+                                   typename GridwiseGemm::EmptyType,
+                                   typename GridwiseGemm::EmptyType,
                                    CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                   typename GridwiseGemm::EmptyType,
                                    ComputePtrOffsetOfBatch,
+                                   typename GridwiseGemm::EmptyType,
                                    NumGroupsToMerge,
                                    HasMainKBlockLoop,
+                                   InMemoryDataOperationEnum::Set,
                                    CGlobalMemoryDataOperation,
-                                   TailNum>(p_shared,
-                                            a_grid_desc_ak0_m_ak1,
-                                            b_grid_desc_bk0_n_bk1,
-                                            c_grid_desc_mblock_mperblock_nblock_nperblock,
-                                            compute_ptr_offset_of_batch,
-                                            num_k_per_block,
-                                            karg,
-                                            epilogue_args);
+                                   false,
+                                   TailNum,
+                                   decltype(epilogue_args)>(
+            p_shared,
+            a_grid_desc_ak0_m_ak1,
+            b_grid_desc_bk0_n_bk1,
+            GridwiseGemm::emptyArgument,
+            GridwiseGemm::emptyArgument,
+            c_grid_desc_mblock_mperblock_nblock_nperblock,
+            GridwiseGemm::emptyArgument,
+            compute_ptr_offset_of_batch,
+            GridwiseGemm::emptyArgument,
+            num_k_per_block,
+            karg,
+            epilogue_args);
+
 #if defined(__gfx11__)
     }
 #endif

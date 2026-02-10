@@ -7,6 +7,7 @@
 
 #include <sstream>
 
+#include "ck/ck.hpp"
 #include "ck/library/utility/numeric.hpp"
 #include "ck/utility/common_header.hpp"
 #include "ck/utility/env.hpp"
@@ -99,18 +100,23 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                        BGridDesc_BK0_N_BK1,
                                        DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock,
                                        EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                       typename GridwiseGemm::EmptyType,
                                        decltype(gemm_kernel_args[group_id].block_2_ctile_map_),
                                        ComputePtrOffsetOfBatch,
                                        ComputePtrOffsetOfN,
+                                       0,
                                        HasMainKBlockLoopInAllGemm,
                                        EGlobalMemoryDataOperation,
+                                       InMemoryDataOperationEnum::Set,
                                        CTranspose,
-                                       TailNum>(
+                                       TailNum,
+                                       decltype(epilogue_args)>(
                 p_shared,
                 gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
                 gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
                 gemm_kernel_args[group_id].ds_grid_desc_mblock_mperblock_nblock_nperblock_,
                 gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                GridwiseGemm::emptyArgument,
                 gemm_kernel_args[group_id].block_2_ctile_map_,
                 compute_ptr_offset_of_batch,
                 compute_ptr_offset_of_n,
@@ -122,22 +128,28 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         {
             if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
             {
+
                 GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
                                            BGridDesc_BK0_N_BK1,
                                            DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock,
                                            EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                           typename GridwiseGemm::EmptyType,
                                            decltype(gemm_kernel_args[group_id].block_2_ctile_map_),
                                            ComputePtrOffsetOfBatch,
                                            ComputePtrOffsetOfN,
+                                           0,
                                            true,
                                            EGlobalMemoryDataOperation,
+                                           InMemoryDataOperationEnum::Set,
                                            CTranspose,
-                                           TailNum>(
+                                           TailNum,
+                                           decltype(epilogue_args)>(
                     p_shared,
                     gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
                     gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
                     gemm_kernel_args[group_id].ds_grid_desc_mblock_mperblock_nblock_nperblock_,
                     gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                    GridwiseGemm::emptyArgument,
                     gemm_kernel_args[group_id].block_2_ctile_map_,
                     compute_ptr_offset_of_batch,
                     compute_ptr_offset_of_n,
@@ -147,22 +159,28 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             }
             else
             {
+
                 GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
                                            BGridDesc_BK0_N_BK1,
                                            DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock,
                                            EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                           typename GridwiseGemm::EmptyType,
                                            decltype(gemm_kernel_args[group_id].block_2_ctile_map_),
                                            ComputePtrOffsetOfBatch,
                                            ComputePtrOffsetOfN,
+                                           0,
                                            false,
                                            EGlobalMemoryDataOperation,
+                                           InMemoryDataOperationEnum::Set,
                                            CTranspose,
-                                           TailNum>(
+                                           TailNum,
+                                           decltype(epilogue_args)>(
                     p_shared,
                     gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
                     gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
                     gemm_kernel_args[group_id].ds_grid_desc_mblock_mperblock_nblock_nperblock_,
                     gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                    GridwiseGemm::emptyArgument,
                     gemm_kernel_args[group_id].block_2_ctile_map_,
                     compute_ptr_offset_of_batch,
                     compute_ptr_offset_of_n,
