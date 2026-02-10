@@ -33,6 +33,7 @@
 
 namespace rocRollerTest::Graphs
 {
+    namespace SolutionParams = rocRoller::Parameters::Solution;
     using namespace rocRoller;
 
     /*
@@ -159,7 +160,6 @@ namespace rocRollerTest::Graphs
                                            GetMemoryType(SolutionParams::LoadPath::BufferToVGPR));
             params->setDimensionInfo(m_tagScaleA, macTileScaleA);
         }
-
         {
             auto macTileB = MacroTile({m_macK, m_macN},
                                       LayoutType::MATRIX_B,
@@ -363,7 +363,8 @@ namespace rocRollerTest::Graphs
                                 : SolutionParams::LoadPath::BufferToVGPR;
         m_problem.loadPathB = b ? SolutionParams::LoadPath::BufferToLDSViaVGPR
                                 : SolutionParams::LoadPath::BufferToVGPR;
-        m_problem.storeLDSD = d;
+        m_problem.storePath = d ? SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer
+                                : SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
     }
 
     void GEMM::setPrefetch(bool prefetch,
@@ -490,11 +491,13 @@ namespace rocRollerTest::Graphs
             = MacroTile({m_problem.macM, m_problem.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB});
-        auto macTileD
-            = MacroTile({m_problem.macM, m_problem.macN},
-                        LayoutType::MATRIX_ACCUMULATOR,
-                        {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB},
-                        m_problem.storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+        auto macTileD = MacroTile(
+            {m_problem.macM, m_problem.macN},
+            LayoutType::MATRIX_ACCUMULATOR,
+            {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB},
+            m_problem.storePath == SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer
+                ? MemoryType::WAVE_LDS
+                : MemoryType::WAVE);
 
         params->setDimensionInfo(m_tagA, macTileA);
 
