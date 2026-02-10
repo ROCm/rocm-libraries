@@ -2,12 +2,12 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormBwdSignatureKey.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormFwdInferenceSignatureKey.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/PlanRegistrySignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormBwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanRegistrySignatureKey.hpp>
 #include <unordered_map>
 
-using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_test_sdk::detail;
 using hipdnn_data_sdk::data_objects::DataType;
 
 TEST(TestPlanRegistrySignatureKey, HashAndEqualityFwdInference)

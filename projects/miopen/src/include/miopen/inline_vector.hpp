@@ -78,7 +78,7 @@ public:
     }
 
     // Copy/move operator
-    InlineVector& operator=(const InlineVector& inline_vec) = default;
+    InlineVector& operator=(const InlineVector& inline_vec)     = default;
     InlineVector& operator=(InlineVector&& inline_vec) noexcept = default;
 
     // Iterators
