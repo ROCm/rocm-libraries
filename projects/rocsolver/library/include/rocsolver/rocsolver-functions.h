@@ -3966,7 +3966,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr(rocblas_handle handle,
     Optionally, this function can also compute \f$Q'C\f$ for a given ``n``-by-``nc`` input matrix ``C``.
 
     \note
-    In order to carry out calculations, this method might synchronize the stream contained within the
+    In order to carry out calculations, this method could potentially synchronize the stream contained within the
     ``rocblas_handle``.
 
     \note
@@ -12715,7 +12715,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zpotri_strided_batched(rocblas_handle 
     the "rocSOLVER performance tuning" and "Memory model" sections of the documentation.
 
     \note
-    In order to carry out calculations, this method might synchronize the stream contained
+    In order to carry out calculations, this method could potentially synchronize the stream contained
     within the ``rocblas_handle``.
 
     \note
@@ -12892,11 +12892,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgesvd(rocblas_handle handle,
     intermediate operations out-of-place and relying more on matrix
     multiplications (GEMMs), but this will require a larger memory
     workspace. The parameter ``fast_alg`` controls whether the fast algorithm is
-    executed or not. For more details, see the "Tuning rocSOLVER performance"
+    executed or not. For more details, see the "rocSOLVER performance tuning"
     and "Memory model" sections of the documentation.
 
     \note
-    In order to carry out calculations, this method might synchronize the stream contained
+    In order to carry out calculations, this method could potentially synchronize the stream contained
     within the ``rocblas_handle``.
 
     \note
@@ -13114,11 +13114,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgesvd_batched(rocblas_handle handle,
     intermediate operations out-of-place, and relying more on matrix
     multiplications (GEMMs), but this will require a larger memory
     workspace. The parameter ``fast_alg`` controls whether the fast algorithm is
-    executed or not. For more details, see the "Tuning rocSOLVER performance"
+    executed or not. For more details, see the "rocSOLVER performance tuning"
     and "Memory model" sections of the documentation.
 
     \note
-    In order to carry out calculations, this method might synchronize the stream contained
+    In order to carry out calculations, this method could potentially synchronize the stream contained
     within the ``rocblas_handle``.
 
     \note
@@ -21967,7 +21967,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvd(rocblas_handle handle,
     \f]
 
     \note
-    In order to carry out calculations, this method might synchronize the stream contained within the
+    In order to carry out calculations, this method could potentially synchronize the stream contained within the
     ``rocblas_handle``.
 
     @param[in]
@@ -22098,7 +22098,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsygvd_batched(rocblas_handle handle,
     \f]
 
     \note
-    In order to carry out calculations, this method might synchronize the stream contained within the
+    In order to carry out calculations, this method could potentially synchronize the stream contained within the
     ``rocblas_handle``.
 
     @param[in]
@@ -22229,7 +22229,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvd_batched(rocblas_handle handle,
     \f]
 
     \note
-    In order to carry out calculations, this method might synchronize the stream contained within the
+    In order to carry out calculations, this method could potentially synchronize the stream contained within the
     ``rocblas_handle``.
 
     @param[in]
@@ -22372,7 +22372,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsygvd_strided_batched(rocblas_handle 
     \f]
 
     \note
-    In order to carry out calculations, this method might synchronize the stream contained within the
+    In order to carry out calculations, this method could potentially synchronize the stream contained within the
     ``rocblas_handle``.
 
     @param[in]
