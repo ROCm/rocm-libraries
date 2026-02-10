@@ -41,55 +41,6 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 bool constexpr use_syrk = true;
 
-static int get_num_cu(int deviceId = 0)
-{
-    int ival = 0;
-    auto const attr = hipDeviceAttributeMultiprocessorCount;
-    HIP_CHECK(hipDeviceGetAttribute(&ival, attr, deviceId));
-    return (ival);
-}
-
-static int get_warp_size(int deviceId = 0)
-{
-    int ival = 0;
-    auto const attr = hipDeviceAttributeWarpSize;
-    HIP_CHECK(hipDeviceGetAttribute(&ival, attr, deviceId));
-    return (ival);
-}
-
-template <typename T, typename I>
-__device__ static T reduce_sum_shfl_wsize(I const wsize, T val)
-{
-    // Each iteration halves the number of active threads
-    // Each thread adds its partial sum[i] to sum[lane+i]
-    if(wsize == 64)
-    {
-        val += __shfl_down(val, 32); // offset = 32
-        val += __shfl_down(val, 16); // offset = 16
-        val += __shfl_down(val, 8); // offset = 8
-        val += __shfl_down(val, 4); // offset = 4
-        val += __shfl_down(val, 2); // offset = 2
-        val += __shfl_down(val, 1); // offset = 1
-    }
-    else if(wsize == 32)
-    {
-        val += __shfl_down(val, 16); // offset = 16
-        val += __shfl_down(val, 8); // offset = 8
-        val += __shfl_down(val, 4); // offset = 4
-        val += __shfl_down(val, 2); // offset = 2
-        val += __shfl_down(val, 1); // offset = 1
-    }
-    else
-    {
-        for(auto offset = wsize / 2; offset > 0; offset /= 2)
-        {
-            val += __shfl_down(val, offset);
-            // g.sync();
-        }
-    }
-    return val; // note: only thread 0 will return full sum
-}
-
 // kernel to compute the square of g-norm
 // which is the max 2-norm square of the columns
 //
@@ -103,26 +54,16 @@ __device__ static T reduce_sum_shfl_wsize(I const wsize, T val)
 //
 // assume nx <= warpsize
 // to use DPP instructions
-template <typename T, typename I, typename Istride, typename UA, typename S = decltype(std::real(T{}))>
-static __global__ void cal_gnorm_sq_kernel(I const m,
-                                           I const n,
-                                           I const batch_count,
-
-                                           UA A,
-                                           Istride const shiftA,
-                                           I const lda,
-                                           Istride const strideA,
-
-                                           S* const gnorm_array)
+template <typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
+static __global__ void cal_gnorm_sq_kernel(const I m,
+                                           const I n,
+                                           U AA,
+                                           const rocblas_stride shiftA,
+                                           const I lda,
+                                           const rocblas_stride strideA,
+                                           S* gnorm_array,
+                                           const I batch_count)
 {
-    {
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1) && (gnorm_array != nullptr);
-        if(!has_work)
-        {
-            return;
-        };
-    }
-
     I const nx = blockDim.x;
     I const ny = blockDim.y;
     I const nz = blockDim.z;
@@ -149,13 +90,12 @@ static __global__ void cal_gnorm_sq_kernel(I const m,
     I const bid_inc = nbz;
 
     extern __shared__ double lmem[];
-    double* const gnorm_block = (double*)&(lmem[0]);
+    double* const gnorm_block = (double*)lmem;
 
     for(I bid = bid_start; bid < batch_count; bid += bid_inc)
     {
-        T const* const Ap = load_ptr_batch(A, bid, shiftA, strideA);
-
-        S* const gnorm_bid = &(gnorm_array[bid]);
+        T const* const A = load_ptr_batch(AA, bid, shiftA, strideA);
+        S* const gnorm_bid = gnorm_array + bid;
 
         bool const use_simple = false;
         if(use_simple)
@@ -171,7 +111,7 @@ static __global__ void cal_gnorm_sq_kernel(I const m,
             if(txyz == 0)
             {
                 gnorm_block[0] = 0;
-            };
+            }
             __syncthreads();
 
             double gnorm_j = 0;
@@ -181,12 +121,11 @@ static __global__ void cal_gnorm_sq_kernel(I const m,
                 for(I i = 0; i < m; i++)
                 {
                     auto const ij = idx2D(i, jcol, lda);
-                    auto const aij = Ap[ij];
-                    norm_j += std::norm(aij);
+                    norm_j += std::norm(A[ij]);
                 }
                 gnorm_j = rocblas_max_nan(gnorm_j, norm_j);
             }
-            atomicMax(&(gnorm_block[0]), gnorm_j);
+            atomicMax(gnorm_block, gnorm_j);
             __syncthreads();
 
             if(txyz == 0)
@@ -219,24 +158,28 @@ static __global__ void cal_gnorm_sq_kernel(I const m,
                 for(I i = i_start; i < m; i += i_inc)
                 {
                     auto const ij = idx2D(i, j, lda);
-                    auto const aij = Ap[ij];
-
-                    norm_j += std::norm(aij);
+                    norm_j += std::norm(A[ij]);
                 }
 
                 // ----------------------------------------
                 // note: only tx == 0 has the correct value
                 // ----------------------------------------
-                norm_j = reduce_sum_shfl_wsize(nx, norm_j);
+                norm_j += shift_left(norm_j, 1);
+                norm_j += shift_left(norm_j, 2);
+                norm_j += shift_left(norm_j, 4);
+                norm_j += shift_left(norm_j, 8);
+                norm_j += shift_left(norm_j, 16);
+                if(warpSize > 32)
+                    norm_j += shift_left(norm_j, 32);
                 if(tx == 0)
                 {
                     gnorm_j = std::max(gnorm_j, norm_j);
                 }
-            } // end for j
+            }
 
             if(tx == 0)
             {
-                atomicMax(&(gnorm_block[0]), gnorm_j);
+                atomicMax(gnorm_block, gnorm_j);
             }
             __syncthreads();
 
@@ -245,64 +188,7 @@ static __global__ void cal_gnorm_sq_kernel(I const m,
                 atomicMax(gnorm_bid, static_cast<S>(gnorm_block[0]));
             }
         }
-    } // end for bid
-}
-
-// ----------------------------------------
-// compute the square gnorm of matrix,
-// which is    max_j  norm( A(:,j), 2 )^2
-// ----------------------------------------
-template <typename T, typename I, typename Istride, typename UA, typename S = decltype(std::real(T{}))>
-static void cal_gnorm_sq(hipStream_t stream,
-                         I const m,
-                         I const n,
-                         I const batch_count,
-
-                         UA A,
-                         Istride const shiftA,
-                         I const lda,
-                         Istride const strideA,
-
-                         S* const gnorm_array)
-{
-    {
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return;
-        };
     }
-
-    {
-        size_t const size_gnorm_array = sizeof(S) * batch_count;
-        hipError_t const istat = hipMemsetAsync(gnorm_array, 0, size_gnorm_array, stream);
-        if(istat != hipSuccess)
-        {
-            return;
-        };
-    }
-
-    auto const num_cu = get_num_cu();
-    auto const warp_size = get_warp_size();
-    I const lds_size = sizeof(S);
-
-    I const max_threads = 1024;
-    I const nx = warp_size; // !!! note nx <= warp_size is necessary
-        // for correctness in using DPP instructions
-    I const ny = max_threads / nx;
-    I const nz = 1;
-
-    I const max_blocks = num_cu;
-    I const nbx = 1; // !!! note nbx == 1 is necessary for correctness
-    I const nby = std::min(max_blocks, ceildiv(n, ny));
-    I const nbz = std::min(max_blocks, batch_count);
-
-    cal_gnorm_sq_kernel<T, I, Istride>
-        <<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), lds_size, stream>>>(m, n, batch_count,
-
-                                                                      A, shiftA, lda, strideA,
-
-                                                                      gnorm_array);
 }
 
 // -------------------------------------
@@ -332,45 +218,55 @@ static __global__ void scale_kernel(I const batch_count, S const dscale, S* cons
 //
 // where u is machine epsilon
 // ---------------------------------------
-template <typename T, typename I, typename Istride, typename UA, typename S = decltype(std::real(T{}))>
-static rocblas_status cal_sigma(hipStream_t stream,
-                                I const m,
-                                I const n,
-                                I const batch_count,
-
-                                UA A,
-                                Istride const shiftA,
-                                I const lda,
-                                Istride const strideA,
-
-                                S* const sigma_array)
+template <typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
+static rocblas_status cal_sigma(rocblas_handle handle,
+                                const I m,
+                                const I n,
+                                U A,
+                                const rocblas_stride shiftA,
+                                const I lda,
+                                const rocblas_stride strideA,
+                                S* sigma,
+                                const I batch_count)
 {
-    // -----------------
+    // note: sigma == nullptr treated as no shift
+    if(sigma == nullptr)
+        return rocblas_status_success;
+
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+
     // compute square of gnorm
-    // reuse sigma_array
-    // -----------------
-    S* const gnorm_array = sigma_array;
-    cal_gnorm_sq<T, I, Istride>(stream, m, n, batch_count,
+    // reuse sigma
+    size_t const size_sigma = sizeof(S) * batch_count;
+    HIP_CHECK(hipMemsetAsync(sigma, 0, size_sigma, stream));
 
-                                A, shiftA, lda, strideA,
+    I const lds_size = sizeof(S);
 
-                                gnorm_array);
+    I const max_threads = 1024;
+    I const nx = props->warpSize; // note nx == warp_size is necessary for correctness
+    I const ny = max_threads / nx;
+    I const nz = 1;
 
-    // --------------------------------------------
+    I const max_blocks = props->multiProcessorCount;
+    I const nbx = 1; // note nbx == 1 is necessary for correctness
+    I const nby = std::min(max_blocks, ceil(n, ny));
+    I const nbz = std::min(max_blocks, batch_count);
+
+    ROCSOLVER_LAUNCH_KERNEL((cal_gnorm_sq_kernel<T>), dim3(nbx, nby, nbz), dim3(nx, ny, nz),
+                            lds_size, stream, m, n, A, shiftA, lda, strideA, sigma, batch_count);
+
     // sigma = 11 * n * u (m + (n+1) ) * gnorm(A)^2
-    // --------------------------------------------
     S const eps = std::numeric_limits<S>::epsilon();
     S const dscale = 11.0 * n * eps * (m + (n + 1));
 
-    {
-        I const nx = 64;
-        I const nbx = ceildiv(batch_count, nx);
-        scale_kernel<S, I><<<dim3(nbx, 1, 1), dim3(nx, 1, 1), 0, stream>>>(
+    I const nx_scale = 64;
+    I const nbx_scale = ceil(batch_count, nx_scale);
+    ROCSOLVER_LAUNCH_KERNEL((scale_kernel<S>), dim3(nbx_scale, 1, 1), dim3(nx_scale, 1, 1), 0,
+                            stream, batch_count, dscale, sigma);
 
-            batch_count, dscale, gnorm_array);
-    }
-
-    return (rocblas_status_success);
+    return rocblas_status_success;
 }
 
 // ---------------------------------
@@ -378,28 +274,16 @@ static rocblas_status cal_sigma(hipStream_t stream,
 //
 // launch as dim3(nbx,1,batch_count), dim3(nx,1,1)
 // ---------------------------------
-template <typename T, typename I, typename Istride, typename UB, typename S = decltype(std::real(T{}))>
-static __global__ void add_shift_kernel(I const m,
-                                        I const n,
-                                        I const batch_count,
-                                        S* const sigma_array,
-
-                                        UB B,
-                                        Istride const shiftB,
-                                        I const ldb,
-                                        Istride const strideB)
+template <typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
+static __global__ void add_shift_kernel(const I m,
+                                        const I n,
+                                        U BB,
+                                        const rocblas_stride shiftB,
+                                        const I ldb,
+                                        const rocblas_stride strideB,
+                                        S* sigma_array,
+                                        const I batch_count)
 {
-    {
-        // -------------------------------------------------
-        // note: sigma_array == nullptr  treated as no shift
-        // -------------------------------------------------
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1) && (sigma_array != nullptr);
-        if(!has_work)
-        {
-            return;
-        };
-    }
-
     I const bid_start = blockIdx.z;
     I const bid_inc = gridDim.z;
 
@@ -408,73 +292,58 @@ static __global__ void add_shift_kernel(I const m,
 
     I const min_mn = std::min(m, n);
 
-    S const zero = 0;
     for(I bid = bid_start; bid < batch_count; bid += bid_inc)
     {
-        auto const Bp = load_ptr_batch(B, bid, shiftB, strideB);
-        S const sigma_bid = (sigma_array == nullptr) ? zero : sigma_array[bid];
+        auto const B = load_ptr_batch(BB, bid, shiftB, strideB);
 
-        // ----------------------------
-        // note: ignore negative shifts
-        // ----------------------------
-        S const sigma = std::max(sigma_bid, zero);
+        // note: ignore null and negative shifts
+        S const sigma = (sigma_array == nullptr) ? 0 : max(sigma_array[bid], 0);
 
-        if(sigma != zero)
+        if(sigma != 0)
         {
             for(I i = i_start; i < min_mn; i += i_inc)
             {
                 // diagonal entry
-                I const j = i;
-
-                auto const ij = idx2D(i, j, ldb);
-                Bp[ij] += sigma;
+                auto const ij = idx2D(i, i, ldb);
+                B[ij] += sigma;
             }
         }
-    } // end for bid
+    }
 }
 
 // --------------------------------------------
 // routine to perform B <- B + sigma * identity
 // --------------------------------------------
-template <typename T, typename I, typename Istride, typename UB, typename S = decltype(std::real(T{}))>
-static void add_shift(hipStream_t stream,
+template <typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
+static void add_shift(rocblas_handle handle,
                       I const m,
                       I const n,
                       I const batch_count,
-                      S* const sigma_array,
-
-                      UB B,
-                      Istride const shiftB,
+                      S* const sigma,
+                      U B,
+                      rocblas_stride const shiftB,
                       I const ldb,
-                      Istride const strideB
-
-)
+                      rocblas_stride const strideB)
 {
-    {
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1) && (sigma_array != nullptr);
-        if(!has_work)
-        {
-            return;
-        };
-    }
+    // note: sigma == nullptr treated as no shift
+    if(sigma == nullptr)
+        return;
 
-    auto const ceil = [](auto n, auto base) { return ((n - 1) / base + 1); };
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
 
     I const nx = 64;
-    I const ny = 1;
-    I const nz = 1;
 
-    I const max_blocks = get_num_cu();
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    I const max_blocks = props->multiProcessorCount;
     I const min_mn = std::min(m, n);
 
-    I const nbx = std::min(max_blocks, ceildiv(min_mn, nx));
+    I const nbx = std::min(max_blocks, ceil(min_mn, nx));
     I const nby = 1;
     I const nbz = std::min(max_blocks, batch_count);
 
-    add_shift_kernel<T, I, Istride, decltype(B), S>
-        <<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(m, n, batch_count, sigma_array,
-
-                                                               B, shiftB, ldb, strideB);
+    ROCSOLVER_LAUNCH_KERNEL((add_shift_kernel<T>), dim3(nbx, nby, nbz), dim3(nx, 1, 1), 0, stream,
+                            m, n, B, shiftB, ldb, strideB, sigma, batch_count);
 }
 
 // ----------------------------------------------------
@@ -519,8 +388,8 @@ static void set_triangular(rocblas_handle handle,
     I const ny = max_threads / nx;
 
     I const max_blocks = 1024;
-    I const nbx = std::min(max_blocks, ceildiv(m, nx));
-    I const nby = std::min(max_blocks, ceildiv(n, ny));
+    I const nbx = std::min(max_blocks, ceil(m, nx));
+    I const nby = std::min(max_blocks, ceil(n, ny));
     I const nbz = std::min(max_blocks, batch_count);
 
     ROCSOLVER_LAUNCH_KERNEL((laset_kernel<T>), dim3(nbx, nby, nbx), dim3(nx, ny, 1), 0, stream, uplo,
@@ -810,7 +679,7 @@ static rocblas_status rocsolver_cholqr1_template(rocblas_handle handle,
     // optional, if sigma != 0
     // B <- B + sigma * identity
     if(sigma_array != nullptr)
-        add_shift<T>(stream, m, n, batch_count, sigma_array, R, shiftR, ldr, strideR);
+        add_shift<T>(handle, m, n, batch_count, sigma_array, R, shiftR, ldr, strideR);
 
     // perform Cholesky factorization
     // B = R' * R,   R is upper triangular
@@ -963,10 +832,8 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
     // Note: paper suggests
     // T const sigma = 11 * (m * n * ueps + (n + 1) * (n * ueps)) * gnorm
     if(compute_sigma)
-    {
         ROCBLAS_CHECK(
-            cal_sigma<T, I>(stream, m, n, batch_count, A, shiftA, lda, strideA, sigma_array));
-    }
+            cal_sigma<T, I>(handle, m, n, A, shiftA, lda, strideA, sigma_array, batch_count));
 
     // perform CholeskQR1 with shift
     ROCBLAS_CHECK(rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
