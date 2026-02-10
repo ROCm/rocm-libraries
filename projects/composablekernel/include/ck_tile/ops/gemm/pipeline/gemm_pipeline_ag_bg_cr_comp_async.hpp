@@ -435,7 +435,7 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             Base::GlobalPrefetchAsync(
                 b_copy_lds_window0, b_tile_windows[number<0>{}], b_dram_tile_window_step);
 
-            if(HasHotLoop)
+            if constexpr(HasHotLoop)
             {
                 // we have had 3 global prefetches so far, indexed (0, 1, 2).
                 index_t i_global_read = amd_wave_read_first_lane(3);
