@@ -6,7 +6,7 @@ set(CLANG_FORMAT_PRUNE -path "./build" -prune -o -path "./install" -prune -o -pa
 # Note: The clang-format in /opt/rocm produces different results than the one in /usr/bin.  MIOpen
 # formatting is based on the one in /usr/bin so we use that one
 # set(CLANG_FORMAT_BINARY /opt/rocm/llvm/bin/clang-format)
-set(CLANG_FORMAT_BINARY /usr/bin/clang-format-12)
+set(CLANG_FORMAT_BINARY /usr/bin/clang-format-18)
 
 add_custom_target(
     check_format

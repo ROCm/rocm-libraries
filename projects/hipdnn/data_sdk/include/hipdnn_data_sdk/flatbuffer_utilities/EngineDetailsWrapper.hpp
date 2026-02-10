@@ -131,7 +131,7 @@ private:
                 auto knob = knobs->Get(i);
                 auto wrapper
                     = std::make_unique<hipdnn_data_sdk::flatbuffer_utilities::KnobWrapper>(knob);
-                auto knobName = wrapper->knobIdStr();
+                auto knobName = wrapper->knobId();
                 _knobNameToIndex[knobName] = i;
                 _knobWrappers.push_back(std::move(wrapper));
             }

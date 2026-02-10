@@ -250,7 +250,7 @@
     StoreVectorWidth: 8
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -283,8 +283,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -475,7 +475,7 @@
     StoreVectorWidth: 8
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -508,8 +508,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -700,7 +700,7 @@
     StoreVectorWidth: 8
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -733,8 +733,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -925,7 +925,7 @@
     StoreVectorWidth: 8
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -958,8 +958,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -1150,7 +1150,7 @@
     StoreVectorWidth: 8
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -1183,8 +1183,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -1375,7 +1375,7 @@
     StoreVectorWidth: 8
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -1408,8 +1408,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -1600,7 +1600,7 @@
     StoreVectorWidth: 8
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -1633,8 +1633,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -1825,7 +1825,7 @@
     StoreVectorWidth: 8
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -1858,8 +1858,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -2050,7 +2050,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -2083,8 +2083,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -2275,7 +2275,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -2308,8 +2308,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -2500,7 +2500,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -2533,8 +2533,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -2725,7 +2725,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -2758,8 +2758,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -2950,7 +2950,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -2983,8 +2983,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -3175,7 +3175,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -3208,8 +3208,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -3400,7 +3400,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -3433,8 +3433,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -3625,7 +3625,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -3658,8 +3658,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -3850,7 +3850,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -3883,8 +3883,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -4075,7 +4075,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -4108,8 +4108,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -4300,7 +4300,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -4333,8 +4333,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -4525,7 +4525,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -4558,8 +4558,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -4750,7 +4750,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -4783,8 +4783,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -4975,7 +4975,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -5008,8 +5008,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -5200,7 +5200,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -5233,8 +5233,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -5425,7 +5425,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -5458,8 +5458,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -5650,7 +5650,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -5683,8 +5683,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -5875,7 +5875,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -5908,8 +5908,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -6100,7 +6100,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -6133,8 +6133,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -6325,7 +6325,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -6358,8 +6358,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -6550,7 +6550,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -6583,8 +6583,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -6775,7 +6775,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -6808,8 +6808,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -7000,7 +7000,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -7033,8 +7033,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -7225,7 +7225,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -7258,8 +7258,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -7449,7 +7449,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 2
     SubGroup1: 128
     SubGroupA: 2
@@ -7482,8 +7482,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -7674,7 +7674,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -7707,8 +7707,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -7899,7 +7899,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -7932,8 +7932,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -8124,7 +8124,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -8157,8 +8157,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -8349,7 +8349,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -8382,8 +8382,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -8574,7 +8574,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -8607,8 +8607,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -8799,7 +8799,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -8832,8 +8832,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -9024,7 +9024,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -9057,8 +9057,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -9249,7 +9249,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -9282,8 +9282,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -9474,7 +9474,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -9507,8 +9507,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -9699,7 +9699,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -9732,8 +9732,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -9924,7 +9924,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -9957,8 +9957,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -10149,7 +10149,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -10182,8 +10182,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -10374,7 +10374,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -10407,8 +10407,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -10599,7 +10599,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -10632,8 +10632,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -10824,7 +10824,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -10857,8 +10857,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -11049,7 +11049,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -11082,8 +11082,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -11274,7 +11274,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -11307,8 +11307,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -11499,7 +11499,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -11532,8 +11532,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -11724,7 +11724,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -11757,8 +11757,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -11949,7 +11949,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -11982,8 +11982,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -12174,7 +12174,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -12207,8 +12207,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -12399,7 +12399,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -12432,8 +12432,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -12624,7 +12624,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -12657,8 +12657,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -12849,7 +12849,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -12882,8 +12882,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -13074,7 +13074,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -13107,8 +13107,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -13299,7 +13299,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -13332,8 +13332,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -13524,7 +13524,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -13557,8 +13557,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -13749,7 +13749,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -13782,8 +13782,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -13974,7 +13974,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -14007,8 +14007,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -14199,7 +14199,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -14232,8 +14232,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -14424,7 +14424,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -14457,8 +14457,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -14649,7 +14649,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
@@ -14682,8 +14682,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -14874,7 +14874,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
@@ -14907,8 +14907,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -15099,7 +15099,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
@@ -15132,8 +15132,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -15324,7 +15324,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
@@ -15357,8 +15357,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -15549,7 +15549,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
@@ -15582,8 +15582,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -15774,7 +15774,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
@@ -15807,8 +15807,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -15999,7 +15999,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
@@ -16032,8 +16032,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -16224,7 +16224,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
@@ -16257,8 +16257,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -16449,7 +16449,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -16482,8 +16482,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -16674,7 +16674,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -16707,8 +16707,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -16899,7 +16899,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -16932,8 +16932,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -17124,7 +17124,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -17157,8 +17157,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -17349,7 +17349,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -17382,8 +17382,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -17574,7 +17574,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -17607,8 +17607,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -17799,7 +17799,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -17832,8 +17832,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -18024,7 +18024,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -18057,8 +18057,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -18249,7 +18249,7 @@
     StoreVectorWidth: 8
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -18282,8 +18282,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -18474,7 +18474,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -18507,8 +18507,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -18699,7 +18699,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -18732,8 +18732,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -18924,7 +18924,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -18957,8 +18957,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -19149,7 +19149,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -19182,8 +19182,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -19374,7 +19374,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -19407,8 +19407,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -19599,7 +19599,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -19632,8 +19632,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -19824,7 +19824,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -19857,8 +19857,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -20049,7 +20049,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -20082,8 +20082,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -20274,7 +20274,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -20307,8 +20307,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -20499,7 +20499,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -20532,8 +20532,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -20724,7 +20724,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -20757,8 +20757,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -20949,7 +20949,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -20982,8 +20982,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -21174,7 +21174,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -21207,8 +21207,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -21399,7 +21399,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -21432,8 +21432,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -21624,7 +21624,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -21657,8 +21657,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -21849,7 +21849,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -21882,8 +21882,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -22074,7 +22074,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -22107,8 +22107,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -22299,7 +22299,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -22332,8 +22332,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -22524,7 +22524,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -22557,8 +22557,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -22749,7 +22749,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -22782,8 +22782,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -22974,7 +22974,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -23007,8 +23007,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -23199,7 +23199,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -23232,8 +23232,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -23424,7 +23424,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -23457,8 +23457,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -23649,7 +23649,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -23682,8 +23682,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -23874,7 +23874,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -23907,8 +23907,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -24099,7 +24099,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -24132,8 +24132,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -24324,7 +24324,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -24357,8 +24357,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -24549,7 +24549,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -24582,8 +24582,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -24774,7 +24774,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -24807,8 +24807,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -24999,7 +24999,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -25032,8 +25032,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -25224,7 +25224,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -25257,8 +25257,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -25449,7 +25449,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -25482,8 +25482,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -25674,7 +25674,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -25707,8 +25707,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -25899,7 +25899,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -25932,8 +25932,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -26124,7 +26124,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -26157,8 +26157,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -26349,7 +26349,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
@@ -26382,8 +26382,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -26574,7 +26574,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
@@ -26607,8 +26607,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -26799,7 +26799,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
@@ -26832,8 +26832,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -27024,7 +27024,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -27057,8 +27057,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -27249,7 +27249,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -27282,8 +27282,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -27474,7 +27474,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -27507,8 +27507,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -27699,7 +27699,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -27732,8 +27732,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -27924,7 +27924,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -27957,8 +27957,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -28149,7 +28149,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -28182,8 +28182,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -28374,7 +28374,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -28407,8 +28407,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -28599,7 +28599,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -28632,8 +28632,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -28824,7 +28824,7 @@
     StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -28857,8 +28857,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -29049,7 +29049,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -29082,8 +29082,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -29274,7 +29274,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -29307,8 +29307,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -29499,7 +29499,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -29532,8 +29532,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -29724,7 +29724,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -29757,8 +29757,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -29949,7 +29949,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -29982,8 +29982,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -30174,7 +30174,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -30207,8 +30207,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -30399,7 +30399,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -30432,8 +30432,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -30624,7 +30624,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -30657,8 +30657,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -30849,7 +30849,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 16
     SubGroupA: 4
@@ -30882,8 +30882,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 4, 4]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -31074,7 +31074,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 16
     SubGroupA: 4
@@ -31107,8 +31107,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 4, 4]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -31299,7 +31299,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 16
     SubGroupA: 4
@@ -31332,8 +31332,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 4, 4]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -31524,7 +31524,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 16
     SubGroupA: 4
@@ -31557,8 +31557,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 4, 4]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -31749,7 +31749,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 16
     SubGroupA: 4
@@ -31782,8 +31782,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 4, 4]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -31974,7 +31974,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 16
     SubGroupA: 4
@@ -32007,8 +32007,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 4, 4]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -32199,7 +32199,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 16
     SubGroupA: 4
@@ -32232,8 +32232,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 4, 4]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -32424,7 +32424,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 16
     SubGroupA: 4
@@ -32457,8 +32457,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 4, 4]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -32649,7 +32649,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 16
     SubGroupA: 4
@@ -32682,8 +32682,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 4, 4]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -32874,7 +32874,7 @@
     StoreVectorWidth: 1
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 16
     SubGroupA: 4
@@ -32907,8 +32907,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 4, 4]
-    WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
