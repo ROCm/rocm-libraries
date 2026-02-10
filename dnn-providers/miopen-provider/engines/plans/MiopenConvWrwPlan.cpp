@@ -105,7 +105,7 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
             auto status = miopenDestroySolution(s);
             if(status != miopenStatusSuccess)
             {
-                HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvWrwPlan destructor");
+                HIPDNN_PLUGIN_LOG_ERROR("miopenDestroySolution failed in ConvWrwPlan destructor");
             }
         });
 

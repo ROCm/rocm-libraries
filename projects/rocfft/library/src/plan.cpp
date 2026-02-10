@@ -44,8 +44,8 @@
 
 #include <algorithm>
 #include <assert.h>
-#include <functional>
 #include <cstring>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <map>

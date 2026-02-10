@@ -525,7 +525,7 @@ namespace rocRoller
          *
          *     WaitZero()
          *     if receiveTileExpr:
-         *       for (i = 0; i < numFixupsExpr; i++)
+         *       for each partial result (loop created externally)
          *          nextWG = WG + 1 + i
          *          Assert nextWG < numScratch
          *          do:
@@ -547,7 +547,6 @@ namespace rocRoller
          */
         RecvInfo receiveTile(KernelGraph&                           graph,
                              ExpressionPtr                          receiveTileExpr,
-                             ExpressionPtr                          numFixupsExpr,
                              int                                    scratchTileTag,
                              std::vector<DeferredConnection> const& loadConnections,
                              int                                    flagsScratchTag,
@@ -1215,12 +1214,24 @@ namespace rocRoller
                 graph.mapper.connect(assignCurrentTile, currentTile, NaryArgument::DEST);
             }
 
+            // Compute the starting K tile index within the current output tile.
+            // firstAccumTile = currentTile % numAccumTiles gives which K tile (0 to numAccumTiles-1)
+            // we begin processing within this (M, N) output tile.
+            int assignFirstAccumTile;
+            {
+                auto firstAccumTileExpr = DF(currentTile) % numAccumTiles;
+                assignFirstAccumTile
+                    = graph.control.addElement(Assign{Register::Type::Scalar, firstAccumTileExpr});
+                graph.mapper.connect(assignFirstAccumTile, firstAccumTile, NaryArgument::DEST);
+            }
+
             int assignNumAccumTilesProcessed;
             {
-                auto sameNonAccumTileBound
-                    = conditionalSubtract((DF(currentTile) / numAccumTiles + one) * numAccumTiles,
-                                          DF(currentTile),
-                                          numTilesVarType.dataType);
+                // Compute how many K tiles to process in this iteration.
+                // sameNonAccumTileBound = numAccumTiles - firstAccumTile is the number of K tiles
+                // remaining in the current output tile. We take the minimum of this and other bounds.
+                auto sameNonAccumTileBound = conditionalSubtract(
+                    numAccumTiles, DF(firstAccumTile), numTilesVarType.dataType);
                 auto numSKTilesPerWGBound = conditionalSubtract(
                     argInfo.numSKTilesPerWG, DF(forTileIncr), numTilesVarType.dataType);
                 auto numSKTilesExprBound = conditionalSubtract(
@@ -1233,18 +1244,13 @@ namespace rocRoller
                     assignNumAccumTilesProcessed, numAccumTilesProcessed, NaryArgument::DEST);
             }
 
-            int assignFirstAccumTile;
-            {
-                auto firstAccumTileExpr = DF(currentTile) % numAccumTiles;
-                assignFirstAccumTile
-                    = graph.control.addElement(Assign{Register::Type::Scalar, firstAccumTileExpr});
-                graph.mapper.connect(assignFirstAccumTile, firstAccumTile, NaryArgument::DEST);
-            }
-
             int assignLastAccumTile;
             {
-                auto lastAccumTileExpr
-                    = (DF(currentTile) + DF(numAccumTilesProcessed) - one) % numAccumTiles;
+                // Compute the last K tile index processed within this output tile.
+                // Since numAccumTilesProcessed <= numAccumTiles - firstAccumTile (bounded by
+                // sameNonAccumTileBound to stay within the same output tile), the result is
+                // guaranteed to be in range [0, numAccumTiles - 1].
+                auto lastAccumTileExpr = DF(firstAccumTile) + DF(numAccumTilesProcessed) - one;
                 assignLastAccumTile
                     = graph.control.addElement(Assign{Register::Type::Scalar, lastAccumTileExpr});
                 graph.mapper.connect(assignLastAccumTile, lastAccumTile, NaryArgument::DEST);
@@ -1265,15 +1271,40 @@ namespace rocRoller
             if(accumInfo.accumulatorTile != -1)
             {
                 auto remainAccumTiles = numAccumTiles - DF(lastAccumTile) - one;
-                auto numRemainPartialResults
-                    = (remainAccumTiles + argInfo.numSKTilesPerWG - one) / argInfo.numSKTilesPerWG;
 
-                // For loop that sums up all the partial result
-                auto [forReceiveTileLoopCoord, forReceiveTileLoopOp]
-                    = rangeFor(graph,
-                               numRemainPartialResults,
-                               rocRoller::RECEIVE,
-                               resultVariableType(numRemainPartialResults));
+                // For loop that receives and accumulates partial results from other workgroups.
+                // The loop iterates ceil(remainAccumTiles / numSKTilesPerWG) times.
+                // Using the equivalence: i < ceil(a/b) iff i*b < a (for a >= 0, b > 0),
+                // we express the loop condition as a multiplication to avoid runtime division.
+                auto iteratorCoord = graph.coordinates.addElement(Linear(numAccumTiles, one));
+                auto forReceiveTileLoopCoord
+                    = graph.coordinates.addElement(ForLoop(numAccumTiles, one));
+                graph.coordinates.addElement(
+                    DataFlow(), {iteratorCoord}, {forReceiveTileLoopCoord});
+
+                auto iterator = std::make_shared<Expression::Expression>(Expression::DataFlowTag{
+                    iteratorCoord, Register::Type::Scalar, numTilesVarType});
+
+                // Loop condition: iterates while iterator * numSKTilesPerWG < remainAccumTiles
+                // This is equivalent to iterator < ceil(remainAccumTiles / numSKTilesPerWG)
+                auto loopCondition = iterator * argInfo.numSKTilesPerWG < remainAccumTiles;
+
+                auto forReceiveTileLoopOp
+                    = graph.control.addElement(ForLoopOp{loopCondition, rocRoller::RECEIVE});
+                graph.mapper.connect(forReceiveTileLoopOp, iteratorCoord, NaryArgument::DEST);
+                graph.mapper.connect<ForLoop>(forReceiveTileLoopOp, forReceiveTileLoopCoord);
+
+                auto initialAssign = graph.control.addElement(
+                    Assign{Register::Type::Scalar, Expression::literal(0, numTilesVarType)});
+                graph.mapper.connect(initialAssign, iteratorCoord, NaryArgument::DEST);
+
+                auto incrementAssign
+                    = graph.control.addElement(Assign{Register::Type::Scalar, iterator + one});
+                graph.mapper.connect(incrementAssign, iteratorCoord, NaryArgument::DEST);
+
+                graph.control.addElement(Initialize(), {forReceiveTileLoopOp}, {initialAssign});
+                graph.control.addElement(
+                    ForLoopIncrement(), {forReceiveTileLoopOp}, {incrementAssign});
 
                 // Create scratch space for flags
                 auto flagsScratch
@@ -1312,7 +1343,6 @@ namespace rocRoller
 
                 receiveInfo = receiveTile(graph,
                                           hasFirstAccumTile && doesntHaveLastAccumTile,
-                                          numRemainPartialResults,
                                           scratchTileInfo.load,
                                           loadConnections,
                                           flagsScratchTag,
@@ -1374,9 +1404,11 @@ namespace rocRoller
             graph.control.chain<Body>(
                 receiveInfo.setPlusOne, scratchTileInfo.setPlusOne, forTileSKOp);
             graph.control.chain<Body>(forTileSKOp, assignCurrentTile);
+            // Order: currentTile -> firstAccumTile -> numAccumTilesProcessed -> lastAccumTile
+            // (firstAccumTile must come before numAccumTilesProcessed since we reuse it for sameNonAccumTileBound)
             graph.control.chain<Sequence>(assignCurrentTile,
-                                          assignNumAccumTilesProcessed,
                                           assignFirstAccumTile,
+                                          assignNumAccumTilesProcessed,
                                           assignLastAccumTile,
                                           loopInfo.topLoopOp,
                                           sendInfo.preWaitZero);
