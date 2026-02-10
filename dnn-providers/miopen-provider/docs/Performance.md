@@ -15,10 +15,10 @@ The MIOpen Provider Plugin performs **algorithm selection during the first execu
 
 | Execution | Performance | Notes |
 |-----------|-------------|-------|
-| **First** | Significantly slower | Algorithm selection overhead |
+| **First** | May be slower | Algorithm selection overhead (small unless benchmarking is enabled) |
 | **Subsequent** | Normal performance | Uses cached algorithm selection |
 
-The first execution performs kernel benchmarking to select the optimal algorithm, which adds hundreds of milliseconds of latency. All subsequent executions use the cached selection and execute at normal speed.
+The first execution performs algorithm selection. The overhead is typically small, but if benchmarking is enabled, kernel benchmarking adds significant overhead. All subsequent executions use the cached selection and execute at normal speed.
 
 #### Monitoring
 
