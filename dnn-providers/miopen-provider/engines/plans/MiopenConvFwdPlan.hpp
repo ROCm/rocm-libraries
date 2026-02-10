@@ -4,6 +4,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
@@ -58,8 +59,8 @@ public:
     ConvFwdPlan(const ConvFwdPlan&) = delete;
     ConvFwdPlan& operator=(const ConvFwdPlan&) = delete;
 
-    ConvFwdPlan(ConvFwdPlan&& other) = default;
-    ConvFwdPlan& operator=(ConvFwdPlan&& other) = default;
+    ConvFwdPlan(ConvFwdPlan&& other) = delete;
+    ConvFwdPlan& operator=(ConvFwdPlan&& other) = delete;
 
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
 
@@ -70,6 +71,7 @@ public:
 
 private:
     ConvFwdParams _params;
+    mutable std::mutex _algorithmMutex;
     mutable std::optional<miopenConvFwdAlgorithm_t> _algorithm;
     mutable size_t _workspaceSize = 0;
     MiopenExecutionSettings _executionSettings;

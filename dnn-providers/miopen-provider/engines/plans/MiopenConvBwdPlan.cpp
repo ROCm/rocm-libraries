@@ -134,62 +134,69 @@ void ConvBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
     // because miopenFindConvolutionBackwardDataAlgorithm requires device memory buffers.
     // These buffers are only available during execute(), not during plan construction.
     // The selected algorithm is cached to avoid redundant find calls on subsequent executions.
-    if(!_algorithm.has_value())
     {
-        int requestCount = (_executionSettings.debugMode()
-                            == MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
-                               ? 10
-                               : 1;
+        std::lock_guard<std::mutex> lock(_algorithmMutex);
 
-        std::vector<miopenConvAlgoPerf_t> perfResults(static_cast<size_t>(requestCount));
-        int returnedAlgoCount;
-
-        THROW_ON_MIOPEN_FAILURE(
-            miopenFindConvolutionBackwardDataAlgorithm(handle.miopenHandle,
-                                                       _params.dy().tensorDescriptor(),
-                                                       yBuffer.ptr,
-                                                       _params.w().tensorDescriptor(),
-                                                       wBuffer.ptr,
-                                                       _params.conv().convDescriptor(),
-                                                       _params.dx().tensorDescriptor(),
-                                                       xBuffer.ptr,
-                                                       requestCount,
-                                                       &returnedAlgoCount,
-                                                       perfResults.data(),
-                                                       workspace,
-                                                       workspaceSize,
-                                                       false));
-
-        if(returnedAlgoCount <= 0)
+        if(!_algorithm.has_value())
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "miopenFindConvolutionBackwardDataAlgorithm returned no algorithms");
-        }
+            int requestCount
+                = (_executionSettings.debugMode()
+                   == MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
+                      ? 10
+                      : 1;
 
-        if(_executionSettings.debugMode()
-           == MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
-        {
-            HIPDNN_PLUGIN_LOG_INFO("Convolution Bwd: Found {} algorithms", returnedAlgoCount);
-            for(size_t i = 0; i < static_cast<size_t>(returnedAlgoCount); ++i)
+            std::vector<miopenConvAlgoPerf_t> perfResults(static_cast<size_t>(requestCount));
+            int returnedAlgoCount;
+
+            THROW_ON_MIOPEN_FAILURE(
+                miopenFindConvolutionBackwardDataAlgorithm(handle.miopenHandle,
+                                                           _params.dy().tensorDescriptor(),
+                                                           yBuffer.ptr,
+                                                           _params.w().tensorDescriptor(),
+                                                           wBuffer.ptr,
+                                                           _params.conv().convDescriptor(),
+                                                           _params.dx().tensorDescriptor(),
+                                                           xBuffer.ptr,
+                                                           requestCount,
+                                                           &returnedAlgoCount,
+                                                           perfResults.data(),
+                                                           workspace,
+                                                           workspaceSize,
+                                                           false));
+
+            if(returnedAlgoCount <= 0)
             {
-                HIPDNN_PLUGIN_LOG_INFO("  Algorithm {}: algorithm={}, time={}, workspace_size={}",
-                                       i,
-                                       static_cast<int>(perfResults[i].bwd_data_algo),
-                                       perfResults[i].time,
-                                       perfResults[i].memory);
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                    "miopenFindConvolutionBackwardDataAlgorithm returned no algorithms");
             }
+
+            if(_executionSettings.debugMode()
+               == MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
+            {
+                HIPDNN_PLUGIN_LOG_INFO("Convolution Bwd: Found {} algorithms", returnedAlgoCount);
+                for(size_t i = 0; i < static_cast<size_t>(returnedAlgoCount); ++i)
+                {
+                    HIPDNN_PLUGIN_LOG_INFO(
+                        "  Algorithm {}: algorithm={}, time={}, workspace_size={}",
+                        i,
+                        static_cast<int>(perfResults[i].bwd_data_algo),
+                        perfResults[i].time,
+                        perfResults[i].memory);
+                }
+            }
+
+            HIPDNN_PLUGIN_LOG_INFO(
+                "Convolution Bwd: Selected algorithm={}, time={}, workspace_size={}",
+                static_cast<int>(perfResults[0].bwd_data_algo),
+                perfResults[0].time,
+                perfResults[0].memory);
+
+            _algorithm = perfResults[0].bwd_data_algo;
+            // Update workspace size with the actual requirement from the selected algorithm.
+            // This may differ from the initial estimate.
+            _workspaceSize = perfResults[0].memory;
         }
-
-        HIPDNN_PLUGIN_LOG_INFO("Convolution Bwd: Selected algorithm={}, time={}, workspace_size={}",
-                               static_cast<int>(perfResults[0].bwd_data_algo),
-                               perfResults[0].time,
-                               perfResults[0].memory);
-
-        _algorithm = perfResults[0].bwd_data_algo;
-        // Update workspace size with the actual requirement from the selected algorithm.
-        // This may differ from the initial estimate.
-        _workspaceSize = perfResults[0].memory;
     }
 
     float alpha = 1.0f;
