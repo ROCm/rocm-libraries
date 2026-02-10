@@ -61,7 +61,7 @@ auto GetTestCases(std::string precision)
     // clang-format on
 }
 
-class GPU_DeepBench_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<std::tuple<int, int>>
+struct GPU_DeepBench_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<std::tuple<int, int>>
 {
 };
 

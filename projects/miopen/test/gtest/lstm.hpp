@@ -228,11 +228,11 @@ struct Verifier
 template <typename T>
 struct LSTM_test : Verifier
 {
-    int batchSize{0};
-    int seqLength{0};
-    int inVecLen{0};
-    int hiddenSize{0};
+    int batchSize{4};
+    int seqLength{10};
+    int inVecLen{32};
     int numLayers{1};
+    int hiddenSize{0};
     int useDropout{0};
     int usePadding{0};
     int flatBatchFill{0};

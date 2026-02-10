@@ -27,49 +27,9 @@
 #include "lstm.hpp"
 #include <hip/hip_runtime.h>
 
-auto GetTestCases(std::string precision)
-{
-    std::string flags       = "test_lstm --verbose " + precision;
-    std::string commonFlags = " --batch-size 32 --seq-len 3 --batch-seq 32 32 32 --vector-len 128 "
-                              "--hidden-size 128 --num-layers 1 --in-mode 0 --bias-mode 0";
-
-    // clang-format off
-    return std::vector<std::string>{
-        {flags + commonFlags + " -dir-mode 0 --no-hx"},
-        {flags + commonFlags + " -dir-mode 0 --no-dhy"},
-        {flags + commonFlags + " -dir-mode 0 --no-hx --no-dhy"},
-        {flags + commonFlags + " -dir-mode 0 --no-cx"},
-        {flags + commonFlags + " -dir-mode 0 --no-hx --no-cx"},
-        {flags + commonFlags + " -dir-mode 0 --no-dcy"},
-        {flags + commonFlags + " -dir-mode 0 --no-cx --no-dcy"},
-        {flags + commonFlags + " -dir-mode 1 --no-hx"},
-        {flags + commonFlags + " -dir-mode 1 --no-dhy"},
-        {flags + commonFlags + " -dir-mode 1 --no-hx --no-dhy"},
-        {flags + commonFlags + " -dir-mode 1 --no-cx"},
-        {flags + commonFlags + " -dir-mode 1 --no-hx --no-cx"},
-        {flags + commonFlags + " -dir-mode 1 --no-dcy"},
-        {flags + commonFlags + " -dir-mode 1 --no-cx --no-dcy"},
-        {flags + commonFlags + " -dir-mode 0 --no-hy"},
-        {flags + commonFlags + " -dir-mode 0 --no-dhx"},
-        {flags + commonFlags + " -dir-mode 0 --no-hy --no-dhx"},
-        {flags + commonFlags + " -dir-mode 0 --no-cy"},
-        {flags + commonFlags + " -dir-mode 0 --no-hy --no-cy"},
-        {flags + commonFlags + " -dir-mode 0 --no-dcx"},
-        {flags + commonFlags + " -dir-mode 0 --no-cy --no-dcx"},
-        {flags + commonFlags + " -dir-mode 1 --no-hy"},
-        {flags + commonFlags + " -dir-mode 1 --no-dhx"},
-        {flags + commonFlags + " -dir-mode 1 --no-hy --no-dhx"},
-        {flags + commonFlags + " -dir-mode 1 --no-cy"},
-        {flags + commonFlags + " -dir-mode 1 --no-hy --no-cy"},
-        {flags + commonFlags + " -dir-mode 1 --no-dcx"},
-        {flags + commonFlags + " -dir-mode 1 --no-cy --no-dcx"},
-	    {flags + commonFlags + " -dir-mode 0 --no-hx --no-dhy --no-cx --no-dcy --no-hy --no-dhx --no-cy --no-dcx"},
-	    {flags + commonFlags + " -dir-mode 1 --no-hx --no-dhy --no-cx --no-dcy --no-hy --no-dhx --no-cy --no-dcx"}
-    };
-    // clang-format on
-}
-
-class GPU_LSTM_extra_FP32 : LSTM_test<float>, testing::TestWithParam<std::tuple<int, int>>
+struct GPU_LSTM_extra_FP32
+    : LSTM_test<float>,
+      testing::TestWithParam<std::tuple<int, int, int, int, int, int, int, int, int>>
 {
 };
 
@@ -78,23 +38,65 @@ TEST_P(GPU_LSTM_extra_FP32, FloatTest)
     int device_count{0};
     if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
     {
-        //GTEST_SKIP() << "No HIP devices available for testing";
+        GTEST_SKIP() << "No HIP devices available for testing";
     }
 
     int batchSize{32};
     int seqLength{3};
 
-    //auto [dirMode, ] = GetParam();
+    auto [dirMode, nohx, nodhy, nocx, nodcy, nohy, nodhx, nocy, nodcx] = GetParam();
 
     this->batchSize  = batchSize;
     this->seqLength  = seqLength;
-    this->batchSeq   = generate_batchSeq(batchSize, seqLength)[0];
-for (auto elem : this->batchSeq) std::cout << elem << ' ';
-std::cout << '\n';
+    this->batchSeq   = {32, 32, 32};
     this->inVecLen   = 128;
     this->hiddenSize = 128;
+    this->dirMode    = dirMode;
+    this->nohx       = bool(nohx);
+    this->nodhy      = bool(nodhy);
+    this->nocx       = bool(nocx);
+    this->nodcy      = bool(nodcy);
+    this->nohy       = bool(nohy);
+    this->nodhx      = bool(nodhx);
+    this->nocy       = bool(nocy);
+    this->nodcx      = bool(nodcx);
+
+    RunTest();
 };
 
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_LSTM_extra_FP32,
-                         testing::Combine(testing::Values(0, 1), testing::Values(0, 1)));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    GPU_LSTM_extra_FP32,
+    // clang-format off
+    testing::Values(// dir-mode no-hx no-dhy no-cx no-dcy no-hy no-dhx no-cy no-dcx
+        std::make_tuple(0,       1,    0,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(0,       0,    1,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(0,       1,    1,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(0,       0,    0,     1,    0,     0,    0,     0,    0),
+        std::make_tuple(0,       1,    0,     1,    0,     0,    0,     0,    0),
+        std::make_tuple(0,       0,    0,     0,    1,     0,    0,     0,    0),
+        std::make_tuple(0,       0,    0,     1,    1,     0,    0,     0,    0),
+        std::make_tuple(1,       1,    0,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(1,       0,    1,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(1,       1,    1,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(1,       0,    0,     1,    0,     0,    0,     0,    0),
+        std::make_tuple(1,       1,    0,     1,    0,     0,    0,     0,    0),
+        std::make_tuple(1,       0,    0,     0,    1,     0,    0,     0,    0),
+        std::make_tuple(1,       0,    0,     1,    1,     0,    0,     0,    0),
+        std::make_tuple(0,       0,    0,     0,    0,     1,    0,     0,    0),
+        std::make_tuple(0,       0,    0,     0,    0,     0,    1,     0,    0),
+        std::make_tuple(0,       0,    0,     0,    0,     1,    1,     0,    0),
+        std::make_tuple(0,       0,    0,     0,    0,     0,    0,     1,    0),
+        std::make_tuple(0,       0,    0,     0,    0,     1,    0,     1,    0),
+        std::make_tuple(0,       0,    0,     0,    0,     0,    0,     0,    1),
+        std::make_tuple(0,       0,    0,     0,    0,     0,    0,     1,    1),
+        std::make_tuple(1,       0,    0,     0,    0,     1,    0,     0,    0),
+        std::make_tuple(1,       0,    0,     0,    0,     0,    1,     0,    0),
+        std::make_tuple(1,       0,    0,     0,    0,     1,    1,     0,    1),
+        std::make_tuple(1,       0,    0,     0,    0,     0,    0,     1,    0),
+        std::make_tuple(1,       0,    0,     0,    0,     1,    0,     1,    0),
+        std::make_tuple(1,       0,    0,     0,    0,     0,    0,     0,    1),
+        std::make_tuple(1,       0,    0,     0,    0,     0,    0,     1,    1),
+        std::make_tuple(0,       1,    1,     1,    1,     1,    1,     1,    1),
+        std::make_tuple(1,       1,    1,     1,    1,     1,    1,     1,    1)));
+    // clang-format on

@@ -42,7 +42,7 @@ TEST_P(GPU_LSTM_dropout_FP32, FloatTest)
     int batchSize{17};
     int seqLength{25};
 
-    auto [flatBatchFill, dirMode] = GetParam();
+    auto [dirMode, flatBatchFill] = GetParam();
 
     this->useDropout    = useDropout;
     this->batchSize     = batchSize;
@@ -51,8 +51,8 @@ TEST_P(GPU_LSTM_dropout_FP32, FloatTest)
     this->batchSeq      = generate_batchSeq(batchSize, seqLength)[0];
     this->numLayers     = 3;
     this->hiddenSize    = 67;
-    this->flatBatchFill = flatBatchFill;
     this->dirMode       = dirMode;
+    this->flatBatchFill = flatBatchFill;
 
     RunTest();
 }
