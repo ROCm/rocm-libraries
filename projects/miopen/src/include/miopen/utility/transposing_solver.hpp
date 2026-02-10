@@ -663,7 +663,7 @@ struct TransposingSolver : Base
 
         // Use Derived::Transpose to allow derived classes to override (CRTP pattern)
         auto transposed_problem = Derived::Transpose(problem);
-        ConvSolution sln        = Inner{}.GetSolution(ctx, transposed_problem);
+        ConvSolution sln        = Inner{}.GetSolution(ctx, transposed_problem, config);
         // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
         auto old_factory             = sln.invoker_factory.value();
         const auto old_kernels_end   = sln.construction_params.size();
