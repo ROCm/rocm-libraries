@@ -59,7 +59,7 @@ inline hipError_t merge_sort_block_merge_impl(
     KeysIterator                                               keys,
     ValuesIterator                                             values,
     const OffsetT                                              size,
-    unsigned int                                               sorted_block_size,
+    unsigned int                                               initial_run_len,
     BinaryFunction                                             compare_function,
     const hipStream_t                                          stream,
     bool                                                       debug_synchronous,
@@ -91,22 +91,31 @@ inline hipError_t merge_sort_block_merge_impl(
     const unsigned int merge_mergepath_items_per_block
         = merge_mergepath_block_size * merge_mergepath_items_per_thread;
 
-    const unsigned int sort_number_of_blocks = ceiling_div(size, sorted_block_size);
     const unsigned int merge_oddeven_number_of_blocks
         = ceiling_div(size, merge_oddeven_items_per_block);
     const unsigned int merge_mergepath_number_of_blocks
         = ceiling_div(size, merge_mergepath_items_per_block);
 
+    // Use Merge Path for large data to utilize full grid parallelism;
+    // fallback to Odd-Even for small data to avoid partition kernel overhead.
     const bool use_mergepath = size > params.merge_oddeven_config.size_limit;
-    // variables below used for mergepath
+
     const unsigned int merge_num_partitions = merge_mergepath_number_of_blocks + 1;
     const unsigned int merge_partition_number_of_blocks
         = ceiling_div(merge_num_partitions, merge_partition_block_size);
 
     if(size == size_t(0))
+    {
         return hipSuccess;
+    }
 
-    if(sorted_block_size < std::max(merge_mergepath_items_per_block, merge_oddeven_block_size))
+    // Ensure that the input data is already sorted into runs at least as large as
+    // the block capacity.
+    // The block merge kernels (Merge Path / Odd-Even) are designed for binary merging
+    // (merging exactly two sorted runs). If initial_run_len is smaller than the
+    // items per block, a single block would overlap more than two runs, which these
+    // kernels cannot handle.
+    if(initial_run_len < std::max(merge_mergepath_items_per_block, merge_oddeven_block_size))
     {
         return hipError_t::hipErrorAssert;
     }
@@ -115,8 +124,7 @@ inline hipError_t merge_sort_block_merge_impl(
     {
         std::cout << "-----" << '\n';
         std::cout << "size: " << size << '\n';
-        std::cout << "sorted_block_size: " << sorted_block_size << '\n';
-        std::cout << "sort_number_of_blocks: " << sort_number_of_blocks << '\n';
+        std::cout << "initial_run_len: " << initial_run_len << '\n';
         std::cout << "merge_oddeven_block_size: " << merge_oddeven_block_size << '\n';
         std::cout << "merge_oddeven_number_of_blocks: " << merge_oddeven_number_of_blocks << '\n';
         std::cout << "merge_oddeven_items_per_thread: " << merge_oddeven_items_per_thread << '\n';
@@ -137,7 +145,7 @@ inline hipError_t merge_sort_block_merge_impl(
     std::chrono::steady_clock::time_point start;
 
     bool temporary_store = true;
-    for(OffsetT block = sorted_block_size; block < size; block *= 2)
+    for(OffsetT current_run_len = initial_run_len; current_run_len < size; current_run_len *= 2)
     {
         temporary_store = !temporary_store;
 
@@ -146,61 +154,76 @@ inline hipError_t merge_sort_block_merge_impl(
                                     auto values_input_,
                                     auto values_output_) -> hipError_t
         {
-            if(use_mergepath && block >= merge_mergepath_items_per_block)
+            if(use_mergepath)
             {
                 if(debug_synchronous)
                 {
                     start = std::chrono::steady_clock::now();
                 }
 
+                // [Phase 1: Global Partitioning]
+                // Calculates the specific split points (diagonals) for each thread block in the global arrays.
+                // This step divides the massive merge workload into independent, balanced chunks so the
+                // next kernel can execute in parallel without inter-block communication.
                 auto device_block_merge_mergepath_partition_kernel = [=](auto target_config)
                 {
                     static constexpr merge_sort_block_merge_config_params params
                         = decltype(target_config)::params;
-                    static constexpr unsigned int items_per_tile
+                    static constexpr unsigned int items_per_block
                         = params.merge_mergepath_config.block_size
                           * params.merge_mergepath_config.items_per_thread;
 
-                    const unsigned int partition_id
+                    const unsigned int partition_idx
                         = blockIdx.x * params.merge_mergepath_partition_config.block_size
                           + threadIdx.x;
 
-                    if(partition_id >= merge_num_partitions)
+                    if(partition_idx >= merge_num_partitions)
                     {
                         return;
                     }
 
-                    const unsigned int merged_tiles        = block / items_per_tile;
-                    const unsigned int target_merged_tiles = merged_tiles * 2;
-                    const unsigned int mask                = target_merged_tiles - 1;
+                    // The global offset represented by current partition index.
+                    const OffsetT global_offset
+                        = static_cast<OffsetT>(partition_idx) * items_per_block;
 
-                    // id of the first tile in the current tile-group
-                    const unsigned int tilegroup_start_id = ~mask & partition_id;
-                    // id of the current tile in the current tile-group
-                    const unsigned int local_tile_id = mask & partition_id;
+                    // The total length of two merged runs.
+                    const OffsetT merged_run_length = 2 * current_run_len;
 
-                    // index of the first item in the current tile-group
-                    const OffsetT tilegroup_start
-                        = static_cast<OffsetT>(tilegroup_start_id) * items_per_tile;
+                    // Find the start of the current Merge Group (aligned to merged_run_length).
+                    const OffsetT group_base
+                        = (global_offset / merged_run_length) * merged_run_length;
 
-                    const OffsetT keys1_beg = rocprim::min(size, tilegroup_start);
-                    const OffsetT keys1_end = rocprim::min(size, tilegroup_start + block);
-                    const OffsetT keys2_beg = keys1_end;
-                    const OffsetT keys2_end = rocprim::min(size, keys2_beg + block);
+                    // Left Run starts at the group base
+                    const OffsetT run_base_L = group_base;
+                    // Right Run starts after Left Run
+                    const OffsetT run_base_R = group_base + current_run_len;
 
-                    const OffsetT partition_at
-                        = rocprim::min(keys2_end - keys1_beg,
-                                       static_cast<OffsetT>(local_tile_id) * items_per_tile);
+                    // Calculate bounds, clamping to input size
+                    const OffsetT run_beg_L = rocprim::min(size, run_base_L);
+                    const OffsetT run_end_L = rocprim::min(size, run_base_L + current_run_len);
 
-                    const OffsetT partition_diag
-                        = ::rocprim::detail::merge_path(keys_input_ + keys1_beg,
-                                                        keys_input_ + keys2_beg,
-                                                        keys1_end - keys1_beg,
-                                                        keys2_end - keys2_beg,
-                                                        partition_at,
+                    const OffsetT run_beg_R = run_end_L; // Start of R is End of L
+                    const OffsetT run_end_R = rocprim::min(size, run_beg_R + current_run_len);
+
+                    // Calculate how many items we need to consume from this group to reach the current partition point.
+                    // diag = Current_Global_Position - Group_Start_Position
+                    const OffsetT diag_local = global_offset - group_base;
+
+                    // Clamp diagonal to the total number of available items in this pair.
+                    const OffsetT count_L = run_end_L - run_beg_L;
+                    const OffsetT count_R = run_end_R - run_beg_R;
+
+                    const OffsetT diag_clamped = rocprim::min(count_L + count_R, diag_local);
+
+                    const OffsetT consumed_L
+                        = ::rocprim::detail::merge_path(keys_input_ + run_beg_L,
+                                                        keys_input_ + run_beg_R,
+                                                        count_L,
+                                                        count_R,
+                                                        diag_clamped,
                                                         compare_function);
 
-                    d_merge_partitions[partition_id] = keys1_beg + partition_diag;
+                    d_merge_partitions[partition_idx] = run_beg_L + consumed_L;
                 };
 
                 // Note: shared memory is not used in this kernel so there is no need to pass vsmem
@@ -223,6 +246,11 @@ inline hipError_t merge_sort_block_merge_impl(
                 {
                     start = std::chrono::steady_clock::now();
                 }
+
+                // [Phase 2: Parallel Block Merge]
+                // Performs the actual merge operation. Each block reads partition boundaries calculated
+                // in Phase 1, loads the corresponding sub-intervals into Shared Memory, and executes a
+                // high-speed local merge.
                 auto device_block_merge_mergepath_kernel = [=](auto target_config) mutable
                 {
                     using TargetConfig = decltype(target_config);
@@ -237,7 +265,7 @@ inline hipError_t merge_sort_block_merge_impl(
                                            TargetConfig::wavefront>;
 
                     using VSmemHelperT = detail::vsmem_helper_impl<merge_impl>;
-                    ROCPRIM_SHARED_MEMORY
+                ROCPRIM_SHARED_MEMORY
                     typename VSmemHelperT::static_temp_storage_t static_temp_storage;
 
                     typename merge_impl::storage_type& storage
@@ -249,7 +277,7 @@ inline hipError_t merge_sort_block_merge_impl(
                                               values_input_,
                                               values_output_,
                                               size,
-                                              block,
+                                              current_run_len,
                                               merge_mergepath_number_of_blocks,
                                               compare_function,
                                               d_merge_partitions,
@@ -289,7 +317,7 @@ inline hipError_t merge_sort_block_merge_impl(
                         values_input_,
                         values_output_,
                         static_cast<unsigned int>(size),
-                        static_cast<unsigned int>(block),
+                        static_cast<unsigned int>(current_run_len),
                         compare_function);
                 };
                 ROCPRIM_RETURN_ON_ERROR(
@@ -379,12 +407,9 @@ inline hipError_t merge_sort_block_merge(
 
     const target current_target(stream);
 
-    const auto         params                     = get_config<selector>(Config{}, current_target);
-    const unsigned int merge_mergepath_block_size = params.merge_mergepath_config.block_size;
-    const unsigned int merge_mergepath_items_per_thread
-        = params.merge_mergepath_config.items_per_thread;
+    const auto         params = get_config<selector>(Config{}, current_target);
     const unsigned int merge_mergepath_items_per_block
-        = merge_mergepath_block_size * merge_mergepath_items_per_thread;
+        = params.merge_mergepath_config.block_size * params.merge_mergepath_config.items_per_thread;
 
     const unsigned int merge_mergepath_number_of_blocks
         = ceiling_div(size, merge_mergepath_items_per_block);
