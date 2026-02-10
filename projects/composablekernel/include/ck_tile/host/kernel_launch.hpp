@@ -31,41 +31,41 @@ struct kernel_attr
 };
 
 #if CK_TILE_USE_LAUNCH_BOUNDS
-#define KENTYR_LAUNCH_BOUNDS __launch_bounds__(Kernel::kBlockSize, MinBlockPerCu)
+#define KENTRY_LAUNCH_BOUNDS __launch_bounds__(Kernel::kBlockSize, MinBlockPerCu)
 #else
-#define KENTYR_LAUNCH_BOUNDS
+#define KENTRY_LAUNCH_BOUNDS
 #endif
 #if defined(__HIP_DEVICE_COMPILE__)
-#define KENTYR_BODY Kernel{}(args...)
-#define KENTYR_ATTR_NO_PACKED_FP32_OPS __attribute__((target("no-packed-fp32-ops")))
+#define KENTRY_BODY Kernel{}(args...)
+#define KENTRY_ATTR_NO_PACKED_FP32_OPS __attribute__((target("no-packed-fp32-ops")))
 #else
-#define KENTYR_BODY (..., (ignore = args, 0))
-#define KENTYR_ATTR_NO_PACKED_FP32_OPS
+#define KENTRY_BODY (..., (ignore = args, 0))
+#define KENTRY_ATTR_NO_PACKED_FP32_OPS
 #endif
 
 template <int MinBlockPerCu, typename Kernel, typename... Args>
-KENTYR_LAUNCH_BOUNDS __global__ void kentry(Args... args)
+KENTRY_LAUNCH_BOUNDS __global__ void kentry(Args... args)
 {
-    KENTYR_BODY;
+    KENTRY_BODY;
 }
 template <typename Attr, int MinBlockPerCu, typename Kernel, typename... Args>
-KENTYR_LAUNCH_BOUNDS __global__ //
+KENTRY_LAUNCH_BOUNDS __global__ //
     std::enable_if_t<!kattr_no_packed_fp32_ops_v<Attr>>
     kentry(Args... args)
 {
-    KENTYR_BODY;
+    KENTRY_BODY;
 }
 template <typename Attr, int MinBlockPerCu, typename Kernel, typename... Args>
-KENTYR_LAUNCH_BOUNDS KENTYR_ATTR_NO_PACKED_FP32_OPS __global__ //
+KENTRY_LAUNCH_BOUNDS KENTRY_ATTR_NO_PACKED_FP32_OPS __global__ //
     std::enable_if_t<kattr_no_packed_fp32_ops_v<Attr>>
     kentry(Args... args)
 {
-    KENTYR_BODY;
+    KENTRY_BODY;
 }
 
-#undef KENTYR_LAUNCH_BOUNDS
-#undef KENTYR_BODY
-#undef KENTYR_ATTR_NO_PACKED_FP32_OPS
+#undef KENTRY_LAUNCH_BOUNDS
+#undef KENTRY_BODY
+#undef KENTRY_ATTR_NO_PACKED_FP32_OPS
 
 //
 // return a anonymous functor(lambda) to be called later

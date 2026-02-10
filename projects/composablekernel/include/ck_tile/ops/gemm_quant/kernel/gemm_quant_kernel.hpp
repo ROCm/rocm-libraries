@@ -1453,7 +1453,7 @@ struct QuantGemmKernel
         }
     }
 
-    CK_TILE_DEVICE void Run_(QuantGemmKernelArgs kargs) const
+    CK_TILE_DEVICE void Run_(QuantGemmKernelArgs& kargs) const
     {
         const auto blockId  = amd_wave_read_first_lane(blockIdx.x);
         const auto [iM, iN] = TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(blockId);
@@ -1484,13 +1484,12 @@ struct QuantGemmKernel
     static constexpr bool kIsAvailableV<T, std::void_t<decltype(T::kIsAvailable)>> =
         T::kIsAvailable;
 
-    template <typename... Ts>
-    CK_TILE_DEVICE void operator()(Ts... args) const
+    CK_TILE_DEVICE void operator()(QuantGemmKernelArgs& kargs) const
     {
         if constexpr(!kIsAvailableV<GemmPipeline>)
-            (..., (ignore = args, 0));
+            ignore = kargs;
         else
-            Run_(std::forward<Ts>(args)...);
+            Run_(kargs);
     }
 };
 
