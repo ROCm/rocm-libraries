@@ -26,7 +26,8 @@
 
 // The implementation of the rocblaslt<->Tensile interface layer.
 
-#include "rocblaslt.h"
+#include <hip/hip_runtime.h>
+#include <iostream>
 
 /*****************************************************************************
  * This is the only file in rocblaslt which should #include Tensile headers    *
@@ -35,7 +36,6 @@
 
 #include "Debug.hpp"
 #include "rocblaslt-types.h"
-#include "rocblaslt_mat_utils.hpp"
 #include "tensile_host.hpp"
 
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -52,19 +52,22 @@
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
+#include <functional>
+#include <hip/hip_runtime.h>
+#include <iostream>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include <atomic>
-#include <complex>
 #include <exception>
 #include <filesystem>
-#include <iomanip>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <regex>
 #include <sstream>
 #include <string>
-#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -75,6 +78,380 @@
 #endif
 
 #define INTERNAL_HIPHOSTMEM_SIZE 32768
+
+#define CHECK_HIP_DRV(cmd)                                                              \
+    {                                                                                   \
+        hipError_t error = cmd;                                                         \
+        if(error != hipSuccess)                                                         \
+        {                                                                               \
+            std::cerr << "HIP Driver Error: " << hipGetErrorString(error) << std::endl; \
+            return false;                                                               \
+        }                                                                               \
+    }
+
+namespace
+{
+
+    // This class manages the execution of externally provided assembly (.s) files.
+    //
+    // This is intended as a lightweight alternative while a more robust solution is built out.
+    //
+    // To add your own assembly kernel, you need to create a RegistryEntry along the
+    // lines of entrySimpleGemmPoC() below, and add it to the registry returned by getRegistry().
+    //
+    // Then, tell hipblaslt to enable external assembly, and where the assembly files are,
+    // via environment variables:
+    //
+    // export HIPBLASLT_ENABLE_EXTERNAL_ASSEMBLY=1
+    // export HIPBLASLT_EXTERNAL_ASSEMBLY_DIR=/path/to/your/asm/files/
+    //
+    // You should then be able to your assembly kernel through hipblaslt-bench, verifying it
+    // is wired up correctly and seeing its performance.
+    //
+    // To run entrySimpleGemmPoC are:
+    //
+    // ninja hipblaslt-bench && \
+    //  hipblaslt-bench -m 128 -n 64 -k 256 -r f32_r --verify --alpha 1 --beta 1
+    class ExternalAssemblyDriver
+    {
+    public:
+        struct Dim3
+        {
+            int x, y, z;
+        };
+
+        struct GridConfig
+        {
+            Dim3 blocks;
+            Dim3 blockSize;
+            int  getWavesPerWorkgroup() const
+            {
+                // Assuming wavefront size of 64
+                int threadsPerBlock = blockSize.x * blockSize.y * blockSize.z;
+                return (threadsPerBlock + 63) / 64;
+            }
+        };
+
+        // Each kernel provides:
+        //  - A function to pack its arguments into a byte buffer
+        //  - A function to compute grid/block dimensions
+        using ArgPacker = std::function<std::vector<uint8_t>(const RocblasltContractionProblem&)>;
+        using GridConfigFn = std::function<GridConfig(const RocblasltContractionProblem&)>;
+
+        using KernelSelector
+            = std::function<bool(rocblaslt_handle, const RocblasltContractionProblem&)>;
+
+        struct KernelInfo
+        {
+            std::string  asmPath;
+            std::string  funcName;
+            ArgPacker    packArgs;
+            GridConfigFn getGridConfig;
+        };
+
+        struct RegistryEntry
+        {
+            std::string    name;
+            KernelSelector selector;
+            KernelInfo     info;
+        };
+
+        static bool isEnabled()
+        {
+            static bool enabled = []() {
+                const char* env = getenv("HIPBLASLT_ENABLE_EXTERNAL_ASSEMBLY");
+                if(env && (std::string(env) == "1" || std::string(env) == "TRUE"))
+                {
+                    return true;
+                }
+                return false;
+            }();
+            return enabled;
+        }
+
+        /// Returns the path to the .s source file.
+        static std::string getAsmPath(const std::string& filename)
+        {
+            const char* env = std::getenv("HIPBLASLT_EXTERNAL_ASSEMBLY_DIR");
+            if(env)
+            {
+                std::string path = env;
+                if(!path.empty() && path.back() != '/')
+                {
+                    path += "/";
+                }
+                return path + filename;
+            }
+
+            // Assume .s is in current directory if env var is not set
+            return "./" + filename;
+        }
+
+        /// Derives the co_cache/ path for a given .s filename.
+        static std::string getCachePath(const std::string& asmPath)
+        {
+            std::filesystem::path p(asmPath);
+            std::filesystem::path cacheDir = p.parent_path() / "co_cache";
+            std::filesystem::path coFile   = p.stem();
+            coFile += ".co";
+            return (cacheDir / coFile).string();
+        }
+
+        /// Queries the GPU architecture string (e.g. "gfx942") for the current device.
+        static std::string getGpuArch()
+        {
+            static std::string arch = []() {
+                hipDeviceProp_t props;
+                int             deviceId = 0;
+                hipError_t      success  = hipGetDevice(&deviceId);
+                if(success != hipSuccess)
+                {
+                    throw std::runtime_error(
+                        "[ExternalAssemblyDriver] Failed to get current HIP device.");
+                }
+                hipGetDeviceProperties(&props, deviceId);
+                std::string full(props.gcnArchName);
+                auto        pos = full.find(':');
+                if(pos != std::string::npos)
+                {
+                    return full.substr(0, pos);
+                }
+                return full;
+            }();
+            return arch;
+        }
+
+        /// Compiles a .s file to a .co file if the .co doesn't already exist.
+        static std::string compileToCO(const std::string& asmPath)
+        {
+            std::string coPath = getCachePath(asmPath);
+
+            if(std::filesystem::exists(coPath))
+            {
+                std::cout << "[ExternalAssemblyDriver] Using cached: " << coPath << std::endl;
+                return coPath;
+            }
+
+            std::filesystem::path cacheDir = std::filesystem::path(coPath).parent_path();
+            std::filesystem::create_directories(cacheDir);
+
+            std::string arch     = getGpuArch();
+            std::string compiler = "/opt/rocm/llvm/bin/clang";
+
+            std::ostringstream cmd;
+            cmd << compiler << " -x assembler"
+                << " -target amdgcn-amd-amdhsa"
+                << " -mcpu=" << arch << " -o " << coPath << " " << asmPath << " 2>&1";
+
+            std::cout << "[ExternalAssemblyDriver] Compiling: " << cmd.str() << std::endl;
+
+            int ret = std::system(cmd.str().c_str());
+            if(ret != 0)
+            {
+                std::cerr << "[ExternalAssemblyDriver] Compilation failed for: " << asmPath
+                          << std::endl;
+                std::filesystem::remove(coPath);
+                return "";
+            }
+
+            std::cout << "[ExternalAssemblyDriver] Compiled successfully: " << coPath << std::endl;
+            return coPath;
+        }
+
+        /// Reads a .s file into a string.
+        static std::string readAsmFile(const std::string& asmPath)
+        {
+            std::ifstream asmFile(asmPath);
+            if(!asmFile.is_open())
+            {
+                throw std::runtime_error("[ExternalAssemblyDriver] Failed to open assembly file: "
+                                         + asmPath);
+            }
+            return std::string((std::istreambuf_iterator<char>(asmFile)),
+                               std::istreambuf_iterator<char>());
+        }
+
+        static const KernelInfo* findKernel(rocblaslt_handle                   handle,
+                                            const RocblasltContractionProblem& prob)
+        {
+            for(const auto& entry : getRegistry())
+            {
+                if(entry.selector(handle, prob))
+                {
+                    return &entry.info;
+                }
+            }
+            return nullptr;
+        }
+
+        /// Main entry point: packs args, launches kernel.
+        static bool dispatch(rocblaslt_handle                   handle,
+                             const KernelInfo&                  info,
+                             const RocblasltContractionProblem& prob)
+        {
+
+            // 1. Get compiled GPU function
+            hipFunction_t func = getFunction(info);
+            if(!func)
+            {
+                std::cerr << "[ExternalAssemblyDriver] Failed to get GPU function handle."
+                          << std::endl;
+                return false;
+            }
+
+            std::vector<uint8_t> argBuffer = info.packArgs(prob);
+
+            GridConfig grid = info.getGridConfig(prob);
+
+            std::cout << "[ExternalAssemblyDriver] Dispatching kernel: " << info.funcName
+                      << std::endl;
+            return launchKernel(func, argBuffer, grid, prob.stream);
+        }
+
+    private:
+        /// Generic kernel launch using packed arg buffer and grid config.
+        static bool launchKernel(hipFunction_t         func,
+                                 std::vector<uint8_t>& argBuffer,
+                                 const GridConfig&     grid,
+                                 hipStream_t           stream)
+        {
+            size_t argsSize = argBuffer.size();
+            void*  argsPtr  = argBuffer.data();
+
+            void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
+                              argsPtr,
+                              HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                              &argsSize,
+                              HIP_LAUNCH_PARAM_END};
+
+            hipError_t err = hipModuleLaunchKernel(func,
+                                                   grid.blocks.x,
+                                                   grid.blocks.y,
+                                                   grid.blocks.z,
+                                                   grid.blockSize.x,
+                                                   grid.blockSize.y,
+                                                   grid.blockSize.z,
+                                                   0,
+                                                   stream,
+                                                   NULL,
+                                                   config);
+
+            if(err != hipSuccess)
+            {
+                std::cerr << "[ExternalAssemblyDriver] Launch failed: " << hipGetErrorString(err)
+                          << std::endl;
+                return false;
+            }
+            return true;
+        }
+
+        // Rule 1: Simple GEMM PoC
+        static RegistryEntry entrySimpleGemmPoC()
+        {
+            return {"SimpleGemm_PoC",
+                    // Selector: what GEMM geometries should this kernel be used for?
+                    [](rocblaslt_handle, const RocblasltContractionProblem& p) -> bool {
+                        bool dimsMatch = (p.m == 128 && p.n == 64 && p.k == 256);
+
+                        bool typesMatch = (p.a_type == HIP_R_32F && p.b_type == HIP_R_32F
+                                           && p.c_type == HIP_R_32F && p.d_type == HIP_R_32F);
+
+                        return dimsMatch && typesMatch;
+                    },
+                    // KernelInfo
+                    {getAsmPath("simplegemm_poc.s"),
+                     // Function name:
+                     "SimpleGemm",
+                     // ArgPacker
+                     [](const RocblasltContractionProblem& p) -> std::vector<uint8_t> {
+                         struct Args
+                         {
+                             void*       D;
+                             const void *A, *B, *C;
+                             float       alpha, beta;
+                             int         m, n, k;
+                         };
+
+                         Args args = {p.D,
+                                      p.A,
+                                      p.B,
+                                      p.C,
+                                      *(float*)p.alpha,
+                                      *(float*)p.beta,
+                                      static_cast<int>(p.m),
+                                      static_cast<int>(p.n),
+                                      static_cast<int>(p.k)};
+
+                         auto* raw = reinterpret_cast<uint8_t*>(&args);
+                         return std::vector<uint8_t>(raw, raw + sizeof(Args));
+                     },
+                     // GridConfigFn
+                     [](const RocblasltContractionProblem& p) -> GridConfig {
+                         int blockSize = 256;
+                         int threads   = static_cast<int>(p.m * p.n);
+                         int blocks    = (threads + blockSize - 1) / blockSize;
+                         return {{blocks, 1, 1}, {blockSize, 1, 1}};
+                     }}};
+        }
+
+        static const std::vector<RegistryEntry>& getRegistry()
+        {
+            static std::vector<RegistryEntry> registry = {
+                entrySimpleGemmPoC(),
+            };
+            return registry;
+        }
+
+        /// Loads (and caches) a HIP function from a KernelInfo.
+        /// Compiles the .s -> .co on first access if needed.
+        static hipFunction_t getFunction(const KernelInfo& info)
+        {
+            static std::mutex                                     mutex;
+            static std::unordered_map<std::string, hipFunction_t> funcMap;
+            static std::vector<hipModule_t>                       modules;
+
+            std::lock_guard<std::mutex> lock(mutex);
+
+            std::string key = info.asmPath + "::" + info.funcName;
+
+            if(funcMap.count(key))
+            {
+                return funcMap[key];
+            }
+
+            std::string coPath = compileToCO(info.asmPath);
+            if(coPath.empty())
+            {
+                std::cerr << "[ExternalAssemblyDriver] Compilation failed, cannot load module."
+                          << std::endl;
+                return nullptr;
+            }
+
+            std::cout << "[ExternalAssemblyDriver] Loading module: " << coPath << std::endl;
+
+            hipModule_t module;
+            if(hipModuleLoad(&module, coPath.c_str()) != hipSuccess)
+            {
+                std::cerr << "[ExternalAssemblyDriver] Failed to load module: " << coPath
+                          << std::endl;
+                return nullptr;
+            }
+
+            hipFunction_t func;
+            if(hipModuleGetFunction(&func, module, info.funcName.c_str()) != hipSuccess)
+            {
+                std::cerr << "[ExternalAssemblyDriver] Failed to find symbol: " << info.funcName
+                          << std::endl;
+                return nullptr;
+            }
+
+            modules.push_back(module);
+            funcMap[key] = func;
+            return func;
+        }
+    };
+
+} // End anonymous namespace
 
 RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     trans_a,
                                                          hipblasOperation_t     trans_b,
@@ -2221,7 +2598,6 @@ namespace
                 {
                     std::cerr << "\nrocblaslt error: Cannot read " << tensileLibPath << ": "
                               << strerror(errno) << std::endl;
-                    // rocblaslt_abort();
                 }
 
 #if ROCBLASLT_TENSILE_LAZY_LOAD
@@ -2532,9 +2908,24 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                        const RocblasltContractionProblem& prob,
                                        std::shared_ptr<void>              gemmData)
 {
+
     rocblaslt_status status = rocblaslt_status_internal_error;
+
     try
     {
+        if(ExternalAssemblyDriver::isEnabled())
+        {
+            const auto* kernel = ExternalAssemblyDriver::findKernel(handle, prob);
+            if(kernel)
+            {
+                if(ExternalAssemblyDriver::dispatch(handle, *kernel, prob))
+                {
+                    return rocblaslt_status_success;
+                }
+                throw std::runtime_error("Failed to run Direct Assembly kernel.");
+            }
+        }
+
 #ifdef HIPBLASLT_USE_ROCROLLER
         if(useRocRoller(handle, prob))
             return runRocRollerContractionProblem(handle, algo, prob);
@@ -2620,7 +3011,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                                   false);
         }
 
-        auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+        // Print the data problem:
+        std::shared_ptr<TensileLite::ContractionSolution> solution
+            = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
         if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -2695,7 +3088,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // set XCC=1 to param when this is a fallback solution
             data->problem.setParams().setWGMXCC((isCUFallback ? 1 : 0));
 
-            auto kernels = solution->solve(data->problem, GetTensileInputs(prob), *hardware);
+            std::vector<TensileLite::KernelInvocation> kernels
+                = solution->solve(data->problem, GetTensileInputs(prob), *hardware);
+
             // Remove this after supports getting comgr buffers from hip.
             bool isPreloaded = false;
             if(rocblaslt::Debug::Instance().preload())
@@ -3575,6 +3970,45 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int*                               returnAlgoCount,
                                   size_t                             maxWorkSpaceBytes)
 {
+
+    try
+    {
+
+        // If direct assembly is enabled (environment variable), and there is a direct assembly kernel that can perform prob,
+        // set the returnAlgoCount to 1 and return success.
+        if(!ExternalAssemblyDriver::isEnabled())
+        {
+            std::cout << "[ExternalAssemblyDriver] Direct assembly not enabled via "
+                         "HIPBLASLT_ENABLE_EXTERNAL_ASSEMBLY"
+                      << std::endl;
+        }
+        else if(ExternalAssemblyDriver::findKernel(handle, prob))
+        {
+
+            std::cout << "[ExternalAssemblyDriver] Match found" << std::endl;
+            *returnAlgoCount = 1;
+            return rocblaslt_status_success;
+        }
+        else
+        {
+            std::cout
+                << "[ExternalAssemblyDriver] Direct assembly enabled but no matching kernel found"
+                << std::endl;
+        }
+    }
+
+    catch(const std::exception& e)
+    {
+
+        std::cout << "[ExternalAssemblyDriver] Exception caught: " << e.what() << std::endl;
+        return rocblaslt_status_internal_error;
+    }
+    catch(...)
+    {
+        std::cout << "[ExternalAssemblyDriver] Unknown exception caught" << std::endl;
+        return rocblaslt_status_internal_error;
+    }
+
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
         return getRocRollerBestSolutions(handle,
@@ -3625,7 +4059,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
         for(size_t i = 0; i < algoCount; ++i)
         {
             auto& solution = solutions[i];
-            msg << "getBestSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+            msg << "getBestSolutions(): sol-idx = " << solution->index
+                << ", sol-tag = " << solution->matchingTag() << std::endl;
         }
         log_info(__func__, msg.str());
     }
@@ -3701,7 +4136,7 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
 
     heuristicResults.resize(solutions.size());
 
-    int i = 0;
+    int i                 = 0;
     int duplicated_counts = 0;
     for(auto solution : solutions)
     {
@@ -3730,7 +4165,8 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
         if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
         {
             std::ostringstream msg;
-            msg << "getAllSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+            msg << "getAllSolutions(): sol-idx = " << solution->index
+                << ", sol-tag = " << solution->matchingTag() << std::endl;
             log_info(__func__, msg.str());
         }
 
@@ -4217,7 +4653,8 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
             for(size_t i = 0; i < algoCount; ++i)
             {
                 auto& solution = solutions[i];
-                msg << "getBestSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+                msg << "getBestSolutions(): sol-idx = " << solution->index
+                    << ", sol-tag = " << solution->matchingTag() << std::endl;
             }
             log_info(__func__, msg.str());
         }
