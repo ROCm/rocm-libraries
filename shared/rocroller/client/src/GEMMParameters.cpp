@@ -122,7 +122,7 @@ namespace rocRoller
                 fullName << "_LA" << loadPathA;
                 fullName << "_LB" << loadPathB;
 
-                fullName << "_SD" << storeLDSD;
+                fullName << "_SD" << storePath;
 
                 fullName << "_LSA" << loadPathAScale;
                 fullName << "_LSB" << loadPathBScale;
@@ -280,7 +280,7 @@ namespace rocRoller
                 s << "LDS Padding A:   " << x.padLDSA << std::endl;
                 s << "Load B:          " << x.loadPathB << std::endl;
                 s << "LDS Padding B:   " << x.padLDSB << std::endl;
-                s << "Store D LDS:     " << x.storeLDSD << std::endl;
+                s << "Store D Path:    " << x.storePath << std::endl;
                 s << "Load AScale:     " << x.loadPathAScale << std::endl;
                 s << "Load BScale:     " << x.loadPathBScale << std::endl;
                 s << "Prefetch:        "
