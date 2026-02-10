@@ -85,7 +85,7 @@ endif()
 # Set RPATH so the Python extension can find liborigami.so at runtime.
 if(NOT WIN32)
     set_target_properties(_pyorigami PROPERTIES
-        INSTALL_RPATH "$ORIGIN/../../..:$ORIGIN/../../lib"
+        INSTALL_RPATH "$ORIGIN/../../..:$ORIGIN/../../lib:$ORIGIN/../../../lib"
     )
 endif()
 
