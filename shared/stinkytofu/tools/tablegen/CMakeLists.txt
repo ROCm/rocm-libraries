@@ -9,8 +9,8 @@ set(SOURCES
     GenLogicalIR.cpp
     GenInstructions.cpp  # NEW: Instruction metadata generator (proof-of-concept)
     # Pattern parser sources (needed for GenPatterns)
-    ../../src/ir/asm/IRLexer.cpp
-    ../../src/ir/asm/PatternParser.cpp
+    ../../src/serialization/asm/IRLexer.cpp
+    ../../src/serialization/asm/PatternParser.cpp
 )
 
 add_executable(tablegen "${SOURCES}")
@@ -28,7 +28,7 @@ add_executable(tablegen_inst_gen
 target_include_directories(tablegen PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../src/ir/asm"  # For IRLexer.hpp
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../src/serialization/asm"  # For IRLexer.hpp
 )
 
 # Define output directory for generated files
@@ -43,27 +43,28 @@ set(HARDWARE_SOURCE_FILES "")
 
 # Per-arch Isa.inc and gfxIsa.inc are produced by tablegen_inst_gen (instruction_generated), not full tablegen.
 foreach(arch ${STINKYTOFU_ARCHS_TO_BUILD})
-    list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/rocisa/Rocisa${arch}Mappings.inc")
-    list(APPEND HARDWARE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/src/gfx/${arch}.cpp")
+    list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/rocisa/Rocisa${arch}Mappings.inc")
+    list(APPEND HARDWARE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/src/gfx/${arch}/${arch}.cpp")
 endforeach()
 
 # Add pattern-generated files
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/PeepholePatterns.inc")
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/LogicalIRPatterns.inc")
-set(PATTERN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/Dialect/Transforms/PeepholePatterns.pattern")
-set(HLIR_PATTERN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/Dialect/Transforms/LogicalIR/LogicalIRPatterns.pattern")
+set(PATTERN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../src/transforms/asm/PeepholePatterns.pattern")
+set(HLIR_PATTERN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../src/transforms/logical/LogicalIRPatterns.pattern")
 
 # Add high-level IR generated files
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/LogicalOpcodes_generated.inc")
-list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/logical/LogicalOpcode.cpp")
-list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/logical/LogicalInstructions_generated.hpp")
-list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/LogicalToAsmMappings_generated.inc")
+list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/logical/LogicalOpcode.cpp")
+list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/logical/LogicalInstructions_generated.hpp")
+list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/LogicalToAsmMappings_generated.inc")
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/PythonBindings_generated.inc")
 
 # Instruction metadata and ISA .inc from .def files (tablegen_inst_gen, no gfxisa).
+# .def files live in hardware/src/gfx/Gfx***/ (per-arch folders).
 # Single run produces: hardware/generated/*_costs.inc, *_init.inc, *_operands.inc and
 # hardware/*Isa.inc, hardware/gfxIsa.inc so the full tablegen does not need gfxisa for ISA.
-get_filename_component(INSTRUCTION_DEF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/defs" ABSOLUTE)
+get_filename_component(INSTRUCTION_DEF_BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/src/gfx" ABSOLUTE)
 set(INSTRUCTION_GEN_DIR "${TABLEGEN_OUTPUT_DIR}/hardware/generated")
 set(INSTRUCTION_GEN_FILES "")
 foreach(arch Gfx1250 Gfx942 Gfx950)
@@ -75,12 +76,12 @@ endforeach()
 list(APPEND INSTRUCTION_GEN_FILES "${TABLEGEN_OUTPUT_DIR}/hardware/gfxIsa.inc")
 list(APPEND TABLEGEN_GENERATED_FILES ${INSTRUCTION_GEN_FILES})
 set(INSTRUCTION_DEF_FILES
-    "${INSTRUCTION_DEF_DIR}/Gfx1250Formats.def"
-    "${INSTRUCTION_DEF_DIR}/Gfx1250Instructions.def"
-    "${INSTRUCTION_DEF_DIR}/Gfx942Formats.def"
-    "${INSTRUCTION_DEF_DIR}/Gfx942Instructions.def"
-    "${INSTRUCTION_DEF_DIR}/Gfx950Formats.def"
-    "${INSTRUCTION_DEF_DIR}/Gfx950Instructions.def"
+    "${INSTRUCTION_DEF_BASE_DIR}/Gfx1250/Gfx1250Formats.def"
+    "${INSTRUCTION_DEF_BASE_DIR}/Gfx1250/Gfx1250Instructions.def"
+    "${INSTRUCTION_DEF_BASE_DIR}/Gfx942/Gfx942Formats.def"
+    "${INSTRUCTION_DEF_BASE_DIR}/Gfx942/Gfx942Instructions.def"
+    "${INSTRUCTION_DEF_BASE_DIR}/Gfx950/Gfx950Formats.def"
+    "${INSTRUCTION_DEF_BASE_DIR}/Gfx950/Gfx950Instructions.def"
 )
 
 # One tablegen_inst_gen run: all archs + ISA .inc (single build, no two-phase).
@@ -88,7 +89,7 @@ add_custom_command(
     OUTPUT ${INSTRUCTION_GEN_FILES}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/hardware/generated"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/hardware"
-    COMMAND $<TARGET_FILE:tablegen_inst_gen> --input-dir="${INSTRUCTION_DEF_DIR}" --output-dir="${TABLEGEN_OUTPUT_DIR}"
+    COMMAND $<TARGET_FILE:tablegen_inst_gen> --input-dir="${INSTRUCTION_DEF_BASE_DIR}" --output-dir="${TABLEGEN_OUTPUT_DIR}"
     DEPENDS tablegen_inst_gen ${INSTRUCTION_DEF_FILES}
     COMMENT "Generating instruction metadata and ISA from .def files..."
     VERBATIM
@@ -102,9 +103,8 @@ list(REMOVE_ITEM TABLEGEN_OTHER_FILES ${INSTRUCTION_GEN_FILES})
 add_custom_command(
     OUTPUT ${TABLEGEN_OTHER_FILES}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/hardware"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/ir"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/ir/logical"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/ir/rocisa"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/logical"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/rocisa"
     COMMAND $<TARGET_FILE:tablegen> "${TABLEGEN_OUTPUT_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware"
     DEPENDS tablegen instruction_generated ${HARDWARE_SOURCE_FILES} ${PATTERN_FILE} ${HLIR_PATTERN_FILE}
     COMMENT "Generating ISA definitions, IR classes, and pattern matchers with tablegen..."

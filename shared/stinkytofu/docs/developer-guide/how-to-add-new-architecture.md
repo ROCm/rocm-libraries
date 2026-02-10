@@ -20,9 +20,9 @@ Adding a new architecture involves:
 
 | Architecture | File | Type | Defaults | Notes |
 |--------------|------|------|----------|-------|
-| **Gfx942** | `hardware/src/gfx/Gfx942.cpp` | CDNA3/MI300 | cycle=4, latency=4 | ~986 lines, has MFMA |
-| **Gfx950** | `hardware/src/gfx/Gfx950.cpp` | CDNA5 | cycle=4, latency=4 | Has WMMA |
-| **Gfx1250** | `hardware/src/gfx/Gfx1250.cpp` | RDNA4 | cycle=1, latency=1 | Simpler ISA |
+| **Gfx942** | `hardware/src/gfx/Gfx942/Gfx942.cpp` | CDNA3/MI300 | cycle=4, latency=4 | ~986 lines, has MFMA |
+| **Gfx950** | `hardware/src/gfx/Gfx950/Gfx950.cpp` | CDNA5 | cycle=4, latency=4 | Has WMMA |
+| **Gfx1250** | `hardware/src/gfx/Gfx1250/Gfx1250.cpp` | RDNA4 | cycle=1, latency=1 | Simpler ISA |
 
 **This guide uses Gfx942 as the example** - all code snippets are from actual files you can reference.
 
@@ -62,10 +62,10 @@ Add a `#cmakedefine` entry in `include/Config.h.in`.
 **Example:** Copy a similar architecture as your starting point:
 ```bash
 # For CDNA-like architecture, copy Gfx942 or Gfx950
-cp hardware/src/gfx/Gfx942.cpp hardware/src/gfx/GfxYourArch.cpp
+cp hardware/src/gfx/Gfx942/Gfx942.cpp hardware/src/gfx/GfxYourArch/GfxYourArch.cpp
 
 # For RDNA-like architecture, copy Gfx1250
-cp hardware/src/gfx/Gfx1250.cpp hardware/src/gfx/GfxYourArch.cpp
+cp -r hardware/src/gfx/Gfx1250 hardware/src/gfx/GfxYourArch && mv hardware/src/gfx/GfxYourArch/Gfx1250.cpp hardware/src/gfx/GfxYourArch/GfxYourArch.cpp
 ```
 
 Here's the actual structure from **Gfx942** (CDNA3/MI300):
@@ -193,9 +193,9 @@ namespace stinkytofu
 - Use `DEF_T` macro for standard instructions
 - Use `GEN_MFMA` / `GEN_WMMA` for matrix instructions
 - **Copy from existing architectures:**
-  - `hardware/src/gfx/Gfx942.cpp` - ~986 lines, CDNA3 with MFMA
-  - `hardware/src/gfx/Gfx950.cpp` - CDNA5 with WMMA
-  - `hardware/src/gfx/Gfx1250.cpp` - RDNA4, simpler instruction set
+  - `hardware/src/gfx/Gfx942/Gfx942.cpp` - ~986 lines, CDNA3 with MFMA
+  - `hardware/src/gfx/Gfx950/Gfx950.cpp` - CDNA5 with WMMA
+  - `hardware/src/gfx/Gfx1250/Gfx1250.cpp` - RDNA4, simpler instruction set
 - Use `grep "v_mfma\|v_wmma" instruction_costs_groundtruth.txt` to see all matrix variants
 
 **Where to find instruction costs:**
@@ -205,14 +205,14 @@ namespace stinkytofu
 
 ### Step 4: Create ArchInfo Class
 
-#### 1. Create `hardware/include/Gfx942.hpp`
+#### 1. Create `src/hardware/Gfx942.hpp`
 
 **Template:** Copy from an existing ArchInfo file.
 
 **Example (actual Gfx942 structure):**
 
 ```cpp
-#include "isa/ArchHelper.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 
 namespace
 {
@@ -276,7 +276,7 @@ struct Gfx942ArchInfo : public ArchHelper::ArchInfo
 
 ### Step 5: Create Rocisa-related header
 
-#### 1. Create `src/ir/rocisa/Gfx942RocisaArchInfo.hpp`
+#### 1. Create `src/conversion/rocisa/Gfx942RocisaArchInfo.hpp`
 
 **Template:** Copy from an existing RocisaArchInfo file.
 
@@ -290,7 +290,7 @@ namespace
     const std::unordered_map<std::type_index, uint16_t>* Gfx942RocisaToHwInstMap()
     {
 #define GET_ROCISA_HW_MAPPING_TABLE
-#include "ir/rocisa/RocisaGfx942Mappings.inc"
+#include "stinkytofu/ir/rocisa/RocisaGfx942Mappings.inc"
         return &rocisaToHwInstMap;
     }
 
@@ -298,7 +298,7 @@ namespace
         Gfx942RocisaToHwInstLoweringMap()
     {
 #define GET_ROCISA_TO_HW_CONVERSION_TABLE
-#include "ir/rocisa/RocisaGfx942Mappings.inc"
+#include "stinkytofu/ir/rocisa/RocisaGfx942Mappings.inc"
         return &convertRocisaToHwInstFunc;
     }
 };
@@ -306,7 +306,7 @@ namespace
 
 **To adapt:** Replace `942` with your architecture number.
 
-#### 2. Update `src/ir/rocisa/RocisaArchHelper.cpp`
+#### 2. Update `src/conversion/rocisa/RocisaArchInfo.hpp`
 
 **Example (how Gfx942 is included):**
 
@@ -334,7 +334,7 @@ When adding a new architecture, follow the Gfx942 pattern:
 
 - [ ] Update `cmake/StinkytofuArchList.cmake` - add your architecture to the list
 - [ ] Update `include/Config.h.in` - add `#cmakedefine STINKYTOFU_ARCH_GFXYOURARCH`
-- [ ] Create `hardware/src/gfx/GfxYourArch.cpp` (copy from Gfx942/Gfx950/Gfx1250)
+- [ ] Create `hardware/src/gfx/GfxYourArch/GfxYourArch.cpp` (copy from Gfx942/Gfx950/Gfx1250 folder)
   - [ ] Define instruction cost table `GFXYOURARCH_COSTS[]`
   - [ ] Set default costs `GFXYOURARCH_DEFAULT_CYCLE/LATENCY`
   - [ ] Define instructions (`defineGfxYourArchInsts`)
@@ -342,10 +342,10 @@ When adding a new architecture, follow the Gfx942 pattern:
   - [ ] Set logical-to-arch mappings (`setGfxYourArchLogicalToArchMap`)
   - [ ] Set Rocisa conversion mappings (`setGfxYourArchConversionMap`)
 - [ ] Add to `hardware/CMakeLists.txt` in `GFX_SOURCES`
-- [ ] Create `hardware/include/GfxYourArch.hpp` (copy from similar arch)
-- [ ] Update `src/hardware/ArchHelper.cpp` to include new header
-- [ ] Create `src/ir/rocisa/GfxYourArchRocisaArchInfo.hpp` (copy from similar arch)
-- [ ] Update `src/ir/rocisa/RocisaArchHelper.cpp` to include new header
+- [ ] Create `src/hardware/GfxYourArch.hpp` (copy from similar arch)
+- [ ] Update `src/hardware/ArchHelper.cpp` to include new header (as `#include "hardware/GfxYourArch.hpp"`)
+- [ ] Create `src/conversion/rocisa/GfxYourArchRocisaArchInfo.hpp` (copy from similar arch)
+- [ ] Update `src/conversion/rocisa/RocisaArchInfo.hpp` to include new header
 - [ ] Rebuild and test:
   ```bash
   cd build
@@ -357,6 +357,6 @@ When adding a new architecture, follow the Gfx942 pattern:
 **Pro tip:** Use search-and-replace on the copied files:
 ```bash
 # Example: Copy Gfx942 and replace 942 -> YourArch
-sed -i 's/942/YourArch/g' hardware/src/gfx/GfxYourArch.cpp
-sed -i 's/9, 4, 2/X, Y, Z/g' hardware/include/GfxYourArch.hpp
+sed -i 's/942/YourArch/g' hardware/src/gfx/GfxYourArch/GfxYourArch.cpp
+sed -i 's/9, 4, 2/X, Y, Z/g' src/hardware/GfxYourArch.hpp
 ```

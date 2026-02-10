@@ -28,9 +28,9 @@
  * Ported from rocisa's count.cpp, adapted for StinkyTofu's enum-based design.
  */
 
-#include "ir/logical/LogicalInstructions.hpp"
-#include "ir/logical/LogicalOpcode.hpp"
-#include "ir/python/PyLogicalModule.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/ir/logical/LogicalOpcode.hpp"
+#include "stinkytofu/core/PyLogicalModule.hpp"
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/vector.h>

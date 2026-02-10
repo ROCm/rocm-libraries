@@ -15,7 +15,7 @@ set(TEST_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hipblaslt/tensilelite/rocisa/rocisa/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../src          # For private headers (IRLexer.hpp, etc.)
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ir/asm   # For parser/lexer private headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/serialization/asm   # For IRLexer.hpp and parser/lexer private headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../hardware/include
     ${CMAKE_CURRENT_SOURCE_DIR}/unit  # For TestHelpers.hpp
     ${TABLEGEN_OUTPUT_DIR}

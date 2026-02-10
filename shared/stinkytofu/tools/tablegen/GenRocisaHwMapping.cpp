@@ -120,7 +120,7 @@ namespace
         const GpuArch& arch = *manager.getArch(archName);
 
         std::filesystem::path path
-            = std::filesystem::path(outdir) / ("ir/rocisa/Rocisa" + archName + "Mappings.inc");
+            = std::filesystem::path(outdir) / ("stinkytofu/ir/rocisa/Rocisa" + archName + "Mappings.inc");
 
         std::ofstream os(path);
         if(!os)

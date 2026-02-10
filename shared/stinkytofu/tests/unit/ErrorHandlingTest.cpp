@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#include "ErrorHandling.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 using namespace stinkytofu;
 

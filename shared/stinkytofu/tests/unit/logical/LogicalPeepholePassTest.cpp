@@ -21,10 +21,10 @@
  *
  * ************************************************************************ */
 
-#include "ir/logical/passes/LogicalPeepholePass.hpp"
+#include "stinkytofu/transforms/logical/LogicalPeepholePass.hpp"
 #include "TestHelpers.hpp"
-#include "ir/logical/LogicalInstructions.hpp"
-#include "stinkytofu.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 #include <gtest/gtest.h>
 
 using namespace stinkytofu;

@@ -22,10 +22,10 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
-#include "ir/asm/OptimizationPipeline.hpp"
-#include "ir/asm/StinkyAsmIR.hpp"
-#include "ir/asm/StinkyAsmPrinter.hpp"
-#include "stinkytofu.hpp"
+#include "stinkytofu/pipeline/OptimizationPipeline.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 
 #include <sstream>
 #include <string>

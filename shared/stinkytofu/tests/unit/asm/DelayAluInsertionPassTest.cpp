@@ -20,12 +20,12 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "ir/asm/DelayAluInsertionPass.hpp"
-#include "ir/asm/DefUseChain.hpp"
-#include "ir/asm/StinkyAsmIR.hpp"
-#include "isa/ArchHelper.hpp"
-#include "stinkytofu.hpp"
-#include "support/Casting.hpp"
+#include "stinkytofu/transforms/asm/DelayAluInsertionPass.hpp"
+#include "stinkytofu/ir/asm/DefUseChain.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/support/Casting.hpp"
 
 #include <gtest/gtest.h>
 

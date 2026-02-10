@@ -31,8 +31,8 @@
 
 #include <gtest/gtest.h>
 
-#include "ir/asm/IRParser.hpp"
-#include "ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/IRParser.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 #include <fstream>
 #include <sstream>

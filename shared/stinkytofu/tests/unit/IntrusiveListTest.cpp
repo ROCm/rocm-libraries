@@ -27,7 +27,7 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-#include "adt/IntrusiveList.hpp"
+#include "stinkytofu/support/IntrusiveList.hpp"
 
 using namespace stinkytofu;
 

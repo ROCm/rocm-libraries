@@ -58,7 +58,7 @@ void usage()
         << "\n"
         << "Examples:\n"
         << "  tablegen out shared/stinkytofu/hardware\n"
-        << "  tablegen --gen-instructions --arch=gfx1250 --input-dir=hardware/defs "
+        << "  tablegen --gen-instructions --arch=gfx1250 --input-dir=hardware/src/gfx "
            "--output-dir=hardware/generated\n";
 }
 
@@ -124,12 +124,12 @@ int main(int argc, char** argv)
 
     // Generate peephole optimization patterns (assembly IR)
     std::string asmPatternFile
-        = hardwareDir + "/../lib/Dialect/Transforms/PeepholePatterns.pattern";
+        = hardwareDir + "/../src/transforms/asm/PeepholePatterns.pattern";
     success &= genPeepholePatterns(asmPatternFile, outdir);
 
     // Generate high-level IR optimization patterns
     std::string hlirPatternFile
-        = hardwareDir + "/../lib/Dialect/Transforms/LogicalIR/LogicalIRPatterns.pattern";
+        = hardwareDir + "/../src/transforms/logical/LogicalIRPatterns.pattern";
     success &= genPeepholePatterns(hlirPatternFile, outdir);
 
     // Generate high-level IR instruction classes and mappings

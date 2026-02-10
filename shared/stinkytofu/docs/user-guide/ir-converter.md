@@ -7,7 +7,7 @@ StinkyTofu provides the 'StinkyIRConverter' class to programmatically convert ML
 ## Basic Usage
 
 '''cpp
-#include "stinkytofu.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 
 using namespace stinkytofu;
 
@@ -91,8 +91,8 @@ if(result == StinkyErrorCode::SUCCESS) {
 Here's a complete example showing conversion and assembly emission:
 
 '''cpp
-#include "stinkytofu.hpp"
-#include "ir/asm/StinkyAsmEmitter.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include <iostream>
 
 using namespace stinkytofu;

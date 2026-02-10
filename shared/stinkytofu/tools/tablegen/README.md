@@ -44,7 +44,7 @@ For each architecture (e.g., `gfx942`, `gfx950`):
 - Opcode lookup functions for both mnemonic-to-ISA-opcode and unified-opcode-to-ISA-opcode mappings
 - Mnemonic string table with efficient binary search
 
-**`ir/rocisa/Rocisa<arch>Mappings.inc`**
+**`stinkytofu/ir/rocisa/Rocisa<arch>Mappings.inc`**
 - Simple one-to-one mappings between Rocisa types and hardware instructions
 - Conversion function pointers for complex instruction lowering (e.g., `v_mfma`, `v_smfmac`)
 
@@ -68,9 +68,19 @@ hardware/
 |   +-- InstDefDSL.hpp      # Instruction definition DSL with cost map system
 +-- src/gfx/
     +-- GpuArchManager.cpp  # Architecture registration and management
-    +-- Gfx942.cpp          # gfx942 instruction definitions + cost tables
-    +-- Gfx950.cpp          # gfx950 instruction definitions
     +-- InstDefDSL.cpp      # DSL implementation
+    +-- Gfx942/             # per-arch folder
+    |   +-- Gfx942.cpp
+    |   +-- Gfx942Formats.def
+    |   +-- Gfx942Instructions.def
+    +-- Gfx950/
+    |   +-- Gfx950.cpp
+    |   +-- Gfx950Formats.def
+    |   +-- Gfx950Instructions.def
+    +-- Gfx1250/
+        +-- Gfx1250.cpp
+        +-- Gfx1250Formats.def
+        +-- Gfx1250Instructions.def
 ```
 
 ## Instruction Definition DSL
@@ -124,7 +134,7 @@ void defineGfx942Insts(GpuArch& registry) {
 
 2. **Implement instruction set:**
    ```cpp
-   // hardware/src/gfx/Gfx1000.cpp
+   // hardware/src/gfx/Gfx1000/Gfx1000.cpp
    #include "gfx/GpuArchManager.hpp"
    #include "gfx/CommonInstsDSL.hpp"  // For instruction type definitions
    #include "gfx/InstDefDSL.hpp"
@@ -183,7 +193,7 @@ void defineGfx942Insts(GpuArch& registry) {
 
 5. **Add instruction costs in the architecture file:**
    ```cpp
-   // In hardware/src/gfx/Gfx1000.cpp
+   // In hardware/src/gfx/Gfx1000/Gfx1000.cpp
    namespace {
        struct InstructionCost {
            const char* opcode;
@@ -221,9 +231,9 @@ void defineGfx942Insts(GpuArch& registry) {
    ```cmake
    # hardware/CMakeLists.txt
    set(GFX_SOURCES
-       src/gfx/Gfx942.cpp
-       src/gfx/Gfx950.cpp
-       src/gfx/Gfx1000.cpp  # Add new file
+      src/gfx/Gfx942/Gfx942.cpp
+      src/gfx/Gfx950/Gfx950.cpp
+      src/gfx/Gfx1000/Gfx1000.cpp  # Add new arch folder + file
        src/gfx/GpuArchManager.cpp
        src/gfx/InstDefDSL.cpp
    )
@@ -309,4 +319,4 @@ if (inst->is(IF_MFMA) || inst->is(IF_SMFMA)) {
 - `hardware/include/gfx/CommonInstsDSL.hpp` - Instruction type definitions
 - `tools/tablegen/GenIsa.cpp` - ISA table generation implementation
 - `tools/tablegen/GenRocisaHwMapping.cpp` - Rocisa mapping generation
-- `include/ir/rocisa/tblgen/RocisaHwInstMappings.hpp` - Rocisa-to-hardware mappings
+- Generated Rocisa mappings: `stinkytofu/ir/rocisa/Rocisa<arch>Mappings.inc` (build output). Rocisa conversion sources and AllHwMappings live under `src/conversion/rocisa/` (internal).

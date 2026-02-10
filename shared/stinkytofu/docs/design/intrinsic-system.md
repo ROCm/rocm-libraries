@@ -208,7 +208,7 @@ This happens **before** lowering to assembly IR, allowing cross-module optimizat
 
 ### Source Files
 
-- `lib/Intrinsics/Intrinsics.intrinsic` - Source definitions
+- `src/ir/logical/Intrinsics.intrinsic` - Source definitions
 - `tools/intrinsic-compiler/intrinsic-compiler.cpp` - Compiler tool
 
 ### Build Artifacts
@@ -225,7 +225,7 @@ This happens **before** lowering to assembly IR, allowing cross-module optimizat
       intrinsics.st.bc     <- Installed here
   include/
     stinkytofu/
-      ir/IntrinsicRegistry.hpp
+      ir/logical/IntrinsicRegistry.hpp
 ```
 
 ## Implementation Notes
@@ -288,6 +288,6 @@ ninja intrinsics_compiled
 ## See Also
 
 - [Adding Intrinsics Guide](../user-guide/adding-intrinsics.md) - How to add new intrinsics
-- `include/ir/IntrinsicRegistry.hpp` - Registry API
-- `include/ir/IRSerializer.hpp` - Binary format
+- `include/stinkytofu/ir/logical/IntrinsicRegistry.hpp` - Registry API
+- `include/stinkytofu/serialization/logical/IRSerializer.hpp` - Binary format
 - `tools/intrinsic-compiler/` - Compiler implementation

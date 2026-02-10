@@ -20,8 +20,8 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "ir/asm/StinkySignature.hpp"
-#include "ir/asm/StinkyAsmModule.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
+#include "stinkytofu/core/StinkyAsmModule.hpp"
 
 #include <cmath>
 #include <iomanip>

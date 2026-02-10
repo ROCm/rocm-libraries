@@ -21,16 +21,16 @@
  *
  * ************************************************************************ */
 
-#include "ir/IRSerializer.hpp"
-#include "ir/IntrinsicPatternConverter.hpp"
-#include "ir/asm/PatternParser.hpp"
+#include "stinkytofu/serialization/logical/IRSerializer.hpp"
+#include "stinkytofu/ir/logical/IntrinsicPatternConverter.hpp"
+#include "stinkytofu/serialization/asm/PatternParser.hpp"
 #include <cmath>
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <sstream>
 
 // Include IRLexer implementation (it's not in public headers)
-#include "../../src/ir/asm/IRLexer.hpp"
+#include "../../src/serialization/asm/IRLexer.hpp"
 
 using namespace stinkytofu;
 

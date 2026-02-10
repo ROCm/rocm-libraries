@@ -9,7 +9,7 @@ Virtual registers enable template-based code generation in StinkyTofu. They allo
 ### Creating Virtual Registers
 
 '''cpp
-#include "ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 using namespace stinkytofu;
 
@@ -296,6 +296,6 @@ if (baseOffset + requiredVGPRs <= availableVGPRs) {
 
 - [Activation Templates User Guide](activation-templates.md) - Practical examples for activation functions
 - [StinkyAsmEmitter User Guide](asm-emitter.md) - Converting IR to assembly
-- API Reference: 'include/ir/asm/StinkyAsmIR.hpp'
+- API Reference: 'include/stinkytofu/ir/asm/StinkyAsmIR.hpp'
 - Unit Tests: 'tests/unit/VirtualRegisterTest.cpp', 'tests/unit/VirtualRegisterRemappingTest.cpp'
 

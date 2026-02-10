@@ -40,10 +40,10 @@
  *   intrinsic-compiler [--verbose|-v] <input.intrinsic> <output.st.bc>
  */
 
-#include "ir/IRSerializer.hpp"
-#include "ir/IntrinsicPatternConverter.hpp"
-#include "ir/asm/PatternParser.hpp"
-#include "ir/logical/passes/LogicalPeepholePass.hpp"
+#include "stinkytofu/serialization/logical/IRSerializer.hpp"
+#include "stinkytofu/ir/logical/IntrinsicPatternConverter.hpp"
+#include "stinkytofu/serialization/asm/PatternParser.hpp"
+#include "stinkytofu/transforms/logical/LogicalPeepholePass.hpp"
 #include <iostream>
 #include <string>
 
@@ -61,9 +61,9 @@ void printUsage(const char* progName)
     std::cout << "  --verbose, -v     Show detailed compilation progress\n\n";
     std::cout << "Example:\n";
     std::cout << "  " << progName
-              << " lib/Intrinsics/Intrinsics.intrinsic build/intrinsics.st.bc\n";
+              << " src/ir/logical/Intrinsics.intrinsic build/intrinsics.st.bc\n";
     std::cout << "  " << progName
-              << " -v lib/Intrinsics/Intrinsics.intrinsic build/intrinsics.st.bc\n";
+              << " -v src/ir/logical/Intrinsics.intrinsic build/intrinsics.st.bc\n";
 }
 
 int main(int argc, char** argv)

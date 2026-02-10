@@ -25,10 +25,10 @@
 #include <sstream>
 #include <string>
 
-#include "ir/asm/StinkyAsmEmitter.hpp"
-#include "ir/asm/StinkyAsmIR.hpp"
-#include "isa/ArchHelper.hpp"
-#include "stinkytofu.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 
 using namespace stinkytofu;
 

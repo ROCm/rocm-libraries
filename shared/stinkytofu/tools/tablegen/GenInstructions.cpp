@@ -34,7 +34,7 @@
  *    - *_operands.inc: Operand requirements
  *    - *_init.inc: DEF_T initialization calls
  *
- * Usage: tablegen --gen-instructions --arch=gfx1250 --input-dir=hardware/defs --output-dir=hardware/generated
+ * Usage: tablegen --gen-instructions --arch=gfx1250 --input-dir=hardware/src/gfx --output-dir=<build>/hardware (per-arch .def in GfxXXX/ subdirs)
  */
 
 #include <algorithm>
@@ -972,9 +972,9 @@ namespace stinkytofu
         std::string normArch = normalizeArch(arch);
         std::cout << "Generating instruction metadata for " << normArch << "...\n";
 
-        // Construct file paths (use normalized arch: Gfx1250Formats.def, etc.)
-        std::string formatFile = inputDir + "/" + normArch + "Formats.def";
-        std::string instFile   = inputDir + "/" + normArch + "Instructions.def";
+        // Construct file paths: inputDir is base (e.g. hardware/src/gfx), .def files in arch subdir
+        std::string formatFile = inputDir + "/" + normArch + "/" + normArch + "Formats.def";
+        std::string instFile   = inputDir + "/" + normArch + "/" + normArch + "Instructions.def";
         std::string outputBase = outputDir + "/" + normArch;
 
         // Parse format definitions
@@ -1020,8 +1020,8 @@ namespace stinkytofu
         std::map<std::string, std::vector<InstructionDef>> archInstructions;
         for(const std::string& arch : archs)
         {
-            std::string formatFile = inputDir + "/" + arch + "Formats.def";
-            std::string instFile   = inputDir + "/" + arch + "Instructions.def";
+            std::string formatFile = inputDir + "/" + arch + "/" + arch + "Formats.def";
+            std::string instFile   = inputDir + "/" + arch + "/" + arch + "Instructions.def";
             DefTParser  parser(arch);
             if(!parser.parseFormats(formatFile))
             {

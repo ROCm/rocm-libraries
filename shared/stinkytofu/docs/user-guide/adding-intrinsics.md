@@ -15,7 +15,7 @@ Intrinsics are automatically available throughout StinkyTofu via the `IntrinsicR
 
 ### Step 1: Define Your Intrinsic
 
-Edit `lib/Intrinsics/Intrinsics.intrinsic`:
+Edit `src/ir/logical/Intrinsics.intrinsic`:
 
 ```
 intrinsic ReluF32 {
@@ -52,7 +52,7 @@ The build system automatically:
 In TensileLite or any code generator:
 
 ```cpp
-#include "ir/IntrinsicRegistry.hpp"
+#include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 
 auto& intrinsics = IntrinsicRegistry::instance();
 
@@ -219,5 +219,5 @@ TEST_F(IntrinsicFlowTest, MyNewIntrinsic) {
 ## See Also
 
 - [Intrinsic System Design](../design/intrinsic-system.md) - Technical details
-- [IntrinsicRegistry API](../../include/ir/IntrinsicRegistry.hpp) - Runtime API
-- Example intrinsics: `lib/Intrinsics/Intrinsics.intrinsic`
+- [IntrinsicRegistry API](../../include/stinkytofu/ir/logical/IntrinsicRegistry.hpp) - Runtime API
+- Example intrinsics: `src/ir/logical/Intrinsics.intrinsic`

@@ -21,14 +21,14 @@
  *
  * ************************************************************************ */
 
-#include "ir/IntrinsicCall.hpp"
-#include "ir/IntrinsicLibrary.hpp"
-#include "ir/IntrinsicRegistry.hpp"
-#include "ir/asm/StinkyAsmIR.hpp"
-#include "ir/asm/StinkyAsmModule.hpp"
-#include "ir/logical/LogicalInstructions.hpp"
-#include "ir/python/PyLogicalModule.hpp"
-#include "isa/gfx/GfxIsa.hpp"
+#include "stinkytofu/ir/logical/IntrinsicCall.hpp"
+#include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
+#include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/core/StinkyAsmModule.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/core/PyLogicalModule.hpp"
+#include "stinkytofu/hardware/GfxIsa.hpp"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>

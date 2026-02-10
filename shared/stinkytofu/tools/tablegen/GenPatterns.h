@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "ir/asm/PatternParser.hpp"
+#include "stinkytofu/serialization/asm/PatternParser.hpp"
 #include <string>
 #include <vector>
 

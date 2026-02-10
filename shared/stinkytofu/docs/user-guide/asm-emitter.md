@@ -9,8 +9,8 @@
 ### Simple Assembly Emission
 
 '''cpp
-#include "ir/asm/StinkyAsmEmitter.hpp"
-#include "stinkytofu.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 
 using namespace stinkytofu;
 
@@ -73,8 +73,8 @@ std::string assembly = emitter.emit(irlist);
 Here's a complete example showing how to create instructions and emit them as assembly:
 
 '''cpp
-#include "ir/asm/StinkyAsmEmitter.hpp"
-#include "stinkytofu.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 #include <iostream>
 
 using namespace stinkytofu;

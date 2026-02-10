@@ -1,6 +1,6 @@
-#include "ir/logical/LogicalToFunctionConverter.hpp"
-#include "ir/asm/StinkyAsmIR.hpp"
-#include "ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/ir/logical/LogicalToFunctionConverter.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include <cstring>
 #include <iostream>
 

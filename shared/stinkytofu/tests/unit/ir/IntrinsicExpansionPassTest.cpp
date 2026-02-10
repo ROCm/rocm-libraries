@@ -29,10 +29,10 @@
  * into concrete LogicalInstructions using definitions from intrinsics.st.bc.
  */
 
-#include "ir/passes/IntrinsicExpansionPass.hpp"
-#include "ir/IntrinsicCall.hpp"
-#include "ir/IntrinsicRegistry.hpp"
-#include "stinkytofu.hpp"
+#include "stinkytofu/transforms/logical/IntrinsicExpansionPass.hpp"
+#include "stinkytofu/ir/logical/IntrinsicCall.hpp"
+#include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 #include <cstring>
 #include <gtest/gtest.h>
 

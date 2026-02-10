@@ -22,16 +22,15 @@
  * ************************************************************************ */
 
 #include "TestHelpers.hpp"
-#include "ir/asm/StinkyAsmEmitter.hpp"
-#include "ir/logical/LogicalInstructions.hpp"
-#include "ir/logical/LogicalToFunctionConverter.hpp"
-#include "ir/logical/passes/CompositeInstructionLoweringPass.hpp"
-#include "ir/logical/passes/ToStinkyAsmPass.hpp"
-#include "ir/python/PyLogicalModule.hpp"
-#include "isa/ArchHelper.hpp"
-#include "isa/gfx/GfxIsa.hpp"
-#include "stinkypasses.hpp"
-#include "stinkytofu.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/ir/logical/LogicalToFunctionConverter.hpp"
+#include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
+#include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
+#include "stinkytofu/core/PyLogicalModule.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 #include <gtest/gtest.h>
 #include <memory>
 #include <sstream>

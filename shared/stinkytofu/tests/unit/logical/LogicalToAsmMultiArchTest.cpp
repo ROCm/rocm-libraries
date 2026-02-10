@@ -3,11 +3,11 @@
  */
 
 #include "TestHelpers.hpp"
-#include "ir/logical/LogicalInstructions.hpp"
-#include "ir/logical/LogicalOpcode.hpp"
-#include "ir/logical/passes/CompositeInstructionLoweringPass.hpp"
-#include "ir/logical/passes/ToStinkyAsmPass.hpp"
-#include "stinkytofu.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/ir/logical/LogicalOpcode.hpp"
+#include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
+#include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 #include <gtest/gtest.h>
 #include <map>
 #include <set>

@@ -25,12 +25,12 @@
 #include <memory>
 #include <sstream>
 
-#include "ir/asm/DefUseChain.hpp"
-#include "ir/asm/PeepholeOptimizationPass.hpp"
-#include "ir/asm/StinkyAsmIR.hpp"
-#include "ir/asm/StinkyAsmPrinter.hpp"
-#include "isa/ArchHelper.hpp"
-#include "stinkytofu.hpp"
+#include "stinkytofu/ir/asm/DefUseChain.hpp"
+#include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/core/stinkytofu.hpp"
 
 using namespace stinkytofu;
 

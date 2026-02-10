@@ -160,7 +160,7 @@ This section shows how the `peephole` pattern type was added as a concrete examp
 
 ### Example: Adding the Peephole Pattern Type
 
-1. **Add keyword to lexer** (`src/ir/asm/IRLexer.hpp` and `.cpp`):
+1. **Add keyword to lexer** (`src/serialization/asm/IRLexer.hpp` and `.cpp`):
    ```cpp
    // In IRLexer.hpp
    KW_peephole,     // 'peephole' (pattern type)
@@ -171,14 +171,14 @@ This section shows how the `peephole` pattern type was added as a concrete examp
        return TokenKind::KW_peephole;
    ```
 
-2. **Add enum value** (`include/ir/asm/PatternParser.hpp`):
+2. **Add enum value** (`include/stinkytofu/serialization/asm/PatternParser.hpp`):
    ```cpp
    enum class PatternType {
        Peephole   // Peephole optimization pattern
    };
    ```
 
-3. **Update parser** (`src/ir/asm/PatternParser.cpp`):
+3. **Update parser** (`src/serialization/asm/PatternParser.cpp` - implementation):
    ```cpp
    if (lexer.peek().kind == TokenKind::KW_peephole) {
        pattern.type = PatternType::Peephole;
@@ -197,13 +197,13 @@ This section shows how the `peephole` pattern type was added as a concrete examp
 
 5. **Pattern matcher generation** is handled automatically by existing TableGen code in `tools/tablegen/GenPatterns.cpp`.
 
-6. **Pattern application** uses the existing `PeepholeOptimizationPass` in `src/ir/asm/PeepholeOptimizationPass.cpp`.
+6. **Pattern application** uses the existing `PeepholeOptimizationPass` in `src/transforms/asm/PeepholeOptimizationPass.cpp`.
 
 ## References
 
 - MLIR DRR: https://mlir.llvm.org/docs/DeclarativeRewrites/
 - LLVM TableGen: https://llvm.org/docs/TableGen/
 - Peephole Pattern System: `docs/design/peephole-pattern-system.md`
-- Pattern Parser Implementation: `include/ir/asm/PatternParser.hpp`
+- Pattern Parser: `include/stinkytofu/serialization/asm/PatternParser.hpp`
 
 
