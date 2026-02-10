@@ -6,7 +6,6 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <numeric>
-#include <ranges>
 #include <stdexcept>
 #include <vector>
 
@@ -153,7 +152,7 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
             if(strides[i] > strides[posFirstMin])
             {
                 // C is smaller than at least one of D, H, or W. Assume N...WC memory
-                // layout and force C to the end of the list before stable_sort() so
+                // layout and force C to the end of the list before sort with stable tiebreakers so
                 // that it's handled properly in case of duplicate minimum stride lengths.
                 indices.erase(indices.begin() + 1);
                 indices.push_back(1);
@@ -163,14 +162,35 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
     }
 
     // Sort indices by their corresponding stride values (descending; aligns with NC...W layout)
-    std::stable_sort(
-        indices.begin(), indices.end(), [&stridesAreUnique, &strides](size_t a, size_t b) mutable {
-            if(strides[a] == strides[b])
-            {
-                stridesAreUnique = false;
-            }
-            return strides[a] > strides[b];
-        });
+    // Use std::sort with a stable tie-breaker instead of std::stable_sort, which uses
+    // deprecated std::get_temporary_buffer in libstdc++ causing clang-tidy errors.
+    struct SortItem
+    {
+        size_t index; // The dimension index value
+        size_t originalPos; // Position before sorting (for stability tie-breaking)
+    };
+
+    std::vector<SortItem> sortItems(numDims);
+    for(size_t i = 0; i < numDims; ++i)
+    {
+        sortItems[i] = {indices[i], i};
+    }
+
+    std::sort(sortItems.begin(),
+              sortItems.end(),
+              [&strides, &stridesAreUnique](const SortItem& a, const SortItem& b) {
+                  if(strides[a.index] == strides[b.index])
+                  {
+                      stridesAreUnique = false;
+                      return a.originalPos < b.originalPos; // stable tie-breaker
+                  }
+                  return strides[a.index] > strides[b.index]; // descending by stride
+              });
+
+    for(size_t i = 0; i < numDims; ++i)
+    {
+        indices[i] = sortItems[i].index;
+    }
 
     // Assign order based on sorted stride indices from longest strides to shortest.
     for(size_t i = 0; i < numDims; ++i)
