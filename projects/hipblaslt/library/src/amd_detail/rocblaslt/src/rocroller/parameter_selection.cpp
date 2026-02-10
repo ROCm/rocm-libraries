@@ -40,8 +40,7 @@ std::string SolutionParameters::toString() const
     result << "StreamK: " << streamK << std::endl;
     result << "LoadA: " << loadPathA << std::endl;
     result << "LoadB: " << loadPathB << std::endl;
-    result << "LDS Usage";
-    result << " D:" << (storeLDSD ? "On" : "Off") << std::endl;
+    result << "StoreD:" << storePath << std::endl;
     result << "Workgroup Mapping: Dim:" << workgroupMappingDim << " RemapXCC:" << workgroupRemapXCC
            << std::endl;
     result << "Prefetch:" << prefetch << " InFlight:" << prefetchInFlight

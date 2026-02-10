@@ -307,6 +307,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar_impl.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Parameters/Solution/LoadOption.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Parameters/Solution/StoreOption.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Parameters/Solution/StreamK.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/CooperativeScheduler.hpp"

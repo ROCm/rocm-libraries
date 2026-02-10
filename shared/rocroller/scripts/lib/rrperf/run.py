@@ -147,6 +147,9 @@ def generate_missing_attr_value(run, attr):
             wgm_dim = getattr(run, "workgroupMappingDim")
             wgm_value = getattr(run, "workgroupMappingValue")
             return (wgm_dim, wgm_value)
+        case "storeLDS_D":
+            store = getattr(run, "store")
+            return "LDS" in store
         case "streamK":
             # Old version used bool, new version uses str
             streamK = getattr(run, "streamK", "None")
