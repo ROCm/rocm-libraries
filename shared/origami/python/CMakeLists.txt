@@ -131,7 +131,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
             ENVIRONMENT
             "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
             DEPENDS _pyorigami
-            SKIP_RETURN_CODE 5
+            SKIP_RETURN_CODE 5  # Allow skipping tests without emitting an error
     )
 
     # Install Python test files to bin/origami/tests for TheRock CI testing.
