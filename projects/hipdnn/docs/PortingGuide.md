@@ -5,10 +5,8 @@ This guide helps developers migrate cuDNN Frontend code to hipDNN. It focuses on
 ## Table of Contents
 - [Quick Start](#quick-start)
 - [Core Concepts](#core-concepts)
-- [API Conversion Reference](#api-conversion-reference)
 - [Common Pitfalls](#common-pitfalls)
 - [Working Examples](#working-examples)
-- [Feature Availability](#feature-availability)
 
 ## Quick Start
 
@@ -66,8 +64,6 @@ ninja
 | **Device Memory Utility** | Surface<type> | MigratableMemory<type> |
 | **Device Memory Access** | Surface<type>::devPtr | MigratableMemory<type>::deviceData() |
 
-## API Conversion Reference
-
 ## Common Pitfalls
 
 ### 1. CMAKE_POSITION_INDEPENDENT_CODE
@@ -80,6 +76,22 @@ ninja
 ```cmake
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 ```
+
+### 2. Lack of Heuristic Modes
+
+**Error**: Missing Heuristic modes A and B
+
+**Cause**: The heuristic implementation in hipDNN has yet to be implemented
+
+**Fix**: Use a combination of `graph::get_ranked_engine_ids()` and `graph::set_preferred_engine_id_ext()` if you need more detailed control over engine selection.
+
+### 3. Device Memory Utilities
+
+**Error**: Different memory utilities for allocating device memory.
+
+**Cause**: The memory utilities are typically consumer dependent, and written on an as-needed basis.  cuDNN provides a Surface utility for their samples, for example.
+
+**Fix**: `MigratableMemory<type>` is a utility that can automatically migrate data between host and device, and is a decent stand-in.  If you want to manage things like dims / strides more carefully, there's also a `Tensor` utility class.  Both of these classes can be found in the `hipdnn_data_sdk::utilities` namespace.
 
 ## Working Examples
 
@@ -151,7 +163,7 @@ void test_batchnorm_simple()
     dscale->set_output(true).set_data_type(fe::DataType_t::FLOAT);
     dbias->set_output(true).set_data_type(fe::DataType_t::FLOAT);
 
-    // Create a unique_ptr for the cuDNN handle
+    // Create the hipDNN handle
     hipdnnHandle_t handle;
     hipdnnCreate(&handle);
 
