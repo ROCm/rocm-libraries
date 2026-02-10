@@ -51,12 +51,17 @@ void CompareInstanceLists()
     compare_instance_vectors(ckFactoryInstances, builderFactoryInstances);
 }
 
-TEST(CPU_CKBuilderGroupedFwdConv2D_FP32, CompareInstanceListsFloat) { CompareInstanceLists<float>(); }
+TEST(CPU_CKBuilderGroupedFwdConv2D_FP32, CompareInstanceListsFloat)
+{
+    CompareInstanceLists<float>();
+}
 
 /*
-TEST(CPU_CKBuilderGroupedFwdConv2D_FP16, CompareInstanceListsHalf) { CompareInstanceLists<ck::half_t>(); }
+TEST(CPU_CKBuilderGroupedFwdConv2D_FP16, CompareInstanceListsHalf) {
+CompareInstanceLists<ck::half_t>(); }
 
-TEST(CPU_CKBuilderGroupedFwdConv2D_BFP16, CompareInstanceListsBHalf) { CompareInstanceLists<ck::bhalf_t>(); }
+TEST(CPU_CKBuilderGroupedFwdConv2D_BFP16, CompareInstanceListsBHalf) {
+CompareInstanceLists<ck::bhalf_t>(); }
 
 TEST(CPU_CKBuilderGroupedFwdConv2D_I8, CompareInstanceListsInt8) { CompareInstanceLists<int8_t>(); }
 */
