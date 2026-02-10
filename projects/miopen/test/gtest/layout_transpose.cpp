@@ -470,22 +470,19 @@ TEST_P(BatchedTransposeDataTypeTest, BatchedTransposeSupportedTypes)
     bool batched_supports = miopen::BatchedTransposeSolution::IsApplicable(data_type);
 
     // Expected support: FP32, FP16, BF16, Int8, Int32
-    bool should_support = (data_type == miopenFloat || data_type == miopenHalf ||
-                           data_type == miopenBFloat16 || data_type == miopenInt8 ||
-                           data_type == miopenInt32);
+    bool should_support =
+        (data_type == miopenFloat || data_type == miopenHalf || data_type == miopenBFloat16 ||
+         data_type == miopenInt8 || data_type == miopenInt32);
 
     EXPECT_EQ(batched_supports, should_support)
         << "BatchedTransposeSolution applicability mismatch for " << GetDataType(data_type);
 }
 
 // Smoke tests for batched transpose (types supported by batched transpose)
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         BatchedTransposeDataTypeTest,
-                         ::testing::Values(miopenFloat,
-                                           miopenHalf,
-                                           miopenBFloat16,
-                                           miopenInt8,
-                                           miopenInt32));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    BatchedTransposeDataTypeTest,
+    ::testing::Values(miopenFloat, miopenHalf, miopenBFloat16, miopenInt8, miopenInt32));
 
 // Full tests including unsupported types
 INSTANTIATE_TEST_SUITE_P(Full,

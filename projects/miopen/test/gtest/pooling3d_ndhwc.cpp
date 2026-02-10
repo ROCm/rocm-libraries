@@ -161,4 +161,6 @@ INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_NDHWC_FP32, testing::Values(GetTest
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_NDHWC_FP16, testing::Values(GetTestCases("--half")));
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_NDHWC_BF16, testing::Values(GetTestCases("--bfloat16")));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Pooling3d_NDHWC_BF16,
+                         testing::Values(GetTestCases("--bfloat16")));
