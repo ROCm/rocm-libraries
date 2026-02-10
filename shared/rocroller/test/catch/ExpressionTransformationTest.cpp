@@ -667,6 +667,20 @@ TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
         CHECK_THAT(convertPropagation(convert(Int32, (r64[0] / r64[1]))),
                    IdenticalTo(convert(Int32, convert(Int32, (r64[0] / r64[1])))));
     }
+
+    SECTION("Other expressions")
+    {
+        CHECK_THAT(Expression::convertPropagation(Expression::convert(Int32, -r64[0])),
+                   IdenticalTo(Expression::convert(Int32, -Expression::convert(Int32, r64[0]))));
+
+        CHECK_THAT(
+            convertPropagation(convert(
+                Int32,
+                Expression::concat({r64[0], r64[1]}, {DataType::None, PointerType::Buffer}))),
+            IdenticalTo(convert(Int32,
+                                Expression::concat({convert(Int32, r64[0]), convert(Int32, r64[1])},
+                                                   {DataType::None, PointerType::Buffer}))));
+    }
 }
 
 TEST_CASE("Nested Reinterpret simplification", "[expression][expression-transformation]")
@@ -743,7 +757,7 @@ TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformat
 
     auto argExpr = [&]() {
         auto arg = context->kernel()->arguments().at(0);
-        CHECK_THAT(arg.expression, IdenticalTo(ex1));
+        CHECK_THAT(arg.getExpression(), IdenticalTo(ex1));
 
         auto argPtr = std::make_shared<AssemblyKernelArgument>(arg);
         return std::make_shared<Expression::Expression>(argPtr);
@@ -763,7 +777,7 @@ TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformat
 
     auto arg2Expr = [&]() {
         auto arg = context->kernel()->arguments().at(1);
-        CHECK_THAT(arg.expression, IdenticalTo(arg1e));
+        CHECK_THAT(arg.getExpression(), IdenticalTo(arg1e));
 
         auto argPtr = std::make_shared<AssemblyKernelArgument>(arg);
         return std::make_shared<Expression::Expression>(argPtr);

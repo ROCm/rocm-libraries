@@ -26,8 +26,10 @@ import os
 import shutil
 import sys
 import time
+import itertools
 
 from copy import deepcopy
+from joblib import Parallel, delayed
 from pathlib import Path
 from typing import Dict
 
@@ -51,29 +53,20 @@ from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
 from Tensile.Common import HR, print1, print2, IsaInfo, IsaVersion, \
         printExit, printWarning, ensurePath, tqdm, state, \
-        BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR
+        BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
 from Tensile.Common.Architectures import isaToGfx, gfxToVariants
 from Tensile.Common.GlobalParameters import globalParameters, startTime
 
 
-def _generateForkedSolutions(problemType, constantParams, forkPermutations, assembler: Assembler, \
-                            debugConfig: DebugConfig, isaInfoMap: Dict[IsaVersion, IsaInfo]):
-    """Creates a list with a Solution object for each parameter combination in forkPermutations"""
-    print1("# Enumerating Solutions")
-
-    solutions = []
-    solutionSet = set()
-    for perm in forkPermutations:
-        # Expect only a single ISA in the map for the Tensile context
-        # because the GPU has to be physically present for benchmarking
-
+def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap):
+    """Helper function to generate a single solution from a permutation."""
+    try:
         solution = {
             "ProblemType": deepcopy(problemType.state),
             "ISA": next(iter(isaInfoMap.keys()))
         }
         solution.update(constantParams)
         solution.update(perm)
-
 
         mi = solution["MatrixInstruction"]
         wavefrontSize = solution["WavefrontSize"]
@@ -97,11 +90,37 @@ def _generateForkedSolutions(problemType, constantParams, forkPermutations, asse
                 isaInfoMap
             )
             if solutionObject["Valid"]:
-                if solutionObject not in solutionSet:
-                    solutionSet.add(solutionObject)
-                    solutions.append(solutionObject)
+                return solutionObject
+            elif debugConfig.printSolutionRejectionReason:
+                print1("rejecting solution " + str(solution))
         elif debugConfig.printSolutionRejectionReason:
             print1("rejecting solution " + str(solution))
+    except Exception as e:
+        print(f"Error processing permutation {perm}: {e}")
+    return None
+
+def _generateForkedSolutions(problemType, constantParams, forkPermutations, assembler: Assembler,
+                             debugConfig: DebugConfig, isaInfoMap: Dict[IsaVersion, IsaInfo]):
+    """Creates a list with a Solution object for each parameter combination in forkPermutations using parallel processing"""
+    print1("# Enumerating Solutions (Parallel)")
+
+    forkIters = zip(
+        forkPermutations,
+        itertools.repeat(problemType),
+        itertools.repeat(constantParams),
+        itertools.repeat(assembler),
+        itertools.repeat(debugConfig),
+        itertools.repeat(isaInfoMap)
+    )
+    raw_solutions = ParallelMap2(_generate_single_solution, forkIters, "fork solutions", return_as="list")
+
+    # Filter out None and duplicates
+    solutionSet = set()
+    solutions = []
+    for sol in tqdm(raw_solutions, "Remove duplicate solutions"):
+        if sol is not None and sol not in solutionSet:
+            solutionSet.add(sol)
+            solutions.append(sol)
 
     return solutions
 

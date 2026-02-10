@@ -162,8 +162,9 @@ Span and Multiplied are arguably the simpliest.
  */
 
 template <class TRange, class TValue>
-auto GenericFindImpl(rank<1>, const TRange& range, const TValue& value)
-    -> decltype(range.find(value))
+auto GenericFindImpl(rank<1>,
+                     const TRange& range,
+                     const TValue& value) -> decltype(range.find(value))
 {
     return range.find(value);
 }
