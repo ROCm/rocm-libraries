@@ -119,7 +119,7 @@
 #define SUBTENSOR_OP_WITH_ALPHA_BETA(dst, src) \
     do                                         \
     {                                          \
-        (dst) = (src)*alpha;                   \
+        (dst) = (src) * alpha;                 \
         (void)beta;                            \
     } while(0)
 #elif MIOPEN_ALPHA_IS_ONE
@@ -130,10 +130,10 @@
         (void)alpha;                           \
     } while(0)
 #else
-#define SUBTENSOR_OP_WITH_ALPHA_BETA(dst, src) \
-    do                                         \
-    {                                          \
-        (dst) = mad((src), alpha, (dst)*beta); \
+#define SUBTENSOR_OP_WITH_ALPHA_BETA(dst, src)   \
+    do                                           \
+    {                                            \
+        (dst) = mad((src), alpha, (dst) * beta); \
     } while(0)
 #endif
 

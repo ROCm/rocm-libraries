@@ -8,6 +8,8 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
+#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
+
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 
@@ -15,7 +17,7 @@
 
 using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_data_sdk::flatbuffer_utilities;
 
 class TestMiopenBatchnormFwdTrainingActivPlanBuilder : public ::testing::Test
 {
@@ -28,7 +30,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
        IsApplicableReturnsTrueForValidSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
 
@@ -48,7 +51,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseF
 TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsTrueForValidTwoNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
 
@@ -60,7 +64,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
 {
     // Create a fused batchnorm training + activation graph WITHOUT running statistics
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
 
@@ -72,7 +77,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseF
     // Graph with SIGMOID_FWD instead of RELU_FWD
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
         false, false, hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_FWD);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
 
@@ -82,7 +88,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseF
 TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, GetWorkspaceSizeReturnsZero)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     size_t workspaceSize = _planBuilder.getWorkspaceSize(_dummyHandle, graph);
 
@@ -92,10 +99,12 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, GetWorkspaceSizeReturnsZe
 TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, BuildPlanSetsPlanForValidGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
+    MockEngineConfig mockEngineConfig;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -145,10 +154,13 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
+    MockEngineConfig mockEngineConfig;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
+                 std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
@@ -245,10 +257,13 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
+    MockEngineConfig mockEngineConfig;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
+                 std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
@@ -324,7 +339,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseF
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
 
@@ -437,7 +453,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
 

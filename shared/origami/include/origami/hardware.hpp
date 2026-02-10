@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -67,6 +67,24 @@ class hardware_t {
   }
 
   /**
+   * @brief Convert architecture_t to string (e.g. for logging).
+   *
+   * @param a Architecture enum value
+   * @return std::string_view Corresponding string value
+   */
+  static constexpr std::string_view arch_enum_to_name(architecture_t a) noexcept {
+    switch (a) {
+      case architecture_t::gfx90a: return "gfx90a";
+      case architecture_t::gfx942: return "gfx942";
+      case architecture_t::gfx950: return "gfx950";
+      case architecture_t::gfx1201: return "gfx1201";
+      case architecture_t::gfx1100: return "gfx1100";
+      case architecture_t::gfx1151: return "gfx1151";
+      default: return "unknown";
+    }
+  }
+
+  /**
    * @brief Architecture-specific constants for memory and compute characteristics.
    *
    */
@@ -126,11 +144,12 @@ class hardware_t {
 
   /**
    * @brief Map of matrix instruction latencies by architecture.
-   * 
+   *
    * Inline to prevent ODR violations when included in multiple shared libraries.
    * This ensures only one definition exists across all translation units. (PR#1862)
    */
-  static inline const std::unordered_map<architecture_t, std::unordered_map<matrix_instruction, size_t>>
+  static inline const std::unordered_map<architecture_t,
+                                         std::unordered_map<matrix_instruction, size_t>>
       INSTRUCTION_MAP = {
           // clang-format off
         {architecture_t::gfx90a,
@@ -371,38 +390,6 @@ class hardware_t {
          }}};
   // clang-format on
 
-  /**
-   * @brief Map of main loop efficiency values by architecture and CMS kernel configuration.
-   *
-   */
-  static inline const std::unordered_map<architecture_t, std::unordered_map<CMS_kernel, double>>
-      CMS_MAP = {
-      {hardware_t::architecture_t::gfx950,
-        {
-          // BF16
-          // NT
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 160, 256, 64), 1. / 1.20},
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 192, 256, 64), 1. / 1.10},
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 208, 256, 64), 1. / 1.20},
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 256, 160, 64), 1. / 1.20},
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 256, 192, 64), 1. / 1.20},
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 256, 256, 64), 1. / 1.15},
-          // NN
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 160, 256, 64), 1. / 1.10},
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 208, 256, 64), 1. / 1.10},
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 256, 192, 64), 1. / 1.00},
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 256, 256, 64), 1. / 1.05},
-          // TN
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 160, 256, 64), 1. / 1.10},
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 192, 256, 64), 1. / 1.05},
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256,  96, 64), 1. / 1.10},
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256, 192, 64), 1. / 1.10},
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256, 224, 64), 1. / 1.05},
-          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256, 256, 64), 1. / 1.05},
-        }
-      },
-    };
-
   architecture_t arch;  ///< GPU architecture type
   size_t N_CU;          ///< Number of Compute Units
   size_t lds_capacity;  ///< Capacity of Local Data Share (LDS) in bytes
@@ -445,6 +432,26 @@ class hardware_t {
              std::tuple<double, double, double> mem_bw_per_wg_coefficients);
 
   /**
+   * @brief Construct hardware_t using architecture constants and a clock frequency.
+   *
+   * Computes memory performance ratios from the provided architecture constants
+   * and compute clock, then delegates to the full constructor.
+   *
+   * @param arch GPU architecture type
+   * @param N_CU Number of compute units
+   * @param lds_capacity LDS capacity in bytes
+   * @param constants Architecture-specific constants
+   * @param L2_capacity L2 cache capacity in bytes
+   * @param compute_clock_ghz Compute clock frequency in GHz
+   */
+  hardware_t(architecture_t arch,
+             size_t N_CU,
+             size_t lds_capacity,
+             const architecture_constants& constants,
+             size_t L2_capacity,
+             double compute_clock_ghz);
+
+  /**
    * @brief Construct hardware_t from HIP device properties.
    *
    * Automatically determines architecture and extracts hardware parameters
@@ -482,6 +489,26 @@ class hardware_t {
   static hardware_t get_hardware_for_device(int deviceId);
 
   /**
+   * @brief Create hardware_t instance for a specific architecture with specified parameters.
+   *
+   * Creates a hardware instance using the specified architecture and hardware parameters.
+   * Useful for analytical modeling when actual hardware is not available.
+   *
+   * @param arch Architecture enum value
+   * @param N_CU Number of compute units
+   * @param lds_capacity LDS capacity in bytes
+   * @param L2_capacity L2 cache capacity in bytes
+   * @param compute_clock_khz Compute clock in KHz
+   * @return hardware_t Configured hardware instance
+   * @throws std::runtime_error if architecture is not supported
+   */
+  static hardware_t get_hardware_for_arch(architecture_t arch,
+                                          size_t N_CU,
+                                          size_t lds_capacity,
+                                          size_t L2_capacity,
+                                          int compute_clock_khz);
+
+  /**
    * @brief Check if the hardware described by properties is supported.
    *
    * Determines whether the GPU architecture represented by the device
@@ -509,24 +536,6 @@ class hardware_t {
    * @return size_t Instruction latency in cycles, or 0 if not found
    */
   size_t get_mi_latency(size_t MI_M, size_t MI_N, size_t MI_K, data_type_t mi_input_type) const;
-
-  /**
-   * @brief Get main loop efficiency for a given kernel configuration.
-   *
-   * @param transA Whether matrix A is transposed
-   * @param transB Whether matrix B is transposed
-   * @param MT_M Macro tile M dimension
-   * @param MT_N Macro tile N dimension
-   * @param MT_K Macro tile K dimension
-   * @param mi_input_type Input data type for the matrix instruction
-   * @return double Main loop efficiency value (1.0 if not found)
-   */
-  double get_adjusted_main_loop_efficiency(transpose_t transA,
-                                           transpose_t transB,
-                                           size_t MT_M,
-                                           size_t MT_N,
-                                           size_t MT_K,
-                                           data_type_t mi_input_type) const;
 
   /**
    * @brief Get valid matrix instruction dimensions for a given datatype.

@@ -29,7 +29,7 @@
 /**********************************************
  * LSTM CPU verification functions
  **********************************************/
-#include "../test/gemm.hpp"
+#include "gemm.hpp"
 
 template <class T>
 void LSTMFwdCPUVerify(const miopen::Handle& handle,

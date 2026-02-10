@@ -6,12 +6,12 @@
 
 #include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "EngineManager.hpp"
 #include "HipdnnEnginePluginExecutionContext.hpp"
@@ -23,6 +23,7 @@
 static const char* pluginName = "miopen_plugin";
 static const char* pluginVersion = "1.0.0";
 
+using namespace hipdnn_data_sdk::flatbuffer_utilities;
 using namespace hipdnn_plugin_sdk;
 using namespace miopen_plugin;
 
@@ -73,7 +74,7 @@ hipdnnPluginStatus_t hipdnnPluginGetTypeImpl(hipdnnPluginType_t* type)
 
         *type = HIPDNN_PLUGIN_TYPE_ENGINE;
 
-        LOG_API_SUCCESS(apiName, "type={}", *type);
+        LOG_API_SUCCESS(apiName, "type={}", toString(*type));
     });
 }
 
@@ -224,10 +225,11 @@ hipdnnPluginStatus_t
             if(*numEngines == maxEngines)
             {
                 *numEngines = static_cast<uint32_t>(applicableEngines.size());
-                HIPDNN_LOG_INFO("Maximum number of engines reached ({}), ignoring additional "
-                                "engines, numEngines count: {}",
-                                maxEngines,
-                                *numEngines);
+                HIPDNN_PLUGIN_LOG_INFO(
+                    "Maximum number of engines reached ({}), ignoring additional "
+                    "engines, numEngines count: {}",
+                    maxEngines,
+                    *numEngines);
                 break;
             }
 

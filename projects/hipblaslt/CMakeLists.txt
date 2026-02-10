@@ -65,8 +65,8 @@ option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile pytho
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
-    # rocm-smi is not presently available on Windows so we do not require it.
-    cmake_dependent_option(HIPBLASLT_ENABLE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
+    # amd-smi is not presently available on Windows so we do not require it.
+    cmake_dependent_option(HIPBLASLT_ENABLE_AMD_SMI "Require amd_smi." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
 endif()
 
@@ -127,10 +127,10 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_ROCM_SMI)
-    find_package(rocm_smi REQUIRED)
+if(HIPBLASLT_ENABLE_AMD_SMI)
+    find_package(amd_smi REQUIRED)
 else()
-    find_package(rocm_smi)
+    find_package(amd_smi)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
@@ -156,7 +156,7 @@ if(HIPBLASLT_ENABLE_LLVM)
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
-    if(NOT WIN32 AND (HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN"))
+    if(NOT WIN32 AND (HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"))
         execute_process(
             COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
             OUTPUT_VARIABLE ASAN_LIB_PATH
@@ -372,7 +372,8 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_DEVICE)
+# Both the device-library contents and custom kernels in the rocroller directory should be installed if selected for
+if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
     if(WIN32)
         # Put files used at runtime adjacent to '.dll's and '.exe's in bin/.
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_BINDIR}/hipblaslt" CACHE PATH "path to tensile library")
@@ -456,7 +457,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/git_info.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/specs.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/suites.py"
-        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/performance"
         COMPONENT benchmarks
     )
 

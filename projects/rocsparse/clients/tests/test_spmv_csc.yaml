@@ -70,6 +70,41 @@ Tests:
   precision: *single_double_precisions_complex_real
 
 #
+# Test rocsparse_spmv_alg_default dispatch:
+# - CSC format + default algo + none should use rowsplit internally
+# - CSC format + default algo + transpose/conjugate_transpose should use adaptive internally
+#
+
+- name: spmv_csc_default_alg
+  category: quick
+  function: spmv_csc
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [10, 500]
+  N: [33, 842]
+  alpha_beta: *alpha_beta_range_quick
+  transA: *all_rocsparse_operation
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  spmv_alg: [rocsparse_spmv_alg_default]
+
+- name: spmv_csc_default_alg
+  category: pre_checkin
+  function: spmv_csc
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [0, 7111]
+  N: [0, 4441]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: *all_rocsparse_operation
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  spmv_alg: [rocsparse_spmv_alg_default]
+  call_stage_analysis: [false, true]
+
+#
 # general matrix type
 #
 

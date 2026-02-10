@@ -9,6 +9,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   `miopenBatchNormForwardInferenceActivationInvVariance` to support hipDNN.
 * [Conv] Enabled CK wrw and bwd solvers with split-k disabled in deterministic mode.
 * [Conv] Added initial Composable Kernel (CK) support for RDNA3.X and RDNA4
+* [Conv] Added `ConvDepthwiseFwd2D` solver for optimizing specific depthwise convolutions.
 
 ### Changed
 * Ported additional OCL kernels to HIP

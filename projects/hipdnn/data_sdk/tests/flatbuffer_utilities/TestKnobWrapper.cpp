@@ -167,7 +167,7 @@ TEST_F(TestKnobWrapper, ConstructFromFlatbufferPointer)
 
     KnobWrapper wrapper(knob);
     EXPECT_TRUE(wrapper.isValid());
-    EXPECT_EQ(wrapper.knobIdStr(), "KNOB_42");
+    EXPECT_EQ(wrapper.knobId(), "KNOB_42");
     EXPECT_EQ(wrapper.description(), "Test knob");
 }
 
@@ -177,7 +177,7 @@ TEST_F(TestKnobWrapper, ConstructFromBuffer)
 
     KnobWrapper wrapper(buffer.data(), buffer.size());
     EXPECT_TRUE(wrapper.isValid());
-    EXPECT_EQ(wrapper.knobIdStr(), "KNOB_42");
+    EXPECT_EQ(wrapper.knobId(), "KNOB_42");
     EXPECT_EQ(wrapper.description(), "Test knob");
 }
 
@@ -201,11 +201,11 @@ TEST_F(TestKnobWrapper, ConstructFromInvalidBuffer)
     EXPECT_FALSE(wrapper.isValid());
 }
 
-TEST_F(TestKnobWrapper, GetKnobIdStrFromValidWrapper)
+TEST_F(TestKnobWrapper, GetKnobIdFromValidWrapper)
 {
     auto buffer = createKnob("CUSTOM_KNOB_NAME", "Test");
     KnobWrapper wrapper(buffer.data(), buffer.size());
-    EXPECT_EQ(wrapper.knobIdStr(), "CUSTOM_KNOB_NAME");
+    EXPECT_EQ(wrapper.knobId(), "CUSTOM_KNOB_NAME");
 }
 
 TEST_F(TestKnobWrapper, GetDescriptionFromValidWrapper)
@@ -331,7 +331,7 @@ TEST_F(TestKnobWrapper, AccessMethodsOnInvalidWrapperThrow)
     KnobWrapper wrapper(nullptr, 0);
     EXPECT_FALSE(wrapper.isValid());
 
-    EXPECT_THROW(wrapper.knobIdStr(), std::invalid_argument);
+    EXPECT_THROW(wrapper.knobId(), std::invalid_argument);
     EXPECT_THROW(wrapper.description(), std::invalid_argument);
     EXPECT_THROW(wrapper.defaultValueType(), std::invalid_argument);
     EXPECT_THROW(wrapper.isDeprecated(), std::invalid_argument);
@@ -348,7 +348,7 @@ TEST_F(TestKnobWrapper, EmptyStringsHandling)
     KnobWrapper wrapper(buffer.data(), buffer.size());
 
     EXPECT_TRUE(wrapper.isValid());
-    EXPECT_EQ(wrapper.knobIdStr(), "");
+    EXPECT_EQ(wrapper.knobId(), "");
     EXPECT_EQ(wrapper.description(), "");
 }
 
@@ -363,17 +363,17 @@ TEST_F(TestKnobWrapper, MultipleDifferentKnobs)
     KnobWrapper wrapper2(buffer2.data(), buffer2.size());
     KnobWrapper wrapper3(buffer3.data(), buffer3.size());
 
-    EXPECT_EQ(wrapper1.knobIdStr(), "KNOB_1");
+    EXPECT_EQ(wrapper1.knobId(), "KNOB_1");
     EXPECT_TRUE(wrapper1.hasDefaultValue());
     EXPECT_FALSE(wrapper1.hasConstraint());
     EXPECT_FALSE(wrapper1.isDeprecated());
 
-    EXPECT_EQ(wrapper2.knobIdStr(), "KNOB_2");
+    EXPECT_EQ(wrapper2.knobId(), "KNOB_2");
     EXPECT_FALSE(wrapper2.hasDefaultValue());
     EXPECT_FALSE(wrapper2.hasConstraint());
     EXPECT_TRUE(wrapper2.isDeprecated());
 
-    EXPECT_EQ(wrapper3.knobIdStr(), "KNOB_3");
+    EXPECT_EQ(wrapper3.knobId(), "KNOB_3");
     EXPECT_TRUE(wrapper3.hasDefaultValue());
     EXPECT_TRUE(wrapper3.hasConstraint());
     EXPECT_FALSE(wrapper3.isDeprecated());
