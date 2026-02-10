@@ -265,15 +265,14 @@ constexpr auto rocsolver2char_norm_type(rocsolver_norm_type value)
     return '\0';
 }
 
-constexpr auto rocsolver2char_cholqr_algo(rocsolver_cholqr_algo value)
+constexpr auto rocsolver2char_alg_select(rocsolver_alg_select value)
 {
     switch(value)
     {
-    case rocsolver_cholqr_cholqr1: return '1';
-    case rocsolver_cholqr_cholqr2: return '2';
-    case rocsolver_cholqr_cholqr3_compute: return '3';
-    case rocsolver_cholqr_cholqr3_user: return '4';
-    case rocsolver_cholqr_default: return 'D';
+    case rocsolver_alg_select1: return '1';
+    case rocsolver_alg_select2: return '2';
+    case rocsolver_alg_select3: return '3';
+    case rocsolver_alg_select4: return '4';
     }
     return '\0';
 }
@@ -500,16 +499,15 @@ constexpr rocsolver_norm_type char2rocsolver_norm_type(char value)
     }
 }
 
-constexpr rocsolver_cholqr_algo char2rocsolver_cholqr_algo(char value)
+constexpr rocsolver_alg_select char2rocsolver_alg_select(char value)
 {
     switch(std::toupper(value))
     {
-    case '1': return rocsolver_cholqr_cholqr1;
-    case '2': return rocsolver_cholqr_cholqr2;
-    case '3': return rocsolver_cholqr_cholqr3_compute;
-    case '4': return rocsolver_cholqr_cholqr3_user;
-    case 'D': return rocsolver_cholqr_default;
-    default: return static_cast<rocsolver_cholqr_algo>(0);
+    case '1': return rocsolver_alg_select1;
+    case '2': return rocsolver_alg_select2;
+    case '3': return rocsolver_alg_select3;
+    case '4': return rocsolver_alg_select4;
+    default: return static_cast<rocsolver_alg_select>(0);
     }
 }
 #undef ROCSOLVER_ROCBLAS_HAS_F8_DATATYPES

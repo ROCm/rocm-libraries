@@ -12103,7 +12103,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        rocblas_int ldr,
                                        rocblas_stride strideR,
                                        float* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        rocblas_int* info,
                                        rocblas_int batch_count)
 {
@@ -12125,7 +12125,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        rocblas_int ldr,
                                        rocblas_stride strideR,
                                        double* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        rocblas_int* info,
                                        rocblas_int batch_count)
 {
@@ -12147,7 +12147,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        rocblas_int ldr,
                                        rocblas_stride strideR,
                                        float* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        rocblas_int* info,
                                        rocblas_int batch_count)
 {
@@ -12169,7 +12169,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        rocblas_int ldr,
                                        rocblas_stride strideR,
                                        double* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        rocblas_int* info,
                                        rocblas_int batch_count)
 {
@@ -12191,7 +12191,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        int64_t ldr,
                                        rocblas_stride strideR,
                                        float* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        int64_t* info,
                                        int64_t batch_count)
 {
@@ -12213,7 +12213,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        int64_t ldr,
                                        rocblas_stride strideR,
                                        double* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        int64_t* info,
                                        int64_t batch_count)
 {
@@ -12235,7 +12235,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        int64_t ldr,
                                        rocblas_stride strideR,
                                        float* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        int64_t* info,
                                        int64_t batch_count)
 {
@@ -12257,7 +12257,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        int64_t ldr,
                                        rocblas_stride strideR,
                                        double* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        int64_t* info,
                                        int64_t batch_count)
 {
@@ -12280,7 +12280,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        rocblas_int ldr,
                                        rocblas_stride strideR,
                                        float* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        rocblas_int* info,
                                        rocblas_int batch_count)
 {
@@ -12299,7 +12299,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        rocblas_int ldr,
                                        rocblas_stride strideR,
                                        double* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        rocblas_int* info,
                                        rocblas_int batch_count)
 {
@@ -12318,7 +12318,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        rocblas_int ldr,
                                        rocblas_stride strideR,
                                        float* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        rocblas_int* info,
                                        rocblas_int batch_count)
 {
@@ -12337,7 +12337,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        rocblas_int ldr,
                                        rocblas_stride strideR,
                                        double* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        rocblas_int* info,
                                        rocblas_int batch_count)
 {
@@ -12356,7 +12356,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        int64_t ldr,
                                        rocblas_stride strideR,
                                        float* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        int64_t* info,
                                        int64_t batch_count)
 {
@@ -12375,7 +12375,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        int64_t ldr,
                                        rocblas_stride strideR,
                                        double* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        int64_t* info,
                                        int64_t batch_count)
 {
@@ -12394,7 +12394,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        int64_t ldr,
                                        rocblas_stride strideR,
                                        float* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        int64_t* info,
                                        int64_t batch_count)
 {
@@ -12413,7 +12413,7 @@ inline rocblas_status rocsolver_cholqr(bool STRIDED,
                                        int64_t ldr,
                                        rocblas_stride strideR,
                                        double* sigma,
-                                       rocsolver_cholqr_algo algo,
+                                       rocsolver_alg_select algo,
                                        int64_t* info,
                                        int64_t batch_count)
 {

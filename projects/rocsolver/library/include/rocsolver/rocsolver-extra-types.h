@@ -195,16 +195,13 @@ typedef enum rocsolver_norm_type_
 
 /*! \brief Used by specific functions to specify the algorithm choice.
  ********************************************************************************/
-typedef enum rocsolver_cholqr_algo_
+typedef enum rocsolver_alg_select_
 {
-    rocsolver_cholqr_cholqr1 = 311, /**< Computations are all performed using CholeskyQR1 algorithm. */
-    rocsolver_cholqr_cholqr2 = 312, /**< Computations are all performed using CholeskyQR2 algorithm. */
-    rocsolver_cholqr_default = 313, /**< Default algorithm using CholeskyQR2 algorithm. */
-    rocsolver_cholqr_cholqr3_compute
-    = 314, /**< Computations are all performed using shifted CholeskyQR3 algorithm with the shifts internally computed. */
-    rocsolver_cholqr_cholqr3_user
-    = 315, /**< Computations are all performed using shifted CholeskyQR3 algorithm with the shifts provided by the user. */
-} rocsolver_cholqr_algo;
+    rocsolver_alg_select1 = 311,
+    rocsolver_alg_select2 = 312,
+    rocsolver_alg_select3 = 313,
+    rocsolver_alg_select4 = 314,
+} rocsolver_alg_select;
 
 /*! \brief Used to specify a function with multiple supported algorithm modes.
  ********************************************************************************/

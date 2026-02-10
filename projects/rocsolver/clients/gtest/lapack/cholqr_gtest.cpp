@@ -37,16 +37,15 @@ using namespace std;
  * Test parameter tuple: {m, lda, ldr}, n, algo
  *
  * Algorithm modes:
- *   '1' = cholqr1: Basic CholeskyQR1 - fast but may fail on ill-conditioned matrices
- *   '2' = cholqr2: CholeskyQR2 - more robust, does two iterations (default)
- *   '3' = cholqr3_compute: Shifted CholeskyQR3 with internally computed shifts - most robust
- *   '4' = cholqr3_user: Shifted CholeskyQR3 with user-provided sigma shifts
- *   'D' = default: Same as cholqr2
+ *   '1' = Basic CholeskyQR1 - fast but may fail on ill-conditioned matrices
+ *   '2' = CholeskyQR2 - more robust, does two iterations (default)
+ *   '3' = Shifted CholeskyQR3 with internally computed shifts - most robust
+ *   '4' = Shifted CholeskyQR3 with user-provided sigma shifts
  */
 template <typename I>
 using cholqr_tuple = tuple<vector<I>, I, char>;
 
-// case when m = n = 0 will also execute the bad arguments test
+// case when m = n = 0 and alg_select = 1 will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
 // ============================================================================
@@ -100,15 +99,6 @@ const vector<int64_t> n_size_range_64 = {
 const vector<char> algo_range = {
     '1', // cholqr1
     '2', // cholqr2
-    '3', // cholqr3_compute
-    '4', // cholqr3_user
-    'D' // default (cholqr2)
-};
-
-// Reduced algorithm range for faster testing
-const vector<char> algo_range_reduced = {
-    '1', // cholqr1
-    '2', // cholqr2 (default)
     '3' // cholqr3_compute
 };
 
@@ -151,7 +141,7 @@ Arguments cholqr_setup_arguments(cholqr_tuple<I> tup)
     arg.set<I>("ldr", matrix_size.size() > 2 ? matrix_size[2] : n_size);
 
     // Set the algorithm
-    arg.set<char>("cholqr_algo", algo);
+    arg.set<char>("alg_select", algo);
 
     // only testing standard use case/defaults for strides
 
@@ -178,7 +168,7 @@ protected:
     {
         Arguments arg = cholqr_setup_arguments(this->GetParam());
 
-        if(arg.peek<I>("m") == 0 && arg.peek<I>("n") == 0)
+        if(arg.peek<I>("m") == 0 && arg.peek<I>("n") == 0 && arg.peek<char>("alg_select") == '1')
             testing_cholqr_bad_arg<BATCHED, STRIDED, T, I>();
 
         arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
@@ -343,23 +333,23 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          CHOLQR,
                          Combine(ValuesIn(matrix_size_range),
                                  ValuesIn(n_size_range),
-                                 ValuesIn(algo_range_reduced)));
+                                 ValuesIn(algo_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          CHOLQR_64,
                          Combine(ValuesIn(matrix_size_range_64),
                                  ValuesIn(n_size_range_64),
-                                 ValuesIn(algo_range_reduced)));
+                                 ValuesIn(algo_range)));
 
 // Daily tests: reduced algorithms, larger sizes
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          CHOLQR,
                          Combine(ValuesIn(large_matrix_size_range),
                                  ValuesIn(large_n_size_range),
-                                 ValuesIn(algo_range_reduced)));
+                                 ValuesIn(algo_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          CHOLQR_64,
                          Combine(ValuesIn(large_matrix_size_range_64),
                                  ValuesIn(large_n_size_range_64),
-                                 ValuesIn(algo_range_reduced)));
+                                 ValuesIn(algo_range)));

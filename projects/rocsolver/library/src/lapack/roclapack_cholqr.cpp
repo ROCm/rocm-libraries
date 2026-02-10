@@ -38,7 +38,7 @@ rocblas_status rocsolver_cholqr_impl(rocblas_handle handle,
                                      T* R,
                                      const I ldr,
                                      S* sigma,
-                                     const rocsolver_cholqr_algo algo,
+                                     const rocsolver_alg_select algo,
                                      I* info)
 {
     ROCSOLVER_ENTER_TOP("cholqr", "-m", m, "-n", n, "--lda", lda, "--ldr", ldr, "--algo", algo);
@@ -124,7 +124,7 @@ rocblas_status rocsolver_scholqr(rocblas_handle handle,
                                  float* R,
                                  const rocblas_int ldr,
                                  float* sigma,
-                                 const rocsolver_cholqr_algo algo,
+                                 const rocsolver_alg_select algo,
                                  rocblas_int* info)
 {
     return (rocsolver::rocsolver_cholqr_impl<float>(handle, m, n, A, lda, R, ldr, sigma, algo, info));
@@ -138,7 +138,7 @@ rocblas_status rocsolver_dcholqr(rocblas_handle handle,
                                  double* R,
                                  const rocblas_int ldr,
                                  double* sigma,
-                                 const rocsolver_cholqr_algo algo,
+                                 const rocsolver_alg_select algo,
                                  rocblas_int* info)
 {
     return (rocsolver::rocsolver_cholqr_impl<double>(handle, m, n, A, lda, R, ldr, sigma, algo, info));
@@ -152,7 +152,7 @@ rocblas_status rocsolver_ccholqr(rocblas_handle handle,
                                  rocblas_float_complex* R,
                                  const rocblas_int ldr,
                                  float* sigma,
-                                 const rocsolver_cholqr_algo algo,
+                                 const rocsolver_alg_select algo,
                                  rocblas_int* info)
 {
     return (rocsolver::rocsolver_cholqr_impl<rocblas_float_complex>(handle, m, n, A, lda, R, ldr,
@@ -167,7 +167,7 @@ rocblas_status rocsolver_zcholqr(rocblas_handle handle,
                                  rocblas_double_complex* R,
                                  const rocblas_int ldr,
                                  double* sigma,
-                                 const rocsolver_cholqr_algo algo,
+                                 const rocsolver_alg_select algo,
                                  rocblas_int* info)
 {
     return (rocsolver::rocsolver_cholqr_impl<rocblas_double_complex>(handle, m, n, A, lda, R, ldr,
@@ -182,7 +182,7 @@ rocblas_status rocsolver_scholqr_64(rocblas_handle handle,
                                     float* R,
                                     const int64_t ldr,
                                     float* sigma,
-                                    const rocsolver_cholqr_algo algo,
+                                    const rocsolver_alg_select algo,
                                     int64_t* info)
 {
 #ifdef HAVE_ROCBLAS_64
@@ -200,7 +200,7 @@ rocblas_status rocsolver_dcholqr_64(rocblas_handle handle,
                                     double* R,
                                     const int64_t ldr,
                                     double* sigma,
-                                    const rocsolver_cholqr_algo algo,
+                                    const rocsolver_alg_select algo,
                                     int64_t* info)
 {
 #ifdef HAVE_ROCBLAS_64
@@ -218,7 +218,7 @@ rocblas_status rocsolver_ccholqr_64(rocblas_handle handle,
                                     rocblas_float_complex* R,
                                     const int64_t ldr,
                                     float* sigma,
-                                    const rocsolver_cholqr_algo algo,
+                                    const rocsolver_alg_select algo,
                                     int64_t* info)
 {
 #ifdef HAVE_ROCBLAS_64
@@ -237,7 +237,7 @@ rocblas_status rocsolver_zcholqr_64(rocblas_handle handle,
                                     rocblas_double_complex* R,
                                     const int64_t ldr,
                                     double* sigma,
-                                    const rocsolver_cholqr_algo algo,
+                                    const rocsolver_alg_select algo,
                                     int64_t* info)
 {
 #ifdef HAVE_ROCBLAS_64

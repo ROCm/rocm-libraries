@@ -50,7 +50,7 @@ void cholqr_checkBadArgs(const rocblas_handle handle,
                          const I ldr,
                          const rocblas_stride stR,
                          S dSigma,
-                         const rocsolver_cholqr_algo algo,
+                         const rocsolver_alg_select algo,
                          V dInfo,
                          const I bc)
 {
@@ -111,7 +111,7 @@ void testing_cholqr_bad_arg()
     rocblas_stride stA = 1;
     rocblas_stride stR = 1;
     I bc = 1;
-    rocsolver_cholqr_algo algo = rocsolver_cholqr_cholqr3_compute;
+    rocsolver_alg_select algo = rocsolver_alg_select3;
 
     if(BATCHED)
     {
@@ -158,7 +158,7 @@ void cholqr_initData(const rocblas_handle handle,
                      const I ldr,
                      const rocblas_stride stR,
                      Sd& dSigma,
-                     const rocsolver_cholqr_algo algo,
+                     const rocsolver_alg_select algo,
                      const I bc,
                      Th& hA,
                      Uh& hR,
@@ -188,7 +188,7 @@ void cholqr_initData(const rocblas_handle handle,
         // For cholqr3_user, we compute sigma using the same formula as cholqr3_compute:
         //   sigma = 11 * n * eps * (m + (n+1)) * ||A||_F^2
         // For other modes, sigma is either not used or computed internally
-        if(algo == rocsolver_cholqr_cholqr3_user)
+        if(algo == rocsolver_alg_select4)
         {
             S eps = std::numeric_limits<S>::epsilon();
             for(I b = 0; b < bc; ++b)
@@ -239,7 +239,7 @@ void cholqr_getError(const rocblas_handle handle,
                      const I ldr,
                      const rocblas_stride stR,
                      Sd& dSigma,
-                     const rocsolver_cholqr_algo algo,
+                     const rocsolver_alg_select algo,
                      Id& dInfo,
                      const I bc,
                      Th& hA,
@@ -361,7 +361,7 @@ void cholqr_getPerfData(const rocblas_handle handle,
                         const I ldr,
                         const rocblas_stride stR,
                         Sd& dSigma,
-                        const rocsolver_cholqr_algo algo,
+                        const rocsolver_alg_select algo,
                         Id& dInfo,
                         const I bc,
                         Th& hA,
@@ -449,8 +449,8 @@ void testing_cholqr(Arguments& argus)
     rocblas_stride stR = argus.get<rocblas_stride>("strideR", ldr * n);
 
     // Get cholqr algorithm from command line
-    char algo_char = argus.get<char>("cholqr_algo", 'D');
-    rocsolver_cholqr_algo algo = char2rocsolver_cholqr_algo(algo_char);
+    char algo_char = argus.get<char>("alg_select");
+    rocsolver_alg_select algo = char2rocsolver_alg_select(algo_char);
 
     I bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;

@@ -39,7 +39,7 @@ rocblas_status rocsolver_cholqr_batched_impl(rocblas_handle handle,
                                              const I ldr,
                                              const rocblas_stride strideR,
                                              S* sigma,
-                                             const rocsolver_cholqr_algo algo,
+                                             const rocsolver_alg_select algo,
                                              I* info,
                                              const I batch_count)
 {
@@ -126,7 +126,7 @@ rocblas_status rocsolver_scholqr_batched(rocblas_handle handle,
                                          const rocblas_int ldr,
                                          const rocblas_stride strideR,
                                          float* sigma,
-                                         const rocsolver_cholqr_algo algo,
+                                         const rocsolver_alg_select algo,
                                          rocblas_int* info,
                                          const rocblas_int batch_count)
 {
@@ -143,7 +143,7 @@ rocblas_status rocsolver_dcholqr_batched(rocblas_handle handle,
                                          const rocblas_int ldr,
                                          const rocblas_stride strideR,
                                          double* sigma,
-                                         const rocsolver_cholqr_algo algo,
+                                         const rocsolver_alg_select algo,
                                          rocblas_int* info,
                                          const rocblas_int batch_count)
 {
@@ -160,7 +160,7 @@ rocblas_status rocsolver_ccholqr_batched(rocblas_handle handle,
                                          const rocblas_int ldr,
                                          const rocblas_stride strideR,
                                          float* sigma,
-                                         const rocsolver_cholqr_algo algo,
+                                         const rocsolver_alg_select algo,
                                          rocblas_int* info,
                                          const rocblas_int batch_count)
 {
@@ -177,7 +177,7 @@ rocblas_status rocsolver_zcholqr_batched(rocblas_handle handle,
                                          const rocblas_int ldr,
                                          const rocblas_stride strideR,
                                          double* sigma,
-                                         const rocsolver_cholqr_algo algo,
+                                         const rocsolver_alg_select algo,
                                          rocblas_int* info,
                                          const rocblas_int batch_count)
 {
@@ -194,7 +194,7 @@ rocblas_status rocsolver_scholqr_batched_64(rocblas_handle handle,
                                             const int64_t ldr,
                                             const rocblas_stride strideR,
                                             float* sigma,
-                                            const rocsolver_cholqr_algo algo,
+                                            const rocsolver_alg_select algo,
                                             int64_t* info,
                                             const int64_t batch_count)
 {
@@ -215,7 +215,7 @@ rocblas_status rocsolver_dcholqr_batched_64(rocblas_handle handle,
                                             const int64_t ldr,
                                             const rocblas_stride strideR,
                                             double* sigma,
-                                            const rocsolver_cholqr_algo algo,
+                                            const rocsolver_alg_select algo,
                                             int64_t* info,
                                             const int64_t batch_count)
 {
@@ -236,7 +236,7 @@ rocblas_status rocsolver_ccholqr_batched_64(rocblas_handle handle,
                                             const int64_t ldr,
                                             const rocblas_stride strideR,
                                             float* sigma,
-                                            const rocsolver_cholqr_algo algo,
+                                            const rocsolver_alg_select algo,
                                             int64_t* info,
                                             const int64_t batch_count)
 {
@@ -257,7 +257,7 @@ rocblas_status rocsolver_zcholqr_batched_64(rocblas_handle handle,
                                             const int64_t ldr,
                                             const rocblas_stride strideR,
                                             double* sigma,
-                                            const rocsolver_cholqr_algo algo,
+                                            const rocsolver_alg_select algo,
                                             int64_t* info,
                                             const int64_t batch_count)
 {

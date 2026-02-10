@@ -407,16 +407,15 @@ rocblas_status rocsolver_cholqr_argCheck(rocblas_handle handle,
                                          const I ldr,
                                          const rocblas_stride strideR,
                                          S* sigma,
-                                         const rocsolver_cholqr_algo algo,
+                                         const rocsolver_alg_select algo,
                                          I* info,
                                          const I batch_count = 1)
 {
     // order is important for unit tests:
 
     // 1. invalid/non-supported values
-    if(algo != rocsolver_cholqr_cholqr1 && algo != rocsolver_cholqr_cholqr2
-       && algo != rocsolver_cholqr_default && algo != rocsolver_cholqr_cholqr3_compute
-       && algo != rocsolver_cholqr_cholqr3_user)
+    if(algo != rocsolver_alg_select1 && algo != rocsolver_alg_select2
+       && algo != rocsolver_alg_select3 && algo != rocsolver_alg_select4)
         return rocblas_status_invalid_value;
 
     // 2. invalid size
@@ -434,9 +433,7 @@ rocblas_status rocsolver_cholqr_argCheck(rocblas_handle handle,
     if((m && n && (!A || !R)) || (batch_count > 0 && !info))
         return rocblas_status_invalid_pointer;
     // sigma is required for cholqr3 algorithms
-    if(batch_count > 0
-       && (algo == rocsolver_cholqr_cholqr3_compute || algo == rocsolver_cholqr_cholqr3_user)
-       && !sigma)
+    if(batch_count > 0 && (algo == rocsolver_alg_select3 || algo == rocsolver_alg_select4) && !sigma)
         return rocblas_status_invalid_pointer;
 
     return rocblas_status_continue;
@@ -448,7 +445,7 @@ static rocblas_status rocsolver_cholqr_getMemorySize(const I m,
                                                      const I lda,
                                                      const I ldr,
                                                      const I batch_count,
-                                                     const rocsolver_cholqr_algo algo,
+                                                     const rocsolver_alg_select algo,
                                                      size_t* size_scalars,
                                                      size_t* size_work1,
                                                      size_t* size_work2,
@@ -491,7 +488,7 @@ static rocblas_status rocsolver_cholqr_getMemorySize(const I m,
     *size_work3 = std::max(*size_work3, w3);
     *size_work4 = std::max(*size_work4, w4);
 
-    if(algo == rocsolver_cholqr_cholqr1)
+    if(algo == rocsolver_alg_select1)
     {
         // storage for R1 not needed
         *size_R1 = 0;
@@ -505,7 +502,7 @@ static rocblas_status rocsolver_cholqr_getMemorySize(const I m,
         // storage for R1, in computing [Q,R1] = cholqr1(A)
         *size_R1 = sizeof(T) * n * n * batch_count;
 
-        if((algo == rocsolver_cholqr_cholqr3_compute) || (algo == rocsolver_cholqr_cholqr3_user))
+        if((algo == rocsolver_alg_select3) || (algo == rocsolver_alg_select4))
         {
             // ---- requirements for CHOLQR3 ----
             // extra space for iinfo and second copy of R1
@@ -793,7 +790,7 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
                                                 const I ldr,
                                                 const rocblas_stride strideR,
                                                 S* sigma,
-                                                const rocsolver_cholqr_algo algo,
+                                                const rocsolver_alg_select algo,
                                                 I* info,
                                                 const I batch_count,
                                                 T* scalars,
@@ -826,13 +823,13 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
     if(m == 0 || n == 0)
         return rocblas_status_success;
 
-    if(algo == rocsolver_cholqr_cholqr1)
+    if(algo == rocsolver_alg_select1)
     {
         return rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
             handle, m, n, A, shiftA, lda, strideA, R, shiftR, ldr, strideR, batch_count, info,
             scalars, work1, work2, work3, work4, pivots, iinfo, workArr, optim_mem);
     }
-    else if((algo == rocsolver_cholqr_cholqr2) || (algo == rocsolver_cholqr_default))
+    else if(algo == rocsolver_alg_select2)
     {
         return rocsolver_cholqr2_template<BATCHED, STRIDED, T>(
             handle, m, n, A, shiftA, lda, strideA, R, shiftR, ldr, strideR, batch_count, info,
@@ -840,7 +837,7 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
     }
     else
     {
-        bool const compute_sigma = (algo == rocsolver_cholqr_cholqr3_compute);
+        bool const compute_sigma = (algo == rocsolver_alg_select3);
         return rocsolver_cholqr3_template<BATCHED, STRIDED, T>(
             handle, m, n, A, shiftA, lda, strideA, R, shiftR, ldr, strideR, compute_sigma, sigma,
             info, batch_count, scalars, work1, work2, work3, work4, pivots, iinfo, R1, workArr,
