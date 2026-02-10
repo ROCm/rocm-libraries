@@ -92,14 +92,14 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     find_package(hipdnn_data_sdk CONFIG REQUIRED)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 
-    # Setup testing dependencies & tests for standalone build
-    include(Dependencies)
-    include(Tests)
-
     include(CheckToolVersion)
     include(ClangCheck)
     include(ClangTidy)
     include(Sanitizers)
+
+    # Setup testing dependencies & tests for standalone build
+    include(Dependencies)
+    include(Tests)
 
 else()
     message(STATUS "Building miopen provider plugin as a dependency")
