@@ -29,6 +29,7 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/StoreOption.hpp>
 #include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <string>
 
@@ -67,7 +68,8 @@ struct GEMMProblem
     // Unroll Sizes
     unsigned int unrollK = 0;
 
-    bool                     storeLDSD = true;
+    SolutionParams::StorePath storePath{
+        SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer};
     SolutionParams::LoadPath loadPathA{SolutionParams::LoadPath::BufferToLDSViaVGPR};
     SolutionParams::LoadPath loadPathB{SolutionParams::LoadPath::BufferToLDSViaVGPR};
 

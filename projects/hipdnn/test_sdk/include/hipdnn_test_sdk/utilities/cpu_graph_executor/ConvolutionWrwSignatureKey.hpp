@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionWrwPlan.hpp>
+#include <ostream>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -135,25 +136,11 @@ struct ConvolutionWrwSignatureKey
     }
 };
 
+inline std::ostream& operator<<(std::ostream& os, const ConvolutionWrwSignatureKey& key)
+{
+    os << "ConvolutionWrw(x=" << key.xDataType << ", dy=" << key.dyDataType
+       << ", dw=" << key.outputDataType << ", compute=" << key.computeDataType << ")";
+    return os;
 }
 
-template <>
-struct fmt::formatter<hipdnn_test_sdk::utilities::ConvolutionWrwSignatureKey>
-{
-    static constexpr auto parse(format_parse_context& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const hipdnn_test_sdk::utilities::ConvolutionWrwSignatureKey& key,
-                FormatContext& ctx) const
-    {
-        return fmt::format_to(ctx.out(),
-                              "ConvolutionWrw(x={}, dy={}, dw={}, compute={})",
-                              key.xDataType,
-                              key.dyDataType,
-                              key.outputDataType,
-                              key.computeDataType);
-    }
-};
+}

@@ -1032,6 +1032,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     CHECK_HIP_ERROR(hipFree(d_scale_b));
     CHECK_HIP_ERROR(hipFree(d_scale_c));
     CHECK_HIP_ERROR(hipFree(d_scale_d));
+    CHECK_HIP_ERROR(hipFree(d_scale_e));
     CHECK_HIP_ERROR(hipFree(d_aux_buffer));
     CHECK_HIP_ERROR(hipFree(d_out_amax));
     CHECK_HIP_ERROR(hipFree(default_ptr));
@@ -1618,6 +1619,7 @@ void testing_aux_matmul_bad_ws_size(const Arguments& arg)
     CHECK_HIP_ERROR(hipFree(d_b));
     CHECK_HIP_ERROR(hipFree(d_c));
     CHECK_HIP_ERROR(hipFree(d_d));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB));
