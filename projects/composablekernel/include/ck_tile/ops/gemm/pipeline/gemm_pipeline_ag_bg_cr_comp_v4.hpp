@@ -48,6 +48,7 @@ struct BaseGemmPipelineAgBgCrCompV4
     TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_number)
     {
         // Use amd_wave_read_first_lane to avoid higher resource usage.
+        // It forces to store these values in SGPR.
         // Compiler cannot deduce if one path is used for all threads
         const bool has_hot_loop_first_lane      = amd_wave_read_first_lane(has_hot_loop);
         const TailNumber tail_number_first_lane = amd_wave_read_first_lane(tail_number);
