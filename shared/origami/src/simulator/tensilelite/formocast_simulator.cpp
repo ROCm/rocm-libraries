@@ -1069,6 +1069,18 @@ namespace origami
         return simulator::getLocalReadQueueFullStallCycles(currentCycle, fifo, bpRead, numWaves, lrStallLatencyBuffer);
     }
 
+    int Formocast::getLocalWriteQueueFullStallCycles(int currentCycle, int previousLW, int issueCycles, int bpWrite, int numWaves) const
+    {
+        int issuePenality = 0;
+        if(numWaves == 4)
+        {
+            issuePenality = issueCycles;
+            if(bpWrite == 16)
+                issuePenality += 3;
+        }
+        return std::max(previousLW + issueCycles + issuePenality, currentCycle + issueCycles);
+    }
+
     void Formocast::pushLocalRead(int currentCycle, std::queue<int>& fifo, int bpr, bool isGfx950)
     {
         simulator::pushLocalRead(currentCycle, fifo, bpr, isGfx950);

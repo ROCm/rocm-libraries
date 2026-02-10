@@ -658,6 +658,16 @@ namespace origami
          * @return Stall cycles if FIFO is full, 0 otherwise
          */
         int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall, double bankConflict) const;
+
+        /**
+         * @brief Check if local write FIFO is full
+         * @param currentCycle Current simulation cycle
+         * @param issueCycles Issue cycles for the write operation
+         * @param bpWrite Bytes per write operation
+         * @param numWaves Number of waves
+         * @return The Cycle this instruction can be issued.
+         */
+        int getLocalWriteQueueFullStallCycles(int currentCycle, int previousLW, int issueCycles, int bpWrite, int numWaves) const;
         
         /**
          * @brief Check if local read operations have finished

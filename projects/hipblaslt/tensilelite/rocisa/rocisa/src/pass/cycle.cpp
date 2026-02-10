@@ -913,46 +913,31 @@ namespace rocisa
                 }
                 if(auto wInst = std::dynamic_pointer_cast<DSStoreB128>(item))
                 {
-                    if(previousLW + wInst->issueLatency() >= cycles && numWaves == 4)
-                        cycles += wInst->issueLatency() * 2;
-                    else
-                        cycles += wInst->issueLatency();
+                    cycles = formocast.getLocalWriteQueueFullStallCycles(cycles, previousLW, wInst->issueLatency(), 16, numWaves);
                     previousLW = cycles;
                     formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, 16, 1.0, false, 0);
                 }
                 else if(auto wInst = std::dynamic_pointer_cast<DSStoreB64>(item))
                 {
-                    if(previousLW + wInst->issueLatency() >= cycles && numWaves == 4)
-                        cycles += wInst->issueLatency() * 2;
-                    else
-                        cycles += wInst->issueLatency();
+                    cycles = formocast.getLocalWriteQueueFullStallCycles(cycles, previousLW, wInst->issueLatency(), 8, numWaves);
                     previousLW = cycles;
                     formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, 8, 1.0, false, 0);
                 }
                 else if(auto wInst = std::dynamic_pointer_cast<DSStoreB32>(item))
                 {
-                    if(previousLW + wInst->issueLatency() >= cycles && numWaves == 4)
-                        cycles += wInst->issueLatency() * 2;
-                    else
-                        cycles += wInst->issueLatency();
+                    cycles = formocast.getLocalWriteQueueFullStallCycles(cycles, previousLW, wInst->issueLatency(), 4, numWaves);
                     previousLW = cycles;
                     formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, 4, 1.0, false, 0);
                 }
                 else if(auto wInst = std::dynamic_pointer_cast<DSStoreB16>(item))
                 {
-                    if(previousLW + wInst->issueLatency() >= cycles && numWaves == 4)
-                        cycles += wInst->issueLatency() * 2;
-                    else
-                        cycles += wInst->issueLatency();
+                    cycles = formocast.getLocalWriteQueueFullStallCycles(cycles, previousLW, wInst->issueLatency(), 2, numWaves);
                     previousLW = cycles;
                     formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, 2, 1.0, false, 0);
                 }
                 else if(auto wInst = std::dynamic_pointer_cast<DSStoreB8>(item))
                 {
-                    if(previousLW + wInst->issueLatency() >= cycles && numWaves == 4)
-                        cycles += wInst->issueLatency() * 2;
-                    else
-                        cycles += wInst->issueLatency();
+                    cycles = formocast.getLocalWriteQueueFullStallCycles(cycles, previousLW, wInst->issueLatency(), 1, numWaves);
                     previousLW = cycles;
                     formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, 1, 1.0, false, 0);
                 }

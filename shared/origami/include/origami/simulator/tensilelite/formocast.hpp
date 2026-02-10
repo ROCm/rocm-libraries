@@ -301,7 +301,7 @@ namespace origami
          * @return Stall cycles if FIFO is full, currentCycle otherwise
          */
         int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, int lrStallLatencyBuffer);
-        
+
         /**
          * @brief Push a local read operation into the FIFO
          * @param currentCycle Current simulation cycle
