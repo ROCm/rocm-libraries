@@ -740,7 +740,6 @@ public:
             engineHeuristicDesc, _graphDesc->get(), modes));
 
         std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> engineConfigs;
-        std::vector<int64_t> engineIds;
         HIPDNN_CHECK_ERROR(detail::getEngineConfigs(
             engineConfigs, rankedEngineIds, engineHeuristicDesc.get(), true));
 
@@ -1689,6 +1688,6 @@ inline Error
 
     return {ErrorCode::OK, ""};
 }
-}
+} // namespace detail
 
 } // namespace hipdnn_frontend::graph

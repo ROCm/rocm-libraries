@@ -249,4 +249,4 @@ private:
     std::unordered_set<std::string> _validValues;
 };
 
-} // namespace hidpnn_frontend
+} // namespace hipdnn_frontend
