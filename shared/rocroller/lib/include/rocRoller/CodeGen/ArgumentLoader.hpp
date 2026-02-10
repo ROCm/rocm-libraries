@@ -63,8 +63,8 @@ namespace rocRoller
         ArgumentLoader(AssemblyKernelPtr kernel);
 
         /**
-         * Loads all arguments into a single allocation of SGPRs.  Uses the widest load
-         * instructions possible given alignment constraints.
+         * Loads all manually loaded arguments into a single allocation of SGPRs.  Uses the
+         * widest load instructions possible given alignment constraints.
          */
         Generator<Instruction> loadAllArguments();
 
@@ -83,19 +83,26 @@ namespace rocRoller
         Generator<Instruction>
             loadRange(int offset, int sizeBytes, Register::ValuePtr& value) const;
 
-        Generator<Instruction>
-            getPreloadedRegisters(Register::ValuePtr& regs, int& offset, int& count);
+        Generator<Instruction> allocatePreloadedRegisters(int& offset, int& count);
+
+        // /**
+        //  * Returns true if we need to request the kernel argument pointer in the initial kernel
+        //  * execution state (this would be false if we can preload every single kernel argument).
+        //  */
+        // bool needsKernargPointer() const;
+
+        bool anyPreloadedArguments() const;
+        bool anyManuallyLoadedArguments() const;
 
         /**
-         * Returns true if we need to request the kernel argument pointer in the initial kernel
-         * execution state (this would be false if we can preload every single kernel argument).
-         */
-        bool needsKernargPointer( std::vector<AssemblyKernelArgument> const& args) const;
-
-        /**
-         * Splits all the kernel arguments from `original` into either `preloaded` or `nonPreloaded` based on whether they will fit into the maximum number of preloaded kernel arguments.
+         * Decides which if any kernel arguments can be preloaded based on architecture and
+         * kernel options.
          * 
-         * The first priority is to pick the earliest arguments from `original` first, but it will also pick out-of-order arguments.
+         * The priority is to pick the earliest arguments first, but it will pick out-of-order
+         * arguments if alignment prevents earlier arguments from being preloaded.
+         *
+         * `args` will be partitioned into preloaded and non-preloaded arguments, and then
+         * sorted descending by size.
          */
         void decidePreloadedKernargs(std::vector<AssemblyKernelArgument>& args);
 
@@ -103,7 +110,7 @@ namespace rocRoller
          * Splits the block allocations of kernel arguments into individual registers and clears
          * the block allocations so that individual kernel arguments can be deallocated individually. 
          */
-        void splitOutArgumentRegisters();
+        Generator<Instruction> splitOutArgumentRegisters();
 
     private:
         friend class rocRollerTest::ArgumentLoaderTest_loadArgExtra_Test;
@@ -122,7 +129,15 @@ namespace rocRoller
 
         std::unordered_map<std::string, Register::ValuePtr> m_loadedValues;
 
+
         Register::ValuePtr m_preloadedBlock;
+        Register::ValuePtr m_manuallyLoadedBlock;
+        int m_manuallyLoadedOffset = 0;
+
+        void populateAnyArgumentsFlags() const;
+
+        mutable std::optional<bool> m_anyPreloadedArguments;
+        mutable std::optional<bool> m_anyManuallyLoadedArguments;
     };
 
     /**

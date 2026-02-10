@@ -41,6 +41,8 @@
 
 // #include <rocRoller/Operations/Command.hpp>
 
+// #define debug critical
+// #define Debug Critical
 namespace rocRoller
 {
     namespace KernelGraph
@@ -94,7 +96,7 @@ namespace rocRoller
                 if(nextOffset > offset)
                 {
                     auto gapSize = nextOffset - offset;
-                    Log::critical("Gap size: {}", gapSize);
+                    Log::debug("Gap size: {}", gapSize);
                     for(; argToAppend != arguments.end(); ++argToAppend)
                     {
                         if(launchTimeOnlyArguments.contains(argToAppend->name))
@@ -105,7 +107,7 @@ namespace rocRoller
 
                         if(argToAppend->size == gapSize)
                         {
-                            Log::critical(
+                            Log::debug(
                                 "Found argument: {} ({})", argToAppend->name, argToAppend->size);
                             break;
                         }
@@ -115,7 +117,7 @@ namespace rocRoller
                         argToAppend = arguments.begin();
                 }
 
-                Log::critical("Adding argument: {} ({})", argToAppend->name, argToAppend->size);
+                Log::debug("Adding argument: {} ({})", argToAppend->name, argToAppend->size);
                 newArguments.push_back(*argToAppend);
                 offset = RoundUpToMultiple<int>(offset, argToAppend->size) + argToAppend->size;
 
@@ -141,10 +143,10 @@ namespace rocRoller
 
             auto arguments = m_context->kernel()->resetArguments();
 
-            Log::critical("Arguments Before:");
+            Log::debug("Arguments Before:");
             for(auto const& arg : arguments)
             {
-                Log::critical("Argument: {} ({})", arg.name, arg.size);
+                Log::debug("Argument: {} ({})", arg.name, arg.size);
             }
 
             std::ranges::sort(arguments, [&](auto const& a, auto const& b) {
@@ -164,11 +166,11 @@ namespace rocRoller
             // auto newArguments = FillAlignmentGaps(arguments, launchTimeOnlyArguments);
             std::vector<AssemblyKernelArgument> newArguments{arguments.begin(), arguments.end()};
 
-            Log::critical("Arguments After:");
+            Log::debug("Arguments After:");
             for(auto const& arg : newArguments)
             {
                 std::string ltOnly = launchTimeOnlyArguments.contains(arg.name) ? " (LT only)" : "";
-                Log::critical("Argument: {} ({}){}", arg.name, arg.size, ltOnly);
+                Log::debug("Argument: {} ({}){}", arg.name, arg.size, ltOnly);
             }
 
             for(auto& arg : newArguments)

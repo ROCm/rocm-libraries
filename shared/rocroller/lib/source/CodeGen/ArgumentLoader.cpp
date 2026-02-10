@@ -36,8 +36,8 @@
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
-#define debug critical
-#define Debug Critical
+// #define debug critical
+// #define Debug Critical
 
 namespace rocRoller
 {
@@ -52,66 +52,55 @@ namespace rocRoller
         return m_kernel->argumentPointer();
     }
 
-    Generator<Instruction>
-        ArgumentLoader::getPreloadedRegisters(Register::ValuePtr& regs, int& offset, int& count)
+    Generator<Instruction> ArgumentLoader::allocatePreloadedRegisters(int& offset, int& count)
     {
-        regs     = nullptr;
         offset   = 0;
         count    = 0;
         auto ctx = m_context.lock();
 
-        auto maxPreloadedRegs = ctx->kernelOptions()->systemPreloadedKernelArguments;
-
-        co_yield Instruction::Comment(concatenate("maxPreloadedRegs", maxPreloadedRegs));
-
-        if(maxPreloadedRegs == 0)
-            co_return;
-
-        int numUserSGPRs = ctx->allocator(Register::Type::Scalar)->useCount();
-
-        int maxArchPreloadedRegs = 31 - numUserSGPRs;
-
-        if(maxPreloadedRegs < 0)
-        {
-            maxPreloadedRegs = maxArchPreloadedRegs;
-        }
-        else
-        {
-            maxPreloadedRegs = std::min(maxPreloadedRegs, maxArchPreloadedRegs);
-        }
-
-        int preloadedRegs = 0;
-
         for(auto const& arg : m_kernel->arguments())
         {
-            auto argEnd = (arg.offset + arg.size) / 4;
-            if(argEnd > maxPreloadedRegs)
+            if(arg.preloaded)
+                count += std::max(1, arg.size / 4);
+            else
+            {
+                m_manuallyLoadedOffset = arg.offset;
                 break;
-
-            preloadedRegs = argEnd;
+            }
         }
 
-        regs = Register::Value::Placeholder(ctx,
-                                            Register::Type::Scalar,
-                                            DataType::Raw32,
-                                            preloadedRegs,
-                                            Register::AllocationOptions::FullyContiguous());
+        if(count > 0)
+        {
+            m_preloadedBlock
+                = Register::Value::Placeholder(ctx,
+                                               Register::Type::Scalar,
+                                               DataType::Raw32,
+                                               count,
+                                               Register::AllocationOptions::FullyContiguous());
 
-        co_yield regs->allocate();
+            m_preloadedBlock->setName("Preloaded argument block");
 
-        Log::debug("Splitting out preloaded args:");
-        co_yield splitOutArgs(regs, 0);
-
-        m_preloadedBlock = regs;
-
-        co_yield Instruction::Comment("Here!");
-
-        count = preloadedRegs;
+            co_yield m_preloadedBlock->allocate();
+        }
     }
-    // void ArgumentLoader::releasePreloadedBlock()
-    // {
-    //     m_preloadedBlock.reset();
-    // }
+
+    Generator<Instruction> ArgumentLoader::splitOutArgumentRegisters()
+    {
+
+        if(anyPreloadedArguments())
+        {
+            Log::debug("Splitting out preloaded args:");
+            co_yield splitOutArgs(m_preloadedBlock, 0);
+            m_preloadedBlock.reset();
+        }
+
+        if(anyManuallyLoadedArguments())
+        {
+            Log::debug("Splitting out manually loaded args:");
+            co_yield splitOutArgs(m_manuallyLoadedBlock, m_manuallyLoadedOffset);
+            m_manuallyLoadedBlock.reset();
+        }
+    }
 
     Generator<Instruction>
         ArgumentLoader::loadRange(int offset, int endOffset, Register::ValuePtr& value) const
@@ -132,6 +121,8 @@ namespace rocRoller
                                                  DataType::Raw32,
                                                  totalRegisters,
                                                  Register::AllocationOptions::FullyContiguous());
+            value->setName(
+                fmt::format("Manually loaded argument block for range {}-{}", offset, endOffset));
         }
 
         // This is still needed even with deferred `subset()` since we generate
@@ -197,7 +188,7 @@ namespace rocRoller
         int totalAssignedSGPRs = 0;
 
         // Take the first args first, but if one doesn't fit, try to find a later one.
-        for(auto & arg: args)
+        for(auto& arg : args)
         {
             auto argSGPRs = getArgSGPRs(arg);
 
@@ -212,38 +203,51 @@ namespace rocRoller
             }
         }
 
-        auto isPreloaded = [](AssemblyKernelArgument const& arg){
-            return arg.preloaded;
-        };
+        auto isPreloaded = [](AssemblyKernelArgument const& arg) { return arg.preloaded; };
 
         auto firstNonPreloaded = std::stable_partition(args.begin(), args.end(), isPreloaded);
 
-        auto largestArgFirst = [&totalArgSGPRs](AssemblyKernelArgument const& a, AssemblyKernelArgument const& b)
-        {
-            return a.size > b.size;
-        };
+        auto largestArgFirst
+            = [&totalArgSGPRs](AssemblyKernelArgument const& a, AssemblyKernelArgument const& b) {
+                  return a.size > b.size;
+              };
 
         std::stable_sort(args.begin(), firstNonPreloaded, largestArgFirst);
         std::stable_sort(firstNonPreloaded, args.end(), largestArgFirst);
 
-        int offset = 0;
+        for(auto const& arg : args)
+        {
+            Log::debug("Argument: {} ({}) ({})", arg.name, arg.size, arg.preloaded);
+        }
+
+        int  offset              = 0;
         bool startedNonPreloaded = false;
 
-        for(auto & arg: args)
+        for(auto& arg : args)
         {
-            if(arg.preloaded && !startedNonPreloaded)
+            if(!arg.preloaded && !startedNonPreloaded)
             {
                 startedNonPreloaded = true;
-                AssertFatal(offset / 4 == (firstNonPreloaded - args.begin()));
+                // AssertFatal(offset / 4 == (firstNonPreloaded - args.begin()),
+                //             "Offset mismatch",
+                //             ShowValue(offset),
+                //             ShowValue(firstNonPreloaded - args.begin()));
                 arg.offset = RoundUpToMultiple(offset, arg.size);
             }
             else
             {
-                AssertFatal(offset % arg.size == 0, "No bubbles allowed in either segment!", ShowValue(offset), ShowValue(arg.size));
+                AssertFatal(offset % arg.size == 0,
+                            "No bubbles allowed in either segment!",
+                            ShowValue(offset),
+                            ShowValue(arg.size),
+                            ShowValue(startedNonPreloaded)
+                        );
                 arg.offset = offset;
             }
 
-            offset += arg.size;
+            Log::debug("Arg: {} size {} offset {}", arg.name, arg.size, arg.offset);
+
+            offset = arg.offset + arg.size;
         }
     }
 
@@ -266,7 +270,10 @@ namespace rocRoller
             auto        argEnd = arg.offset + arg.size;
             if(arg.offset >= beginOffset && argEnd <= endOffset)
             {
-                AssertFatal(!m_loadedValues.contains(arg.name), ShowValue(arg));
+                AssertFatal(!m_loadedValues.contains(arg.name),
+                            ShowValue(arg),
+                            ShowValue(beginOffset),
+                            ShowValue(endOffset));
 
                 auto beginReg = (arg.offset - beginOffset) / 4;
                 auto endReg   = beginReg + (arg.size / 4);
@@ -314,6 +321,35 @@ namespace rocRoller
         }
     }
 
+    bool ArgumentLoader::anyPreloadedArguments() const
+    {
+        if(!m_anyPreloadedArguments.has_value())
+            populateAnyArgumentsFlags();
+        return m_anyPreloadedArguments.value();
+    }
+
+    bool ArgumentLoader::anyManuallyLoadedArguments() const
+    {
+        if(!m_anyManuallyLoadedArguments.has_value())
+            populateAnyArgumentsFlags();
+
+        return m_anyManuallyLoadedArguments.value();
+    }
+
+    void ArgumentLoader::populateAnyArgumentsFlags() const
+    {
+        m_anyPreloadedArguments      = false;
+        m_anyManuallyLoadedArguments = false;
+
+        for(auto const& arg : m_kernel->arguments())
+        {
+            if(arg.preloaded)
+                m_anyPreloadedArguments = true;
+            else
+                m_anyManuallyLoadedArguments = true;
+        }
+    }
+
 #if 1
     Generator<Instruction> ArgumentLoader::loadAllArguments()
     {
@@ -334,22 +370,24 @@ namespace rocRoller
 
         for(auto const& arg : args)
         {
-            if(!m_loadedValues.contains(arg.name))
+            if(!m_loadedValues.contains(arg.name) && !arg.preloaded)
             {
                 beginOffset = std::min<int>(beginOffset, arg.offset);
                 endOffset   = std::max<int>(endOffset, arg.offset + arg.size);
             }
         }
 
-        Register::ValuePtr allArgs;
+        // beginOffset = std::max(beginOffset, m_manuallyLoadedOffset);
+
+        // Register::ValuePtr allArgs;
 
         if(beginOffset >= endOffset)
             co_return;
 
-        co_yield loadRange(beginOffset, endOffset, allArgs);
+        co_yield loadRange(beginOffset, endOffset, m_manuallyLoadedBlock);
 
-        Log::critical("Splitting out manually loaded args:");
-        co_yield splitOutArgs(allArgs, beginOffset);
+        // Log::critical("Splitting out manually loaded args:");
+        // co_yield splitOutArgs(allArgs, beginOffset);
     }
 
 #else

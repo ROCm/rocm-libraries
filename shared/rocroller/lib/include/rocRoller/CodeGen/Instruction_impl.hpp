@@ -453,12 +453,12 @@ namespace rocRoller
     inline void Instruction::directiveString(std::ostream& os, LogLevel level) const
     {
         os << m_directive;
+        if(!m_directive.empty())
+            os << "\n";
     }
 
     inline void Instruction::functionalString(std::ostream& os, LogLevel level) const
     {
-        auto pos = os.tellp();
-
         if(!m_label.empty())
         {
             os << m_label << ":\n";
@@ -487,6 +487,8 @@ namespace rocRoller
                 os << "s_nop " << (count - 1) << "\n";
             }
         }
+
+        auto pos = os.tellp();
 
         coreInstructionString(os);
 

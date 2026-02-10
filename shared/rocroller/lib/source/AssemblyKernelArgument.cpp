@@ -62,6 +62,9 @@ namespace rocRoller
         if(size != -1)
             rv += concatenate(", s:", size);
 
+        if(preloaded)
+            rv += concatenate(", preloaded");
+
         return rv + "}";
     }
 
