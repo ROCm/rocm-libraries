@@ -14,6 +14,8 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     set(MIOPEN_PLUGIN_VERSION "0.0.1")
     project(hipDNN VERSION ${MIOPEN_PLUGIN_VERSION} LANGUAGES CXX)
 
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/CheckPreCommit.cmake)
+
     if(NOT WIN32)
         # Only set if not already specified by user
         if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -46,6 +48,17 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
         message(DEPRECATION "HIP_DNN_SKIP_TESTS has been renamed to HIPDNN_SKIP_TESTS. Please update your build scripts to use -DHIPDNN_SKIP_TESTS instead.")
     endif()
     option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
+
+    option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
+    option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+    if(WIN32)
+        option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
+        if(ENABLE_CLANG_TIDY)
+            message(WARNING "Clang-Tidy enabled on Windows - this significantly increases build time.")
+        endif()
+    else()
+        option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+    endif()
 
     list(
         PREPEND
@@ -82,6 +95,11 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     # Setup testing dependencies & tests for standalone build
     include(Dependencies)
     include(Tests)
+
+    include(CheckToolVersion)
+    include(ClangCheck)
+    include(ClangTidy)
+    include(Sanitizers)
 
 else()
     message(STATUS "Building miopen provider plugin as a dependency")
@@ -144,9 +162,7 @@ set_target_properties(miopen_plugin_impl PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-if(BUILD_PLUGIN_AS_DEPENDENCY)
-    clang_tidy_check(miopen_plugin_impl)
-endif()
+clang_tidy_check(miopen_plugin_impl)
 
 # Static library for unit tests to link against (provides access to internal implementation)
 add_library(miopen_plugin_private STATIC $<TARGET_OBJECTS:miopen_plugin_impl>)
@@ -226,3 +242,9 @@ install(TARGETS miopen_legacy_plugin EXPORT miopen-legacy-plugin
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+
+# Create tidy/tidy-cxx custom targets for standalone builds.
+# In dependency mode, the parent hipdnn project creates these targets.
+if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
+    add_clang_tidy_custom_target()
+endif()
