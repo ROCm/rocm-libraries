@@ -1041,40 +1041,39 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                   const std::array<index_t, NumDTensor> StrideDs,
                   const index_t StrideE,
                   const index_t KBatch)
-    {    
+    {
 
-        ignore = StrideDs;
+        ignore              = StrideDs;
         const auto M_padded = CalculateMPadded(M);
         const auto N_padded = CalculateMPadded(N);
         const auto K_padded = CalculateKPadded(K, KBatch);
 
-        const auto e_grid_desc_m_n = MakeDEGridDescriptor_M_N<ELayout>(M, M_padded, N, N_padded, StrideE);
-
+        const auto e_grid_desc_m_n =
+            MakeDEGridDescriptor_M_N<ELayout>(M, M_padded, N, N_padded, StrideE);
 
         const index_t AK0 = CalculateAK0Padded(K, KBatch);
         const index_t BK0 = CalculateBK0Padded(K, KBatch);
 
-        const auto a_grid_desc_ak0_m_ak1 =
-            MakeAsGridDescriptor_AK0_M_AK1(M, M_padded, K, K_padded, std::array<index_t, 1>{StrideA}, AK0);
+        const auto a_grid_desc_ak0_m_ak1 = MakeAsGridDescriptor_AK0_M_AK1(
+            M, M_padded, K, K_padded, std::array<index_t, 1>{StrideA}, AK0);
 
-        const auto b_grid_desc_bk0_n_bk1 =
-            MakeBsGridDescriptor_BK0_N_BK1(K, K_padded, N, N_padded, std::array<index_t, 1>{StrideB}, BK0);
+        const auto b_grid_desc_bk0_n_bk1 = MakeBsGridDescriptor_BK0_N_BK1(
+            K, K_padded, N, N_padded, std::array<index_t, 1>{StrideB}, BK0);
 
         constexpr long_index_t TwoGB = (long_index_t{1} << 31);
 
         const auto& a_desc = a_grid_desc_ak0_m_ak1.At(I0);
         const auto& b_desc = b_grid_desc_bk0_n_bk1.At(I0);
-        
+
         if(!(a_desc.GetElementSpaceSize() * sizeof(LDSTypeA) <= TwoGB &&
-            b_desc.GetElementSpaceSize() * sizeof(LDSTypeB) <= TwoGB &&
-            e_grid_desc_m_n.GetElementSpaceSize() * sizeof(EDataType) <= TwoGB))
+             b_desc.GetElementSpaceSize() * sizeof(LDSTypeB) <= TwoGB &&
+             e_grid_desc_m_n.GetElementSpaceSize() * sizeof(EDataType) <= TwoGB))
         {
             return false;
         }
 
         return true;
     }
-
 
     // block_id to matrix tile idx (m0, n0) mapping are controlled by {M01, N01}
     template <typename Argument>

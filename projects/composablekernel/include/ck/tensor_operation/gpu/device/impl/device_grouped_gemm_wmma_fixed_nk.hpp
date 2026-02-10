@@ -554,11 +554,11 @@ struct DeviceGroupedGemm_Wmma_Fixed_Nk : public DeviceGroupedGemmFixedNK<ALayout
                     throw std::runtime_error("wrong! block_2_etile_map validation failed");
                 }
 
-                if(!GridwiseGemm::CheckValidity(AverM, N, K,StrideA, StrideB, StrideDs, StrideE, k_batch_))
+                if(!GridwiseGemm::CheckValidity(
+                       AverM, N, K, StrideA, StrideB, StrideDs, StrideE, k_batch_))
                 {
-                    throw std::runtime_error(
-                        "wrong! GridwiseGemm has invalid "
-                        "setting");
+                    throw std::runtime_error("wrong! GridwiseGemm has invalid "
+                                             "setting");
                 }
                 gemm_desc_kernel_arg_.push_back(KernelArgument(std::array<const void*, 1>{nullptr},
                                                                std::array<const void*, 1>{nullptr},
@@ -745,18 +745,18 @@ struct DeviceGroupedGemm_Wmma_Fixed_Nk : public DeviceGroupedGemmFixedNK<ALayout
                         ave_time = launch_kernel(
                             std::integral_constant<bool, true>{},
                             std::integral_constant<InMemoryDataOperationEnum,
-                                                    InMemoryDataOperationEnum::AtomicAdd>{},
+                                                   InMemoryDataOperationEnum::AtomicAdd>{},
                             std::integral_constant<index_t, min_occupancy>{},
                             std::integral_constant<TailNumber, TailNumber::Full>{});
                     }
                     else
                     {
-                        ave_time = launch_kernel(
-                            std::integral_constant<bool, true>{},
-                            std::integral_constant<InMemoryDataOperationEnum,
-                                                    InMemoryDataOperationEnum::Set>{},
-                            std::integral_constant<index_t, min_occupancy>{},
-                            std::integral_constant<TailNumber, TailNumber::Full>{});
+                        ave_time =
+                            launch_kernel(std::integral_constant<bool, true>{},
+                                          std::integral_constant<InMemoryDataOperationEnum,
+                                                                 InMemoryDataOperationEnum::Set>{},
+                                          std::integral_constant<index_t, min_occupancy>{},
+                                          std::integral_constant<TailNumber, TailNumber::Full>{});
                     }
                 }
             }
@@ -769,18 +769,18 @@ struct DeviceGroupedGemm_Wmma_Fixed_Nk : public DeviceGroupedGemmFixedNK<ALayout
                         ave_time = launch_kernel(
                             std::integral_constant<bool, false>{},
                             std::integral_constant<InMemoryDataOperationEnum,
-                                                    InMemoryDataOperationEnum::AtomicAdd>{},
+                                                   InMemoryDataOperationEnum::AtomicAdd>{},
                             std::integral_constant<index_t, min_occupancy>{},
                             std::integral_constant<TailNumber, TailNumber::Full>{});
                     }
                     else
                     {
-                       ave_time = launch_kernel(
-                            std::integral_constant<bool, false>{},
-                            std::integral_constant<InMemoryDataOperationEnum,
-                                                    InMemoryDataOperationEnum::Set>{},
-                            std::integral_constant<index_t, min_occupancy>{},
-                            std::integral_constant<TailNumber, TailNumber::Full>{});
+                        ave_time =
+                            launch_kernel(std::integral_constant<bool, false>{},
+                                          std::integral_constant<InMemoryDataOperationEnum,
+                                                                 InMemoryDataOperationEnum::Set>{},
+                                          std::integral_constant<index_t, min_occupancy>{},
+                                          std::integral_constant<TailNumber, TailNumber::Full>{});
                     }
                 }
             }

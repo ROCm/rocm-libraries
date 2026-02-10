@@ -297,7 +297,6 @@ bool run_grouped_gemm(const ProblemSize& problem_size, const ExecutionConfig& co
                                             c_device_tensors[i].mDesc.GetElementSize() *
                                                 sizeof(EDataType));
         }
-    
     }
 
     std::cout << "Verification: " << (pass ? "SUCCESS" : "FAILURE") << "!" << std::endl;
