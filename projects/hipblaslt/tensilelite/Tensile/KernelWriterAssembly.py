@@ -8476,7 +8476,7 @@ class KernelWriterAssembly(KernelWriter):
                            comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
             else:
               if kernel["UseF32XEmulation"]:
-                abOffsetStr = "+2" if kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16 else "+4"
+                abOffsetStr = "+" + str(vgprPerInputA // 2)
                 if kernel["SourceSwap"]:
                   src1_0     = vgpr(aStr_base[:-4], vgprPerInputA / 2)
                   src1_1     = vgpr(aStr_base[:-4] + abOffsetStr, vgprPerInputA / 2)
