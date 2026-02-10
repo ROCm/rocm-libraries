@@ -27,41 +27,8 @@
 #include "lstm.hpp"
 #include <hip/hip_runtime.h>
 
-auto GetTestCases(std::string precision)
-{
-    std::string flags = "test_lstm --verbose " + precision;
-    std::string commonFlags =
-        " --num-layers 1 --in-mode 1 --bias-mode 0 -dir-mode 0 --rnn-mode 0 --flat-batch-fill";
-
-    // clang-format off
-    return std::vector<std::string>{
-        {flags + " --batch-size 16 --seq-len 25 --vector-len 512 --hidden-size 512" + commonFlags},
-        {flags + " --batch-size 32 --seq-len 25 --vector-len 512 --hidden-size 512" + commonFlags},
-        {flags + " --batch-size 64 --seq-len 25 --vector-len 512 --hidden-size 512" + commonFlags},
-        {flags + " --batch-size 128 --seq-len 25 --vector-len 512 --hidden-size 512" + commonFlags},
-        {flags + " --batch-size 16 --seq-len 25 --vector-len 1024 --hidden-size 1024" + commonFlags},
-        {flags + " --batch-size 32 --seq-len 25 --vector-len 1024 --hidden-size 1024" + commonFlags},
-        {flags + " --batch-size 64 --seq-len 25 --vector-len 1024 --hidden-size 1024" + commonFlags},
-        {flags + " --batch-size 128 --seq-len 25 --vector-len 1024 --hidden-size 1024" + commonFlags},
-        {flags + " --batch-size 16 --seq-len 25 --vector-len 2048 --hidden-size 2048" + commonFlags},
-        {flags + " --batch-size 32 --seq-len 25 --vector-len 2048 --hidden-size 2048" + commonFlags},
-        {flags + " --batch-size 64 --seq-len 25 --vector-len 2048 --hidden-size 2048" + commonFlags},
-        {flags + " --batch-size 128 --seq-len 25 --vector-len 2048 --hidden-size 2048" + commonFlags},
-        {flags + " --batch-size 16 --seq-len 25 --vector-len 4096 --hidden-size 4096" + commonFlags},
-        {flags + " --batch-size 32 --seq-len 25 --vector-len 4096 --hidden-size 4096" + commonFlags},
-        {flags + " --batch-size 64 --seq-len 25 --vector-len 4096 --hidden-size 4096" + commonFlags},
-        {flags + " --batch-size 128 --seq-len 25 --vector-len 4096 --hidden-size 4096" + commonFlags},
-        {flags + " --batch-size 8 --seq-len 50 --vector-len 1536 --hidden-size 1536" + commonFlags},
-        {flags + " --batch-size 16 --seq-len 50 --vector-len 1536 --hidden-size 1536" + commonFlags},
-        {flags + " --batch-size 32 --seq-len 50 --vector-len 1536 --hidden-size 1536" + commonFlags},
-        {flags + " --batch-size 16 --seq-len 150 --vector-len 256 --hidden-size 256" + commonFlags},
-        {flags + " --batch-size 32 --seq-len 150 --vector-len 256 --hidden-size 256" + commonFlags},
-        {flags + " --batch-size 64 --seq-len 150 --vector-len 256 --hidden-size 256" + commonFlags}
-    };
-    // clang-format on
-}
-
-struct GPU_DeepBench_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<std::tuple<int, int>>
+struct GPU_DeepBench_LSTM_FP32 : LSTM_test<float>,
+                                 testing::TestWithParam<std::tuple<int, int, int, int>>
 {
 };
 
@@ -70,16 +37,48 @@ TEST_P(GPU_DeepBench_LSTM_FP32, FloatTest)
     int device_count{0};
     if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
     {
-        //GTEST_SKIP() << "No HIP devices available for testing";
+        // GTEST_SKIP() << "No HIP devices available for testing";
     }
 
-    int batchSize{32};
-    int seqLength{3};
+    this->numLayers     = 1;
+    this->inputMode     = 1;
+    this->biasMode      = 0;
+    this->dirMode       = 0;
+    this->flatBatchFill = 1;
 
-    auto [,] = GetParam();
+    auto [batchSize, seqLength, inVecLen, hiddenSize] = GetParam();
 
+    this->batchSize  = batchSize;
+    this->seqLength  = seqLength;
+    this->inVecLen   = inVecLen;
+    this->hiddenSize = hiddenSize;
 };
 
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_DeepBench_LSTM_FP32,
-                         testing::Combine(testing::Values(0, 1), testing::Values(0, 1)));
+// clang-format off
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    GPU_DeepBench_LSTM_FP32,
+    testing::Values(//batch-size seq-len vector-len hidden-size
+        std::make_tuple(16,       25,      512,       512),
+        std::make_tuple(32,       25,      512,       512),
+        std::make_tuple(64,       25,      512,       512),
+        std::make_tuple(128,      25,      512,       512),
+        std::make_tuple(16,       25,      1024,      1024),
+        std::make_tuple(32,       25,      1024,      1024),
+        std::make_tuple(64,       25,      1024,      1024),
+        std::make_tuple(128,      25,      1024,      1024),
+        std::make_tuple(16,       25,      2048,      2048),
+        std::make_tuple(32,       25,      2048,      2048),
+        std::make_tuple(64,       25,      2048,      2048),
+        std::make_tuple(128,      25,      2048,      2048),
+        std::make_tuple(16,       25,      4096,      4096),
+        std::make_tuple(32,       25,      4096,      4096),
+        std::make_tuple(64,       25,      4096,      4096),
+        std::make_tuple(128,      25,      4096,      4096),
+        std::make_tuple(8,        50,      1536,      1536),
+        std::make_tuple(16,       50,      1536,      1536),
+        std::make_tuple(32,       50,      1536,      1536),
+        std::make_tuple(16,       150,     256,       256),
+        std::make_tuple(32,       150,     256,       256),
+        std::make_tuple(64,       150,     256,       256)));
+// clang-format on

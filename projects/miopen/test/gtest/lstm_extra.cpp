@@ -41,33 +41,34 @@ TEST_P(GPU_LSTM_extra_FP32, FloatTest)
         GTEST_SKIP() << "No HIP devices available for testing";
     }
 
-    int batchSize{32};
-    int seqLength{3};
-
-    auto [dirMode, nohx, nodhy, nocx, nodcy, nohy, nodhx, nocy, nodcx] = GetParam();
-
-    this->batchSize  = batchSize;
-    this->seqLength  = seqLength;
+    this->batchSize  = 32;
+    this->seqLength  = 3;
     this->batchSeq   = {32, 32, 32};
     this->inVecLen   = 128;
     this->hiddenSize = 128;
-    this->dirMode    = dirMode;
-    this->nohx       = bool(nohx);
-    this->nodhy      = bool(nodhy);
-    this->nocx       = bool(nocx);
-    this->nodcy      = bool(nodcy);
-    this->nohy       = bool(nohy);
-    this->nodhx      = bool(nodhx);
-    this->nocy       = bool(nocy);
-    this->nodcx      = bool(nodcx);
+    this->numLayers  = 1;
+    this->inputMode  = 0;
+    this->biasMode   = 0;
+
+    auto [dirMode, nohx, nodhy, nocx, nodcy, nohy, nodhx, nocy, nodcx] = GetParam();
+
+    this->dirMode = dirMode;
+    this->nohx    = bool(nohx);
+    this->nodhy   = bool(nodhy);
+    this->nocx    = bool(nocx);
+    this->nodcy   = bool(nodcy);
+    this->nohy    = bool(nohy);
+    this->nodhx   = bool(nodhx);
+    this->nocy    = bool(nocy);
+    this->nodcx   = bool(nodcx);
 
     RunTest();
 };
 
+// clang-format off
 INSTANTIATE_TEST_SUITE_P(
     Full,
     GPU_LSTM_extra_FP32,
-    // clang-format off
     testing::Values(// dir-mode no-hx no-dhy no-cx no-dcy no-hy no-dhx no-cy no-dcx
         std::make_tuple(0,       1,    0,     0,    0,     0,    0,     0,    0),
         std::make_tuple(0,       0,    1,     0,    0,     0,    0,     0,    0),
@@ -99,4 +100,4 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(1,       0,    0,     0,    0,     0,    0,     1,    1),
         std::make_tuple(0,       1,    1,     1,    1,     1,    1,     1,    1),
         std::make_tuple(1,       1,    1,     1,    1,     1,    1,     1,    1)));
-    // clang-format on
+// clang-format on
