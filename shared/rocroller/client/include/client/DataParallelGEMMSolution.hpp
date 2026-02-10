@@ -492,12 +492,14 @@ namespace rocRoller
                         = (solutionParams.types.typeAcc != solutionParams.types.typeD);
 
                     // m_tagD: If conversion is needed, use WAVE (not LDS) since it won't be stored directly
-                    auto macTileD = KernelGraph::CoordinateGraph::MacroTile(
+                    auto memoryTypeD = GetMemoryType(solutionParams.storePath);
+                    auto macTileD    = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b},
-                        (solutionParams.storeLDSD && !needsConversion) ? MemoryType::WAVE_LDS
-                                                                       : MemoryType::WAVE);
+                        (IsLDSStore(solutionParams.storePath) && !needsConversion)
+                               ? memoryTypeD
+                               : MemoryType::WAVE);
 
                     params->setDimensionInfo(m_tagA, macTileA);
                     params->setDimensionInfo(m_tagB, macTileB);
@@ -506,12 +508,12 @@ namespace rocRoller
 
                     if(m_tagCvt.has_value())
                     {
-                        // For type conversion, this is what gets stored - use WAVE_LDS if storeLDSD
+                        // For type conversion, this is what gets stored - use LDS store path if specified
                         auto macTileCvt = KernelGraph::CoordinateGraph::MacroTile(
                             {solutionParams.macM, solutionParams.macN},
                             LayoutType::MATRIX_ACCUMULATOR,
                             {wave_m, wave_n, wave_k, wave_b},
-                            solutionParams.storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                            IsLDSStore(solutionParams.storePath) ? memoryTypeD : MemoryType::WAVE);
                         params->setDimensionInfo(*m_tagCvt, macTileCvt);
                     }
 

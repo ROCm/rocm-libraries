@@ -221,7 +221,7 @@ class GEMMSolution:
 
     load_A: str = "BufferToLDSViaVGPR"
     load_B: str = "BufferToLDSViaVGPR"
-    storeLDS_D: bool = True
+    store: str = "VGPRToGlobalMemoryViaLDSWithBuffer"
     betaInFma: bool = True
 
     padLDS_A: tuple[int, int] = (0, 0)
@@ -413,7 +413,7 @@ class GEMMResult(GEMM, RRPerfResult):
             "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
             "Load_A": TF(self.load_A),
             "Load_B": TF(self.load_B),
-            "Store_D": TF(self.storeLDS_D),
+            "Store_D": self.store,
             "PF": TF(self.prefetch)
             + "/"
             + str(self.prefetchInFlight)
@@ -598,6 +598,14 @@ def cast_missing_parameters(result):
         result["workgroupMappingDim"] = wgmDim
         result["workgroupMappingValue"] = wgmValue
 
+    if "storeLDS_D" in result:
+        storeLDS_D = result["storeLDS_D"]
+        del result["storeLDS_D"]
+        result["store"] = (
+            "VGPRToGlobalMemoryViaLDSWithBuffer"
+            if storeLDS_D
+            else "VGPRToGlobalMemoryWithBuffer"
+        )
     # Convert old streamK bool fields to new streamK string enum
     if "streamKTwoTile" in result or "streamKTwoTileDPFirst" in result:
         old_streamK = result.get("streamK", False)
