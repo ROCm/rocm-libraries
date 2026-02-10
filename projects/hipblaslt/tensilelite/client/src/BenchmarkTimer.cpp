@@ -27,6 +27,7 @@
 #include "BenchmarkTimer.hpp"
 #include "PerformanceReporter.hpp"
 #include "ResultReporter.hpp"
+#include "TimingInstrumentation.hpp"
 
 #include "Reference.hpp"
 
@@ -383,6 +384,9 @@ namespace TensileLite
             m_timeInSolution += totalTime;
             m_totalGPUTime += totalTime;
             m_numEnqueuesInSolution += startEvents->size();
+
+            // Report GPU execution time for timing instrumentation
+            reportTiming("gpu_kernel_execution", totalTime.count());
 
             if(m_sleepPercent > 0)
             {

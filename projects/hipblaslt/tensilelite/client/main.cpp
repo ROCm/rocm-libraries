@@ -42,6 +42,7 @@
 #include "ReferenceValidator.hpp"
 #include "SolutionIterator.hpp"
 #include "TimingEvents.hpp"
+#include "TimingInstrumentation.hpp"
 
 #include "LibraryUpdateReporter.hpp"
 #include "LogReporter.hpp"
@@ -363,6 +364,7 @@ namespace TensileLite
                 ("rotating-buffer-size",      po::value<int32_t>()->default_value(0), "Size of rotating buffer in the unit of MB.")
                 ("rotating-buffer-mode",      po::value<int32_t>()->default_value(0), "Rotating mode.")
                 ("output-amaxD",              po::value<bool>()->default_value(false), "Output AmaxD.")
+                ("timing-instrumentation",    po::value<bool>()->default_value(false)->implicit_value(true), "Enable detailed timing instrumentation output to stderr.")
                 ;
             // clang-format on
 
@@ -613,6 +615,9 @@ int main(int argc, const char* argv[])
 
     auto args = parse_args(argc, argv);
 
+    // Enable timing instrumentation if requested
+    g_timingInstrumentationEnabled = args["timing-instrumentation"].as<bool>();
+
     // Set srand
     unsigned int seed = args["init-seed"].as<unsigned int>();
     if(seed == 0)
@@ -627,13 +632,19 @@ int main(int argc, const char* argv[])
     auto        hardware = GetHardware(args);
     hipStream_t stream   = GetStream(args);
 
-    std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library
-        = LoadSolutionLibrary(args);
-    if(!library)
-        throw std::runtime_error("Failed to load solution library");
+    std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library;
+    {
+        ScopedTimer timer("library_loading");
+        library = LoadSolutionLibrary(args);
+        if(!library)
+            throw std::runtime_error("Failed to load solution library");
+    }
 
     TensileLite::hip::SolutionAdapter adapter;
-    LoadCodeObjects(args, adapter);
+    {
+        ScopedTimer timer("code_object_loading");
+        LoadCodeObjects(args, adapter);
+    }
 
     auto filename = args["library-file"].as<std::string>();
 
@@ -644,11 +655,14 @@ int main(int argc, const char* argv[])
     else
         libraryDirectory = '.';
 
-    auto result = adapter.initializeLazyLoading(hardware->archName(), libraryDirectory);
-    if(result != hipSuccess)
     {
-        std::string str = "Lazy loading failed. (" + std::to_string(int(result)) + ").";
-        std::runtime_error(str.c_str());
+        ScopedTimer timer("lazy_loading_init");
+        auto result = adapter.initializeLazyLoading(hardware->archName(), libraryDirectory);
+        if(result != hipSuccess)
+        {
+            std::string str = "Lazy loading failed. (" + std::to_string(int(result)) + ").";
+            std::runtime_error(str.c_str());
+        }
     }
 
     auto problems        = problemFactory.problems();
@@ -683,48 +697,59 @@ int main(int argc, const char* argv[])
         iter--;
     }
 
-    auto dataInit = std::make_shared<DataInitialization>(args, problemFactory);
+    std::shared_ptr<DataInitialization> dataInit;
+    {
+        ScopedTimer timer("data_init_setup");
+        dataInit = std::make_shared<DataInitialization>(args, problemFactory);
+    }
 
     auto solutionIterator = SolutionIterator::Default(library, hardware, args);
 
     MetaRunListener listeners;
-
-    listeners.addListener(dataInit);
-    listeners.addListener(solutionIterator);
-    listeners.addListener(std::make_shared<ProgressListener>(args));
     std::shared_ptr<BenchmarkTimer> benchmarkTimer;
     float                           flushTimeMs{};
 
-    if(runKernels)
     {
-        bool hasIcacheFlush
-            = std::any_of(begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
-        flushTimeMs = hasIcacheFlush ? estimate_flush_kernel_time(stream, gpuTimer) : 0.f;
-        listeners.addListener(std::make_shared<ReferenceValidator>(args, dataInit));
-        benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
-        listeners.addListener(benchmarkTimer);
-        listeners.addListener(std::make_shared<HardwareMonitorListener>(args));
+        ScopedTimer timer("listener_setup");
+        listeners.addListener(dataInit);
+        listeners.addListener(solutionIterator);
+        listeners.addListener(std::make_shared<ProgressListener>(args));
+
+        if(runKernels)
+        {
+            bool hasIcacheFlush
+                = std::any_of(begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
+            flushTimeMs = hasIcacheFlush ? estimate_flush_kernel_time(stream, gpuTimer) : 0.f;
+            listeners.addListener(std::make_shared<ReferenceValidator>(args, dataInit));
+            benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
+            listeners.addListener(benchmarkTimer);
+            listeners.addListener(std::make_shared<HardwareMonitorListener>(args));
+        }
     }
 
-    auto reporters = std::make_shared<MetaResultReporter>();
-    reporters->addReporter(PerformanceReporter::Default(args));
-
-    // PerformanceReporter needs to be called before these two, or else values
-    // will be missing
-    reporters->addReporter(LogReporter::Default(args));
-    reporters->addReporter(ResultFileReporter::Default(args));
-    reporters->addReporter(LibraryUpdateReporter::Default(args));
-
-    if(args.count("log-file"))
+    std::shared_ptr<MetaResultReporter> reporters;
     {
-        std::string filename = args["log-file"].as<std::string>();
-        auto        logFile  = std::make_shared<std::ofstream>(
-            filename.c_str(), args["log-file-append"].as<bool>() ? std::ios::app : std::ios::out);
+        ScopedTimer timer("reporter_setup");
+        reporters = std::make_shared<MetaResultReporter>();
+        reporters->addReporter(PerformanceReporter::Default(args));
 
-        reporters->addReporter(LogReporter::Default(args, logFile, LogLevel::Normal));
+        // PerformanceReporter needs to be called before these two, or else values
+        // will be missing
+        reporters->addReporter(LogReporter::Default(args));
+        reporters->addReporter(ResultFileReporter::Default(args));
+        reporters->addReporter(LibraryUpdateReporter::Default(args));
+
+        if(args.count("log-file"))
+        {
+            std::string filename = args["log-file"].as<std::string>();
+            auto        logFile  = std::make_shared<std::ofstream>(
+                filename.c_str(), args["log-file-append"].as<bool>() ? std::ios::app : std::ios::out);
+
+            reporters->addReporter(LogReporter::Default(args, logFile, LogLevel::Normal));
+        }
+
+        listeners.setReporter(reporters);
     }
-
-    listeners.setReporter(reporters);
 
     // ReferenceValidator validator(args, dataInit);
     // BenchmarkTimer timer(args);
@@ -758,25 +783,43 @@ int main(int argc, const char* argv[])
                 reporters->report(ResultKey::ProblemProgress,
                                   concatenate(problemIdx, "/", lastProblemIdx));
 
-                listeners.preProblem(problem);
-                auto inputs = dataInit->prepareGPUInputs(problem);
+                {
+                    ScopedTimer timer("pre_problem");
+                    listeners.preProblem(problem);
+                }
+                std::shared_ptr<ProblemInputs> inputs;
+                {
+                    ScopedTimer timer("gpu_input_preparation");
+                    inputs = dataInit->prepareGPUInputs(problem);
+                }
 
                 size_t warmupInvocations    = listeners.numWarmupRuns();
                 size_t syncs                = listeners.numSyncs();
                 size_t enq                  = listeners.numEnqueuesPerSync();
                 size_t maxRotatingBufferNum = max(warmupInvocations, syncs * enq);
 
-                auto inputArr = dataInit->prepareRotatingGPUOutput(
-                    maxRotatingBufferNum, problem, inputs, stream);
-                static_cast<void>(hipDeviceSynchronize());
+                std::vector<std::shared_ptr<ProblemInputs>> inputArr;
+                {
+                    ScopedTimer timer("rotating_buffer_preparation");
+                    inputArr = dataInit->prepareRotatingGPUOutput(
+                        maxRotatingBufferNum, problem, inputs, stream);
+                    static_cast<void>(hipDeviceSynchronize());
+                }
                 bool resetInput = false;
                 while(solutionIterator->moreSolutionsInProblem())
                 {
-                    auto solution = solutionIterator->getSolution();
+                    std::shared_ptr<ContractionSolution> solution;
+                    {
+                        ScopedTimer timer("solution_selection");
+                        solution = solutionIterator->getSolution();
+                    }
                     if(solution == nullptr)
                         throw std::runtime_error("Could not find a solution");
 
-                    listeners.preSolution(solution.get());
+                    {
+                        ScopedTimer timer("pre_solution");
+                        listeners.preSolution(solution.get());
+                    }
                     if(solutionIterator->runCurrentSolution() && runKernels)
                     {
                         try
@@ -791,24 +834,27 @@ int main(int argc, const char* argv[])
                                 resetInput = true;
 
                                 std::vector<std::vector<KernelInvocation>> kernels;
-                                for(size_t r = 0; r < inputArr.size(); r++)
                                 {
-                                    auto kernel = useUserArgs
-                                                      ? solution->solveTensileGPU((*problem),
-                                                                                  *inputArr[r],
-                                                                                  *hardware,
-                                                                                  &dUA,
-                                                                                  &dUAHost,
-                                                                                  nullptr,
-                                                                                  0,
-                                                                                  stream)
-                                                      : solution->solve((*problem),
-                                                                        *inputArr[r],
-                                                                        *hardware,
-                                                                        nullptr,
-                                                                        0,
-                                                                        stream);
-                                    kernels.push_back(kernel);
+                                    ScopedTimer timer("kernel_solving");
+                                    for(size_t r = 0; r < inputArr.size(); r++)
+                                    {
+                                        auto kernel = useUserArgs
+                                                          ? solution->solveTensileGPU((*problem),
+                                                                                      *inputArr[r],
+                                                                                      *hardware,
+                                                                                      &dUA,
+                                                                                      &dUAHost,
+                                                                                      nullptr,
+                                                                                      0,
+                                                                                      stream)
+                                                          : solution->solve((*problem),
+                                                                            *inputArr[r],
+                                                                            *hardware,
+                                                                            nullptr,
+                                                                            0,
+                                                                            stream);
+                                        kernels.push_back(kernel);
+                                    }
                                 }
 
                                 size_t       warmupInvocations = listeners.numWarmupRuns();
@@ -816,52 +862,58 @@ int main(int argc, const char* argv[])
                                 TimingEvents warmupStartEvents(warmupInvocations, warmupEventCount);
                                 TimingEvents warmupStopEvents(warmupInvocations, warmupEventCount);
 
-                                listeners.preWarmup();
-                                for(int i = 0; i < warmupInvocations; i++)
                                 {
-                                    size_t kIdx = i % kernels.size();
-                                    HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
-                                                                        stream,
-                                                                        warmupStartEvents[i],
-                                                                        warmupStopEvents[i]));
-                                    // Do validation after first warmup
-                                    if(i == 0)
-                                        listeners.validateWarmups(
-                                            inputs, warmupStartEvents, warmupStopEvents);
+                                    ScopedTimer timer("warmup_runs");
+                                    listeners.preWarmup();
+                                    for(int i = 0; i < warmupInvocations; i++)
+                                    {
+                                        size_t kIdx = i % kernels.size();
+                                        HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
+                                                                            stream,
+                                                                            warmupStartEvents[i],
+                                                                            warmupStopEvents[i]));
+                                        // Do validation after first warmup
+                                        if(i == 0)
+                                            listeners.validateWarmups(
+                                                inputs, warmupStartEvents, warmupStopEvents);
+                                    }
+                                    listeners.postWarmup(warmupStartEvents, warmupStopEvents, stream);
                                 }
-                                listeners.postWarmup(warmupStartEvents, warmupStopEvents, stream);
 
                                 size_t syncs      = listeners.numSyncs();
                                 size_t enq        = listeners.numEnqueuesPerSync();
                                 size_t eventCount = gpuTimer ? kernels[0].size() : 0;
 
-                                listeners.preSyncs();
-                                if(enq)
-                                    for(int i = 0; i < syncs; i++)
-                                    {
-                                        TimingEvents startEvents(enq, eventCount);
-                                        TimingEvents stopEvents(enq, eventCount);
-
-                                        listeners.preEnqueues(stream);
-
-                                        for(int j = 0; j < enq; j++)
+                                {
+                                    ScopedTimer timer("benchmark_runs");
+                                    listeners.preSyncs();
+                                    if(enq)
+                                        for(int i = 0; i < syncs; i++)
                                         {
-                                            size_t kIdx = ((i * enq) + j) % kernels.size();
-                                            HIP_CHECK_EXC(adapter.launchKernels(
-                                                kernels[kIdx], stream, nullptr, nullptr));
+                                            TimingEvents startEvents(enq, eventCount);
+                                            TimingEvents stopEvents(enq, eventCount);
 
-                                            if(icacheFlush)
+                                            listeners.preEnqueues(stream);
+
+                                            for(int j = 0; j < enq; j++)
                                             {
-                                                hipLaunchKernelGGL(
-                                                    flush_icache, flushGridSize, 64, 0, stream);
+                                                size_t kIdx = ((i * enq) + j) % kernels.size();
+                                                HIP_CHECK_EXC(adapter.launchKernels(
+                                                    kernels[kIdx], stream, nullptr, nullptr));
+
+                                                if(icacheFlush)
+                                                {
+                                                    hipLaunchKernelGGL(
+                                                        flush_icache, flushGridSize, 64, 0, stream);
+                                                }
                                             }
+
+                                            listeners.postEnqueues(startEvents, stopEvents, stream);
+                                            listeners.validateEnqueues(inputs, startEvents, stopEvents);
                                         }
 
-                                        listeners.postEnqueues(startEvents, stopEvents, stream);
-                                        listeners.validateEnqueues(inputs, startEvents, stopEvents);
-                                    }
-
-                                listeners.postSyncs();
+                                    listeners.postSyncs();
+                                }
 
                                 if(useUserArgs)
                                 {
@@ -877,7 +929,10 @@ int main(int argc, const char* argv[])
                         }
                     }
 
-                    listeners.postSolution();
+                    {
+                        ScopedTimer timer("post_solution");
+                        listeners.postSolution();
+                    }
 
                     if(exitOnError && listeners.error() > 0)
                     {
@@ -886,14 +941,20 @@ int main(int argc, const char* argv[])
                     }
                 }
 
-                listeners.postProblem();
+                {
+                    ScopedTimer timer("post_problem");
+                    listeners.postProblem();
+                }
             }
         }
 
         listeners.postBenchmarkRun();
     }
 
-    listeners.finalizeReport();
+    {
+        ScopedTimer timer("finalize_report");
+        listeners.finalizeReport();
+    }
 
     // error range in shell is [0-255]
     return std::min(listeners.error(), 255);
