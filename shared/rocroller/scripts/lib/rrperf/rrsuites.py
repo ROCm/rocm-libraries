@@ -437,7 +437,7 @@ def visualizer():
         beta=0.5,
         workgroup_size_x=256,
         workgroup_size_y=1,
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         visualize=True,
         prefetch=False,
         types=TypeParameters(
@@ -502,7 +502,7 @@ def hgemm_no_store_LDS():
             mac_m=128,
             mac_n=256,
             mac_k=16,
-            storeLDS_D=False,
+            store="VGPRToGlobalMemoryWithBuffer",
             scheduler="Priority",
             prefetch=True,
             prefetchInFlight=2,
@@ -581,9 +581,15 @@ def streamk_sweep():
                                 prefetch=prefetch,
                                 prefetchInFlight=prefetchInFlight,
                                 prefetchLDSFactor=prefetchLDSFactor,
-                                streamK=True,
-                                streamKTwoTile=twoTile,
-                                streamKTwoTileDPFirst=twoTileDPFirst,
+                                streamK=(
+                                    "TwoTile"
+                                    if twoTile
+                                    else (
+                                        "TwoTileDPFirst"
+                                        if twoTileDPFirst
+                                        else "Standard"
+                                    )
+                                ),
                                 types=TypeParameters(
                                     base["types"],
                                     trans_A="N",
@@ -601,16 +607,14 @@ def streamk():
         # prefetch=True,
         # prefetchInFlight=2,
         # prefetchLDSFactor=2,
-        streamK=True,
     )
 
-    for twoTile, twoTileDPFirst in [(True, False), (False, True), (False, False)]:
+    for streamKMode in ["TwoTile", "TwoTileDPFirst", "Standard"]:
         # SGEMM
         yield mkGEMM(
             SGEMM_3072x4096x4096,
             **common_overrides,
-            streamKTwoTile=twoTile,
-            streamKTwoTileDPFirst=twoTileDPFirst,
+            streamK=streamKMode,
             types=TypeParameters(
                 SGEMM_3072x4096x4096["types"],
                 trans_A="N",
@@ -624,8 +628,7 @@ def streamk():
             mac_n=256,
             mac_k=16,
             **common_overrides,
-            streamKTwoTile=twoTile,
-            streamKTwoTileDPFirst=twoTileDPFirst,
+            streamK=streamKMode,
             types=TypeParameters(
                 HGEMM_7680x8448x8448["types"],
                 trans_A="N",
@@ -638,8 +641,7 @@ def streamk():
             mac_n=256,
             mac_k=16,
             **common_overrides,
-            streamKTwoTile=twoTile,
-            streamKTwoTileDPFirst=twoTileDPFirst,
+            streamK=streamKMode,
             types=TypeParameters(
                 HGEMM_7680x8448x8192["types"],
                 trans_A="N",
@@ -657,7 +659,7 @@ def smallMN_largeK_fp32():
         prefetch=False,
         # prefetchInFlight=2,
         # prefetchLDSFactor=2,
-        streamK=False,
+        streamK="None",
         types=TypeParameters(
             SGEMM_256x256x16384["types"],
             trans_A="T",
@@ -671,7 +673,7 @@ def scalar_is_zero():
     sgemm = update_parameters(
         SGEMM_3072x4096x4096,
         beta=0.0,
-        streamK=False,
+        streamK="None",
     )
     yield mkGEMM(sgemm)
     yield mkGEMM(sgemm, mac_m=128, mac_n=64, mac_k=16)
@@ -679,7 +681,7 @@ def scalar_is_zero():
     hgemm = update_parameters(
         HGEMM_7680x8448x8192,
         beta=0.0,
-        streamK=False,
+        streamK="None",
     )
     yield mkGEMM(hgemm)
     yield mkGEMM(
@@ -1055,7 +1057,7 @@ def fp4_target():
         load_B="BufferToLDSViaVGPR",
         loadScale_A="BufferToLDSViaVGPR",
         loadScale_B="BufferToLDSViaVGPR",
-        storeLDS_D=True,
+        store="VGPRToGlobalMemoryViaLDSWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=2,
@@ -1103,7 +1105,7 @@ def fp4_target_d2lds_mi32x32x64_pf2x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToLDSViaVGPR",
         loadScale_B="BufferToLDSViaVGPR",
-        storeLDS_D=True,
+        store="VGPRToGlobalMemoryViaLDSWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=1,
@@ -1144,7 +1146,7 @@ def addSkipPermlane(suite: List[GEMMRun], value=True):
         yield run
 
 
-def addStreamK(suite, value=True):
+def addStreamK(suite, value="Standard"):
     for run in suite:
         run.streamK = value
         yield run
@@ -1183,7 +1185,7 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToVGPR",
         loadScale_B="BufferToVGPR",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -1235,7 +1237,7 @@ def fp4_target_d2lds_mi32x32x64_st32x8_pf4x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToVGPR",
         loadScale_B="BufferToVGPR",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -1298,7 +1300,7 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToVGPR",
         loadScale_B="BufferToVGPR",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -1351,7 +1353,7 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf4x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToVGPR",
         loadScale_B="BufferToVGPR",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -1415,7 +1417,7 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToLDS",
         loadScale_B="BufferToLDS",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=1,
@@ -1549,7 +1551,7 @@ def fp4_target_mxd2lds_mi16x16x128_st32x8_pf2x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToLDS",
         loadScale_B="BufferToLDS",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=1,
@@ -1612,7 +1614,7 @@ def does_this_fail():
         load_B="BufferToLDS",
         loadScale_A="BufferToVGPR",
         loadScale_B="BufferToVGPR",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -1658,7 +1660,7 @@ def fp4_single_scale_target_d2lds_mi16x16x128_pf4x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToVGPR",
         loadScale_B="BufferToVGPR",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -1715,7 +1717,7 @@ def fp4_d2lds_wgts256x256x256():
         load_B="BufferToLDS",
         loadScale_A="BufferToLDS",
         loadScale_B="BufferToLDS",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=1,
@@ -1825,7 +1827,7 @@ def mxfp8_target_128x256():
         load_B="BufferToLDSViaVGPR",
         loadScale_A="BufferToLDSViaVGPR",
         loadScale_B="BufferToLDSViaVGPR",
-        storeLDS_D=True,
+        store="VGPRToGlobalMemoryViaLDSWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=2,
@@ -1873,7 +1875,7 @@ def mxfp8_target_256x128():
         load_B="BufferToLDSViaVGPR",
         loadScale_A="BufferToLDSViaVGPR",
         loadScale_B="BufferToLDSViaVGPR",
-        storeLDS_D=True,
+        store="VGPRToGlobalMemoryViaLDSWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=2,
@@ -1921,7 +1923,7 @@ def mxfp8_target_d2lds_mi32x32x64_pf2x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToLDSViaVGPR",
         loadScale_B="BufferToLDSViaVGPR",
-        storeLDS_D=True,
+        store="VGPRToGlobalMemoryViaLDSWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=1,
@@ -1974,7 +1976,7 @@ def mxfp8_target_d2lds_mi32x32x64_pf4x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToVGPR",
         loadScale_B="BufferToVGPR",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -2030,7 +2032,7 @@ def mxfp8_target_d2lds_mi16x16x128_pf4x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToVGPR",
         loadScale_B="BufferToVGPR",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -2086,7 +2088,7 @@ def fp8_target_d2lds_mi16x16x128_pf4x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToVGPR",
         loadScale_B="BufferToVGPR",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,

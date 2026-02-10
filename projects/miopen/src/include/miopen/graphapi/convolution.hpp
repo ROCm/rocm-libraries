@@ -48,10 +48,10 @@ private:
     miopenConvolutionMode_t mMode = miopenConvolution;
 
 public:
-    Convolution() noexcept              = default;
-    Convolution(const Convolution&)     = default;
-    Convolution(Convolution&&) noexcept = default;
-    Convolution& operator=(const Convolution&) = default;
+    Convolution() noexcept                         = default;
+    Convolution(const Convolution&)                = default;
+    Convolution(Convolution&&) noexcept            = default;
+    Convolution& operator=(const Convolution&)     = default;
     Convolution& operator=(Convolution&&) noexcept = default;
     Convolution(miopenDataType_t compType,
                 miopenConvolutionMode_t mode,
