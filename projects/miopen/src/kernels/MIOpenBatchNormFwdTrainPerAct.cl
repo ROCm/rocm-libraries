@@ -120,7 +120,7 @@ __kernel void MIOpenBatchNormFwdTrainPerActivation(
             inhat      = (FLOAT2FLOATPREC(in[index]) - mean) * invVariance;
             out[index] = FLOATPREC2FLOAT(mad(pvt_scale, inhat, pvt_bias));
         } // end for(n)
-    }     // end for(img_offset) //image mini_batch is processed
+    } // end for(img_offset) //image mini_batch is processed
 }
 
 // Restore warnings

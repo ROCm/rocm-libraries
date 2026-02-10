@@ -28,14 +28,18 @@ add_executable(
 target_compile_options(public_hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(
     public_hipdnn_backend_tests
-    GTest::gtest
-    GTest::gtest_main
-    Threads::Threads
-    hipdnn_test_sdk
-    hipdnn_plugin_sdk
-    hipdnn_backend
-    hip::host
+    PRIVATE
+        GTest::gtest
+        GTest::gtest_main
+        Threads::Threads
+        hipdnn_test_sdk
+        hipdnn_plugin_sdk
+        hipdnn_backend
+        hip::host
 )
+
+# Enable spdlog support (tests include backend internal headers that use spdlog/fmt)
+hipdnn_enable_spdlog(public_hipdnn_backend_tests)
 
 target_include_directories(public_hipdnn_backend_tests PRIVATE ${HIPDNN_TEST_INCLUDE_DIRS})
 

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -82,7 +82,7 @@ namespace rocRoller
 
             void operator()(AssemblyKernelArgumentPtr const& expr)
             {
-                m_referencedArgs.insert(expr->name);
+                m_referencedArgs.insert(expr->getName());
             }
 
             void operator()(DataFlowTag const& expr)

@@ -375,6 +375,12 @@ namespace rocRoller
     template <CCountedEnum T>
     T fromString(std::string const& str);
 
+    /**
+     * @brief Generate a set of valid string values for a CCountedEnum type.
+     */
+    template <CCountedEnum T>
+    std::set<std::string> enumStrings();
+
     template <CHasName T>
     requires(std::default_initializable<T>) std::string name()
     {
