@@ -1,0 +1,85 @@
+# GitHub Actions workflow for PR Metrics
+# This file should be placed in a rocm-libraries fork at:
+#   .github/workflows/pr-metrics.yml
+#
+# Prerequisites:
+# - rocMETRICS package installed (pip install git+https://github.com/ROCm/rocMETRICS.git)
+# - Full git history (fetch-depth: 0)
+
+name: PR Metrics
+
+on:
+  pull_request:
+    branches: [develop]
+
+jobs:
+  pr-delta:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install rocmetrics
+        run: pip install git+https://github.com/ROCm/rocMETRICS.git
+
+      - name: Run PR Delta Analysis
+        id: pr-delta
+        run: |
+          rocmetrics pr-delta \
+            --repo-path . \
+            --base-ref ${{ github.event.pull_request.base.sha }} \
+            --head-ref ${{ github.event.pull_request.head.sha }} \
+            --component rocm-libraries \
+            --pr-number ${{ github.event.pull_request.number }} \
+            --author "${{ github.event.pull_request.user.login }}" \
+            --branch "${{ github.head_ref }}" \
+            --base-branch "${{ github.base_ref }}" \
+            > pr-delta.json
+
+      - name: Display PR Delta Results
+        run: |
+          echo "## PR Delta Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+          cat pr-delta.json | jq '.payload | {
+            files_analyzed,
+            functions_analyzed,
+            ccn_regressions,
+            ccn_improvements,
+            total_churn,
+            churn_ratio,
+            max_risk_score
+          }' >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-delta-report
+          path: pr-delta.json
+          retention-days: 30
+
+      # TODO: Add ES upload when credentials are available
+      # - name: Upload to Elasticsearch
+      #   if: success()
+      #   env:
+      #     ELASTICSEARCH_HOST: ${{ secrets.ES_HOST }}
+      #     ELASTICSEARCH_API_KEY: ${{ secrets.ES_API_KEY }}
+      #   run: |
+      #     rocmetrics pr-delta \
+      #       --repo-path . \
+      #       --base-ref ${{ github.event.pull_request.base.sha }} \
+      #       --head-ref ${{ github.event.pull_request.head.sha }} \
+      #       --component rocm-libraries \
+      #       --pr-number ${{ github.event.pull_request.number }} \
+      #       --author "${{ github.event.pull_request.user.login }}" \
+      #       --branch "${{ github.head_ref }}" \
+      #       --base-branch "${{ github.base_ref }}" \
+      #       --upload rocm-libraries-pr-delta-prod1
