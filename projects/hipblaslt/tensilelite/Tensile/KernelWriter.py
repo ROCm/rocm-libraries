@@ -4975,8 +4975,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # for cgemm or zgemm + MIAV case, allocate 2 or 4 vgpr for alpha calculation (cannot use tmp vgpr in write batch)
     if kernel["ProblemType"]["DataType"].isComplex() \
-      and kernel["MIArchVgpr"] \
-      and (kernel["_GlobalAccumulation"] == 'SingleBuffer' or kernel["_GlobalAccumulation"] == None):
+      and kernel["MIArchVgpr"]: 
 
       # need proper alignment
       vgprIdx = ((vgprIdx+2 - 1)//2)*2

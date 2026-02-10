@@ -2,8 +2,12 @@
 # SPDX-License-Identifier:  MIT
 
 add_library(hipblaslt-rocroller OBJECT)
+
+add_subdirectory(custom_kernels)
+
 target_sources(hipblaslt-rocroller
     PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/custom_kernels.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/gemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/parameter_selection.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/runtime_args_selection.cpp"
@@ -11,6 +15,7 @@ target_sources(hipblaslt-rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/solution_cache.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/solution_selection.cpp"
 )
+
 target_compile_features(hipblaslt-rocroller PRIVATE cxx_std_20)
 set_target_properties(hipblaslt-rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipblaslt-rocroller PRIVATE roc::origami-headers)
