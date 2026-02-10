@@ -9,7 +9,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <span>
 
 #define WG_SIZE (static_cast<size_t>(256))
 #define MAX_ACTIVE_THREADS (64 * 4 * 64)
@@ -629,9 +628,9 @@ float Im2ColGPU(const Handle& handle,
                 ConstData_t im,
                 std::size_t im_offset,
                 std::size_t in_c,
-                std::span<const size_t> in_spatial,
-                std::span<const size_t> wei_spatial,
-                std::span<const size_t> out_spatial,
+                const std::vector<size_t>& in_spatial,
+                const std::vector<size_t>& wei_spatial,
+                const std::vector<size_t>& out_spatial,
                 const std::vector<int>& pad_spatial,
                 const std::vector<int>& stride_spatial,
                 const std::vector<int>& dilation_spatial,
@@ -695,13 +694,13 @@ float Im2ColGPU(const Handle& handle,
 float Col2ImGPU(const Handle& handle,
                 std::size_t spatial_dim,
                 ConstData_t col,
-                std::span<const size_t> out_spatial,
-                std::span<const size_t> wei_spatial,
+                const std::vector<size_t>& out_spatial,
+                const std::vector<size_t>& wei_spatial,
                 const std::vector<int>& pad_spatial,
                 const std::vector<int>& stride_spatial,
                 const std::vector<int>& dilation_spatial,
                 std::size_t in_c,
-                std::span<const size_t> in_spatial,
+                const std::vector<size_t>& in_spatial,
                 Data_t im,
                 std::size_t im_offset,
                 miopenDataType_t type)
