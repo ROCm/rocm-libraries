@@ -135,8 +135,6 @@ add_library(
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
 
-# Enable spdlog support via plugin_sdk helper function
-hipdnn_enable_spdlog(miopen_plugin_impl)
 target_compile_options(miopen_plugin_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(miopen_plugin_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden
@@ -150,7 +148,7 @@ endif()
 # Static library for unit tests to link against (provides access to internal implementation)
 add_library(miopen_plugin_private STATIC $<TARGET_OBJECTS:miopen_plugin_impl>)
 target_include_directories(miopen_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-# Link to miopen_plugin_impl to inherit its PUBLIC properties (including spdlog setup)
+# Link to miopen_plugin_impl to inherit its PUBLIC properties
 target_link_libraries(miopen_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk miopen_plugin_impl)
 # Backwards compatibility alias
 add_library(miopen_legacy_plugin_private ALIAS miopen_plugin_private)
