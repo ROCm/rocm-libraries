@@ -1,2 +1,1 @@
-All AI coding rules for this project are maintained in a single central file.
-See: [docs/ai-rules.md](./docs/ai-rules.md)
+docs/ai-rules.md

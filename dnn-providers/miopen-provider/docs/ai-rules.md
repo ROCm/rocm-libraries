@@ -1,3 +1,7 @@
+---
+alwaysApply: true
+---
+
 # AI Rules for MIOpen Provider Plugin
 
 ## Project Overview

@@ -1,3 +1,7 @@
+---
+alwaysApply: true
+---
+
 # AI Rules for hipDNN Project
 
 ## Project Overview & Architecture
