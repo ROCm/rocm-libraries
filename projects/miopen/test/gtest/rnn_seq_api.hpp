@@ -364,7 +364,7 @@ struct rnn_ref
                           std::vector<T>& workSpace,
                           bool nohx) const = 0;
 
-    virtual ~rnn_ref(){};
+    virtual ~rnn_ref() {};
 };
 
 template <class T>

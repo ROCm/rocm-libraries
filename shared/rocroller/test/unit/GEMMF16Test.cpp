@@ -64,7 +64,7 @@ namespace GEMMTests
         gemm.macN = wavesPerWGY * gemm.waveN;
         gemm.macK = 2 * gemm.waveK;
 
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         gemm.workgroupSizeX = 256;
         gemm.workgroupSizeY = 1;

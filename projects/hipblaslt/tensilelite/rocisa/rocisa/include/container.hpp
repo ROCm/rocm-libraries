@@ -1004,12 +1004,14 @@ namespace rocisa
         std::string holderName;
         int         holderIdx;
         int         holderType;
+        std::vector<int> holderOffsets;
 
         HolderContainer(const std::string& regType, const std::string& holderName, float regNum)
             : RegisterContainer(regType, RegName(holderName), 0, regNum)
             , holderName(holderName)
             , holderIdx(0)
             , holderType(1)
+            , holderOffsets({})
         {
         }
 
@@ -1018,6 +1020,7 @@ namespace rocisa
             , holderName(regName.name)
             , holderIdx(0)
             , holderType(1)
+            , holderOffsets(regName.offsets)
         {
         }
 
@@ -1026,6 +1029,7 @@ namespace rocisa
             , holderName("")
             , holderIdx(holderIdx)
             , holderType(0)
+            , holderOffsets({})
         {
         }
 
@@ -1034,6 +1038,7 @@ namespace rocisa
             , holderName(other.holderName)
             , holderIdx(other.holderIdx)
             , holderType(other.holderType)
+            , holderOffsets(other.holderOffsets)
         {
         }
 
@@ -1042,6 +1047,7 @@ namespace rocisa
             , holderName(std::move(other.holderName))
             , holderIdx(other.holderIdx)
             , holderType(other.holderType)
+            , holderOffsets(std::move(other.holderOffsets))
         {
         }
 
@@ -1053,6 +1059,7 @@ namespace rocisa
                 holderName = other.holderName;
                 holderIdx  = other.holderIdx;
                 holderType = other.holderType;
+                holderOffsets = other.holderOffsets;
             }
             return *this;
         }
@@ -1065,6 +1072,7 @@ namespace rocisa
                 holderName = std::move(other.holderName);
                 holderIdx  = other.holderIdx;
                 holderType = other.holderType;
+                holderOffsets = std::move(other.holderOffsets);
             }
             return *this;
         }
@@ -1084,6 +1092,9 @@ namespace rocisa
             {
                 regName = std::move(RegName(holderName));
                 regName->offsets.insert(regName->offsets.begin(), num);
+                for(int offset : holderOffsets) {
+                    regName->offsets.push_back(offset);
+                }
             }
         }
 

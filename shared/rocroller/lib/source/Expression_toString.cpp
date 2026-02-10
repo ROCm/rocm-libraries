@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -164,7 +164,7 @@ namespace rocRoller
             {
                 // The call() function appends the result type, so add ":" to separate the
                 // value from the type.
-                return expr->name + ":";
+                return expr->getName() + ":";
             }
 
             std::string operator()(WaveTilePtr const& expr) const
