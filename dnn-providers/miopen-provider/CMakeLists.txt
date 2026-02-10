@@ -243,6 +243,7 @@ install(TARGETS miopen_legacy_plugin EXPORT miopen-legacy-plugin
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
 
+# TODO: remove alongside symlink (they will always be built separately)
 # Create tidy/tidy-cxx custom targets for standalone builds.
 # In dependency mode, the parent hipdnn project creates these targets.
 if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
