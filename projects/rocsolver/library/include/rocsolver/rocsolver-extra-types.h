@@ -193,6 +193,19 @@ typedef enum rocsolver_norm_type_
     rocsolver_norm_type_max = 304, /**< Maximum absolute value of any element. */
 } rocsolver_norm_type;
 
+/*! \brief Used by specific functions to specify the algorithm choice.
+ ********************************************************************************/
+typedef enum rocsolver_cholqr_algo_
+{
+    rocsolver_cholqr_cholqr1 = 311, /**< Computations are all performed using CholeskyQR1 algorithm. */
+    rocsolver_cholqr_cholqr2 = 312, /**< Computations are all performed using CholeskyQR2 algorithm. */
+    rocsolver_cholqr_default = 313, /**< Default algorithm using CholeskyQR2 algorithm. */
+    rocsolver_cholqr_cholqr3_compute
+    = 314, /**< Computations are all performed using shifted CholeskyQR3 algorithm with the shifts internally computed. */
+    rocsolver_cholqr_cholqr3_user
+    = 315, /**< Computations are all performed using shifted CholeskyQR3 algorithm with the shifts provided by the user. */
+} rocsolver_cholqr_algo;
+
 /*! \brief Used to specify a function with multiple supported algorithm modes.
  ********************************************************************************/
 typedef enum rocsolver_function_
@@ -203,18 +216,5 @@ typedef enum rocsolver_function_
     rocsolver_function_steqr = 404,
     rocsolver_function_syev_heev = 405, /**< Affected by sterf and steqr. */
 } rocsolver_function;
-
-/*! \brief Used by specific functions to specify the algorithm choice.
- ********************************************************************************/
-typedef enum rocsolver_cholqr_algo_
-{
-    rocsolver_cholqr_cholqr1 = 406, /**< Computations are all performed using CholeskyQR1 algorithm. */
-    rocsolver_cholqr_cholqr2 = 407, /**< Computations are all performed using CholeskyQR2 algorithm. */
-    rocsolver_cholqr_default = 408, /**< Default algorithm using CholeskyQR2 algorithm. */
-    rocsolver_cholqr_cholqr3_compute
-    = 409, /**< Computations are all performed using shifted CholeskyQR3 algorithm with the shifts internally computed. */
-    rocsolver_cholqr_cholqr3_user
-    = 410, /**< Computations are all performed using shifted CholeskyQR3 algorithm with the shifts provided by the user. */
-} rocsolver_cholqr_algo;
 
 #endif /* ROCSOLVER_EXTRA_TYPES_H */
