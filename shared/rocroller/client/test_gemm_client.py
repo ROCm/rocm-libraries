@@ -252,7 +252,7 @@ load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
 padLDS_B: [0, 0]
-storeLDS_D: true
+store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -279,9 +279,7 @@ types:
   scaleShuffleTileB: []
   scaleSkipPermlane: false
 tailLoops: true
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -319,7 +317,7 @@ load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
 padLDS_B: [0, 0]
-storeLDS_D: true
+store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -355,9 +353,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
@@ -385,7 +381,7 @@ load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
 padLDS_B: [0, 0]
-storeLDS_D: true
+store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -421,9 +417,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
@@ -482,7 +476,7 @@ def build_solution_params():
         # data-parallel gemm, float, params from config file
         ["--config", DP_GEMM],
         # streamk gemm, float, params from command line
-        ["--streamk"],
+        ["--streamK", "Standard"],
     ]
 
     for type, prefetch, scaleA, scaleB in itertools.product(
@@ -691,14 +685,14 @@ def test_gemm_options(tmp_path):
     )
     assert post["load_A"] == "BufferToLDSViaVGPR"
     assert post["load_B"] == "BufferToLDSViaVGPR"
-    assert not post["storeLDS_D"]
+    assert post["store"] == "VGPRToGlobalMemoryWithBuffer"
 
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--lds=BD"]
     )
     assert post["load_A"] == "BufferToVGPR"
     assert post["load_B"] == "BufferToLDSViaVGPR"
-    assert post["storeLDS_D"]
+    assert post["store"] == "VGPRToGlobalMemoryViaLDSWithBuffer"
 
     # setting d2l options
     post = run_and_load_example_yaml(

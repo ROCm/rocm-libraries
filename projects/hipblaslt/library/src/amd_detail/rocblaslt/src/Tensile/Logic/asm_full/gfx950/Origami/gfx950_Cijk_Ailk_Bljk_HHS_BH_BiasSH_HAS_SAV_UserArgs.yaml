@@ -47222,7 +47222,7 @@
     WavefrontSize: 64
     WorkGroup: [1, 1, 64]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -47429,7 +47429,7 @@
     WavefrontSize: 64
     WorkGroup: [1, 4, 16]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -47636,7 +47636,7 @@
     WavefrontSize: 64
     WorkGroup: [2, 4, 8]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
