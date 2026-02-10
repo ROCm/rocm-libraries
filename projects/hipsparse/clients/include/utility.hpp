@@ -1703,8 +1703,7 @@ inline void host_csr_to_csr_compress(int                     M,
 
         for(int j = start; j < end; j++)
         {
-            if(testing_abs(csr_val_A[j]) > testing_real(tol)
-               && testing_abs(csr_val_A[j]) > (std::numeric_limits<float>::min)())
+            if(testing_abs(csr_val_A[j]) > testing_real(tol))
             {
                 count++;
             }
@@ -1745,8 +1744,7 @@ inline void host_csr_to_csr_compress(int                     M,
 
         for(int j = start; j < end; j++)
         {
-            if(testing_abs(csr_val_A[j]) > testing_real(tol)
-               && testing_abs(csr_val_A[j]) > (std::numeric_limits<float>::min)())
+            if(testing_abs(csr_val_A[j]) > testing_real(tol))
             {
                 csr_col_ind_C[index] = csr_col_ind_A[j];
                 csr_val_C[index]     = csr_val_A[j];
