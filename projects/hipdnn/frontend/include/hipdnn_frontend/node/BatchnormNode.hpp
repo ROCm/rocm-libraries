@@ -6,9 +6,9 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
-#include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -75,19 +75,19 @@ public:
         // SECTION 2: Validate Required Parameter Dimensions
         // Why: All required parameters (x, scale, bias, epsilon) must have dimensions
         // set by user. Validate them upfront before proceeding with shape checks.
-        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
-        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
-        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(bias, 2, "Bias tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 2, "Bias tensor"));
 
         // Epsilon (ε) provides numerical stability: xhat = (x - mean) / sqrt(var + ε)
         // Without ε, division by zero occurs when var ≈ 0. Must be a scalar.
-        HIPDNN_CHECK_ERROR(validateScalarParameter(epsilon, "Epsilon"));
+        HIPDNN_CHECK_ERROR(detail::validateScalarParameter(epsilon, "Epsilon"));
 
         // SECTION 3: Validate Output Tensor Shape Consistency
         // Why: BN preserves tensor shape - it only transforms values, not dimensions.
         // Output y[n,c,h,w] has same shape as input x[n,c,h,w].
         HIPDNN_CHECK_ERROR(
-            validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
+            detail::validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
 
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
         // Why: All BN parameters (scale, bias, mean, variance) are per-channel with
@@ -102,15 +102,15 @@ public:
         int64_t channels = xDims[1];
 
         // Validate scale has correct channel-only shape (required user parameter)
-        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
 
         // Validate bias has correct channel-only shape (required user parameter)
-        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
 
         // Validate optional mean and inv_variance tensors (only if dimensions set)
         HIPDNN_CHECK_ERROR(
-            validateChannelOnlyShapeIfSet(attributes.get_mean(), channels, "Mean tensor"));
-        HIPDNN_CHECK_ERROR(validateChannelOnlyShapeIfSet(
+            detail::validateChannelOnlyShapeIfSet(attributes.get_mean(), channels, "Mean tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
             attributes.get_inv_variance(), channels, "Inverse variance tensor"));
 
         // SECTION 5: Validate Running Stats Consistency
@@ -141,13 +141,13 @@ public:
                 "next_running_variance) must be provided");
 
             // Validate running stats have correct shapes (only if dimensions set)
-            HIPDNN_CHECK_ERROR(validateChannelOnlyShapeIfSet(
+            HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
                 prevRunningMean, channels, "Previous running mean tensor"));
-            HIPDNN_CHECK_ERROR(validateChannelOnlyShapeIfSet(
+            HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
                 prevRunningVar, channels, "Previous running variance tensor"));
-            HIPDNN_CHECK_ERROR(validateChannelOnlyShapeIfSet(
+            HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
                 nextRunningMean, channels, "Next running mean tensor"));
-            HIPDNN_CHECK_ERROR(validateChannelOnlyShapeIfSet(
+            HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
                 nextRunningVar, channels, "Next running variance tensor"));
         }
 
@@ -155,8 +155,8 @@ public:
         // Why: For spatial BN, statistics are computed over N*H*W elements per channel.
         // We need N*H*W > 1 to compute meaningful statistics (mean and variance).
         // With only 1 element, variance is undefined and normalization degenerates.
-        HIPDNN_CHECK_ERROR(
-            validateBatchNormTrainingSpatialDimensions(x, scale, "Batch normalization training"));
+        HIPDNN_CHECK_ERROR(detail::validateBatchNormTrainingSpatialDimensions(
+            x, scale, "Batch normalization training"));
 
         return {ErrorCode::OK, ""};
     }
