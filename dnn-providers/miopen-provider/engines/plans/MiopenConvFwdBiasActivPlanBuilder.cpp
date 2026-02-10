@@ -5,7 +5,6 @@
 #include <tuple>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
-#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "MiopenConvFwdBiasActivPlanBuilder.hpp"
@@ -459,9 +458,6 @@ void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
 {
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
-
-    // Use deterministic mode from plan builder configuration
-    (void)engineConfig; // engineConfig parameter kept for interface compatibility
 
     ConvFwdBiasActivParams params(
         convAttr, biasAttr, activAttr, opGraph.getTensorMap(), _deterministic);
