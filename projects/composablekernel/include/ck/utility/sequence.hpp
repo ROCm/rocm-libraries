@@ -711,6 +711,8 @@ struct build_map_inverse<Sequence<Is...>, Sequence<Idxs...>>
 template <typename SeqMap>
 struct sequence_map_inverse
 {
+    static_assert(is_valid_sequence_map<SeqMap>::value,
+                  "sequence_map_inverse requires SeqMap to be a valid permutation sequence map");
     using type =
         typename detail::build_map_inverse<SeqMap, make_index_sequence<SeqMap::Size()>>::type;
 };

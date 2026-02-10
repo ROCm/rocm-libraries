@@ -40,8 +40,8 @@ struct ford_base
     /// Type of OrderedLengths with cv-qualifiers removed
     using OrderedLengthsType = remove_cvref_t<decltype(OrderedLengths)>;
 
-    /// Inverse of Orders: maps from iteration position to original dimension
-    using New2Old = typename sequence_map_inverse<Orders>::type;
+    /// Mapping from loop level ("new" index) to original dimension ("old" index)
+    using New2Old = Orders;
 
     __host__ __device__ constexpr ford_base()
     {
@@ -225,7 +225,7 @@ struct ford : detail::ford_base<Lengths, Orders>
         for(index_t linear_idx = 0; linear_idx < Base::TotalSize; ++linear_idx)
         {
             auto multi_id = make_zero_multi_index<Base::NDim>();
-            Decomposer::template decompose_runtime<typename Base::New2Old>(linear_idx, multi_id);
+            Decomposer::template decompose_runtime<Orders>(linear_idx, multi_id);
             f(multi_id);
         }
     }

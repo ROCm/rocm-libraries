@@ -443,3 +443,283 @@ TEST(FordEdgeCases, VariousSizes)
 
     EXPECT_EQ(count, 30); // 3 * 5 * 2 = 30
 }
+
+// ============================================================================
+// Regression Tests for Non-Trivial Orderings
+// These tests specifically verify correct behavior for non-identity permutations
+// which were previously broken (GitHub PR #4447 feedback)
+// ============================================================================
+
+// Regression test: Orders<2, 0, 1> should correctly map loop levels to dimensions
+// This was broken when New2Old was incorrectly defined as sequence_map_inverse<Orders>
+TEST(FordRegression, NonTrivialOrder3D_201)
+{
+    // With Orders = <2, 0, 1>:
+    // - Loop level 0 iterates dimension 2 (outermost)
+    // - Loop level 1 iterates dimension 0 (middle)
+    // - Loop level 2 iterates dimension 1 (innermost)
+    //
+    // For Lengths = <2, 3, 2>:
+    // - Dimension 0 has size 2, Dimension 1 has size 3, Dimension 2 has size 2
+    // - OrderedLengths = <L2, L0, L1> = <2, 2, 3>
+    //
+    // Iteration should proceed:
+    // (dim0, dim1, dim2) with dim2 slowest, dim0 middle, dim1 fastest
+
+    std::vector<std::tuple<index_t, index_t, index_t>> visited;
+
+    static_ford<Sequence<2, 3, 2>, Sequence<2, 0, 1>>{}([&](auto multi_id) {
+        constexpr index_t i = multi_id[Number<0>{}];
+        constexpr index_t j = multi_id[Number<1>{}];
+        constexpr index_t k = multi_id[Number<2>{}];
+        visited.emplace_back(i, j, k);
+    });
+
+    ASSERT_EQ(visited.size(), 12u); // 2 * 3 * 2 = 12
+
+    // Expected order with Orders<2, 0, 1>:
+    // dim2 varies slowest (0, then 1), dim0 varies in middle (0, 1), dim1 varies fastest (0, 1, 2)
+    size_t idx = 0;
+    for(index_t k = 0; k < 2; ++k)
+    {
+        for(index_t i = 0; i < 2; ++i)
+        {
+            for(index_t j = 0; j < 3; ++j)
+            {
+                EXPECT_EQ(visited[idx], std::make_tuple(i, j, k))
+                    << "Mismatch at idx=" << idx << " expected (i,j,k)=(" << i << "," << j << ","
+                    << k << ")";
+                ++idx;
+            }
+        }
+    }
+}
+
+// Same regression test for ford (runtime version)
+TEST(FordRegression, NonTrivialOrder3D_201_Runtime)
+{
+    std::vector<std::tuple<index_t, index_t, index_t>> visited;
+
+    ford<Sequence<2, 3, 2>, Sequence<2, 0, 1>>{}([&](auto multi_id) {
+        index_t i = multi_id[Number<0>{}];
+        index_t j = multi_id[Number<1>{}];
+        index_t k = multi_id[Number<2>{}];
+        visited.emplace_back(i, j, k);
+    });
+
+    ASSERT_EQ(visited.size(), 12u);
+
+    size_t idx = 0;
+    for(index_t k = 0; k < 2; ++k)
+    {
+        for(index_t i = 0; i < 2; ++i)
+        {
+            for(index_t j = 0; j < 3; ++j)
+            {
+                EXPECT_EQ(visited[idx], std::make_tuple(i, j, k))
+                    << "Mismatch at idx=" << idx << " expected (i,j,k)=(" << i << "," << j << ","
+                    << k << ")";
+                ++idx;
+            }
+        }
+    }
+}
+
+// Regression test: Verify static_ford and ford produce identical results for all non-trivial
+// orderings
+TEST(FordRegression, ConsistencyWithNonTrivialOrder_201)
+{
+    std::vector<std::tuple<index_t, index_t, index_t>> static_visited;
+    std::vector<std::tuple<index_t, index_t, index_t>> runtime_visited;
+
+    static_ford<Sequence<2, 3, 2>, Sequence<2, 0, 1>>{}([&](auto multi_id) {
+        constexpr index_t i = multi_id[Number<0>{}];
+        constexpr index_t j = multi_id[Number<1>{}];
+        constexpr index_t k = multi_id[Number<2>{}];
+        static_visited.emplace_back(i, j, k);
+    });
+
+    ford<Sequence<2, 3, 2>, Sequence<2, 0, 1>>{}([&](auto multi_id) {
+        index_t i = multi_id[Number<0>{}];
+        index_t j = multi_id[Number<1>{}];
+        index_t k = multi_id[Number<2>{}];
+        runtime_visited.emplace_back(i, j, k);
+    });
+
+    ASSERT_EQ(static_visited.size(), runtime_visited.size());
+    for(size_t idx = 0; idx < static_visited.size(); ++idx)
+    {
+        EXPECT_EQ(static_visited[idx], runtime_visited[idx])
+            << "static_ford and ford disagree at index " << idx;
+    }
+}
+
+// Regression test: Another non-trivial ordering <1, 2, 0>
+TEST(FordRegression, NonTrivialOrder3D_120)
+{
+    // Orders = <1, 2, 0>:
+    // - Loop level 0 iterates dimension 1 (outermost)
+    // - Loop level 1 iterates dimension 2 (middle)
+    // - Loop level 2 iterates dimension 0 (innermost)
+
+    std::vector<std::tuple<index_t, index_t, index_t>> visited;
+
+    static_ford<Sequence<2, 3, 4>, Sequence<1, 2, 0>>{}([&](auto multi_id) {
+        constexpr index_t i = multi_id[Number<0>{}];
+        constexpr index_t j = multi_id[Number<1>{}];
+        constexpr index_t k = multi_id[Number<2>{}];
+        visited.emplace_back(i, j, k);
+    });
+
+    ASSERT_EQ(visited.size(), 24u); // 2 * 3 * 4 = 24
+
+    // Expected: j slowest, k middle, i fastest
+    size_t idx = 0;
+    for(index_t j = 0; j < 3; ++j)
+    {
+        for(index_t k = 0; k < 4; ++k)
+        {
+            for(index_t i = 0; i < 2; ++i)
+            {
+                EXPECT_EQ(visited[idx], std::make_tuple(i, j, k))
+                    << "Mismatch at idx=" << idx << " expected (i,j,k)=(" << i << "," << j << ","
+                    << k << ")";
+                ++idx;
+            }
+        }
+    }
+}
+
+// Regression test for ford with <1, 2, 0> ordering
+TEST(FordRegression, NonTrivialOrder3D_120_Runtime)
+{
+    std::vector<std::tuple<index_t, index_t, index_t>> visited;
+
+    ford<Sequence<2, 3, 4>, Sequence<1, 2, 0>>{}([&](auto multi_id) {
+        index_t i = multi_id[Number<0>{}];
+        index_t j = multi_id[Number<1>{}];
+        index_t k = multi_id[Number<2>{}];
+        visited.emplace_back(i, j, k);
+    });
+
+    ASSERT_EQ(visited.size(), 24u);
+
+    size_t idx = 0;
+    for(index_t j = 0; j < 3; ++j)
+    {
+        for(index_t k = 0; k < 4; ++k)
+        {
+            for(index_t i = 0; i < 2; ++i)
+            {
+                EXPECT_EQ(visited[idx], std::make_tuple(i, j, k))
+                    << "Mismatch at idx=" << idx << " expected (i,j,k)=(" << i << "," << j << ","
+                    << k << ")";
+                ++idx;
+            }
+        }
+    }
+}
+
+// Regression test: 4D with non-trivial ordering
+TEST(FordRegression, NonTrivialOrder4D)
+{
+    // Orders = <3, 1, 0, 2>:
+    // - Level 0 iterates dim 3 (outermost)
+    // - Level 1 iterates dim 1
+    // - Level 2 iterates dim 0
+    // - Level 3 iterates dim 2 (innermost)
+
+    std::vector<std::tuple<index_t, index_t, index_t, index_t>> visited;
+
+    static_ford<Sequence<2, 2, 2, 2>, Sequence<3, 1, 0, 2>>{}([&](auto multi_id) {
+        constexpr index_t a = multi_id[Number<0>{}];
+        constexpr index_t b = multi_id[Number<1>{}];
+        constexpr index_t c = multi_id[Number<2>{}];
+        constexpr index_t d = multi_id[Number<3>{}];
+        visited.emplace_back(a, b, c, d);
+    });
+
+    ASSERT_EQ(visited.size(), 16u);
+
+    // Expected: d slowest, b, a, c fastest
+    size_t idx = 0;
+    for(index_t d = 0; d < 2; ++d)
+    {
+        for(index_t b = 0; b < 2; ++b)
+        {
+            for(index_t a = 0; a < 2; ++a)
+            {
+                for(index_t c = 0; c < 2; ++c)
+                {
+                    EXPECT_EQ(visited[idx], std::make_tuple(a, b, c, d))
+                        << "Mismatch at idx=" << idx;
+                    ++idx;
+                }
+            }
+        }
+    }
+}
+
+// Regression test: 4D with non-trivial ordering for ford (runtime)
+TEST(FordRegression, NonTrivialOrder4D_Runtime)
+{
+    std::vector<std::tuple<index_t, index_t, index_t, index_t>> visited;
+
+    ford<Sequence<2, 2, 2, 2>, Sequence<3, 1, 0, 2>>{}([&](auto multi_id) {
+        index_t a = multi_id[Number<0>{}];
+        index_t b = multi_id[Number<1>{}];
+        index_t c = multi_id[Number<2>{}];
+        index_t d = multi_id[Number<3>{}];
+        visited.emplace_back(a, b, c, d);
+    });
+
+    ASSERT_EQ(visited.size(), 16u);
+
+    size_t idx = 0;
+    for(index_t d = 0; d < 2; ++d)
+    {
+        for(index_t b = 0; b < 2; ++b)
+        {
+            for(index_t a = 0; a < 2; ++a)
+            {
+                for(index_t c = 0; c < 2; ++c)
+                {
+                    EXPECT_EQ(visited[idx], std::make_tuple(a, b, c, d))
+                        << "Mismatch at idx=" << idx;
+                    ++idx;
+                }
+            }
+        }
+    }
+}
+
+// Regression test: Asymmetric dimensions with non-trivial ordering
+TEST(FordRegression, AsymmetricDimensionsWithOrder)
+{
+    // Lengths = <3, 4, 5> (all different), Orders = <1, 2, 0>
+    // dim1 (size 4) outermost, dim2 (size 5) middle, dim0 (size 3) innermost
+
+    std::vector<std::tuple<index_t, index_t, index_t>> visited;
+
+    static_ford<Sequence<3, 4, 5>, Sequence<1, 2, 0>>{}([&](auto multi_id) {
+        constexpr index_t i = multi_id[Number<0>{}];
+        constexpr index_t j = multi_id[Number<1>{}];
+        constexpr index_t k = multi_id[Number<2>{}];
+        visited.emplace_back(i, j, k);
+    });
+
+    ASSERT_EQ(visited.size(), 60u); // 3 * 4 * 5 = 60
+
+    size_t idx = 0;
+    for(index_t j = 0; j < 4; ++j)
+    {
+        for(index_t k = 0; k < 5; ++k)
+        {
+            for(index_t i = 0; i < 3; ++i)
+            {
+                EXPECT_EQ(visited[idx], std::make_tuple(i, j, k)) << "Mismatch at idx=" << idx;
+                ++idx;
+            }
+        }
+    }
+}
