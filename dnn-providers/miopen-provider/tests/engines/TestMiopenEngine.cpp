@@ -162,10 +162,8 @@ TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
     MiopenEngine engine(1);
     HipdnnEnginePluginHandle dummyHandle;
     MockGraph mockGraph;
-    MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
-    engine.getDetails(dummyHandle, mockGraph, result);
     engine.getDetails(dummyHandle, mockGraph, result);
 
     hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr,

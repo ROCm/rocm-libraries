@@ -36,7 +36,7 @@ public:
             miopenStatus_t status = miopenDestroy(miopenHandle);
             if(status != miopenStatusSuccess)
             {
-                HIPDNN_LOG_ERROR("Failed to destroy MIOpen handle");
+                HIPDNN_PLUGIN_LOG_ERROR("Failed to destroy MIOpen handle");
             }
         }
     }
@@ -57,7 +57,7 @@ public:
     std::shared_ptr<miopen_plugin::MiopenContainer> miopenContainer;
     hipdnn_plugin_sdk::EngineManager& getEngineManager()
     {
-        return container->getEngineManager();
+        return miopenContainer->getEngineManager();
     }
 
     void storeEngineDetailsDetachedBuffer(const void* ptr,

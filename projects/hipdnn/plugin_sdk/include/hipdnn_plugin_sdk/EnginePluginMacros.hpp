@@ -55,7 +55,7 @@
  * struct HipdnnEnginePluginHandle {
  *     void setStream(hipStream_t stream);
  *     EngineManager& getEngineManager();
- *     std::shared_ptr<MyContainer> container;
+ *     std::shared_ptr<MyContainer> miopenContainer;
  * };
  *
  * struct HipdnnEnginePluginExecutionContext {
@@ -151,7 +151,7 @@
                                                                                                    \
             *type = HIPDNN_PLUGIN_TYPE_ENGINE;                                                     \
                                                                                                    \
-            LOG_API_SUCCESS(apiName, "type={}", *type);                                            \
+            LOG_API_SUCCESS(apiName, "type={}", static_cast<int>(*type));                          \
         });                                                                                        \
     }                                                                                              \
                                                                                                    \
@@ -209,7 +209,7 @@
             hipdnn_plugin_sdk::throwIfNull(handle);                                                \
                                                                                                    \
             auto* newHandle = new HipdnnEnginePluginHandle();                                      \
-            newHandle->container = g_containerManager.getOrCreate();                               \
+            newHandle->miopenContainer = g_containerManager.getOrCreate();                         \
             *handle = newHandle;                                                                   \
                                                                                                    \
             LOG_API_SUCCESS(apiName, "createdHandle={:p}", static_cast<void*>(*handle));           \
@@ -281,10 +281,9 @@
                 if(*numEngines == maxEngines)                                                      \
                 {                                                                                  \
                     *numEngines = static_cast<uint32_t>(applicableEngines.size());                 \
-                    HIPDNN_LOG_INFO("Maximum number of engines reached ({}), ignoring additional " \
-                                    "engines, numEngines count: {}",                               \
-                                    maxEngines,                                                    \
-                                    *numEngines);                                                  \
+                    HIPDNN_SDK_LOG_INFO("Maximum number of engines reached ("                      \
+                                        << maxEngines << "), ignoring additional "                 \
+                                        << "engines, numEngines count: " << *numEngines);          \
                     break;                                                                         \
                 }                                                                                  \
                                                                                                    \

@@ -8,7 +8,7 @@
 
 #include "HipdnnEnginePluginHandle.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 // We have made the intentional decision to hardcode the batchnorm mode to miopenBNSpatial
@@ -170,4 +170,4 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
     }
 }
 
-}
+} // namespace miopen_plugin

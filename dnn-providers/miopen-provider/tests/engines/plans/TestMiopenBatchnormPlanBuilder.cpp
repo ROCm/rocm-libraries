@@ -12,8 +12,6 @@
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/MockNode.hpp>
 
-#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
-
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
 
@@ -66,6 +64,7 @@ class TestMiopenBatchnormPlanBuilder : public ::testing::Test
 protected:
     MiopenBatchnormPlanBuilder _planBuilder;
     HipdnnEnginePluginHandle _dummyHandle;
+    MockEngineConfig _mockEngineConfig;
 };
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForGraphWithUnsupportedNodeCount)
@@ -783,7 +782,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceNod
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -795,7 +794,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceWit
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -807,7 +806,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedBackwardNode
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -819,7 +818,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForFusedTwoNodeGraph)
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -831,7 +830,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForFusedThreeNodeGraph)
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -867,7 +866,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForUnsupportedNodeType)
 
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
@@ -903,7 +902,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedInferenceAttri
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+                 std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
@@ -938,7 +938,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedBackwardAttrib
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+                 std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
@@ -992,7 +993,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGr
 
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+                 std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
@@ -1038,7 +1040,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGr
 
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+                 std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
@@ -1114,7 +1117,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphFirs
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+                 std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
@@ -1181,7 +1185,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphSeco
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+                 std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
@@ -1248,7 +1253,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphThir
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+                 std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 

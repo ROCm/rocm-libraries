@@ -43,7 +43,8 @@ public:
      * @param opGraph The operation graph to check.
      * @return true if this plan builder can handle the graph, false otherwise.
      */
-    virtual bool isApplicable(const HipdnnEnginePluginHandle& handle, const IGraph& opGraph) const
+    virtual bool isApplicable(const HipdnnEnginePluginHandle& handle,
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
     /**
@@ -53,8 +54,9 @@ public:
      * @param opGraph The operation graph.
      * @return The maximum workspace size in bytes.
      */
-    virtual size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                       const IGraph& opGraph) const
+    virtual size_t
+        getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+                            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
     /**
@@ -70,10 +72,11 @@ public:
      * @param executionContext The execution context to store the plan on.
      * @throws HipdnnPluginException if the plan cannot be built.
      */
-    virtual void buildPlan(const HipdnnEnginePluginHandle& handle,
-                           const IGraph& opGraph,
-                           [[maybe_unused]] const IEngineConfig& engineConfig,
-                           HipdnnEnginePluginExecutionContext& executionContext) const
+    virtual void buildPlan(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        HipdnnEnginePluginExecutionContext& executionContext) const
         = 0;
 
     /**
@@ -87,7 +90,9 @@ public:
      * @return A vector of KnobT objects representing the custom knobs.
      */
     virtual std::vector<hipdnn_data_sdk::data_objects::KnobT>
-        getCustomKnobs(const HipdnnEnginePluginHandle& handle, const IGraph& opGraph) const = 0;
+        getCustomKnobs(const HipdnnEnginePluginHandle& handle,
+                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+        = 0;
 };
 
 } // namespace hipdnn_plugin_sdk

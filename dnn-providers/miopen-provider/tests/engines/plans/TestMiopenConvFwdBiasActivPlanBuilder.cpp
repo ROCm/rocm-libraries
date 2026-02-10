@@ -12,8 +12,6 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
-#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
-
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "tests/common/ActivationCommon.hpp"

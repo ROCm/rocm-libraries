@@ -9,8 +9,6 @@
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
-#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
-
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 

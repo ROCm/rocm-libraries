@@ -7,6 +7,6 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenContainer.hpp"
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 
 DECLARE_ENGINE_PLUGIN_DEFAULT_IMPL("miopen_provider_plugin", "1.0.0", MiopenContainer)
