@@ -130,7 +130,6 @@ LAPACK main functions
     :ref:`rocsolver_gelqf <gelqf>`, x, x, x, x
     :ref:`rocsolver_geql2 <geql2>`, x, x, x, x
     :ref:`rocsolver_geqlf <geqlf>`, x, x, x, x
-    :ref:`rocsolver_cholqr <cholqr>`, x, x, x, x
 
 .. csv-table:: Problem and matrix reductions
     :header: "Function", "single", "double", "single complex", "double complex"
@@ -193,6 +192,11 @@ LAPACK-like functions
     :ref:`rocsolver_getf2_npvt <getf2_npvt>`, x, x, x, x
     :ref:`rocsolver_getrf_npvt <getrf_npvt>`, x, x, x, x
     :ref:`rocsolver_geblttrf_npvt <geblttrf_npvt>`, x, x, x, x
+
+.. csv-table:: Orthogonal factorizations
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`rocsolver_cholqr <cholqr>`, x, x, x, x
 
 .. csv-table:: Linear-systems solvers
     :header: "Function", "single", "double", "single complex", "double complex"

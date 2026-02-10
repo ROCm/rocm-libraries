@@ -6,13 +6,12 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
-* Cholesky QR methods for computing the QR factorization of a tall rectangular matrix
-    * CholQR
-    * CHolQR_64
-
 * Computation of different matrix norms
     * LANGE
     * LANGE_64
+* Cholesky QR methods for computing the QR factorization of a tall rectangular matrix
+    - CHOLQR (with batched and strided\_batched versions)
+    - CHOLQR_64 (with batched and strided\_batched versions)
 
 ### Changed
 ### Removed
