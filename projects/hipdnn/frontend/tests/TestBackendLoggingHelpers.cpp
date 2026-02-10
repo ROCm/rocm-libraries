@@ -5,9 +5,10 @@
 #include <sstream>
 
 #include <HipdnnStatus.h>
-#include <hipdnn_frontend/backend/BackendLoggingHelpers.hpp>
+#include <hipdnn_frontend/detail/BackendLoggingHelpers.hpp>
 
-using hipdnn_frontend::streamStatus;
+using hipdnn_frontend::detail::streamStatus;
+using hipdnn_frontend::detail::toString;
 
 TEST(TestBackendLoggingHelpers, ToStringAllStatusValues)
 {

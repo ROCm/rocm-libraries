@@ -41,19 +41,19 @@ hardware_t::hardware_t(architecture_t arch,
                        const architecture_constants& constants,
                        size_t L2_capacity,
                        double compute_clock_ghz)
-    : hardware_t(arch,
-                 N_CU,
-                 lds_capacity,
-                 constants.num_xcds,
-                 1e9 * constants.mem1_perf_ratio / (compute_clock_ghz * 1e6),
-                 1e9 * constants.mem2_perf_ratio /
-                     ((compute_clock_ghz * 1e6 / constants.mem_clock_ratio) *
-                      constants.mem_clock_ratio),
-                 1e9 * constants.mem3_perf_ratio / (compute_clock_ghz * 1e6 / constants.mem_clock_ratio),
-                 L2_capacity,
-                 compute_clock_ghz,
-                 constants.parallel_mi_cu,
-                 constants.mem_bw_per_wg_coefficients) {}
+    : hardware_t(
+          arch,
+          N_CU,
+          lds_capacity,
+          constants.num_xcds,
+          1e9 * constants.mem1_perf_ratio / (compute_clock_ghz * 1e6),
+          1e9 * constants.mem2_perf_ratio /
+              ((compute_clock_ghz * 1e6 / constants.mem_clock_ratio) * constants.mem_clock_ratio),
+          1e9 * constants.mem3_perf_ratio / (compute_clock_ghz * 1e6 / constants.mem_clock_ratio),
+          L2_capacity,
+          compute_clock_ghz,
+          constants.parallel_mi_cu,
+          constants.mem_bw_per_wg_coefficients) {}
 
 hardware_t::hardware_t(hipDeviceProp_t properties)
     : hardware_t(get_hardware_for_properties(properties)) {}
@@ -107,12 +107,7 @@ hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,
 
   auto constants = get_arch_constants(arch);
 
-  return hardware_t(arch,
-                    N_CU,
-                    lds_capacity,
-                    constants,
-                    L2_capacity,
-                    compute_clock_khz / 1e6);
+  return hardware_t(arch, N_CU, lds_capacity, constants, L2_capacity, compute_clock_khz / 1e6);
 }
 
 bool hardware_t::is_hardware_supported(hipDeviceProp_t properties) {
@@ -169,25 +164,6 @@ size_t hardware_t::get_mi_latency(size_t MI_M,
   }
 }
 
-double hardware_t::get_adjusted_main_loop_efficiency(transpose_t transA,
-                                                     transpose_t transB,
-                                                     size_t MT_M,
-                                                     size_t MT_N,
-                                                     size_t MT_K,
-                                                     data_type_t mi_input_type) const {
-  const auto& cms_map = CMS_MAP.at(arch);
-  auto key            = CMS_kernel(mi_input_type, transA, transB, MT_M, MT_N, MT_K);
-  auto it = cms_map.find(key);
-  if (it != cms_map.end()) {
-    if (origami::runtime_options().get().debug_enabled) {
-      std::cout << "Found " << key.to_string() << " with efficiency " << it->second << "\n";
-    }
-    return it->second;
-  } else {
-    return 1.0;  // Default main loop efficiency
-  }
-}
-
 bool hardware_t::has_MALL() const {
   switch (arch) {
     case architecture_t::gfx90a:
@@ -210,45 +186,45 @@ std::string hardware_t::get_before_first_colon(const std::string& input) {
 
 std::vector<dim3_t> hardware_t::get_valid_matrix_instructions(data_type_t mi_input_type) const {
   std::vector<dim3_t> result;
-  
+
   const auto& instruction_map = INSTRUCTION_MAP.at(arch);
-  
+
   for (const auto& kv : instruction_map) {
     const matrix_instruction& mi = kv.first;
-    if (mi.mi_input_type == mi_input_type) {
-      result.push_back(dim3_t{mi.MI_M, mi.MI_N, mi.MI_K});
-    }
+    if (mi.mi_input_type == mi_input_type) { result.push_back(dim3_t{mi.MI_M, mi.MI_N, mi.MI_K}); }
   }
-  
+
   return result;
 }
 
 dim3_t hardware_t::get_recommended_matrix_instruction(data_type_t mi_input_type) const {
   const auto& instruction_map = INSTRUCTION_MAP.at(arch);
-  
-  dim3_t best_dim = {0, 0, 0};
+
+  dim3_t best_dim        = {0, 0, 0};
   double best_throughput = 0.0;
-  
+
   for (const auto& kv : instruction_map) {
     const matrix_instruction& mi = kv.first;
     if (mi.mi_input_type == mi_input_type) {
       size_t latency = kv.second / parallel_mi_cu;
       if (latency == 0) latency = std::numeric_limits<size_t>::max();  // Avoid division by zero
-      
+
       // Calculate throughput as M*N*K/latency
-      double throughput = static_cast<double>(mi.MI_M * mi.MI_N * mi.MI_K) / static_cast<double>(latency);
-      
+      double throughput =
+          static_cast<double>(mi.MI_M * mi.MI_N * mi.MI_K) / static_cast<double>(latency);
+
       // Update if throughput is better, or if equal, prefer instruction where M=16 (tiebreaker)
       bool is_better = throughput > best_throughput;
-      bool is_tie_with_m16 = (throughput == best_throughput) && (mi.MI_M == 16) && (best_dim.m != 16);
-      
+      bool is_tie_with_m16 =
+          (throughput == best_throughput) && (mi.MI_M == 16) && (best_dim.m != 16);
+
       if (is_better || is_tie_with_m16) {
         best_throughput = throughput;
-        best_dim = dim3_t{mi.MI_M, mi.MI_N, mi.MI_K};
+        best_dim        = dim3_t{mi.MI_M, mi.MI_N, mi.MI_K};
       }
     }
   }
-  
+
   return best_dim;
 }
 
