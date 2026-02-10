@@ -77,22 +77,30 @@ struct index_decomposer<Sequence<Ls...>, Sequence<Is...>>
     static constexpr index_t lengths[NDim] = {Ls...};
 
     /**
-     * @brief Compute stride for a dimension (product of all subsequent lengths).
-     * @param dim_idx The dimension index
-     * @return The stride value for dimension dim_idx
+     * @brief Compute all strides in a single O(N) pass.
+     *
+     * For dimensions with lengths [L0, L1, L2, ...]:
+     *   strides[N-1] = 1
+     *   strides[i] = strides[i+1] * lengths[i+1]
+     *
+     * @return index_array containing computed strides
      */
-    static constexpr index_t compute_stride(index_t dim_idx)
+    static constexpr index_array<NDim> compute_all_strides()
     {
-        index_t stride = 1;
-        for(index_t i = dim_idx + 1; i < NDim; ++i)
+        index_array<NDim> result{};
+        if constexpr(NDim > 0)
         {
-            stride *= lengths[i];
+            result.data[NDim - 1] = 1;
+            for(index_t i = static_cast<index_t>(NDim) - 2; i >= 0; --i)
+            {
+                result.data[i] = result.data[i + 1] * lengths[i + 1];
+            }
         }
-        return stride;
+        return result;
     }
 
     /// Pre-computed strides for each dimension
-    static constexpr index_t strides[NDim] = {compute_stride(Is)...};
+    static constexpr index_array<NDim> strides = compute_all_strides();
 
     /**
      * @brief Compile-time decomposition of a linear index.
@@ -103,7 +111,7 @@ struct index_decomposer<Sequence<Ls...>, Sequence<Is...>>
      * @tparam LinearIdx The linear index to decompose (compile-time constant)
      */
     template <index_t LinearIdx>
-    using decompose = Sequence<((LinearIdx / strides[Is]) % lengths[Is])...>;
+    using decompose = Sequence<((LinearIdx / strides.data[Is]) % lengths[Is])...>;
 
     /**
      * @brief Runtime decomposition of a linear index with reordering.
@@ -120,7 +128,8 @@ struct index_decomposer<Sequence<Ls...>, Sequence<Is...>>
     __host__ __device__ static void decompose_runtime(index_t linear_idx, MultiIndex& result)
     {
         // Compute ordered indices and assign to result in original dimension order
-        ((result(Number<New2Old::At(Number<Is>{})>{}) = (linear_idx / strides[Is]) % lengths[Is]),
+        ((result(Number<New2Old::At(Number<Is>{})>{}) =
+              (linear_idx / strides.data[Is]) % lengths[Is]),
          ...);
     }
 };
