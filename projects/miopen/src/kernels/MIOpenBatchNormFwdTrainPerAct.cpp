@@ -127,7 +127,7 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
 
         // epsilon is double in API; cast to precision type for math
         fp_prec_type invVariance =
-            static_cast<fp_prec_type>(rsqrt(variance + static_cast<fp_prec_type>(epsilon)));
+            static_cast<fp_prec_type>(rsqrt(static_cast<double>(variance) + epsilon));
 
         fp_prec_type pvt_scale = sc_base[idx];
         fp_prec_type pvt_bias  = bs_base[idx];
