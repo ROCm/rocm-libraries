@@ -40,16 +40,16 @@ hardware_t::hardware_t(architecture_t arch,
                        size_t lds_capacity,
                        const architecture_constants& constants,
                        size_t L2_capacity,
-                       double compute_clock_ghz)
-    : hardware_t(
+                       double compute_clock_ghz,
+                       double memory_clock_ghz)
+   : hardware_t(
           arch,
           N_CU,
           lds_capacity,
           constants.num_xcds,
           1e9 * constants.mem1_perf_ratio / (compute_clock_ghz * 1e6),
-          1e9 * constants.mem2_perf_ratio /
-              ((compute_clock_ghz * 1e6 / constants.mem_clock_ratio) * constants.mem_clock_ratio),
-          1e9 * constants.mem3_perf_ratio / (compute_clock_ghz * 1e6 / constants.mem_clock_ratio),
+          1e9 * constants.mem2_perf_ratio / (memory_clock_ghz * 1e6 * constants.mem_clock_ratio),
+          1e9 * constants.mem3_perf_ratio / (memory_clock_ghz * 1e6),
           L2_capacity,
           compute_clock_ghz,
           constants.parallel_mi_cu,
@@ -86,7 +86,8 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties) {
                     properties.sharedMemPerBlock,
                     constants,
                     properties.l2CacheSize,
-                    properties.clockRate / 1e6);
+                    properties.clockRate / 1.e6,
+                    properties.memoryClockRate / 1.e6);
 }
 
 hardware_t hardware_t::get_hardware_for_device(int deviceId) {
@@ -107,7 +108,13 @@ hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,
 
   auto constants = get_arch_constants(arch);
 
-  return hardware_t(arch, N_CU, lds_capacity, constants, L2_capacity, compute_clock_khz / 1e6);
+  return hardware_t(arch,
+                    N_CU,
+                    lds_capacity,
+                    constants,
+                    L2_capacity,
+                    compute_clock_khz / 1.e6,
+                    compute_clock_khz / 1.e6 / constants.mem_clock_ratio);
 }
 
 bool hardware_t::is_hardware_supported(hipDeviceProp_t properties) {
