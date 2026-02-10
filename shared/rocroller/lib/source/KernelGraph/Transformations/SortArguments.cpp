@@ -32,17 +32,7 @@
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer.hpp>
-// #include <rocRoller/CommandSolution.hpp>
-// #include <rocRoller/Expression.hpp>
-// #include <rocRoller/ExpressionTransformations.hpp>
 
-// #include <rocRoller/KernelGraph/KernelGraph.hpp>
-// #include <rocRoller/KernelGraph/Visitors.hpp>
-
-// #include <rocRoller/Operations/Command.hpp>
-
-// #define debug critical
-// #define Debug Critical
 namespace rocRoller
 {
     namespace KernelGraph
@@ -80,106 +70,49 @@ namespace rocRoller
             std::unordered_map<std::string, int> m_argumentFirstUse;
         };
 
-        std::vector<AssemblyKernelArgument>
-            FillAlignmentGaps(std::deque<AssemblyKernelArgument> arguments,
-                              std::set<std::string>              launchTimeOnlyArguments)
+        void sortArgumentsByFirstUse(KernelGraph const&                   graph,
+                                     AssemblyKernelPtr                    kernel,
+                                     std::vector<AssemblyKernelArgument>& arguments)
         {
-            std::vector<AssemblyKernelArgument> newArguments;
+            ArgumentFirstUseVisitor visitor(graph, kernel);
+            visitor.walk();
 
-            int offset = 0;
-            while(!arguments.empty())
-            {
-                auto argToAppend = arguments.begin();
-
-                auto nextOffset = RoundUpToMultiple<int>(offset, argToAppend->size);
-
-                if(nextOffset > offset)
-                {
-                    auto gapSize = nextOffset - offset;
-                    Log::debug("Gap size: {}", gapSize);
-                    for(; argToAppend != arguments.end(); ++argToAppend)
-                    {
-                        if(launchTimeOnlyArguments.contains(argToAppend->name))
-                        {
-                            argToAppend = arguments.end();
-                            break;
-                        }
-
-                        if(argToAppend->size == gapSize)
-                        {
-                            Log::debug(
-                                "Found argument: {} ({})", argToAppend->name, argToAppend->size);
-                            break;
-                        }
-                    }
-
-                    if(argToAppend == arguments.end())
-                        argToAppend = arguments.begin();
-                }
-
-                Log::debug("Adding argument: {} ({})", argToAppend->name, argToAppend->size);
-                newArguments.push_back(*argToAppend);
-                offset = RoundUpToMultiple<int>(offset, argToAppend->size) + argToAppend->size;
-
-                arguments.erase(argToAppend);
-            }
-
-            return newArguments;
+            std::ranges::sort(arguments, [&](auto const& a, auto const& b) {
+                return visitor.argumentFirstUse(a.name) < visitor.argumentFirstUse(b.name);
+            });
         }
 
         KernelGraph SortArguments::apply(KernelGraph const& graph)
         {
+            auto kernel    = m_context->kernel();
+            auto arguments = kernel->arguments();
 
-            ArgumentFirstUseVisitor visitor(graph, m_context->kernel());
-
-            visitor.walk();
-
-            auto launchTimeOnlyArguments = m_context->kernel()->launchTimeOnlyArguments();
-
-            // auto arguments = [&]() -> std::deque<AssemblyKernelArgument> {
-            //     auto tmp = m_context->kernel()->resetArguments();
-            //     return {tmp.begin(), tmp.end()};
-            // }();
-
-            auto arguments = m_context->kernel()->resetArguments();
-
-            Log::debug("Arguments Before:");
+            Log::debug("SortArguments: Before sorting by first use:");
             for(auto const& arg : arguments)
             {
                 Log::debug("Argument: {} ({})", arg.name, arg.size);
             }
 
-            std::ranges::sort(arguments, [&](auto const& a, auto const& b) {
-                auto aLaunchTimeOnly = launchTimeOnlyArguments.contains(a.name);
-                auto bLaunchTimeOnly = launchTimeOnlyArguments.contains(b.name);
-                if(aLaunchTimeOnly && !bLaunchTimeOnly)
-                    return false;
-                if(!aLaunchTimeOnly && bLaunchTimeOnly)
-                    return true;
+            sortArgumentsByFirstUse(graph, kernel, arguments);
 
-                return visitor.argumentFirstUse(a.name) < visitor.argumentFirstUse(b.name);
-            });
+            Log::debug("SortArguments: After sorting by first use:");
+            for(auto const& arg : arguments)
+            {
+                Log::debug("Argument: {} ({})", arg.name, arg.size);
+            }
 
             m_context->argLoader()->decidePreloadedKernargs(arguments);
 
-
-            // auto newArguments = FillAlignmentGaps(arguments, launchTimeOnlyArguments);
-            std::vector<AssemblyKernelArgument> newArguments{arguments.begin(), arguments.end()};
-
-            Log::debug("Arguments After:");
-            for(auto const& arg : newArguments)
+            Log::debug("SortArguments: After deciding preloaded kernargs:");
+            for(auto const& arg : arguments)
             {
-                std::string ltOnly = launchTimeOnlyArguments.contains(arg.name) ? " (LT only)" : "";
-                Log::debug("Argument: {} ({}){}", arg.name, arg.size, ltOnly);
+                Log::debug("Argument: {} ({})", arg.name, arg.size);
             }
 
-            for(auto& arg : newArguments)
+            for(auto& arg : arguments)
             {
-                if(!launchTimeOnlyArguments.contains(arg.name))
-                {
-                    arg.offset = -1;
-                    m_context->kernel()->addArgument(arg);
-                }
+                arg.offset = -1;
+                m_context->kernel()->addArgument(arg);
             }
 
             return graph;
