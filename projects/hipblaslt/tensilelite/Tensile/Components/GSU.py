@@ -31,7 +31,7 @@ from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, 
     SCmpEQU64
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
-from ..Common import ceilDivide, log2, print2
+from ..Common import ceilDivide, log2, print2, INDEX_CHARS
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -412,6 +412,7 @@ class GSUOn(GSU):
         module = Module("GSU On graIncrements")
 
         tc = tP["tensorChar"]
+        tIdx: int = tP["idx"]
         dimIdx = kernel["ProblemType"]["IndicesSummation"][loopIdx] # dimension index
         loopChar = writer.states.indexChars[dimIdx]
         stride = writer.strideRef(tc, dimIdx)
@@ -441,9 +442,10 @@ class GSUOn(GSU):
                     dst=vgpr("GlobalReadIncs%s+%u+1"%(tc, 2*loopIdx)), \
                     src=sgpr(tmpSgpr+1)))
         else:
-            with writer.allocTmpSgpr(2) as tmpSgprInfo:
+            with writer.allocTmpSgpr(3) as tmpSgprInfo:
                 tmpSgpr = tmpSgprInfo.idx
                 gsuSgpr = tmpSgpr + 1
+                incSgpr = tmpSgpr + 2
 
                 tcGR = tc if tc == "Metadata" else (tc + "GR")
 
@@ -457,7 +459,12 @@ class GSUOn(GSU):
                 du = kernel["_DepthU%s"%tc]
                 duBpe = int(du * tP["bpeGR"]) * mi_dim
                 module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
-                module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))
+
+                if 'MXS' in tc:
+                    module.add(SMulI32(dst=sgpr(incSgpr), src0=sgpr("Size%s"%INDEX_CHARS[tIdx]), src1=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))
+                else:
+                    module.add(SMovB32(dst=sgpr(incSgpr), src=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))
+                module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=sgpr(incSgpr), comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
 
                 m = sgpr(gsuSgpr)
@@ -469,7 +476,7 @@ class GSUOn(GSU):
                 duBpe = int(du * tP["bpeGR"]) * mi_dim
                 # multiply by stride, optimizing if unit stride
                 if writer.isConstUnitStride(stride):
-                    module.add(SCSelectB32(dst=incr, src0=duBpe, src1=m, comment="incr%s (unrollIdx)"%(tc)))
+                    module.add(SCSelectB32(dst=incr, src0=sgpr(incSgpr), src1=m, comment="incr%s (unrollIdx)"%(tc)))
                 else:
                     module.add(SCMovB32(dst=m, src=duBpe, comment="DepthU*Bpe if GSUC = 1"))
                     module.add(SMulI32(dst=incr, src0=m, src1=stride, comment="incr%s unrollIdx)"%(tc) ))

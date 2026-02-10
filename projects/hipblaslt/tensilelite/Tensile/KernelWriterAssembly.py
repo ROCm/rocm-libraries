@@ -12055,7 +12055,7 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["EnableMatrixInstruction"]:
         if kernel["UnrollMajorLDS%s" % tc]:
           if tc in ("MXSA", "MXSB"):
-            inc = tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
+            inc = kernel["MacroTile%s"%tP["tensorChar"]] * tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA,self.states.numReadsIterCoalescedMXSB)
           else:
             inc = tP["bpeDS"] * max(self.states.numReadsIterCoalescedA, self.states.numReadsIterCoalescedB)
           comment = " (bpeDS)"
@@ -12106,7 +12106,11 @@ class KernelWriterAssembly(KernelWriter):
     else:
       if tP["localReadInstruction"].numOffsets == 1:
         if kernel["EnableMatrixInstruction"]:
-          if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
+          if "MXS" in tc:
+            subTc = tc[3]
+            mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+            offsetInc = kernel["MacroTile%s"%tP["tensorChar"]] * mxUnit
+          elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
             if tc in ("MXSA", "MXSB"):
               offsetInc = matrixInstK * max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
             else:
@@ -17538,7 +17542,7 @@ class KernelWriterAssembly(KernelWriter):
     ldsConstOffset: int = kernel[f"LdsOffset{tc}"]
     ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
     ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
-    dim1Divisor = 2 if kernel["TDMSplit"] else 1
+    dim1Divisor = 2 if (kernel["TDMSplit"] and not ("MXS" in tc)) else 1
 
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
     mod.add(comp.setDataType(dtype, descSgprName(1)))
@@ -17608,7 +17612,10 @@ class KernelWriterAssembly(KernelWriter):
     ldsConstOffset: int = kernel[f"LdsOffset{tc}"]
     ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
     ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
-    dim1Divisor = 2 if kernel["TDMSplit"] else 1
+    dim1Divisor = 2 if (kernel["TDMSplit"] and not ("MXS" in tc)) else 1
+    if ("MXS" in tc):
+        subTc = tc[3]
+        mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
 
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
     mod.add(comp.setDataType(dtype, descSgprName(1)))
@@ -17634,16 +17641,23 @@ class KernelWriterAssembly(KernelWriter):
 
     mod.add(comp.setIterationEnabled(descSgprName(1), False))
     mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
-    mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self, sizeShifter))
-    mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), self))
+    if ("MXS" in tc):
+      mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(ti), self, ceil(log2(mxUnit)), True))
+      mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(3), self, ceil(log2(duScale*mxUnit)), True))
+    else:
+      mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self, sizeShifter))
+      mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), self))
 
     if tc.startswith("MX"):
       #reset to 0 since scale of sizeTile0 and stride for MX is not required
       sizeShifter = 1 if dtype.isFloat4() else 0
-
-    mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
-    mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp // dim1Divisor, self))
-    mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
+      mod.add(comp.setTensorTile0(descSgprName(1), sizeTile1 * mxUnit, self, sizeShifter))
+      mod.add(comp.setTensorTile1(descSgprName(1), sizeTile0 // mxUnit// numComp // dim1Divisor, self))
+      mod.add(comp.setTensorStride0(descSgprName(1), sizeRefName(ti), ceil(log2(mxUnit)), True))
+    else:
+      mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
+      mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp // dim1Divisor, self))
+      mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
 
     if kernel["TDMSplit"]:
       extraPadSize: int = round(mt * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
