@@ -24,6 +24,10 @@
  *
  *******************************************************************************/
 
+#if !NDEBUG
+#include <iostream>
+#endif // !NDEBUG
+
 #include "contraction_solution_registry.hpp"
 
 namespace hiptensor

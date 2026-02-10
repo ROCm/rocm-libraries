@@ -75,7 +75,7 @@ Follow these steps to run the tuning:
    .. code-block:: bash
 
       Creating exact logic
-      --Reading matching table: <hipblaslt_root_folder>/build/release/library/MatchTable.yaml
+      --Reading matching table: <hipblaslt_root_folder>/build/release/device-library/MatchTable.yaml
       --Reading bench files
       --Found file <output folder>/0_Bench/result_NN_SSS_88x12x664.txt
       Writing logic yaml files: 100%|    | 1/1 [00:05<00:00,  5.69s/it]
