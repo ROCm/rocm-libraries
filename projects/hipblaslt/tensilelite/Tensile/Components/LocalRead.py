@@ -596,6 +596,12 @@ class LocalReadMFMA(LocalRead):
             tileStride   = kernel["_DepthU%s"%tc] + LdsPad
             UnrollStride = 1
 
+        if "MXS" in tc:
+            subTc = tc[3]
+            mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+            tileStride = mxUnit
+            UnrollStride = kernel["MacroTile%s" % tP["tensorChar"]] * mxUnit
+
         enableLDSTr = tP["enableLDSTr"]
         matrixInstT = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
         matrixInstTO = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
@@ -1404,7 +1410,9 @@ class LocalReadMFMA(LocalRead):
                             # gfx1250 LDS offset formula shared by XF32 and BF16/Half/FP8/etc paths.
                             # The WMMA V3 LDS layout uses a *2 factor on the unroll stride.
                             def calcGfx1250LdsOffset():
-                                if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
+                                if "MXS" in tc:
+                                    incOffset = 0
+                                elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
                                     incOffset = rIdx * numElementPerRead * UnrollStride * 2
                                     incOffset += tiIdx * matrixInstTO * vectorWidth * tileStride
                                 else:

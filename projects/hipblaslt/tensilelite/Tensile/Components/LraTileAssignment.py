@@ -814,7 +814,10 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # strider for each type of index
         umlds            = kernel["UnrollMajorLDS%s" % tc]
         mt               = kernel["MacroTile%u" % tile01]
-        if enableLDSTr:
+        if ("MXS" in tc):
+           subTc = tc[3]
+           strideTile = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+        elif enableLDSTr:
            strideTile = 4
         else:
            strideTile = kernel["_DepthU%s"%tc] + LdsPad if umlds else 1
@@ -849,7 +852,9 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                 strideK = (mt + LdsPad) * 4
 
         strideBlock = matrixInstT * strideTile
-        if enableLDSTr:
+        if ("MXS" in tc):
+           strideWave = matrixInstT * num1DBlocks * strideTile * vectorWidth
+        elif enableLDSTr:
            strideWave = matrixInstT * vectorWidth
         else:
            strideWave = matrixInstT * num1DBlocks * strideTile * vectorWidth
