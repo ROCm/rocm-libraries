@@ -25,6 +25,7 @@ using namespace miopen_plugin;
 using namespace hipdnn_data_sdk::flatbuffer_utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_frontend::graph;
 
 class TestMiopenConvFwdBiasActivPlanBuilder : public ::testing::Test
 {
@@ -115,8 +116,6 @@ class TestGpuMiopenConvFwdBiasActivPlanBuilder
 protected:
     void SetUp() override
     {
-        namespace graph = hipdnn_frontend::graph;
-
         // Re-enable in Windows once CK is supported
         SKIP_IF_WINDOWS();
 
@@ -141,22 +140,22 @@ protected:
         _graphObj.set_io_data_type(param.defaultDataType);
 
         auto xTensorAttrObj
-            = graph::makeTensorAttributes("x",
-                                          param.dataTypes[TypeKey::X],
-                                          convTestCase.xDims,
-                                          generateStrides(convTestCase.xDims, layout.strideOrder));
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xTensorAttrObj));
+            = makeTensorAttributes("x",
+                                   param.dataTypes[TypeKey::X],
+                                   convTestCase.xDims,
+                                   generateStrides(convTestCase.xDims, layout.strideOrder));
+        auto xTensorAttr = std::make_shared<TensorAttributes>(std::move(xTensorAttrObj));
         xTensorAttr->set_is_virtual(isVirtual(TypeKey::X));
 
-        auto wTensorAttrObj = graph::makeTensorAttributes(
-            "w",
-            param.dataTypes[TypeKey::W],
-            convTestCase.wDims,
-            generateStrides(convTestCase.wDims, param.layout.strideOrder));
-        auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wTensorAttrObj));
+        auto wTensorAttrObj
+            = makeTensorAttributes("w",
+                                   param.dataTypes[TypeKey::W],
+                                   convTestCase.wDims,
+                                   generateStrides(convTestCase.wDims, param.layout.strideOrder));
+        auto wTensorAttr = std::make_shared<TensorAttributes>(std::move(wTensorAttrObj));
         wTensorAttr->set_is_virtual(isVirtual(TypeKey::W));
 
-        graph::ConvFpropAttributes convAttrs;
+        ConvFpropAttributes convAttrs;
         convAttrs.set_pre_padding(convTestCase.convPrePadding);
         convAttrs.set_post_padding(convTestCase.convPostPadding);
         convAttrs.set_stride(convTestCase.convStride);
@@ -168,21 +167,20 @@ protected:
         yConvTensorAttr->set_dim(convTestCase.yDims);
         yConvTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
         yConvTensorAttr->set_is_virtual(isVirtual(TypeKey::Y_CONV));
-        std::shared_ptr<graph::TensorAttributes> yBiasTensorAttr;
+        std::shared_ptr<TensorAttributes> yBiasTensorAttr;
         if(param.op == FusedOp::CBA)
         {
             const auto biasDims = getDerivedShape(convTestCase.yDims);
 
             auto biasTensorAttrObj
-                = graph::makeTensorAttributes("bias",
-                                              param.dataTypes[TypeKey::BIAS],
-                                              biasDims,
-                                              generateStrides(biasDims, layout.strideOrder));
-            auto biasTensorAttr
-                = std::make_shared<graph::TensorAttributes>(std::move(biasTensorAttrObj));
+                = makeTensorAttributes("bias",
+                                       param.dataTypes[TypeKey::BIAS],
+                                       biasDims,
+                                       generateStrides(biasDims, layout.strideOrder));
+            auto biasTensorAttr = std::make_shared<TensorAttributes>(std::move(biasTensorAttrObj));
             biasTensorAttr->set_is_virtual(isVirtual(TypeKey::BIAS));
 
-            graph::PointwiseAttributes biasAttrs;
+            PointwiseAttributes biasAttrs;
             biasAttrs.set_name("bias");
             biasAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
             biasAttrs.set_compute_data_type(param.dataTypes[TypeKey::BIAS_COMPUTE]);
@@ -195,7 +193,7 @@ protected:
             yBiasTensorAttr->set_is_virtual(isVirtual(TypeKey::Y_BIAS));
         }
 
-        graph::PointwiseAttributes activAttrs;
+        PointwiseAttributes activAttrs;
         activAttrs.set_name("activation_forward");
         activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
         activAttrs.set_compute_data_type(param.dataTypes[TypeKey::ACTIV_COMPUTE]);
@@ -249,7 +247,7 @@ protected:
     MiopenConvFwdBiasActivPlanBuilder _planBuilder;
     HipdnnEnginePluginHandle _handle;
 
-    hipdnn_frontend::graph::Graph _graphObj;
+    Graph _graphObj;
     bool _isApplicable;
 };
 
