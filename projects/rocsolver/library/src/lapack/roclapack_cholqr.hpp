@@ -398,6 +398,7 @@ static void set_triangular(rocblas_handle handle,
 
 template <typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
 rocblas_status rocsolver_cholqr_argCheck(rocblas_handle handle,
+                                         const rocsolver_alg_select algo,
                                          const I m,
                                          const I n,
                                          U A,
@@ -407,7 +408,6 @@ rocblas_status rocsolver_cholqr_argCheck(rocblas_handle handle,
                                          const I ldr,
                                          const rocblas_stride strideR,
                                          S* sigma,
-                                         const rocsolver_alg_select algo,
                                          I* info,
                                          const I batch_count = 1)
 {
@@ -440,12 +440,12 @@ rocblas_status rocsolver_cholqr_argCheck(rocblas_handle handle,
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename I>
-static rocblas_status rocsolver_cholqr_getMemorySize(const I m,
+static rocblas_status rocsolver_cholqr_getMemorySize(const rocsolver_alg_select algo,
+                                                     const I m,
                                                      const I n,
                                                      const I lda,
                                                      const I ldr,
                                                      const I batch_count,
-                                                     const rocsolver_alg_select algo,
                                                      size_t* size_scalars,
                                                      size_t* size_work1,
                                                      size_t* size_work2,
@@ -779,6 +779,7 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
 
 template <bool BATCHED, bool STRIDED, typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
 static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
+                                                const rocsolver_alg_select algo,
                                                 const I m,
                                                 const I n,
                                                 U A,
@@ -790,7 +791,6 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
                                                 const I ldr,
                                                 const rocblas_stride strideR,
                                                 S* sigma,
-                                                const rocsolver_alg_select algo,
                                                 I* info,
                                                 const I batch_count,
                                                 T* scalars,
