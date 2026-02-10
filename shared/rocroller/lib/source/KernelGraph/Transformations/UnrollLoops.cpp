@@ -321,9 +321,8 @@ namespace rocRoller
                         [&](Tile const&) { insertUnrollBesideForLoop(Tile()); },
                         [&](Split const&) { insertUnrollBesideForLoop(Split()); },
                         [&](auto const&) {
-                            AssertFatal(false,
-                                        "Unhandled incoming edge while creating Unroll.",
-                                        ShowValue(input));
+                            Throw<FatalError>("Unhandled incoming edge while creating Unroll.",
+                                              ShowValue(input));
                         },
                     },
                     std::get<CoordinateTransformEdge>(edge));
@@ -362,9 +361,8 @@ namespace rocRoller
                         [&](Flatten const&) { insertUnrollBesideForLoop(Flatten()); },
                         [&](Join const&) { insertUnrollBesideForLoop(Join()); },
                         [&](auto const&) {
-                            AssertFatal(false,
-                                        "Unhandled outgoing edge while creating Unroll.",
-                                        ShowValue(output));
+                            Throw<FatalError>("Unhandled outgoing edge while creating Unroll.",
+                                              ShowValue(output));
                         },
                     },
                     std::get<CoordinateTransformEdge>(edge));
