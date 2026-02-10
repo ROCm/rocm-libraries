@@ -91,8 +91,7 @@ extern "C" __global__ __launch_bounds__((MLO_POOLING_GROUP_SZ0)) //
         top_h_end = min(top_h_end, static_cast<int>(top_h));
         top_w_end = min(top_w_end, static_cast<int>(top_w));
 
-        FLOAT_ACCUM bot_data[PIX_D_PER_WORK][PIX_H_PER_WORK][PIX_W_PER_WORK] = {
-            FLOAT_ACCUM{0}};
+        FLOAT_ACCUM bot_data[PIX_D_PER_WORK][PIX_H_PER_WORK][PIX_W_PER_WORK] = {FLOAT_ACCUM{0}};
 
         for(int h = top_d_start; h < top_d_end; ++h)
         {
@@ -103,8 +102,8 @@ extern "C" __global__ __launch_bounds__((MLO_POOLING_GROUP_SZ0)) //
                     unsigned int top_gbl_off =
                         b_id * top_str_b + c_id * top_str_c + h * top_str_d + j * top_str_h + i;
 
-                    FLOAT_ACCUM top_val = b_id < batch ? CVT_FLOAT2ACCUM(top_df[top_gbl_off])
-                                                       : CVT_FP32_2ACCUM(0.0f);
+                    FLOAT_ACCUM top_val =
+                        b_id < batch ? CVT_FLOAT2ACCUM(top_df[top_gbl_off]) : CVT_FP32_2ACCUM(0.0f);
                     index_t mask_idx = b_id < batch
                                            ? mask[top_gbl_off]
                                            : std::numeric_limits<MLO_POOLING_INDEX_TYPE>::max();
