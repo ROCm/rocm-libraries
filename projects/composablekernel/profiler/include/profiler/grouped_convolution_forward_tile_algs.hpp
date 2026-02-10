@@ -7,6 +7,7 @@
 
 #include "../../experimental/builder/test/utils/conv_algorithm_type_utils.hpp"
 #include "grouped_convolution_signatures.hpp"
+#include "common.hpp"
 #include "ck_tile/ref/naive_grouped_conv_fwd_gpu.hpp"
 
 #include "ck_tile/builder/testing/filter_extent.hpp"
@@ -137,6 +138,13 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
     float avg_time;
     bool valid = true;
 
+    using DataType =
+        std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP32,
+                           float,
+                           std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP16,
+                                              ck_tile::half_t,
+                                              ck_tile::bfloat16_t>>;
+
     auto reference = ckt::alloc_outputs(args);
     using ReferenceInstance =
         typename ckb::ConvBuilder<SIGNATURE, ckt::ConvAlgorithm_Reference{}>::Instance;
@@ -151,8 +159,19 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
             std::cout << "Perf: " << std::setw(10) << avg_time << " ms," << " " << op_name
                       << std::endl;
 
-            const auto errors = ckt::validate(args, outputs, reference.get()).get_errors();
-            for(const auto& error : errors)
+            ckt::ValidationReport report;
+            ckt::Outputs<SIGNATURE>::reflect(
+                args,
+                [&](std::string_view name, const auto& desc, void* ckt::Outputs<SIGNATURE>::*ptr) {
+                    report.check(name,
+                                 desc,
+                                 outputs.*ptr,
+                                 reference.get().*ptr,
+                                 ck::profiler::get_rtol<DataType>(),
+                                 ck::profiler::get_atol<DataType>());
+                });
+
+            for(const auto& error : report.get_errors())
             {
                 valid = false;
                 std::cout << "Number of incorrect values: " << error.wrong_elements
