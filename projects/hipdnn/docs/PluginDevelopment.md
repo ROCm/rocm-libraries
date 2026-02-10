@@ -196,7 +196,7 @@ In general, the **best practices** consist of:
 ### Key Files Reference
 
 - **Plugin API Interface**: [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
-- **Example Plugin Implementation**: [`dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp`](../../../dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp)
+- **Example Plugin Implementation**: [`dnn-providers/miopen-provider/MiopenPlugin.cpp`](../../../dnn-providers/miopen-provider/MiopenPlugin.cpp)
 - **Example Engine Manager**: [`dnn-providers/miopen-provider/EngineManager.hpp`](../../../dnn-providers/miopen-provider/EngineManager.hpp)
 - **Example Engine Implementation**: [`dnn-providers/miopen-provider/engines/MiopenEngine.cpp`](../../../dnn-providers/miopen-provider/engines/MiopenEngine.cpp)
 
@@ -294,7 +294,7 @@ This path is relative to the backend shared library location, typically:
 /opt/rocm/lib/
 └── hipdnn_plugins/
     └── engines/
-        ├── miopen_legacy_plugin.so
+        ├── miopen_plugin.so
         └── other_plugin.so
 ```
 
@@ -466,7 +466,7 @@ At a high level, it:
 - Coordinates streams and handles synchronization
 
 ### Structure
-- **Main Plugin**: [`MiopenLegacyPlugin.cpp`](../../../dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp) - Entry point and plugin registration
+- **Main Plugin**: [`MiopenPlugin.cpp`](../../../dnn-providers/miopen-provider/MiopenPlugin.cpp) - Entry point and plugin registration
 - **Engine Manager**: [`EngineManager.hpp`](../../../dnn-providers/miopen-provider/EngineManager.hpp) - Manages MIOpen engines
 - **MIOpen Engine**: [`MiopenEngine.cpp`](../../../dnn-providers/miopen-provider/engines/MiopenEngine.cpp) - Implements graph execution using MIOpen kernels
 

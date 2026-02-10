@@ -7,7 +7,7 @@
 
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 // We have made the intentional decision to hardcode the batchnorm mode to miopenBNSpatial
@@ -116,8 +116,9 @@ const std::optional<MiopenTensor>& BatchnormBwdParams::optBias() const
     return _optBias;
 }
 
-BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params)
+BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params, bool benchmarkingEnabled)
     : _params(std::move(params))
+    , _benchmarkingEnabled(benchmarkingEnabled)
 {
 }
 
@@ -133,6 +134,9 @@ void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
                                uint32_t numDeviceBuffers,
                                [[maybe_unused]] void* workspace) const
 {
+    // Set tuning policy based on benchmarking flag - RAII ensures restoration
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+
     float alphaDataDiff = 1.0f;
     float betaDataDiff = 0.0f;
     float alphaParamDiff = 1.0f;
@@ -209,4 +213,4 @@ void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
         activationDescriptor));
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

@@ -10,6 +10,7 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
@@ -18,7 +19,7 @@
 
 #include <functional>
 
-namespace miopen_legacy_plugin::test_utilities
+namespace miopen_plugin::test_utilities
 {
 
 // NOLINTBEGIN (portability-template-virtual-member-function)
@@ -26,6 +27,9 @@ template <typename DataType, typename TestCaseType>
 class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<TestCaseType>
 {
 protected:
+    static constexpr float DEFAULT_MIN = -1.0f;
+    static constexpr float DEFAULT_MAX = 1.0f;
+
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
@@ -66,7 +70,6 @@ protected:
                               = hipdnn_data_sdk::utilities::TensorLayout::NCHW)
         = 0;
 
-protected:
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
     {
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, cpuBundle;
@@ -87,7 +90,7 @@ protected:
             << "At least one output tensor id must be specified for "
                "validation.";
 
-        HIPDNN_LOG_INFO("Validating {} output tensors", outputTensorIds);
+        HIPDNN_PLUGIN_LOG_INFO("Validating {} output tensors", outputTensorIds.size());
 
         // Lazily register validators after graph execution since tensor Ids and types may be inferred during graph finalization
         for(const auto& registerValidator : _deferredValidators)
@@ -176,7 +179,7 @@ protected:
     {
         for(auto& tensorPair : bundle.tensors)
         {
-            bundle.randomizeTensor(tensorPair.first, -1.0f, 1.0f, seed);
+            bundle.randomizeTensor(tensorPair.first, DEFAULT_MIN, DEFAULT_MAX, seed);
         }
     }
 

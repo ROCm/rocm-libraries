@@ -4,6 +4,7 @@
 #pragma once
 
 #include <functional>
+#include <ostream>
 #include <variant>
 
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormBwdSignatureKey.hpp>
@@ -13,6 +14,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionWrwSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/MatmulSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PointwiseSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::utilities
@@ -36,6 +38,7 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               ConvolutionFwdSignatureKey,
                                               ConvolutionBwdSignatureKey,
                                               ConvolutionWrwSignatureKey,
+                                              MatmulSignatureKey,
                                               PointwiseSignatureKey>;
 
 struct PlanRegistrySignatureKeyHash
@@ -68,21 +71,10 @@ struct PlanRegistrySignatureKeyEqual
     }
 };
 
+inline std::ostream& operator<<(std::ostream& os, const PlanRegistrySignatureKey& key)
+{
+    std::visit([&os](const auto& arg) { os << arg; }, key);
+    return os;
 }
 
-template <>
-struct fmt::formatter<hipdnn_test_sdk::utilities::PlanRegistrySignatureKey>
-{
-    static constexpr auto parse(format_parse_context& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const hipdnn_test_sdk::utilities::PlanRegistrySignatureKey& key,
-                FormatContext& ctx) const
-    {
-        return std::visit([&ctx](const auto& arg) { return fmt::format_to(ctx.out(), "{}", arg); },
-                          key);
-    }
-};
+}

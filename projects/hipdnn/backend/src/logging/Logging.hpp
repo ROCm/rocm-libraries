@@ -9,6 +9,8 @@
 #include <memory>
 #include <spdlog/spdlog.h>
 
+// Backend-specific logging macros
+// These are separate from HIPDNN_LOG_* used by frontend/plugins to avoid conflicts
 #ifdef HIPDNN_BACKEND_COMPILATION
 #define _HIPDNN_BACKEND_LOG_ACTION(spdlog_level, ...)               \
     do                                                              \
@@ -21,13 +23,13 @@
         }                                                           \
     } while(0)
 
-#define HIPDNN_LOG_INFO(...) \
+#define HIPDNN_BACKEND_LOG_INFO(...) \
     _HIPDNN_BACKEND_LOG_ACTION(spdlog::level::level_enum::info, __VA_ARGS__)
-#define HIPDNN_LOG_WARN(...) \
+#define HIPDNN_BACKEND_LOG_WARN(...) \
     _HIPDNN_BACKEND_LOG_ACTION(spdlog::level::level_enum::warn, __VA_ARGS__)
-#define HIPDNN_LOG_ERROR(...) \
+#define HIPDNN_BACKEND_LOG_ERROR(...) \
     _HIPDNN_BACKEND_LOG_ACTION(spdlog::level::level_enum::err, __VA_ARGS__)
-#define HIPDNN_LOG_FATAL(...) \
+#define HIPDNN_BACKEND_LOG_FATAL(...) \
     _HIPDNN_BACKEND_LOG_ACTION(spdlog::level::level_enum::critical, __VA_ARGS__)
 #endif // HIPDNN_BACKEND_COMPILATION
 

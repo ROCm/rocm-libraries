@@ -22,7 +22,7 @@ primbench has the following dependencies:
 
 ## Example
 
-`copy_benchmark.cpp` provides an example of how to use primbench:
+`copy_benchmark.cpp` ([here](./examples/copy_benchmark.cpp)) provides an example of how to use primbench:
 
 ```cpp
 // Only include this in one translation unit

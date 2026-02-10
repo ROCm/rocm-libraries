@@ -17,7 +17,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
-using namespace miopen_legacy_plugin::test_utilities;
+using namespace miopen_plugin::test_utilities;
 using namespace test_bn_common;
 
 namespace
@@ -68,7 +68,7 @@ protected:
 
         // Epsilon (pass-by-value)
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
-        epsilonTensorAttr->set_name("epsilon").set_value(1e-5f);
+        epsilonTensorAttr->set_name("epsilon").set_value(1e-5);
 
         graph::BatchnormInferenceAttributesVarianceExt bnAttrs;
 

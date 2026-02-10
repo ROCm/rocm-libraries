@@ -226,6 +226,32 @@ constexpr T getToleranceWrw()
 
 } // namespace conv
 
+namespace matmul
+{
+
+template <typename T>
+constexpr T getTolerance()
+{
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 1e-2_h;
+    }
+    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        return 1e-2_bf;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace matmul
+
 namespace pointwise
 {
 

@@ -40,7 +40,7 @@ def _mock_dtype(is_16bit=False, is_8bit=False, num_bytes=4):
 # Base kernel configuration factory
 def create_base_kernel():
     kernel = {
-        "UseCustomMainLoopSchedule": True,
+        "UseCustomMainLoopSchedule": 1,
         "EnableMatrixInstruction": True,
         "UnrollLoopSwapGlobalReadOrder": False,
         "ISA": IsaVersion(9,5,0),

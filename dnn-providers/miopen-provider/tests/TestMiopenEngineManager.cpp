@@ -16,7 +16,7 @@
 #include "mocks/MockEngine.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_plugin_sdk;
 using ::testing::Return;
@@ -108,9 +108,12 @@ TEST(TestMiopenEngineManager, ReturnsEngineDetails)
     engineDetails.size = 200;
     auto mockEngine = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(1));
-    EXPECT_CALL(*mockEngine, getDetails(::testing::_, ::testing::_))
-        .WillOnce([&engineDetails](HipdnnEnginePluginHandle& handle, hipdnnPluginConstData_t& out) {
+    EXPECT_CALL(*mockEngine, getDetails(::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&engineDetails](HipdnnEnginePluginHandle& handle,
+                                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
+                                   hipdnnPluginConstData_t& out) {
             (void)handle;
+            (void)graph;
             out.ptr = engineDetails.ptr;
             out.size = engineDetails.size;
         });
@@ -168,7 +171,8 @@ TEST(TestMiopenEngineManager, InitializeExecutionContextCallsEngine)
 {
     auto mockEngine = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(7));
-    EXPECT_CALL(*mockEngine, initializeExecutionContext(::testing::_, ::testing::_, ::testing::_))
+    EXPECT_CALL(*mockEngine,
+                initializeExecutionContext(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
 
     EngineManager manager;

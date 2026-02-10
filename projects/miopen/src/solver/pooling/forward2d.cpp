@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/pooling/solvers.hpp>
 
@@ -31,6 +8,7 @@
 #include <miopen/pooling.hpp>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/mlo_internal.hpp>
+#include <miopen/solver/implicitgemm_util.hpp>
 
 namespace miopen {
 
@@ -51,7 +29,8 @@ struct kernel_params
     int out_pix_tile0;
     int out_pix_tile1;
 
-    kernel_params(const miopen::pooling::ProblemDescription& p)
+    kernel_params(const miopen::pooling::ProblemDescription& p,
+                  const std::optional<PerformanceConfigPooling2dForward>& config = std::nullopt)
     {
         const auto& pd  = p.GetPooling();
         const auto& yd  = p.GetYDesc();
@@ -62,11 +41,18 @@ struct kernel_params
         out_height      = yd.GetLengths()[2];
         out_width       = yd.GetLengths()[3];
         out_pix_tile0   = 1;
-        out_pix_tile1   = out_height <= 8    ? 1 //
-                          : out_height <= 32 ? 4 //
-                                             : 8;
-        if(out_height > 16 && out_height % 32 > 16)
-            out_pix_tile1 = std::min(16, std::max(1, prePow2(out_pix_tile1 * kernel_stride_h)));
+        if(config)
+        {
+            out_pix_tile1 = config->out_pix_tile1;
+        }
+        else
+        {
+            out_pix_tile1 = out_height <= 8    ? 1 //
+                            : out_height <= 32 ? 4 //
+                                               : 8;
+            if(out_height > 16 && out_height % 32 > 16)
+                out_pix_tile1 = std::min(16, std::max(1, prePow2(out_pix_tile1 * kernel_stride_h)));
+        }
     }
 };
 
@@ -79,7 +65,7 @@ std::size_t sizeof_kernel_FLOAT(const miopen::pooling::ProblemDescription& probl
 std::size_t sizeof_kernel_FLOAT_ACCUM(const miopen::pooling::ProblemDescription& problem)
 {
     const auto datatype = problem.GetXDesc().GetType();
-    if(datatype == miopenHalf)
+    if(datatype == miopenHalf || datatype == miopenBFloat16)
         return get_data_size(miopenFloat); // mixed precision
     return get_data_size(datatype);
 }
@@ -112,7 +98,9 @@ std::size_t sizeof_private_memory(const miopen::pooling::ProblemDescription& pro
     const auto& MLO_POOLING_KERNEL_SZ0      = kp.kernel_size_w;
     const auto& MLO_POOLING_STRIDE0         = kp.kernel_stride_w;
     const auto& MLO_POOLING_N_HORIZ_OUT_PIX = kp.out_pix_tile0;
-    const auto& MLO_POOLING_N_VERT_OUT_PIX  = kp.out_pix_tile1;
+    // safer estimate of memory with max_out_pix_tile1
+    assert(kp.out_pix_tile1 <= PerformanceConfigPooling2dForward::max_out_pix_tile1);
+    const auto& MLO_POOLING_N_VERT_OUT_PIX = PerformanceConfigPooling2dForward::max_out_pix_tile1;
 
     const auto MLO_BOT_DATA_SZ0 =
         (static_cast<std::size_t>(MLO_POOLING_N_HORIZ_OUT_PIX) - 1) * MLO_POOLING_STRIDE0 +
@@ -142,7 +130,8 @@ bool PoolingForward2d::IsApplicable(const ExecutionContext& context,
            problem.GetXDesc().GetNumDims() == 4 &&
            problem.GetXDesc().GetType() == problem.GetYDesc().GetType() &&
            (problem.GetXDesc().GetType() == miopenFloat ||
-            problem.GetXDesc().GetType() == miopenHalf) &&
+            problem.GetXDesc().GetType() == miopenHalf ||
+            problem.GetXDesc().GetType() == miopenBFloat16) &&
            problem.GetXDesc().IsPossibleLayout4D5D("NCHW", strict) &&
            problem.GetYDesc().IsPossibleLayout4D5D("NCHW", strict) &&
            sizeof_private_memory(problem) <=
@@ -150,7 +139,8 @@ bool PoolingForward2d::IsApplicable(const ExecutionContext& context,
 }
 
 ConvSolution PoolingForward2d::GetSolution(const ExecutionContext&,
-                                           const miopen::pooling::ProblemDescription& problem) const
+                                           const miopen::pooling::ProblemDescription& problem,
+                                           const PerformanceConfigPooling2dForward& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
@@ -160,7 +150,7 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext&,
         kernel.kernel_file = "MIOpenPooling.cpp";
         kernel.kernel_name = "mloPoolingG";
 
-        const kernel_params kp(problem);
+        const kernel_params kp(problem, config);
 
         int batch_sz, n_outputs;
         std::tie(batch_sz, n_outputs, std::ignore, std::ignore) =
@@ -169,12 +159,8 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext&,
         const auto& pool_d   = problem.GetPooling();
         const auto wsp_index = pool_d.GetWorkspaceIndexMode();
 
-        int grp_tile0 = kp.out_width <= 8 ? 8 : (kp.out_width % 32 <= 16 ? 16 : 32);
-        int grp_tile1 = kp.out_height <= 8    ? 8
-                        : kp.out_height < 16  ? 16
-                        : kp.out_height <= 32 ? 32
-                        : kp.out_height <= 64 ? 64
-                                              : 128;
+        int grp_tile0 = config.local_size0;
+        int grp_tile1 = config.local_size1;
         grp_tile1 /= kp.out_pix_tile1;
         while(grp_tile0 * grp_tile1 > 256 && grp_tile0 > 1)
             grp_tile0 >>= 1;
@@ -253,6 +239,21 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext&,
     return result;
 }
 
+bool PerformanceConfigPooling2dForward::IsValidValue(
+    const miopen::pooling::ProblemDescription&) const
+{
+    if(!IsTwoPower<min_out_pix_tile1, max_out_pix_tile1>(out_pix_tile1))
+        return false;
+    if(!IsTwoPower<min_local_size0, max_local_size0>(local_size0))
+        return false;
+    if(!IsTwoPower<min_local_size1, max_local_size1>(local_size1))
+        return false;
+    // this constraint is enforced to avoid grp_tile1 becoming zero in GetSolution
+    if(local_size1 / out_pix_tile1 < 1)
+        return false;
+    return true;
+}
+
 std::size_t
 PoolingForward2d::GetWorkspaceSize(const ExecutionContext&,
                                    const miopen::pooling::ProblemDescription& problem) const
@@ -260,6 +261,22 @@ PoolingForward2d::GetWorkspaceSize(const ExecutionContext&,
     if(problem.GetPooling().GetMode() != miopenPoolingMax)
         return 0;
     return problem.GetYDesc().GetElementSize() * get_data_size(problem.GetPooling().GetIndexType());
+}
+
+bool PoolingForward2d::IsValidPerformanceConfig(
+    const ExecutionContext& context,
+    const miopen::pooling::ProblemDescription& problem,
+    const PerformanceConfigPooling2dForward& config) const
+{
+    return config.IsValid(context, problem);
+}
+
+PerformanceConfigPooling2dForward PoolingForward2d::GetDefaultPerformanceConfig(
+    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
+{
+    PerformanceConfigPooling2dForward config;
+    config.HeuristicInit(problem);
+    return config;
 }
 
 } // namespace pooling

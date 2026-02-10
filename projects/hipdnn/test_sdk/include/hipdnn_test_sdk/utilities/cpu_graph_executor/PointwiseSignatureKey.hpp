@@ -10,6 +10,7 @@
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PointwisePlan.hpp>
+#include <ostream>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -301,37 +302,23 @@ private:
                                                     OutputDataTypeEnum>>();
     }
 };
+
+inline std::ostream& operator<<(std::ostream& os, const PointwiseSignatureKey& key)
+{
+    if(key.input1DataType != hipdnn_data_sdk::data_objects::DataType::UNSET)
+    {
+        // Binary operation
+        os << "Pointwise(op=" << key.operation << ", in0=" << key.inputDataType
+           << ", in1=" << key.input1DataType << ", compute=" << key.computeDataType
+           << ", out=" << key.outputDataType << ")";
+    }
+    else
+    {
+        // Unary operation
+        os << "Pointwise(op=" << key.operation << ", in=" << key.inputDataType
+           << ", compute=" << key.computeDataType << ", out=" << key.outputDataType << ")";
+    }
+    return os;
 }
 
-template <>
-struct fmt::formatter<hipdnn_test_sdk::utilities::PointwiseSignatureKey>
-{
-    static constexpr auto parse(format_parse_context& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const hipdnn_test_sdk::utilities::PointwiseSignatureKey& key,
-                FormatContext& ctx) const
-    {
-        if(key.input1DataType != hipdnn_data_sdk::data_objects::DataType::UNSET)
-        {
-            // Binary operation
-            return fmt::format_to(ctx.out(),
-                                  "Pointwise(op={}, in0={}, in1={}, compute={}, out={})",
-                                  key.operation,
-                                  key.inputDataType,
-                                  key.input1DataType,
-                                  key.computeDataType,
-                                  key.outputDataType);
-        }
-        // Unary operation
-        return fmt::format_to(ctx.out(),
-                              "Pointwise(op={}, in={}, compute={}, out={})",
-                              key.operation,
-                              key.inputDataType,
-                              key.computeDataType,
-                              key.outputDataType);
-    }
-};
+}

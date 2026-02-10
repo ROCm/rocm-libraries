@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,8 @@
 #include <rocRoller/KernelGraph/Transforms/AddDirect2LDS.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddF6LDSPadding.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddLDS.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddLDSBarriers.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddLDSPadding.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddPRNG.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddPrefetch.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddStreamK.hpp>
@@ -53,12 +55,15 @@
 #include <rocRoller/KernelGraph/Transforms/LowerTile.hpp>
 #include <rocRoller/KernelGraph/Transforms/NopExtraScopes.hpp>
 #include <rocRoller/KernelGraph/Transforms/OrderEpilogueBlocks.hpp>
+#include <rocRoller/KernelGraph/Transforms/OrderExchangeNodes.hpp>
 #include <rocRoller/KernelGraph/Transforms/OrderMemory.hpp>
 #include <rocRoller/KernelGraph/Transforms/OrderMultiplyNodes.hpp>
 #include <rocRoller/KernelGraph/Transforms/PrefetchScale.hpp>
 #include <rocRoller/KernelGraph/Transforms/RemapOutputTiles.hpp>
 #include <rocRoller/KernelGraph/Transforms/RemoveDuplicates.hpp>
+#include <rocRoller/KernelGraph/Transforms/RemoveImplicitScheduling.hpp>
 #include <rocRoller/KernelGraph/Transforms/RemoveSetCoordinate.hpp>
+#include <rocRoller/KernelGraph/Transforms/ScheduleMultiplyAndLDS.hpp>
 #include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/KernelGraph/Transforms/SwizzleScale.hpp>
 #include <rocRoller/KernelGraph/Transforms/UnrollLoops.hpp>

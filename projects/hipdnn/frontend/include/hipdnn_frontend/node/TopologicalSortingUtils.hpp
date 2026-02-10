@@ -145,9 +145,8 @@ inline bool detectCycle(const std::vector<size_t>& topologicalOrder,
         return false;
     }
 
-    HIPDNN_FE_LOG_ERROR("Graph contains a cycle - not a DAG. Processed {}/{} nodes",
-                        topologicalOrder.size(),
-                        nodeCount);
+    HIPDNN_FE_LOG_ERROR("Graph contains a cycle - not a DAG. Processed "
+                        << topologicalOrder.size() << "/" << nodeCount << " nodes");
 
     // Log which nodes are part of the cycle
     std::vector<size_t> cycleNodes;
@@ -182,7 +181,7 @@ inline bool detectCycle(const std::vector<size_t>& topologicalOrder,
             nodeList += std::to_string(idx);
         }
 
-        HIPDNN_FE_LOG_ERROR("Nodes involved in cycle: [{}]", nodeList);
+        HIPDNN_FE_LOG_ERROR("Nodes involved in cycle: [" << nodeList << "]");
     }
 
     return true;

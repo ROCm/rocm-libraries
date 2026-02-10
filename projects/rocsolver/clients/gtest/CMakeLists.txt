@@ -1,5 +1,5 @@
 # ##########################################################################
-# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -83,6 +83,8 @@ set(rocauxiliary_test_source
   auxiliary/larfg_gtest.cpp
   auxiliary/larft_gtest.cpp
   auxiliary/larfb_gtest.cpp
+  # norm and condition number
+  auxiliary/lange_gtest.cpp
   # plane rotations
   auxiliary/lasr_gtest.cpp
   # orthonormal/unitary matrices

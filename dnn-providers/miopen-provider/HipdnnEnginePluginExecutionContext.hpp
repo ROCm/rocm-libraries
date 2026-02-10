@@ -9,9 +9,9 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "engines/plans/PlanInterface.hpp"
 
@@ -25,12 +25,12 @@ public:
         return _plan != nullptr;
     }
 
-    void setPlan(std::unique_ptr<miopen_legacy_plugin::IPlan> plan)
+    void setPlan(std::unique_ptr<miopen_plugin::IPlan> plan)
     {
         _plan = std::move(plan);
     }
 
-    virtual miopen_legacy_plugin::IPlan& plan() const
+    virtual miopen_plugin::IPlan& plan() const
     {
         if(!hasValidPlan())
         {
@@ -41,6 +41,17 @@ public:
         return *_plan;
     }
 
+    void setBenchmarkingEnabled(bool enabled)
+    {
+        _benchmarkingEnabled = enabled;
+    }
+
+    bool benchmarkingEnabled() const
+    {
+        return _benchmarkingEnabled;
+    }
+
 private:
-    std::unique_ptr<miopen_legacy_plugin::IPlan> _plan;
+    std::unique_ptr<miopen_plugin::IPlan> _plan;
+    bool _benchmarkingEnabled = false;
 };

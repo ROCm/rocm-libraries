@@ -20,6 +20,7 @@ struct GroupXdlopsNumericData
     unsigned int group_count;
 
     bool deterministic = false;
+    bool tf32_compute  = false;
 
     friend std::ostream& operator<<(std::ostream& os, const GroupXdlopsNumericData& numeric_data)
     {
@@ -31,13 +32,15 @@ struct GroupXdlopsNumericData
         LogVector(os, "dilation", numeric_data.dilation);
         os << "group_count: " << numeric_data.group_count;
         os << "deterministic: " << numeric_data.deterministic;
+        os << "tf32_compute: " << numeric_data.tf32_compute;
         os << "]";
         return os;
     }
 
 private:
     template <typename T>
-    static void LogVector(std::ostream& os, const std::string& vec_name, const std::vector<T>& vec)
+    inline static void
+    LogVector(std::ostream& os, const std::string& vec_name, const std::vector<T>& vec)
     {
         os << vec_name << ": [";
         for(size_t i = 0; i < vec.size(); ++i)
@@ -61,7 +64,8 @@ ConvTestCase GetConvTestForGroupXdlops(miopenTensorLayout_t layout,
                                     std::move(conv_numeric_data.stride),
                                     std::move(conv_numeric_data.dilation),
                                     std::move(conv_numeric_data.group_count),
-                                    conv_numeric_data.deterministic}};
+                                    conv_numeric_data.deterministic,
+                                    conv_numeric_data.tf32_compute}};
 
     return conv_test_case;
 }

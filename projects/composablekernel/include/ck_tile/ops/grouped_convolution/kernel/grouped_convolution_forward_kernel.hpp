@@ -654,6 +654,14 @@ struct GroupedConvolutionForwardKernel
 
     CK_TILE_HOST static bool IsSupportedArgument(const GroupedConvFwdKernelArgsSpecialized& kargs)
     {
+        if constexpr(GemmPipeline_::Async)
+        {
+            if(get_device_name() != "gfx950")
+            {
+                return false;
+            }
+        }
+
         if constexpr((GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
                       is_any_of<OutDataType, fp16_t, bf16_t>::value) ||
                      !IsSplitKSupported)
@@ -723,8 +731,11 @@ struct GroupedConvolutionForwardKernel
         if constexpr(GroupedConvTraitsType_::ExplicitGemm &&
                      ConvSpecialization != ConvolutionSpecialization::Filter1x1Stride1Pad0)
         {
-            CK_TILE_ERROR(
-                "Explicit Gemm is supported only for Filter1x1Stride1Pad0 specialization!");
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR(
+                    "Explicit Gemm is supported only for Filter1x1Stride1Pad0 specialization!");
+            }
             return false;
         }
 
@@ -736,13 +747,19 @@ struct GroupedConvolutionForwardKernel
             // Check access per C
             if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0)
             {
-                CK_TILE_ERROR("Conv C is not a multiple of vector load size for input image!");
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("Conv C is not a multiple of vector load size for input image!");
+                }
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported input layout!");
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR("Not supported input layout!");
+            }
             return false;
         }
 
@@ -754,13 +771,19 @@ struct GroupedConvolutionForwardKernel
         {
             if(ConvC % GroupedConvTraitsType_::VectorSizeB != 0)
             {
-                CK_TILE_ERROR("Conv C is not a multiple of vector load size for weight!");
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("Conv C is not a multiple of vector load size for weight!");
+                }
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported weight layout!");
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR("Not supported weight layout!");
+            }
             return false;
         }
 
@@ -771,13 +794,20 @@ struct GroupedConvolutionForwardKernel
         {
             if(ConvK % GroupedConvTraitsType_::VectorSizeC != 0)
             {
-                CK_TILE_ERROR("Conv K is not a multiple of vector store size for output image!");
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR(
+                        "Conv K is not a multiple of vector store size for output image!");
+                }
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported output layout!");
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR("Not supported output layout!");
+            }
             return false;
         }
 
@@ -786,7 +816,10 @@ struct GroupedConvolutionForwardKernel
             const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
             if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0)
             {
-                CK_TILE_ERROR("ConvG must be a multiple of NumGroupsToMerge!");
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("ConvG must be a multiple of NumGroupsToMerge!");
+                }
                 return false;
             }
         }
@@ -955,7 +988,8 @@ struct GroupedConvolutionForwardKernel
         else
         {
             if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
-                           is_any_of<OutDataType, fp16_t, bf16_t>::value))
+                           is_any_of<OutDataType, fp16_t, bf16_t>::value) &&
+                         IsSplitKSupported)
             {
                 auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
                     c_ptr, c_desc, block_idx_m, block_idx_n);
@@ -1115,19 +1149,40 @@ struct GroupedConvolutionForwardKernel
             // allocate LDS
             __shared__ char smem_ptr[GetSmemSize()];
 
-            RunGemm(a_ptr,
-                    b_ptr,
-                    ds_ptr_with_offsets,
-                    c_ptr,
-                    smem_ptr,
-                    a_desc,
-                    b_desc,
-                    c_desc,
-                    kargs.GemmK,
-                    kargs.k_batch,
-                    i_m,
-                    i_n,
-                    kargs.elfunc);
+            if constexpr(GemmPipeline_::Async)
+            {
+#if defined(__gfx950__)
+                RunGemm(a_ptr,
+                        b_ptr,
+                        ds_ptr_with_offsets,
+                        c_ptr,
+                        smem_ptr,
+                        a_desc,
+                        b_desc,
+                        c_desc,
+                        kargs.GemmK,
+                        kargs.k_batch,
+                        i_m,
+                        i_n,
+                        kargs.elfunc);
+#endif
+            }
+            else
+            {
+                RunGemm(a_ptr,
+                        b_ptr,
+                        ds_ptr_with_offsets,
+                        c_ptr,
+                        smem_ptr,
+                        a_desc,
+                        b_desc,
+                        c_desc,
+                        kargs.GemmK,
+                        kargs.k_batch,
+                        i_m,
+                        i_n,
+                        kargs.elfunc);
+            }
         }
     }
 };

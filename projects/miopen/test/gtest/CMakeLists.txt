@@ -26,7 +26,13 @@ if(MIOPEN_BACKEND_HIP)
 endif()
 
 if(MIOPEN_BACKEND_OPENCL)
-  set(SKIP_TESTS dumpTensorTest.cpp)
+  list(APPEND SKIP_TESTS dumpTensorTest.cpp)
+endif()
+
+if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
+    add_definitions(-DCK_EXPERIMENTAL_BUILDER)
+else()
+    list(APPEND SKIP_TESTS ck_builder_xdl.cpp ck_builder_shared.cpp)
 endif()
 
 function(add_gtest_negative_filter NEGATIVE_FILTER_TO_ADD)
@@ -71,10 +77,16 @@ function(add_gtest TEST_NAME TEST_CPP)
 
   # Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
   #               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
-  target_link_libraries(${TEST_NAME} ${CMAKE_DL_LIBS} GTest::gtest GTest::gtest_main MIOpen ${Boost_LIBRARIES} hip::host )
+  target_link_libraries(${TEST_NAME} ${CMAKE_DL_LIBS} GTest::gtest GTest::gtest_main GTest::gmock MIOpen ${Boost_LIBRARIES} hip::host )
   if(NOT MIOPEN_EMBED_DB STREQUAL "")
       target_link_libraries(${TEST_NAME} $<BUILD_INTERFACE:miopen_data>)
   endif()
+
+  if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
+    find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
+    target_link_libraries(${TEST_NAME} ck_builder composable_kernel::device_conv_operations)
+  endif()
+
   if(MIOPEN_TEST_DISCRETE)
     string(CONCAT TEST_ENVIRONMENT_VARIABLES
     "ENVIRONMENT;MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};"

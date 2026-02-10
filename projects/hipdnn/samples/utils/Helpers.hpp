@@ -51,17 +51,26 @@ using hipdnn_data_sdk::utilities::TensorLayout;
         }                                                                                 \
     } while(0)
 
-inline void printSampleHelp(const std::string& sampleName)
+enum class SampleType
+{
+    GENERIC,
+    BN_TRAINING
+};
+
+inline void printSampleHelp(const std::string& sampleName,
+                            SampleType sampleType = SampleType::GENERIC)
 {
     std::cout << "Usage: " << sampleName << " [OPTIONS]\n"
               << "Options:\n"
-              << "  --verify-cpu, -vc           Enable CPU reference validation\n"
-              << "  --batch-stats-only          Use batch statistics only (no running stats) [BN "
-                 "training only]\n"
-              << "  --full-training             Use full training with running statistics [BN "
-                 "training only]\n"
-              << "  --help, -h                  Show this help message\n"
-              << std::endl;
+              << "  --verify-cpu, -vc           Enable CPU reference validation\n";
+
+    if(sampleType == SampleType::BN_TRAINING)
+    {
+        std::cout << "  --batch-stats-only          Use batch statistics only (no running stats)\n"
+                  << "  --full-training             Use full training with running statistics\n";
+    }
+
+    std::cout << "  --help, -h                  Show this help message\n" << std::endl;
 }
 
 struct Config
@@ -70,7 +79,8 @@ struct Config
     bool useRunningStats = false;
 };
 
-inline Config parseCommandLineArgs(int argc, char* argv[])
+inline Config
+    parseCommandLineArgs(int argc, char* argv[], SampleType sampleType = SampleType::GENERIC)
 {
     auto config = Config{};
 
@@ -82,23 +92,23 @@ inline Config parseCommandLineArgs(int argc, char* argv[])
         {
             config.cpuValidation = true;
         }
-        else if(arg == "--batch-stats-only")
+        else if(arg == "--batch-stats-only" && sampleType == SampleType::BN_TRAINING)
         {
             config.useRunningStats = false;
         }
-        else if(arg == "--full-training")
+        else if(arg == "--full-training" && sampleType == SampleType::BN_TRAINING)
         {
             config.useRunningStats = true;
         }
         else if(arg == "--help" || arg == "-h")
         {
-            printSampleHelp(argv[0]);
+            printSampleHelp(argv[0], sampleType);
             exit(EXIT_SUCCESS);
         }
         else
         {
             std::cerr << "Unknown argument: " << arg << std::endl;
-            printSampleHelp(argv[0]);
+            printSampleHelp(argv[0], sampleType);
             exit(EXIT_FAILURE);
         }
     }

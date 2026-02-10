@@ -794,8 +794,8 @@ try
         throw std::invalid_argument("Invalid Device ID");
     set_device(device_id);
 
-    EfficiencyMonitor& perf_monitor = getEfficiencyMonitor();
-    perf_monitor.set_device_id(device_id);
+    auto perf_monitor = EfficiencyMonitor::create();
+    perf_monitor->setDeviceId(device_id);
 
     if(datafile)
         return hipblaslt_bench_datafile(filter, any_stride, props);
@@ -1011,9 +1011,7 @@ try
     }
 
     arg.norm_check_assert = false;
-    int status            = run_bench_test(arg, filter, any_stride, props);
-    freeEfficiencyMonitor();
-    return status;
+    return run_bench_test(arg, filter, any_stride, props);
 }
 catch(const std::invalid_argument& exp)
 {

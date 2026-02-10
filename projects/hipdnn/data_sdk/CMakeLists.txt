@@ -1,8 +1,10 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier:  MIT
 
-include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+
+# Version handling
+hipdnn_setup_version(hipdnn_data_sdk)
 
 set(HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/data_sdk")
 set(HIP_DNN_DATA_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -96,21 +98,15 @@ _hipdnn_data_sdk_process_dependency(
 
 add_library(hipdnn_data_sdk INTERFACE)
 
+# Generate version header
+hipdnn_generate_version_header(hipdnn_data_sdk)
+
 # Add includes from dependency targets
 hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
-hipdnn_add_dependency_includes(hipdnn_data_sdk spdlog::spdlog_header_only)
 hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
 
 target_link_libraries(hipdnn_data_sdk INTERFACE hip::host)
 target_compile_definitions(hipdnn_data_sdk INTERFACE __HIP_PLATFORM_AMD__)
-
-if (fmt_FOUND)
-    message(STATUS "Found fmt: using system fmt")
-    hipdnn_add_dependency_includes(hipdnn_data_sdk fmt::fmt COMPILE_DEFINITIONS SPDLOG_FMT_EXTERNAL)
-else()
-    message(STATUS "Not found fmt: using bundled fmt from spdlog")
-endif()
-target_compile_definitions(hipdnn_data_sdk INTERFACE FMT_HEADER_ONLY)
 
 target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>
@@ -184,6 +180,14 @@ install(
     FILES_MATCHING
     PATTERN "*.h"
     PATTERN "*.hpp"
+    PATTERN "*.h.in" EXCLUDE
+)
+
+# Install generated version header
+install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_data_sdk/version.h"
+    DESTINATION ${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}/hipdnn_data_sdk
+    COMPONENT Development
 )
 
 install(EXPORT hipdnn_data_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk
@@ -221,8 +225,19 @@ else()
     )
 endif()
 
-install(FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkConfig.cmake"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk COMPONENT Development
+# Generate package version file for find_package version checking
+write_basic_package_version_file(
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkConfigVersion.cmake"
+    VERSION ${HIPDNN_DATA_SDK_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(
+    FILES
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkConfig.cmake"
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk
+    COMPONENT Development
 )
 
 add_subdirectory(tests)
