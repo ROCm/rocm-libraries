@@ -10,6 +10,7 @@ rocBLAS documentation is available at
 
 ### Changed
 * Client build system now automatically builds AOCL 5.2 (AMD Optimizing CPU Libraries) from source on Linux for improved CPU BLAS performance. New `--skip-aocl` and `--clean-deps` flags added to `install.sh` for build control. New `LINK_BLIS` CMake option to control AOCL BLAS linking in client binaries.
+* amd-smi replaces the deprecated rocm-smi dependency for `rocblas-bench` client functionality for clock frequency monitoring, for example, `ROCBLAS_BENCH_FREQ`.
 * `trsv` function no longer internally calls `hipSetDevice` if a different device is current in the calling thread.  The calling thread's current device should be consistent with the one set in the `rocblas_handle`, the same as was true for all other rocBLAS functions.
 
 ### Optimized
