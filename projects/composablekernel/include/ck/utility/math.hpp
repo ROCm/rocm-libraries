@@ -229,7 +229,7 @@ __host__ __device__ constexpr auto next_power_of_two()
 template <index_t X>
 __host__ __device__ constexpr auto next_power_of_two(Number<X>)
 {
-    return Number<next_power_of_two<X>>{};
+    return Number<next_power_of_two<X>()>{};
 }
 
 __host__ __device__ constexpr int32_t integer_log2_floor(int32_t x)
