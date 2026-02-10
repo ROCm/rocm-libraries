@@ -200,8 +200,8 @@ int mloLRNForwardRunHost(bool do_scale,
                     }
 
                 } // for (int i = 0; i < top_width; i++)
-            }     // for (int j = 0; j < top_height; j++)
-        }         // for (int b = 0; b < batch; b++)
+            } // for (int j = 0; j < top_height; j++)
+        } // for (int b = 0; b < batch; b++)
     }
     else
     {
@@ -255,10 +255,10 @@ int mloLRNForwardRunHost(bool do_scale,
                                   j * top_v_stride + i] = c_val;
 
                     } // for (int i = 0; i < top_width; i++)
-                }     // for (int j = 0; j < top_height; j++)
-            }         // for (int o = 0; o < outputs; o++)
-        }             // for (int b = 0; b < batch; b++)
-    }                 // (norm_region == ACROSS_CHANNELS)
+                } // for (int j = 0; j < top_height; j++)
+            } // for (int o = 0; o < outputs; o++)
+        } // for (int b = 0; b < batch; b++)
+    } // (norm_region == ACROSS_CHANNELS)
 
     return (ret);
 }
@@ -499,9 +499,9 @@ int mloLRNBackwardRunHost(int norm_region,
                     }
 
                 } // for (int i = 0; i < bot_width; i++)
-            }     // for (int j = 0; j < bot_height; j++)
-        }         // for (int b = 0; b < n_batchs; b++)
-    }             // if (norm_region == MLO_LRN_ACROSS_CHANNELS)
+            } // for (int j = 0; j < bot_height; j++)
+        } // for (int b = 0; b < n_batchs; b++)
+    } // if (norm_region == MLO_LRN_ACROSS_CHANNELS)
     else
     {
         for(int b = 0; b < n_batchs; b++)

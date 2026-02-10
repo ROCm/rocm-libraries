@@ -131,7 +131,7 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
             auto status = miopenDestroyFusionPlan(desc);
             if(status != miopenStatusSuccess)
             {
-                HIPDNN_LOG_ERROR(
+                HIPDNN_PLUGIN_LOG_ERROR(
                     "miopenDestroyFusionPlan failed in ConvFwdBiasActivPlan destructor");
             }
         });
@@ -228,7 +228,7 @@ void ConvFwdBiasActivPlan::execute(const HipdnnEnginePluginHandle& handle,
             auto status = miopenDestroyOperatorArgs(args);
             if(status != miopenStatusSuccess)
             {
-                HIPDNN_LOG_ERROR(
+                HIPDNN_PLUGIN_LOG_ERROR(
                     "miopenDestroyOperatorArgs failed in ConvFwdBiasActivPlan destructor");
             }
         });
