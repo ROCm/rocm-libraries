@@ -316,7 +316,7 @@ size_t MiopenConvPlanBuilder::getWorkspaceSize(
 void MiopenConvPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() != 1)
@@ -327,7 +327,6 @@ void MiopenConvPlanBuilder::buildPlan(
                 + std::to_string(opGraph.nodeCount()) + " nodes");
     }
 
-    (void)engineConfig; // engineConfig parameter kept for interface compatibility
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();
 

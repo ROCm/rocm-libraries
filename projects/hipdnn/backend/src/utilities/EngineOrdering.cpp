@@ -20,35 +20,22 @@ void sortEngineIds(std::vector<int64_t>& engineIds)
     std::vector<size_t> indices(engineIds.size());
     std::iota(indices.begin(), indices.end(), 0);
 
-    std::sort(indices.begin(), indices.end(), [&engineIds](size_t i, size_t j) {
-        int64_t a = engineIds[i];
-        int64_t b = engineIds[j];
-
-        bool aIsMiopen = (a == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID);
-        bool bIsMiopen = (b == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID);
-        bool aIsMiopenDet = (a == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID);
-        bool bIsMiopenDet = (b == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID);
-
-        // MIOPEN_ENGINE always comes before everything
-        // Logic to check for dupes isnt really need in the backend but its here just in case
-        // that changes in the future.
-        if(aIsMiopen != bIsMiopen)
+    auto getPriority = [](int64_t engineId) -> int {
+        if(engineId == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID)
         {
-            return aIsMiopen;
+            return 0;
         }
-        if(aIsMiopen)
+        if(engineId == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID)
         {
-            return i < j; // Preserve original order among duplicates
+            return 2;
         }
+        return 1; // Other engines
+    };
 
-        // MIOPEN_ENGINE_DETERMINISTIC always comes after everything
-        if(aIsMiopenDet != bIsMiopenDet)
-        {
-            return !aIsMiopenDet;
-        }
-
-        // For other engines, preserve original order (using index as tie-breaker for stability)
-        return i < j;
+    std::sort(indices.begin(), indices.end(), [&](size_t i, size_t j) {
+        int priA = getPriority(engineIds[i]);
+        int priB = getPriority(engineIds[j]);
+        return (priA != priB) ? (priA < priB) : (i < j);
     });
 
     // Reorder engineIds based on sorted indices
