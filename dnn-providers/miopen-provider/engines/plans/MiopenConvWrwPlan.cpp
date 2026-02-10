@@ -139,6 +139,8 @@ void ConvWrwPlan::execute(const HipdnnEnginePluginHandle& handle,
 
         if(!_algorithm.has_value())
         {
+            HIPDNN_PLUGIN_LOG_INFO("Convolution Wrw: Performing algorithm selection (first execution)");
+
             int requestCount
                 = (_executionSettings.debugMode()
                    == MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
