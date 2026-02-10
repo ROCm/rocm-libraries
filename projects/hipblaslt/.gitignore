@@ -61,4 +61,3 @@ cmake_install.cmake
 #clangd
 .cache
 
-build_*
