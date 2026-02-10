@@ -436,12 +436,14 @@ class TestCustomScheduleBF16:
     @pytest.mark.parametrize(
         # fmt: off
         "transA, transB, lds_tr_inst,  tr_lds", [
-        (  True,  False,       False,       1),
-        ( False,  False,        True,       1),
+        (  True,  False,       False,       1),  # TN
+        ( False,   True,        True,       0),  # NT
+        ( False,  False,        True,       1),  # NN
         # fmt: on
         ])
     def test_schedule_224x128x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
-        """Tests the 224x128x64 16-bit NN schedule."""
+        """Tests the 224x128x64 16-bit schedules (TN/NT/NN)."""
+        NT = (not transA and transB)
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
         kernel["ProblemType"].update({
@@ -459,25 +461,33 @@ class TestCustomScheduleBF16:
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
-        assert schedule_info.numCodePaths == 1
+        assert schedule_info.numCodePaths == (2 if NT else 1)
         assert schedule_info.numMfma == 56
+        assert bool(kernel.get("SwapGlobalReadOrder", False)) == NT
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 
-    def test_schedule_256x224x64_16bit_TN(self):
-        """Tests the 256x224x64 16-bit TN schedule."""
+    @pytest.mark.parametrize(
+    # fmt: off
+    "transA, transB, lds_tr_inst,  tr_lds", [
+    (  True,  False,       False,       1),
+    ( False,   True,        True,       0),
+    # fmt: on
+    ])
+    def test_schedule_256x224x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
+        """Tests the 256x224x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
         kernel["ProblemType"].update({
             "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": True, "TransposeB": False
+            "TransposeA": transA, "TransposeB": transB
         })
         kernel.update({
             "MacroTile0": 256, "MacroTile1": 224, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
-            "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 7,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 8, "MIWaveTileB": 7,
         })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
