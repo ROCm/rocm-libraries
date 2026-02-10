@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -111,12 +111,12 @@ namespace ExpressionTest
 
             SECTION("Kernel arg")
             {
-                auto kernelArg                   = std::make_shared<AssemblyKernelArgument>();
-                kernelArg->name                  = "KernelArg1";
-                kernelArg->variableType.dataType = DataType::Int32;
-                kernelArg->expression            = Expression::literal(10);
-                kernelArg->offset                = 1;
-                kernelArg->size                  = 5;
+                auto kernelArg = std::make_shared<AssemblyKernelArgument>("KernelArg1",
+                                                                          DataType::Int32,
+                                                                          DataDirection::ReadOnly,
+                                                                          Expression::literal(10),
+                                                                          1,
+                                                                          5);
 
                 auto expr = b >> std::make_shared<Expression::Expression>(kernelArg);
 

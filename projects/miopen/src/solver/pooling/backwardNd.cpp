@@ -101,8 +101,8 @@ ConvSolution PoolingBackwardNd::GetSolution(const ExecutionContext&,
 #if WORKAROUND_ISSUE_MIFIN_80
     const std::size_t lcl_work = config.local_size;
 #else
-    const std::size_t wavesize     = context.GetStream().GetWavefrontWidth();
-    const std::size_t lcl_work     = wavesize;
+    const std::size_t wavesize = context.GetStream().GetWavefrontWidth();
+    const std::size_t lcl_work = wavesize;
 #endif
     size_t grp_num = (activ_work + lcl_work - 1) / lcl_work;
 
