@@ -110,7 +110,10 @@ RUN if [ -n "$THEROCK_TARBALL" ] || [ -n "$THEROCK_PREBUILT_ID" ] || [ -n "$THER
             --artifact-group "$THEROCK_ARTIFACT_GROUP" \
             --output-dir /opt/rocm \
             2>&1 | tee /tmp/install.log; \
-        grep -i 'version\|release' /tmp/install.log > /opt/rocm/THEROCK_VERSION || \
+        # Fragile: depends on install_rocm_from_artifacts.py printing
+        # "Found latest release: <version>". Falls back if format changes. \
+        version=$(grep -oP 'Found latest release: \K\S+' /tmp/install.log) && \
+            echo "$version" > /opt/rocm/THEROCK_VERSION || \
             echo "latest (version details unavailable)" > /opt/rocm/THEROCK_VERSION; \
     else \
         echo "Installing release $THEROCK_RELEASE for $THEROCK_ARTIFACT_GROUP"; \
