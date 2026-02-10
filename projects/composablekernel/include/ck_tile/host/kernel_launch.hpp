@@ -25,6 +25,8 @@ inline constexpr bool
 template <bool no_packed_fp32_ops>
 struct kernel_attr
 {
+    // The kernel function attribute "no-packed-fp32-ops": Disable the use of packed FP32
+    // instructions so that they can be co-executed with matrix operations
     static constexpr bool kattr_no_packed_fp32_ops = no_packed_fp32_ops;
 };
 
