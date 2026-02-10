@@ -857,8 +857,8 @@ class ActivationModule:
         self.needCombine = True
         module = Module("Gradient Relu")
         if cDataType.isSingle():
-            module.add(VCmpGTF32(dst=VCC(), src0=self.vgprPrefix(vgprIn), src1=0, comment=" VCC = (x > 0) ? 1 : 0" ))
-            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprOut), src0=0, src1=hex(0x3f800000), src2=VCC(), comment=" y = VCC ? 1.0 : 0.0" ))
+            module.add(VCmpGTF32(dst=VCC(), src0=self.vgprPrefix(vgprIn), src1=0.0, comment=" VCC = (x > 0) ? 1 : 0" ))
+            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprOut), src0=0.0, src1=1.0, src2=VCC(), comment=" y = VCC ? 1.0 : 0.0" ))
         else:
             raise RuntimeError("Unsupported data type %s."%cDataType.toDevice("HIP"))
         return module
@@ -1410,12 +1410,10 @@ class ActivationInline:
       needExec = True if self.enableGuard else False
       kStr += self.getRequiredRegStr(asm, activation.vgprCounter, activation.sgprCounter, needExec=needExec)
     elif (activationType == 'drelu'):
-      kStr += (asm + " // drelu\n")
-      module = activation.getDReluModule(self.dataType, 0, 0)
-      kStr += self.getActivationAsmStr(activation, module, (len(asm) * " "))
-      kStr += addSpace(asm, ": \"+v\"(value) : \n")
-      needExec = True if self.enableGuard else False
-      kStr += self.getRequiredRegStr(asm, activation.vgprCounter, activation.sgprCounter, needExec=needExec)
+      if (self.dataType.isSingle()):
+        kStr += (padSpacesStr + "value = (value > 0.0f) ? 1.0f : 0.0f;\n")
+      else:
+        raise RuntimeError("Unsupported data type %s."%ptrStr)
     elif (activationType == 'silu'):
       kStr += (asm + " // Silu\n")
       module = activation.getSiluModule(self.dataType, 0, 0)
