@@ -716,8 +716,7 @@ namespace rocRoller
             }
 
             Register::ValuePtr resultPlaceholder(ResultType const& resType,
-                                                 bool              allowSpecial = true,
-                                                 int               valueCount   = 1) const
+                                                 bool              allowSpecial = true) const
             {
                 if(Register::IsSpecial(resType.regType) && resType.varType == DataType::Bool)
                 {
@@ -725,10 +724,10 @@ namespace rocRoller
                         return m_context->getSCC();
                     else
                         return Register::Value::Placeholder(
-                            m_context, Register::Type::Scalar, resType.varType, valueCount);
+                            m_context, Register::Type::Scalar, resType.varType, resType.valueCount);
                 }
                 return Register::Value::Placeholder(
-                    m_context, resType.regType, resType.varType, valueCount);
+                    m_context, resType.regType, resType.varType, resType.valueCount);
             }
 
             /**
