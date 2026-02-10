@@ -274,7 +274,7 @@ TEST_CASE("Instruction class will handle nops.", "[codegen][instruction]")
         CHECK(inst.numExecutedInstructions() == 9);
         context->schedule(inst);
 
-        CHECK(context.output() == "s_nop 0\n\ns_nop 8\n\n");
+        CHECK(context.output() == "s_nop 0\ns_nop 8\n");
     }
 
     // clearOutput();
@@ -284,7 +284,7 @@ TEST_CASE("Instruction class will handle nops.", "[codegen][instruction]")
         auto inst = Instruction::Nop(17);
         context->schedule(inst);
 
-        CHECK(context.output() == "s_nop 0xf\ns_nop 0\n\n");
+        CHECK(context.output() == "s_nop 0xf\ns_nop 0\n");
     }
 }
 
@@ -339,7 +339,7 @@ TEST_CASE("Instruction class will handle labels.", "[codegen][instruction]")
         CHECK(inst.isLabel());
         CHECK(inst.getLabel() == "main_loop");
 
-        CHECK(context.output() == "main_loop:\n\nnext loop:\n\n");
+        CHECK(context.output() == "main_loop:\nnext loop:\n");
     }
 }
 
@@ -356,7 +356,7 @@ TEST_CASE("Instruction class will handle waitcnt.", "[codegen][instruction]")
 
     CHECK(inst.numExecutedInstructions() == 1);
 
-    CHECK(context.output() == "s_waitcnt expcnt(2)\n\ns_waitcnt expcnt(3)\n\n");
+    CHECK(context.output() == "s_waitcnt expcnt(2)\ns_waitcnt expcnt(3)\n");
 }
 
 TEST_CASE("Instruction class will handle wait zero.", "[codegen][instruction]")
@@ -401,7 +401,7 @@ TEST_CASE("Instruction class will handle assembler directives.", "[codegen][inst
 
     auto inst = Instruction::Directive(".set .amdgcn.next_free_vgpr, 0", "Comment");
 
-    CHECK(inst.toString(LogLevel::Verbose) == ".set .amdgcn.next_free_vgpr, 0 // Comment\n");
+    CHECK(inst.toString(LogLevel::Verbose) == ".set .amdgcn.next_free_vgpr, 0\n // Comment\n");
 
     CHECK(inst.numExecutedInstructions() == 0);
 }

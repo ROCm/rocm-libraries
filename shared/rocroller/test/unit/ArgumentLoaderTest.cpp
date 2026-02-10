@@ -134,6 +134,7 @@ namespace rocRollerTest
         auto loader = m_context->argLoader();
         m_context->schedule(kernel->allocateInitialRegisters());
         m_context->schedule(loader->loadAllArguments());
+        m_context->schedule(loader->splitOutArgumentRegisters());
 
         std::string expected = R"(
             s_load_dwordx4 s[4:7], s[0:1], 0
@@ -177,6 +178,7 @@ namespace rocRollerTest
         auto loader = m_context->argLoader();
         m_context->schedule(kernel->allocateInitialRegisters());
         m_context->schedule(loader->loadAllArguments());
+        m_context->schedule(loader->splitOutArgumentRegisters());
 
         Register::ValuePtr a, b, c;
         m_context->schedule(loader->getValue("a", a));
