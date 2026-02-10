@@ -874,6 +874,9 @@ class LocalReadMFMA(LocalRead):
                         packCodePre = packPre.add(Module("packCodePre"))
 
                     tmpvgpr = []
+                    is_wmma_v3 = writer.states.asmCaps.get("HasWMMA_V3", False)
+                    multiGroupXF32 = kernel["UseF32XEmulation"] and is_wmma_v3 and numVgpr * numReadsPerUnroll > 8
+                    outerBaseValuiIdx = baseValuiIdx
                     for tiIdx in range(0, numTilePerInst):
                         for rIdx in range(0, numReadsPerUnroll):
                             valuiIdx = int(valufIdx)
@@ -1389,6 +1392,18 @@ class LocalReadMFMA(LocalRead):
                             # load read instrution
                             paramList = []
 
+                            # gfx1250 LDS offset formula shared by XF32 and BF16/Half/FP8/etc paths.
+                            # The WMMA V3 LDS layout uses a *2 factor on the unroll stride.
+                            def calcGfx1250LdsOffset():
+                                if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
+                                    incOffset = rIdx * numElementPerRead * UnrollStride * 2
+                                    incOffset += tiIdx * matrixInstTO * vectorWidth * tileStride
+                                else:
+                                    vw = kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]
+                                    incOffset = (rIdx // vw) * UnrollStride * vw
+                                    incOffset += rIdx * numElementPerRead * UnrollStride
+                                return int((incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
+
                             for oIdx in range(0, numOffsets):
                                 if perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0:
                                     permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 else kernel["VectorWidth%s"%tc] * kernel["MatrixInstM"]
@@ -1426,35 +1441,32 @@ class LocalReadMFMA(LocalRead):
                                     # Previously a single ds_read could be used to load all inputs for mfma
                                     # For emulated TF32, 2x ds_read is required along with a different mfma layout
                                     # so we need to adjust the offsets accordingly for the second ds_read.
-                                    # Numbers here are specific to the mfma layout
-                                    incOffset = 0
-                                    midIdx = numReadsPerUnroll // 2
-                                    if rIdx >= midIdx:
-                                        if kernel["UnrollMajorLDS%s" % tP["tensorChar"]] == False:
-                                            if kernel["MatrixInstM"] == 32:
-                                                incOffset = midIdx * numElementPerRead * UnrollStride
-                                            elif kernel["MatrixInstM"] == 16:
-                                                incOffset = 3 * midIdx * numElementPerRead * UnrollStride
-                                        else:
-                                            if kernel["MatrixInstM"] == 32 and kernel["MatrixInstK"] == 16:
-                                                incOffset = 4
-                                            elif kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 32:
-                                                incOffset = 12
-                                    incOffset = rIdx * numElementPerRead * UnrollStride + incOffset
-                                    offset_val = (incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
+                                    if tuple(kernel["ISA"][:2]) == (12, 5):
+                                        # gfx1250 WMMA V3: shared offset formula with BF16/Half (see calcGfx1250LdsOffset)
+                                        offset_val = calcGfx1250LdsOffset()
+                                    else:
+                                        # Numbers here are specific to the mfma layout (gfx950)
+                                        incOffset = 0
+                                        midIdx = numReadsPerUnroll // 2
+                                        if rIdx >= midIdx:
+                                            if kernel["UnrollMajorLDS%s" % tP["tensorChar"]] == False:
+                                                if kernel["MatrixInstM"] == 32:
+                                                    incOffset = midIdx * numElementPerRead * UnrollStride
+                                                elif kernel["MatrixInstM"] == 16:
+                                                    incOffset = 3 * midIdx * numElementPerRead * UnrollStride
+                                            else:
+                                                if kernel["MatrixInstM"] == 32 and kernel["MatrixInstK"] == 16:
+                                                    incOffset = 4
+                                                elif kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 32:
+                                                    incOffset = 12
+                                        incOffset = rIdx * numElementPerRead * UnrollStride + incOffset
+                                        offset_val = (incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
                                 # For wmma_v3, the maximum number of bytes per read is 16 bytes in 4 vgprs, which happens in the case of fp16/bf16/fp8/bf8/fp6/bf6/f4.
                                 elif tuple(kernel["ISA"][:2]) == (12, 5) \
                                         and (kernel["ProblemType"][MacDataType].is8bitFloat() or kernel["ProblemType"][MacDataType].isBFloat16() \
                                             or kernel["ProblemType"][MacDataType].isHalf() or kernel["ProblemType"][MacDataType].isFloat4() \
                                                 or kernel["ProblemType"][MacDataType].is6bitFloat() or kernel["ProblemType"][MacDataType].isInt8()):
-                                    if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
-                                        incOffset = rIdx * numElementPerRead * UnrollStride * 2
-                                        incOffset += tiIdx * matrixInstTO * vectorWidth * tileStride
-                                    else:
-                                        vw = kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]
-                                        incOffset = (rIdx // vw) * UnrollStride * vw
-                                        incOffset += rIdx * numElementPerRead * UnrollStride
-                                    offset_val = int((incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
+                                    offset_val = calcGfx1250LdsOffset()
                                 else:
                                     offset_val = int((rIdx * numElementPerRead * UnrollStride + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
 
@@ -1550,6 +1562,25 @@ class LocalReadMFMA(LocalRead):
 
                             subIterLoadCount += 1
                     # End of loop3
+                    # WMMA V3 XF32 emulation: rearrange packed data from per-group
+                    # [HI_g0(4), LO_g0(4), HI_g1(4), LO_g1(4)] layout to
+                    # [HI_g0(4), HI_g1(4), LO_g0(4), LO_g1(4)] layout
+                    # so 3-pass WMMA uses X[0:7] = all HI, X[8:15] = all LO
+                    if multiGroupXF32 and needPack:
+                        swapMod = Module("WMMA V3 XF32 rearrange %s" % tc)
+                        halfGroup = 4  # half of an 8-VGPR group
+                        totalVgprs = numVgpr * numReadsPerUnroll
+                        numGroups = totalVgprs // 8
+                        assert numGroups == 2, \
+                            "WMMA V3 XF32 rearrange currently only supports 2 groups, got %d" % numGroups
+                        # Swap LO of group 0 with HI of group 1
+                        swapStart = outerBaseValuiIdx + halfGroup  # start of LO_g0
+                        for i in range(halfGroup):
+                            swapMod.add(VSwapB32(
+                                dst=vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, swapStart + i)),
+                                src=vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, swapStart + halfGroup + i)),
+                                comment="XF32 rearrange: swap LO_g0[%d] <-> HI_g1[%d]" % (i, i)))
+                        packCode.add(swapMod)
                     if needPack:
                         if tP["isA"]:
                             writer.states.a.numPackCvt = len(packCode.flatitems())
