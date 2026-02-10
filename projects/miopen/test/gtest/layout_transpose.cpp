@@ -452,3 +452,70 @@ DEFINE_2D_TYPED_TESTS(TransposeSolutionNhwc2Default);
 
 DEFINE_3D_TYPED_TESTS(TransposeSolutionDefault2Ndhwc);
 DEFINE_3D_TYPED_TESTS(TransposeSolutionNdhwc2Default);
+
+//=============================================================================
+// Batched Transpose Data Type Applicability Tests
+//=============================================================================
+
+// Test fixture for batched transpose data type support
+class BatchedTransposeDataTypeTest : public ::testing::TestWithParam<miopenDataType_t>
+{
+};
+
+TEST_P(BatchedTransposeDataTypeTest, BatchedTransposeSupportedTypes)
+{
+    auto data_type = GetParam();
+
+    // Check if batched transpose supports this data type
+    bool batched_supports = miopen::BatchedTransposeSolution::IsApplicable(data_type);
+
+    // Expected support: FP32, FP16, BF16, Int8, Int32
+    bool should_support = (data_type == miopenFloat || data_type == miopenHalf ||
+                           data_type == miopenBFloat16 || data_type == miopenInt8 ||
+                           data_type == miopenInt32);
+
+    EXPECT_EQ(batched_supports, should_support)
+        << "BatchedTransposeSolution applicability mismatch for " << GetDataType(data_type);
+}
+
+// Smoke tests for batched transpose (types supported by batched transpose)
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         BatchedTransposeDataTypeTest,
+                         ::testing::Values(miopenFloat,
+                                           miopenHalf,
+                                           miopenBFloat16,
+                                           miopenInt8,
+                                           miopenInt32));
+
+// Full tests including unsupported types
+INSTANTIATE_TEST_SUITE_P(Full,
+                         BatchedTransposeDataTypeTest,
+                         ::testing::Values(miopenFloat,
+                                           miopenHalf,
+                                           miopenBFloat16,
+                                           miopenInt8,
+                                           miopenInt32,
+                                           miopenDouble));
+
+// Test that verifies batched transpose is preferred over universal for supported types
+TEST(BatchedTransposeSolverSelection, BatchedPreferredOverUniversal)
+{
+    // This test documents that batched transpose should be tried before universal
+    // The actual selection happens in TransposingSolver::GetTransposeSolvers()
+
+    // Supported by batched transpose
+    EXPECT_TRUE(miopen::BatchedTransposeSolution::IsApplicable(miopenFloat))
+        << "FP32 should use batched transpose";
+    EXPECT_TRUE(miopen::BatchedTransposeSolution::IsApplicable(miopenHalf))
+        << "FP16 should use batched transpose";
+    EXPECT_TRUE(miopen::BatchedTransposeSolution::IsApplicable(miopenBFloat16))
+        << "BF16 should use batched transpose";
+    EXPECT_TRUE(miopen::BatchedTransposeSolution::IsApplicable(miopenInt8))
+        << "Int8 should use batched transpose";
+    EXPECT_TRUE(miopen::BatchedTransposeSolution::IsApplicable(miopenInt32))
+        << "Int32 should use batched transpose";
+
+    // NOT supported by batched transpose (falls back to universal)
+    EXPECT_FALSE(miopen::BatchedTransposeSolution::IsApplicable(miopenDouble))
+        << "Double should fall back to universal transpose";
+}

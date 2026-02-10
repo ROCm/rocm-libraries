@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <miopen/batched_transpose_sol.hpp>
 #include <miopen/datatype.hpp>
+#include <miopen/op_kernel_args.hpp>
 #include <miopen/subbuffers.hpp>
 #include <miopen/tensor_layout.hpp>
 
@@ -57,6 +59,7 @@ struct TransposePseudoSolver
 {
     virtual ~TransposePseudoSolver()                                        = default;
     virtual std::string GetTranspose() const                                = 0;
+    virtual bool IsApplicable(const TransposeProblem& problem) const        = 0;
     virtual ConvSolution GetSolution(const ExecutionContext& ctx,
                                      const TransposeProblem& problem) const = 0;
 
@@ -147,6 +150,12 @@ struct UniversalTransposeSolver : TransposePseudoSolver
 {
     std::string GetTranspose() const override { return "*-*"; }
 
+    bool IsApplicable(const TransposeProblem& /*problem*/) const override
+    {
+        // Universal transpose supports all tensor types and layouts
+        return true;
+    }
+
     ConvSolution GetSolution(const ExecutionContext& ctx,
                              const TransposeProblem& problem) const override
     {
@@ -197,6 +206,88 @@ struct UniversalTransposeSolver : TransposePseudoSolver
         return sln;
     }
 };
+
+/// \brief Traits for batched transpose layout transformations
+/// Provides layout string for each transpose solution type
+template <typename TransposeSolution>
+struct BatchedTransposeTraits;
+
+template <>
+struct BatchedTransposeTraits<TransposeSolutionDefault2Nhwc>
+{
+    static constexpr const char* layout_transform = "NCHW-NHWC";
+};
+
+template <>
+struct BatchedTransposeTraits<TransposeSolutionNhwc2Default>
+{
+    static constexpr const char* layout_transform = "NHWC-NCHW";
+};
+
+/// \brief Generic batched transpose solver template
+/// Eliminates code duplication between NCHW<->NHWC transpose solvers by parameterizing
+/// on the TransposeSolution type. Uses traits to provide the layout transformation string.
+/// \tparam TransposeSolution The specific batched transpose solution class to use
+///         (e.g., TransposeSolutionDefault2Nhwc, TransposeSolutionNhwc2Default)
+template <typename TransposeSolution>
+struct BatchedTransposeSolverImpl : TransposePseudoSolver
+{
+    std::string GetTranspose() const override
+    {
+        return BatchedTransposeTraits<TransposeSolution>::layout_transform;
+    }
+
+    bool IsApplicable(const TransposeProblem& problem) const override
+    {
+        return BatchedTransposeSolution::IsApplicable(problem.input.GetType());
+    }
+
+    ConvSolution GetSolution(const ExecutionContext& ctx,
+                             const TransposeProblem& problem) const override
+    {
+        const auto& desc = problem.input;
+        const auto& lens = desc.GetLengths();
+
+        // Extract NCHW dimensions (lengths are always stored in NCHW order)
+        const uint32_t n = static_cast<uint32_t>(lens[0]);
+        const uint32_t c = static_cast<uint32_t>(lens[1]);
+        const uint32_t h = lens.size() > 2 ? static_cast<uint32_t>(lens[2]) : 1;
+        const uint32_t w = lens.size() > 3 ? static_cast<uint32_t>(lens[3]) : 1;
+
+        TransposeSolution transpose_sol(ctx, desc.GetType(), n, c, h, w);
+
+        auto sln = ConvSolution{};
+        sln.construction_params.push_back(transpose_sol.GetKernelInfo());
+
+        // Capture kernel args by value for the invoker
+        auto kernel_args = transpose_sol.GetKernelArg();
+
+        sln.invoker_factory = [kernel_args](const std::vector<Kernel>& kernels) mutable {
+            return [kernel_args, kernel = kernels.front()](
+                       const Handle& handle, const AnyInvokeParams& any_params) mutable {
+                const auto& params = any_params.CastTo<TransposeInvokeParams>();
+
+                // Update src/dst pointers in kernel args
+                kernel_args[0] = OpKernelArg(params.out); // dst
+                kernel_args[1] = OpKernelArg(params.in);  // src
+
+                handle.Run(kernel)(kernel_args);
+            };
+        };
+
+        return sln;
+    }
+};
+
+/// \brief High-performance NCHW to NHWC transpose using LDS-tiled batched transpose kernel
+/// Uses TransposeSolutionDefault2Nhwc which provides coalesced memory access and shared memory
+/// tiling for significantly better performance than the naive UniversalTransposeSolver.
+using BatchedNchw2NhwcTransposeSolver = BatchedTransposeSolverImpl<TransposeSolutionDefault2Nhwc>;
+
+/// \brief High-performance NHWC to NCHW transpose using LDS-tiled batched transpose kernel
+/// Uses TransposeSolutionNhwc2Default which provides coalesced memory access and shared memory
+/// tiling for significantly better performance than the naive UniversalTransposeSolver.
+using BatchedNhwc2NchwTransposeSolver = BatchedTransposeSolverImpl<TransposeSolutionNhwc2Default>;
 
 class SegmentedGpuBuffer
 {
@@ -260,7 +351,23 @@ struct ProblemTensorTransposeDescriptor
     {
         const auto& desc_from = (src.*cdescriptor)();
         auto& desc_to         = (dest.*descriptor)();
-        desc_to               = Transpose(desc_from);
+        
+        // Log before transpose
+        const auto& from_strides = desc_from.GetStrides();
+        MIOPEN_LOG_I("ProblemTensorTransposeDescriptor::Transpose: target='" << to 
+                     << "', is_input=" << is_input
+                     << ", from_strides=" << (from_strides.size() >= 4 
+                         ? std::to_string(from_strides[0]) + "," + std::to_string(from_strides[1]) + "," 
+                           + std::to_string(from_strides[2]) + "," + std::to_string(from_strides[3]) : "?"));
+        
+        desc_to = Transpose(desc_from);
+        
+        // Log after transpose
+        const auto& to_strides = desc_to.GetStrides();
+        MIOPEN_LOG_I("ProblemTensorTransposeDescriptor::Transpose: to_strides=" 
+                     << (to_strides.size() >= 4 
+                         ? std::to_string(to_strides[0]) + "," + std::to_string(to_strides[1]) + "," 
+                           + std::to_string(to_strides[2]) + "," + std::to_string(to_strides[3]) : "?"));
     }
 
     inline void Transpose(const InvokeParams& src, InvokeParams& dest) const
@@ -399,9 +506,32 @@ struct TransposingSolver : Base
 {
     using TransposeDescriptor = ProblemTensorTransposeDescriptor<Problem, InvokeParams>;
 
+    /// TransposingSolver always needs workspace for transpose buffers.
+    bool MayNeedWorkspace() const override { return true; }
+
+    /// Convert invoke params for inner solver invocation.
+    /// Override in derived class if inner solver expects a different params type.
+    /// Default: return params as AnyInvokeParams (pass-through).
+    /// Convert from API invoke params to TransposingSolver invoke params.
+    /// Override in derived class if API passes a different type than InvokeParams.
+    /// Default: cast AnyInvokeParams directly to InvokeParams.
+    static InvokeParams ConvertFromApiParams(const AnyInvokeParams& any_params)
+    {
+        return any_params.CastTo<InvokeParams>();
+    }
+
+    static AnyInvokeParams ConvertForInnerSolver(const InvokeParams& params)
+    {
+        return params;
+    }
+
     static std::vector<AnyTransposePseudoSolver> GetTransposeSolvers()
     {
-        return {UniversalTransposeSolver{}};
+        return {
+            BatchedNchw2NhwcTransposeSolver{}, // High-performance NCHW->NHWC
+            BatchedNhwc2NchwTransposeSolver{}, // High-performance NHWC->NCHW
+            UniversalTransposeSolver{}         // Fallback for other layout conversions
+        };
     }
 
     static std::unordered_map<std::string, AnyTransposePseudoSolver> GetTransposeSolversMap()
@@ -414,9 +544,10 @@ struct TransposingSolver : Base
 
     bool IsApplicable(const ExecutionContext& ctx, const Problem& problem) const override
     {
-        const auto transpose_solvers    = Derived::GetTransposeSolversMap();
-        const auto skip_transpose_check = transpose_solvers.find("*-*") != transpose_solvers.end();
-        auto any_difference             = false;
+        const auto transpose_solvers = Derived::GetTransposeSolversMap();
+        auto any_difference          = false;
+
+        MIOPEN_LOG_I("TransposingSolver::IsApplicable: Checking transposed solver applicability");
 
         for(auto transpose : Derived::GetTransposes())
         {
@@ -424,33 +555,104 @@ struct TransposingSolver : Base
             const auto layout         = descriptor.GetLayout_str();
             const auto to             = SyncLayoutDims(layout.c_str(), transpose.to);
 
+            MIOPEN_LOG_I("TransposingSolver::IsApplicable: Tensor layout='"
+                         << layout << "', target='" << to << "'");
+
+            if(layout == to)
+            {
+                MIOPEN_LOG_I("TransposingSolver::IsApplicable: Layout matches target, no transpose needed");
+                continue;
+            }
+
+            any_difference = true;
+
             auto specific_pair = layout + "-";
             specific_pair.append(to);
 
-            if(!skip_transpose_check &&
-               transpose_solvers.find(specific_pair) == transpose_solvers.end() &&
-               transpose_solvers.find(layout + "-*") == transpose_solvers.end() &&
-               transpose_solvers.find(std::string("*-") + to) == transpose_solvers.end())
-                return false;
+            MIOPEN_LOG_I("TransposingSolver::IsApplicable: Looking for transpose solver for '"
+                         << specific_pair << "'");
 
-            any_difference |= layout != to;
+            // Create a TransposeProblem for applicability checking
+            const auto transpose_problem = TransposeProblem{descriptor, layout.c_str()};
+
+            // Find an applicable transpose solver (specific first, then wildcards, then fallback)
+            auto transpose_solver = transpose_solvers.find(specific_pair);
+            if(transpose_solver != transpose_solvers.end() &&
+               transpose_solver->second->IsApplicable(transpose_problem))
+            {
+                MIOPEN_LOG_I("TransposingSolver::IsApplicable: Found specific transpose solver");
+                continue;
+            }
+
+            transpose_solver = transpose_solvers.find(layout + "-*");
+            if(transpose_solver != transpose_solvers.end() &&
+               transpose_solver->second->IsApplicable(transpose_problem))
+            {
+                MIOPEN_LOG_I("TransposingSolver::IsApplicable: Found layout-* transpose solver");
+                continue;
+            }
+
+            transpose_solver = transpose_solvers.find(std::string("*-") + to);
+            if(transpose_solver != transpose_solvers.end() &&
+               transpose_solver->second->IsApplicable(transpose_problem))
+            {
+                MIOPEN_LOG_I("TransposingSolver::IsApplicable: Found *-target transpose solver");
+                continue;
+            }
+
+            transpose_solver = transpose_solvers.find("*-*");
+            if(transpose_solver != transpose_solvers.end() &&
+               transpose_solver->second->IsApplicable(transpose_problem))
+            {
+                MIOPEN_LOG_I("TransposingSolver::IsApplicable: Found universal *-* transpose solver");
+                continue;
+            }
+
+            // No applicable transpose solver found
+            MIOPEN_LOG_I("TransposingSolver::IsApplicable: No applicable transpose solver found for '"
+                         << specific_pair << "'");
+            return false;
         }
 
-        return any_difference && Inner{}.IsApplicable(ctx, Transpose(problem));
+        if(!any_difference)
+        {
+            MIOPEN_LOG_I("TransposingSolver::IsApplicable: No layout difference detected, solver not applicable");
+            return false;
+        }
+
+        // Use Derived::Transpose to allow derived classes to override (CRTP pattern)
+        const auto transposed_problem = Derived::Transpose(problem);
+
+        const bool inner_applicable   = Inner{}.IsApplicable(ctx, transposed_problem);
+
+        MIOPEN_LOG_I("TransposingSolver::IsApplicable: Inner solver ("
+                     << Inner{}.SolverDbId() << ") IsApplicable=" << inner_applicable);
+
+        if(!inner_applicable)
+        {
+            MIOPEN_LOG_I("TransposingSolver::IsApplicable: Inner solver is NOT applicable");
+        }
+
+        return inner_applicable;
     }
 
     std::size_t GetWorkspaceSize(const ExecutionContext& ctx, const Problem& problem) const override
     {
-        const auto transposed_problem = Transpose(problem);
+        // Use Derived::Transpose to allow derived classes to override (CRTP pattern)
+        const auto transposed_problem = Derived::Transpose(problem);
         auto ws_size                  = Inner{}.GetWorkspaceSize(ctx, transposed_problem);
+        MIOPEN_LOG_I2("TransposingSolver::GetWorkspaceSize: inner ws_size = " << ws_size);
 
         for(const auto& transpose : Derived::GetTransposes())
         {
             const auto& descriptor = (transposed_problem.*(transpose.cdescriptor))();
             const auto e_size      = get_data_size(descriptor.GetType());
-            ws_size += descriptor.GetElementSpace() * e_size;
+            const auto tensor_size = descriptor.GetElementSpace() * e_size;
+            MIOPEN_LOG_I2("TransposingSolver::GetWorkspaceSize: adding tensor_size = " << tensor_size);
+            ws_size += tensor_size;
         }
 
+        MIOPEN_LOG_I("TransposingSolver::GetWorkspaceSize: total ws_size = " << ws_size);
         return ws_size;
     }
 
@@ -458,8 +660,10 @@ struct TransposingSolver : Base
                              const Problem& problem,
                              const typename Inner::PerformanceConfigType& config) const override
     {
-        auto transposed_problem = Transpose(problem);
-        ConvSolution sln        = Inner{}.GetSolution(ctx, transposed_problem, config);
+
+        // Use Derived::Transpose to allow derived classes to override (CRTP pattern)
+        auto transposed_problem = Derived::Transpose(problem);
+        ConvSolution sln        = Inner{}.GetSolution(ctx, transposed_problem);
         // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
         auto old_factory             = sln.invoker_factory.value();
         const auto old_kernels_end   = sln.construction_params.size();
@@ -480,20 +684,42 @@ struct TransposingSolver : Base
             auto specific_pair = layout + "-";
             specific_pair.append(to);
 
-            auto transpose_solver = transpose_solvers.find(specific_pair);
+            const auto transpose_problem = TransposeProblem{descriptor, layout.c_str()};
+
+            // Find an applicable transpose solver (specific first, then wildcards, then fallback)
+            auto transpose_solver = transpose_solvers.end();
+
+            auto candidate = transpose_solvers.find(specific_pair);
+            if(candidate != transpose_solvers.end() &&
+               candidate->second->IsApplicable(transpose_problem))
+                transpose_solver = candidate;
+
             if(transpose_solver == transpose_solvers.end())
             {
-                transpose_solver = transpose_solvers.find(layout + "-*");
-                if(transpose_solver == transpose_solvers.end())
-                {
-                    transpose_solver = transpose_solvers.find(std::string("*-") + to);
-                    if(transpose_solver == transpose_solvers.end())
-                        transpose_solver = transpose_solvers.find("*-*");
-                    assert(transpose_solver != transpose_solvers.end());
-                }
+                candidate = transpose_solvers.find(layout + "-*");
+                if(candidate != transpose_solvers.end() &&
+                   candidate->second->IsApplicable(transpose_problem))
+                    transpose_solver = candidate;
             }
 
-            const auto transpose_problem = TransposeProblem{descriptor, layout.c_str()};
+            if(transpose_solver == transpose_solvers.end())
+            {
+                candidate = transpose_solvers.find(std::string("*-") + to);
+                if(candidate != transpose_solvers.end() &&
+                   candidate->second->IsApplicable(transpose_problem))
+                    transpose_solver = candidate;
+            }
+
+            if(transpose_solver == transpose_solvers.end())
+            {
+                candidate = transpose_solvers.find("*-*");
+                if(candidate != transpose_solvers.end() &&
+                   candidate->second->IsApplicable(transpose_problem))
+                    transpose_solver = candidate;
+            }
+
+            assert(transpose_solver != transpose_solvers.end());
+
             auto transpose_sln = transpose_solver->second->GetSolution(ctx, transpose_problem);
 
             const auto kernels_begin = sln.construction_params.size();
@@ -549,7 +775,7 @@ struct TransposingSolver : Base
 
                 return [invoker, in_transpose_invokers, out_transpose_invokers, ws_size](
                            const Handle& handle, const AnyInvokeParams& any_params) {
-                    const auto& invoke_params = any_params.CastTo<InvokeParams>();
+                    const auto invoke_params = Derived::ConvertFromApiParams(any_params);
                     auto transposed_params    = invoke_params;
 
                     handle.ResetKernelTime();
@@ -564,9 +790,10 @@ struct TransposingSolver : Base
                                                                transposed_params};
 
                     // Execute the invoker provided by the inner solver
+                    // Use Derived::ConvertForInnerSolver to convert params if needed
                     MIOPEN_LOG_I2("Executing the inner solver invoker");
                     const auto time = handle.GetKernelTime();
-                    invoker(handle, transposed_params);
+                    invoker(handle, Derived::ConvertForInnerSolver(transposed_params));
                     handle.AccumKernelTime(time);
                 };
             };
@@ -574,7 +801,7 @@ struct TransposingSolver : Base
         return sln;
     }
 
-private:
+protected:
     inline static Problem Transpose(const Problem& problem)
     {
         auto transposed_problem = problem;

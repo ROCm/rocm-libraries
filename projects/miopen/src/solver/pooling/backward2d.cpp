@@ -129,6 +129,10 @@ bool PoolingBackward2d::IsApplicable(const ExecutionContext&,
     static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
 
     return problem.GetDirection() == miopen::pooling::Direction::Backward &&
+           problem.GetXDesc().GetType() == problem.GetYDesc().GetType() &&
+           (problem.GetXDesc().GetType() == miopenFloat ||
+            problem.GetXDesc().GetType() == miopenHalf ||
+            problem.GetXDesc().GetType() == miopenBFloat16) &&
            (problem.GetPooling().GetMode() == miopenPoolingMax ||
             problem.GetPooling().GetMode() == miopenPoolingAverage ||
             problem.GetPooling().GetMode() == miopenPoolingAverageInclusive) &&

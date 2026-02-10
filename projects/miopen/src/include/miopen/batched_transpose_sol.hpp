@@ -74,6 +74,13 @@ struct MIOPEN_INTERNALS_EXPORT BatchedTransposeSolution
     bool IsSkippable() const;
     size_t GetOutputTensorSize() const;
 
+    /// Check if the given data type is supported by batched transpose
+    static bool IsApplicable(miopenDataType_t data_type)
+    {
+        return data_type == miopenHalf || data_type == miopenFloat || data_type == miopenInt32 ||
+               data_type == miopenInt8 || data_type == miopenBFloat16;
+    }
+
     miopenDataType_t data_type;
     uint32_t batch;
     uint32_t height;
