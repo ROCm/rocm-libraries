@@ -67,8 +67,7 @@ public:
     {
         using TestCase = TestCaseProblemDescription;
 
-        return std::vector
-        {
+        return std::vector{
             // clang-format off
             // 4D
             TestCase{

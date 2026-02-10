@@ -18,10 +18,10 @@
 using namespace hipdnn_backend;
 
 #define LOG_API_ENTRY(format, ...) \
-    HIPDNN_LOG_INFO("API called: [{}] " format, __func__, __VA_ARGS__)
+    HIPDNN_BACKEND_LOG_INFO("API called: [{}] " format, __func__, __VA_ARGS__)
 
 #define LOG_API_SUCCESS(func_name, format, ...) \
-    HIPDNN_LOG_INFO("API success: [{}] " format, func_name, __VA_ARGS__)
+    HIPDNN_BACKEND_LOG_INFO("API success: [{}] " format, func_name, __VA_ARGS__)
 
 namespace
 {
