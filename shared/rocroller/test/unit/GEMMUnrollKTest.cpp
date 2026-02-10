@@ -46,7 +46,7 @@ namespace GEMMTests
         gemm.k         = 64 * 4 * 2;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.fuseLoops = true;
         gemm.unrollK   = 2;
 
@@ -66,7 +66,7 @@ namespace GEMMTests
         gemm.k         = 64 * 4 * 2;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.fuseLoops = false;
         gemm.unrollK   = 2;
         gemm.macK      = 4;
@@ -80,7 +80,7 @@ namespace GEMMTests
         gemm.k         = 64 * 4 * 2;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.fuseLoops = false;
         gemm.unrollK   = 8;
         gemm.macK      = 8;
@@ -94,7 +94,7 @@ namespace GEMMTests
         gemm.k         = 64 * 4 * 2;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.fuseLoops = false;
         gemm.unrollK   = 8;
         gemm.macK      = 8;
@@ -108,7 +108,7 @@ namespace GEMMTests
         gemm.k         = 64 * 4 * 2;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.fuseLoops = false;
         gemm.unrollK   = 8;
         gemm.macK      = 8;
@@ -124,7 +124,7 @@ namespace GEMMTests
         gemm.k                 = 2048 * 3;
         gemm.loadPathA         = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB         = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD         = false;
+        gemm.storePath         = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.fuseLoops         = false;
         gemm.unrollK           = 3;
         gemm.macM              = 128;
@@ -163,7 +163,7 @@ namespace GEMMTests
         gemm.transB    = "N";
         gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.fuseLoops = true;
         gemm.tailLoops = true;
         gemm.unrollK   = 4;
@@ -193,7 +193,7 @@ namespace GEMMTests
         GEMMProblem gemm;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = true;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
         gemm.fuseLoops = true;
         gemm.unrollK   = 2;
         gemm.macK      = 4;
@@ -232,7 +232,7 @@ namespace GEMMTests
         gemm.k         = 64 * 16 * 2;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = true;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
         gemm.fuseLoops = true;
         gemm.unrollK   = 2;
         gemm.macM      = 128;
@@ -275,7 +275,7 @@ namespace GEMMTests
         gemm.k         = 64 * 4 * 3;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.fuseLoops = false;
         gemm.unrollK   = 3;
         gemm.macK      = 4;
