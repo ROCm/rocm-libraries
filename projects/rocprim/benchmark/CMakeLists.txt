@@ -106,8 +106,7 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
       hip::device)
   endif()
 
-  find_library(AMDSMI_LIB NAMES amd_smi REQUIRED)
-  target_link_libraries(${BENCHMARK_TARGET} PRIVATE ${AMDSMI_LIB})
+  target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
 
   target_compile_options(${BENCHMARK_TARGET}
     PRIVATE
