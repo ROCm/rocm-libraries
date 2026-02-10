@@ -224,12 +224,12 @@ namespace TensileLite
                     HasIndex = true,
                     HasValue = true
                 };
-                ssize_t index;
-                size_t  value;
+                size_t index;
+                size_t value;
 
                 KRingShiftTailWrapOnly() = default;
                 KRingShiftTailWrapOnly(size_t index, size_t value)
-                    : index(static_cast<ssize_t>(index))
+                    : index(index)
                     , value(value)
                 {
                 }
