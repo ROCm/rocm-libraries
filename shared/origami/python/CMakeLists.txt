@@ -85,7 +85,7 @@ endif()
 # Set RPATH so the Python extension can find liborigami.so at runtime.
 if(NOT WIN32)
     set_target_properties(_pyorigami PROPERTIES
-        INSTALL_RPATH "$ORIGIN/../../..:$ORIGIN/../../lib:$ORIGIN/../../../lib"
+        INSTALL_RPATH "$ORIGIN/../../..:$ORIGIN/../../lib"
     )
 endif()
 
@@ -134,20 +134,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
             SKIP_RETURN_CODE 5
     )
 
-    # Install the origami Python package to bin/origami/origami/ for TheRock CI testing.
-    install(TARGETS _pyorigami
-        LIBRARY DESTINATION "${CMAKE_INSTALL_BINDIR}/origami/origami"
-        COMPONENT tests
-    )
-    install(
-        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/"
-        DESTINATION "${CMAKE_INSTALL_BINDIR}/origami/origami"
-        COMPONENT tests
-        FILES_MATCHING
-        PATTERN "*.py"
-    )
-
-    # Install Python test files to bin/origami/tests for TheRock CI testing
+    # Install Python test files to bin/origami/tests for TheRock CI testing.
     install(
         DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"
         DESTINATION "${CMAKE_INSTALL_BINDIR}/origami/tests"
