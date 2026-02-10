@@ -509,12 +509,11 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     int c_per_group = c / group;
     int k_per_group = k / group;
 
-    // Calculate batch chunk size to avoid exceeding GPU grid limits
-    // HIP kernel launch fails when global_work_dim >= 5 * 2^32 = 21,474,836,480
-    // global_work_dim = grid_size * block_size = grid_size * 256
-    // max_grid_size = (5 * 2^32 - 1) / 256 = 83,886,079
-    // Using 64M to ensure we stay well below the limit with margin for rounding
-    constexpr size_t MAX_GRID_SIZE = 64 * 1024 * 1024; // 64M work groups max
+    // Calculate batch chunk size to avoid uint32_t overflow in hipExtModuleLaunchKernel.
+    // The HIP API uses uint32_t for grid dimensions, so we must ensure:
+    // grid_size * block_size < 2^32
+    // max_grid_size = 2^32 / block_size = 4,294,967,296 / 256 = 16,777,216
+    constexpr size_t MAX_GRID_SIZE = 16 * 1024 * 1024; // 16M work groups max
     size_t block_size              = 256;
 
     int batch_chunk_size       = n;
