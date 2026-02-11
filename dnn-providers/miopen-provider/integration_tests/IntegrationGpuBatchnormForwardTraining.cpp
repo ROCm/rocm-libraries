@@ -64,7 +64,7 @@ protected:
     {
         const TestCaseType& testCase = this->GetParam();
 
-        HIPDNN_PLUGIN_LOG_INFO("Test is using {} for its random seed", testCase.seed);
+        HIPDNN_PLUGIN_LOG_INFO("Test is using " << testCase.seed << " for its random seed");
 
         hipdnn_frontend::graph::Graph graphObj;
         graphObj.set_name("BatchnormForwardTrainingTest");
