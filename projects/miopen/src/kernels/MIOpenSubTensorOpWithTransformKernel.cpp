@@ -59,7 +59,7 @@ struct subtensor<true, true>
 };
 
 template <>
-struct subtensor<true, false>
+struct subtensor<false, true>
 {
     static __forceinline__ __device__ void
     transform(FLOAT& dst, const FLOAT& src, const FLOAT& alpha, const FLOAT&)
@@ -69,7 +69,7 @@ struct subtensor<true, false>
 };
 
 template <>
-struct subtensor<false, true>
+struct subtensor<true, false>
 {
     static __forceinline__ __device__ void
     transform(FLOAT& dst, const FLOAT& src, const FLOAT&, const FLOAT& beta)
