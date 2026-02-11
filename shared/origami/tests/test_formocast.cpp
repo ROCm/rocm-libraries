@@ -527,6 +527,112 @@ TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
         REQUIRE(fifo.size() == 1);
         REQUIRE(fifo.front() == 110); // 100 + 10
     }
+    
+    SECTION("Push local write without bank conflict - bpr=8") {
+        std::queue<int> fifo;
+
+        simulator.pushLocalReadWrite(100, fifo, 8, 1.0, false, 0);
+        
+        REQUIRE(fifo.size() == 1);
+        // For local write: latency = baseLatency + bankConflict * conflictMultiplier
+        // With bankConflict=1.0: latency = baseLatency + conflictMultiplier
+        // For gfx950: LocalWriteBaseLatencyB64=10, LocalWriteConflictMultiplierB64=2
+        // So: latency = 10 + 1.0 * 2 = 12
+        REQUIRE(fifo.front() == 112); // 100 + 12
+    }
+    
+    SECTION("Push local write with bank conflict - bpr=8") {
+        std::queue<int> fifo;
+
+        simulator.pushLocalReadWrite(100, fifo, 8, 1.5, false, 0);
+        
+        REQUIRE(fifo.size() == 1);
+        // With bankConflict=1.5: latency = baseLatency + 1.5 * conflictMultiplier
+        // For gfx950: LocalWriteBaseLatencyB64=10, LocalWriteConflictMultiplierB64=2
+        // So: latency = 10 + 1.5 * 2 = 13
+        REQUIRE(fifo.front() == 113); // 100 + 13
+    }
+    
+    SECTION("Push local write without bank conflict - bpr=16") {
+        std::queue<int> fifo;
+
+        simulator.pushLocalReadWrite(100, fifo, 16, 1.0, false, 0);
+        
+        REQUIRE(fifo.size() == 1);
+        // For gfx950: LocalWriteBaseLatencyB128=10, LocalWriteConflictMultiplierB128=4
+        // So: latency = 10 + 1.0 * 4 = 14
+        REQUIRE(fifo.front() == 114); // 100 + 14
+    }
+    
+    SECTION("Push local write with bank conflict - bpr=16") {
+        std::queue<int> fifo;
+
+        simulator.pushLocalReadWrite(100, fifo, 16, 1.5, false, 0);
+        
+        REQUIRE(fifo.size() == 1);
+        // For gfx950: LocalWriteBaseLatencyB128=10, LocalWriteConflictMultiplierB128=4
+        // So: latency = 10 + 1.5 * 4 = 16
+        REQUIRE(fifo.front() == 116); // 100 + 16
+    }
+    
+    SECTION("Push local write without bank conflict - bpr=4") {
+        std::queue<int> fifo;
+
+        simulator.pushLocalReadWrite(100, fifo, 4, 1.0, false, 0);
+        
+        REQUIRE(fifo.size() == 1);
+        // For gfx950: LocalWriteBaseLatencyB32=10, LocalWriteConflictMultiplierB32=1
+        // So: latency = 10 + 1.0 * 1 = 11
+        REQUIRE(fifo.front() == 111); // 100 + 11
+    }
+    
+    SECTION("Get local write queue full stall cycles - numWaves != 4") {
+        // When numWaves != 4, no penalty is applied
+        // result = max(previousLW + issueCycles, currentCycle + issueCycles)
+        // Test case 1: currentCycle dominates
+        int result1 = simulator.getLocalWriteQueueFullStallCycles(100, 50, 10, 8, 2);
+        REQUIRE(result1 == 110); // max(50 + 10, 100 + 10) = 110
+        
+        // Test case 2: previousLW dominates
+        int result2 = simulator.getLocalWriteQueueFullStallCycles(100, 150, 10, 8, 2);
+        REQUIRE(result2 == 160); // max(150 + 10, 100 + 10) = 160
+    }
+    
+    SECTION("Get local write queue full stall cycles - numWaves == 4, bpWrite != 16") {
+        // When numWaves == 4 and bpWrite != 16, penalty = issueCycles
+        // result = max(previousLW + issueCycles + issueCycles, currentCycle + issueCycles)
+        // Test case 1: currentCycle dominates
+        int result1 = simulator.getLocalWriteQueueFullStallCycles(100, 50, 10, 8, 4);
+        REQUIRE(result1 == 110); // max(50 + 10 + 10, 100 + 10) = max(70, 110) = 110
+        
+        // Test case 2: previousLW + penalty dominates
+        int result2 = simulator.getLocalWriteQueueFullStallCycles(100, 120, 10, 8, 4);
+        REQUIRE(result2 == 140); // max(120 + 10 + 10, 100 + 10) = max(140, 110) = 140
+    }
+    
+    SECTION("Get local write queue full stall cycles - numWaves == 4, bpWrite == 16") {
+        // When numWaves == 4 and bpWrite == 16, penalty = issueCycles + 3
+        // result = max(previousLW + issueCycles + issueCycles + 3, currentCycle + issueCycles)
+        // Test case 1: currentCycle dominates
+        int result1 = simulator.getLocalWriteQueueFullStallCycles(100, 50, 10, 16, 4);
+        REQUIRE(result1 == 110); // max(50 + 10 + 10 + 3, 100 + 10) = max(73, 110) = 110
+        
+        // Test case 2: previousLW + penalty dominates
+        int result2 = simulator.getLocalWriteQueueFullStallCycles(100, 120, 10, 16, 4);
+        REQUIRE(result2 == 143); // max(120 + 10 + 10 + 3, 100 + 10) = max(143, 110) = 143
+    }
+    
+    SECTION("Get local write queue full stall cycles - edge cases") {
+        // Edge case: previousLW == currentCycle
+        int result1 = simulator.getLocalWriteQueueFullStallCycles(100, 100, 10, 8, 2);
+        REQUIRE(result1 == 110); // max(100 + 10, 100 + 10) = 110
+        
+        // Edge case: numWaves == 4, bpWrite == 16, previousLW much larger
+        // penalty = issueCycles + 3 = 5 + 3 = 8
+        // result = max(200 + 5 + 8, 50 + 5) = max(213, 55) = 213
+        int result2 = simulator.getLocalWriteQueueFullStallCycles(50, 200, 5, 16, 4);
+        REQUIRE(result2 == 213);
+    }
 }
 
 TEST_CASE("Formocast: Bank conflict analysis", "[formocast]") {
