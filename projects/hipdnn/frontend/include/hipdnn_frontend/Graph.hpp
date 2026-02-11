@@ -111,9 +111,9 @@ private:
 
     /// Initialize engine config for a specific engine ID.
     /// @param engineId The engine to configure
-    /// @param finalize If true, finalize immediately. Set to false when knobs
-    ///                 need to be set before finalization (caller must finalize).
-    Error initializeEngineConfig(int64_t engineId, bool finalize = true)
+    /// @note This method does NOT finalize the engine config. The caller must
+    ///       finalize after setting any knobs on the config.
+    Error initializeEngineConfig(int64_t engineId)
     {
         ScopedHipdnnBackendDescriptor engineDesc;
 
@@ -130,13 +130,6 @@ private:
                                                  1,
                                                  &engineDesc.get()),
             "Failed to set engine on the engine config descriptor.");
-
-        if(finalize)
-        {
-            HIPDNN_RETURN_ON_BACKEND_FAILURE(
-                hipdnnBackend()->backendFinalize(engineConfigDesc->get()),
-                "Failed to finalize engine config descriptor");
-        }
 
         _engineConfigDesc = std::move(engineConfigDesc);
         return {ErrorCode::OK, ""};
@@ -792,7 +785,7 @@ public:
 
         std::unordered_map<KnobType_t, Knob> existingKnobs;
         HIPDNN_CHECK_ERROR(get_knob_lookup_for_engine(engineId, existingKnobs));
-        HIPDNN_CHECK_ERROR(initializeEngineConfig(engineId, false));
+        HIPDNN_CHECK_ERROR(initializeEngineConfig(engineId));
 
         std::vector<KnobSetting> validatedSettings;
         for(const auto& setting : settings)
