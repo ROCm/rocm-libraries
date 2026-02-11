@@ -27,9 +27,9 @@ public:
 
     bool isApplicable(const HipdnnEnginePluginHandle& handle,
                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
-    static WorkspaceSizeRange
+    WorkspaceSizeRange
         getWorkspaceSizeRange(const HipdnnEnginePluginHandle& handle,
-                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph);
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const;
     size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
                                const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                                const MiopenExecutionSettings& executionSettings) const override;

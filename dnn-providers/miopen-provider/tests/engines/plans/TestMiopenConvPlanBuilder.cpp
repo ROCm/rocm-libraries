@@ -143,7 +143,7 @@ TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeRangeThrowsForMultiNodeGraph)
     MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
 
-    EXPECT_THROW(MiopenConvPlanBuilder::getWorkspaceSizeRange(_dummyHandle, mockGraph),
+    EXPECT_THROW(_planBuilder.getWorkspaceSizeRange(_dummyHandle, mockGraph),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -164,7 +164,7 @@ TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeRangeThrowsForUnsupportedGraph
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    EXPECT_THROW(MiopenConvPlanBuilder::getWorkspaceSizeRange(_dummyHandle, graph),
+    EXPECT_THROW(_planBuilder.getWorkspaceSizeRange(_dummyHandle, graph),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -274,7 +274,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeFwd)
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    auto range = MiopenConvPlanBuilder::getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
     HipdnnEnginePluginExecutionContext ctx;
     _planBuilder.buildPlan(_handle, graph, ctx);
@@ -291,7 +291,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeBwd)
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    auto range = MiopenConvPlanBuilder::getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
     HipdnnEnginePluginExecutionContext ctx;
     _planBuilder.buildPlan(_handle, graph, ctx);
@@ -308,7 +308,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    auto range = MiopenConvPlanBuilder::getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
     HipdnnEnginePluginExecutionContext ctx;
     _planBuilder.buildPlan(_handle, graph, ctx);
@@ -346,7 +346,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitFwd)
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    auto range = MiopenConvPlanBuilder::getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
     ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
     MiopenExecutionSettings executionSettings1;
@@ -390,7 +390,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitBwd)
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    auto range = MiopenConvPlanBuilder::getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
     ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
     MiopenExecutionSettings executionSettings1;
@@ -434,7 +434,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitWrw)
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    auto range = MiopenConvPlanBuilder::getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
     ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
     MiopenExecutionSettings executionSettings1;
@@ -458,7 +458,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, GetCustomKnobsReturnsWorkspaceSizeLimitKnob
                                                               builder.GetSize());
 
     auto customKnobs = _planBuilder.getCustomKnobs(_handle, graph);
-    const auto range = MiopenConvPlanBuilder::getWorkspaceSizeRange(_handle, graph);
+    const auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
     auto workspaceKnobIt
         = std::find_if(customKnobs.begin(),
@@ -568,7 +568,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder,
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    const auto range = MiopenConvPlanBuilder::getWorkspaceSizeRange(_handle, graph);
+    const auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
     // Skip if min is 0 (already tested in BuildPlanThrowsOnNegativeWorkspaceSizeLimit)
     if(range.min == 0)
@@ -610,7 +610,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder,
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    const auto range = MiopenConvPlanBuilder::getWorkspaceSizeRange(_handle, graph);
+    const auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
     if(range.max >= std::numeric_limits<int64_t>::max())
     {
@@ -650,7 +650,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsWorkspaceSiz
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    const auto range = MiopenConvPlanBuilder::getWorkspaceSizeRange(_handle, graph);
+    const auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
     const auto testWorkspaceSize = range.min + (range.max - range.min) / 2;
 
     flatbuffers::FlatBufferBuilder configBuilder;

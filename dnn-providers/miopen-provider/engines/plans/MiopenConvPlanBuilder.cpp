@@ -478,7 +478,7 @@ bool MiopenConvPlanBuilder::isApplicable(
 
 MiopenConvPlanBuilder::WorkspaceSizeRange MiopenConvPlanBuilder::getWorkspaceSizeRange(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -622,8 +622,8 @@ void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvPlanBuilder::getCustomKnobs(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
 
