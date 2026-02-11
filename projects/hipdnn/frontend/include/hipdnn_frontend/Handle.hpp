@@ -40,7 +40,8 @@ inline HipdnnHandlePtr createHipdnnHandle()
     auto status = detail::hipdnnBackend()->create(&rawHandle);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
-        throw std::runtime_error("Failed to create hipdnn handle");
+        throw std::runtime_error("Failed to create hipdnn handle: status "
+                                 + std::to_string(static_cast<int>(status)));
     }
     return HipdnnHandlePtr(rawHandle);
 }
@@ -51,7 +52,8 @@ inline HipdnnHandlePtr createHipdnnHandle(hipStream_t stream)
     auto status = detail::hipdnnBackend()->setStream(handle.get(), stream);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
-        throw std::runtime_error("Failed to set stream on hipdnn handle");
+        throw std::runtime_error("Failed to set stream on hipdnn handle: status "
+                                 + std::to_string(static_cast<int>(status)));
     }
     return handle;
 }
