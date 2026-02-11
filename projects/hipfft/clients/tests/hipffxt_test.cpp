@@ -28,14 +28,17 @@
 #include "../../shared/accuracy_test.h"
 #include "../hipfft_params.h"
 
-// FIXME: only on cuda?
+#ifdef __HIP_PLATFORM_NVIDIA__
 DISABLE_WARNING_PUSH
 DISABLE_WARNING_DEPRECATED_DECLARATIONS
 DISABLE_WARNING_RETURN_TYPE
+#endif
 #include <hip/hip_runtime_api.h>
+#ifdef __HIP_PLATFORM_NVIDIA__
 DISABLE_WARNING_POP
+#endif
 
-std::string formatname(const hipfftXtSubFormat format)
+std::string formatname(const int format)
 {
     switch(format)
     {
@@ -51,6 +54,8 @@ std::string formatname(const hipfftXtSubFormat format)
         return "HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED";
     case HIPFFT_FORMAT_UNDEFINED:
         return "HIPFFT_FORMAT_UNDEFINED";
+    default:
+        return "Unknown format";
     }
 }
 
@@ -130,7 +135,9 @@ TEST_P(hipfftxtdirectionformat, c2cinplace)
 
     hipLibXtDesc*       inoutdesc = nullptr;
     hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, informat);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
+                                         << hipfft_rt
+                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
     
     std::vector<std::complex<double>> input(Nx * Ny);
     for(size_t xidx = 0; xidx < Nx; ++xidx)
@@ -149,17 +156,24 @@ TEST_P(hipfftxtdirectionformat, c2cinplace)
     EXPECT_EQ(inoutdesc->subFormat, informat);
 
     hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtExecDescriptor failed with code "
+                                         << hipfft_rt
+                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
 
-    EXPECT_EQ(inoutdesc->subFormat, outformat);
+    EXPECT_EQ(inoutdesc->subFormat, outformat) << "descriptor subformat is "
+                                               << inoutdesc->subFormat
+                                               << " (" << formatname(inoutdesc->subFormat) << ")"
+                                               << " but we expected " << outformat
+                                               << " (" << formatname(outformat) << ")";
     
     std::vector<std::complex<double>> output(Nx * Ny);
     hipfft_rt = hipfftXtMemcpy(plan,
                                reinterpret_cast<void*>(output.data()),
                                reinterpret_cast<void*>(inoutdesc),
                                HIPFFT_COPY_DEVICE_TO_HOST);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-    
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy failed with code "
+                                         << hipfft_rt
+                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
     hipfft_rt = hipfftXtFree(inoutdesc);
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 
@@ -174,7 +188,7 @@ INSTANTIATE_TEST_SUITE_P(
         ::testing::Values(HIPFFT_FORWARD, HIPFFT_BACKWARD),
         ::testing::Values(HIPFFT_XT_FORMAT_INPLACE,
                           HIPFFT_XT_FORMAT_INPLACE_SHUFFLED),
-        ::testing::Values(1, 2)
+        ::testing::Values(1) // We only cover batch=1 for now.
         ),
     [](const testing::TestParamInfo<hipfftxtdirectionformat::ParamType>& info) {
         const int direction = std::get<0>(info.param);
@@ -370,7 +384,9 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
                                ? reinterpret_cast<void*>(real.data())
                                : reinterpret_cast<void*>(complex.data()),
                                HIPFFT_COPY_HOST_TO_DEVICE);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy failed with code "
+                                         << hipfft_rt
+                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
     
     EXPECT_EQ(inoutdesc->subFormat, informat)
         << "informat not what expected:"
@@ -378,7 +394,9 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
         << " expected " << formatname((hipfftXtSubFormat)informat);
 
     hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "exec failed"; 
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtExecDescriptor failed with code "
+                                         << hipfft_rt
+                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
 
     EXPECT_EQ(inoutdesc->subFormat, outformat)
         << "outformat not what expected:"

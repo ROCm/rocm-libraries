@@ -31,6 +31,8 @@
 #include <string>
 #include <vector>
 
+#include <iostream> // FIXME: temp
+
 #ifdef HIPFFT_MPI_ENABLE
 #include "hipfft/hipfftMp.h"
 #endif
@@ -806,9 +808,7 @@ try
         return HIPFFT_INVALID_SIZE;
     }
 
-    size_t lengths[2];
-    lengths[0]                                      = nx;
-    lengths[1]                                      = ny;
+    size_t lengths[2] = {static_cast<size_t>(nx), static_cast<size_t>(ny)};
     size_t                     number_of_transforms = 1;
     hipfft_ionembed_t<size_t>* user_ionembed        = nullptr;
     // ignored internally (default layout)
@@ -1222,26 +1222,19 @@ catch(...)
 static rocfft_plan get_exec_plan(const hipfftHandle plan, const bool inplace, const int direction)
 {
     if(!plan || !plan->initialized())
+    {
         throw HIPFFT_INVALID_PLAN;
+    }
 
-    // NOTE: direction is IGNORED by hipFFT in case of plans for real transforms
-    if(plan->type.is_real_to_complex())
+    switch(direction)
     {
+    case HIPFFT_FORWARD:
         return inplace ? plan->ip_forward : plan->op_forward;
-    }
-    else if(plan->type.is_complex_to_real())
-    {
+    case HIPFFT_BACKWARD:
         return inplace ? plan->ip_inverse : plan->op_inverse;
+    default:
+        throw HIPFFT_INVALID_VALUE;
     }
-    else
-    {
-        if(direction != HIPFFT_FORWARD && direction != HIPFFT_BACKWARD)
-            throw HIPFFT_INVALID_VALUE;
-        return inplace ? (direction == HIPFFT_FORWARD ? plan->ip_forward : plan->ip_inverse)
-                       : (direction == HIPFFT_FORWARD ? plan->op_forward : plan->op_inverse);
-    }
-
-    return nullptr;
 }
 
 static hipfftResult hipfftExec(const rocfft_plan&           rplan,
@@ -1799,6 +1792,7 @@ try
         bits_per_element = hipDataType_bits(plan->type.outputType);
         break;
     case HIPFFT_XT_FORMAT_INPLACE:
+    case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
         bricks           = &plan->outBricks;
         bits_per_element = std::max(hipDataType_bits(plan->type.inputType),
                                     hipDataType_bits(plan->type.outputType));
@@ -1854,10 +1848,15 @@ static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
     // should end up with at most two dimensions after
     // collapsing
     if(brick_length.size() > 2 || brick_stride.size() > 2 || field_stride.size() > 2)
+    {
+        // FIXME: is this actually true?
         throw std::runtime_error("should have at most 2 dims after collapsing");
+    }
     // fastest dim is expected to be contiguous
     if(brick_stride.front() != 1 || field_stride.front() != 1)
+    {
         throw std::runtime_error("fastest dim not contiguous after collapsing");
+    }
 }
 
 hipfftResult hipfftXtMemcpy(hipfftHandle plan, void* dest, void* src, hipfftXtCopyType cptype)
@@ -1879,13 +1878,16 @@ try
         return static_cast<void*>(static_cast<char*>(buf) + hipDataType_bytes(dtype, offset_elems));
     };
 
+    // This determines whether we use the input brick decomposition or the output brick
+    // decomposition for the copy operation.
     auto brick_layout = [plan](int subFormat) -> const std::vector<hipfft_brick>& {
         switch(subFormat)
         {
-        case HIPFFT_XT_FORMAT_INPUT:
+        case HIPFFT_XT_FORMAT_INPUT: 
+        case HIPFFT_XT_FORMAT_INPLACE:
             return plan->inBricks;
         case HIPFFT_XT_FORMAT_OUTPUT:
-        case HIPFFT_XT_FORMAT_INPLACE:
+        case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
             return plan->outBricks;
         default:
             throw HIPFFT_INVALID_VALUE;
@@ -1922,7 +1924,9 @@ try
                              destDesc->descriptor->size[i],
                              hipMemcpyHostToDevice)
                    != hipSuccess)
+                {
                     return HIPFFT_INTERNAL_ERROR;
+                }
             }
             else
             {
@@ -1935,7 +1939,9 @@ try
                        brick_length[1],
                        hipMemcpyHostToDevice)
                    != hipSuccess)
+                {
                     return HIPFFT_INTERNAL_ERROR;
+                }
             }
         }
         return HIPFFT_SUCCESS;
@@ -1969,7 +1975,9 @@ try
                        srcDesc->descriptor->size[i],
                        hipMemcpyDeviceToHost)
                    != hipSuccess)
+                {
                     return HIPFFT_INTERNAL_ERROR;
+                }
             }
             else
             {
@@ -1982,7 +1990,9 @@ try
                        brick_length[1],
                        hipMemcpyDeviceToHost)
                    != hipSuccess)
+                {
                     return HIPFFT_INTERNAL_ERROR;
+                }
             }
         }
         return HIPFFT_SUCCESS;
@@ -2039,18 +2049,46 @@ catch(...)
     return handle_exception();
 }
 
-static hipfftResult hipfftXtExecDescriptorBase(const rocfft_plan&           rplan,
-                                               const rocfft_execution_info& rinfo,
+static hipfftResult hipfftXtExecDescriptorBase(const hipfftHandle           plan,
+                                               int direction,
                                                hipLibXtDesc*                input,
                                                hipLibXtDesc*                output)
 {
-    if(!rplan)
-        return HIPFFT_INVALID_PLAN;
     if(!input || !output)
         return HIPFFT_INVALID_VALUE;
-
-    const auto ret
-        = rocfft_execute(rplan, input->descriptor->data, output->descriptor->data, rinfo);
+   
+    const bool inplace = input == output;
+    const auto rplan   = get_exec_plan(plan, inplace, direction);
+    if(!rplan)
+    {
+        return HIPFFT_INVALID_PLAN;
+    }
+        
+    auto ret = rocfft_status_success;
+    try
+    {
+        ret = rocfft_execute(rplan, input->descriptor->data, output->descriptor->data, plan->info);
+        if(ret == rocfft_status_success && inplace)
+        {
+            // If the execution was succesful, then we can change the subformat value if necessary.
+            switch(input->subFormat)
+            {
+            case HIPFFT_XT_FORMAT_INPLACE:
+                input->subFormat = HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+                break;
+            case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
+                input->subFormat = HIPFFT_XT_FORMAT_INPLACE;
+                break;
+            default:
+                throw HIPFFT_INVALID_VALUE;
+            }
+        }
+    }
+    catch(...)
+    {
+        return handle_exception();
+    }
+    
     return ret == rocfft_status_success ? HIPFFT_SUCCESS : HIPFFT_EXEC_FAILED;
 }
 
@@ -2058,121 +2096,56 @@ hipfftResult hipfftXtExecDescriptorC2C(hipfftHandle  plan,
                                        hipLibXtDesc* input,
                                        hipLibXtDesc* output,
                                        int           direction)
-try
 {
     if(!is_ready_for_execution<rocfft_precision_single>(plan))
         return HIPFFT_INVALID_PLAN;
-
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, direction);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan, direction, input, output);
 }
 
 hipfftResult hipfftXtExecDescriptorR2C(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
-try
 {
     if(!is_ready_for_execution<rocfft_precision_single>(plan))
         return HIPFFT_INVALID_PLAN;
-
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, HIPFFT_FORWARD);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan, HIPFFT_FORWARD, input, output);
 }
 
 hipfftResult hipfftXtExecDescriptorC2R(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
-try
 {
     if(!is_ready_for_execution<rocfft_precision_single>(plan))
         return HIPFFT_INVALID_PLAN;
-
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, HIPFFT_BACKWARD);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan, HIPFFT_BACKWARD, input, output);
 }
 
 hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
                                        hipLibXtDesc* input,
                                        hipLibXtDesc* output,
                                        int           direction)
-try
 {
     if(!is_ready_for_execution<rocfft_precision_double>(plan))
         return HIPFFT_INVALID_PLAN;
-
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, direction);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan, direction, input, output);
 }
 
 hipfftResult hipfftXtExecDescriptorD2Z(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
-try
 {
     if(!is_ready_for_execution<rocfft_precision_double>(plan))
         return HIPFFT_INVALID_PLAN;
-
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, HIPFFT_FORWARD);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan, HIPFFT_FORWARD, input, output);
 }
 
 hipfftResult hipfftXtExecDescriptorZ2D(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
-try
 {
     if(!is_ready_for_execution<rocfft_precision_double>(plan))
         return HIPFFT_INVALID_PLAN;
-
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, HIPFFT_BACKWARD);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan, HIPFFT_BACKWARD, input, output);
 }
 
 hipfftResult hipfftXtExecDescriptor(hipfftHandle  plan,
                                     hipLibXtDesc* input,
                                     hipLibXtDesc* output,
                                     int           direction)
-try
 {
-    // any precision
-    if(!plan || !plan->initialized())
-        return HIPFFT_INVALID_PLAN;
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, direction);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan, direction, input, output);
 }
 
 #ifdef HIPFFT_MPI_ENABLE
