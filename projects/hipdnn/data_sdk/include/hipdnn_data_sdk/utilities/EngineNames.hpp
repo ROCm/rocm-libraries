@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <iomanip>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -97,9 +97,8 @@ inline std::string_view getEngineNameFromId(int64_t id)
         return it->second;
     }
 
-    HIPDNN_SDK_LOG_WARN("Engine ID " << formatEngineIdHex(id)
-                                     << " not found in registered engines.");
-    throw std::out_of_range("Engine ID not found");
+    throw std::out_of_range("Engine ID " + formatEngineIdHex(id)
+                            + " not found in registered engines");
 }
 
 struct EngineRegistrar
@@ -115,9 +114,9 @@ struct EngineRegistrar
         {
             if(existingId == id && existingName != name)
             {
-                HIPDNN_SDK_LOG_ERROR("Engine name collision detected! '"
-                                     << existingName << "' and '" << name
-                                     << "' both hash to ID: " << formatEngineIdHex(id));
+                throw std::runtime_error("Engine name collision detected! '"
+                                         + std::string(existingName) + "' and '" + std::string(name)
+                                         + "' both hash to ID: " + formatEngineIdHex(id));
             }
         }
     }
@@ -133,8 +132,11 @@ struct EngineRegistrar
 // change the generated uint64_t ID.
 
 // Define all engines using the macro
-HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE, "MIOPEN_ENGINE")
-HIPDNN_REGISTER_ENGINE(HIPBLASLT_ENGINE, "HIPBLASLT_ENGINE")
 HIPDNN_REGISTER_ENGINE(FUSILLI_ENGINE, "FUSILLI_ENGINE")
+
+HIPDNN_REGISTER_ENGINE(HIPBLASLT_ENGINE, "HIPBLASLT_ENGINE")
+
+HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE, "MIOPEN_ENGINE")
+HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE_DETERMINISTIC, "MIOPEN_ENGINE_DETERMINISTIC")
 
 } // namespace hipdnn_data_sdk::utilities

@@ -630,3 +630,111 @@ TEST(TestMiopenConvDescriptor, ThrowsOnInvalidGroupCount)
     EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, -1),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+TEST(TestMiopenConvDescriptor, SetsDeterministicAttributeWhenEnabled)
+{
+    const std::vector<int64_t> prePadding{0, 0};
+    const std::vector<int64_t> postPadding{0, 0};
+    const std::vector<int64_t> stride{1, 1};
+    const std::vector<int64_t> dilation{1, 1};
+    const auto convMode = hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION;
+    size_t spatialDimCount = 2;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_data_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+        builder, 0, 0, 0, &prePadding, &postPadding, &stride, &dilation, convMode);
+    builder.Finish(attrOffset);
+    auto attrPtr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>(
+        builder.GetBufferPointer());
+
+    // Create descriptor with deterministic enabled
+    MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1, true);
+
+    // Verify the deterministic attribute is set to 1
+    int deterministicValue = 0;
+    miopenStatus_t status = miopenGetConvolutionAttribute(
+        convDesc.convDescriptor(), MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, &deterministicValue);
+    EXPECT_EQ(status, miopenStatusSuccess);
+    EXPECT_EQ(deterministicValue, 1);
+}
+
+TEST(TestMiopenConvDescriptor, DeterministicAttributeDefaultsToDisabled)
+{
+    const std::vector<int64_t> prePadding{0, 0};
+    const std::vector<int64_t> postPadding{0, 0};
+    const std::vector<int64_t> stride{1, 1};
+    const std::vector<int64_t> dilation{1, 1};
+    const auto convMode = hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION;
+    size_t spatialDimCount = 2;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_data_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+        builder, 0, 0, 0, &prePadding, &postPadding, &stride, &dilation, convMode);
+    builder.Finish(attrOffset);
+    auto attrPtr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>(
+        builder.GetBufferPointer());
+
+    // Create descriptor with default (deterministic disabled)
+    MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1);
+
+    // Verify the deterministic attribute is 0 (disabled)
+    int deterministicValue = -1;
+    miopenStatus_t status = miopenGetConvolutionAttribute(
+        convDesc.convDescriptor(), MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, &deterministicValue);
+    EXPECT_EQ(status, miopenStatusSuccess);
+    EXPECT_EQ(deterministicValue, 0);
+}
+
+TEST(TestMiopenConvDescriptor, SetsDeterministicAttributeForBwdDescriptor)
+{
+    const std::vector<int64_t> prePadding{0, 0};
+    const std::vector<int64_t> postPadding{0, 0};
+    const std::vector<int64_t> stride{1, 1};
+    const std::vector<int64_t> dilation{1, 1};
+    const auto convMode = hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION;
+    size_t spatialDimCount = 2;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_data_sdk::data_objects::CreateConvolutionBwdAttributesDirect(
+        builder, 0, 0, 0, &prePadding, &postPadding, &stride, &dilation, convMode);
+    builder.Finish(attrOffset);
+    auto attrPtr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>(
+        builder.GetBufferPointer());
+
+    // Create descriptor with deterministic enabled
+    MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1, true);
+
+    // Verify the deterministic attribute is set to 1
+    int deterministicValue = 0;
+    miopenStatus_t status = miopenGetConvolutionAttribute(
+        convDesc.convDescriptor(), MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, &deterministicValue);
+    EXPECT_EQ(status, miopenStatusSuccess);
+    EXPECT_EQ(deterministicValue, 1);
+}
+
+TEST(TestMiopenConvDescriptor, SetsDeterministicAttributeForWrwDescriptor)
+{
+    const std::vector<int64_t> prePadding{0, 0};
+    const std::vector<int64_t> postPadding{0, 0};
+    const std::vector<int64_t> stride{1, 1};
+    const std::vector<int64_t> dilation{1, 1};
+    const auto convMode = hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION;
+    size_t spatialDimCount = 2;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_data_sdk::data_objects::CreateConvolutionWrwAttributesDirect(
+        builder, 0, 0, 0, &prePadding, &postPadding, &stride, &dilation, convMode);
+    builder.Finish(attrOffset);
+    auto attrPtr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>(
+        builder.GetBufferPointer());
+
+    // Create descriptor with deterministic enabled
+    MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1, true);
+
+    // Verify the deterministic attribute is set to 1
+    int deterministicValue = 0;
+    miopenStatus_t status = miopenGetConvolutionAttribute(
+        convDesc.convDescriptor(), MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, &deterministicValue);
+    EXPECT_EQ(status, miopenStatusSuccess);
+    EXPECT_EQ(deterministicValue, 1);
+}
