@@ -174,7 +174,7 @@
     SolutionNameMin: Cijk_Alik_Bjlk_HHS_BBiasH_HAH_SAV_MT32x32x32_MI16x16x16x1_SN_MIWT1_1
     SourceSwap: 1
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: 1
     StoreRemapVectorWidth: 0
