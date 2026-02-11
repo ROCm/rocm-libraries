@@ -476,7 +476,7 @@ TEST_P(BatchedTransposeDataTypeTest, BatchedTransposeSupportedTypes)
          data_type == miopenInt8 || data_type == miopenInt32);
 
     EXPECT_EQ(batched_supports, should_support)
-        << "BatchedTransposeSolution applicability mismatch for " << GetDataType(data_type);
+        << "BatchedTransposeSolution applicability mismatch for " << miopen::GetDataType(data_type);
 }
 
 // Smoke tests for batched transpose (types supported by batched transpose)
