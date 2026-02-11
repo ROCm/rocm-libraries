@@ -49,8 +49,6 @@ project_map = {
             "-DTHEROCK_ENABLE_MIOPEN=ON",
             "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         ],
         "projects_to_test": ["miopen", "miopen_plugin"],
     },
@@ -84,8 +82,6 @@ additional_options = {
         "cmake_options": [
             "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         ],
         "projects_to_test": ["hipdnn", "miopen_plugin"],
         "project_to_add": "miopen",
@@ -94,8 +90,6 @@ additional_options = {
         "cmake_options": [
             "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         ],
         "projects_to_test": ["miopen_plugin"],
         "project_to_add": "miopen",
