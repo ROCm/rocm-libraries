@@ -624,19 +624,22 @@ def main(
                         )
                 totalTestFails += benchmarkErrors
 
-                print("clientExit={} {} for {}" \
-                        .format(totalTestFails, "(ERROR)" if totalTestFails else "(PASS)", \
-                        globalParameters["ConfigPath"]) )
+                if compileOnly:
+                    print1("# Compile-only mode: skipping result collection.")
+                else:
+                    print("clientExit={} {} for {}" \
+                            .format(totalTestFails, "(ERROR)" if totalTestFails else "(PASS)", \
+                            globalParameters["ConfigPath"]) )
 
-                # copy data
-                resultsFileBase = resultsFileBaseFinal
-                resultsFileName = resultsFileBase + ".csv"
-                solutionsFileName = resultsFileBase + ".yaml"
-                granularityFileName = resultsFileBase + "_Granularity.csv"
-                shutil.copy(resultsFileName, newResultsFileName)
-                shutil.copy(solutionsFileName, newSolutionsFileName)
-                if os.path.isfile(granularityFileName):
-                    shutil.copy(granularityFileName, newGranularityFileName)
+                    # copy data
+                    resultsFileBase = resultsFileBaseFinal
+                    resultsFileName = resultsFileBase + ".csv"
+                    solutionsFileName = resultsFileBase + ".yaml"
+                    granularityFileName = resultsFileBase + "_Granularity.csv"
+                    shutil.copy(resultsFileName, newResultsFileName)
+                    shutil.copy(solutionsFileName, newSolutionsFileName)
+                    if os.path.isfile(granularityFileName):
+                        shutil.copy(granularityFileName, newGranularityFileName)
             else:
                 print1("# {}_{:02d} already benchmarked; skipping." \
                         .format(str(problemTypeObj), idx) )
