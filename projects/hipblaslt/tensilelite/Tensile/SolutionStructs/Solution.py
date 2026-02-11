@@ -1609,7 +1609,15 @@ class Solution(collections.abc.Mapping):
     # Check if CMS is available for this solution
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       hasCMS,_ = hasCustomSchedule(state)
-      state["UseCustomMainLoopSchedule"] = 1 if hasCMS else 0
+      if hasCMS:
+        state["UseCustomMainLoopSchedule"] = 1
+      elif state["UseCustomMainLoopSchedule"] == 1:
+        reject(state, printRejectionReason,
+               "UseCustomMainLoopSchedule explicitly set to 1 "
+               "but no CMS schedule is available for this kernel configuration")
+        return
+      else:
+        state["UseCustomMainLoopSchedule"] = 0
 
     # 0: Normal mode. Hardware applies all of the normal data dependency checks
     # 1: Full expert mode (not suppoeted yet). Disable hardware checks against: VA_VDST, VA_SDST, VA_SSRC, VA_VCC, VM_VSRC and SA_SDST.

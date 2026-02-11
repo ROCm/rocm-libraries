@@ -979,3 +979,56 @@ class TestCustomScheduleValidation:
         )
         assert status == False
 
+
+class TestExplicitCMSRejection:
+    @pytest.mark.parametrize("isa", [IsaVersion(9,5,0), IsaVersion(9,4,2)])
+    def test_no_schedule_for_non_matching_tile(self, isa):
+        """Tests that hasCustomSchedule returns False for a tile config with no registered schedule."""
+        kernel = create_base_kernel()
+        dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
+        kernel["ProblemType"].update({
+            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+            "TransposeA": True, "TransposeB": False
+        })
+        kernel.update({
+            "MacroTile0": 64, "MacroTile1": 64, "DepthU": 64,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
+            "TransposeLDS": 1, "ISA": isa,
+        })
+
+        has_schedule, schedule_info = hasCustomSchedule(kernel)
+        assert not has_schedule
+        assert schedule_info is None
+
+    def test_schedule_found_for_matching_tile(self):
+        """Tests that hasCustomSchedule returns True for a 256x256x64 16-bit TN kernel."""
+        kernel = create_base_kernel()
+        dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
+        kernel["ProblemType"].update({
+            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+            "TransposeA": True, "TransposeB": False
+        })
+        kernel.update({
+            "MacroTile0": 256, "MacroTile1": 256, "DepthU": 64,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
+            "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 8,
+        })
+
+        has_schedule, schedule_info = hasCustomSchedule(kernel)
+        assert has_schedule
+        assert isinstance(schedule_info, ScheduleInfo)
+
+    @pytest.mark.parametrize("cms_value", [0, -1])
+    def test_cms_disabled_or_auto_returns_false(self, cms_value):
+        """Tests that hasCustomSchedule returns False when CMS is 0 or -1 evaluates to falsy."""
+        kernel = create_base_kernel()
+        kernel["UseCustomMainLoopSchedule"] = cms_value
+
+        has_schedule, schedule_info = hasCustomSchedule(kernel)
+        assert not has_schedule
+        assert schedule_info is None
+
