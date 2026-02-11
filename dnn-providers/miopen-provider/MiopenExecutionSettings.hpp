@@ -10,12 +10,6 @@ namespace miopen_plugin
 
 struct MiopenExecutionSettings
 {
-    enum class DebugMode
-    {
-        NONE, // Debug mode disabled (default)
-        LOG_ALL_FOUND_PLAN_ALGORITHMS // Log all found plan algorithms
-    };
-
     void setBenchmarkingEnabled(bool enabled)
     {
         _benchmarkingEnabled = enabled;
@@ -52,20 +46,9 @@ struct MiopenExecutionSettings
         return _workspaceSizeLimit;
     }
 
-    void setDebugMode(DebugMode mode)
-    {
-        _debugMode = mode;
-    }
-
-    DebugMode debugMode() const
-    {
-        return _debugMode;
-    }
-
 private:
     bool _benchmarkingEnabled = false;
     std::optional<size_t> _workspaceSizeLimit;
-    DebugMode _debugMode = DebugMode::NONE;
 };
 
 } // namespace miopen_plugin

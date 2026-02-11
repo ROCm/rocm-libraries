@@ -142,11 +142,8 @@ void ConvFwdPlan::execute(const HipdnnEnginePluginHandle& handle,
             HIPDNN_PLUGIN_LOG_INFO(
                 "Convolution Fwd: Performing algorithm selection (first execution)");
 
-            int requestCount
-                = (_executionSettings.debugMode()
-                   == MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
-                      ? 10
-                      : 1;
+            bool traceEnabled = HIPDNN_PLUGIN_LOG_IS_TRACE_ENABLED();
+            int requestCount = traceEnabled ? 10 : 1;
 
             std::vector<miopenConvAlgoPerf_t> perfResults(static_cast<size_t>(requestCount));
             int returnedAlgoCount;
@@ -174,13 +171,12 @@ void ConvFwdPlan::execute(const HipdnnEnginePluginHandle& handle,
                     "miopenFindConvolutionForwardAlgorithm returned no algorithms");
             }
 
-            if(_executionSettings.debugMode()
-               == MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
+            if(traceEnabled)
             {
-                HIPDNN_PLUGIN_LOG_INFO("Convolution Fwd: Found {} algorithms", returnedAlgoCount);
+                HIPDNN_PLUGIN_LOG_TRACE("Convolution Fwd: Found {} algorithms", returnedAlgoCount);
                 for(size_t i = 0; i < static_cast<size_t>(returnedAlgoCount); ++i)
                 {
-                    HIPDNN_PLUGIN_LOG_INFO(
+                    HIPDNN_PLUGIN_LOG_TRACE(
                         "  Algorithm {}: algorithm={}, time={}, workspace_size={}",
                         i,
                         static_cast<int>(perfResults[i].fwd_algo),

@@ -350,16 +350,12 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitFwd)
     ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
     MiopenExecutionSettings executionSettings1;
-    executionSettings1.setDebugMode(
-        MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     HipdnnEnginePluginExecutionContext ctx1;
     ctx1.setExecutionSettings(executionSettings1);
     _planBuilder.buildPlan(_handle, graph, ctx1);
     executePlan(ctx1.plan(), graph);
 
     MiopenExecutionSettings executionSettings2;
-    executionSettings2.setDebugMode(
-        MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     executionSettings2.setWorkspaceSizeLimit(range.min);
     HipdnnEnginePluginExecutionContext ctx2;
     ctx2.setExecutionSettings(executionSettings2);
@@ -398,16 +394,12 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitBwd)
     ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
     MiopenExecutionSettings executionSettings1;
-    executionSettings1.setDebugMode(
-        MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     HipdnnEnginePluginExecutionContext ctx1;
     ctx1.setExecutionSettings(executionSettings1);
     _planBuilder.buildPlan(_handle, graph, ctx1);
     executePlan(ctx1.plan(), graph);
 
     MiopenExecutionSettings executionSettings2;
-    executionSettings2.setDebugMode(
-        MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     executionSettings2.setWorkspaceSizeLimit(range.min);
     HipdnnEnginePluginExecutionContext ctx2;
     ctx2.setExecutionSettings(executionSettings2);
@@ -446,16 +438,12 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitWrw)
     ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
     MiopenExecutionSettings executionSettings1;
-    executionSettings1.setDebugMode(
-        MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     HipdnnEnginePluginExecutionContext ctx1;
     ctx1.setExecutionSettings(executionSettings1);
     _planBuilder.buildPlan(_handle, graph, ctx1);
     executePlan(ctx1.plan(), graph);
 
     MiopenExecutionSettings executionSettings2;
-    executionSettings2.setDebugMode(
-        MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     executionSettings2.setWorkspaceSizeLimit(range.min);
     HipdnnEnginePluginExecutionContext ctx2;
     ctx2.setExecutionSettings(executionSettings2);
