@@ -130,7 +130,7 @@
 .endm
 
 .macro _v_cvt_f16_f32_hvv  dst, src0
-    .long  0x7f001500 + ((\dst) << (17)) + ((\src1) << 0)
+    .long  0x7f001500 + ((\dst) << (17)) + ((\src0) << 0)
 .endm
 
 s_version UC_VERSION_GFX12|UC_VERSION_W64_BIT
@@ -4217,10 +4217,10 @@ v_cvt_f16_f32_e32 v98, v144
 v_cvt_f16_f32_e32 v99, v146
 v_cvt_f16_f32_e32 v102, v148
 v_cvt_f16_f32_e32 v103, v150
-.long 0x7fc41591
-.long 0x7fc61593
-.long 0x7fcc1595
-.long 0x7fce1597
+_v_cvt_f16_f32_hvv 98, 145
+_v_cvt_f16_f32_hvv 99, 147
+_v_cvt_f16_f32_hvv 102, 149
+_v_cvt_f16_f32_hvv 103, 151
 v_mov_b32_e32 v145, 0xbfb8aa3b
 v_mov_b32_e32 v147, 0xbfb8aa3b
 v_mov_b32_e32 v149, 0xbfb8aa3b
@@ -4261,10 +4261,10 @@ v_cvt_f16_f32_e32 v96, v144
 v_cvt_f16_f32_e32 v97, v146
 v_cvt_f16_f32_e32 v100, v148
 v_cvt_f16_f32_e32 v101, v150
-.long 0x7fc01591
-.long 0x7fc21593
-.long 0x7fc81595
-.long 0x7fca1597
+_v_cvt_f16_f32_hvv 96, 145
+_v_cvt_f16_f32_hvv 97, 147
+_v_cvt_f16_f32_hvv 100, 149
+_v_cvt_f16_f32_hvv 101, 151
 s_setprio 0
 buffer_store_b16 v98, v138, s[68:71], null idxen
 buffer_store_b16 v102, v142, s[68:71], null idxen
@@ -4350,10 +4350,10 @@ v_cvt_f16_f32_e32 v106, v144
 v_cvt_f16_f32_e32 v107, v146
 v_cvt_f16_f32_e32 v110, v148
 v_cvt_f16_f32_e32 v111, v150
-.long 0x7fd41591
-.long 0x7fd61593
-.long 0x7fdc1595
-.long 0x7fde1597
+_v_cvt_f16_f32_hvv 106, 145
+_v_cvt_f16_f32_hvv 107, 147
+_v_cvt_f16_f32_hvv 110, 149
+_v_cvt_f16_f32_hvv 111, 151
 v_mov_b32_e32 v145, 0xbfb8aa3b
 v_mov_b32_e32 v147, 0xbfb8aa3b
 v_mov_b32_e32 v149, 0xbfb8aa3b
@@ -4394,10 +4394,10 @@ v_cvt_f16_f32_e32 v104, v144
 v_cvt_f16_f32_e32 v105, v146
 v_cvt_f16_f32_e32 v108, v148
 v_cvt_f16_f32_e32 v109, v150
-.long 0x7fd01591
-.long 0x7fd21593
-.long 0x7fd81595
-.long 0x7fda1597
+_v_cvt_f16_f32_hvv 104, 145
+_v_cvt_f16_f32_hvv 105, 147
+_v_cvt_f16_f32_hvv 108, 149
+_v_cvt_f16_f32_hvv 109, 151
 s_setprio 0
 buffer_store_b16 v106, v138, s[68:71], null idxen
 buffer_store_b16 v110, v142, s[68:71], null idxen
@@ -4486,10 +4486,10 @@ v_cvt_f16_f32_e32 v114, v144
 v_cvt_f16_f32_e32 v115, v146
 v_cvt_f16_f32_e32 v118, v148
 v_cvt_f16_f32_e32 v119, v150
-.long 0x7fe41591
-.long 0x7fe61593
-.long 0x7fec1595
-.long 0x7fee1597
+_v_cvt_f16_f32_hvv 114, 145
+_v_cvt_f16_f32_hvv 115, 147
+_v_cvt_f16_f32_hvv 118, 149
+_v_cvt_f16_f32_hvv 119, 151
 v_mov_b32_e32 v145, 0xbfb8aa3b
 v_mov_b32_e32 v147, 0xbfb8aa3b
 v_mov_b32_e32 v149, 0xbfb8aa3b
@@ -4530,10 +4530,10 @@ v_cvt_f16_f32_e32 v112, v144
 v_cvt_f16_f32_e32 v113, v146
 v_cvt_f16_f32_e32 v116, v148
 v_cvt_f16_f32_e32 v117, v150
-.long 0x7fe01591
-.long 0x7fe21593
-.long 0x7fe81595
-.long 0x7fea1597
+_v_cvt_f16_f32_hvv 112, 145
+_v_cvt_f16_f32_hvv 113, 147
+_v_cvt_f16_f32_hvv 116, 149
+_v_cvt_f16_f32_hvv 117, 151
 s_setprio 0
 buffer_store_b16 v114, v138, s[68:71], null idxen
 buffer_store_b16 v118, v142, s[68:71], null idxen
@@ -4619,10 +4619,10 @@ v_cvt_f16_f32_e32 v122, v144
 v_cvt_f16_f32_e32 v123, v146
 v_cvt_f16_f32_e32 v126, v148
 v_cvt_f16_f32_e32 v127, v150
-.long 0x7ff41591
-.long 0x7ff61593
-.long 0x7ffc1595
-.long 0x7ffe1597
+_v_cvt_f16_f32_hvv 122, 145
+_v_cvt_f16_f32_hvv 123, 147
+_v_cvt_f16_f32_hvv 126, 149
+_v_cvt_f16_f32_hvv 127, 151
 v_mov_b32_e32 v145, 0xbfb8aa3b
 v_mov_b32_e32 v147, 0xbfb8aa3b
 v_mov_b32_e32 v149, 0xbfb8aa3b
@@ -4663,10 +4663,10 @@ v_cvt_f16_f32_e32 v120, v144
 v_cvt_f16_f32_e32 v121, v146
 v_cvt_f16_f32_e32 v124, v148
 v_cvt_f16_f32_e32 v125, v150
-.long 0x7ff01591
-.long 0x7ff21593
-.long 0x7ff81595
-.long 0x7ffa1597
+_v_cvt_f16_f32_hvv 120, 145
+_v_cvt_f16_f32_hvv 121, 147
+_v_cvt_f16_f32_hvv 124, 149
+_v_cvt_f16_f32_hvv 125, 151
 s_setprio 0
 buffer_store_b16 v122, v138, s[68:71], null idxen
 buffer_store_b16 v126, v142, s[68:71], null idxen
