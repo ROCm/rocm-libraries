@@ -38,7 +38,7 @@ class TensorDataMoverLoad(TensorDataMover):
         numWaves: int = prod(kernel["MIWaveGroup"])
         wavelen: int = kernel["WavefrontSize"]
         mt: int = kernel["MacroTile0"] if tc == "A" else kernel["MacroTile1"]
-        tdmSplit: int = 2 if kernel["TDMSplit"] else 1
+        tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc)) else 1
 
         mod.addComment(f"TDM calc start addr of {tc}")
 
@@ -76,7 +76,7 @@ class TensorDataMoverLoad(TensorDataMover):
         assert numWaves > 1
         wavelen: int = kernel["WavefrontSize"]
         mt: int = kernel["MacroTile0"] if tc.endswith("A") else kernel["MacroTile1"]
-        tdmSplit: int = 2 if kernel["TDMSplit"] else 1
+        tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc)) else 1
         if ("MXS" in tc):
             subTc = tc[3]
             mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]

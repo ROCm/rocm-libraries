@@ -17571,7 +17571,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves // dim1Divisor, self))
     mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
 
-    if kernel["TDMSplit"]:
+    if (kernel["TDMSplit"] and not ("MXS" in tc)):
       extraPadSize: int = round(mt * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
       mod.add(SMovB32(sgpr(f"tdm{tc}LdsSplitIncs"), round(mt * du * bpe // dim1Divisor) + extraPadSize, comment=f"tdm{tc} Lds Split Incs({mt * du * bpe // dim1Divisor})"))
       mod.add(SMulI32(sgpr(f"tdm{tc}GlobalSplitIncs"), sgpr(strideRefName()), round(mt * bpe) // dim1Divisor, comment=f"tdm{tc} Global Split Incs(stride * {mt * bpe // dim1Divisor})"))
@@ -17659,7 +17659,7 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp // dim1Divisor, self))
       mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
 
-    if kernel["TDMSplit"]:
+    if (kernel["TDMSplit"] and not ("MXS" in tc)):
       extraPadSize: int = round(mt * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
       mod.add(SMovB32(sgpr("tdmABLdsSplitIncs"), round(mt * du * bpe // dim1Divisor) + extraPadSize, comment=f"tdm{tc} Lds Split Incs({mt * du * bpe // dim1Divisor})"))
       mod.add(SMulI32(sgpr("tdmABGlobalSplitIncs"), sgpr(strideRefName()), round(mt * bpe) // dim1Divisor, comment=f"tdm{tc} Global Split Incs(stride * {mt * bpe // dim1Divisor})"))
@@ -17743,7 +17743,7 @@ class KernelWriterAssembly(KernelWriter):
     tc: str = tP['tensorChar']
     mod = Module("TDM increment")
     mod.add(comp.incrementGlobalAddr(f"tdm{tc}Group0", f"GlobalReadIncs{tc}"))
-    if kernel["TDMSplit"]:
+    if (kernel["TDMSplit"] and not ("MXS" in tc)):
       mod.add(SSubU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}GlobalSplitIncs"), f"tdm{tc} Global Split Incs sub"))
       mod.add(SSubU32(sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}LdsSplitIncs"), f"tdm{tc} Lds Split Incs sub"))
     return mod
@@ -17756,7 +17756,7 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("TDMGlobalIncrementsWaveSeparated")
     mod.add(comp.incrementGlobalAddr(f"tdm{tcA}Group0", f"tdm{tcA}{tcB}Incs"))
 
-    if kernel["TDMSplit"]:
+    if (kernel["TDMSplit"] and not (("MXS" in tcA) or ("MXS" in tcB))):
       mod.add(SSubU32(sgpr(f"tdm{tcA}Group0+2"), sgpr(f"tdm{tcA}Group0+2"), sgpr("tdmABGlobalSplitIncs"), "tdmAB Global Split Incs sub"))
       mod.add(SSubU32(sgpr(f"tdm{tcA}Group0+1"), sgpr(f"tdm{tcA}Group0+1"), sgpr("tdmABLdsSplitIncs"), "tdmAB Lds Split Incs sub"))
 
