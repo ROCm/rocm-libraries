@@ -26,6 +26,12 @@ struct BasicInvoker
         using ADataTypeBuf = ck_tile::if_select_v<ADataType_, ck_tile::tf32_t, float, ADataType_>;
         using BDataTypeBuf = ck_tile::if_select_v<BDataType_, ck_tile::tf32_t, float, BDataType_>;
 
+        if constexpr(std::is_same_v<ADataTypeCompute, ck_tile::tf32_t>)
+        {
+            static_assert(std::is_same_v<ADataTypeCompute, BDataTypeCompute>,
+                          "ADataTypeCompute and BDataTypeCompute must be the same");
+        }
+
         if constexpr(Persistent)
         {
             std::cout << "WARNING: Ignoring persistent kernel option for basic gemm." << std::endl;

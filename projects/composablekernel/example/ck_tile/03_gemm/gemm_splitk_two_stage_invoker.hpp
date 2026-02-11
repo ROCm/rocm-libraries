@@ -40,6 +40,12 @@ struct SplitKTwoStageInvoker
         using ADataTypeBuf = ck_tile::if_select_v<ADataType_, ck_tile::tf32_t, float, ADataType_>;
         using BDataTypeBuf = ck_tile::if_select_v<BDataType_, ck_tile::tf32_t, float, BDataType_>;
 
+        if constexpr(std::is_same_v<ADataTypeCompute, ck_tile::tf32_t>)
+        {
+            static_assert(std::is_same_v<ADataTypeCompute, BDataTypeCompute>,
+                          "ADataTypeCompute and BDataTypeCompute must be the same");
+        }
+
         using GemmShape = ck_tile::TileGemmShape<
             ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
             ck_tile::sequence<GemmConfig::M_Warp, GemmConfig::N_Warp, GemmConfig::K_Warp>,
