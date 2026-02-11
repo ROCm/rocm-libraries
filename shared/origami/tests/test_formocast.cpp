@@ -500,6 +500,19 @@ TEST_CASE("Formocast: Intermediate metrics calculation", "[formocast]") {
     }
 }
 
+TEST_CASE("Formocast: Print hardware", "[formocast]") {
+  Formocast simulator;
+
+  for (int arch = 0; arch != static_cast<int>(hardware_t::architecture_t::Count); ++arch) {
+    try {
+      simulator.setHardware(static_cast<hardware_t::architecture_t>(arch));
+    } catch (const std::runtime_error&) {
+      continue;  // Skip unsupported architectures
+    }
+    simulator.hw_consts.print();
+  }
+}
+
 TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
     Formocast simulator;
     simulator.setHardware(hardware_t::architecture_t::gfx950);
