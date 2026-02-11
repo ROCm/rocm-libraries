@@ -359,9 +359,14 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                          asmToolchain: AssemblyToolchain, srcToolchain: SourceToolchain, cCompiler: str,
                          buildTmpPath: Path, benchmarkProblemsPath: Path,
                          debugConfig: DebugConfig, deviceId: int,
-                         gfxName: str, isaInfoMap: Dict[str, IsaInfo], probSolMap: dict
+                         gfxName: str, isaInfoMap: Dict[str, IsaInfo], probSolMap: dict,
+                         compileOnly: bool = False,
     ):
-    """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config"""
+    """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config
+
+    Args:
+        compileOnly: If True, generate and compile kernels but skip benchmarking.
+    """
     benchmarkTestFails = 0
 
     print1("")
@@ -520,7 +525,9 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             benchmarkStep.activationArgs, solutions, cacheValid)
 
         # run benchmarking client
-        if not os.path.exists(resultsFileName) or globalParameters["ForceRedoBenchmarkProblems"]:
+        if compileOnly:
+            print1("# Compile-only mode: skipping benchmark.")
+        elif not os.path.exists(resultsFileName) or globalParameters["ForceRedoBenchmarkProblems"]:
             libraryLogicPath = None
             forBenchmark = True
             returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath)
@@ -553,9 +560,14 @@ def main(
     deviceId: int,
     gfxName: str,
     isaInfoMap: Dict[str, IsaInfo],
-    probSolMap: dict
+    probSolMap: dict,
+    compileOnly: bool = False,
 ):
-    """Entry point for the "BenchmarkProblems" section of a Tensile config yaml"""
+    """Entry point for the "BenchmarkProblems" section of a Tensile config yaml
+
+    Args:
+        compileOnly: If True, generate and compile kernels but skip benchmarking.
+    """
     getClientExecutablePath()
 
     if config is None:
@@ -607,7 +619,8 @@ def main(
                             deviceId,
                             gfxName,
                             isaInfoMap,
-                            probSolMap
+                            probSolMap,
+                            compileOnly,
                         )
                 totalTestFails += benchmarkErrors
 
