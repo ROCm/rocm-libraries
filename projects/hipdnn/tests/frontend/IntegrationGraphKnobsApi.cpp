@@ -3,7 +3,6 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_test_sdk/utilities/LoggingUtils.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;

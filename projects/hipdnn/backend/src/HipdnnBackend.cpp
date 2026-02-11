@@ -354,3 +354,31 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                         *maxStringLen);
     });
 }
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendSetGlobalLoggingCallback_ext(hipdnnBackendLogOutputCallback_t callback, bool async)
+{
+    return hipdnn_backend::logging::initializeGlobalOutputCallbackLogger(callback, async);
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLogLevel_ext(hipdnnSeverity_t level)
+{
+    // Validate log level
+    if(level != HIPDNN_SEV_INFO && level != HIPDNN_SEV_WARN && level != HIPDNN_SEV_ERROR
+       && level != HIPDNN_SEV_FATAL && level != HIPDNN_SEV_OFF)
+    {
+        return HIPDNN_STATUS_BAD_PARAM;
+    }
+
+    return hipdnn_backend::logging::setGlobalLogLevel(level);
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetGlobalLogLevel_ext(hipdnnSeverity_t* level)
+{
+    if(level == nullptr)
+    {
+        return HIPDNN_STATUS_BAD_PARAM;
+    }
+
+    return hipdnn_backend::logging::getGlobalLogLevel(level);
+}

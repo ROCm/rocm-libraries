@@ -15,8 +15,6 @@ SPDX-License-Identifier: MIT
 
 int main(int argc, char** argv)
 {
-    hipdnn_backend::logging::initialize();
-
     ::testing::InitGoogleTest(&argc, argv);
 
     hipdnn_backend::plugin::EnginePluginResourceManager::setPluginPaths(
@@ -27,6 +25,5 @@ int main(int argc, char** argv)
     listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
 
     auto result = RUN_ALL_TESTS();
-    spdlog::shutdown();
     return result;
 }

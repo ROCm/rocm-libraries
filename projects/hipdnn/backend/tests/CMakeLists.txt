@@ -39,6 +39,7 @@ add_executable(
     TestHandle.cpp
     TestHelpers.cpp
     TestBackendLogger.cpp
+    TestGlobalLoggingApis.cpp
     TestPlugin.cpp
     TestSharedLibrary.cpp
     utilities/TestEngineOrdering.cpp

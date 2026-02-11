@@ -143,4 +143,65 @@ HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
         HIPDNN_SDK_LOG_FATAL_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
+// === Logging Callback and Log Level APIs ===
+
+/**
+ * @brief Set global backend log output callback to redirect all logs from console/file.
+ *
+ * When a global backend log output callback is set, logs are sent ONLY to the callback
+ * (console/file output is disabled). Setting callback to nullptr restores default console/file behavior.
+ *
+ * @param callback   Backend log output callback function, or nullptr to restore default behavior
+ * @param async      If true, callback is invoked asynchronously; if false, synchronously
+ * @return Error object indicating success or failure
+ */
+inline Error setGlobalLoggingCallback(hipdnnBackendLogOutputCallback_t callback, bool async = true)
+{
+    auto status = hipdnnBackendSetGlobalLoggingCallback_ext(callback, async);
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to set global logging callback"};
+    }
+    return {};
+}
+
+/**
+ * @brief Set the global log level.
+ *
+ * This controls which log messages are output to console/file AND to the global backend log output callback.
+ * Updates BOTH frontend and backend log levels.
+ *
+ * @param level   The severity level to set
+ * @return Error object indicating success or failure
+ */
+inline Error setGlobalLogLevel(hipdnnSeverity_t level)
+{
+    // Update frontend's cache (in user executable)
+    hipdnn_data_sdk::logging::setLogLevel(level);
+
+    // Update backend's cache (in backend shared library)
+    auto status = hipdnnBackendSetGlobalLogLevel_ext(level);
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to set global log level"};
+    }
+    return {};
+}
+
+/**
+ * @brief Get the global log level.
+ *
+ * @param[out] level   The current severity level
+ * @return Error object indicating success or failure
+ */
+inline Error getGlobalLogLevel(hipdnnSeverity_t& level)
+{
+    auto status = hipdnnBackendGetGlobalLogLevel_ext(&level);
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to get global log level"};
+    }
+    return {};
+}
+
 }

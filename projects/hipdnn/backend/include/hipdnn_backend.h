@@ -363,6 +363,52 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                                                                           char** pluginPaths,
                                                                           size_t* maxStringLen);
 
+/**
+ * @brief Backend log output callback function type for receiving logs from hipDNN.
+ *
+ * @param[in] severity   The severity level of the log message
+ * @param[in] message    The log message (null-terminated string, includes component name)
+ */
+typedef void (*hipdnnBackendLogOutputCallback_t)(hipdnnSeverity_t severity, const char* message);
+
+/**
+ * @brief Set global backend log output callback to redirect all logs from console/file.
+ *
+ * When a global backend log output callback is set, logs are sent ONLY to the callback
+ * (console/file output is disabled). Setting callback to NULL restores default console/file behavior.
+ *
+ * @param[in] callback   Backend log output callback function, or NULL to restore default behavior
+ * @param[in] async      If true, callback is invoked asynchronously; if false, synchronously
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           The callback was set successfully
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR    An internal error occurred
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLoggingCallback_ext(
+    hipdnnBackendLogOutputCallback_t callback, bool async);
+
+/**
+ * @brief Set the global log level for the backend.
+ *
+ * This controls which log messages are output to console/file AND to the global backend log output callback.
+ * Valid levels: HIPDNN_SEV_INFO, HIPDNN_SEV_WARN, HIPDNN_SEV_ERROR, HIPDNN_SEV_FATAL, HIPDNN_SEV_OFF.
+ *
+ * @param[in] level   The severity level to set
+ *
+ * @retval HIPDNN_STATUS_SUCCESS      The log level was set successfully
+ * @retval HIPDNN_STATUS_BAD_PARAM    Invalid log level
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLogLevel_ext(hipdnnSeverity_t level);
+
+/**
+ * @brief Get the global log level for the backend.
+ *
+ * @param[out] level   Pointer to store the current log level
+ *
+ * @retval HIPDNN_STATUS_SUCCESS      The log level was retrieved successfully
+ * @retval HIPDNN_STATUS_BAD_PARAM    level pointer is NULL
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetGlobalLogLevel_ext(hipdnnSeverity_t* level);
+
 #ifdef __cplusplus
 }
 #endif

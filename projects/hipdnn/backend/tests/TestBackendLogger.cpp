@@ -35,7 +35,7 @@ public:
             = std::make_unique<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter>(
                 "HIPDNN_LOG_FILE");
 
-        hipdnn_backend::logging::cleanup();
+        hipdnn_backend::logging::loggerShutdown();
 
         testing::internal::CaptureStderr();
 
@@ -45,7 +45,7 @@ public:
 
     void TearDown() override
     {
-        hipdnn_backend::logging::cleanup();
+        hipdnn_backend::logging::loggerShutdown();
 
         _logLevelGuard.reset();
         _logFileGuard.reset();
@@ -140,7 +140,7 @@ TEST_F(TestBackendLogger, LoggingCanBeReinitialized)
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "off");
     HIPDNN_BACKEND_LOG_INFO("This should not appear");
 
-    hipdnn_backend::logging::cleanup();
+    hipdnn_backend::logging::loggerShutdown();
 
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
     HIPDNN_BACKEND_LOG_INFO("This should appear after reinitialization");
@@ -195,7 +195,7 @@ TEST_F(TestBackendLogger, LogFileCanBeSpecifiedByEnvVar)
     HIPDNN_BACKEND_LOG_INFO("Logging to custom file");
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    hipdnn_backend::logging::cleanup();
+    hipdnn_backend::logging::loggerShutdown();
 
     std::string logContent;
     std::ifstream logFileStream(_logFile);

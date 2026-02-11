@@ -8,7 +8,6 @@ SPDX-License-Identifier: MIT
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
-#include <hipdnn_test_sdk/utilities/LoggingUtils.hpp>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
@@ -17,10 +16,6 @@ SPDX-License-Identifier: MIT
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
-
-    hipdnn_frontend::initializeFrontendLogging();
-    hipdnn_data_sdk::logging::registerLoggingCallback(
-        hipdnn_test_sdk::utilities::testLoggingCallback);
 
     auto pluginPath = std::filesystem::weakly_canonical(
         hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);

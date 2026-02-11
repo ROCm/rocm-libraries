@@ -30,7 +30,6 @@ add_executable(
     types/TestPortableTypes.cpp
     types/TestUserDefinedLiterals.cpp
     utilities/TestAllocators.cpp
-    utilities/TestCallbackLogger.cpp
     utilities/TestEngineNames.cpp
     utilities/TestFloats.cpp
     utilities/TestJson.cpp
