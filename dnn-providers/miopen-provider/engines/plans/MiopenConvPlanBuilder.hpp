@@ -18,7 +18,7 @@ public:
         size_t max;
     };
 
-    MiopenConvPlanBuilder() = default;
+    explicit MiopenConvPlanBuilder(bool deterministic = false);
     ~MiopenConvPlanBuilder() override = default;
 
     // Disallow copy and assignment
@@ -47,6 +47,9 @@ public:
     std::vector<hipdnn_data_sdk::data_objects::KnobT>
         getCustomKnobs(const HipdnnEnginePluginHandle& handle,
                        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+
+private:
+    bool _deterministic;
 };
 
 }

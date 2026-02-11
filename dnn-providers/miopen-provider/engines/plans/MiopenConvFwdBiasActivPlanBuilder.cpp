@@ -13,6 +13,11 @@
 namespace miopen_plugin
 {
 
+MiopenConvFwdBiasActivPlanBuilder::MiopenConvFwdBiasActivPlanBuilder(bool deterministic)
+    : _deterministic(deterministic)
+{
+}
+
 namespace
 {
 
@@ -386,6 +391,7 @@ bool checkComputeTypesLogErrors(
         return false;
     }
 }
+
 } // namespace
 
 bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
@@ -419,7 +425,8 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
         ConvFwdBiasActivParams params(std::get<0>(nodeAttrs.value()),
                                       std::get<1>(nodeAttrs.value()),
                                       std::get<2>(nodeAttrs.value()),
-                                      opGraph.getTensorMap());
+                                      opGraph.getTensorMap(),
+                                      _deterministic);
         MiopenExecutionSettings executionSettings;
         ConvFwdBiasActivPlan plan(handle, std::move(params), executionSettings, true, false);
         return true;
@@ -439,7 +446,7 @@ size_t MiopenConvFwdBiasActivPlanBuilder::getMaxWorkspaceSize(
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 
-    ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
+    ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap(), _deterministic);
     ConvFwdBiasActivPlan plan(handle, std::move(params), executionSettings, false, true);
     return plan.getWorkspaceSize(handle);
 }
@@ -460,7 +467,8 @@ void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 
-    ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
+    ConvFwdBiasActivParams params(
+        convAttr, biasAttr, activAttr, opGraph.getTensorMap(), _deterministic);
     auto plan = std::make_unique<ConvFwdBiasActivPlan>(
         handle, std::move(params), executionContext.executionSettings(), true, true);
     executionContext.setPlan(std::move(plan));

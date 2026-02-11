@@ -290,3 +290,21 @@ TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
     EXPECT_THROW(ConvFwdPlan(_handle, std::move(params), executionSettings),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+TEST(TestConvFwdParams, AcceptsDeterministicEnabledFlag)
+{
+    // Create a valid convolution graph
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    // Get the convolution node and attributes
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionFwdAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    // Construct params with deterministic enabled
+    EXPECT_NO_THROW(ConvFwdParams(*attrs, graph.getTensorMap(), true));
+
+    // Construct params with deterministic disabled (default)
+    EXPECT_NO_THROW(ConvFwdParams(*attrs, graph.getTensorMap(), false));
+}
