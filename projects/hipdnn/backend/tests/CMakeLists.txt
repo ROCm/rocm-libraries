@@ -41,6 +41,7 @@ add_executable(
     TestBackendLogger.cpp
     TestPlugin.cpp
     TestSharedLibrary.cpp
+    utilities/TestEngineOrdering.cpp
 )
 
 target_link_libraries(
