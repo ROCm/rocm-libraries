@@ -496,24 +496,48 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                            miopenDouble));
 
 // Test that verifies batched transpose is preferred over universal for supported types
-TEST(BatchedTransposeSolverSelection, BatchedPreferredOverUniversal)
+TEST(BatchedTransposeSolverSelection, VerifyBatchedKernelSelected)
 {
-    // This test documents that batched transpose should be tried before universal
-    // The actual selection happens in TransposingSolver::GetTransposeSolvers()
+    // This test verifies that supported data types actually select the batched
+    // transpose kernel (not just that it's applicable).
+    // We check construction_params[0].kernel_name starts with "batched_transpose_"
+
+    auto&& handle = get_handle();
+    auto ctx      = miopen::ExecutionContext{&handle};
+
+    // Test parameters: simple NCHW->NHWC transpose
+    uint32_t n = 1, c = 64, h = 56, w = 56;
+
+    // Helper lambda to check kernel name
+    auto verify_kernel =
+        [&](miopenDataType_t data_type, const char* type_name, bool should_use_batched) {
+            auto transpose_sol = miopen::TransposeSolutionDefault2Nhwc(ctx, data_type, n, c, h, w);
+            auto kernel_info   = transpose_sol.GetKernelInfo();
+
+            ASSERT_FALSE(kernel_info.kernel_name.empty())
+                << "Kernel name should not be empty for " << type_name;
+
+            if(should_use_batched)
+            {
+                EXPECT_TRUE(kernel_info.kernel_name.find("batched_transpose_") == 0)
+                    << type_name
+                    << " should use batched_transpose kernel, got: " << kernel_info.kernel_name;
+            }
+            else
+            {
+                EXPECT_TRUE(kernel_info.kernel_name.find("batched_transpose_") != 0)
+                    << type_name
+                    << " should NOT use batched_transpose kernel, got: " << kernel_info.kernel_name;
+            }
+        };
 
     // Supported by batched transpose
-    EXPECT_TRUE(miopen::BatchedTransposeSolution::IsApplicable(miopenFloat))
-        << "FP32 should use batched transpose";
-    EXPECT_TRUE(miopen::BatchedTransposeSolution::IsApplicable(miopenHalf))
-        << "FP16 should use batched transpose";
-    EXPECT_TRUE(miopen::BatchedTransposeSolution::IsApplicable(miopenBFloat16))
-        << "BF16 should use batched transpose";
-    EXPECT_TRUE(miopen::BatchedTransposeSolution::IsApplicable(miopenInt8))
-        << "Int8 should use batched transpose";
-    EXPECT_TRUE(miopen::BatchedTransposeSolution::IsApplicable(miopenInt32))
-        << "Int32 should use batched transpose";
+    verify_kernel(miopenFloat, "FP32", true);
+    verify_kernel(miopenHalf, "FP16", true);
+    verify_kernel(miopenBFloat16, "BF16", true);
+    verify_kernel(miopenInt8, "Int8", true);
+    verify_kernel(miopenInt32, "Int32", true);
 
     // NOT supported by batched transpose (falls back to universal)
-    EXPECT_FALSE(miopen::BatchedTransposeSolution::IsApplicable(miopenDouble))
-        << "Double should fall back to universal transpose";
+    verify_kernel(miopenDouble, "Double", false);
 }
