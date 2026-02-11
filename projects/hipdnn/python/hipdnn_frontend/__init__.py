@@ -49,4 +49,7 @@ __all__ = [
     "BatchnormMode",
     "Handle",
     "create_handle",
+    "destroy_handle",
+    "set_stream",
+    "get_stream",
 ]
