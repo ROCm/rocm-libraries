@@ -43,11 +43,9 @@ workgroup_size_y: 2
 workgroupMappingDim: 0
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDS
 load_B: BufferToLDS
-storeLDS_D: false
+store: VGPRToGlobalMemoryWithBuffer
 prefetch: true
 prefetchInFlight: 4
 prefetchLDSFactor: 1
