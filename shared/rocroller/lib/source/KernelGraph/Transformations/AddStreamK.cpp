@@ -1463,11 +1463,17 @@ namespace rocRoller
                 auto dpSelectorValue = dpFirst ? zero : one;
 
                 // Initialize SK section.
+                // The DP tile dims are also initialized to zero here so
+                // that the reverse Sunder can be fully traversed.  The
+                // selector ensures only the SK branch is evaluated at
+                // runtime.
                 auto skInit = initializeCoordinates(
                     graph,
                     scopeSK,
                     {{{skForwardForTileIdx,
                        skReverseForTileIdx,
+                       dpForwardForTileIdx.value(),
+                       dpReverseForTileIdx.value(),
                        forwardForAccumIdx,
                        reverseForAccumIdx},
                       zero},
@@ -1496,10 +1502,16 @@ namespace rocRoller
                 graph.control.chain<Sequence>(sendInfo.sendCond, receiveInfo.preWaitZero);
 
                 // Initialize DP section.
+                // The SK tile dims are also initialized to zero here so
+                // that the reverse Sunder can be fully traversed.  The
+                // selector ensures only the DP branch is evaluated at
+                // runtime.
                 auto dpInit = initializeCoordinates(
                     graph,
                     scopeDP,
-                    {{{dpForwardForTileIdx.value(),
+                    {{{skForwardForTileIdx,
+                       skReverseForTileIdx,
+                       dpForwardForTileIdx.value(),
                        dpReverseForTileIdx.value(),
                        forwardForAccumIdx,
                        reverseForAccumIdx},
