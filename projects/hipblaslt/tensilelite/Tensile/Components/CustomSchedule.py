@@ -1348,9 +1348,9 @@ def _get_schedule_96x256x64_16bit(kernel, useLDSTr, TLDS):
             # Epilogue-related
             'LRSA'   : [[22]],
             'LRSB'   : [[23]],
-            'LWSA'   : [[46]],
-            'LWSB'   : [[46]],
-            'LCC'    : [[47, 47]],
+            'LWSA'   : [[43]],
+            'LWSB'   : [[44]],
+            'LCC'    : [[45, 46]],
         }
 
         syncCode = syncTable[1::2]
