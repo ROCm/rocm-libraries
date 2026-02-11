@@ -34,17 +34,12 @@ import os
 def get_changed_files(ref1, ref2, project: str = None):
     """Return a set of files changed between two git refs."""
     try:
+        cmd = ["git", "diff", "--name-only", ref1, ref2]
+        if project:
+            # Scope git diff to only this project's subtree for efficiency
+            cmd += ["--", f"projects/{project}/"]
         result = subprocess.run(
-            ["pwd"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        print("cwd:", result.stdout)
-        current_directory = os.getcwd()
-        ck_path=os.path.dirname(current_directory)
-        result = subprocess.run(
-            ["git", "diff", "--name-only", ref1, ref2,"--", ck_path],
+            cmd,
             capture_output=True,
             text=True,
             check=True,
@@ -88,14 +83,13 @@ def load_depmap(depmap_json):
 def select_tests(file_to_executables, changed_files, filter_mode):
     """Return a set of test executables affected by changed files."""
     affected = set()
-    print("changed_files:",changed_files)
-    #print("file_to_executables:",file_to_executables)
     for f in changed_files:
         if f in file_to_executables:
             for exe in file_to_executables[f]:
-                affected.add(exe)
-                print("adding test:",exe)
-    print("affected tests:",affected)
+                if filter_mode == "all":
+                    affected.add(exe)
+                elif filter_mode == "test_prefix" and exe.startswith("test_"):
+                    affected.add(exe)
     return sorted(affected)
 
 
@@ -108,7 +102,7 @@ def main():
         if not os.path.exists(depmap_json):
             print(f"Dependency map JSON not found: {depmap_json}")
             sys.exit(1)
-        file_to_executables = load_depmap(depmap_json)
+        file_to_executables, _ = load_depmap(depmap_json)
         for f, exes in file_to_executables.items():
             print(f"{f}: {', '.join(exes)}")
         print(f"Total files: {len(file_to_executables)}")
@@ -125,7 +119,7 @@ def main():
         if not os.path.exists(depmap_json):
             print(f"Dependency map JSON not found: {depmap_json}")
             sys.exit(1)
-        file_to_executables = load_depmap(depmap_json)
+        file_to_executables, _ = load_depmap(depmap_json)
         affected_executables = set()
         for f in changed_files:
             if f in file_to_executables:
@@ -163,8 +157,6 @@ def main():
 
     file_to_executables, json_project = load_depmap(depmap_json)
     changed_files = get_changed_files(ref1, ref2, json_project)
-    print("changed_files:",changed_files)
-    print("file_to_executables:",file_to_executables)
     if not changed_files:
         print("No changed files detected.")
         tests = []
