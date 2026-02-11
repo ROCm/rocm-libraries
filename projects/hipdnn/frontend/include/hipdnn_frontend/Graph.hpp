@@ -1,5 +1,66 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+
+/**
+ * @file Graph.hpp
+ * @brief Main Graph class for building and executing deep learning operations
+ *
+ * This file contains the Graph class, which is the primary interface for users
+ * to construct computational graphs of deep learning operations and execute them
+ * on AMD GPUs via the hipDNN backend.
+ *
+ * @section graph_overview Overview
+ *
+ * The Graph class provides a fluent API for:
+ * - Creating tensors with specified dimensions and data types
+ * - Adding operations (convolution, batch normalization, pointwise, matmul)
+ * - Building execution plans with heuristic-based engine selection
+ * - Executing the graph on GPU
+ *
+ * @section graph_workflow Typical Workflow
+ *
+ * @code{.cpp}
+ * using namespace hipdnn_frontend;
+ * using namespace hipdnn_frontend::graph;
+ *
+ * // 1. Create and configure the graph
+ * Graph graph;
+ * graph.set_io_data_type(DataType::HALF)
+ *      .set_compute_data_type(DataType::FLOAT)
+ *      .set_name("my_conv_graph");
+ *
+ * // 2. Create input tensors
+ * auto x = Graph::tensor(TensorAttributes()
+ *              .set_dim({N, C, H, W})
+ *              .set_stride({C*H*W, H*W, W, 1})
+ *              .set_uid(0));
+ * auto w = Graph::tensor(TensorAttributes()
+ *              .set_dim({K, C, R, S})
+ *              .set_uid(1));
+ *
+ * // 3. Add operations
+ * auto y = graph.conv_fprop(x, w, ConvFpropAttributes()
+ *              .set_padding({1, 1})
+ *              .set_stride({1, 1}));
+ * y->set_output(true).set_uid(2);
+ *
+ * // 4. Build and execute
+ * hipdnnHandle_t handle;
+ * hipdnnCreate(&handle);
+ * graph.build(handle);
+ *
+ * int64_t workspaceSize;
+ * graph.get_workspace_size(workspaceSize);
+ * void* workspace;
+ * hipMalloc(&workspace, workspaceSize);
+ *
+ * std::unordered_map<int64_t, void*> variantPack = {
+ *     {0, d_input}, {1, d_weights}, {2, d_output}
+ * };
+ * graph.execute(handle, variantPack, workspace);
+ * @endcode
+ */
+
 #pragma once
 
 #include <HipdnnBackendFlatbufferData.h>
@@ -39,6 +100,21 @@
 namespace hipdnn_frontend::graph
 {
 
+/**
+ * @class Graph
+ * @brief The main class for building and executing hipDNN computational graphs
+ *
+ * Graph is the central class in hipDNN Frontend. It allows users to:
+ * - Define tensors and their properties
+ * - Add operation nodes (convolution, batchnorm, pointwise, matmul)
+ * - Build execution plans using heuristics
+ * - Execute the graph on AMD GPUs
+ *
+ * The Graph class uses a fluent interface pattern, where setter methods return
+ * a reference to the graph for method chaining.
+ *
+ * @see TensorAttributes, ConvFpropAttributes, BatchnormAttributes, PointwiseAttributes
+ */
 class Graph : public INode
 {
 private:
@@ -522,12 +598,25 @@ private:
 #endif
 
 public:
+    /**
+     * @brief Construct an empty Graph
+     */
     Graph()
         : INode(GraphAttributes{})
     {
         HIPDNN_FE_LOG_INFO("Creating new Graph instance");
     }
 
+    /**
+     * @brief Validate the graph structure and tensor configurations
+     * @return Error indicating success or describing validation failures
+     *
+     * Validates that:
+     * - All tensors have required attributes set
+     * - No duplicate tensor UIDs exist
+     * - Graph is a valid DAG (no cycles)
+     * - Graph is connected (single component)
+     */
     Error validate()
     {
         HIPDNN_FE_LOG_INFO("Validating graph " << graph_attributes.get_name());
@@ -650,6 +739,14 @@ public:
         return buildFlatbufferOperationGraphConst();
     }
 
+    /**
+     * @brief Build the operation graph descriptor
+     * @param handle The hipDNN handle
+     * @return Error indicating success or failure
+     *
+     * This is typically called internally by build(). It creates the backend
+     * operation graph descriptor from the frontend graph representation.
+     */
     Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
     {
         HIPDNN_FE_LOG_INFO("Building operation graph " << graph_attributes.get_name());
@@ -679,7 +776,14 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    // Get knobs for a specific engine
+    /**
+     * @brief Get available configuration knobs for a specific engine
+     * @param engineId The engine ID to query
+     * @param knobs Output vector of available Knob objects
+     * @return Error indicating success or failure
+     *
+     * @see Knob, KnobSetting
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const
     {
@@ -715,7 +819,12 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    // Get ranked list of engine IDs based on heuristics
+    /**
+     * @brief Get a ranked list of engine IDs based on heuristics
+     * @param rankedEngineIds Output vector of engine IDs, ranked by expected performance
+     * @param modes Heuristic modes to use for ranking
+     * @return Error indicating success or failure
+     */
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
                                 const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
@@ -732,6 +841,14 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Create execution plans using heuristics
+     * @param modes Heuristic modes to use for engine selection
+     * @return Error indicating success or failure
+     *
+     * Creates execution plans by querying the backend for available engines
+     * and selecting based on the specified heuristic modes.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plans(const std::vector<HeuristicMode>& modes
                                  = {HeuristicMode::FALLBACK})
@@ -763,7 +880,17 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    // Create execution plan with typed knob settings
+    /**
+     * @brief Create an execution plan with specific engine and knob settings
+     * @param engineId The engine ID to use
+     * @param settings Vector of KnobSetting objects to configure the engine
+     * @return Error indicating success or failure
+     *
+     * This method allows fine-grained control over engine selection and
+     * configuration through knob settings.
+     *
+     * @see Knob, KnobSetting, get_knobs_for_engine()
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plan_ext(int64_t engineId, const std::vector<KnobSetting>& settings)
     {
@@ -1005,6 +1132,12 @@ public:
     }
 #endif
 
+    /**
+     * @brief Finalize the execution plan
+     * @return Error indicating success or failure
+     *
+     * Called internally by build() after create_execution_plans().
+     */
     Error build_plans() // NOLINT(readability-identifier-naming)
     {
         HIPDNN_FE_LOG_INFO("Building plans for graph " << graph_attributes.get_name());
@@ -1024,6 +1157,27 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Build the complete graph and create execution plans
+     * @param handle The hipDNN handle
+     * @param modes Heuristic modes for engine selection
+     * @param policy Build plan policy (currently only HEURISTICS_CHOICE is used)
+     * @param do_multithreaded_builds Reserved for future use
+     * @return Error indicating success or failure
+     *
+     * This is the main method to prepare a graph for execution. It performs:
+     * 1. Graph validation
+     * 2. Operation graph building
+     * 3. Execution plan creation
+     * 4. Plan building
+     *
+     * @code{.cpp}
+     * hipdnnHandle_t handle;
+     * hipdnnCreate(&handle);
+     * Error err = graph.build(handle);
+     * if(err.is_bad()) { /* handle error */ }
+     * @endcode
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     Error build(hipdnnHandle_t handle,
                 std::vector<HeuristicMode> const& modes = {HeuristicMode::FALLBACK},
@@ -1047,6 +1201,13 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Get the workspace memory size required for execution
+     * @param workspaceSize Output parameter for the workspace size in bytes
+     * @return Error indicating success or failure
+     *
+     * Call this after build() to determine how much workspace memory to allocate.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_workspace_size(int64_t& workspaceSize) const
     {
@@ -1062,6 +1223,21 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Execute the graph with tensor pointers mapped by TensorAttributes
+     * @param handle The hipDNN handle
+     * @param tensorLookup Map from TensorAttributes to device memory pointers
+     * @param workspace Pointer to workspace memory (can be nullptr if size is 0)
+     * @return Error indicating success or failure
+     *
+     * @code{.cpp}
+     * std::unordered_map<std::shared_ptr<TensorAttributes>, void*> tensorLookup = {
+     *     {inputTensor, d_input},
+     *     {outputTensor, d_output}
+     * };
+     * graph.execute(handle, tensorLookup, workspace);
+     * @endcode
+     */
     Error execute(hipdnnHandle_t handle,
                   std::unordered_map<std::shared_ptr<TensorAttributes>, void*>& tensorLookup,
                   void* workspace) const
@@ -1083,6 +1259,22 @@ public:
         return execute(handle, variantPack, workspace);
     }
 
+    /**
+     * @brief Execute the graph with tensor pointers mapped by UID
+     * @param handle The hipDNN handle
+     * @param variantPack Map from tensor UID to device memory pointers
+     * @param workspace Pointer to workspace memory (can be nullptr if size is 0)
+     * @return Error indicating success or failure
+     *
+     * @code{.cpp}
+     * std::unordered_map<int64_t, void*> variantPack = {
+     *     {0, d_input},   // UID 0 -> input tensor
+     *     {1, d_weights}, // UID 1 -> weights
+     *     {2, d_output}   // UID 2 -> output tensor
+     * };
+     * graph.execute(handle, variantPack, workspace);
+     * @endcode
+     */
     Error execute(hipdnnHandle_t handle,
                   std::unordered_map<int64_t, void*>& variantPack,
                   void* workspace) const
