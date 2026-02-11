@@ -290,6 +290,12 @@ gfx11_common_patterns: &gfx11_common_patterns
   - "*GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_BFP16.ConvHipImplicitGemmGroupWrwXdlops*"
   - "Smoke/GPU_MultiMarginLoss*"
   - "*CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDevApplicability_FP16.ConvHipImplicitGemmGroupWrwXdlops*"
+  # Slow tests to exclude (from #3362)
+  - "Full/GPU_Softmax_FP32*"  # 24 min
+  - "Full/GPU_Softmax_BFP16*"  # 13 min
+  - "Full/GPU_Softmax_FP16*" # 11.5 min
+  - "Smoke/GPU_Reduce_FP32*"  # 6.5 min
+  - "Smoke/GPU_Reduce_FP16*"  # 4.5 min
 
 exclude_gpu:
   exclude_gpu_gfx120X:
@@ -311,6 +317,8 @@ exclude_gpu:
       - "ex_gpu_gfx110X"
 
   exclude_gpu_gfx115X:
+  #Negative patterns for gfx1150 and gfx1151 will be covered here. 
+  #Add exclude_gpu_gfx1150/gfx1151 separately only if they have unique patterns.
     test_patterns: *gfx11_common_patterns
     labels:
       - "quick"
@@ -318,16 +326,6 @@ exclude_gpu:
       - "comprehensive"
       - "full"
       - "ex_gpu_gfx115X"
-
-  exclude_gpu_gfx1150:
-    test_patterns:
-      - "Smoke/GPU_BNCKFWDTrainLarge2D_FP16*"
-      - "Smoke/GPU_BNOCLFWDTrainLarge2D_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_BFP16*"
-      - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16*"
-    labels:
-      - "quick"
-      - "ex_gpu_gfx1150"
 
   exclude_gpu_gfx950:
     test_patterns:
