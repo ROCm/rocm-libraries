@@ -12,25 +12,52 @@
 // Backend-specific logging macros
 // These are separate from HIPDNN_LOG_* used by frontend/plugins to avoid conflicts
 #ifdef HIPDNN_BACKEND_COMPILATION
-#define _HIPDNN_BACKEND_LOG_ACTION(spdlog_level, ...)               \
-    do                                                              \
-    {                                                               \
-        hipdnn_backend::logging::initialize();                      \
-        auto _logger = hipdnn_backend::logging::getBackendLogger(); \
-        if(_logger && _logger->should_log(spdlog_level))            \
-        {                                                           \
-            _logger->log(spdlog_level, __VA_ARGS__);                \
-        }                                                           \
+#include <fmt/format.h>
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
+
+#define HIPDNN_BACKEND_LOG_INFO(...)                                                            \
+    do                                                                                          \
+    {                                                                                           \
+        hipdnn_backend::logging::initialize();                                                  \
+        if(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO))                        \
+        {                                                                                       \
+            hipdnn_backend::logging::logMessage(                                                \
+                HIPDNN_SEV_INFO, fmt::format("[hipdnn_backend] {}", fmt::format(__VA_ARGS__))); \
+        }                                                                                       \
     } while(0)
 
-#define HIPDNN_BACKEND_LOG_INFO(...) \
-    _HIPDNN_BACKEND_LOG_ACTION(spdlog::level::level_enum::info, __VA_ARGS__)
-#define HIPDNN_BACKEND_LOG_WARN(...) \
-    _HIPDNN_BACKEND_LOG_ACTION(spdlog::level::level_enum::warn, __VA_ARGS__)
-#define HIPDNN_BACKEND_LOG_ERROR(...) \
-    _HIPDNN_BACKEND_LOG_ACTION(spdlog::level::level_enum::err, __VA_ARGS__)
-#define HIPDNN_BACKEND_LOG_FATAL(...) \
-    _HIPDNN_BACKEND_LOG_ACTION(spdlog::level::level_enum::critical, __VA_ARGS__)
+#define HIPDNN_BACKEND_LOG_WARN(...)                                                            \
+    do                                                                                          \
+    {                                                                                           \
+        hipdnn_backend::logging::initialize();                                                  \
+        if(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN))                        \
+        {                                                                                       \
+            hipdnn_backend::logging::logMessage(                                                \
+                HIPDNN_SEV_WARN, fmt::format("[hipdnn_backend] {}", fmt::format(__VA_ARGS__))); \
+        }                                                                                       \
+    } while(0)
+
+#define HIPDNN_BACKEND_LOG_ERROR(...)                                                            \
+    do                                                                                           \
+    {                                                                                            \
+        hipdnn_backend::logging::initialize();                                                   \
+        if(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_ERROR))                        \
+        {                                                                                        \
+            hipdnn_backend::logging::logMessage(                                                 \
+                HIPDNN_SEV_ERROR, fmt::format("[hipdnn_backend] {}", fmt::format(__VA_ARGS__))); \
+        }                                                                                        \
+    } while(0)
+
+#define HIPDNN_BACKEND_LOG_FATAL(...)                                                            \
+    do                                                                                           \
+    {                                                                                            \
+        hipdnn_backend::logging::initialize();                                                   \
+        if(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_FATAL))                        \
+        {                                                                                        \
+            hipdnn_backend::logging::logMessage(                                                 \
+                HIPDNN_SEV_FATAL, fmt::format("[hipdnn_backend] {}", fmt::format(__VA_ARGS__))); \
+        }                                                                                        \
+    } while(0)
 #endif // HIPDNN_BACKEND_COMPILATION
 
 namespace hipdnn_backend::logging
@@ -40,11 +67,7 @@ void initialize();
 
 void cleanup();
 
-void setLogLevel(const std::string& level);
-
-std::shared_ptr<spdlog::logger> getBackendLogger();
-
-std::shared_ptr<spdlog::logger> getCallbackReceiverLogger();
+void logMessage(hipdnnSeverity_t severity, const std::string& message);
 
 void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg);
 
