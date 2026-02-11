@@ -216,9 +216,6 @@ class GEMMSolution:
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
-    unroll_x: int = 0
-    unroll_y: int = 0
-
     load_A: str = "BufferToLDSViaVGPR"
     load_B: str = "BufferToLDSViaVGPR"
     store: str = "VGPRToGlobalMemoryViaLDSWithBuffer"
@@ -597,6 +594,11 @@ def cast_missing_parameters(result):
 
         result["workgroupMappingDim"] = wgmDim
         result["workgroupMappingValue"] = wgmValue
+
+    # Remove old/deprecated
+    for attr in ["unroll_x", "unroll_y"]:
+        if attr in result:
+            del result[attr]
 
     if "storeLDS_D" in result:
         storeLDS_D = result["storeLDS_D"]

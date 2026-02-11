@@ -28,7 +28,8 @@ public:
         const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
         const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-            tensorMap);
+            tensorMap,
+        bool deterministicEnabled = false);
     ConvFwdBiasActivParams(const ConvFwdBiasActivParams&) = delete;
     ConvFwdBiasActivParams& operator=(const ConvFwdBiasActivParams&) = delete;
 
