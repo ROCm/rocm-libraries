@@ -8,7 +8,7 @@
 #include <hipdnn_data_sdk/utilities/StaticCast.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <numeric>
 #include <vector>
 
@@ -61,7 +61,8 @@ public:
         };
 
         // Iterate all indices in parallel
-        auto parallelFunc = makeParallelTensorFunctor(batchnormFwdInferenceFunc, x.dims());
+        auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
+            batchnormFwdInferenceFunc, x.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
         y.memory().markHostModified(); // Mark y memory as modified on host
@@ -118,8 +119,8 @@ public:
         };
 
         // Iterate all indices in parallel
-        auto parallelFunc
-            = makeParallelTensorFunctor(batchnormFwdInferenceWithVarianceFunc, x.dims());
+        auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
+            batchnormFwdInferenceWithVarianceFunc, x.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
         y.memory().markHostModified(); // Mark y memory as modified on host
@@ -247,7 +248,8 @@ public:
         auto nChannels = x.dims().at(1);
         std::vector<int64_t> parallelDims = {nChannels};
 
-        auto parallelFunc = makeParallelTensorFunctor(batchnormFwdTrainingFunc, parallelDims);
+        auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
+            batchnormFwdTrainingFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         // Mark all modified tensors as host-modified
@@ -410,7 +412,8 @@ public:
         auto nChannels = x.dims().at(1);
         std::vector<int64_t> parallelDims = {nChannels};
 
-        auto parallelFunc = makeParallelTensorFunctor(batchnormBwdFunc, parallelDims);
+        auto parallelFunc
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(batchnormBwdFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         dx.memory().markHostModified();
