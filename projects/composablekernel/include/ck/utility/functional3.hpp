@@ -74,7 +74,7 @@ struct index_decomposer<Sequence<Ls...>, Sequence<Is...>>
     static constexpr index_t NDim = sizeof...(Ls);
 
     /// Dimension lengths in iteration order
-    static constexpr index_t lengths[NDim] = {Ls...};
+    static constexpr index_array<NDim> lengths = {{Ls...}};
 
     /**
      * @brief Compute all strides in a single O(N) pass.
@@ -90,10 +90,10 @@ struct index_decomposer<Sequence<Ls...>, Sequence<Is...>>
         index_array<NDim> result{};
         if constexpr(NDim > 0)
         {
-            result.data[NDim - 1] = 1;
-            for(index_t i = static_cast<index_t>(NDim) - 2; i >= 0; --i)
+            result[NDim - 1] = 1;
+            for(index_t i = NDim - 2; i >= 0; --i)
             {
-                result.data[i] = result.data[i + 1] * lengths[i + 1];
+                result[i] = result[i + 1] * lengths[i + 1];
             }
         }
         return result;
@@ -111,7 +111,7 @@ struct index_decomposer<Sequence<Ls...>, Sequence<Is...>>
      * @tparam LinearIdx The linear index to decompose (compile-time constant)
      */
     template <index_t LinearIdx>
-    using decompose = Sequence<((LinearIdx / strides.data[Is]) % lengths[Is])...>;
+    using decompose = Sequence<((LinearIdx / strides[Is]) % lengths[Is])...>;
 
     /**
      * @brief Runtime decomposition of a linear index with reordering.
@@ -128,8 +128,7 @@ struct index_decomposer<Sequence<Ls...>, Sequence<Is...>>
     __host__ __device__ static void decompose_runtime(index_t linear_idx, MultiIndex& result)
     {
         // Compute ordered indices and assign to result in original dimension order
-        ((result(Number<New2Old::At(Number<Is>{})>{}) =
-              (linear_idx / strides.data[Is]) % lengths[Is]),
+        ((result(Number<New2Old::At(Number<Is>{})>{}) = (linear_idx / strides[Is]) % lengths[Is]),
          ...);
     }
 };

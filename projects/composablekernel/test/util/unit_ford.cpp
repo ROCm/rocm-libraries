@@ -391,9 +391,9 @@ TEST(IndexDecomposer, StrideComputation)
     // For Sequence<2, 3, 4>: strides = {3*4=12, 4, 1}
     using Decomposer = detail::index_decomposer<Sequence<2, 3, 4>, Sequence<0, 1, 2>>;
 
-    EXPECT_EQ(Decomposer::strides.data[0], 12);
-    EXPECT_EQ(Decomposer::strides.data[1], 4);
-    EXPECT_EQ(Decomposer::strides.data[2], 1);
+    EXPECT_EQ(Decomposer::strides[0], 12);
+    EXPECT_EQ(Decomposer::strides[1], 4);
+    EXPECT_EQ(Decomposer::strides[2], 1);
 }
 
 // ============================================================================
