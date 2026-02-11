@@ -51,7 +51,7 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
 
         // MIOPEN_ENGINE_DETERMINISTIC (convolution-only)
         {MIOPEN_ENGINE_DETERMINISTIC_ID,
-         []() -> std::unique_ptr<IEngine> {
+         []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine> {
              auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_DETERMINISTIC_ID);
              // Only include conv plan builders - batchnorm doesn't support deterministic mode
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(true));
