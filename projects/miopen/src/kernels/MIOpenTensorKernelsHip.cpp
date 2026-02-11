@@ -97,6 +97,7 @@ extern "C" __global__ void Op1dTensorGeneric(const MIOPEN_TYPE* a,
         c_ptr += c_step;
     }
 }
+
 #endif
 
 #ifdef USE_2D_TENSOR_GENERIC
@@ -153,6 +154,7 @@ extern "C" __global__ void Op2dTensorGeneric(const MIOPEN_TYPE* a,
         gid += step;
     }
 }
+
 #endif
 
 #ifdef USE_2D_TENSOR_SQUASH
@@ -418,6 +420,7 @@ extern "C" __global__ void Op3dTensorGeneric(const MIOPEN_TYPE* a,
         gid += step;
     }
 }
+
 #endif
 
 #ifdef USE_4D_TENSOR_GENERIC
