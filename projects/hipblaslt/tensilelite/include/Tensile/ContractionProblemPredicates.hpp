@@ -224,11 +224,11 @@ namespace TensileLite
                     HasIndex = true,
                     HasValue = true
                 };
-                size_t index;
+                int64_t index;
                 size_t value;
 
                 KRingShiftTailWrapOnly() = default;
-                KRingShiftTailWrapOnly(size_t index, size_t value)
+                KRingShiftTailWrapOnly(int64_t index, size_t value)
                     : index(index)
                     , value(value)
                 {
@@ -280,11 +280,11 @@ namespace TensileLite
                     size_t rem  = strideB1J & mask; // mod cacheLineElems (pow2)
 
                     // K is the (last) bound index (typically the summation dimension).
-                    size_t k = 0;
-                    if(index < 0)
-                        k = problem.boundSize(problem.boundIndices().size() + index);
-                    else
-                        k = problem.boundSize(index);
+                    auto const boundCount = static_cast<int64_t>(problem.boundIndices().size());
+                    int64_t    idx        = (index < 0) ? (boundCount + index) : index;
+                    if(idx < 0 || idx >= boundCount)
+                        return false;
+                    size_t k = problem.boundSize(static_cast<size_t>(idx));
 
                     // tailSize = k % depthU. If depthU>k, tailSize=k and mainloop is empty => safe.
                     size_t tailSize = (depthU != 0) ? (k % depthU) : 0;
