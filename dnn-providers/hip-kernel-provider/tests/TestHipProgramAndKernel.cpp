@@ -9,14 +9,14 @@
 
 #include <vector>
 
-TEST(HipProgram, CompilesAndGetsKernel)
+TEST(TestHipProgram, CompilesAndGetsKernel)
 {
     HipProgram program("vector_add.cpp", {"-O3"});
     hipFunction_t kernel = program.GetKernel("vector_add");
     EXPECT_NE(nullptr, kernel);
 }
 
-TEST(HipKernel, LaunchesVectorAdd)
+TEST(TestHipKernel, LaunchesVectorAdd)
 {
     constexpr int N = 256;
 
