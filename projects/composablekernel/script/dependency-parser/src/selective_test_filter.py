@@ -86,13 +86,12 @@ def load_depmap(depmap_json):
 def select_tests(file_to_executables, changed_files, filter_mode):
     """Return a set of test executables affected by changed files."""
     affected = set()
+    print("changed_files:",changed_files)
+    print("file_to_executables:",file_to_executables[changed_files[0]])
     for f in changed_files:
         if f in file_to_executables:
             for exe in file_to_executables[f]:
-                if filter_mode == "all":
-                    affected.add(exe)
-                elif filter_mode == "test_prefix" and exe.startswith("test_"):
-                    affected.add(exe)
+                affected.add(exe)
     return sorted(affected)
 
 
