@@ -148,7 +148,7 @@ TEST_F(TestBfloat16, Bfloat16TruncateInterop)
 
     // Test implicit conversion between rounding modes
     bfloat16 rneVal = bfloat16::from_bits(0x4000); // 2.0
-    bfloat16_truncate truncVal = rneVal;           // Implicit conversion
+    bfloat16_truncate truncVal = rneVal; // Implicit conversion
     EXPECT_EQ(truncVal.data, rneVal.data);
 
     // Convert back

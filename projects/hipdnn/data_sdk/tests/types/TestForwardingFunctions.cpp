@@ -439,8 +439,7 @@ TEST_F(TestForwardingFunctions, DoubleFmod)
 
 TEST_F(TestForwardingFunctions, DoubleFma)
 {
-    EXPECT_TRUE(
-        nearEqual(hipdnn_data_sdk::types::fma(2.0, 3.0, 1.0), std::fma(2.0, 3.0, 1.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::fma(2.0, 3.0, 1.0), std::fma(2.0, 3.0, 1.0)));
 }
 
 // ============================================================================
