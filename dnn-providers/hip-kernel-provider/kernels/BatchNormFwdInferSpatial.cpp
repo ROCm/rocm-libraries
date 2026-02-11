@@ -1,18 +1,17 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "bnorm_spatial_activation_functions.hpp"
-#include "float_types.h"
-#include "vector_types.hpp"
-#include <hip/hip_runtime.h>
+#include "BatchnormActivation.hpp"
+#include "FloatTypes.h"
+#include "VectorTypes.hpp"
 
 // determine block size using parameters passed from the host
 constexpr int blockSize = MIO_BN_GRP0 * MIO_BN_GRP1 * MIO_BN_GRP2;
 
 // define types for vectorized loads/stores
-using FLOAT_VEC_TYPE = typename miopen::mapped_vector_type<FLOAT, MIO_BN_VEC_SIZE>::type;
+using FLOAT_VEC_TYPE = typename hip_kernel_plugin::mapped_vector_type<FLOAT, MIO_BN_VEC_SIZE>::type;
 using FLOAT_ACCUM_VEC_TYPE =
-    typename miopen::mapped_vector_type<FLOAT_ACCUM, MIO_BN_VEC_SIZE>::type;
+    typename hip_kernel_plugin::mapped_vector_type<FLOAT_ACCUM, MIO_BN_VEC_SIZE>::type;
 
 template <unsigned int vecSizeX, unsigned int vecSizeY>
 __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
@@ -51,8 +50,9 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
         {
             inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
             inhat[i] = scale[i] * inhat[i] + bias[i];
-            inhat[i] = miopen::batchnorm::activation_op<FLOAT_ACCUM,
-                                                        miopen::neuron_op_type{MIOPEN_NRN_OP_ID}>(
+            inhat[i] = hip_kernel_plugin::batchnorm::applyActivation<
+                FLOAT_ACCUM,
+                hip_kernel_plugin::batchnorm::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
                 inhat[i], alpha, beta);
             value[i] = CVT_ACCUM2FLOAT(inhat[i]);
         }
@@ -64,21 +64,21 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
 }
 
 extern "C" __global__ void __launch_bounds__(blockSize)
-    MIOpenBatchNormFwdInferSpatialEst(const FLOAT* __restrict in,
-                                      FLOAT* __restrict out,
-                                      const FLOAT_ACCUM* __restrict estimatedMean,
-                                      const FLOAT_ACCUM* __restrict estimatedVariance,
-                                      const FLOAT_ACCUM* __restrict scale,
-                                      const FLOAT_ACCUM* __restrict bias,
-                                      double epsilon,
-                                      unsigned int c,
-                                      unsigned int hw,
-                                      unsigned int batchSize,
-                                      unsigned int cStride,
-                                      unsigned int hwStride,
-                                      unsigned int batchStride,
-                                      FLOAT_ACCUM alpha,
-                                      FLOAT_ACCUM beta)
+    BatchNormFwdInferSpatialEst(const FLOAT* __restrict in,
+                                FLOAT* __restrict out,
+                                const FLOAT_ACCUM* __restrict estimatedMean,
+                                const FLOAT_ACCUM* __restrict estimatedVariance,
+                                const FLOAT_ACCUM* __restrict scale,
+                                const FLOAT_ACCUM* __restrict bias,
+                                double epsilon,
+                                unsigned int c,
+                                unsigned int hw,
+                                unsigned int batchSize,
+                                unsigned int cStride,
+                                unsigned int hwStride,
+                                unsigned int batchStride,
+                                FLOAT_ACCUM alpha,
+                                FLOAT_ACCUM beta)
 {
     unsigned int tidx = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
     unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
@@ -154,20 +154,20 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 // Uses estimated inverse variance rather than inverse variance, which avoids need for an
 // epsilon parameter and rsqrt() operations.
 extern "C" __global__ void __launch_bounds__(blockSize)
-    MIOpenBatchNormFwdInferSpatialEstInvVar(const FLOAT* __restrict in,
-                                            FLOAT* __restrict out,
-                                            const FLOAT_ACCUM* __restrict estimatedMean,
-                                            const FLOAT_ACCUM* __restrict estimatedInvVariance,
-                                            const FLOAT_ACCUM* __restrict scale,
-                                            const FLOAT_ACCUM* __restrict bias,
-                                            unsigned int c,
-                                            unsigned int hw,
-                                            unsigned int batchSize,
-                                            unsigned int cStride,
-                                            unsigned int hwStride,
-                                            unsigned int batchStride,
-                                            FLOAT_ACCUM alpha,
-                                            FLOAT_ACCUM beta)
+    BatchNormFwdInferSpatialEstInvVar(const FLOAT* __restrict in,
+                                      FLOAT* __restrict out,
+                                      const FLOAT_ACCUM* __restrict estimatedMean,
+                                      const FLOAT_ACCUM* __restrict estimatedInvVariance,
+                                      const FLOAT_ACCUM* __restrict scale,
+                                      const FLOAT_ACCUM* __restrict bias,
+                                      unsigned int c,
+                                      unsigned int hw,
+                                      unsigned int batchSize,
+                                      unsigned int cStride,
+                                      unsigned int hwStride,
+                                      unsigned int batchStride,
+                                      FLOAT_ACCUM alpha,
+                                      FLOAT_ACCUM beta)
 {
     unsigned int tidx = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
     unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;

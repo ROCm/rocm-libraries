@@ -177,6 +177,11 @@ endfunction()
 set(KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/kernels/BatchNormFwdInferSpatial.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernels/vector_add.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/kernels/FloatTypes.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/kernels/VectorTypes.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/kernels/Bfloat16Dev.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/kernels/BatchnormActivation.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/kernels/HipKernelMath.hpp
 )
 
 # Generate embedded kernel sources and includes at configure time
@@ -195,11 +200,15 @@ add_library(
     HipKernelPlugin.cpp
     HipKernelPluginPublic.cpp
     HipKernelContainer.cpp
+    HipKernelUtils.cpp
     engines/HipKernelEngine.cpp
     hip/HipProgram.cpp
     hip/HipKernel.cpp
     ${CMAKE_BINARY_DIR}/kernel_sources.cpp
     ${CMAKE_BINARY_DIR}/kernel_includes.cpp
+    engines/plans/BatchnormPlanBuilder.cpp
+    engines/plans/BatchnormFwdInferencePlan.cpp
+    engines/plans/BatchnormApplicabilityChecks.cpp
 )
 target_compile_definitions(
     hip_kernel_plugin_impl PRIVATE COMPONENT_NAME="hip_kernel_plugin"
