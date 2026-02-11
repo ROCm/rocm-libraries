@@ -175,23 +175,22 @@ void ConvWrwPlan::execute(const HipdnnEnginePluginHandle& handle,
 
             if(traceEnabled)
             {
-                HIPDNN_PLUGIN_LOG_TRACE("Convolution Wrw: Found {} algorithms", returnedAlgoCount);
+                HIPDNN_PLUGIN_LOG_TRACE("Convolution Wrw: Found " << returnedAlgoCount
+                                                                  << " algorithms");
                 for(size_t i = 0; i < static_cast<size_t>(returnedAlgoCount); ++i)
                 {
-                    HIPDNN_PLUGIN_LOG_TRACE(
-                        "  Algorithm {}: algorithm={}, time={}, workspace_size={}",
-                        i,
-                        static_cast<int>(perfResults[i].bwd_weights_algo),
-                        perfResults[i].time,
-                        perfResults[i].memory);
+                    HIPDNN_PLUGIN_LOG_TRACE("  Algorithm "
+                                            << i << ": algorithm="
+                                            << static_cast<int>(perfResults[i].bwd_weights_algo)
+                                            << ", time=" << perfResults[i].time
+                                            << ", workspace_size=" << perfResults[i].memory);
                 }
             }
 
-            HIPDNN_PLUGIN_LOG_INFO(
-                "Convolution Wrw: Selected algorithm={}, time={}, workspace_size={}",
-                static_cast<int>(perfResults[0].bwd_weights_algo),
-                perfResults[0].time,
-                perfResults[0].memory);
+            HIPDNN_PLUGIN_LOG_INFO("Convolution Wrw: Selected algorithm="
+                                   << static_cast<int>(perfResults[0].bwd_weights_algo)
+                                   << ", time=" << perfResults[0].time
+                                   << ", workspace_size=" << perfResults[0].memory);
 
             _algorithm = perfResults[0].bwd_weights_algo;
             // Update workspace size with the actual requirement from the selected algorithm.
