@@ -53,7 +53,7 @@ public:
 
             auto absDiff = static_cast<float>(fabs(implValue - refValue));
             auto threshold
-                = _absoluteTolerance + _relativeTolerance * std::fabs(static_cast<float>(refValue));
+                = _absoluteTolerance + _relativeTolerance * fabs(static_cast<float>(refValue));
 
             if(absDiff > threshold)
             {
