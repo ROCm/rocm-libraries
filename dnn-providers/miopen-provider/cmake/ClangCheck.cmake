@@ -42,8 +42,9 @@ if(ENABLE_CLANG_FORMAT)
 
     add_custom_target(
         check_format
-        COMMAND find . ${CLANG_FORMAT_PRUNE} -regex ".*\\.\\(cpp\\|hpp\\|c\\|h\\)" -exec
-                ${CLANG_FORMAT_BINARY} --dry-run --Werror {} +
+        COMMAND find . ${CLANG_FORMAT_PRUNE}
+                \( -name "*.cpp" -o -name "*.hpp" -o -name "*.c" -o -name "*.h" \)
+                -exec ${CLANG_FORMAT_BINARY} --dry-run --Werror {} +
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         VERBATIM
         COMMENT "Checking code format"
@@ -51,8 +52,9 @@ if(ENABLE_CLANG_FORMAT)
 
     add_custom_target(
         format
-        COMMAND find . ${CLANG_FORMAT_PRUNE} -regex ".*\\.\\(cpp\\|hpp\\|c\\|h\\)" -exec
-                ${CLANG_FORMAT_BINARY} --verbose -i {} +
+        COMMAND find . ${CLANG_FORMAT_PRUNE}
+                \( -name "*.cpp" -o -name "*.hpp" -o -name "*.c" -o -name "*.h" \)
+                -exec ${CLANG_FORMAT_BINARY} --verbose -i {} +
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         VERBATIM
         COMMENT "Formatting code"
