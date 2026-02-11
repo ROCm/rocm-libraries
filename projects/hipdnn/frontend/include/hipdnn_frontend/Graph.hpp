@@ -727,7 +727,7 @@ public:
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
             engineHeuristicDesc, _graphDesc->get(), modes));
 
-        std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> engineConfigs;
+        std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
         HIPDNN_CHECK_ERROR(detail::getEngineConfigs(
             engineConfigs, rankedEngineIds, engineHeuristicDesc.get(), true));
 
@@ -846,7 +846,7 @@ public:
             "Failed to finalize engine config descriptor");
 
         // Create execution plan descriptor
-        _executionPlanDesc = std::make_unique<ScopedHipdnnBackendDescriptor>(
+        _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
 
         if(!_executionPlanDesc->valid())
