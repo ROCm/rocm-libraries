@@ -54,7 +54,6 @@ class TestGemmUniversal_FP16_KM_NK
 {
 };
 
-// dummy change to test the launch_tests script
 // clang-format off
 using KernelTypes_MK_KN = ::testing::Types<
     //         ADataType, BDataType, ComputeDataType, CDataType
