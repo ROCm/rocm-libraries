@@ -23,6 +23,10 @@ namespace hipdnn_data_sdk::types
 // Forwarding functions for int8_t
 // ============================================================================
 
+/// Returns the absolute value of x.
+/// @note abs(INT8_MIN) (-128) exhibits undefined behavior per C++ standard,
+/// as the result (128) cannot be represented in int8_t. On two's complement
+/// systems, this typically returns -128 (the input unchanged).
 inline int8_t abs(int8_t x)
 {
     return static_cast<int8_t>(std::abs(x));

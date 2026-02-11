@@ -213,6 +213,8 @@ template <Bfloat16RoundingMode RoundMode = Bfloat16RoundingMode::RNE>
 // NOLINTNEXTLINE(readability-identifier-naming) - lowercase to match hip_bfloat16 convention
 struct bfloat16_t
 {
+    /// Raw bit representation of the bfloat16 value.
+    /// Public to ensure binary compatibility with HIP hip_bfloat16 type.
     uint16_t data;
 
     /// The rounding mode used by this type
@@ -470,13 +472,9 @@ inline bfloat16_t<M> copysign(bfloat16_t<M> x, bfloat16_t<M> y)
 template <Bfloat16RoundingMode M>
 inline bfloat16_t<M> max(bfloat16_t<M> a, bfloat16_t<M> b)
 {
-    if(isnan(a) && isnan(b))
-    {
-        return bfloat16_t<M>::from_bits(detail::BFLOAT16_CANONICAL_NAN);
-    }
     if(isnan(a))
     {
-        return b;
+        return isnan(b) ? bfloat16_t<M>::from_bits(detail::BFLOAT16_CANONICAL_NAN) : b;
     }
     if(isnan(b))
     {
@@ -488,13 +486,9 @@ inline bfloat16_t<M> max(bfloat16_t<M> a, bfloat16_t<M> b)
 template <Bfloat16RoundingMode M>
 inline bfloat16_t<M> min(bfloat16_t<M> a, bfloat16_t<M> b)
 {
-    if(isnan(a) && isnan(b))
-    {
-        return bfloat16_t<M>::from_bits(detail::BFLOAT16_CANONICAL_NAN);
-    }
     if(isnan(a))
     {
-        return b;
+        return isnan(b) ? bfloat16_t<M>::from_bits(detail::BFLOAT16_CANONICAL_NAN) : b;
     }
     if(isnan(b))
     {

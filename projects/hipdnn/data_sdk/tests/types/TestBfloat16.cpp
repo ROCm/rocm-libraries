@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_data_sdk/types/All.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 
 #include <cmath>
 #include <limits>
@@ -232,6 +232,27 @@ TEST_F(TestBfloat16, Inequality)
     bfloat16 b(2.0f);
     EXPECT_TRUE(a != b);
     EXPECT_FALSE(a != a);
+}
+
+TEST_F(TestBfloat16, NanComparisonSemantics)
+{
+    // IEEE 754 NaN comparison semantics: NaN != NaN, NaN == NaN is false
+    bfloat16 nan = std::numeric_limits<bfloat16>::quiet_NaN();
+    bfloat16 value(1.0f);
+
+    // NaN is not equal to itself
+    EXPECT_FALSE(nan == nan);
+    EXPECT_TRUE(nan != nan);
+
+    // NaN is not equal to any value
+    EXPECT_FALSE(nan == value);
+    EXPECT_TRUE(nan != value);
+
+    // NaN comparisons are always false
+    EXPECT_FALSE(nan < value);
+    EXPECT_FALSE(nan > value);
+    EXPECT_FALSE(nan <= value);
+    EXPECT_FALSE(nan >= value);
 }
 
 TEST_F(TestBfloat16, LessThan)
@@ -465,19 +486,6 @@ TEST_F(TestBfloat16, Fma)
     bfloat16 b(3.0f);
     bfloat16 c(1.0f);
     EXPECT_TRUE(nearEqual(fma(a, b, c), bfloat16(7.0f)));
-}
-
-// ============================================================================
-// User-Defined Literal Tests
-// ============================================================================
-
-TEST_F(TestBfloat16, UserDefinedLiteral)
-{
-    bfloat16 a = 1.5_bf;
-    EXPECT_TRUE(nearEqual(static_cast<float>(a), 1.5f));
-
-    bfloat16 b = -3.14_bf;
-    EXPECT_TRUE(nearEqual(static_cast<float>(b), -3.14f, 0.02f));
 }
 
 // ============================================================================

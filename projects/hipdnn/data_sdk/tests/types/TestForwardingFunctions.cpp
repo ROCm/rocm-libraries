@@ -160,6 +160,84 @@ TEST_F(TestForwardingFunctions, FloatFma)
         nearEqual(hipdnn_data_sdk::types::fma(2.0f, 3.0f, 1.0f), std::fma(2.0f, 3.0f, 1.0f)));
 }
 
+TEST_F(TestForwardingFunctions, FloatExp2)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::exp2(2.0f), std::exp2(2.0f)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::exp2(0.0f), std::exp2(0.0f)));
+}
+
+TEST_F(TestForwardingFunctions, FloatLog2)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::log2(4.0f), std::log2(4.0f)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::log2(8.0f), std::log2(8.0f)));
+}
+
+TEST_F(TestForwardingFunctions, FloatLog10)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::log10(10.0f), std::log10(10.0f)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::log10(100.0f), std::log10(100.0f)));
+}
+
+TEST_F(TestForwardingFunctions, FloatSin)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::sin(0.0f), std::sin(0.0f)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::sin(1.0f), std::sin(1.0f)));
+}
+
+TEST_F(TestForwardingFunctions, FloatCos)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::cos(0.0f), std::cos(0.0f)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::cos(1.0f), std::cos(1.0f)));
+}
+
+TEST_F(TestForwardingFunctions, FloatTan)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::tan(0.0f), std::tan(0.0f)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::tan(0.5f), std::tan(0.5f)));
+}
+
+TEST_F(TestForwardingFunctions, FloatAsin)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::asin(0.0f), std::asin(0.0f)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::asin(0.5f), std::asin(0.5f)));
+}
+
+TEST_F(TestForwardingFunctions, FloatAcos)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::acos(0.0f), std::acos(0.0f)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::acos(0.5f), std::acos(0.5f)));
+}
+
+TEST_F(TestForwardingFunctions, FloatAtan)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::atan(0.0f), std::atan(0.0f)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::atan(1.0f), std::atan(1.0f)));
+}
+
+TEST_F(TestForwardingFunctions, FloatSinh)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::sinh(0.0f), std::sinh(0.0f)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::sinh(1.0f), std::sinh(1.0f)));
+}
+
+TEST_F(TestForwardingFunctions, FloatCosh)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::cosh(0.0f), std::cosh(0.0f)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::cosh(1.0f), std::cosh(1.0f)));
+}
+
+TEST_F(TestForwardingFunctions, FloatErf)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::erf(0.0f), std::erf(0.0f)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::erf(1.0f), std::erf(1.0f)));
+}
+
+TEST_F(TestForwardingFunctions, FloatFmod)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::fmod(5.0f, 2.0f), std::fmod(5.0f, 2.0f)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::fmod(7.5f, 3.0f), std::fmod(7.5f, 3.0f)));
+}
+
 // ============================================================================
 // Double forwarding function tests
 // ============================================================================
@@ -195,6 +273,176 @@ TEST_F(TestForwardingFunctions, DoubleTanh)
     EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::tanh(1.0), std::tanh(1.0)));
 }
 
+TEST_F(TestForwardingFunctions, DoubleIsinf)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::isinf(std::numeric_limits<double>::infinity()),
+              std::isinf(std::numeric_limits<double>::infinity()));
+    EXPECT_EQ(hipdnn_data_sdk::types::isinf(1.0), std::isinf(1.0));
+}
+
+TEST_F(TestForwardingFunctions, DoubleSignbit)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::signbit(-1.0), std::signbit(-1.0));
+    EXPECT_EQ(hipdnn_data_sdk::types::signbit(1.0), std::signbit(1.0));
+}
+
+TEST_F(TestForwardingFunctions, DoubleIsfinite)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::isfinite(1.0), std::isfinite(1.0));
+    EXPECT_EQ(hipdnn_data_sdk::types::isfinite(std::numeric_limits<double>::infinity()),
+              std::isfinite(std::numeric_limits<double>::infinity()));
+}
+
+TEST_F(TestForwardingFunctions, DoubleCopysign)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::copysign(3.0, -1.0), std::copysign(3.0, -1.0));
+    EXPECT_EQ(hipdnn_data_sdk::types::copysign(-3.0, 1.0), std::copysign(-3.0, 1.0));
+}
+
+TEST_F(TestForwardingFunctions, DoubleMax)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::max(1.0, 2.0), std::fmax(1.0, 2.0));
+    EXPECT_EQ(hipdnn_data_sdk::types::max(2.0, 1.0), std::fmax(2.0, 1.0));
+}
+
+TEST_F(TestForwardingFunctions, DoubleMin)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::min(1.0, 2.0), std::fmin(1.0, 2.0));
+    EXPECT_EQ(hipdnn_data_sdk::types::min(2.0, 1.0), std::fmin(2.0, 1.0));
+}
+
+TEST_F(TestForwardingFunctions, DoubleFloor)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::floor(2.7), std::floor(2.7));
+    EXPECT_EQ(hipdnn_data_sdk::types::floor(-2.3), std::floor(-2.3));
+}
+
+TEST_F(TestForwardingFunctions, DoubleCeil)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::ceil(2.3), std::ceil(2.3));
+    EXPECT_EQ(hipdnn_data_sdk::types::ceil(-2.7), std::ceil(-2.7));
+}
+
+TEST_F(TestForwardingFunctions, DoubleRound)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::round(2.3), std::round(2.3));
+    EXPECT_EQ(hipdnn_data_sdk::types::round(2.7), std::round(2.7));
+}
+
+TEST_F(TestForwardingFunctions, DoubleTrunc)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::trunc(2.7), std::trunc(2.7));
+    EXPECT_EQ(hipdnn_data_sdk::types::trunc(-2.7), std::trunc(-2.7));
+}
+
+TEST_F(TestForwardingFunctions, DoubleExp)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::exp(0.0), std::exp(0.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::exp(1.0), std::exp(1.0)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleExp2)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::exp2(2.0), std::exp2(2.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::exp2(0.0), std::exp2(0.0)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleLog)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::log(1.0), std::log(1.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::log(2.71828), std::log(2.71828)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleLog2)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::log2(4.0), std::log2(4.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::log2(8.0), std::log2(8.0)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleLog10)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::log10(10.0), std::log10(10.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::log10(100.0), std::log10(100.0)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleRsqrt)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::rsqrt(4.0), 1.0 / std::sqrt(4.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::rsqrt(9.0), 1.0 / std::sqrt(9.0)));
+}
+
+TEST_F(TestForwardingFunctions, DoublePow)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::pow(2.0, 3.0), std::pow(2.0, 3.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::pow(3.0, 2.0), std::pow(3.0, 2.0)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleSin)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::sin(0.0), std::sin(0.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::sin(1.0), std::sin(1.0)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleCos)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::cos(0.0), std::cos(0.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::cos(1.0), std::cos(1.0)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleTan)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::tan(0.0), std::tan(0.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::tan(0.5), std::tan(0.5)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleAsin)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::asin(0.0), std::asin(0.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::asin(0.5), std::asin(0.5)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleAcos)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::acos(0.0), std::acos(0.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::acos(0.5), std::acos(0.5)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleAtan)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::atan(0.0), std::atan(0.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::atan(1.0), std::atan(1.0)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleSinh)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::sinh(0.0), std::sinh(0.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::sinh(1.0), std::sinh(1.0)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleCosh)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::cosh(0.0), std::cosh(0.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::cosh(1.0), std::cosh(1.0)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleErf)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::erf(0.0), std::erf(0.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::erf(1.0), std::erf(1.0)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleFmod)
+{
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::fmod(5.0, 2.0), std::fmod(5.0, 2.0)));
+    EXPECT_TRUE(nearEqual(hipdnn_data_sdk::types::fmod(7.5, 3.0), std::fmod(7.5, 3.0)));
+}
+
+TEST_F(TestForwardingFunctions, DoubleFma)
+{
+    EXPECT_TRUE(
+        nearEqual(hipdnn_data_sdk::types::fma(2.0, 3.0, 1.0), std::fma(2.0, 3.0, 1.0)));
+}
+
 // ============================================================================
 // Integer type forwarding function tests
 // ============================================================================
@@ -203,6 +451,20 @@ TEST_F(TestForwardingFunctions, Int8Abs)
 {
     EXPECT_EQ(hipdnn_data_sdk::types::abs(int8_t{-5}), 5);
     EXPECT_EQ(hipdnn_data_sdk::types::abs(int8_t{5}), 5);
+}
+
+TEST_F(TestForwardingFunctions, Int8Max)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::max(int8_t{-5}, int8_t{10}), 10);
+    EXPECT_EQ(hipdnn_data_sdk::types::max(int8_t{10}, int8_t{-5}), 10);
+    EXPECT_EQ(hipdnn_data_sdk::types::max(int8_t{-10}, int8_t{-5}), -5);
+}
+
+TEST_F(TestForwardingFunctions, Int8Min)
+{
+    EXPECT_EQ(hipdnn_data_sdk::types::min(int8_t{-5}, int8_t{10}), -5);
+    EXPECT_EQ(hipdnn_data_sdk::types::min(int8_t{10}, int8_t{-5}), -5);
+    EXPECT_EQ(hipdnn_data_sdk::types::min(int8_t{-10}, int8_t{-5}), -10);
 }
 
 TEST_F(TestForwardingFunctions, Int32Abs)

@@ -94,34 +94,36 @@ constexpr uint8_t FP8_E5M2_EPSILON = 0x34;
 /// Round error (0.5)
 constexpr uint8_t FP8_E5M2_ROUND_ERROR = 0x38;
 
+/// Rounding threshold for round-to-nearest-even (midpoint of 21-bit remainder)
+constexpr uint32_t FP8_E5M2_ROUND_THRESHOLD = 0x100000;
+
 // NOLINTBEGIN(readability-identifier-naming,readability-implicit-bool-conversion,modernize-use-auto)
 
 // Convert float to FP8 E5M2 bits (OCP format: 1 sign, 5 exponent, 2 mantissa)
 // Range: +/- 57344, has infinity and NaN
 inline uint8_t float_to_fp8_e5m2_bits(float f, bool saturate = true) noexcept
 {
+    // Handle special values first using std library functions
+    if(std::isnan(f))
+    {
+        return std::signbit(f) ? 0xFF : 0x7F; // NaN with preserved sign
+    }
+
+    if(std::isinf(f))
+    {
+        if(saturate)
+        {
+            return std::signbit(f) ? 0xFB : 0x7B; // Saturate to max finite
+        }
+        return std::signbit(f) ? 0xFC : 0x7C; // Infinity
+    }
+
     uint32_t bits;
     std::memcpy(&bits, &f, sizeof(float));
 
     uint32_t sign = (bits >> 24) & 0x80; // Extract sign to bit 7
     int32_t exp = ((bits >> 23) & 0xFF) - 127 + 15; // Rebias from float (127) to E5M2 (15)
     uint32_t mant = bits & 0x007FFFFF;
-
-    // Handle NaN
-    if(((bits >> 23) & 0xFF) == 255 && mant != 0)
-    {
-        return static_cast<uint8_t>(sign | 0x7F); // NaN (all mantissa bits set)
-    }
-
-    // Handle infinity
-    if(((bits >> 23) & 0xFF) == 255)
-    {
-        if(saturate)
-        {
-            return static_cast<uint8_t>(sign | 0x7B); // Saturate to max finite
-        }
-        return static_cast<uint8_t>(sign | 0x7C); // Infinity
-    }
 
     // Handle overflow
     if(exp >= 31)
@@ -158,7 +160,8 @@ inline uint8_t float_to_fp8_e5m2_bits(float f, bool saturate = true) noexcept
     uint32_t remainder = mant & 0x001FFFFF;
 
     // Round to nearest even
-    if(remainder > 0x100000 || (remainder == 0x100000 && (fp8Mant & 1)))
+    if(remainder > FP8_E5M2_ROUND_THRESHOLD
+       || (remainder == FP8_E5M2_ROUND_THRESHOLD && (fp8Mant & 1)))
     {
         fp8Mant++;
         if(fp8Mant > 3)
@@ -251,6 +254,8 @@ inline float fp8_e5m2_bits_to_float(uint8_t bits) noexcept
 // NOLINTNEXTLINE(readability-identifier-naming) - lowercase for consistency
 struct fp8_e5m2
 {
+    /// Raw bit representation of the FP8 E5M2 value.
+    /// Public to ensure binary compatibility with HIP native types.
     uint8_t data;
 
     // Default constructor - value-initialized to zero for constexpr support
@@ -462,13 +467,9 @@ inline bool isfinite(fp8_e5m2 x)
 
 inline fp8_e5m2 max(fp8_e5m2 a, fp8_e5m2 b)
 {
-    if(isnan(a) && isnan(b))
-    {
-        return fp8_e5m2::from_bits(detail::FP8_E5M2_QNAN);
-    }
     if(isnan(a))
     {
-        return b;
+        return isnan(b) ? fp8_e5m2::from_bits(detail::FP8_E5M2_QNAN) : b;
     }
     if(isnan(b))
     {
@@ -479,13 +480,9 @@ inline fp8_e5m2 max(fp8_e5m2 a, fp8_e5m2 b)
 
 inline fp8_e5m2 min(fp8_e5m2 a, fp8_e5m2 b)
 {
-    if(isnan(a) && isnan(b))
-    {
-        return fp8_e5m2::from_bits(detail::FP8_E5M2_QNAN);
-    }
     if(isnan(a))
     {
-        return b;
+        return isnan(b) ? fp8_e5m2::from_bits(detail::FP8_E5M2_QNAN) : b;
     }
     if(isnan(b))
     {

@@ -147,8 +147,9 @@ inline uint16_t float_to_half_bits(float f) noexcept
 
     // Round to nearest even
     uint32_t halfMant = mant >> 13;
-    uint32_t remainder = mant & 0x1FFF;
-    if(remainder > 0x1000 || (remainder == 0x1000 && ((halfMant & 1) != 0U)))
+    uint32_t remainder = mant & HALF_REMAINDER_MASK;
+    if(remainder > HALF_ROUND_THRESHOLD
+       || (remainder == HALF_ROUND_THRESHOLD && ((halfMant & 1) != 0U)))
     {
         halfMant++;
         if(halfMant > 0x3FF)
@@ -228,6 +229,8 @@ inline float half_bits_to_float(uint16_t bits) noexcept
 // NOLINTNEXTLINE(readability-identifier-naming) - lowercase to match half convention
 struct half
 {
+    /// Raw bit representation of the half-precision value.
+    /// Public to ensure binary compatibility with HIP __half type.
     uint16_t data;
 
     // Default constructor - value-initialized to zero for constexpr support
@@ -448,13 +451,9 @@ inline half copysign(half x, half y)
 // Min/max with NaN handling
 inline half max(half a, half b)
 {
-    if(isnan(a) && isnan(b))
-    {
-        return half::from_bits(detail::HALF_CANONICAL_NAN);
-    }
     if(isnan(a))
     {
-        return b;
+        return isnan(b) ? half::from_bits(detail::HALF_CANONICAL_NAN) : b;
     }
     if(isnan(b))
     {
@@ -465,13 +464,9 @@ inline half max(half a, half b)
 
 inline half min(half a, half b)
 {
-    if(isnan(a) && isnan(b))
-    {
-        return half::from_bits(detail::HALF_CANONICAL_NAN);
-    }
     if(isnan(a))
     {
-        return b;
+        return isnan(b) ? half::from_bits(detail::HALF_CANONICAL_NAN) : b;
     }
     if(isnan(b))
     {

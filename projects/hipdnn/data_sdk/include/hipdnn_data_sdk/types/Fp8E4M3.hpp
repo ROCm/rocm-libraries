@@ -85,12 +85,31 @@ constexpr uint8_t FP8_E4M3_EPSILON = 0x20;
 /// Round error (0.5)
 constexpr uint8_t FP8_E4M3_ROUND_ERROR = 0x38;
 
+/// Rounding threshold for round-to-nearest-even (midpoint of 20-bit remainder)
+constexpr uint32_t FP8_E4M3_ROUND_THRESHOLD = 0x80000;
+
 // NOLINTBEGIN(readability-identifier-naming,readability-implicit-bool-conversion,modernize-use-auto)
 
 // Convert float to FP8 E4M3 bits (OCP format: 1 sign, 4 exponent, 3 mantissa)
 // Range: +/- 448, no infinity, NaN = 0x7F or 0xFF
 inline uint8_t float_to_fp8_e4m3_bits(float f, bool saturate = true) noexcept
 {
+    // Handle special values first using std library functions
+    if(std::isnan(f))
+    {
+        return std::signbit(f) ? 0xFF : 0x7F; // NaN with preserved sign
+    }
+
+    if(std::isinf(f))
+    {
+        // E4M3 has no infinity - saturate to max or return NaN
+        if(saturate)
+        {
+            return std::signbit(f) ? 0xFE : 0x7E; // Max finite value
+        }
+        return std::signbit(f) ? 0xFF : 0x7F; // NaN
+    }
+
     uint32_t bits;
     std::memcpy(&bits, &f, sizeof(float));
 
@@ -98,14 +117,8 @@ inline uint8_t float_to_fp8_e4m3_bits(float f, bool saturate = true) noexcept
     int32_t exp = ((bits >> 23) & 0xFF) - 127 + 7; // Rebias from float (127) to E4M3 (7)
     uint32_t mant = bits & 0x007FFFFF;
 
-    // Handle NaN
-    if(((bits >> 23) & 0xFF) == 255 && mant != 0)
-    {
-        return static_cast<uint8_t>(sign | 0x7F); // NaN
-    }
-
-    // Handle infinity or overflow
-    if(exp >= 15 || ((bits >> 23) & 0xFF) == 255)
+    // Handle overflow
+    if(exp >= 15)
     {
         if(saturate)
         {
@@ -124,7 +137,10 @@ inline uint8_t float_to_fp8_e4m3_bits(float f, bool saturate = true) noexcept
     // Handle denormalized or underflow
     if(exp <= 0)
     {
-        // Denormalized
+        // Denormalized: shift formula is (1 - exp + 20) where exp can range from
+        // -17 (deeply subnormal float) to 0, giving shift values from 21 to 38.
+        // The guard condition (shift >= 24) ensures we don't shift beyond the
+        // 24-bit mantissa, returning zero for values too small to represent.
         mant |= 0x00800000; // Add implicit 1
         uint32_t shift = static_cast<uint32_t>(1 - exp + 20); // 23 - 3 = 20 bits to shift
         if(shift >= 24)
@@ -140,7 +156,8 @@ inline uint8_t float_to_fp8_e4m3_bits(float f, bool saturate = true) noexcept
     uint32_t remainder = mant & 0x000FFFFF;
 
     // Round to nearest even
-    if(remainder > 0x80000 || (remainder == 0x80000 && (fp8Mant & 1)))
+    if(remainder > FP8_E4M3_ROUND_THRESHOLD
+       || (remainder == FP8_E4M3_ROUND_THRESHOLD && (fp8Mant & 1)))
     {
         fp8Mant++;
         if(fp8Mant > 7)
@@ -224,6 +241,8 @@ inline float fp8_e4m3_bits_to_float(uint8_t bits) noexcept
 // NOLINTNEXTLINE(readability-identifier-naming) - lowercase for consistency
 struct fp8_e4m3
 {
+    /// Raw bit representation of the FP8 E4M3 value.
+    /// Public to ensure binary compatibility with HIP native types.
     uint8_t data;
 
     // Default constructor - value-initialized to zero for constexpr support
@@ -434,13 +453,9 @@ inline bool isfinite(fp8_e4m3 x)
 
 inline fp8_e4m3 max(fp8_e4m3 a, fp8_e4m3 b)
 {
-    if(isnan(a) && isnan(b))
-    {
-        return fp8_e4m3::from_bits(detail::FP8_E4M3_NAN);
-    }
     if(isnan(a))
     {
-        return b;
+        return isnan(b) ? fp8_e4m3::from_bits(detail::FP8_E4M3_NAN) : b;
     }
     if(isnan(b))
     {
@@ -451,13 +466,9 @@ inline fp8_e4m3 max(fp8_e4m3 a, fp8_e4m3 b)
 
 inline fp8_e4m3 min(fp8_e4m3 a, fp8_e4m3 b)
 {
-    if(isnan(a) && isnan(b))
-    {
-        return fp8_e4m3::from_bits(detail::FP8_E4M3_NAN);
-    }
     if(isnan(a))
     {
-        return b;
+        return isnan(b) ? fp8_e4m3::from_bits(detail::FP8_E4M3_NAN) : b;
     }
     if(isnan(b))
     {

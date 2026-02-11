@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_data_sdk/types/All.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 
 #include <cmath>
 #include <limits>
@@ -240,6 +240,27 @@ TEST_F(TestFp8E5M2, Inequality)
     EXPECT_FALSE(a != a);
 }
 
+TEST_F(TestFp8E5M2, NanComparisonSemantics)
+{
+    // IEEE 754 NaN comparison semantics: NaN != NaN, NaN == NaN is false
+    fp8_e5m2 nan = std::numeric_limits<fp8_e5m2>::quiet_NaN();
+    fp8_e5m2 value(1.0f);
+
+    // NaN is not equal to itself
+    EXPECT_FALSE(nan == nan);
+    EXPECT_TRUE(nan != nan);
+
+    // NaN is not equal to any value
+    EXPECT_FALSE(nan == value);
+    EXPECT_TRUE(nan != value);
+
+    // NaN comparisons are always false
+    EXPECT_FALSE(nan < value);
+    EXPECT_FALSE(nan > value);
+    EXPECT_FALSE(nan <= value);
+    EXPECT_FALSE(nan >= value);
+}
+
 TEST_F(TestFp8E5M2, LessThan)
 {
     fp8_e5m2 a(1.0f);
@@ -418,19 +439,6 @@ TEST_F(TestFp8E5M2, Round)
 {
     EXPECT_TRUE(nearEqual(round(fp8_e5m2(2.0f)), fp8_e5m2(2.0f)));
     EXPECT_TRUE(nearEqual(round(fp8_e5m2(3.0f)), fp8_e5m2(3.0f)));
-}
-
-// ============================================================================
-// User-Defined Literal Tests
-// ============================================================================
-
-TEST_F(TestFp8E5M2, UserDefinedLiteral)
-{
-    fp8_e5m2 a = 1.5_bfp8;
-    EXPECT_TRUE(nearEqual(static_cast<float>(a), 1.5f));
-
-    fp8_e5m2 b = -2.0_bfp8;
-    EXPECT_TRUE(nearEqual(static_cast<float>(b), -2.0f));
 }
 
 // ============================================================================

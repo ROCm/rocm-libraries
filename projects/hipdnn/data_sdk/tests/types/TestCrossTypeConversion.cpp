@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_data_sdk/types/All.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 
 #include <cmath>
 #include <limits>
