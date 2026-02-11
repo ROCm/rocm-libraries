@@ -345,11 +345,33 @@ namespace TensileLite
         }
         size_t totalAllocatedBytes() const
         {
-            return multiplyElementSize(totalAllocatedElements(), elementBytes());
+	    // Cannot use elementSize directly as elementSize is
+	    // packed size for MX data types.
+	    auto const info = DataTypeInfo::Get(m_dataType);
+	    assert(totalAllocatedElements() * info.elementSize % info.packing == 0);
+            return totalAllocatedElements() * info.elementSize / info.packing;
         }
 
-        float elementBytes() const
+        size_t elementBytes() const
         {
+	    // TODO:Need to enhance this to support segment type in tensileLite.
+	    // tensileLite currently maps MX data types to unsegmented
+	    // types in DataTypeInfo, i.e., Float4 -> Float4x2,
+	    // Float6 -> Float6x32. As a result, return elementSize is
+	    // incorrect for MX data types because elementSize represents
+	    // unsegmented size in bytes not segment size.
+	    //
+	    // To get element size (in bytes) for f4/f6/bf6, use
+	    //
+	    //   auto const info = DataTypeInfo::Get(m_dataType);
+	    //   auto elementSize = info.elementSize / info.packing
+	    //
+	    // tensileLite returns sizeof(Float4x2), sizeof(Float6x32),
+	    // sizeof(BFloat6x32) for rocisa::f4,f6,bf6.
+	    //
+	    assert(m_dataType != rocisa::DataType::Float6 &&
+                   m_dataType != rocisa::DataType::BFloat6 &&
+		   m_dataType != rocisa::DataType::Float4);
             return DataTypeInfo::Get(m_dataType).elementSize;
         }
 
@@ -509,14 +531,14 @@ namespace TensileLite
             {
                 coord[0] = 0;
 
-                auto const* localPtr = data + (desc.index(coord) / TypeInfo<T>::Packing);
+                auto const* localPtr = data + desc.index(coord);
 
                 if(sizes[0] > 0)
                     stream << localPtr[0];
 
-                for(coord[0] = TypeInfo<T>::Packing; coord[0] < sizes[0]; coord[0]+=TypeInfo<T>::Packing)
+                for(coord[0] = 1; coord[0] < sizes[0]; coord[0]++)
                 {
-                    stream << " " << localPtr[coord[0] * stride0 / TypeInfo<T>::Packing];
+                    stream << " " << localPtr[coord[0] * stride0];
                 }
 
                 stream << std::endl;
@@ -524,7 +546,7 @@ namespace TensileLite
 
             if(decorated)
             {
-                stream << "]" << std::endl;
+                stream << std::endl << "]" << std::endl;
             }
         }
     }

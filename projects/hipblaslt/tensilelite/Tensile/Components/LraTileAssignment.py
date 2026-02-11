@@ -226,6 +226,12 @@ class LraTileAssignmentMFMA(LraTileAssignment):
           strideTile  = 1 # DTV case. Actual stride will be applied later.
 
         strideK          = offsetK if umlds else (mt + LdsPad) * offsetK
+
+        # Workaround: StrideK might be a float value and causes function
+        #             signature error later (the function expected an int)
+        if not isinstance(strideK, int):
+           strideK = int(strideK) if strideK.is_integer() else strideK
+
         if enableLDSTr:
            if kernel["UseGeneralizedNLCOne%s"%tc] and perpStride > 1:
               strideK  = 8

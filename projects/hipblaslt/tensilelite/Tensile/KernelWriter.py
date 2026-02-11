@@ -128,8 +128,8 @@ class StateValues:
   bpr: int = 4 # all registers are 32bit
   # default setup
   # AB=DataType / Cexternal=DestDataType / Cinternal=Accumulation (MAC or MFMA)
-  bpeA: float = field(init=False)
-  bpeB: float = field(init=False)
+  bpeA: float = field(init=False)  # this is a float because of sub-byte data types (f6, f4)
+  bpeB: float = field(init=False)  # this is a float because of sub-byte data types (f6, f4)
   bpeE: int = field(init=False)
   # Cexternal = the "current" kernel output type,
   # - default: the "current" kernel is a non-GSU-kernel,
@@ -4101,7 +4101,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     """
 
     if kernel["EnableMatrixInstruction"] and kernel["LocalReadVectorWidthA"] >= kernel["MIInputPerThread"]:
-      WLR = max(kernel["LocalReadVectorWidthA"]//kernel["MIInputPerThread"], 1)
+      WLR = int(max(kernel["LocalReadVectorWidthA"]//kernel["MIInputPerThread"], 1))
       self.states.numItersPLR = kernel["PrefetchLocalRead"]%(kernel["LoopIters"]//WLR)
     else:
       self.states.numItersPLR = kernel["PrefetchLocalRead"]%(kernel["LoopIters"])

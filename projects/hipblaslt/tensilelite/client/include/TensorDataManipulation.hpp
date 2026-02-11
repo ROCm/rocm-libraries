@@ -175,10 +175,11 @@ namespace Tensor
                 return Tensor(shape, sizeof(T));
             }
 
-            Tensor(const Shape shape, float elementSize)
+            Tensor(const Shape shape, size_t elementSize)
                 : desc(shape)
                 , elementSize(elementSize)
-                , data(new char[TensileLite::multiplyElementSize(desc.flattenSize(), elementSize)])
+                , data(new char[elementSize * desc.flattenSize()])
+                //, data(new char[TensileLite::multiplyElementSize(desc.flattenSize(), elementSize)])
             {
             }
 
@@ -241,7 +242,8 @@ namespace Tensor
 
             size_t getNumBytes() const
             {
-                return TensileLite::multiplyElementSize(getDesc().flattenSize(), getElementSize());
+		return getDesc().flattenSize() * getElementSize();
+                //return TensileLite::multiplyElementSize(getDesc().flattenSize(), getElementSize());
             }
 
             void reshape(const Shape& shape)
@@ -255,7 +257,8 @@ namespace Tensor
             }
 
         private:
-            float                   elementSize{};
+            size_t                   elementSize{};
+            //float                   elementSize{};
             TensorDesc              desc;
             std::unique_ptr<char[]> data;
         };

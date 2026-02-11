@@ -217,6 +217,7 @@ def ParallelMap2(
 
     threadCount = CPUThreadCount(enable)
     threadCount = 16  # Manually set threads count to prevent oversubscription
+    threadCount = 1  # Manually set threads count to prevent oversubscription
     if threadCount <= 1 and globalParameters["ShowProgressBar"]:
         # Provide a progress bar for single-threaded operation.
         return [function(*args) if multiArg else function(args) for args in tqdm(objects, message)]

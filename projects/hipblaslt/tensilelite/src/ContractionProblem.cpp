@@ -1212,10 +1212,19 @@ namespace TensileLite
             gflop += 2 * cSize * 1e-9; // Include (+ beta * C) in gflops
             cSize *= 2; // Include read C and write D in gbytes
         }
+	// TODO: for MX data types, the size is smaller than a byte
+	// so we need to use (elementSize/packing) to derive the actual
+	// byte size of a segment.
+	auto infoA = DataTypeInfo::Get(a().dataType());
+	auto infoB = DataTypeInfo::Get(b().dataType());
+	auto infoC = DataTypeInfo::Get(c().dataType());
         double gbyte
-            = (multiplyElementSize(aSize, a().elementBytes()) +
-               multiplyElementSize(bSize, b().elementBytes()) +
-               multiplyElementSize(cSize, c().elementBytes()))
+            = ((aSize * infoA.elementSize / infoA.packing) +
+               (bSize * infoB.elementSize / infoB.packing) +
+               (cSize * infoC.elementSize / infoC.packing))
+            //= (multiplyElementSize(aSize, a().elementBytes()) +
+            //   multiplyElementSize(bSize, b().elementBytes()) +
+            //   multiplyElementSize(cSize, c().elementBytes()))
               * 1e-9;
 
         m_arithmeticIntensity = gflop / gbyte;
