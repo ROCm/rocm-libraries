@@ -99,8 +99,7 @@ class __Global_binder final {
             });
         });
 
-        auto rem_undef{::std::size(ud_)};
-        do {
+        for (auto i = 0u; i != ::std::size(ud_); ++i) {
             auto sidx{ud_.back()};
             ud_.pop_back();
 
@@ -110,7 +109,7 @@ class __Global_binder final {
                     info->dlpi_addr + it->second->st_value);
             }
             else ud_.push_front(sidx);
-        } while (--rem_undef);
+        }
     }
 
     // IMPLEMENTATION - ACCESSORS
