@@ -1145,47 +1145,9 @@ namespace rocRoller
             auto reverseInfo = addTileSpaceCT(
                 graph, false, loopInfo, accumInfo, argInfo, numTotalTiles, params->streamK);
 
-            // Add tile and accumulator ForLoop dimensions.
-            //
-            // 1. Create separate tile-loop counters for SK and DP
-            //    (skForTileIncr sized numSKTilesPerWG, dpForTileIncr
-            //    sized numDPTilesPerWG). DP counter is only created
-            //    in TwoTile mode.
-            //
-            // 2. Hijack the old accumulator loop: remove the previous
-            //    DataFlow edge from the accumulator increment to the
-            //    original ForLoop coordinate, then create shared
-            //    forward/reverse accum ForLoop dims with new DataFlow
-            //    edges from the accumulator increment. Add Identify
-            //    edges from the new accum dims to the original
-            //    accumulator coordinate so that offsets and strides
-            //    are computed correctly. Replace the original ForLoop
-            //    coordinate with a Linear dim.
-            //
-            // 3. Create separate tile ForLoop dims for SK and DP
-            //    (different sizes: numSKTilesPerWG vs numDPTilesPerWG).
-            //    Connect each partition's tile dims to its own
-            //    localTileSpace via Split/Join, and add DataFlow edges
-            //    from the respective tile-loop counter.
-
-            // SK tile-loop counter (register)
-            auto skForTileIncr = graph.coordinates.addElement(Linear(argInfo.numSKTilesPerWG, one));
-
-            // Hijack old accumulator loop.
-            //
-            // The old accumulator loop was a simple range-based loop.
-            // The new accumulator loop streams the accumulator tile
-            // index.
-            //
-            // Remove the DataFlow edge from the accumulator increment
-            // to the original accumulator ForLoop dimension.  Add new
-            // forward/reverse accum ForLoop dimensions with DataFlow
-            // edges from the accumulator increment.
-            //
-            // Add Identify edges from the new accumulator dimensions
-            // to the original coordinate. These edges are traversed
-            // when computing indexes, so that offsets and strides are
-            // appropriately placed.
+            // Hijack the old accumulator loop. Remove the DataFlow edge
+            // from the accumulator increment counter to the original
+            // accumulator ForLoop coordinate.
             auto forAccumIncr = only(graph.coordinates.getInputNodeIndices(
                                          accumInfo.accumulatorCoord, CG::isEdge<CG::DataFlow>))
                                     .value();
@@ -1195,13 +1157,17 @@ namespace rocRoller
                 graph.coordinates.deleteElement(dataflow);
             }
 
-            // Shared accum ForLoop dims (same size for SK and DP)
+            // Create new forward/reverse accum ForLoop dims, shared by both
+            // SK and DP (both iterate over the same number of accum tiles).
             auto forwardForAccumIdx = graph.coordinates.addElement(ForLoop(numAccumTiles, one));
             auto reverseForAccumIdx = graph.coordinates.addElement(ForLoop(numAccumTiles, one));
 
+            // Wire the accumulator increment counter to the new dims.
             graph.coordinates.addElement(DataFlow(), {forAccumIncr}, {forwardForAccumIdx});
             graph.coordinates.addElement(DataFlow(), {forAccumIncr}, {reverseForAccumIdx});
 
+            // Identify edges let index computation traverse from the new
+            // ForLoop dims back to the original coordinate for offsets/strides.
             graph.coordinates.addElement(
                 Identify(), {forwardForAccumIdx}, {accumInfo.accumulatorCoord});
             graph.coordinates.addElement(
@@ -1209,9 +1175,11 @@ namespace rocRoller
 
             graph.mapper.connect<ForLoop>(loopInfo.accumulatorLoopOp, forwardForAccumIdx);
 
-            // Create tile ForLoop dims and connect them to the local
-            // tile spaces via Split/Join. SK and DP get separate tile
-            // dims but share the accum dims above.
+            // Create tile ForLoop dims and connect them to the local tile
+            // spaces via Split/Join. SK and DP get separate tile dims
+            // but share the accum dims created above.
+
+            auto skForTileIncr = graph.coordinates.addElement(Linear(argInfo.numSKTilesPerWG, one));
             auto skForwardForTileIdx
                 = graph.coordinates.addElement(ForLoop(argInfo.numSKTilesPerWG, one));
             auto skReverseForTileIdx
@@ -1230,7 +1198,7 @@ namespace rocRoller
             graph.coordinates.addElement(DataFlow(), {skForTileIncr}, {skForwardForTileIdx});
             graph.coordinates.addElement(DataFlow(), {skForTileIncr}, {skReverseForTileIdx});
 
-            // DP tile ForLoop dims
+            // DP tile ForLoop dims (TwoTile only)
             std::optional<int> dpForTileIncr;
             std::optional<int> dpForwardForTileIdx;
             std::optional<int> dpReverseForTileIdx;
@@ -1261,7 +1229,9 @@ namespace rocRoller
                     DataFlow(), {dpForTileIncr.value()}, {dpReverseForTileIdx.value()});
             }
 
-            // Replace ForLoop dim with a Linear dim
+            // The original accumulator coordinate no longer has a DataFlow
+            // input. Replace it with a Linear so that loop-related passes
+            // don't treat it as an active ForLoop iterator.
             {
                 auto accumulatorCoordSize
                     = getSize(graph.coordinates.getNode(accumInfo.accumulatorCoord));
