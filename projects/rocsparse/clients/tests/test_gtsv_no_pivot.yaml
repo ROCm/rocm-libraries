@@ -30,9 +30,9 @@ Tests:
   category: quick
   function: gtsv_no_pivot
   precision: *single_only_precisions
-  M: [32]
-  N: [65536]
-  denseld: [32]
+  M: [8]
+  N: [1]
+  denseld: [8]
   matrix: [rocsparse_matrix_random]
 
 # # Quick

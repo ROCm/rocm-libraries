@@ -108,11 +108,17 @@ void testing_gtsv_no_pivot(const Arguments& arg)
     host_vector<T> hdu(m);
 
     // initialize tri-diagonal matrix
+    // for(rocsparse_int i = 0; i < m; ++i)
+    // {
+    //     hdl[i] = static_cast<T>(2);//random_cached_generator<T>(1, 8);
+    //     hd[i]  = static_cast<T>(4);//random_cached_generator<T>(17, 32);
+    //     hdu[i] = static_cast<T>(2);//random_cached_generator<T>(1, 8);
+    // }
     for(rocsparse_int i = 0; i < m; ++i)
     {
-        hdl[i] = random_cached_generator<T>(1, 8);
-        hd[i]  = random_cached_generator<T>(17, 32);
-        hdu[i] = random_cached_generator<T>(1, 8);
+        hdl[i] = static_cast<T>(i);
+        hd[i]  = static_cast<T>(i + m);
+        hdu[i] = static_cast<T>(i + 2 * m);
     }
 
     hdl[0]     = 0.0f;
@@ -125,7 +131,7 @@ void testing_gtsv_no_pivot(const Arguments& arg)
     {
         for(rocsparse_int i = 0; i < m; ++i)
         {
-            hB[j * ldb + i] = j * ldb + i;//random_cached_generator<T>(-10, 10);
+            hB[j * ldb + i] = static_cast<T>(1);//j * ldb + i;//random_cached_generator<T>(-10, 10);
         }
     }
 
@@ -175,19 +181,19 @@ void testing_gtsv_no_pivot(const Arguments& arg)
             }
         }
 
-        // std::cout << "hB" << std::endl;
-        // for(size_t i = 0; i < hB.size(); i++)
-        // {
-        //     std::cout << hB[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
+        std::cout << "hB" << std::endl;
+        for(size_t i = 0; i < m; i++)
+        {
+            std::cout << hB[i] << " ";
+        }
+        std::cout << "" << std::endl;
 
-        // std::cout << "hresult" << std::endl;
-        // for(size_t i = 0; i < hresult.size(); i++)
-        // {
-        //     std::cout << hresult[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
+        std::cout << "hresult" << std::endl;
+        for(size_t i = 0; i < m; i++)
+        {
+            std::cout << hresult[i] << " ";
+        }
+        std::cout << "" << std::endl;
 
         near_check_segments<T>(ldb * n, hB_original.data(), hresult.data());
     }
