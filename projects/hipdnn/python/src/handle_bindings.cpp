@@ -16,6 +16,14 @@ class HandleWrapper
 private:
     HipdnnHandlePtr _handle;
 
+    void checkNotDestroyed() const
+    {
+        if(!_handle)
+        {
+            throw std::runtime_error("Handle has been destroyed");
+        }
+    }
+
 public:
     HandleWrapper()
         : _handle(createHipdnnHandle())
@@ -29,11 +37,23 @@ public:
 
     hipdnnHandle_t get() const
     {
+        checkNotDestroyed();
         return _handle.get();
+    }
+
+    bool isValid() const
+    {
+        return _handle != nullptr;
+    }
+
+    void destroy()
+    {
+        _handle.reset();
     }
 
     void setStream(uintptr_t streamPtr)
     {
+        checkNotDestroyed();
         auto error = setHipdnnHandleStream(_handle, reinterpret_cast<hipStream_t>(streamPtr));
         if(error.is_bad())
         {
@@ -44,6 +64,7 @@ public:
 
     uintptr_t getStream() const
     {
+        checkNotDestroyed();
         hipStream_t stream = nullptr;
         auto error = getHipdnnHandleStream(_handle, &stream);
         if(error.is_bad())
@@ -69,12 +90,18 @@ void handle_bindings(nb::module_& m)
              nb::arg("stream"),
              "Set the HIP stream (as integer pointer)")
         .def("get_stream", &HandleWrapper::getStream, "Get the HIP stream (as integer pointer)")
+        .def("__int__", [](const HandleWrapper& h) { return reinterpret_cast<uintptr_t>(h.get()); })
+        .def("__index__",
+             [](const HandleWrapper& h) { return reinterpret_cast<uintptr_t>(h.get()); })
         .def("__repr__", [](const HandleWrapper& h) {
+            if(!h.isValid())
+            {
+                return std::string("<hipdnn_frontend.Handle (destroyed)>");
+            }
             return "<hipdnn_frontend.Handle at "
                    + std::to_string(reinterpret_cast<uintptr_t>(h.get())) + ">";
         });
 
-    // Convenience functions to create handles
     m.def(
         "create_handle",
         []() { return std::make_shared<HandleWrapper>(); },
@@ -84,4 +111,20 @@ void handle_bindings(nb::module_& m)
         [](uintptr_t stream) { return std::make_shared<HandleWrapper>(stream); },
         nb::arg("stream"),
         "Create a new hipdnn handle with a stream");
+    m.def(
+        "destroy_handle",
+        [](HandleWrapper& h) { h.destroy(); },
+        nb::arg("handle"),
+        "Destroy a hipdnn handle. The handle object should not be used after this call.");
+    m.def(
+        "set_stream",
+        [](HandleWrapper& h, uintptr_t stream) { h.setStream(stream); },
+        nb::arg("handle"),
+        nb::arg("stream"),
+        "Set the HIP stream on a handle");
+    m.def(
+        "get_stream",
+        [](const HandleWrapper& h) { return h.getStream(); },
+        nb::arg("handle"),
+        "Get the HIP stream from a handle");
 }
