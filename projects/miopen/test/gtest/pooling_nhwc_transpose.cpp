@@ -31,7 +31,7 @@
 #include "get_handle.hpp"
 
 // Test that verifies batched transpose is used for NHWC pooling forward operations
-TEST(PoolingNHWCTranspose, VerifyBatchedTransposeForwardFP32)
+TEST(GPU_PoolingNHWCTransposeFwd_FP32, VerifyBatchedTranspose)
 {
     auto&& handle = get_handle();
     auto ctx      = miopen::ExecutionContext{&handle};
@@ -50,7 +50,7 @@ TEST(PoolingNHWCTranspose, VerifyBatchedTransposeForwardFP32)
         << kernel_info.kernel_name;
 }
 
-TEST(PoolingNHWCTranspose, VerifyBatchedTransposeForwardFP16)
+TEST(GPU_PoolingNHWCTransposeFwd_FP16, VerifyBatchedTranspose)
 {
     auto&& handle = get_handle();
     auto ctx      = miopen::ExecutionContext{&handle};
@@ -67,7 +67,7 @@ TEST(PoolingNHWCTranspose, VerifyBatchedTransposeForwardFP16)
         << kernel_info.kernel_name;
 }
 
-TEST(PoolingNHWCTranspose, VerifyBatchedTransposeForwardBF16)
+TEST(GPU_PoolingNHWCTransposeFwd_BFP16, VerifyBatchedTranspose)
 {
     auto&& handle = get_handle();
     auto ctx      = miopen::ExecutionContext{&handle};
@@ -85,7 +85,7 @@ TEST(PoolingNHWCTranspose, VerifyBatchedTransposeForwardBF16)
 }
 
 // Test that verifies batched transpose is used for NHWC pooling backward operations
-TEST(PoolingNHWCTranspose, VerifyBatchedTransposeBackwardFP32)
+TEST(GPU_PoolingNHWCTransposeBwd_FP32, VerifyBatchedTranspose)
 {
     auto&& handle = get_handle();
     auto ctx      = miopen::ExecutionContext{&handle};
@@ -105,7 +105,7 @@ TEST(PoolingNHWCTranspose, VerifyBatchedTransposeBackwardFP32)
         << kernel_info.kernel_name;
 }
 
-TEST(PoolingNHWCTranspose, VerifyBatchedTransposeBackwardFP16)
+TEST(GPU_PoolingNHWCTransposeBwd_FP16, VerifyBatchedTranspose)
 {
     auto&& handle = get_handle();
     auto ctx      = miopen::ExecutionContext{&handle};
@@ -123,7 +123,7 @@ TEST(PoolingNHWCTranspose, VerifyBatchedTransposeBackwardFP16)
         << kernel_info.kernel_name;
 }
 
-TEST(PoolingNHWCTranspose, VerifyBatchedTransposeBackwardBF16)
+TEST(GPU_PoolingNHWCTransposeBwd_BFP16, VerifyBatchedTranspose)
 {
     auto&& handle = get_handle();
     auto ctx      = miopen::ExecutionContext{&handle};
@@ -142,7 +142,7 @@ TEST(PoolingNHWCTranspose, VerifyBatchedTransposeBackwardBF16)
 }
 
 // Combined test for multiple data types
-TEST(PoolingNHWCTranspose, VerifyBatchedTransposeMultipleTypes)
+TEST(GPU_PoolingNHWCTransposeMulti_NONE, VerifyBatchedTranspose)
 {
     auto&& handle = get_handle();
     auto ctx      = miopen::ExecutionContext{&handle};

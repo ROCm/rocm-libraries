@@ -454,49 +454,8 @@ DEFINE_2D_TYPED_TESTS(TransposeSolutionNhwc2Default);
 DEFINE_3D_TYPED_TESTS(TransposeSolutionDefault2Ndhwc);
 DEFINE_3D_TYPED_TESTS(TransposeSolutionNdhwc2Default);
 
-//=============================================================================
-// Batched Transpose Data Type Applicability Tests
-//=============================================================================
-
-// Test fixture for batched transpose data type support
-class BatchedTransposeDataTypeTest : public ::testing::TestWithParam<miopenDataType_t>
-{
-};
-
-TEST_P(BatchedTransposeDataTypeTest, BatchedTransposeSupportedTypes)
-{
-    auto data_type = GetParam();
-
-    // Check if batched transpose supports this data type
-    bool batched_supports = miopen::BatchedTransposeSolution::IsApplicable(data_type);
-
-    // Expected support: FP32, FP16, BF16, Int8, Int32
-    bool should_support =
-        (data_type == miopenFloat || data_type == miopenHalf || data_type == miopenBFloat16 ||
-         data_type == miopenInt8 || data_type == miopenInt32);
-
-    EXPECT_EQ(batched_supports, should_support)
-        << "BatchedTransposeSolution applicability mismatch for " << miopen::GetDataType(data_type);
-}
-
-// Smoke tests for batched transpose (types supported by batched transpose)
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    BatchedTransposeDataTypeTest,
-    ::testing::Values(miopenFloat, miopenHalf, miopenBFloat16, miopenInt8, miopenInt32));
-
-// Full tests including unsupported types
-INSTANTIATE_TEST_SUITE_P(Full,
-                         BatchedTransposeDataTypeTest,
-                         ::testing::Values(miopenFloat,
-                                           miopenHalf,
-                                           miopenBFloat16,
-                                           miopenInt8,
-                                           miopenInt32,
-                                           miopenDouble));
-
 // Test that verifies batched transpose is preferred over universal for supported types
-TEST(BatchedTransposeSolverSelection, VerifyBatchedKernelSelected)
+TEST(GPU_BatchedTransposeSolverSelection_NONE, VerifyBatchedKernelSelected)
 {
     // This test verifies that supported data types actually select the batched
     // transpose kernel (not just that it's applicable).

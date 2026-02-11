@@ -46,7 +46,7 @@ class GPU_WidePooling2d_NHWC_FP16 : public testing::TestWithParam<std::vector<st
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-class GPU_WidePooling2d_NHWC_BF16 : public testing::TestWithParam<std::vector<std::string>>
+class GPU_WidePooling2d_NHWC_BFP16 : public testing::TestWithParam<std::vector<std::string>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -68,7 +68,7 @@ void Run2dDriver(miopenDataType_t prec)
     {
     case miopenFloat: params = GPU_WidePooling2d_NHWC_FP32::GetParam(); break;
     case miopenHalf: params = GPU_WidePooling2d_NHWC_FP16::GetParam(); break;
-    case miopenBFloat16: params = GPU_WidePooling2d_NHWC_BF16::GetParam(); break;
+    case miopenBFloat16: params = GPU_WidePooling2d_NHWC_BFP16::GetParam(); break;
     case miopenInt8:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
@@ -145,7 +145,7 @@ TEST_P(GPU_WidePooling2d_NHWC_FP16, HalfTest_pooling2d_wide_nhwc)
     }
 };
 
-TEST_P(GPU_WidePooling2d_NHWC_BF16, BFloat16Test_pooling2d_wide_nhwc)
+TEST_P(GPU_WidePooling2d_NHWC_BFP16, BFloat16Test_pooling2d_wide_nhwc)
 {
     if(IsTestSupportedForDevice())
     {
@@ -166,5 +166,5 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Values(GetTestCases("--half")));
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_WidePooling2d_NHWC_BF16,
+                         GPU_WidePooling2d_NHWC_BFP16,
                          testing::Values(GetTestCases("--bfloat16")));

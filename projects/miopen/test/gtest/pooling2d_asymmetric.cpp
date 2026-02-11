@@ -46,7 +46,7 @@ class GPU_AsymPooling2d_FP16 : public testing::TestWithParam<std::vector<std::st
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-class GPU_AsymPooling2d_BF16 : public testing::TestWithParam<std::vector<std::string>>
+class GPU_AsymPooling2d_BFP16 : public testing::TestWithParam<std::vector<std::string>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -68,7 +68,7 @@ void Run2dDriver(miopenDataType_t prec)
     {
     case miopenFloat: params = GPU_AsymPooling2d_FP32::GetParam(); break;
     case miopenHalf: params = GPU_AsymPooling2d_FP16::GetParam(); break;
-    case miopenBFloat16: params = GPU_AsymPooling2d_BF16::GetParam(); break;
+    case miopenBFloat16: params = GPU_AsymPooling2d_BFP16::GetParam(); break;
     case miopenInt8:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
@@ -147,7 +147,7 @@ TEST_P(GPU_AsymPooling2d_FP16, HalfTest_pooling2d_asymmetric)
     }
 };
 
-TEST_P(GPU_AsymPooling2d_BF16, BFloat16Test_pooling2d_asymmetric)
+TEST_P(GPU_AsymPooling2d_BFP16, BFloat16Test_pooling2d_asymmetric)
 {
     const auto& handle = get_handle();
     if(IsTestSupportedForDevice(handle))
@@ -164,4 +164,4 @@ INSTANTIATE_TEST_SUITE_P(Full, GPU_AsymPooling2d_FP32, testing::Values(GetTestCa
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_AsymPooling2d_FP16, testing::Values(GetTestCases("--half")));
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_AsymPooling2d_BF16, testing::Values(GetTestCases("--bfloat16")));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_AsymPooling2d_BFP16, testing::Values(GetTestCases("--bfloat16")));

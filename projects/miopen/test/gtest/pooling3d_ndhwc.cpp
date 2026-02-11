@@ -46,7 +46,7 @@ class GPU_Pooling3d_NDHWC_FP16 : public testing::TestWithParam<std::vector<std::
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-class GPU_Pooling3d_NDHWC_BF16 : public testing::TestWithParam<std::vector<std::string>>
+class GPU_Pooling3d_NDHWC_BFP16 : public testing::TestWithParam<std::vector<std::string>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -68,7 +68,7 @@ void Run3dDriver(miopenDataType_t prec)
     {
     case miopenFloat: params = GPU_Pooling3d_NDHWC_FP32::GetParam(); break;
     case miopenHalf: params = GPU_Pooling3d_NDHWC_FP16::GetParam(); break;
-    case miopenBFloat16: params = GPU_Pooling3d_NDHWC_BF16::GetParam(); break;
+    case miopenBFloat16: params = GPU_Pooling3d_NDHWC_BFP16::GetParam(); break;
     case miopenInt8:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
@@ -145,7 +145,7 @@ TEST_P(GPU_Pooling3d_NDHWC_FP16, HalfTest_pooling3d_ndhwc)
     }
 };
 
-TEST_P(GPU_Pooling3d_NDHWC_BF16, BFloat16Test_pooling3d_ndhwc)
+TEST_P(GPU_Pooling3d_NDHWC_BFP16, BFloat16Test_pooling3d_ndhwc)
 {
     if(IsTestSupportedForDevice())
     {
@@ -162,5 +162,5 @@ INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_NDHWC_FP32, testing::Values(GetTest
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_NDHWC_FP16, testing::Values(GetTestCases("--half")));
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Pooling3d_NDHWC_BF16,
+                         GPU_Pooling3d_NDHWC_BFP16,
                          testing::Values(GetTestCases("--bfloat16")));
