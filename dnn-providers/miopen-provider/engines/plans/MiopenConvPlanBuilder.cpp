@@ -20,11 +20,17 @@
 namespace miopen_plugin
 {
 
+MiopenConvPlanBuilder::MiopenConvPlanBuilder(bool deterministic)
+    : _deterministic(deterministic)
+{
+}
+
 namespace
 {
 
 bool isApplicableFwd(const HipdnnEnginePluginHandle& handle,
-                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                     bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
@@ -32,7 +38,7 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        ConvFwdParams params(attr, opGraph.getTensorMap());
+        ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -60,7 +66,8 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle,
 }
 
 bool isApplicableBwd(const HipdnnEnginePluginHandle& handle,
-                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                     bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
@@ -68,7 +75,7 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        ConvBwdParams params(attr, opGraph.getTensorMap());
+        ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -96,7 +103,8 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle,
 }
 
 bool isApplicableWrw(const HipdnnEnginePluginHandle& handle,
-                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                     bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
@@ -104,7 +112,7 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        ConvWrwParams params(attr, opGraph.getTensorMap());
+        ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -133,11 +141,12 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle,
 }
 
 size_t getWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                           bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
-    ConvFwdParams params(attr, opGraph.getTensorMap());
+    ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     size_t workSpaceSize;
     THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
                                                                      params.w().tensorDescriptor(),
@@ -150,11 +159,12 @@ size_t getWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
 }
 
 size_t getWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                           bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
-    ConvBwdParams params(attr, opGraph.getTensorMap());
+    ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     size_t workSpaceSize;
 
     THROW_ON_MIOPEN_FAILURE(
@@ -169,11 +179,12 @@ size_t getWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
 }
 
 size_t getWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                           bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
-    ConvWrwParams params(attr, opGraph.getTensorMap());
+    ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     size_t workSpaceSize;
 
     THROW_ON_MIOPEN_FAILURE(
@@ -189,11 +200,12 @@ size_t getWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
 
 void buildPlanFwd(const HipdnnEnginePluginHandle& handle,
                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                  HipdnnEnginePluginExecutionContext& executionContext)
+                  HipdnnEnginePluginExecutionContext& executionContext,
+                  bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
-    ConvFwdParams params(attr, opGraph.getTensorMap());
+    ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     auto plan = std::make_unique<ConvFwdPlan>(
         handle, std::move(params), executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
@@ -201,11 +213,12 @@ void buildPlanFwd(const HipdnnEnginePluginHandle& handle,
 
 void buildPlanBwd(const HipdnnEnginePluginHandle& handle,
                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                  HipdnnEnginePluginExecutionContext& executionContext)
+                  HipdnnEnginePluginExecutionContext& executionContext,
+                  bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
-    ConvBwdParams params(attr, opGraph.getTensorMap());
+    ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     auto plan = std::make_unique<ConvBwdPlan>(
         handle, std::move(params), executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
@@ -213,11 +226,12 @@ void buildPlanBwd(const HipdnnEnginePluginHandle& handle,
 
 void buildPlanWrw(const HipdnnEnginePluginHandle& handle,
                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                  HipdnnEnginePluginExecutionContext& executionContext)
+                  HipdnnEnginePluginExecutionContext& executionContext,
+                  bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
-    ConvWrwParams params(attr, opGraph.getTensorMap());
+    ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     auto plan = std::make_unique<ConvWrwPlan>(
         handle, std::move(params), executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
@@ -251,13 +265,13 @@ bool MiopenConvPlanBuilder::isApplicable(
     switch(node.attributes_type())
     {
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
-        ret = isApplicableFwd(handle, opGraph);
+        ret = isApplicableFwd(handle, opGraph, _deterministic);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
-        ret = isApplicableBwd(handle, opGraph);
+        ret = isApplicableBwd(handle, opGraph, _deterministic);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
-        ret = isApplicableWrw(handle, opGraph);
+        ret = isApplicableWrw(handle, opGraph, _deterministic);
         break;
     default:
         break;
@@ -287,11 +301,11 @@ size_t MiopenConvPlanBuilder::getWorkspaceSize(
     switch(node.attributes_type())
     {
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
-        return getWorkspaceSizeFwd(handle, opGraph);
+        return getWorkspaceSizeFwd(handle, opGraph, _deterministic);
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
-        return getWorkspaceSizeBwd(handle, opGraph);
+        return getWorkspaceSizeBwd(handle, opGraph, _deterministic);
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
-        return getWorkspaceSizeWrw(handle, opGraph);
+        return getWorkspaceSizeWrw(handle, opGraph, _deterministic);
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -303,7 +317,7 @@ size_t MiopenConvPlanBuilder::getWorkspaceSize(
 void MiopenConvPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() != 1)
@@ -314,21 +328,6 @@ void MiopenConvPlanBuilder::buildPlan(
                 + std::to_string(opGraph.nodeCount()) + " nodes");
     }
 
-    // Read deterministic knob setting
-    bool deterministicEnabled = false;
-    if(engineConfig.isValid()
-       && engineConfig.hasKnobSetting(hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME))
-    {
-        const auto& knobSetting
-            = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME);
-        if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
-        {
-            auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
-            deterministicEnabled = (value != 0);
-        }
-    }
-    (void)deterministicEnabled; // Will be used in a follow-up PR
-
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();
 
@@ -336,15 +335,15 @@ void MiopenConvPlanBuilder::buildPlan(
     {
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
         HIPDNN_PLUGIN_LOG_INFO("Building convolution fwd plan for node: {}", nodeName);
-        buildPlanFwd(handle, opGraph, executionContext);
+        buildPlanFwd(handle, opGraph, executionContext, _deterministic);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
         HIPDNN_PLUGIN_LOG_INFO("Building convolution bwd plan for node: {}", nodeName);
-        buildPlanBwd(handle, opGraph, executionContext);
+        buildPlanBwd(handle, opGraph, executionContext, _deterministic);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
         HIPDNN_PLUGIN_LOG_INFO("Building convolution wrw plan for node: {}", nodeName);
-        buildPlanWrw(handle, opGraph, executionContext);
+        buildPlanWrw(handle, opGraph, executionContext, _deterministic);
         break;
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -356,31 +355,10 @@ void MiopenConvPlanBuilder::buildPlan(
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvPlanBuilder::getCustomKnobs(
-    const HipdnnEnginePluginHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
-
-    if(isApplicable(handle, opGraph))
-    {
-        hipdnn_data_sdk::data_objects::KnobT knob;
-        knob.knob_id = hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME;
-        knob.description = "Enable deterministic mode";
-
-        hipdnn_data_sdk::data_objects::IntValueT defaultValue;
-        defaultValue.value = 0;
-        knob.default_value.Set(defaultValue);
-
-        hipdnn_data_sdk::data_objects::IntConstraintT constraint;
-        constraint.min_value = 0;
-        constraint.max_value = 1;
-        constraint.step = 1;
-        knob.constraint.Set(constraint);
-
-        knobs.push_back(std::move(knob));
-    }
-
-    return knobs;
+    return {};
 }
 
 } // namespace miopen_plugin
