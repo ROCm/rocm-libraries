@@ -1,7 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_backend.h>
 #include <hipdnn_frontend.hpp>
 #include <memory>
 #include <nanobind/nanobind.h>
@@ -13,64 +12,42 @@ using namespace hipdnn_frontend;
 class HandleWrapper
 {
 private:
-    hipdnnHandle_t _handle;
-    bool _ownsHandle;
+    HipdnnHandlePtr _handle;
 
 public:
     HandleWrapper()
-        : _handle(nullptr)
-        , _ownsHandle(true)
+        : _handle(createHipdnnHandle())
     {
-        auto backend = hipdnnBackend();
-        auto status = backend->create(&_handle);
-        if(status != HIPDNN_STATUS_SUCCESS)
-        {
-            throw std::runtime_error("Failed to create hipdnn handle");
-        }
     }
 
-    ~HandleWrapper()
+    explicit HandleWrapper(uintptr_t streamPtr)
+        : _handle(createHipdnnHandle(reinterpret_cast<hipStream_t>(streamPtr)))
     {
-        if(_ownsHandle && _handle)
-        {
-            auto backend = hipdnnBackend();
-            backend->destroy(_handle);
-        }
-    }
-
-    // Disable copy
-    HandleWrapper(const HandleWrapper&) = delete;
-    HandleWrapper& operator=(const HandleWrapper&) = delete;
-
-    // Enable move
-    HandleWrapper(HandleWrapper&& other) noexcept
-        : _handle(other._handle)
-        , _ownsHandle(other._ownsHandle)
-    {
-        other._handle = nullptr;
-        other._ownsHandle = false;
-    }
-
-    HandleWrapper& operator=(HandleWrapper&& other) noexcept
-    {
-        if(this != &other)
-        {
-            if(_ownsHandle && _handle)
-            {
-                auto backend = hipdnnBackend();
-                backend->destroy(_handle);
-            }
-            _handle = other._handle;
-            _ownsHandle = other._ownsHandle;
-            other._handle = nullptr;
-            other._ownsHandle = false;
-        }
-        return *this;
     }
 
     hipdnnHandle_t get() const
     {
-        return _handle;
+        return _handle.get();
+    }
+
+    void setStream(uintptr_t streamPtr)
+    {
+        auto error = setHipdnnHandleStream(_handle, reinterpret_cast<hipStream_t>(streamPtr));
+        if(error.is_bad())
+        {
+            throw std::runtime_error("Failed to set stream on hipdnn handle");
+        }
+    }
+
+    uintptr_t getStream() const
+    {
+        hipStream_t stream = nullptr;
+        auto error = getHipdnnHandleStream(_handle, &stream);
+        if(error.is_bad())
+        {
+            throw std::runtime_error("Failed to get stream from hipdnn handle");
+        }
+        return reinterpret_cast<uintptr_t>(stream);
     }
 };
 
@@ -78,18 +55,29 @@ void handle_bindings(nb::module_& m)
 {
     nb::class_<HandleWrapper>(m, "Handle")
         .def(nb::init<>(), "Create a new hipdnn handle")
+        .def(nb::init<uintptr_t>(), nb::arg("stream"), "Create a handle with a stream")
         .def(
             "get",
             [](const HandleWrapper& h) { return reinterpret_cast<uintptr_t>(h.get()); },
             "Get the handle pointer as an integer")
+        .def("set_stream",
+             &HandleWrapper::setStream,
+             nb::arg("stream"),
+             "Set the HIP stream (as integer pointer)")
+        .def("get_stream", &HandleWrapper::getStream, "Get the HIP stream (as integer pointer)")
         .def("__repr__", [](const HandleWrapper& h) {
             return "<hipdnn_frontend.Handle at "
                    + std::to_string(reinterpret_cast<uintptr_t>(h.get())) + ">";
         });
 
-    // Add a convenience function to create handles
+    // Convenience functions to create handles
     m.def(
         "create_handle",
         []() { return std::make_shared<HandleWrapper>(); },
         "Create a new hipdnn handle");
+    m.def(
+        "create_handle",
+        [](uintptr_t stream) { return std::make_shared<HandleWrapper>(stream); },
+        nb::arg("stream"),
+        "Create a new hipdnn handle with a stream");
 }
