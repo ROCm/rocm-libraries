@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Shared spdlog/fmt configuration for hipDNN components (backend, plugins, etc.)
+# Shared spdlog/fmt configuration for hipDNN components
 # This module provides a unified function to enable spdlog support for any target.
 
 # Function to enable spdlog support for a target
