@@ -6,8 +6,13 @@
 #include <limits>
 #include <type_traits>
 
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/types.hpp>
+
+namespace hipdnn_test_sdk::utilities
+{
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
+}
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -21,7 +26,7 @@ namespace hipdnn_test_sdk::utilities
  * Type         | Mantissa Bits | Epsilon (2^-bits)
  * -------------|---------------|-------------------
  * half (fp16)  | 10            | 2^-10 ≈ 0.0009765625
- * hip_bfloat16 | 7             | 2^-7  = 0.0078125
+ * bfloat16 | 7             | 2^-7  = 0.0078125
  * float (fp32) | 23            | 2^-23 ≈ 1.19209e-07
  * double (fp64)| 52            | 2^-52 ≈ 2.22044e-16
  *
@@ -36,7 +41,7 @@ constexpr double getEpsilon()
         // 2^-10 = 0.0009765625
         return 0.0009765625;
     }
-    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    else if constexpr(std::is_same_v<T, bfloat16>)
     {
         // 2^-7 = 0.0078125
         return 0.0078125;
@@ -70,7 +75,7 @@ constexpr double getMax()
         //           = 65504.0
         return 65504.0;
     }
-    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    else if constexpr(std::is_same_v<T, bfloat16>)
     {
         // BFloat16 has same range as float
         return static_cast<double>(std::numeric_limits<float>::max());

@@ -10,13 +10,13 @@
 #include <type_traits>
 #include <vector>
 
-#include <hipdnn_data_sdk/utilities/StaticCast.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/NumericLimits.hpp>
 
 namespace hipdnn_test_sdk::utilities::conv
 {
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
 
 /**
  * @brief Calculates the expected tolerance for Convolution Backward Weights (WrW) operations.
@@ -44,20 +44,19 @@ namespace hipdnn_test_sdk::utilities::conv
  * @param dyMin The minimum value in the output gradient tensor.
  * @param dyMax The maximum value in the output gradient tensor.
  * @param dyDims The dimensions of the output gradient tensor (dy).
- * @return The calculated tolerance value cast to `OutputType`.
+ * @return The calculated tolerance value as float.
  */
 template <typename OutputType, typename InputType, typename ComputeType = float>
-OutputType calculateConvWrwTolerance(double inputMin,
-                                     double inputMax,
-                                     double dyMin,
-                                     double dyMax,
-                                     const std::vector<int64_t>& dyDims)
+float calculateConvWrwTolerance(double inputMin,
+                                double inputMax,
+                                double dyMin,
+                                double dyMax,
+                                const std::vector<int64_t>& dyDims)
 {
     // Validate ComputeType
     static_assert(std::is_same_v<ComputeType, float> || std::is_same_v<ComputeType, double>
-                      || std::is_same_v<ComputeType, half>
-                      || std::is_same_v<ComputeType, hip_bfloat16>,
-                  "ComputeType must be float, double, half, or hip_bfloat16");
+                      || std::is_same_v<ComputeType, half> || std::is_same_v<ComputeType, bfloat16>,
+                  "ComputeType must be float, double, half, or bfloat16");
 
     // dyDims: [N, K, Spatial...]
     // Accumulation for weights (dw) happens over N and Spatial dimensions.
@@ -170,7 +169,7 @@ OutputType calculateConvWrwTolerance(double inputMin,
             "Calculated tolerance exceeds the maximum representable value of the output type.");
     }
 
-    return hipdnn_data_sdk::utilities::staticCast<OutputType>(totalTolerance);
+    return static_cast<float>(totalTolerance);
 }
 
 } // namespace hipdnn_test_sdk::utilities::conv
