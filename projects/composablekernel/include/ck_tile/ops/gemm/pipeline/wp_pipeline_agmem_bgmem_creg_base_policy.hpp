@@ -273,10 +273,9 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
             mixed_prec_compute_type_from_input_t<BDataType, ADataType, ComputeDataType>;
         constexpr index_t WaveSize = get_warp_size();
         constexpr index_t KLane    = WarpTile::at(I2) * WarpTile::at(I0) / WaveSize;
-        constexpr index_t KLaneBytes =
-            KLane / numeric_traits<BDataType>::PackedSize * sizeof(BDataType);
-        constexpr auto NumAccess = static_cast<WGAttrNumAccessEnum>(max(1, KLaneBytes / 16));
-
+        // When BDataType is pk_int4_t, it is internally converted to fp8 for computation.
+        constexpr index_t KLaneBytes = KLane * sizeof(BTypeToUse);
+        constexpr auto NumAccess     = static_cast<WGAttrNumAccessEnum>(max(1, KLaneBytes / 16));
         // For tf32 mode, use tf32_t for warp gemm; otherwise use original types
         using WarpGemm =
             WarpGemmDispatcher<if_select_v<ComputeDataType, tf32_t, tf32_t, ATypeToUse>,
