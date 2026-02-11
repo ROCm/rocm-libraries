@@ -165,12 +165,9 @@ int main(int argc, char* argv[])
 
     initializeFrontendLogging();
 
-    hipdnnHandle_t handle = nullptr;
-    HIPDNN_CHECK(hipdnnCreate(&handle));
+    auto handle = create_hipdnn_handle();
 
-    bool allPassed = run(SampleRunner{handle, config});
-
-    HIPDNN_CHECK(hipdnnDestroy(handle));
+    bool allPassed = run(SampleRunner{handle.get(), config});
 
     if(allPassed)
     {
