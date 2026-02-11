@@ -12,13 +12,14 @@
 #include "MiopenConvWrwPlan.hpp"
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 ConvWrwParams::ConvWrwParams(
     const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes& attributes,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
+        tensorMap,
+    bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
     , _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
@@ -35,7 +36,8 @@ ConvWrwParams::ConvWrwParams(
         = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrDW.dims());
     const auto groupCount = hipdnn_data_sdk::utilities::calculateGroupCount(inputDims, weightDims);
 
-    _conv = MiopenConvDescriptor(_spatialDimCount, attributes, static_cast<int>(groupCount));
+    _conv = MiopenConvDescriptor(
+        _spatialDimCount, attributes, static_cast<int>(groupCount), deterministicEnabled);
 
     _tensorsValid = (!attrX.virtual_() && !attrDW.virtual_() && !attrDY.virtual_());
 }
@@ -71,7 +73,9 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
     : _params(std::move(params))
     , _benchmarkingEnabled(benchmarkingEnabled)
 {
-    (void)_benchmarkingEnabled;
+    // Set tuning policy based on benchmarking flag - RAII ensures restoration
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+
     // MIOpen Find 2.0 API
     miopenProblem_t problem;
     THROW_ON_MIOPEN_FAILURE(miopenCreateConvProblem(
@@ -103,7 +107,7 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
             auto status = miopenDestroySolution(s);
             if(status != miopenStatusSuccess)
             {
-                HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvWrwPlan destructor");
+                HIPDNN_PLUGIN_LOG_ERROR("miopenDestroySolution failed in ConvWrwPlan destructor");
             }
         });
 
@@ -151,4 +155,4 @@ void ConvWrwPlan::execute(const HipdnnEnginePluginHandle& handle,
                                               workspaceSize));
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

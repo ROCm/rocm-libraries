@@ -378,7 +378,7 @@ inline std::map<std::string, int>
     return rv;
 }
 
-inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
+inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion, int deviceId = 0)
 {
     std::vector<std::array<int, 3>> b = {{9, 0, 6}, {9, 0, 8}, {9, 0, 10}, {9, 4, 2}};
     std::map<std::string, int>      rv;
@@ -391,7 +391,13 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["DeviceLDS"]          = deviceLDS;
     rv["CMPXWritesSGPR"]     = checkNotInList(isaVersion[0], {10, 11, 12});
     rv["HasWave32"]          = checkInList(isaVersion[0], {10, 11, 12});
-    rv["HasSchedMode"]       = checkInList(isaVersion[0], {}); //TODO: https://github.com/ROCm/rocm-libraries/issues/3211
+#if HIP_VERSION >= 70353390
+    rv["HasSchedMode"] = checkInList(isaVersion[0], {12})
+                             ? getDeviceAttribute(hipDeviceAttributeExpertSchedMode, deviceId, 0)
+                             : 0;
+#else
+    rv["HasSchedMode"] = 0;
+#endif
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});

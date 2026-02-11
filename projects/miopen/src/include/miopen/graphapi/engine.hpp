@@ -138,11 +138,11 @@ private:
     friend class EngineBuilder;
 
 public:
-    Engine()              = default;
-    Engine(const Engine&) = default;
-    Engine(Engine&&)      = default;
+    Engine()                         = default;
+    Engine(const Engine&)            = default;
+    Engine(Engine&&)                 = default;
     Engine& operator=(const Engine&) = default;
-    Engine& operator=(Engine&&) = default;
+    Engine& operator=(Engine&&)      = default;
 
     GraphPatternExecutor* getExecutor() noexcept { return mExecutor.get(); }
 

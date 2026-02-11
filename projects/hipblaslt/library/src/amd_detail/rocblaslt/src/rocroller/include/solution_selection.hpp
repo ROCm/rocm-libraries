@@ -90,6 +90,7 @@ struct SolutionIndexParameters
     WorkGroupTileSize workgroupTile;
     bool              workgroupMapping;
     bool              streamK;
+    bool              tailLoops = true;
 
     auto operator<=>(const SolutionIndexParameters& other) const = default;
 };
@@ -152,16 +153,24 @@ inline MachineInstructionSize pickMI(rocRoller::DataType typeA,
     }
 }
 
-constexpr int
-    preferredUnrolling(rocRoller::DataType typeA, rocRoller::DataType typeB, WorkGroupTileSize wgt)
+constexpr int preferredUnrolling(rocRoller::DataType typeA,
+                                  rocRoller::DataType typeB,
+                                  WorkGroupTileSize   wgt,
+                                  bool hasPreSwizzle,
+                                  bool hasPreTile)
 {
     // Other datatypes run out of registers when prefetchInFlight is too
     // large.
     // There is an error with smaller tile sizes and larger prefetchInFlight.
-    // Unroll is 2 when wgt.k is greater or equal to 256, otherwise 4
+    // For 256x256x256 tile with FP4, use unroll=2 to reduce register pressure
     if(typeA == rocRoller::DataType::FP4 && typeB == rocRoller::DataType::FP4 && wgt.m > 32
        && wgt.n > 32)
+    {
+        // When hasPreSwizzle and hasPreTile are true, use unroll=2
+        if(hasPreSwizzle && hasPreTile)
+            return 2;
         return 4;
+    }
     else
         return 2;
 }

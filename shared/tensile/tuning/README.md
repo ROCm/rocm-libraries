@@ -8,7 +8,7 @@
 
 #### Tensile tuning step
 
-See the [Tensile tuning](https://github.com/ROCmSoftwarePlatform/Tensile/wiki) wiki for more details of Tensile and the specifics of the tuning process. The staging area we use for the our process is within build directories in the root level of the Tensile clone. This step will produce LibraryLogic files within each for the build subdirectories. `../build-hgemm_asm_full/3_LibraryLogic`.
+See the [Tensile tuning](https://github.com/ROCm/Tensile/wiki) wiki for more details of Tensile and the specifics of the tuning process. The staging area we use for the our process is within build directories in the root level of the Tensile clone. This step will produce LibraryLogic files within each for the build subdirectories. `../build-hgemm_asm_full/3_LibraryLogic`.
 
 #### Building rocBLAS with new configurations
 
@@ -16,7 +16,7 @@ The updated configurations get placed in the rocBLAS path ` rocBLAS/library/src/
 
 #### Build rocBLAS
 
-run `./install -c` in the rocBLAS source directory. See [rocBLAS build](https://github.com/ROCmSoftwarePlatform/rocBLAS/wiki/1.Build) for more information.
+run `./install -c` in the rocBLAS source directory. See [rocBLAS build](https://github.com/ROCm/rocBLAS/wiki/1.Build) for more information.
 
 #### Performance measurements
 

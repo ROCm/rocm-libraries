@@ -9,17 +9,17 @@
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 
 TEST(TestMiopenHipdnnEnginePluginExecutionContext, SetAndGetPlan)
 {
     HipdnnEnginePluginExecutionContext ctx;
 
-    auto mockPlan = std::make_unique<miopen_legacy_plugin::MockPlan>();
+    auto mockPlan = std::make_unique<miopen_plugin::MockPlan>();
     auto* planPtr = mockPlan.get();
     ctx.setPlan(std::move(mockPlan));
 
-    miopen_legacy_plugin::IPlan& planRef = ctx.plan();
+    miopen_plugin::IPlan& planRef = ctx.plan();
 
     EXPECT_EQ(&planRef, planPtr);
 }
@@ -30,7 +30,7 @@ TEST(TestMiopenHipdnnEnginePluginExecutionContext, HasValidPlan)
 
     EXPECT_FALSE(ctx.hasValidPlan());
 
-    auto mockPlan = std::make_unique<miopen_legacy_plugin::MockPlan>();
+    auto mockPlan = std::make_unique<miopen_plugin::MockPlan>();
     ctx.setPlan(std::move(mockPlan));
 
     EXPECT_TRUE(ctx.hasValidPlan());
@@ -47,7 +47,7 @@ TEST(TestMiopenHipdnnEnginePluginExecutionContext, GetWorkspaceSize)
 {
     HipdnnEnginePluginExecutionContext ctx;
 
-    auto mockPlan = std::make_unique<miopen_legacy_plugin::MockPlan>();
+    auto mockPlan = std::make_unique<miopen_plugin::MockPlan>();
     EXPECT_CALL(*mockPlan, getWorkspaceSize(::testing::_)).WillOnce(testing::Return(42));
     ctx.setPlan(std::move(mockPlan));
 

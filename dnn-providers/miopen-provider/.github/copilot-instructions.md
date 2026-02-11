@@ -64,18 +64,18 @@ Plugin-specific test binaries (in `build/bin/` when building from hipDNN root):
 
 | Binary | Tests | Typical Use |
 |--------|-------|-------------|
-| `miopen_legacy_plugin_tests` | Plugin unit tests | Engine manager, plan builders, MIOpen integration |
-| `miopen_plugin_integration_test` | GPU integration tests | End-to-end operation execution |
+| `miopen_plugin_tests` | Plugin unit tests | Engine manager, plan builders, MIOpen integration |
+| `miopen_plugin_integration_tests` | GPU integration tests | End-to-end operation execution |
 
 ### Running Specific Tests with `--gtest_filter`
 
 **Use `--gtest_filter` when iterating on specific functionality:**
 ```bash
 # From hipDNN build directory
-./bin/miopen_legacy_plugin_tests --gtest_filter="TestMiopenEngine.*"
+./bin/miopen_plugin_tests --gtest_filter="TestMiopenEngine.*"
 
 # Run a specific test case
-./bin/miopen_plugin_integration_test --gtest_filter="IntegrationGpuConvolutionFwdFp32.*"
+./bin/miopen_plugin_integration_tests --gtest_filter="IntegrationGpuConvolutionFwdFp32.*"
 ```
 
 ### When Modifying Code
