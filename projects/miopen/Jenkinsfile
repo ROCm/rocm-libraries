@@ -259,7 +259,6 @@ pipeline {
                 }
                 stage('Clang Format') {
                     agent{ label rocmnode("nogpu") }
-
                     steps{
                         script {
                             withWorkingDir {
