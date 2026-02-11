@@ -42,7 +42,7 @@
 #endif
 
 #ifdef _WIN32
-MIOPEN_INTERNALS_EXPORT size_t getpid();
+MIOPEN_INTERNALS_EXPORT int getpid();
 #endif
 
 // See https://github.com/pfultz2/Cloak/wiki/C-Preprocessor-tricks,-tips,-and-idioms
