@@ -41,8 +41,10 @@ def get_changed_files(ref1, ref2, project: str = None):
             check=True,
         )
         print("cwd:", result.stdout)
+        current_directory = os.getcwd()
+        ck_path=os.path.dirname(current_directory)
         result = subprocess.run(
-            ["git", "diff", "--name-only", ref1, ref2,"-- projects/composablekernel/"],
+            ["git", "diff", "--name-only", ref1, ref2,"-- ", ck_path],
             capture_output=True,
             text=True,
             check=True,
