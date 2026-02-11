@@ -1865,6 +1865,48 @@ def _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS):
             SBarrier(comment=""),
         ]
         nglshift = nllshift = 15
+    elif isNN(kernel) and useLDSTr and TLDS == 1:
+        optSchedule = {
+            'SYNC': [[  -1,6,
+                        23,23,
+                        55,55,
+                        94,
+                        # 91
+                    ]],
+            'GRIncA': [[0,1,2,3,4,5,6,7,8]],
+            'GRIncB': [[9,10,11,12,13,14,15,16,17]],
+            'LRA0': [[0,1,2,3,4,5,6,7,8,9,10,11,12,13]],
+            'GRA': [[23,23,27,27,32,32,37,37,42,42,46,46,51,51],
+                    [25,25,29,29,34,34,39,39,44,44,48,48,53,53]],
+            'LRB0': [[23,27,32,37,42,46,51,54],
+                     [25,29,34,39,44,48,53,54]],
+            
+            'LRA1': [[56,56,60,60,64,64,70,70,80,80,87,89,94,94],
+                     [58,58,62,62,66,66,72,72,82,82,88,90,95,95]],
+            'GRB': [[56,56, 60,60, 70,70, 80,80, 90,92, 100,100, 106,106, 109,109],
+                    [58,58, 62,62, 72,72, 82,82, 91,93, 101,101, 107,107, 110,110]],                    
+            # 'LRB1': [[100,100,101,102,103,104,109,110]],
+            # 'LRB1': [[98,99,100,101,102,103,106,109]],
+            'LRB1': [[90,92,94,100,102,103,106,109]],
+            'LRSA': [[54]],
+            'LRSB': [[54]],
+            'LWSA': [[87]],
+            'LWSB': [[89]],
+            'LCC': [[109,110]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=7 newLW=0 newLR=7 for iteration == 0"),
+            SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
+            SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1, comment=""),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=7, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for previous set of global reads"),
+            # SBarrier(comment="")
+        ]
+
+        nglshift = nllshift = 15    
     else:
         return False, None
 
