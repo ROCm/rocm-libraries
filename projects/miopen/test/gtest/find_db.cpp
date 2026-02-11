@@ -47,14 +47,7 @@ void RunFindDbDriver(miopenDataType_t prec)
 
 class GPU_FindDb_FP32 : public testing::TestWithParam<miopenDataType_t>
 {
-    void SetUp() override
-    {
-        prng::reset_seed();
-        if(!IsTestSupportedByDevice(Gpu::All))
-        {
-            GTEST_SKIP();
-        }
-    }
+    void SetUp() override { prng::reset_seed(); }
 };
 
 TEST_P(GPU_FindDb_FP32, FloatTest_find_db) { RunFindDbDriver(GetParam()); }
