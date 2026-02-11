@@ -3478,15 +3478,30 @@ public:
              primbench::settings    settings = {},
              detail::flags::FlagTag flags    = flags::none,
              hipStream_t            stream   = hipStreamDefault)
-        : m_settings(settings), m_flags(flags), m_stream(stream), m_cli(argc, argv)
+        : m_settings(settings)
+        , m_own_stream(stream == hipStreamDefault)
+        , m_flags(flags)
+        , m_stream(stream)
+        , m_cli(argc, argv)
     {
         get_logger().save_program_start_time();
 
         parse();
 
+        // If user did not provide a stream, create a fast private one.
+        // We can't use hipStreamDefault, as it synchronizes with the host.
+        if(m_own_stream)
+            PRIMBENCH_HIP_CHECK(hipStreamCreate(&m_stream));
+
         m_stream_blocker
             = std::make_unique<detail::stream_blocker>(m_stream,
                                                        m_settings.stream_blocking_timeout_secs);
+    }
+
+    ~executor()
+    {
+        if(m_own_stream && m_stream != nullptr)
+            PRIMBENCH_HIP_CHECK(hipStreamDestroy(m_stream));
     }
 
     /**
@@ -3936,6 +3951,7 @@ private:
     detail::flags::FlagTag m_flags; /**< Executor flags */
 
     hipStream_t m_stream; /**< HIP stream used for execution */
+    bool        m_own_stream; /** Whether primbench should create its own stream */
 
     detail::cli m_cli; /**< Command-line argument parser */
 
