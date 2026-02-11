@@ -420,86 +420,6 @@ TEST_CASE("Formocast: LSU overhead calculation", "[formocast]") {
     }
 }
 
-TEST_CASE("Formocast: Intermediate metrics calculation", "[formocast]") {
-    Formocast simulator;
-    
-    auto problem = make_problem_info(1024, 1024, 1024);
-    auto mapping = make_size_mapping();
-    
-    simulator.setProblem(problem);
-    simulator.setSolution(mapping);
-    simulator.setHardware(hardware_t::architecture_t::gfx950);
-    
-    SECTION("Calculate intermediate metrics") {
-        auto metrics = simulator.calculateIntermediateMetrics();
-        
-        REQUIRE(metrics.compute_cycles == Approx(2048.0).epsilon(0.01));
-        REQUIRE(metrics.prefetch_cost == Approx(0.557778).epsilon(0.01));
-        REQUIRE(metrics.startup_cost == Approx(2.6).epsilon(0.01));
-        REQUIRE(metrics.output_write_cost == Approx(1.202859).epsilon(0.01));
-        REQUIRE(metrics.output_write_cost_edge == Approx(0.0).epsilon(0.01));
-        REQUIRE(metrics.split_accumulation_overhead == Approx(0.0).epsilon(0.01));
-        REQUIRE(metrics.local_split_overhead == Approx(0.0).epsilon(0.01));
-        REQUIRE(metrics.cache_hits.A_L1_hit == Approx(0.5).epsilon(0.01));
-        REQUIRE(metrics.cache_hits.B_L1_hit == Approx(0.5).epsilon(0.01));
-    }
-    
-    SECTION("Calculate final performance from intermediate metrics") {
-        auto metrics = simulator.calculateIntermediateMetrics();
-        auto perf = simulator.calculateFinalPerformance(metrics);
-        
-        REQUIRE(perf.microSeconds > 0);
-        REQUIRE(perf.hitRate >= 0);
-        REQUIRE(perf.hitRate <= 100);
-    }
-    
-    SECTION("Consistency between direct and two-stage prediction") {
-        // Test 1: Original problem (1024x1024x1024)
-        auto perf_direct = simulator.predictedPerformance();
-        
-        auto metrics = simulator.calculateIntermediateMetrics();
-        auto perf_twostage = simulator.calculateFinalPerformance(metrics);
-        
-        // Both methods should produce the same result
-        REQUIRE(perf_direct.microSeconds == Approx(perf_twostage.microSeconds).epsilon(0.01));
-        REQUIRE(perf_direct.hitRate == Approx(perf_twostage.hitRate).epsilon(0.01));
-        
-        // Check specific expected values for 1024x1024x1024
-        REQUIRE(perf_direct.microSeconds == Approx(44.5695).epsilon(0.01));
-        REQUIRE(perf_direct.hitRate == Approx(43.75).epsilon(0.01));
-        
-        // Test 2: Small problem (512x512x512)
-        auto problem_small = make_problem_info(512, 512, 512);
-        simulator.setProblem(problem_small);
-        
-        auto perf_direct_small = simulator.predictedPerformance();
-        auto metrics_small = simulator.calculateIntermediateMetrics();
-        auto perf_twostage_small = simulator.calculateFinalPerformance(metrics_small);
-        
-        REQUIRE(perf_direct_small.microSeconds == Approx(perf_twostage_small.microSeconds).epsilon(0.01));
-        REQUIRE(perf_direct_small.hitRate == Approx(perf_twostage_small.hitRate).epsilon(0.01));
-        
-        // Check specific expected values for 512x512x512
-        REQUIRE(perf_direct_small.microSeconds == Approx(22.9029).epsilon(0.01));
-        REQUIRE(perf_direct_small.hitRate == Approx(25.0).epsilon(0.01));
-        
-        // Test 3: Large problem (2048x2048x2048)
-        auto problem_large = make_problem_info(2048, 2048, 2048);
-        simulator.setProblem(problem_large);
-        
-        auto perf_direct_large = simulator.predictedPerformance();
-        auto metrics_large = simulator.calculateIntermediateMetrics();
-        auto perf_twostage_large = simulator.calculateFinalPerformance(metrics_large);
-        
-        REQUIRE(perf_direct_large.microSeconds == Approx(perf_twostage_large.microSeconds).epsilon(0.01));
-        REQUIRE(perf_direct_large.hitRate == Approx(perf_twostage_large.hitRate).epsilon(0.01));
-        
-        // Check specific expected values for 2048x2048x2048
-        REQUIRE(perf_direct_large.microSeconds == Approx(88.5218).epsilon(0.01));
-        REQUIRE(perf_direct_large.hitRate == Approx(81.25).epsilon(0.01));
-    }
-}
-
 TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
     Formocast simulator;
     simulator.setHardware(hardware_t::architecture_t::gfx950);
@@ -588,22 +508,6 @@ TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
         int result = simulator.getLocalReadCompletionCycle(100, fifo, 1);
         REQUIRE(result == 120);
         REQUIRE(fifo.size() == 1);
-    }
-    
-    SECTION("Push local read for gfx950 - bpr=8") {
-        std::queue<int> fifo;
-        simulator.pushLocalRead(100, fifo, 8, true);
-        
-        REQUIRE(fifo.size() == 1);
-        REQUIRE(fifo.front() == 111); // 100 + 11
-    }
-    
-    SECTION("Push local read for gfx950 - bpr=16") {
-        std::queue<int> fifo;
-        simulator.pushLocalRead(100, fifo, 16, true);
-        
-        REQUIRE(fifo.size() == 1);
-        REQUIRE(fifo.front() == 121); // 100 + 21
     }
     
     SECTION("Push local read write with bank conflict") {

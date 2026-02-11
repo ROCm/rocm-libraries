@@ -894,28 +894,6 @@ namespace origami
             return baseLatency + conflictPenalty;
         }
 
-        void pushLocalRead(int currentCycle, std::queue<int>& fifo, int bpr, bool isGfx950)
-        {
-            std::vector<int> latency(5);
-            if (isGfx950)
-            {
-                latency = {11,11,11,11,21};
-            }
-            else
-            {
-                latency = {12,12,12,21,27};
-            }
-            int lrMemLatency;
-            if (bpr == 16) {
-                lrMemLatency = latency[4];
-            } else if (bpr == 8) {
-                lrMemLatency = latency[3];
-            } else {
-                lrMemLatency = latency[2];
-            }
-            fifo.push(currentCycle + lrMemLatency);
-        }
-
         double analyzeBankConflictsFromVGPR(
             const std::vector<std::unordered_map<std::string, int64_t>>& vgprState,
             const std::string& vgprLocalReadAddrA,

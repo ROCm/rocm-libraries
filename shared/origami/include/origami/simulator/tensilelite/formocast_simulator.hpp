@@ -482,34 +482,9 @@ namespace origami
         /**
          * @brief Predict overall performance for the configured problem and solution
          * 
-         * This function combines the functionality of calculateIntermediateMetrics() and
-         * calculateFinalPerformance() into a single call for convenience. It is a legacy
-         * interface that may be deprecated in the future.
-         * 
-         * @note Future development will determine which approach to keep based on developer
-         *       and debugging requirements. The refactored two-step approach (calculate
-         *       intermediate metrics separately, then compute final performance) provides
-         *       better visibility into the prediction process for debugging, while this
-         *       unified function offers simpler usage.
-         * 
          * @return PredictedPerformance structure with execution time and cache hit rates
-         * @see calculateIntermediateMetrics() for detailed intermediate metrics
-         * @see calculateFinalPerformance() for the refactored final calculation
          */
         PredictedPerformance predictedPerformance() const;
-        
-        /**
-         * @brief Calculate intermediate performance metrics (refactored version)
-         * @return IntermediatePerformanceMetrics with detailed breakdown
-         */
-        IntermediatePerformanceMetrics calculateIntermediateMetrics() const;
-        
-        /**
-         * @brief Calculate final performance from intermediate metrics
-         * @param metrics Intermediate performance metrics
-         * @return PredictedPerformance with final execution time prediction
-         */
-        PredictedPerformance calculateFinalPerformance(const IntermediatePerformanceMetrics& metrics) const;
         
         /**
          * @brief Compute L1 cache hit rates for both matrix operands
@@ -699,15 +674,6 @@ namespace origami
          * @param numPreviousLRs Number of previous local reads
          */
         void pushLocalReadWrite(int currentCycle, std::queue<int>& fifo, int bpr, double bankConflict, bool isLocalRead, int numPreviousLRs);
-        
-        /**
-         * @brief Push a local read operation into FIFO
-         * @param currentCycle Current simulation cycle
-         * @param fifo FIFO queue
-         * @param bpr Bytes per read operation
-         * @param isGfx950 Whether hardware is GFX950
-         */
-        void pushLocalRead(int currentCycle, std::queue<int>& fifo, int bpr, bool isGfx950);
         
         /**
          * @brief Analyze bank conflicts from VGPR states for both matrix operands

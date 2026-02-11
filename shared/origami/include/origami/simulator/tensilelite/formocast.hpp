@@ -303,15 +303,6 @@ namespace origami
         int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, int lrStallLatencyBuffer);
 
         /**
-         * @brief Push a local read operation into the FIFO
-         * @param currentCycle Current simulation cycle
-         * @param fifo FIFO queue to push to
-         * @param bpr Bytes per read operation
-         * @param isGfx950 Whether the hardware is GFX950
-         */
-        void pushLocalRead(int currentCycle, std::queue<int>& fifo, int bpr, bool isGfx950);
-        
-        /**
          * @brief Calculate local read latency considering bank conflicts
          * @param baseLatency Base latency without conflicts
          * @param conflictMultiplier Multiplier for bank conflict penalty
