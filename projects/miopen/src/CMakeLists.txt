@@ -1008,7 +1008,7 @@ endif()
 
 ############################################################
 # MIOpen depends on OpenCL
-if(MIOPEN_BACKEND STREQUAL "OpenCL")
+if( MIOPEN_BACKEND STREQUAL "OpenCL")
     MESSAGE( STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}" )
     target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS} )
     target_link_libraries( MIOpen PUBLIC ${OPENCL_LIBRARIES} )
