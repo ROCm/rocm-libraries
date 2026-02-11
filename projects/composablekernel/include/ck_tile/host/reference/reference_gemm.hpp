@@ -388,6 +388,7 @@ template <typename ADataType,
           typename AccDataType,
           typename CDataType,
           typename QuantGroupSize,
+          typename BLayout,
           bool aquant,
           typename AElementOp   = ck_tile::identity,
           typename BElementOp   = ck_tile::identity,
@@ -418,7 +419,10 @@ CK_TILE_HOST void reference_mx_gemm_bquant(const HostTensor<ADataType>& a_m_k,
             {
                 const auto b_pack = type_convert<pk_fp4_t>(b_element_op(b_k_n(k, n)));
 
-                if(k % 2 == 0)
+                const auto pack_dim =
+                    std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor> ? n : k;
+
+                if(pack_dim % 2 == 0)
                 {
                     const auto b_f4_lo = type_convert<pk_fp4_t>(b_pack.unpack(number<0>{}));
                     v_b                = type_convert<ComputeType>(b_f4_lo);

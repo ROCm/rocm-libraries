@@ -242,6 +242,12 @@ struct GemmPipelineAgBgCrImplBase
     CK_TILE_DEVICE constexpr auto MakeALdsWindows(const ALdsTensorView& a_lds_block_view,
                                                   const ALdsLoadTileDistr&) const
     {
+        // with pk_int4_t the LDS type is always BDataType
+        using ADataTypeLDS =
+            std::conditional_t<std::is_same_v<typename Problem::ADataType, pk_int4_t>,
+                               typename Problem::BDataType,
+                               typename Problem::ADataType>;
+
         auto a_lds_shape = []() {
             if constexpr(is_a_load_tr)
                 return make_tuple(number<KPerBlock>{}, number<MPerBlock>{});
@@ -254,9 +260,8 @@ struct GemmPipelineAgBgCrImplBase
         auto a_lds_load_tile_distr = []() {
             if constexpr(is_a_load_tr)
                 return make_static_tile_distribution(
-                    typename InputTileDistributionTraits<
-                        typename ALdsLoadTileDistr::DstrEncode,
-                        typename Problem::ADataType>::TransposedDstrEncode{});
+                    typename InputTileDistributionTraits<typename ALdsLoadTileDistr::DstrEncode,
+                                                         ADataTypeLDS>::TransposedDstrEncode{});
             else
                 return ALdsLoadTileDistr{};
         }();

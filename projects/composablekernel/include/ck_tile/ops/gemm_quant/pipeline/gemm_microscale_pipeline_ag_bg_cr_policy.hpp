@@ -178,7 +178,8 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
     template <typename DataType, bool UseLoadTranspose, index_t ThreadElements>
     static constexpr auto GetAttrNumAccess(bool_constant<UseLoadTranspose>, number<ThreadElements>)
     {
-        constexpr index_t vector_size = DS_READ_TR_SIZE() / sizeof(DataType);
+        constexpr index_t PackedSize  = numeric_traits<remove_cvref_t<DataType>>::PackedSize;
+        constexpr index_t vector_size = DS_READ_TR_SIZE() / sizeof(DataType) * PackedSize;
 
         return !UseLoadTranspose                   ? WGAttrNumAccessEnum::Single
                : vector_size == ThreadElements     ? WGAttrNumAccessEnum::Single

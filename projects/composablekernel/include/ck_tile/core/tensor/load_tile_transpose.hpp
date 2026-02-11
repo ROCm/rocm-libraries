@@ -94,16 +94,46 @@ struct DefaultTranspose
                                        sequence<0>>;
     };
 
+    template <index_t LaneGroupSize>
+    struct Quad4
+    {
+        static_assert(LaneGroupSize == 64 || LaneGroupSize == 32 || LaneGroupSize == 16,
+                      "LaneGroupSize must be 64, 32, or 16");
+        using InputEncoding =
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<16>, sequence<LaneGroupSize / 16, 1, 16>>,
+                                       tuple<sequence<2, 1, 2>>,
+                                       tuple<sequence<0, 0, 1>>,
+                                       sequence<2>,
+                                       sequence<2>>;
+
+        using OutputEncoding =
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<LaneGroupSize>, sequence<16>>,
+                                       tuple<sequence<1>>,
+                                       tuple<sequence<0>>,
+                                       sequence<2>,
+                                       sequence<0>>;
+    };
+
+    static constexpr index_t PackedSize = numeric_traits<remove_cvref_t<DataType>>::PackedSize;
+
     // Select based on data size
     template <index_t LaneGroupSize>
-    using QuadInputEncoding = std::conditional_t<sizeof(DataType) == 2,
-                                                 typename Quad16<LaneGroupSize>::InputEncoding,
-                                                 typename Quad8<LaneGroupSize>::InputEncoding>;
+    using QuadInputEncoding =
+        std::conditional_t<sizeof(DataType) == 2,
+                           typename Quad16<LaneGroupSize>::InputEncoding,
+                           std::conditional_t<PackedSize == 1,
+                                              typename Quad8<LaneGroupSize>::InputEncoding,
+                                              typename Quad4<LaneGroupSize>::InputEncoding>>;
 
     template <index_t LaneGroupSize>
-    using QuadOutputEncoding = std::conditional_t<sizeof(DataType) == 2,
-                                                  typename Quad16<LaneGroupSize>::OutputEncoding,
-                                                  typename Quad8<LaneGroupSize>::OutputEncoding>;
+    using QuadOutputEncoding =
+        std::conditional_t<sizeof(DataType) == 2,
+                           typename Quad16<LaneGroupSize>::OutputEncoding,
+                           std::conditional_t<PackedSize == 1,
+                                              typename Quad8<LaneGroupSize>::OutputEncoding,
+                                              typename Quad4<LaneGroupSize>::OutputEncoding>>;
 
     // Always swap last two dimensions
     static constexpr auto transpose_dims = sequence<1, 0>{};

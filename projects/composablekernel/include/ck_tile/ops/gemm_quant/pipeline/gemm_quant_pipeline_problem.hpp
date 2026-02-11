@@ -87,7 +87,19 @@ struct GemmQuantPipelineProblemBase
     static_assert(!(BCastPolicy_ == CastPolicy::BeforeLDSWrite &&
                     !std::is_same_v<BLayout, BQLayout>));
 
+    // gfx950 supports load with transpose for 4bit types, so we can transpose
+    // pk_fp4_t from LDS in registers. But transpose without this instruction,
+    // the transpose is done in register between Vmem read and LDS write and
+    // the implementation does not support pk_fp4_t
+#ifdef __gfx950__
     static constexpr auto BCastPolicy = BCastPolicy_;
+#else
+    static constexpr auto BCastPolicy =
+        std::is_same_v<BDataType, pk_fp4_t> &&
+                std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>
+            ? CastPolicy::BeforeLDSWrite
+            : BCastPolicy_;
+#endif
 
     static_assert(BlockGemmShape::kM % AQuantGroupSize::kM == 0);
     static_assert(BlockGemmShape::kK % AQuantGroupSize::kK == 0);

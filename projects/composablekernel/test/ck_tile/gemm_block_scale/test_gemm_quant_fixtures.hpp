@@ -109,6 +109,14 @@ struct GemmConfigMx : public GemmConfigBase
     static constexpr ck_tile::index_t K_Tile = 128;
 };
 
+struct GemmConfigMxFP4 : public GemmConfigBase
+{
+    static constexpr ck_tile::index_t M_Tile      = 128;
+    static constexpr ck_tile::index_t N_Tile      = 128;
+    static constexpr ck_tile::index_t K_Tile      = 128;
+    static constexpr ck_tile::index_t K_Warp_Tile = 64;
+};
+
 struct GemmConfigPreshuffleQuant : public GemmConfigBase
 {
     static constexpr bool APreshuffleQuant = true;
@@ -798,6 +806,7 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
                                               AccDataType,
                                               CDataType,
                                               QuantGroupSize,
+                                              BLayout,
                                               false>(a_m_k, bq_bqk_bqn, b_k_n, c_m_n_host_ref);
         else
             ck_tile::reference_gemm_quant<ADataType,
