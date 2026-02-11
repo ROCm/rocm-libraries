@@ -103,14 +103,13 @@ std::vector<TensorsConfig> TensorsConfigs()
 }
 
 template <typename T>
-struct OpTensorLeadingOnesTest
-    : public ::testing::TestWithParam<std::tuple<TensorsConfig, double, double, double>>
+struct OpTensorLeadingOnesTest : testing::TestWithParam<std::tuple<TensorsConfig, T, T, T>>
 {
 protected:
     void SetUp() override
     {
         prng::reset_seed();
-        std::tie(tensorsConfig, alpha0, alpha1, beta) = GetParam();
+        std::tie(tensorsConfig, alpha0, alpha1, beta) = this->GetParam();
 
         // Generate elements in tensors
         tensA = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
@@ -118,7 +117,7 @@ protected:
         tensB = tensor<T>{tensorsConfig.blens, tensorsConfig.bstrides}.generate(
             tensor_elem_gen_integer{});
         tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
-            [](auto...) { return 1; });
+            [](auto...) { return 0; });
 
         auto&& handle = get_handle();
         // Write the device tensors
@@ -234,12 +233,12 @@ protected:
             tensorsConfig.acstrides[0], // c_nstride
             tensorsConfig.acstrides[1], // c_cstride
             work_per_wg,
-            (T)alpha0,
-            (T)alpha1,
-            (T)beta,
-            0L, // Aoffset
-            0L, // Boffset
-            0L, // Coffset
+            alpha0,
+            alpha1,
+            beta,
+            uint64_t(0), // Aoffset
+            uint64_t(0), // Boffset
+            uint64_t(0), // Coffset
             num_wg,
             bitmap);
 
@@ -258,12 +257,12 @@ protected:
                     tensorsConfig.acstrides[0],
                     tensorsConfig.acstrides[1],
                     work_per_wg,
-                    (T)alpha0,
-                    (T)alpha1,
-                    (T)beta,
-                    0L,
-                    0L,
-                    0L,
+                    alpha0,
+                    alpha1,
+                    beta,
+                    uint64_t(0),
+                    uint64_t(0),
+                    uint64_t(0),
                     num_wg,
                     bitmap);
 #endif
@@ -294,12 +293,12 @@ protected:
             tensorsConfig.acstrides[0], // c_nstride
             tensorsConfig.acstrides[1], // c_cstride
             work_per_wg,
-            (T)alpha0,
-            (T)alpha1,
-            (T)beta,
-            0L, // Aoffset
-            0L, // Boffset
-            0L, // Coffset
+            alpha0,
+            alpha1,
+            beta,
+            uint64_t(0), // Aoffset
+            uint64_t(0), // Boffset
+            uint64_t(0), // Coffset
             num_wg,
             bitmap);
 
@@ -318,12 +317,12 @@ protected:
                     tensorsConfig.acstrides[0],
                     tensorsConfig.acstrides[1],
                     work_per_wg,
-                    (T)alpha0,
-                    (T)alpha1,
-                    (T)beta,
-                    0L,
-                    0L,
-                    0L,
+                    alpha0,
+                    alpha1,
+                    beta,
+                    uint64_t(0),
+                    uint64_t(0),
+                    uint64_t(0),
                     num_wg,
                     bitmap);
 #endif
@@ -384,14 +383,16 @@ protected:
     miopen::Allocator::ManageDataPtr tensC_dev;
 
     TensorsConfig tensorsConfig;
-    double alpha0, alpha1, beta;
+    T alpha0, alpha1, beta;
 
 #if PERF_ENABLE
     PerfHelper ph;
 #endif
 };
 
-using GPU_OpTensorLeadingOnesTest_FP16 = OpTensorLeadingOnesTest<half_float::half>;
+using float16 = half_float::half;
+
+using GPU_OpTensorLeadingOnesTest_FP16 = OpTensorLeadingOnesTest<float16>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP16, PortTest)
 {
@@ -402,10 +403,10 @@ TEST_P(GPU_OpTensorLeadingOnesTest_FP16, PortTest)
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_OpTensorLeadingOnesTest_FP16,
-                         testing::Combine(testing::ValuesIn(TensorsConfigs<half_float::half>()),
-                                          testing::Values(1.0),
-                                          testing::Values(1.0),
-                                          testing::Values(0.0, 1.0)));
+                         testing::Combine(testing::ValuesIn(TensorsConfigs<float16>()),
+                                          testing::Values(float16(1)),
+                                          testing::Values(float16(1)),
+                                          testing::Values(float16(0), float16(1))));
 
 using GPU_OpTensorLeadingOnesTest_FP32 = OpTensorLeadingOnesTest<float>;
 
@@ -419,9 +420,9 @@ TEST_P(GPU_OpTensorLeadingOnesTest_FP32, PortTest)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_OpTensorLeadingOnesTest_FP32,
                          testing::Combine(testing::ValuesIn(TensorsConfigs<float>()),
-                                          testing::Values(1.0),
-                                          testing::Values(1.0),
-                                          testing::Values(0.0, 1.0)));
+                                          testing::Values(1.f),
+                                          testing::Values(1.f),
+                                          testing::Values(0.f, 1.f)));
 
 using GPU_OpTensorLeadingOnesTest_FP64 = OpTensorLeadingOnesTest<double>;
 

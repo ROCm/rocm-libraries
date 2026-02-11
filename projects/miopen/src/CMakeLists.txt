@@ -38,9 +38,11 @@ endif()
 # 2.  How BF16 kernels (which are kind of mixed-precision now and expected to
 #     remain in the future)  perform final conversion (and rounding) of FP32
 #     to BF16 results. This affects the main functionality of the library.
-option(MIOPEN_USE_RNE_BFLOAT16 "Sets rounding scheme for bfloat16 type" ON )
-option(MIOPEN_FP8_IEEE_EXPONENT_BIAS "Sets the FP8 exponent bias to IEEE" OFF)
-option(MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
+option( MIOPEN_USE_RNE_BFLOAT16 "Sets rounding scheme for bfloat16 type" ON )
+option( MIOPEN_FP8_IEEE_EXPONENT_BIAS "Sets the FP8 exponent bias to IEEE" OFF)
+option( MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
+
+option( MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
 
 configure_file("${PROJECT_SOURCE_DIR}/include/miopen/config.h.in" "${PROJECT_BINARY_DIR}/include/miopen/config.h")
 
@@ -395,6 +397,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
     file(GLOB_RECURSE GPU_BATCHED_TRANSPOSE_KERNEL_HIP "kernels/gpu_batched_transpose_kernel/*.cpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_INCLUDE "kernels/gpu_general_tensor_reorder_kernel/*.hpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE "kernels/gpu_general_tensor_reorder_kernel/*.cpp")
+
 
     set(MIOPEN_KERNEL_INCLUDES
         ${STATIC_COMPOSABLE_KERNEL_INCLUDE}
@@ -947,6 +950,12 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
     else()
         # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
+        
+        if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
+            add_subdirectory(kernels/ck_builder)
+            list(APPEND MIOPEN_CK_LINK_FLAGS ck_builder)
+            add_definitions(-DCK_EXPERIMENTAL_BUILDER)
+        endif()
     endif()
     if(GPU_TARGETS MATCHES "gfx942" OR GPU_TARGETS MATCHES "gfx950")
         target_compile_definitions(MIOpen PRIVATE CK_ENABLE_TF32)
@@ -1089,7 +1098,13 @@ local:
     # set_target_properties(MIOpen PROPERTIES CXX_VISIBILITY_PRESET hidden)
     set_target_properties(MIOpen PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
 endif()
-
+#######################################
+if(MIOPEN_ENABLE_SQLITE)
+    # MIOpen depends on SQLite
+    target_link_libraries(MIOpen PRIVATE SQLite::SQLite3)
+    target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite::SQLite3>)
+endif()
+############################################################
 # MIOpen depends on librt for Boost.Interprocess
 if(NOT WIN32 AND NOT APPLE)
     find_library(LIBRT rt)
@@ -1097,12 +1112,6 @@ if(NOT WIN32 AND NOT APPLE)
         message(STATUS "Librt: " ${LIBRT})
         target_internal_library(MIOpen ${LIBRT})
     endif()
-endif()
-
-if(MIOPEN_ENABLE_SQLITE)
-    # MIOpen depends on SQLite
-    target_link_libraries(MIOpen PRIVATE SQLite::SQLite3)
-    target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite::SQLite3>)
 endif()
 
 if(MIOPEN_USE_ROCTRACER)
