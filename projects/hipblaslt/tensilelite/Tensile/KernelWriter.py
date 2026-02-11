@@ -2879,6 +2879,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
             module.add(self.tdmApplyStreamKOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
 
+      if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["ClusterBarrier"]:
+        module.add(self.undefineSgpr("WaveIdx"))
+
       ###########################################################################
       # summations loops: open
       ###########################################################################
@@ -8307,6 +8310,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not isPackedIndex(kernel,idx):
         self.defineSgpr("WorkGroup%u"%wg, 1)
         wg+=1
+
+    if kernel["enableTDMA"] or kernel["enableTDMB"]:
+      self.defineSgpr("WaveIdx", 1)
 
     if kernel["Multicast"]:
       tdmA: bool = kernel["enableTDMA"]

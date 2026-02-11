@@ -2315,6 +2315,16 @@ class KernelWriterAssembly(KernelWriter):
           moduleRegInit.add(VMovB32(dst=vgpr(i), src=hex(self.consts.initVgprValue), comment="InitVgpr&0x1"))
         moduleRegInit.addSpaceLine()
 
+      # set m0
+      moduleRegInit.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]),
+          comment="LDS clamp at %u bytes"%(kernel["LdsNumBytes"])))
+
+      # set Serial id vgpr
+      moduleRegInit.add(VMovB32(dst=vgpr("Serial"), src=vgpr(0), comment="thread serial id"))
+
+      if self.states.kernel["WavefrontSize"] == 32:
+        moduleRegInit.add(SMovB32(dst=VCC(setHi=True), src=0, comment="Ensure hi bits are zero"))
+
       # init workgroup id from ttmp
       if self.states.archCaps["WorkGroupIdFromTTM"]:
         enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
@@ -2381,11 +2391,18 @@ class KernelWriterAssembly(KernelWriter):
                                comment="WorkGroup2 = (cluster_z * nwg_z) + wg_z"))
             moduleRegInit.add(label_calculate_workgroup_done)
 
-            if kernel["Multicast"]:
-              moduleRegInit.addComment0("Calculate multicast mask")
-              sgprWgX = sTmp+1
-              sgprWgY = sTmp+2
-              sgprNWgX = sTmp+3
+          if kernel["enableTDMA"] or kernel["enableTDMB"]:
+            with self.allocTmpSgpr(1) as tmpSgprRes:
+              wavelen: int = kernel["WavefrontSize"]
+              sgprIdx: int = tmpSgprRes.idx
+              moduleRegInit.add(VReadfirstlaneB32(sgpr(sgprIdx), vgpr("Serial"), "first tId"))
+              moduleRegInit.add(SLShiftRightB32(sgpr("WaveIdx"), ceil(log2(wavelen)), sgpr(sgprIdx), "wId=fTid // wavelen"))
+
+          if kernel["Multicast"]:
+            moduleRegInit.addComment0("Calculate multicast mask")
+            sgprWgX = sTmp+1
+            sgprWgY = sTmp+2
+            sgprNWgX = sTmp+3
 
               maskA = 1
               for idx in range(kernel["ClusterDim"][1]):
@@ -2401,13 +2418,8 @@ class KernelWriterAssembly(KernelWriter):
                 setMulticastMaskLblEven = Label(f"setMulticastMask_EvenWave", "")
                 setMulticastMaskLblEnd = Label(f"setMulticastMaskEnd", "")
 
-                with self.allocTmpSgpr(1) as tmpSgprRes:
-                  wavelen: int = kernel["WavefrontSize"]
-                  waveIdSgprIdx: int = tmpSgprRes.idx
-                  moduleRegInit.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
-                  moduleRegInit.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
-                  moduleRegInit.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
-                  moduleRegInit.add(SCBranchSCC1(setMulticastMaskLblOdd.getLabelName(), "Jump if wId is odd"))
+                moduleRegInit.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+                moduleRegInit.add(SCBranchSCC1(setMulticastMaskLblOdd.getLabelName(), "Jump if wId is odd"))
 
                 moduleRegInit.add(setMulticastMaskLblEven)
                 moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
@@ -2428,16 +2440,6 @@ class KernelWriterAssembly(KernelWriter):
                                           comment="Shift factor: wg_y * nwg_x"))
                 moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskB"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
                                                  comment="Setting maskB"))
-
-      # set m0
-      moduleRegInit.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]),
-          comment="LDS clamp at %u bytes"%(kernel["LdsNumBytes"])))
-
-      # set Serial id vgpr
-      moduleRegInit.add(VMovB32(dst=vgpr("Serial"), src=vgpr(0), comment="thread serial id"))
-
-      if self.states.kernel["WavefrontSize"] == 32:
-        moduleRegInit.add(SMovB32(dst=VCC(setHi=True), src=0, comment="Ensure hi bits are zero"))
 
       # SrdD can be used as temp sgprs for a bit
       if self.states.doShadowInit and kernel["BufferStore"]:
@@ -17459,13 +17461,11 @@ class KernelWriterAssembly(KernelWriter):
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
-      mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
-      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
-        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe // dim1Divisor) + round(mt // numWaves * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize, \
-                "woffset = wId * (mt // numWaves * du * bpe // dim1Divisor) + (mt // numWaves * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize)"))
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), round(mt // numWaves * du * bpe // dim1Divisor) + round(mt // numWaves * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize, \
+                "woffset = WaveIdx * (mt // numWaves * du * bpe // dim1Divisor) + (mt // numWaves * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize)"))
       else:
-        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe // dim1Divisor), "woffset = wId * (mt // numWaves * du * bpe // dim1Divisor)"))
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), round(mt // numWaves * du * bpe // dim1Divisor), "woffset = WaveIdx * (mt // numWaves * du * bpe // dim1Divisor)"))
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 
@@ -17587,8 +17587,7 @@ class KernelWriterAssembly(KernelWriter):
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
-      mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
-      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)) + 1, sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen // 2"))
+      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr("WaveIdx"), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
         mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * du * bpe // dim1Divisor) + round(mt // numComp * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize, \
                 "woffset = wId * (mt // numComp * du * bpe + mt // numComp * du * bpe // ldsBlockSizePerPad * ldsPadSize)"))
@@ -17702,13 +17701,8 @@ class KernelWriterAssembly(KernelWriter):
     tdmInitLblEnd = Label(f"TDMInit{tcA}{tcB}End", "")
     mod.add(tdmInitLblA)
 
-    with self.allocTmpSgpr(1) as tmpSgprRes:
-      wavelen: int = kernel["WavefrontSize"]
-      waveIdSgprIdx: int = tmpSgprRes.idx
-      mod.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
-      mod.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
-      mod.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
-      mod.add(SCBranchSCC1(tdmInitLblB.getLabelName(), "Jump to B if wId is odd"))
+    mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+    mod.add(SCBranchSCC1(tdmInitLblB.getLabelName(), "Jump to B if wId is odd"))
 
     mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPA))
     mod.add(SBranch(tdmInitLblEnd.getLabelName()))
@@ -17732,13 +17726,8 @@ class KernelWriterAssembly(KernelWriter):
     tdmGlobalOffsetLblEnd = Label(f"TDMGlobalOffset{tcA}{tcB}End", "")
     mod.add(tdmGlobalOffsetLblA)
 
-    with self.allocTmpSgpr(1) as tmpSgprRes:
-      wavelen: int = kernel["WavefrontSize"]
-      waveIdSgprIdx: int = tmpSgprRes.idx
-      mod.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
-      mod.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
-      mod.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
-      mod.add(SCBranchSCC1(tdmGlobalOffsetLblB.getLabelName(), "Jump to B if wId is odd"))
+    mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+    mod.add(SCBranchSCC1(tdmGlobalOffsetLblB.getLabelName(), "Jump to B if wId is odd"))
 
     dstGroup0A = f"tdm{tcA}Group0"
     dstGroup0B = f"tdm{tcB}Group0"
@@ -17801,28 +17790,22 @@ class KernelWriterAssembly(KernelWriter):
     tcB: str = tpB["tensorChar"]
     wavelen: int = kernel["WavefrontSize"]
     incSgprName = f"tdm{tcA}{tcB}Incs"
-    mod.add(VReadfirstlaneB32(sgpr(incSgprName), vgpr("Serial"), "first tId"))
-    mod.add(SLShiftRightB32(sgpr(incSgprName), ceil(log2(wavelen)), sgpr(incSgprName), "wId=fTid // wavelen"))
-    mod.add(SBitcmp1B32(sgpr(incSgprName), 0, "Check parity of wId"))
+    mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
     #TODO: should not directly use GRIA and GRIB
     mod.add(SCSelectB32(sgpr(incSgprName), sgpr(f"GlobalReadIncs{tcB}"), sgpr(f"GlobalReadIncs{tcA}")))
     return mod
 
   def clusterBarrierPreSignal(self, kernel, handleSkipPGR2=False) -> Module:
     mod = Module()
-    with self.allocTmpSgpr(1) as tmpSgprRes:
-      skipClusterBarrierPreSignal = Label(self.labels.getUniqueNamePrefix("skipCBPreSignal"), "")
-      wavelen = kernel["WavefrontSize"]
-      waveIdSgprIdx = tmpSgprRes.idx
-      if handleSkipPGR2 and kernel["PrefetchGlobalRead"] == 2:
-        mod.add(SCBranchSCC1(skipClusterBarrierPreSignal.getLabelName(), \
-                             "skip cluster barrier pre-signal if PGR=2 but only 1 loop"))
-      mod.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
-      mod.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
-      mod.add(SCmpEQU32(sgpr(waveIdSgprIdx), 0x0, "Check for waveID 0"))
-      mod.add(SCBranchSCC0(skipClusterBarrierPreSignal.getLabelName(), "Execute cluster barrier signal for waveID 0"))
-      mod.add(SBarrier(True, False, True, "cluster_barrier signal"))
-      mod.add(skipClusterBarrierPreSignal)
+    skipClusterBarrierPreSignal = Label(self.labels.getUniqueNamePrefix("skipCBPreSignal"), "")
+    if handleSkipPGR2 and kernel["PrefetchGlobalRead"] == 2:
+      mod.add(SCBranchSCC1(skipClusterBarrierPreSignal.getLabelName(), \
+                           "skip cluster barrier pre-signal if PGR=2 but only 1 loop"))
+    mod.add(SCmpEQU32(sgpr("WaveIdx"), 0x0, "Check for waveID 0"))
+    mod.add(SCBranchSCC0(skipClusterBarrierPreSignal.getLabelName(), "Execute cluster barrier signal for waveID 0"))
+    mod.add(SBarrier(True, False, True, "cluster_barrier signal"))
+    mod.add(skipClusterBarrierPreSignal)
+
     return mod
 
   def resetTDMDescriptorForTail(self, kernel: Mapping, tP: Mapping, tmpSgprWaveOffset = None) -> Module:
