@@ -50,14 +50,14 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
 
     option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
-    option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+    option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" OFF) # Disable by default for TheRock
     if(WIN32)
-        option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
+	option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF) # Disable by default for TheRock
         if(ENABLE_CLANG_TIDY)
             message(WARNING "Clang-Tidy enabled on Windows - this significantly increases build time.")
         endif()
     else()
-        option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+        option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
     endif()
 
     list(
