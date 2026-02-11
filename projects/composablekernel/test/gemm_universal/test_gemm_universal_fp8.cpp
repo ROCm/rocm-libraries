@@ -67,9 +67,9 @@ using KernelTypes_MK_NK = ::testing::Types<
     // Fallback test type when FP8 is not enabled
     std::tuple<      F16,       F16,             F16,     F16>>;
 #endif
-  // clang-format on
+// clang-format on
 
-    TYPED_TEST_SUITE(TestGemmUniversal_FP8_MK_KN, KernelTypes_MK_KN);
+TYPED_TEST_SUITE(TestGemmUniversal_FP8_MK_KN, KernelTypes_MK_KN);
 TYPED_TEST_SUITE(TestGemmUniversal_FP8_MK_NK, KernelTypes_MK_NK);
 
 #include "test_gemm_universal_ut_cases_fp8.inc"
