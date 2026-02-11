@@ -42,7 +42,7 @@ def get_changed_files(ref1, ref2, project: str = None):
         )
         print("cwd:", result.stdout)
         result = subprocess.run(
-            ["git", "diff", "--name-only", ref1, ref2],
+            ["git", "diff", "--name-only", ref1, ref2,"-- projects/composablekernel/"],
             capture_output=True,
             text=True,
             check=True,
@@ -87,11 +87,13 @@ def select_tests(file_to_executables, changed_files, filter_mode):
     """Return a set of test executables affected by changed files."""
     affected = set()
     print("changed_files:",changed_files)
-    print("file_to_executables:",file_to_executables[changed_files[0]])
+    #print("file_to_executables:",file_to_executables)
     for f in changed_files:
         if f in file_to_executables:
             for exe in file_to_executables[f]:
                 affected.add(exe)
+                print("adding test:",exe)
+    print("affected tests:",affected)
     return sorted(affected)
 
 
