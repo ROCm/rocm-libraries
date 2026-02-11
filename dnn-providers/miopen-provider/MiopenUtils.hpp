@@ -81,9 +81,9 @@ public:
         }
         else
         {
-            HIPDNN_PLUGIN_LOG_INFO("Tuning policy set to {} (benchmarking={})",
-                                   static_cast<int>(policy),
-                                   benchmarkingEnabled);
+            HIPDNN_PLUGIN_LOG_INFO("Tuning policy set to " << static_cast<int>(policy)
+                                                           << " (benchmarking="
+                                                           << benchmarkingEnabled << ")");
         }
     }
 
@@ -98,8 +98,8 @@ public:
         }
         else
         {
-            HIPDNN_PLUGIN_LOG_INFO("Tuning policy restored to {}",
-                                   static_cast<int>(_originalPolicy));
+            HIPDNN_PLUGIN_LOG_INFO("Tuning policy restored to "
+                                   << static_cast<int>(_originalPolicy));
         }
     }
 
