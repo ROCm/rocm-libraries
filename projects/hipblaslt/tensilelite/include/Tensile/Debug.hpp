@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #pragma once
 
 #include <cstdlib>
+#include <set>
 #include <string>
 #ifdef Tensile_ENABLE_MARKER
 #include <roctracer/roctx.h>
@@ -36,42 +37,34 @@
 
 namespace TensileLite
 {
+    using StringSet = std::set<std::string>;
+
     /**
- * @brief Common place for defining flags which enable debug behaviour.
- */
+     * @brief Common place for defining flags which enable debug behaviour.
+     */
     class Debug : public LazySingleton<Debug>
     {
     public:
         bool printPropertyEvaluation() const;
         bool printPredicateEvaluation() const;
+        bool printPredicateEvaluationVerbose() const;
         bool printDeviceSelection() const;
         bool printCodeObjectInfo() const;
-
         bool printKernelArguments() const;
-
         bool printDataInit() const;
-
-        // print tensor dims, strides, memory sizes
-        bool printTensorInfo() const;
-
-        // if tensors are printed, use hexadecimal output format
-        bool printTensorModeHex() const;
-
+        bool printTensorInfo() const; // print tensor dims, strides, memory sizes
+        bool printTensorModeHex() const; // if tensors are printed, use hexadecimal output format
         bool printLibraryVersion() const;
-
         bool printLookupEfficiency() const;
-
         bool printWinningKernelName() const;
 
-        bool printSolutionSelectionTime() const;
+        bool usePredictionLibrary() const;
 
         bool printLibraryLogicIndex() const;
 
         bool naivePropertySearch() const;
 
         bool skipKernelLaunch() const;
-
-        bool enableDebugSelection() const;
 
         bool useStreamKDataParrallel() const;
 
@@ -83,7 +76,7 @@ namespace TensileLite
 
         int getSolutionIndex() const;
 
-        bool getSolutionSelectionTrace() const;
+        bool printSolutionSelectionTime() const;
 
         int getGridbasedTopSols() const;
 
@@ -94,6 +87,10 @@ namespace TensileLite
         bool gridBasedBatchExp() const;
 
         bool disableStaggerU() const;
+
+        StringSet excludedLibFromGetAll() const;
+
+        void setExcludedLibFromGetAll(StringSet& excludedSet);
 
         __attribute__((always_inline)) inline void markerStart(const char* name) const
         {
@@ -133,11 +130,10 @@ namespace TensileLite
         int         m_value;
         int         m_value2;
         bool        m_naivePropertySearch = false;
-        bool        m_debugSelection      = false;
-        bool        m_dataParallel      = false;
+        bool        m_dataParallel        = false;
         int         m_experimentSelection = 0;
         int         m_solution_index      = -1;
-        bool        m_solselTrace         = false;
+        bool        m_predictionLib       = false;
         std::string m_metric              = "";
         int         m_gridbasedTopSols    = 1;
         bool        m_benchmark           = false;
@@ -145,6 +141,7 @@ namespace TensileLite
         bool        m_gridbasedBatchExp   = false;
         bool        m_printMarker         = false;
         bool        m_disableStaggerU     = false;
+        StringSet   m_excludedFromGetAll;
 
         Debug();
     };

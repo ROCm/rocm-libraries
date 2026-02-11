@@ -939,7 +939,13 @@ EXCLUDE_SYMBOLS        =
 # that contain example code fragments that are included (see the \include
 # command).
 
-EXAMPLE_PATH           =
+EXAMPLE_PATH           = ../../clients/samples/documentation_examples/conversion \
+                         ../../clients/samples/documentation_examples/level1 \
+                         ../../clients/samples/documentation_examples/level2 \
+                         ../../clients/samples/documentation_examples/level3 \
+                         ../../clients/samples/documentation_examples/precond \
+                         ../../clients/samples/documentation_examples/extra \
+                         ../../clients/samples/documentation_examples/generic
 
 # If the value of the EXAMPLE_PATH tag contains directories, you can use the
 # EXAMPLE_PATTERNS tag to specify one or more wildcard pattern (like *.cpp and
@@ -2161,7 +2167,8 @@ INCLUDE_FILE_PATTERNS  =
 
 PREDEFINED             = __attribute__(x)= \
                          __inline= \
-                         HIPSPARSE_EXPORT=
+                         HIPSPARSE_EXPORT= \
+                         HIPSPARSE_DEPRECATED_MSG(x)=
 
 # If the MACRO_EXPANSION and EXPAND_ONLY_PREDEF tags are set to YES then this
 # tag can be used to specify a list of macro names that should be expanded. The

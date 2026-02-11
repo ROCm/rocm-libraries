@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -34,46 +34,77 @@ Tests:
 - name: csr2bsr
   category: quick
   function: csr2bsr
-  precision: *double_only_precisions
+  precision: *single_only_precisions_complex_real
+  M: [0, 1107]
+  N: [0, 1089]
+  block_dim: [1, 6, 10, 14]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random, rocsparse_matrix_zero]
+
+- name: csr2bsr
+  category: quick
+  function: csr2bsr
+  precision: *single_only_precisions_complex_real
   M: [325]
   N: [435]
-  block_dim: [6]
+  block_dim: [2, 7, 11, 15]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_row]
+  direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_random]
 
 - name: csr2bsr
   category: quick
   function: csr2bsr
-  precision: *single_double_precisions_complex_real
-  M: [325]
-  N: [435]
-  block_dim: [6]
+  precision: *single_only_precisions_complex_real
+  M: [541]
+  N: [347]
+  block_dim: [3, 8, 12, 16]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_zero]
 
 - name: csr2bsr
   category: quick
   function: csr2bsr
-  precision: *single_double_precisions_complex_real
-  M: [0, 1, 10, 325, 1107]
-  N: [0, 1, 33, 435, 1089]
-  block_dim: [1, 2, 4, 5, 6, 8, 37]
-  baseA: [rocsparse_index_base_zero]
-  baseB: [rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  precision: *single_only_precisions_complex_real
+  M: [757]
+  N: [559]
+  block_dim: [4, 9, 13, 17]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_random]
+
+- name: csr2bsr
+  category: quick
+  function: csr2bsr
+  precision: *single_only_precisions_complex_real
+  M: 1
+  N: 1
+  block_dim: [5, 10, 14, 18]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
 
 - name: csr2bsr
   category: pre_checkin
   function: csr2bsr
-  precision: *single_double_precisions_complex_real
+  precision: *double_only_precisions
   M: [10245, 50687, 92835]
   N: [11200, 51023, 78583]
-  block_dim: [1, 5, 22, 71]
+  block_dim: [5, 22, 37, 71]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row, rocsparse_direction_column]
@@ -82,19 +113,31 @@ Tests:
 - name: csr2bsr_file
   category: pre_checkin
   function: csr2bsr
-  precision: *single_double_precisions
+  precision: *single_only_precisions
   M: 1
   N: 1
-  block_dim: [3, 8, 16, 19, 45]
+  block_dim: [6, 17]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_row, rocsparse_direction_column]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
-             nos2,
-             nos4,
-             nos6,
-             scircuit]
+  filename: [shipsec1,
+             qc2534,
+             Chebyshev4]
+
+- name: csr2bsr_file
+  category: pre_checkin
+  function: csr2bsr
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  block_dim: [3, 16, 19, 45]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             Chevron2]
 
 - name: csr2bsr
   category: nightly
@@ -102,7 +145,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [20245, 50677, 82859]
   N: [12909, 40232, 88180]
-  block_dim: [1, 5, 16, 32, 47]
+  block_dim: [20, 21, 23, 24]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row, rocsparse_direction_column]
@@ -111,10 +154,10 @@ Tests:
 - name: csr2bsr_file
   category: nightly
   function: csr2bsr
-  precision: *single_double_precisions_complex
+  precision: *single_only_precisions_complex
   M: 1
   N: 1
-  block_dim: [4, 7]
+  block_dim: [25, 26, 27, 28]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
@@ -125,10 +168,10 @@ Tests:
 - name: csr2bsr_file
   category: nightly
   function: csr2bsr
-  precision: *single_double_precisions
+  precision: *double_only_precisions
   M: 1
   N: 1
-  block_dim: [7, 11]
+  block_dim: [29]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
@@ -137,6 +180,4 @@ Tests:
              mac_econ_fwd500,
              sme3Dc,
              webbase-1M,
-             Chebyshev4,
-             shipsec1,
              rma10]

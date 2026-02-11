@@ -106,7 +106,7 @@ longer but is recommended for those working with a large number of libraries.
 
 .. note::
 
-   To build ROCm 6.4.2 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
+   To build ROCm 6.4.3 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
    For more information, see the documentation associated with the release you want to build.
 
 Building rocSPARSE using the install script
@@ -123,6 +123,12 @@ Using install.sh to build rocSPARSE with dependencies
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The following table lists the common ways to use ``install.sh`` to build the rocSPARSE dependencies and library.
+
+.. note::
+
+   By default, rocBLAS is a dependency and the build will fail if it isn't found.
+   To opt out of using rocBLAS when building from source with
+   the ``install.sh`` script, use the ``no-rocblas`` option. 
 
 .. csv-table::
    :header: "Command","Description"
@@ -151,6 +157,7 @@ the library, dependencies, and clients are listed in the table below.
    "``./install.sh -ic``", "Build the library and client, then build and install the rocSPARSE package in ``opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
    "``./install.sh -idc -a gfx908``", "Build the library specifically for the gfx908 architecture, build the dependencies and client, then build and install the rocSPARSE package in ``/opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
    "``./install.sh -ic -a gfx908``", "Build the library specifically for the gfx908 architecture, build the client, then build and install the rocSPARSE package in ``opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
+   "``./install.sh -o``", "Build the client executables using an already installed version of the library."
 
 Building rocSPARSE using individual make commands
 -------------------------------------------------
@@ -230,3 +237,29 @@ after successfully compiling the library with the clients.
 
       # Execute rocSPARSE example
       ./example_csrmv 1000
+
+For more comprehensive testing, you can run the entire unit test suite using the command:
+
+.. code-block:: shell
+
+      # Navigate to clients binary directory
+      cd build/release/clients/staging
+
+      # Execute rocSPARSE example
+      ./rocsparse-test
+
+For more focused testing, you can run a specific test by running the following command:
+
+.. code-block:: shell
+
+      # Navigate to clients binary directory
+      cd build/release/clients/staging
+
+      # Execute rocSPARSE example
+      ./rocsparse-test --gtest_filter=TestName
+
+.. warning::
+
+   The unit test suite is a comprehensive test of the rocSPARSE library and takes multiple hours to finish. Consider running 
+   more focused tests for quicker feedback.
+

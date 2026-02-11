@@ -79,12 +79,6 @@ namespace ArithmeticTest
 
             auto k = m_context->kernel();
 
-            auto const& gpu = m_context->targetArchitecture().target();
-            if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
-            {
-                GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-            }
-
             auto numBoolRegs = k->wavefront_size() / 32;
 
             k->setKernelDimensions(1);
@@ -707,11 +701,6 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-        }
-
         // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())
         {
@@ -854,11 +843,6 @@ namespace ArithmeticTest
         m_context->schedule(kb());
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
-
-        if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-        }
 
         // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())
@@ -1041,11 +1025,6 @@ namespace ArithmeticTest
         m_context->schedule(kb());
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
-
-        if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-        }
 
         // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())
@@ -1324,11 +1303,6 @@ namespace ArithmeticTest
         m_context->schedule(kb());
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
-
-        if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-        }
 
         // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())

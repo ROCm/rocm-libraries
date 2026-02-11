@@ -48,13 +48,13 @@ extern "C" {
 *  @param[in]
 *  alpha               scalar \f$\alpha\f$.
 *  @param[in]
-*  matA                matrix descriptor.
+*  matA                sparse matrix descriptor.
 *  @param[in]
-*  vecX                vector descriptor.
+*  vecX                dense vector descriptor.
 *  @param[in]
 *  beta                scalar \f$\beta\f$.
 *  @param[inout]
-*  vecY                vector descriptor.
+*  vecY                dense vector descriptor.
 *  @param[in]
 *  computeType         floating point precision for the SpMV computation.
 *  @param[in]
@@ -62,11 +62,12 @@ extern "C" {
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
 *
-*  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p beta, \p y or
-*               \p pBufferSizeInBytes pointer is invalid or if \p opA, \p computeType, \p alg is incorrect.
-*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
-*               currently not supported.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p vecX, \p beta, 
+*          \p vecY or \p pBufferSizeInBytes is nullptr, \p opA is invalid, or the matrix 
+*          or vector dimensions are incompatible.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
@@ -225,11 +226,13 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="spmv_mixed">Mixed Precisions</caption>
-*  <tr><th>A / X      <th>Y         <th>compute_type
-*  <tr><td>HIP_R_8I   <td>HIP_R_32I <td>HIP_R_32I
-*  <tr><td>HIP_R_8I   <td>HIP_R_32F <td>HIP_R_32F
-*  <tr><td>HIP_R_16F  <td>HIP_R_32F <td>HIP_R_32F
-*  <tr><td>HIP_R_16BF <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><th>A / X      <th>Y          <th>compute_type
+*  <tr><td>HIP_R_8I   <td>HIP_R_32I  <td>HIP_R_32I
+*  <tr><td>HIP_R_8I   <td>HIP_R_32F  <td>HIP_R_32F
+*  <tr><td>HIP_R_16F  <td>HIP_R_32F  <td>HIP_R_32F
+*  <tr><td>HIP_R_16F  <td>HIP_R_16F  <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_32F  <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_16BF <td>HIP_R_32F
 *  </table>
 *
 *  \par Mixed-regular real precisions
@@ -293,117 +296,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *               \p externalBuffer pointer is invalid or if \p opA, \p computeType, \p alg is incorrect.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
-*
-*  \par Example
-*  \code{.c}
-*    // A, x, and y are m×k, k×1, and m×1
-*    int m = 3, k = 4;
-*    int nnz_A = 8;
-*    hipsparseOperation_t transA = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*
-*    // alpha and beta
-*    float alpha = 0.5f;
-*    float beta  = 0.25f;
-*
-*    std::vector<int> hcsrRowPtr = {0, 3, 5, 8};
-*    std::vector<int> hcsrColInd = {0, 1, 3, 1, 2, 0, 2, 3};
-*    std::vector<float> hcsrVal     = {1, 2, 3, 4, 5, 6, 7, 8};
-*
-*    std::vector<float> hx(k, 1.0f);
-*    std::vector<float> hy(m, 1.0f);
-*
-*    int *dcsrRowPtr;
-*    int *dcsrColInd;
-*    float *dcsrVal;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz_A);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz_A);
-*
-*    hipMemcpy(dcsrRowPtr, hcsrRowPtr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColInd, hcsrColInd.data(), sizeof(int) * nnz_A, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrVal, hcsrVal.data(), sizeof(float) * nnz_A, hipMemcpyHostToDevice);
-*
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    hipsparseSpMatDescr_t matA;
-*    hipsparseCreateCsr(&matA, m, k, nnz_A,
-*                        dcsrRowPtr, dcsrColInd, dcsrVal,
-*                        HIPSPARSE_INDEX_32I, HIPSPARSE_INDEX_32I,
-*                        HIPSPARSE_INDEX_BASE_ZERO, HIP_R_32F);
-*
-*    // Allocate memory for the vector x
-*    float* dx;
-*    hipMalloc((void**)&dx, sizeof(float) * k);
-*    hipMemcpy(dx, hx.data(), sizeof(float) * k, hipMemcpyHostToDevice);
-*
-*    hipsparseDnVecDescr_t vecX;
-*    hipsparseCreateDnVec(&vecX, k, dx, HIP_R_32F);
-*
-*    // Allocate memory for the resulting vector y
-*    float* dy;
-*    hipMalloc((void**)&dy, sizeof(float) * m);
-*    hipMemcpy(dy, hy.data(), sizeof(float) * m, hipMemcpyHostToDevice);
-*
-*    hipsparseDnMatDescr_t vecY;
-*    hipsparseCreateDnVec(&vecY, m, dy, HIP_R_32F);
-*
-*    // Compute buffersize
-*    size_t bufferSize;
-*    hipsparseSpMV_bufferSize(handle,
-*                             transA,
-*                             &alpha,
-*                             matA,
-*                             vecX,
-*                             &beta,
-*                             vecY,
-*                             HIP_R_32F,
-*                             HIPSPARSE_MV_ALG_DEFAULT,
-*                             &bufferSize);
-*
-*    void* buffer;
-*    hipMalloc(&buffer, bufferSize);
-*
-*    // Preprocess operation (Optional)
-*    hipsparseSpMV_preprocess(handle,
-*                            transA,
-*                            &alpha,
-*                            matA,
-*                            vecX,
-*                            &beta,
-*                            vecY,
-*                            HIP_R_32F,
-*                            HIPSPARSE_MV_ALG_DEFAULT,
-*                            buffer);
-*
-*    // Perform operation
-*    hipsparseSpMV(handle,
-*                 transA,
-*                 &alpha,
-*                 matA,
-*                 vecX,
-*                 &beta,
-*                 vecY,
-*                 HIP_R_32F,
-*                 HIPSPARSE_MV_ALG_DEFAULT,
-*                 buffer);
-*
-*    // Copy device to host
-*    hipMemcpy(hy.data(), dy, sizeof(float) * m, hipMemcpyDeviceToHost);
-*
-*    // Destroy matrix descriptors and handles
-*    hipsparseDestroySpMat(matA);
-*    hipsparseDestroyDnVec(vecX);
-*    hipsparseDestroyDnVec(vecY);
-*    hipsparseDestroy(handle);
-*
-*    hipFree(buffer);
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*    hipFree(dx);
-*    hipFree(dy);
-*  \endcode
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

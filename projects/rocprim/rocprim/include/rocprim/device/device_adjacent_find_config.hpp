@@ -34,66 +34,32 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename Config, typename>
-struct wrapped_adjacent_find_config
+template<class Type>
+struct adjacent_find_config_selector
 {
-    static_assert(std::is_same<typename Config::tag, detail::adjacent_find_config_tag>::value,
-                  "Config must be a specialization of struct template adjacent_find_config");
+    using targets    = adjacent_find_targets;
+    using param_type = adjacent_find_config_params;
 
-    template<target_arch Arch>
-    struct architecture_config
+    param_type params;
+
+    template<class Target>
+    constexpr param_type picker_helper()
     {
-        static constexpr adjacent_find_config_params params = Config{};
-    };
+        // Different configs if it is inplace.
+        if constexpr(rocprim::is_arithmetic<Type>::value)
+        {
+            return adjacent_find_config_picker<Target, Type>();
+        }
+        else
+        {
+            return adjacent_find_config_params_base<Type>();
+        }
+    }
+
+    template<class Target>
+    constexpr adjacent_find_config_selector(Target) : params(picker_helper<Target>())
+    {}
 };
-
-// Generic for default config: instantiate base config.
-template<typename Type, typename Enable = void>
-struct wrapped_adjacent_find_impl
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr adjacent_find_config_params params =
-            typename default_adjacent_find_config_base<Type>::type{};
-    };
-};
-
-// Specialization for default config if types are arithmetic or half/bfloat16-precision
-// floating point types: instantiate the tuned config.
-template<typename Type>
-struct wrapped_adjacent_find_impl<Type, std::enable_if_t<rocprim::is_arithmetic<Type>::value>>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr adjacent_find_config_params params
-            = default_adjacent_find_config<static_cast<unsigned int>(Arch), Type>();
-    };
-};
-
-// Specialization for default config.
-template<typename Type>
-struct wrapped_adjacent_find_config<default_config, Type> : wrapped_adjacent_find_impl<Type>
-{};
-
-#ifndef DOXYGEN_DOCUMENTATION_BUILD
-template<typename Config, typename Type>
-template<target_arch Arch>
-constexpr adjacent_find_config_params
-    wrapped_adjacent_find_config<Config, Type>::architecture_config<Arch>::params;
-
-template<typename Type, typename Enable>
-template<target_arch Arch>
-constexpr adjacent_find_config_params
-    wrapped_adjacent_find_impl<Type, Enable>::architecture_config<Arch>::params;
-
-template<typename Type>
-template<target_arch Arch>
-constexpr adjacent_find_config_params wrapped_adjacent_find_impl<
-    Type,
-    std::enable_if_t<is_arithmetic<Type>::value>>::architecture_config<Arch>::params;
-#endif // DOXYGEN_DOCUMENTATION_BUILD
 
 } // namespace detail
 

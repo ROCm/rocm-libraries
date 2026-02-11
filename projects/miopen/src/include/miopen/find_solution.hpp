@@ -43,6 +43,9 @@
 #include <optional>
 #include <vector>
 
+/// Elevate log messages for Search to warnings.
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_WARN_SEARCH)
+
 namespace miopen {
 
 struct AnyInvokeParams;
@@ -137,16 +140,27 @@ auto FindSolutionImpl(rank<1>,
 
         if(context.do_search || enforce.IsSearch(context)) // TODO: Make it a customization point
         {
-            MIOPEN_LOG_I("Starting search: " << s.SolverDbId() << ", enforce: " << enforce);
+            auto record = DbRecord(DbKinds::PerfDb, problem);
+            if(env::enabled(MIOPEN_WARN_SEARCH))
+                MIOPEN_LOG_W("Search Started: " << record.GetKey() << " : " << s.SolverDbId()
+                                                << ", enforce: " << enforce);
+            else
+                MIOPEN_LOG_I("Search Started: " << record.GetKey() << " : " << s.SolverDbId()
+                                                << ", enforce: " << enforce);
             try
             {
                 auto c = s.Search(context, problem, invoke_ctx);
+                if(env::enabled(MIOPEN_WARN_SEARCH))
+                    MIOPEN_LOG_W("Search Ended: " << record.GetKey() << " : " << s.SolverDbId());
+                else
+                    MIOPEN_LOG_I("Search Ended: " << record.GetKey() << " : " << s.SolverDbId());
                 db().Update(problem, s.SolverDbId(), c);
                 return s.GetSolution(context, problem, c);
             }
             catch(const miopen::Exception& ex)
             {
-                MIOPEN_LOG_E("Search failed for: " << s.SolverDbId() << ": " << ex.what());
+                MIOPEN_LOG_E("Search Failed: " << record.GetKey() << s.SolverDbId() << ": "
+                                               << ex.what());
                 return ConvSolution(miopenStatusInternalError);
             }
         }
@@ -163,8 +177,8 @@ auto FindSolutionImpl(rank<0>,
                       Db&&,
                       const AnyInvokeParams&,
                       const std::string&,
-                      const std::optional<FindOptions>&)
-    -> decltype(s.GetSolution(context, problem))
+                      const std::optional<FindOptions>&) -> decltype(s.GetSolution(context,
+                                                                                   problem))
 {
     MIOPEN_LOG_I(s.SolverDbId() << " (not searchable)");
     return s.GetSolution(context, problem);
@@ -194,9 +208,11 @@ auto GetInvokeFactoryImpl(
 }
 
 template <class Solver, class Context, class Problem>
-auto GetInvokeFactoryImpl(
-    rank<0>, Solver s, const Context& context, const Problem& problem, const std::string&)
-    -> decltype(s.GetInvokerFactory(context, problem))
+auto GetInvokeFactoryImpl(rank<0>,
+                          Solver s,
+                          const Context& context,
+                          const Problem& problem,
+                          const std::string&) -> decltype(s.GetInvokerFactory(context, problem))
 {
     MIOPEN_LOG_I(s.SolverDbId() << " (not searchable)");
     return s.GetInvokerFactory(context, problem);

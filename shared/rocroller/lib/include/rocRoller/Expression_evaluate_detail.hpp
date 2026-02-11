@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include <rocRoller/Expression_fwd.hpp>
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
 
 namespace rocRoller::Expression::EvaluateDetail
@@ -132,6 +132,9 @@ namespace rocRoller::Expression::EvaluateDetail
         }
     }
 
+    CommandArgumentValue reinterpretTruncateValue(CommandArgumentValue const& value,
+                                                  DataType                    targetDataType,
+                                                  std::endian                 endianness);
 }
 
 #include <rocRoller/Expression_impl.hpp>

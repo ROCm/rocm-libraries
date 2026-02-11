@@ -179,4 +179,48 @@ double get_variance(const std::vector<T>& values, double mean)
     return variance / values.size();
 }
 
+// struct to represent a Emperical Distribution Function (EDF) 
+// of some sample
+struct EDF{
+    std::vector<double> sample;
+    double n;
+    EDF(const std::vector<double> & x){
+        sample = x;
+        std::sort(sample.begin(), sample.end());
+        n = static_cast<double>(sample.size());
+    }
+
+    double operator()(double x) const{
+        auto it = std::upper_bound(sample.begin(), sample.end(), x);
+        double pos = static_cast<double>(it - sample.begin());
+        return pos / n;
+    }
+};
+
+// Perform Two-Sample Kolmogorov-Smirnov Test
+bool ks_test_2(const std::vector<double> & expected, const std::vector<double> & actual, double alpha = 0.1){
+    EDF aEDF(expected);
+    EDF eEDF(actual);
+
+    double n = aEDF.n;
+    double m = eEDF.n;
+
+    double max_diff = std::numeric_limits<double>::min();
+
+    // Calculate the statistical value: the maximum difference between the two EDF.
+    for(const double & x : aEDF.sample){
+        max_diff = std::max(max_diff, std::abs(aEDF(x) - eEDF(x)));
+    }
+
+    for(const double & x : eEDF.sample){
+        max_diff = std::max(max_diff, std::abs(aEDF(x) - eEDF(x)));
+    }
+
+    // calculating the critical value
+    double c_alpha = std::sqrt(-std::log(alpha / 2) * 0.5);
+    double cv = std::sqrt((n + m) / ( n * m)) * c_alpha;
+
+    return max_diff <= cv; // <= because we reject if d > cv
+}
+
 #endif // TEST_COMMON_HPP_

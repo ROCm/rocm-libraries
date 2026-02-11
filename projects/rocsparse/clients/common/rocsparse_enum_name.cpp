@@ -192,6 +192,7 @@ const char* rocsparse_format_name(rocsparse_format value)
         CASE(rocsparse_format_csc);
         CASE(rocsparse_format_ell);
         CASE(rocsparse_format_bell);
+        CASE(rocsparse_format_sell);
     }
     RETURN_INVALID;
 }
@@ -229,6 +230,7 @@ const char* rocsparse_spmv_alg_name(rocsparse_spmv_alg value)
         CASE(rocsparse_spmv_alg_csr_adaptive);
         CASE(rocsparse_spmv_alg_csr_rowsplit);
         CASE(rocsparse_spmv_alg_ell);
+        CASE(rocsparse_spmv_alg_sell);
         CASE(rocsparse_spmv_alg_coo_atomic);
         CASE(rocsparse_spmv_alg_csr_lrb);
         CASE(rocsparse_spmv_alg_csr_nnzsplit);
@@ -241,6 +243,15 @@ const char* rocsparse_spsv_alg_name(rocsparse_spsv_alg value)
     switch(value)
     {
         CASE(rocsparse_spsv_alg_default);
+    }
+    RETURN_INVALID;
+}
+
+const char* rocsparse_sptrsv_alg_name(rocsparse_sptrsv_alg value)
+{
+    switch(value)
+    {
+        CASE(rocsparse_sptrsv_alg_default);
     }
     RETURN_INVALID;
 }
@@ -259,6 +270,15 @@ const char* rocsparse_spsm_alg_name(rocsparse_spsm_alg value)
     switch(value)
     {
         CASE(rocsparse_spsm_alg_default);
+    }
+    RETURN_INVALID;
+}
+
+const char* rocsparse_sptrsm_alg_name(rocsparse_sptrsm_alg value)
+{
+    switch(value)
+    {
+        CASE(rocsparse_sptrsm_alg_default);
     }
     RETURN_INVALID;
 }

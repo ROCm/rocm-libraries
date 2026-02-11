@@ -259,7 +259,7 @@ size_t
 /*! \brief  CPU Timer(in microsecond): synchronize with the default device and return wall time */
 double get_time_us_sync_device(void)
 {
-    hipDeviceSynchronize();
+    THROW_IF_HIP_ERROR(hipDeviceSynchronize());
 
     auto now = std::chrono::steady_clock::now();
     // now.time_since_epoch() is the duration since epoch
@@ -445,6 +445,15 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
         setenv("ROCBLAS_USE_HIPBLASLT", std::to_string(arg.use_hipblaslt).c_str(), true);
     }
 
+    if(arg.graph_test)
+    {
+        auto stream_order_env = getenv("ROCBLAS_STREAM_ORDER_ALLOC");
+        if(stream_order_env)
+            m_stream_order_saved_status = std::string(stream_order_env);
+        m_stream_order_env_set = true;
+        setenv("ROCBLAS_STREAM_ORDER_ALLOC", "1", true);
+    }
+
     auto status = rocblas_create_handle(&m_handle);
     if(status != rocblas_status_success)
         throw std::runtime_error(rocblas_status_to_string(status));
@@ -509,7 +518,9 @@ rocblas_local_handle::~rocblas_local_handle()
         rocblas_stream_end_capture();
 
     if(m_memory)
-        (hipFree)(m_memory);
+    {
+        PRINT_IF_HIP_ERROR((hipFree)(m_memory));
+    }
 
     if(m_hipblaslt_env_set)
     {
@@ -517,6 +528,11 @@ rocblas_local_handle::~rocblas_local_handle()
     }
 
     rocblas_destroy_handle(m_handle);
+
+    if(m_stream_order_env_set)
+    {
+        setenv("ROCBLAS_STREAM_ORDER_ALLOC", m_stream_order_saved_status.c_str(), true);
+    }
 }
 
 void rocblas_local_handle::rocblas_stream_begin_capture()
@@ -527,7 +543,8 @@ void rocblas_local_handle::rocblas_stream_begin_capture()
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(m_handle, &m_old_stream));
     CHECK_HIP_ERROR(hipStreamSynchronize(m_old_stream));
 
-    m_handle->set_stream_order_memory_allocation(true);
+    // set via env
+    // m_handle->set_stream_order_memory_allocation(true);
 
     CHECK_HIP_ERROR(hipStreamCreate(&m_graph_stream));
     CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle, m_graph_stream));
@@ -554,7 +571,8 @@ void rocblas_local_handle::rocblas_stream_end_capture()
     CHECK_HIP_ERROR(hipStreamDestroy(m_graph_stream));
     m_graph_stream = nullptr;
 
-    m_handle->set_stream_order_memory_allocation(false);
+    // set via env
+    // m_handle->set_stream_order_memory_allocation(false);
 }
 
 void rocblas_parallel_initialize_thread(int id, size_t& memory_used)

@@ -117,9 +117,11 @@ namespace rocRoller
             return name() + stag;
         }
 
-        User::User(Expression::ExpressionPtr size, Expression::ExpressionPtr offset)
+        User::User(Expression::ExpressionPtr size,
+                   Expression::ExpressionPtr offset,
+                   std::string const&        argName)
             : BaseDimension(size, Expression::literal(1u), offset)
-            , argumentName(rocRoller::SCRATCH)
+            , argumentName(argName)
         {
         }
 
@@ -166,14 +168,6 @@ namespace rocRoller
         {
         }
 
-        LDS::LDS() = default;
-
-        LDS::LDS(bool const isDirect2LDS)
-            : BaseDimension()
-            , isDirect2LDS(isDirect2LDS)
-        {
-        }
-
         Unroll::Unroll() = default;
 
         Unroll::Unroll(uint const usize)
@@ -209,6 +203,7 @@ namespace rocRoller
             , layoutType(LayoutType::None)
             , subTileSizes(subTileSizes)
             , miTileSizes(subTileSizes)
+            , swizzleTileSizes(subTileSizes)
         {
         }
 
@@ -216,7 +211,8 @@ namespace rocRoller
                              LayoutType              layoutType,
                              std::vector<int> const& subTileSizes,
                              MemoryType              memoryType,
-                             std::vector<int> const& miTileSizes)
+                             std::vector<int> const& miTileSizes,
+                             std::vector<int> const& swizzleTileSizes)
             : BaseDimension()
             , rank(sizes.size())
             , sizes(sizes)
@@ -224,6 +220,7 @@ namespace rocRoller
             , layoutType(layoutType)
             , subTileSizes(subTileSizes)
             , miTileSizes{miTileSizes.empty() ? subTileSizes : miTileSizes}
+            , swizzleTileSizes{swizzleTileSizes.empty() ? subTileSizes : swizzleTileSizes}
         {
             if(this->memoryType == MemoryType::LDS)
                 this->memoryType = MemoryType::WAVE_LDS;

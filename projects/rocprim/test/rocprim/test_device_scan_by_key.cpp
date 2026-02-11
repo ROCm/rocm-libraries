@@ -358,51 +358,134 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
                 keys = test_utils::get_random_data<K>(size, 0, 3, seed_value);
             }
 
-            common::device_ptr<T> d_input(input);
-            common::device_ptr<K> d_keys(keys);
-            common::device_ptr<U> d_output(input.size());
-
             // Scan function
             scan_op_type scan_op;
             // Key compare function
             rocprim::equal_to<K> keys_compare_op;
 
-            // Calculate expected results on host
-            std::vector<U> expected(input.size());
-            test_utils::host_inclusive_scan_by_key(input.begin(),
-                                                   input.end(),
-                                                   keys.begin(),
-                                                   expected.begin(),
-                                                   scan_op,
-                                                   keys_compare_op);
+            // Normal test
+            {
+                common::device_ptr<T> d_input(input);
+                common::device_ptr<K> d_keys(keys);
+                common::device_ptr<U> d_output(input.size());
+                std::vector<U>        expected(input.size());
+                test_utils::host_inclusive_scan_by_key(input.begin(),
+                                                       input.end(),
+                                                       keys.begin(),
+                                                       expected.begin(),
+                                                       scan_op,
+                                                       keys_compare_op);
+                auto input_iterator = rocprim::make_transform_iterator(
+                    d_input.get(),
+                    [](T in) { return static_cast<acc_type>(in); });
 
-            auto input_iterator
-                = rocprim::make_transform_iterator(d_input.get(),
-                                                   [](T in) { return static_cast<acc_type>(in); });
+                test_utils::test_kernel_wrapper(
+                    [&](void* temp_storage, size_t& storage_bytes)
+                    {
+                        return invoke_inclusive_scan_by_key<deterministic, Config>(
+                            temp_storage,
+                            storage_bytes,
+                            d_keys.get(),
+                            input_iterator,
+                            d_output.get(),
+                            input.size(),
+                            scan_op,
+                            keys_compare_op,
+                            stream,
+                            debug_synchronous);
+                    },
+                    stream,
+                    TestFixture::use_graphs);
 
-            test_utils::test_kernel_wrapper(
-                [&](void* temp_storage, size_t& storage_bytes)
-                {
-                    return invoke_inclusive_scan_by_key<deterministic, Config>(temp_storage,
-                                                                               storage_bytes,
-                                                                               d_keys.get(),
-                                                                               input_iterator,
-                                                                               d_output.get(),
-                                                                               input.size(),
-                                                                               scan_op,
-                                                                               keys_compare_op,
-                                                                               stream,
-                                                                               debug_synchronous);
-                },
-                stream,
-                TestFixture::use_graphs);
+                // Copy output to host
+                const auto output = d_output.load();
 
-            // Copy output to host
-            const auto output = d_output.load();
+                // Check if output values are as expected
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_near(output, expected, single_op_precision * (size - 1)));
+            }
+            // In-place by storing results in keys, K will not be able to be assigned with custom types
+            if constexpr(std::is_arithmetic<T>::value)
+            {
+                common::device_ptr<T> d_input(input);
+                common::device_ptr<K> d_keys(keys);
+                std::vector<K>        expected(input.size());
+                test_utils::host_inclusive_scan_by_key(input.begin(),
+                                                       input.end(),
+                                                       keys.begin(),
+                                                       expected.begin(),
+                                                       scan_op,
+                                                       keys_compare_op);
+                auto input_iterator = rocprim::make_transform_iterator(
+                    d_input.get(),
+                    [](T in) { return static_cast<acc_type>(in); });
 
-            // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(
-                test_utils::assert_near(output, expected, single_op_precision * (size - 1)));
+                test_utils::test_kernel_wrapper(
+                    [&](void* temp_storage, size_t& storage_bytes)
+                    {
+                        return invoke_inclusive_scan_by_key<deterministic, Config>(
+                            temp_storage,
+                            storage_bytes,
+                            d_keys.get(),
+                            input_iterator,
+                            d_keys.get(),
+                            input.size(),
+                            scan_op,
+                            keys_compare_op,
+                            stream,
+                            debug_synchronous);
+                    },
+                    stream,
+                    TestFixture::use_graphs);
+
+                // Copy output to host
+                const auto output = d_keys.load();
+
+                // Check if output values are as expected
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_near(output, expected, single_op_precision * (size - 1)));
+            }
+            // In-place by storing results in input
+            if constexpr(std::is_arithmetic<T>::value)
+            {
+                common::device_ptr<T> d_input(input);
+                common::device_ptr<K> d_keys(keys);
+                std::vector<T>        expected(input.size());
+                test_utils::host_inclusive_scan_by_key(input.begin(),
+                                                       input.end(),
+                                                       keys.begin(),
+                                                       expected.begin(),
+                                                       scan_op,
+                                                       keys_compare_op);
+                auto input_iterator = rocprim::make_transform_iterator(
+                    d_input.get(),
+                    [](T in) { return static_cast<acc_type>(in); });
+
+                test_utils::test_kernel_wrapper(
+                    [&](void* temp_storage, size_t& storage_bytes)
+                    {
+                        return invoke_inclusive_scan_by_key<deterministic, Config>(
+                            temp_storage,
+                            storage_bytes,
+                            d_keys.get(),
+                            input_iterator,
+                            d_input.get(),
+                            input.size(),
+                            scan_op,
+                            keys_compare_op,
+                            stream,
+                            debug_synchronous);
+                    },
+                    stream,
+                    TestFixture::use_graphs);
+
+                // Copy output to host
+                const auto output = d_input.load();
+
+                // Check if output values are as expected
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_near(output, expected, single_op_precision * (size - 1)));
+            }
         }
     }
 
@@ -479,55 +562,141 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             {
                 keys = test_utils::get_random_data<K>(size, 0, 3, seed_value);
             }
-
-            common::device_ptr<T> d_input(input);
-            common::device_ptr<K> d_keys(keys);
-            common::device_ptr<U> d_output(input.size());
-
             // Scan function
             scan_op_type scan_op;
 
             // Key compare function
             rocprim::equal_to<K> keys_compare_op;
 
-            // Calculate expected results on host
-            std::vector<U> expected(input.size());
-            test_utils::host_exclusive_scan_by_key(input.begin(),
-                                                   input.end(),
-                                                   keys.begin(),
-                                                   initial_value,
-                                                   expected.begin(),
-                                                   scan_op,
-                                                   keys_compare_op);
+            // Noremal test
+            {
+                common::device_ptr<T> d_input(input);
+                common::device_ptr<K> d_keys(keys);
+                common::device_ptr<U> d_output(input.size());
+                std::vector<U>        expected(input.size());
+                test_utils::host_exclusive_scan_by_key(input.begin(),
+                                                       input.end(),
+                                                       keys.begin(),
+                                                       initial_value,
+                                                       expected.begin(),
+                                                       scan_op,
+                                                       keys_compare_op);
+                auto input_iterator = rocprim::make_transform_iterator(
+                    d_input.get(),
+                    [](T in) { return static_cast<acc_type>(in); });
 
-            auto input_iterator
-                = rocprim::make_transform_iterator(d_input.get(),
-                                                   [](T in) { return static_cast<acc_type>(in); });
+                test_utils::test_kernel_wrapper(
+                    [&](void* temp_storage, size_t& storage_bytes)
+                    {
+                        return invoke_exclusive_scan_by_key<deterministic, Config>(
+                            temp_storage,
+                            storage_bytes,
+                            d_keys.get(),
+                            input_iterator,
+                            d_output.get(),
+                            initial_value,
+                            input.size(),
+                            scan_op,
+                            keys_compare_op,
+                            stream,
+                            debug_synchronous);
+                    },
+                    stream,
+                    TestFixture::use_graphs);
 
-            test_utils::test_kernel_wrapper(
-                [&](void* temp_storage, size_t& storage_bytes)
-                {
-                    return invoke_exclusive_scan_by_key<deterministic, Config>(temp_storage,
-                                                                               storage_bytes,
-                                                                               d_keys.get(),
-                                                                               input_iterator,
-                                                                               d_output.get(),
-                                                                               initial_value,
-                                                                               input.size(),
-                                                                               scan_op,
-                                                                               keys_compare_op,
-                                                                               stream,
-                                                                               debug_synchronous);
-                },
-                stream,
-                TestFixture::use_graphs);
+                // Copy output to host
+                const auto output = d_output.load();
 
-            // Copy output to host
-            const auto output = d_output.load();
+                // Check if output values are as expected
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_near(output, expected, single_op_precision * (size - 1)));
+            }
+            // In-place by storing results in keys
+            if constexpr(std::is_arithmetic<T>::value)
+            {
+                common::device_ptr<T> d_input(input);
+                common::device_ptr<K> d_keys(keys);
+                std::vector<K>        expected(input.size());
+                test_utils::host_exclusive_scan_by_key(input.begin(),
+                                                       input.end(),
+                                                       keys.begin(),
+                                                       initial_value,
+                                                       expected.begin(),
+                                                       scan_op,
+                                                       keys_compare_op);
+                auto input_iterator = rocprim::make_transform_iterator(
+                    d_input.get(),
+                    [](T in) { return static_cast<acc_type>(in); });
 
-            // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(
-                test_utils::assert_near(output, expected, single_op_precision * (size - 1)));
+                test_utils::test_kernel_wrapper(
+                    [&](void* temp_storage, size_t& storage_bytes)
+                    {
+                        return invoke_exclusive_scan_by_key<deterministic, Config>(
+                            temp_storage,
+                            storage_bytes,
+                            d_keys.get(),
+                            input_iterator,
+                            d_keys.get(),
+                            initial_value,
+                            input.size(),
+                            scan_op,
+                            keys_compare_op,
+                            stream,
+                            debug_synchronous);
+                    },
+                    stream,
+                    TestFixture::use_graphs);
+
+                // Copy output to host
+                const auto output = d_keys.load();
+
+                // Check if output values are as expected
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_near(output, expected, single_op_precision * (size - 1)));
+            }
+            // In-place by storing results in input
+            if constexpr(std::is_arithmetic<T>::value)
+            {
+                common::device_ptr<T> d_input(input);
+                common::device_ptr<K> d_keys(keys);
+                std::vector<T>        expected(input.size());
+                test_utils::host_exclusive_scan_by_key(input.begin(),
+                                                       input.end(),
+                                                       keys.begin(),
+                                                       initial_value,
+                                                       expected.begin(),
+                                                       scan_op,
+                                                       keys_compare_op);
+                auto input_iterator = rocprim::make_transform_iterator(
+                    d_input.get(),
+                    [](T in) { return static_cast<acc_type>(in); });
+
+                test_utils::test_kernel_wrapper(
+                    [&](void* temp_storage, size_t& storage_bytes)
+                    {
+                        return invoke_exclusive_scan_by_key<deterministic, Config>(
+                            temp_storage,
+                            storage_bytes,
+                            d_keys.get(),
+                            input_iterator,
+                            d_input.get(),
+                            initial_value,
+                            input.size(),
+                            scan_op,
+                            keys_compare_op,
+                            stream,
+                            debug_synchronous);
+                    },
+                    stream,
+                    TestFixture::use_graphs);
+
+                // Copy output to host
+                const auto output = d_input.load();
+
+                // Check if output values are as expected
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_near(output, expected, single_op_precision * (size - 1)));
+            }
         }
     }
 
@@ -789,11 +958,21 @@ void testLargeIndicesInclusiveScanByKey()
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanByKey)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScanByKey();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanByKeyWithGraphs)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScanByKey<true>();
 }
 
@@ -832,10 +1011,20 @@ void testLargeIndicesExclusiveScanByKey()
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScanByKey)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     testLargeIndicesExclusiveScanByKey();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScanByKeyWithGraphs)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     testLargeIndicesExclusiveScanByKey<true>();
 }

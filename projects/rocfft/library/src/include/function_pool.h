@@ -24,6 +24,7 @@
 #define FUNCTION_POOL_H
 
 #include "../../../shared/arithmetic.h"
+#include "../../../shared/device_properties.h"
 #include "../../../shared/rocfft_complex.h"
 #include "../device/kernels/common.h"
 #include "function_map_key.h"
@@ -38,7 +39,8 @@ inline std::string PrintMissingKernelInfoBase(const FMKeyBase& key)
     msg << "Kernel not found: \n"
         << "\tlength: " << key.lengths[0] << "," << key.lengths[1] << "\n"
         << "\tprecision: " << key.precision << "\n"
-        << "\tscheme: " << PrintScheme(key.scheme) << "\n";
+        << "\tscheme: " << PrintScheme(key.scheme) << "\n"
+        << "\tGCN Arch Name: " << key.gcn_arch_name << "\n";
     return msg.str();
 }
 
@@ -211,26 +213,30 @@ class function_pool
         return best;
     }
 
-    const FMKey& get_actual_key(const FMKey& key) const
+    template <typename TKey, typename TKeyPool>
+    const TKey& get_actual_key(const TKey& key, TKeyPool& pool) const
     {
-        // - for keys that we are querying with no/empty kernel-config, actually we are refering to
+        // - for keys that we are querying with no/empty kernel-config, actually we are referring to
         //   the default kernel-configs in kernel-generator.py. So get the actual keys to look-up
         //   the pool.
-        // - if not in the def_key_pool, then we simply use itself (for dynamically added kernel)
-        auto it = find_key_in_map(def_key_pool, key);
-        if(it != def_key_pool.end())
-            return it->second;
-        else
-            return key;
-    }
+        // - if not in the pool, then we simply use itself (for dynamically added kernel)
 
-    const PPFMKey& get_actual_key(const PPFMKey& key) const
-    {
-        auto it = find_key_in_map(def_pp_key_pool, key);
-        if(it != def_pp_key_pool.end())
+        // First attempt an exact match with the given architecture in gcn_arch_name if possible
+        auto it = find_key_in_map(pool, key);
+        if(it != pool.end())
             return it->second;
         else
-            return key;
+        {
+            // If a match is not found, try it with the generic arch kernel
+            auto key_copy          = key;
+            key_copy.gcn_arch_name = generic_gcn_arch_name;
+
+            auto it = find_key_in_map(pool, key_copy);
+            if(it != pool.end())
+                return it->second;
+            else
+                return key;
+        }
     }
 
 public:
@@ -283,13 +289,13 @@ public:
 
     bool has_function(const FMKey& key) const
     {
-        auto real_key = get_actual_key(key);
+        auto real_key = get_actual_key(key, def_key_pool);
         return find_key_in_map(function_map, real_key) != function_map.end();
     }
 
     bool has_function(const PPFMKey& key) const
     {
-        auto real_key = get_actual_key(key);
+        auto real_key = get_actual_key(key, def_pp_key_pool);
         return find_key_in_map(pp_function_map, real_key) != pp_function_map.end();
     }
 
@@ -328,7 +334,7 @@ public:
 
     FFTKernel get_kernel(const FMKey& key) const
     {
-        auto real_key = get_actual_key(key);
+        auto real_key = get_actual_key(key, def_key_pool);
         auto it       = find_key_in_map(function_map, real_key);
         if(it == function_map.end())
             throw std::out_of_range("kernel not found in map");
@@ -337,7 +343,7 @@ public:
 
     FFTKernel get_kernel(const PPFMKey& key, ComputeScheme scheme) const
     {
-        auto real_key = get_actual_key(key);
+        auto real_key = get_actual_key(key, def_pp_key_pool);
         auto it       = find_key_in_map(pp_function_map, real_key);
         if(it == pp_function_map.end())
             throw std::out_of_range("kernel not found in partial-pass map");
@@ -395,8 +401,12 @@ static void insert_default_entry(const FMKey&     def_key,
                                  FPMap&           function_map,
                                  size_t           lds_size_bytes)
 {
-    FMKey def_key_with_lds          = def_key;
-    def_key_with_lds.lds_size_bytes = lds_size_bytes;
+    FMKey def_key_with_lds = def_key;
+
+    // Specifically add the current device's max LDS size if not a generic arch entry
+    def_key_with_lds.lds_size_bytes = def_key.gcn_arch_name == generic_gcn_arch_name
+                                          ? lds_size_bytes
+                                          : get_curr_device_prop().sharedMemPerBlock;
 
     // simple_key means the same thing as def_key, but we just remove kernel-config
     // so we don't need to know the exact config when we're lookin' for the default kernel
@@ -416,8 +426,12 @@ static void insert_default_entry(const PPFMKey&   def_key,
                                  PPFPMap&         function_map,
                                  size_t           lds_size_bytes)
 {
-    PPFMKey def_key_with_lds        = def_key;
-    def_key_with_lds.lds_size_bytes = lds_size_bytes;
+    PPFMKey def_key_with_lds = def_key;
+
+    // Specifically add the current device's max LDS size if not a generic arch entry
+    def_key_with_lds.lds_size_bytes = def_key.gcn_arch_name == generic_gcn_arch_name
+                                          ? lds_size_bytes
+                                          : get_curr_device_prop().sharedMemPerBlock;
 
     PPFMKey simple_key(def_key_with_lds);
 

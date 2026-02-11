@@ -125,18 +125,6 @@ namespace rocRoller
     }
 
     inline TensorDescriptor::TensorDescriptor(DataType                      t,
-                                              size_t                        totalLogicalElements,
-                                              std::initializer_list<size_t> strides,
-                                              size_t                        offset)
-        : m_totalLogicalElements(totalLogicalElements)
-        , m_strides(strides)
-        , m_dataType(t)
-        , m_offset(offset)
-    {
-        this->calculate();
-    }
-
-    inline TensorDescriptor::TensorDescriptor(DataType                      t,
                                               std::initializer_list<size_t> sizes,
                                               size_t                        offset)
         : m_sizes(sizes)

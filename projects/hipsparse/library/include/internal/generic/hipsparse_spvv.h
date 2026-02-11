@@ -48,17 +48,17 @@ extern "C" {
 *  @param[in]
 *  vecY                dense vector descriptor.
 *  @param[out]
-*  result              pointer to the result, can be host or device memory
+*  result              pointer to the result, can be host or device memory.
 *  @param[in]
 *  computeType         floating point precision for the SpVV computation.
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
 *
-*  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, \p vecY, \p result or \p pBufferSizeInBytes
-*               pointer is invalid.
-*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType is currently not
-*               supported.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, \p vecY, \p result or 
+*          \p pBufferSizeInBytes is nullptr.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType is currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
@@ -156,92 +156,6 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *               pointer is invalid.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType is currently not
 *               supported.
-*
-*  \par Example
-*  \code{.c}
-*    // Number of non-zeros of the sparse vector
-*    int nnz = 3;
-*
-*    // Size of sparse and dense vector
-*    int size = 9;
-*
-*    // Sparse index vector
-*    std::vector<int> hxInd = {0, 3, 5};
-*
-*    // Sparse value vector
-*    std::vector<float> hxVal = {1.0f, 2.0f, 3.0f};
-*
-*    // Dense vector
-*    std::vector<float> hy = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
-*
-*    // Offload data to device
-*    int* dxInd;
-*    float* dxVal;
-*    float* dy;
-*    hipMalloc((void**)&dxInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dxVal, sizeof(float) * nnz);
-*    hipMalloc((void**)&dy, sizeof(float) * size);
-*
-*    hipMemcpy(dxInd, hxInd.data(), sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dxVal, hxVal.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dy, hy.data(), sizeof(float) * size, hipMemcpyHostToDevice);
-*
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Create sparse vector X
-*    hipsparseSpVecDescr_t vecX;
-*    hipsparseCreateSpVec(&vecX,
-*                        size,
-*                        nnz,
-*                        dxInd,
-*                        dxVal,
-*                        HIPSPARSE_INDEX_32I,
-*                        HIPSPARSE_INDEX_BASE_ZERO,
-*                        HIP_R_32F);
-*
-*    // Create dense vector Y
-*    hipsparseDnVecDescr_t vecY;
-*    hipsparseCreateDnVec(&vecY, size, dy, HIP_R_32F);
-*
-*    // Obtain buffer size
-*    float hresult = 0.0f;
-*    size_t buffer_size;
-*    hipsparseSpVV_bufferSize(handle,
-*                HIPSPARSE_OPERATION_NON_TRANSPOSE,
-*                vecX,
-*                vecY,
-*                &hresult,
-*                HIP_R_32F,
-*                &buffer_size);
-*
-*    void* temp_buffer;
-*    hipMalloc(&temp_buffer, buffer_size);
-*
-*    // SpVV
-*    hipsparseSpVV(handle,
-*                HIPSPARSE_OPERATION_NON_TRANSPOSE,
-*                vecX,
-*                vecY,
-*                &hresult,
-*                HIP_R_32F,
-*                temp_buffer);
-*
-*    hipDeviceSynchronize();
-*
-*    std::cout << "hresult: " << hresult << std::endl;
-*
-*    // Clear hipSPARSE
-*    hipsparseDestroySpVec(vecX);
-*    hipsparseDestroyDnVec(vecY);
-*    hipsparseDestroy(handle);
-*
-*    // Clear device memory
-*    hipFree(dxInd);
-*    hipFree(dxVal);
-*    hipFree(dy);
-*    hipFree(temp_buffer);
-*  \endcode
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

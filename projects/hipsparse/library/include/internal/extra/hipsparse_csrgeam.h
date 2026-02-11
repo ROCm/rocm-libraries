@@ -50,17 +50,21 @@ extern "C" {
 *  \note
 *  Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle          handle to the hipsparse library context queue.
 *  @param[in]
-*  m               number of rows of the sparse CSR matrix \f$A\f$, \f$B\f$ and \f$C\f$.
+*  m               number of rows of the sparse CSR matrix \f$A\f$, \f$B\f$ and \f$C\f$. Must be non-negative.
 *  @param[in]
-*  n               number of columns of the sparse CSR matrix \f$A\f$, \f$B\f$ and \f$C\f$.
+*  n               number of columns of the sparse CSR matrix \f$A\f$, \f$B\f$ and \f$C\f$. Must be non-negative.
 *  @param[in]
 *  descrA          descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *  @param[in]
-*  nnzA            number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  nnzA            number of non-zero entries of the sparse CSR matrix \f$A\f$. Must be non-negative.
 *  @param[in]
 *  csrRowPtrA      array of \p m+1 elements that point to the start of every row of the
 *                  sparse CSR matrix \f$A\f$.
@@ -71,7 +75,7 @@ extern "C" {
 *  descrB          descriptor of the sparse CSR matrix \f$B\f$. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *  @param[in]
-*  nnzB            number of non-zero entries of the sparse CSR matrix \f$B\f$.
+*  nnzB            number of non-zero entries of the sparse CSR matrix \f$B\f$. Must be non-negative.
 *  @param[in]
 *  csrRowPtrB      array of \p m+1 elements that point to the start of every row of the
 *                  sparse CSR matrix \f$B\f$.
@@ -89,11 +93,12 @@ extern "C" {
 *                     matrix \f$C\f$. \p nnzTotalDevHostPtr can be a host or device pointer.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB, \p descrA,
-*          \p csrRowPtrA, \p csrColIndA, \p descrB, \p csrRowPtrB, \p csrColIndB, \p descrC,
-*          \p csrRowPtrC or \p nnzTotalDevHostPtr is invalid.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
-*          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrB or \p descrC is nullptr,
+*          \p m, \p n, \p nnzA or \p nnzB is negative, or \p csrRowPtrA, \p csrColIndA, \p csrRowPtrB, 
+*          \p csrColIndB, \p csrRowPtrC or \p nnzTotalDevHostPtr is nullptr.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
+*          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 */
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
@@ -192,128 +197,6 @@ hipsparseStatus_t hipsparseXcsrgeamNnz(hipsparseHandle_t         handle,
 *          \p csrRowPtrC or \p csrColIndC is invalid.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
-*
-*  \par Example
-*  \code{.c}
-*    int m = 4;
-*    int n = 4;
-*    int nnzA = 9;
-*    int nnzB = 6;
-*
-*    float alpha{1.0f};
-*    float beta{1.0f};
-*
-*    // A, B, and C are m×n
-*
-*    // A
-*    // 1 0 0 2
-*    // 3 4 0 0
-*    // 5 6 7 8
-*    // 0 0 9 0
-*    std::vector<int> hcsrRowPtrA = {0, 2, 4, 8, 9};
-*    std::vector<int> hcsrColIndA = {0, 3, 0, 1, 0, 1, 2, 3, 2};
-*    std::vector<float> hcsrValA = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
-*
-*    // B
-*    // 0 1 0 0
-*    // 1 0 1 0
-*    // 0 1 0 1
-*    // 0 0 1 0
-*    std::vector<int> hcsrRowPtrB = {0, 1, 3, 5, 6};
-*    std::vector<int> hcsrColIndB = {1, 0, 2, 1, 3, 2};
-*    std::vector<float> hcsrValB = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
-*
-*    // Device memory management: Allocate and copy A, B
-*    int* dcsrRowPtrA;
-*    int* dcsrColIndA;
-*    float* dcsrValA;
-*    int* dcsrRowPtrB;
-*    int* dcsrColIndB;
-*    float* dcsrValB;
-*    int* dcsrRowPtrC;
-*    hipMalloc((void**)&dcsrRowPtrA, (m + 1) * sizeof(int));
-*    hipMalloc((void**)&dcsrColIndA, nnzA * sizeof(int));
-*    hipMalloc((void**)&dcsrValA, nnzA * sizeof(float));
-*    hipMalloc((void**)&dcsrRowPtrB, (m + 1) * sizeof(int));
-*    hipMalloc((void**)&dcsrColIndB, nnzB * sizeof(int));
-*    hipMalloc((void**)&dcsrValB, nnzB * sizeof(float));
-*    hipMalloc((void**)&dcsrRowPtrC, (m + 1) * sizeof(int));
-*
-*    hipMemcpy(dcsrRowPtrA, hcsrRowPtrA.data(), (m + 1) * sizeof(int), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColIndA, hcsrColIndA.data(), nnzA * sizeof(int), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrValA, hcsrValA.data(), nnzA * sizeof(float), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrRowPtrB, hcsrRowPtrB.data(), (m + 1) * sizeof(int), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColIndB, hcsrColIndB.data(), nnzB * sizeof(int), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrValB, hcsrValB.data(), nnzB * sizeof(float), hipMemcpyHostToDevice);
-*
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    hipsparseMatDescr_t descrA;
-*    hipsparseCreateMatDescr(&descrA);
-*
-*    hipsparseMatDescr_t descrB;
-*    hipsparseCreateMatDescr(&descrB);
-*
-*    hipsparseMatDescr_t descrC;
-*    hipsparseCreateMatDescr(&descrC);
-*
-*    int nnzC;
-*    hipsparseXcsrgeamNnz(handle,
-*                        m,
-*                        n,
-*                        descrA,
-*                        nnzA,
-*                        dcsrRowPtrA,
-*                        dcsrColIndA,
-*                        descrB,
-*                        nnzB,
-*                        dcsrRowPtrB,
-*                        dcsrColIndB,
-*                        descrC,
-*                        dcsrRowPtrC,
-*                        &nnzC);
-*
-*    int* dcsrColIndC = nullptr;
-*    float* dcsrValC = nullptr;
-*    hipMalloc((void**)&dcsrColIndC, sizeof(int) * nnzC);
-*    hipMalloc((void**)&dcsrValC, sizeof(float) * nnzC);
-*
-*    hipsparseScsrgeam(handle,
-*                      m,
-*                      n,
-*                      &alpha,
-*                      descrA,
-*                      nnzA,
-*                      dcsrValA,
-*                      dcsrRowPtrA,
-*                      dcsrColIndA,
-*                      &beta,
-*                      descrB,
-*                      nnzB,
-*                      dcsrValB,
-*                      dcsrRowPtrB,
-*                      dcsrColIndB,
-*                      descrC,
-*                      dcsrValC,
-*                      dcsrRowPtrC,
-*                      dcsrColIndC);
-*
-*    hipFree(dcsrRowPtrA);
-*    hipFree(dcsrColIndA);
-*    hipFree(dcsrValA);
-*    hipFree(dcsrRowPtrB);
-*    hipFree(dcsrColIndB);
-*    hipFree(dcsrValB);
-*    hipFree(dcsrRowPtrC);
-*    hipFree(dcsrColIndC);
-*    hipFree(dcsrValC);
-*
-*    hipsparseDestroyMatDescr(descrA);
-*    hipsparseDestroyMatDescr(descrB);
-*    hipsparseDestroyMatDescr(descrC);
-*    hipsparseDestroy(handle);
-*  \endcode
 */
 /**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
@@ -729,157 +612,6 @@ hipsparseStatus_t hipsparseXcsrgeam2Nnz(hipsparseHandle_t         handle,
 *          \p csrSortedRowPtrC, \p csrSortedColIndC or \p pBuffer is invalid.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
-*
-*  \par Example
-*  \code{.c}
-*    int m = 4;
-*    int n = 4;
-*    int nnzA = 9;
-*    int nnzB = 6;
-*
-*    float alpha{1.0f};
-*    float beta{1.0f};
-*
-*    // A, B, and C are m×n
-*
-*    // A
-*    // 1 0 0 2
-*    // 3 4 0 0
-*    // 5 6 7 8
-*    // 0 0 9 0
-*    std::vector<int> hcsrRowPtrA = {0, 2, 4, 8, 9};
-*    std::vector<int> hcsrColIndA = {0, 3, 0, 1, 0, 1, 2, 3, 2};
-*    std::vector<float> hcsrValA = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
-*
-*    // B
-*    // 0 1 0 0
-*    // 1 0 1 0
-*    // 0 1 0 1
-*    // 0 0 1 0
-*    std::vector<int> hcsrRowPtrB = {0, 1, 3, 5, 6};
-*    std::vector<int> hcsrColIndB = {1, 0, 2, 1, 3, 2};
-*    std::vector<float> hcsrValB = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
-*
-*    // Device memory management: Allocate and copy A, B
-*    int* dcsrRowPtrA;
-*    int* dcsrColIndA;
-*    float* dcsrValA;
-*    int* dcsrRowPtrB;
-*    int* dcsrColIndB;
-*    float* dcsrValB;
-*    int* dcsrRowPtrC;
-*    hipMalloc((void**)&dcsrRowPtrA, (m + 1) * sizeof(int));
-*    hipMalloc((void**)&dcsrColIndA, nnzA * sizeof(int));
-*    hipMalloc((void**)&dcsrValA, nnzA * sizeof(float));
-*    hipMalloc((void**)&dcsrRowPtrB, (m + 1) * sizeof(int));
-*    hipMalloc((void**)&dcsrColIndB, nnzB * sizeof(int));
-*    hipMalloc((void**)&dcsrValB, nnzB * sizeof(float));
-*    hipMalloc((void**)&dcsrRowPtrC, (m + 1) * sizeof(int));
-*
-*    hipMemcpy(dcsrRowPtrA, hcsrRowPtrA.data(), (m + 1) * sizeof(int), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColIndA, hcsrColIndA.data(), nnzA * sizeof(int), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrValA, hcsrValA.data(), nnzA * sizeof(float), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrRowPtrB, hcsrRowPtrB.data(), (m + 1) * sizeof(int), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColIndB, hcsrColIndB.data(), nnzB * sizeof(int), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrValB, hcsrValB.data(), nnzB * sizeof(float), hipMemcpyHostToDevice);
-*
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    hipsparseMatDescr_t descrA;
-*    hipsparseCreateMatDescr(&descrA);
-*
-*    hipsparseMatDescr_t descrB;
-*    hipsparseCreateMatDescr(&descrB);
-*
-*    hipsparseMatDescr_t descrC;
-*    hipsparseCreateMatDescr(&descrC);
-*
-*    size_t bufferSize;
-*    hipsparseScsrgeam2_bufferSizeExt(handle,
-*                                     m,
-*                                     n,
-*                                     &alpha,
-*                                     descrA,
-*                                     nnzA,
-*                                     dcsrValA,
-*                                     dcsrRowPtrA,
-*                                     dcsrColIndA,
-*                                     &beta,
-*                                     descrB,
-*                                     nnzB,
-*                                     dcsrValB,
-*                                     dcsrRowPtrB,
-*                                     dcsrColIndB,
-*                                     descrC,
-*                                     nullptr,
-*                                     dcsrRowPtrC,
-*                                     nullptr,
-*                                     &bufferSize);
-*
-*    void* dbuffer = nullptr;
-*    hipMalloc((void**)&dbuffer, bufferSize);
-*
-*    int nnzC;
-*    hipsparseXcsrgeam2Nnz(handle,
-*                        m,
-*                        n,
-*                        descrA,
-*                        nnzA,
-*                        dcsrRowPtrA,
-*                        dcsrColIndA,
-*                        descrB,
-*                        nnzB,
-*                        dcsrRowPtrB,
-*                        dcsrColIndB,
-*                        descrC,
-*                        dcsrRowPtrC,
-*                        &nnzC,
-*                        dbuffer);
-*
-*    int* dcsrColIndC = nullptr;
-*    float* dcsrValC = nullptr;
-*    hipMalloc((void**)&dcsrColIndC, sizeof(int) * nnzC);
-*    hipMalloc((void**)&dcsrValC, sizeof(float) * nnzC);
-*
-*    hipsparseScsrgeam2(handle,
-*                      m,
-*                      n,
-*                      &alpha,
-*                      descrA,
-*                      nnzA,
-*                      dcsrValA,
-*                      dcsrRowPtrA,
-*                      dcsrColIndA,
-*                      &beta,
-*                      descrB,
-*                      nnzB,
-*                      dcsrValB,
-*                      dcsrRowPtrB,
-*                      dcsrColIndB,
-*                      descrC,
-*                      dcsrValC,
-*                      dcsrRowPtrC,
-*                      dcsrColIndC,
-*                      dbuffer);
-*
-*    hipFree(dcsrRowPtrA);
-*    hipFree(dcsrColIndA);
-*    hipFree(dcsrValA);
-*    hipFree(dcsrRowPtrB);
-*    hipFree(dcsrColIndB);
-*    hipFree(dcsrValB);
-*    hipFree(dcsrRowPtrC);
-*    hipFree(dcsrColIndC);
-*    hipFree(dcsrValC);
-*
-*    hipFree(dbuffer);
-*
-*    hipsparseDestroyMatDescr(descrA);
-*    hipsparseDestroyMatDescr(descrB);
-*    hipsparseDestroyMatDescr(descrC);
-*    hipsparseDestroy(handle);
-*  \endcode
 */
 /**@{*/
 HIPSPARSE_EXPORT

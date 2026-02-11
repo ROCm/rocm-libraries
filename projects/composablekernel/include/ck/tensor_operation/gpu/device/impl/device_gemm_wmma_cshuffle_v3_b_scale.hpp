@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -12,7 +12,7 @@
 #include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
 #include "ck/tensor_operation/gpu/device/device_gemm_v2.hpp"
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
-#include "ck/tensor_operation/gpu/grid/gridwise_gemm_wmma_cshuffle_v3_b_scale.hpp"
+#include "ck/tensor_operation/gpu/grid/gridwise_gemm_wmma_cshuffle_v3_ab_scale.hpp"
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
 #include "ck/host_utility/flush_cache.hpp"
@@ -86,13 +86,15 @@ struct DeviceGemm_BScale_Wmma_CShuffleV3 : public DeviceGemmV2BScale<ALayout,
 {
 
     // GridwiseGemm
-    using GridwiseGemm = GridwiseGemm_wmma_cshuffle_v3_b_scale<
+    using GridwiseGemm = GridwiseGemm_wmma_cshuffle_v3_ab_scale<
         ALayout,
         BLayout,
         Tuple<>, // DsLayout
         CLayout,
-        ADataType,
-        BDataType,
+        Tuple<ADataType>,
+        void, // AScaleType
+        Tuple<BDataType>,
+        BScaleDataType,
         AccDataType,
         CShuffleDataType,
         Tuple<>, // DsDataType
@@ -102,6 +104,7 @@ struct DeviceGemm_BScale_Wmma_CShuffleV3 : public DeviceGemmV2BScale<ALayout,
         CElementwiseOperation,
         GemmSpec,
         BlockSize,
+        0, // ScaleBlockM
         ScaleBlockN,
         ScaleBlockK,
         MPerBlock,
@@ -144,8 +147,8 @@ struct DeviceGemm_BScale_Wmma_CShuffleV3 : public DeviceGemmV2BScale<ALayout,
 
     using DeviceGemmCommon =
         DeviceGemm_Wmma_CShuffleV3_Common<GridwiseGemm,
-                                          ADataType,
-                                          BDataType,
+                                          Tuple<ADataType>,
+                                          Tuple<BDataType>,
                                           Tuple<>,
                                           CDataType,
                                           MPerBlock,
@@ -195,18 +198,20 @@ struct DeviceGemm_BScale_Wmma_CShuffleV3 : public DeviceGemmV2BScale<ALayout,
                              BElementwiseOperation b_element_op,
                              CElementwiseOperation cde_element_op)
     {
-        return Argument{p_a,
-                        p_b,
+        return Argument{std::array<const void*, 1>{p_a},
+                        std::array<const void*, 1>{p_b},
                         std::array<const void*, 0>{}, // p_ds_grid_
                         p_c,
                         M,
                         N,
                         K,
-                        StrideA,
-                        StrideB,
+                        std::array<index_t, 1>{StrideA},
+                        std::array<index_t, 1>{StrideB},
                         std::array<index_t, 0>{}, // StrideDs_
                         StrideC,
+                        0, // StrideScaleA
                         StrideScaleB,
+                        nullptr,
                         p_b_scale,
                         KBatch,
                         a_element_op,
@@ -233,18 +238,20 @@ struct DeviceGemm_BScale_Wmma_CShuffleV3 : public DeviceGemmV2BScale<ALayout,
                                                       BElementwiseOperation b_element_op,
                                                       CElementwiseOperation c_element_op) override
     {
-        return std::make_unique<Argument>(static_cast<const ADataType*>(p_a),
-                                          static_cast<const BDataType*>(p_b),
+        return std::make_unique<Argument>(std::array<const void*, 1>{p_a},
+                                          std::array<const void*, 1>{p_b},
                                           std::array<const void*, 0>{}, // p_ds_grid_
                                           static_cast<CDataType*>(p_c),
                                           M,
                                           N,
                                           K,
-                                          StrideA,
-                                          StrideB,
+                                          std::array<index_t, 1>{StrideA},
+                                          std::array<index_t, 1>{StrideB},
                                           std::array<index_t, 0>{}, // StrideDs_
                                           StrideC,
+                                          0, // StrideScaleA
                                           StrideScaleB,
+                                          nullptr, // p_a_scale
                                           static_cast<const BScaleDataType*>(p_b_scale),
                                           KBatch,
                                           a_element_op,

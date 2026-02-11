@@ -26,6 +26,7 @@ from rocisa.instruction import DSLoadB128, DSLoadB32, DSLoadB64, DSStoreB128, \
     DSStoreB32, DSStoreB64, SAndB32, SCBranchSCC0, SCmpEQU32, SMovB32, SWaitCnt, \
     VAddF32, VAddI32, VAddU32, VAndB32, VLShiftLeftAddU32, VMovB32, VMulLOU32
 from rocisa.functions import vectorStaticDivide
+from copy import deepcopy
 from ..Common import log2, ceilDivide
 from ..Component import Component
 from ..KernelWriterModules import *
@@ -53,14 +54,15 @@ class LSUOn(LSU):
         self.LSUelemCoord0 = []
         self.LSUelemCoord1 = []
         self.LSUelements   = []
-        self.LSUfullVw     = []
-        (vwdummy, eledummy, self.LSUfullVw, self.LSUelements) = writer.notLocalFullTileElements(kernel, False)
-        storevw = self.LSUfullVw
+        self.LSUfullVws    = []
+        # NOTE: notLocalFullTileElements returns vector widths in descending order, for example: [8, 4, 2, 1]
+        # first-longest vector width and corresponding element are used through LSU component
+        (vwsdummy, elesdummy, self.LSUfullVws, self.LSUelements) = writer.notLocalFullTileElements(kernel)
         atomic = False # atomic is for GSU > 1
         beta = True
         vectorDataTypes = VectorDataTypes()
-        ss = StoreState(writer, kernel, storevw, False, beta, atomic, self.LSUelements, vectorDataTypes, dim=0)
-        self.LSUelemCoord0, self.LSUelemCoord1 = ss.getStoreElementsInfoForBatch(kernel, self.LSUelements)
+        ss = StoreState(writer, kernel, self.LSUfullVws[0], False, beta, atomic, self.LSUelements[0], vectorDataTypes, dim=0)
+        self.LSUelemCoord0, self.LSUelemCoord1 = ss.getStoreElementsInfoForBatch(kernel, self.LSUelements[0])
 
         # search for valid lsu wave offset
         maxtt1 = 0
@@ -76,10 +78,10 @@ class LSUOn(LSU):
         self.LSUelemCoord1PerLSUWave = []
 
         # Check valid LSU/VW combination
-        if len(self.LSUelements) >= kernel["LocalSplitU"]:
+        if len(self.LSUelements[0]) >= kernel["LocalSplitU"]:
             if kernel["LocalSplitU"] == 4:
                 idxGrp = 1
-                for idxGrp in range(1, len(self.LSUelements)//4 + 1):
+                for idxGrp in range(1, len(self.LSUelements[0])//4 + 1):
                     for i in range(idxGrp):
                         i0 = i
                         i1 = i + 1 * idxGrp
@@ -100,13 +102,13 @@ class LSUOn(LSU):
                             break
                     if validOffset != -1:
                         break
-                for idx in range(0, len(self.LSUelements), 4*idxGrp):
+                for idx in range(0, len(self.LSUelements[0]), 4*idxGrp):
                     for idx2 in range(idxGrp):
-                        self.LSUelementsArchIdx[0].append(self.LSUfullVw*(idx + idx2))
-                        self.LSUelementsArchIdx[1].append(self.LSUfullVw*(idx + 1*idxGrp + idx2))
-                        self.LSUelementsArchIdx[2].append(self.LSUfullVw*(idx + 2*idxGrp + idx2))
-                        self.LSUelementsArchIdx[3].append(self.LSUfullVw*(idx + 3*idxGrp + idx2))
-                        self.LSUelementsPerLSUWave.append(self.LSUelements[idx + idx2])
+                        self.LSUelementsArchIdx[0].append(self.LSUfullVws[0]*(idx + idx2))
+                        self.LSUelementsArchIdx[1].append(self.LSUfullVws[0]*(idx + 1*idxGrp + idx2))
+                        self.LSUelementsArchIdx[2].append(self.LSUfullVws[0]*(idx + 2*idxGrp + idx2))
+                        self.LSUelementsArchIdx[3].append(self.LSUfullVws[0]*(idx + 3*idxGrp + idx2))
+                        self.LSUelementsPerLSUWave.append(self.LSUelements[0][idx + idx2])
                         self.LSUelemCoord0PerLSUWave.append(self.LSUelemCoord0[idx + idx2])
                         self.LSUelemCoord1PerLSUWave.append(self.LSUelemCoord1[idx + idx2])
             elif kernel["LocalSplitU"] == 2:
@@ -116,10 +118,10 @@ class LSUOn(LSU):
                 validOffset  = offset1 - offset0
                 validOffset0 = self.LSUelemCoord0[i + 1] - self.LSUelemCoord0[i]
                 validOffset1 = self.LSUelemCoord1[i + 1] - self.LSUelemCoord1[i]
-                for idx in range(0, len(self.LSUelements), 2):
-                    self.LSUelementsArchIdx[0].append(self.LSUfullVw*idx)
-                    self.LSUelementsArchIdx[1].append(self.LSUfullVw*(idx+1))
-                    self.LSUelementsPerLSUWave.append(self.LSUelements[idx])
+                for idx in range(0, len(self.LSUelements[0]), 2):
+                    self.LSUelementsArchIdx[0].append(self.LSUfullVws[0]*idx)
+                    self.LSUelementsArchIdx[1].append(self.LSUfullVws[0]*(idx+1))
+                    self.LSUelementsPerLSUWave.append(self.LSUelements[0][idx])
                     self.LSUelemCoord0PerLSUWave.append(self.LSUelemCoord0[idx])
                     self.LSUelemCoord1PerLSUWave.append(self.LSUelemCoord1[idx])
             else:
@@ -162,11 +164,11 @@ class LSUOn(LSU):
         # Checkout local read resource
         bpr            = 4 #bytes per register
         bytesPerElem   = kernel["ProblemType"]["ComputeDataType"].numBytes()
-        bytesPerVector = self.LSUfullVw * bytesPerElem
+        bytesPerVector = self.LSUfullVws[0] * bytesPerElem
         numWaves       = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
         regsPerStep = int((bytesPerVector+3)//4)
         elementStep = bytesPerVector // bytesPerElem
-        numTotalAccVgprLdsReduction = len(self.LSUelements)*regsPerStep*(self.LSUfullVw//elementStep)
+        numTotalAccVgprLdsReduction = len(self.LSUelements[0])*regsPerStep*(self.LSUfullVws[0]//elementStep)
         assert (numTotalAccVgprLdsReduction%kernel["LocalSplitU"]) == 0, "AccVgprLdsRedcution % LSU != 0"
         numTotalAccVgprLdsReduction = numTotalAccVgprLdsReduction // kernel["LocalSplitU"]
         self.accVgprLdsReduction    = writer.vgprPool.checkOutAligned(numTotalAccVgprLdsReduction, 4, "LsuReduction")
@@ -189,6 +191,11 @@ class LSUOn(LSU):
         module.add(VAndB32(vgpr(wave_id), hex(numWaves - 1), vgpr(wave_id), \
             comment="Get wave ID"))
 
+        # accVgprs read in GSUAMBSK
+        codeAccVgprRead = []
+        if kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
+            codeAccVgprRead = deepcopy(writer.codes.accVgprRead) if writer.states.serializedStore else None
+
         for reUseIdx in range(kernel["LocalSplitUReuseLDS"]):
             module.addComment1("LocalSplitU: local write %d/%d"%(reUseIdx+1,kernel["LocalSplitUReuseLDS"]))
             module.add(Label("localSplitULocalWriteAndRead_%d"%(reUseIdx+1), ""))
@@ -201,7 +208,7 @@ class LSUOn(LSU):
             numAccVgpr = 0
             for lsu in range(kernel["LocalSplitU"]):
                 for i in range(startLSUaccIdxSet, endLSUaccIdxSet):
-                    for j in range(self.LSUfullVw):
+                    for j in range(self.LSUfullVws[0]):
                         accIdx = arch2acc[self.LSUelementsArchIdx[lsu][i] + j]
                         neededAccVGPRIdx[lsu].append(accIdx)
                         numAccVgpr += 1
@@ -249,7 +256,7 @@ class LSUOn(LSU):
                 numInstPerVW = bytesPerVector // 4
                 regsPerStore = 1
 
-            maxOffset = (kernel["LocalSplitU"] -1) * ldsStride + ((numVgprPerLSU // self.LSUfullVw -1) * numInstPerVW + (numInstPerVW -1)) * regsPerStore * (bpr * kernel["WavefrontSize"])
+            maxOffset = (kernel["LocalSplitU"] -1) * ldsStride + ((numVgprPerLSU // self.LSUfullVws[0] -1) * numInstPerVW + (numInstPerVW -1)) * regsPerStore * (bpr * kernel["WavefrontSize"])
             numAddr = maxOffset // maxLDSConstOffset + 1
             addr = writer.vgprPool.checkOut(numAddr,"addr")
             with writer.allocTmpSgpr(1) as tmpSgprInfo:
@@ -275,7 +282,7 @@ class LSUOn(LSU):
             module.add(Label("localSplitULocalWrite_%d"%(reUseIdx+1), ""))
 
             # Do Local Write
-            for i in range(0, numAccVgpr // self.LSUfullVw):
+            for i in range(0, numAccVgpr // self.LSUfullVws[0]):
                 for v in range(numInstPerVW):
                     regIdx = (i * numInstPerVW + v) * regsPerStore
                     module.add(DSStoreBX(dstAddr=vgpr(addr), src=vgpr(accVgprRes+regIdx, regsPerStore), \
@@ -316,7 +323,7 @@ class LSUOn(LSU):
             inLoopTmpVgpr   = writer.vgprPool.checkOutAligned(numVgprPerLSU*(kernel["LocalSplitU"]-1), 4, "TempLsuReduction")
 
             # Do Local Read
-            for i in range(0, numVgprPerLSU // self.LSUfullVw):
+            for i in range(0, numVgprPerLSU // self.LSUfullVws[0]):
                 for v in range(numInstPerVW):
                     for r in range(0, kernel["LocalSplitU"]):
                         regIdx = (i * numInstPerVW + v) * regsPerStore
@@ -334,7 +341,7 @@ class LSUOn(LSU):
                         # Generate Reduction code at the same time.
                         if r == 0:
                             # Insert waitcnt code here
-                            numTotalInst  = numVgprPerLSU // self.LSUfullVw * numInstPerVW * kernel["LocalSplitU"]
+                            numTotalInst  = numVgprPerLSU // self.LSUfullVws[0] * numInstPerVW * kernel["LocalSplitU"]
                             numPassedInst = (i * numInstPerVW + (v + 1)) * kernel["LocalSplitU"]
                             numLRWaitCnt = numTotalInst - numPassedInst
                             moduleReduction.add(SWaitCnt(dscnt=numLRWaitCnt, comment="wait count is (%u-%u)"%(numTotalInst, numPassedInst)))
@@ -349,6 +356,24 @@ class LSUOn(LSU):
                                 else:
                                 # TODO: hpa_half, int8
                                     assert(0) # unsupported data type, need to modify here and LSU write/read code
+                    
+                    if kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
+                        if not kernel["MIArchVgpr"]:
+                            # write to accvgpr
+                            for regToAdd in range(regsPerStore):
+                                codeAccVgprReadInst = codeAccVgprRead.popFirstItem() # v_accvgpr_read_b32
+                                accIdx = codeAccVgprReadInst.srcs[0].regIdx
+                                writeInst = writer.accVgprReadWriteFunction(kernel, accIdx, False)
+                                dstVgpr  = writer.accVgprReadWriteIndex(kernel, accIdx)
+                                moduleReduction.add(writeInst(dst=dstVgpr, src=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd)),
+                                                    comment="copy vreg[%u] to acc[%u]" % (localReadVgprIdx+regToAdd, accIdx)))
+                        else:
+                            # write to vgpr
+                            for regToAdd in range(regsPerStore):
+                                codeAccVgprReadInst = codeAccVgprRead.popFirstItem() # v_mov_b32
+                                dstVgpr = codeAccVgprReadInst.srcs[0]
+                                moduleReduction.add(VMovB32(dst=dstVgpr, src=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd)),
+                                                            comment="copy lsu results to vreg"))
                     localReadVgprIdx += regsPerStore
 
             # Release write/read resource
@@ -524,8 +549,10 @@ class LSUOn(LSU):
         elements_1 = [[] for y in range(2)]
         elements_f0    = [[] for y in range(2)]
         elements_f1    = [[] for y in range(2)]
-        (fullVw, elements_0[False], fullVw_1, elements_1[False]) = writer.notLocalFullTileElements(kernel, False)
-        (edgeVw, elements_0[True], edgeVw_1, elements_1[True] )    = writer.notLocalFullTileElements(kernel, True)
+        # TODO: LocalSplitU has special global write elements, we will not use all StoreVectorWidths
+        (fullVws, elementss_0, fullVws_1, elementss_1)           = writer.notLocalFullTileElements(kernel)
+        (fullVw, elements_0[False], fullVw_1, elements_1[False]) = (fullVws[0], elementss_0[0], fullVws_1[0], elementss_1[0])
+        (edgeVw, elements_0[True], edgeVw_1, elements_1[True] )  = (fullVws[-1], elementss_0[-1], fullVws_1[-1], elementss_1[-1])
         edgeScaled_0 = len(elements_0[True]) // len(elements_1[False])
         edgeScaled_1 = len(elements_1[True]) // len(elements_1[False])
         noEgScaled_0 = len(elements_0[False]) // len(elements_1[False])

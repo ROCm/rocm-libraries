@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -7,20 +7,24 @@
 
 namespace ck_tile {
 
-static CK_TILE_HOST_DEVICE constexpr index_t ceil_to_qualified_tile_length(index_t len)
+template <index_t Headdim>
+static CK_TILE_HOST_DEVICE constexpr index_t ceil_to_qualified_tile_length()
 {
-    if(len == 96)
+    if constexpr(Headdim == 48)
+        return 48;
+    else if constexpr(Headdim == 80)
+        return 96;
+    else if constexpr(Headdim == 96)
         return 128;
-    if(len == 160)
+    else if constexpr(Headdim == 160)
         return 256;
-    if(len == 192)
+    else if constexpr(Headdim == 192)
         return 192;
-
-    // only length of 96, 160 and power-of-two is supported
-    if(!(len & (len - 1)))
-        return len;
-
-    return 0;
+    else if constexpr(is_power_of_two_integer(Headdim))
+        return Headdim;
+    else
+        static_assert(Headdim == 0,
+                      "only Headdim of 48, 96, 160, 192 and power-of-two is supported");
 };
 
 template <typename BlockTile_, // sequence<...
@@ -38,9 +42,9 @@ struct TileFmhaShape
     using Gemm1WarpTile   = remove_cvref_t<Gemm1WarpTile_>;
 
     static constexpr index_t NumGemm0Warps =
-        reduce_on_sequence(Gemm0BlockWarps{}, multiplies{}, number<1>{});
+        reduce_on_sequence(Gemm0BlockWarps{}, multiplies<>{}, number<1>{});
     static constexpr index_t NumGemm1Warps =
-        reduce_on_sequence(Gemm1BlockWarps{}, multiplies{}, number<1>{});
+        reduce_on_sequence(Gemm1BlockWarps{}, multiplies<>{}, number<1>{});
     static_assert(NumGemm1Warps % NumGemm0Warps == 0);
 
     static constexpr index_t NumWarps = max(NumGemm0Warps, NumGemm1Warps);
@@ -55,7 +59,7 @@ struct TileFmhaShape
                                     // once (or repeately load Q as a whole tile)
     static_assert(kQKHeaddim % kK0 == 0, "kQKHeaddim should be divisible by kK0");
 
-    static constexpr index_t kSubQKHeaddim = ceil_to_qualified_tile_length(kQKHeaddim);
+    static constexpr index_t kSubQKHeaddim = ceil_to_qualified_tile_length<kQKHeaddim>();
 
     // v, rowmajor : seqlen*hdim, colmajor : hdim*seqlen
     static constexpr bool IsVLayoutRowMajor = IsVLayoutRowMajor_;
@@ -91,10 +95,10 @@ struct TileFmhaBwdShape
     using Gemm4WarpTile   = remove_cvref_t<Gemm4WarpTile_>;
 
     static constexpr index_t NumWarps =
-        reduce_on_sequence(Gemm0BlockWarps{}, multiplies{}, number<1>{});
+        reduce_on_sequence(Gemm0BlockWarps{}, multiplies<>{}, number<1>{});
 
-    static_assert(NumWarps == reduce_on_sequence(Gemm1BlockWarps{}, multiplies{}, number<1>{}) &&
-                  NumWarps == reduce_on_sequence(Gemm4BlockWarps{}, multiplies{}, number<1>{}));
+    static_assert(NumWarps == reduce_on_sequence(Gemm1BlockWarps{}, multiplies<>{}, number<1>{}) &&
+                  NumWarps == reduce_on_sequence(Gemm4BlockWarps{}, multiplies<>{}, number<1>{}));
 
     static constexpr index_t kM0 = BlockTile::at(number<0>{}); // tile size along q seqlen
     static constexpr index_t kN0 = BlockTile::at(number<1>{}); // tile size along k seqlen

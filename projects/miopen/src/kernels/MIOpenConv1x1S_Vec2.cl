@@ -170,8 +170,8 @@ MIOpenConv1x1(const __global _FLOAT* __restrict in_ptr,
 #if MLO_CLOOP0 % 2 == 0
                 dat[j][i] = (_FLOAT2)(in_ptr[gbl_in_off1.x + i], in_ptr[gbl_in_off1.y + i]);
 #else
-                dat[j][i].x     = in_ptr[gbl_in_off1.x + i];
-                dat[j][i].y     = (ci + 1 >= MLO_CLOOP0) ? (_FLOAT)(0) : in_ptr[gbl_in_off1.y + i];
+                dat[j][i].x = in_ptr[gbl_in_off1.x + i];
+                dat[j][i].y = (ci + 1 >= MLO_CLOOP0) ? (_FLOAT)(0) : in_ptr[gbl_in_off1.y + i];
 #endif
 #if DBG_OUT_OF_RNGE
                 if((gbl_in_off1.x + i >= MLO_IN_BATCH_STRIDE * MLO_BATCH_SZ) ||

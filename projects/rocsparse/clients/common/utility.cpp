@@ -34,13 +34,8 @@
 #ifdef WIN32
 #define strcasecmp(A, B) _stricmp(A, B)
 
-#ifdef __cpp_lib_filesystem
 #include <filesystem>
 namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
 
 #else
 #include <fcntl.h>
@@ -87,6 +82,38 @@ std::string rocsparse_exepath()
     }
     return pathstr;
 #endif
+}
+
+/* ==================================================================================== */
+// Return path where the rocsparse_gentest.py file is located
+std::string rocsparse_gentestpath()
+{
+#ifdef WIN32
+    fs::path        share_path = fs::path(rocsparse_exepath() + "../libexec/rocsparse/test");
+    std::error_code ec;
+    fs::path        path = fs::canonical(share_path, ec);
+    if(!ec)
+    {
+        if(fs::exists(path, ec) && !ec)
+        {
+            path += path.empty() ? "" : "/";
+            return path.string();
+        }
+    }
+#else
+    std::string pathstr;
+    std::string share_path = rocsparse_exepath() + "../libexec/rocsparse/test";
+    char*       path       = realpath(share_path.c_str(), 0);
+    if(path != NULL)
+    {
+        pathstr = path;
+        pathstr += "/";
+        free(path);
+        return pathstr;
+    }
+#endif
+
+    return rocsparse_exepath();
 }
 
 /* ==================================================================================== */

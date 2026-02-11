@@ -119,6 +119,7 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
             {"MIO_BN_GFX103X", (StartsWith(handle.GetDeviceName(), "gfx103") ? "1" : "0")},
             {"MIO_BN_GFX110X", (StartsWith(handle.GetDeviceName(), "gfx110") ? "1" : "0")},
             {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
+            {"MIO_BN_GFX115X", (StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
         };
 
         auto kernel = KernelInfo{};
@@ -145,8 +146,10 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
             decltype(auto) params = raw_params.CastTo<miopen::batchnorm::FwdTrainInvokeParams>();
             const auto resultsave =
                 params.resultSaveMean != nullptr && params.resultSaveInvVariance != nullptr;
-            const auto resultrunning =
-                params.resultRunningMean != nullptr && params.resultRunningVariance != nullptr;
+            const auto resultrunning = params.prevResultRunningMean != nullptr &&
+                                       params.prevResultRunningVariance != nullptr &&
+                                       params.nextResultRunningMean != nullptr &&
+                                       params.nextResultRunningVariance != nullptr;
 
             if(resultsave && resultrunning)
             {
@@ -157,8 +160,10 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
                        params.bnScale,
                        params.bnBias,
                        params.expAvgFactor,
-                       params.resultRunningMean,
-                       params.resultRunningVariance,
+                       params.prevResultRunningMean,
+                       params.prevResultRunningVariance,
+                       params.nextResultRunningMean,
+                       params.nextResultRunningVariance,
                        params.epsilon,
                        params.resultSaveMean,
                        params.resultSaveInvVariance);
@@ -184,8 +189,10 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
                        params.bnScale,
                        params.bnBias,
                        params.expAvgFactor,
-                       params.resultRunningMean,
-                       params.resultRunningVariance,
+                       params.prevResultRunningMean,
+                       params.prevResultRunningVariance,
+                       params.nextResultRunningMean,
+                       params.nextResultRunningVariance,
                        params.epsilon);
             }
             else

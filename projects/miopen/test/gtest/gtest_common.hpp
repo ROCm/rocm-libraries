@@ -52,11 +52,11 @@ public:
         restore = ClearValue();
     }
 
-    ScopedEnvironment()                         = delete;
-    ScopedEnvironment(const ScopedEnvironment&) = delete;
-    ScopedEnvironment(ScopedEnvironment&&)      = delete;
+    ScopedEnvironment()                                    = delete;
+    ScopedEnvironment(const ScopedEnvironment&)            = delete;
+    ScopedEnvironment(ScopedEnvironment&&)                 = delete;
     ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
-    ScopedEnvironment& operator=(ScopedEnvironment&&) = delete;
+    ScopedEnvironment& operator=(ScopedEnvironment&&)      = delete;
 
     ~ScopedEnvironment()
     {
@@ -120,6 +120,14 @@ inline void tuning_check(const std::string& err)
     default_check(err);
 }
 
+inline void compiler_check(const std::string& err)
+{
+    // the test should fail if kernel build failed.
+    EXPECT_FALSE(err.find("Error") != std::string::npos ||
+                 err.find("Code object build failed") != std::string::npos);
+    default_check(err);
+}
+
 inline void db_check(const std::string& err)
 {
     EXPECT_FALSE(err.find("Perf Db: record not found") != std::string::npos);
@@ -138,7 +146,8 @@ enum class Gpu : int
     gfx950  = 1 << 5,
     gfx103X = 1 << 6,
     gfx110X = 1 << 7,
-    gfx120X = 1 << 8,
+    gfx115X = 1 << 8,
+    gfx120X = 1 << 9,
     gfxLast = Gpu::gfx120X, // \note Change the value when adding a new device
     All     = -1
 };
@@ -180,7 +189,8 @@ struct disabled
 struct DevDescription
 {
     std::string_view name;
-    unsigned cu_cnt; // CU for gfx9, WGP for gfx10, 11, ...
+    unsigned cu_cnt;         // CU for gfx9, WGP for gfx10, 11, ...
+    unsigned wavefront_size; // Default wavefront size
 
     friend std::ostream& operator<<(std::ostream& os, const DevDescription& dd);
 };
@@ -194,7 +204,7 @@ public:
 
     // Add additional methods here if needed
     const std::string& Name() const override;
-    boost::optional<bool> Xnack() const override;
+    bool isXnackEnabled() const override;
 
 private:
     std::string name;
@@ -209,7 +219,9 @@ public:
     // Add additional methods here if needed
     const miopen::TargetProperties& GetTargetProperties() const override;
     std::size_t GetMaxComputeUnits() const override;
+    std::size_t GetWavefrontWidth() const override;
     std::size_t GetMaxMemoryAllocSize() const override;
+
     bool CooperativeLaunchSupported() const override;
 
 private:

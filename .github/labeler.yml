@@ -14,10 +14,19 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblaslt/**/*'
   - any-glob-to-any-file: 'shared/origami/**/*'
+  - any-glob-to-any-file: 'shared/rocroller/**/*'
+
+"project: hipblaslt-provider":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/hipblaslt-provider/**/*'
 
 "project: hipcub":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipcub/**/*'
+
+"project: hipdnn":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipdnn/**/*'
 
 "project: hipfft":
 - changed-files:
@@ -43,9 +52,13 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/miopen/**/*'
 
+"project: miopen-provider":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/miopen-provider/**/*'
+
 "project: none":
 - changed-files:
-  - all-globs-to-all-files: ['!projects/**/*', '!shared/**/*']
+  - all-globs-to-all-files: ['!dnn-providers/**/*', '!projects/**/*', '!shared/**/*']
 
 "project: rocblas":
 - changed-files:
@@ -80,6 +93,14 @@
 - changed-files:
   - any-glob-to-any-file: 'shared/mxdatagenerator/**/*'
 
+"shared: origami":
+- changed-files:
+  - any-glob-to-any-file: 'shared/origami/**/*'
+
+"shared: primbench":
+- changed-files:
+  - any-glob-to-any-file: 'shared/primbench/**/*'
+
 "shared: rocroller":
 - changed-files:
   - any-glob-to-any-file: 'shared/rocroller/**/*'
@@ -88,16 +109,27 @@
 - changed-files:
   - any-glob-to-any-file: 'shared/tensile/**/*'
 
-"shared: origami":
+"project: rocwmma":
 - changed-files:
-  - any-glob-to-any-file: 'shared/origami/**/*'
+  - any-glob-to-any-file: 'projects/rocwmma/**/*'
+
+"project: hiptensor":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hiptensor/**/*'
 
 documentation:
 - changed-files:
   - any-glob-to-any-file:
     - docs/**/*
     - '**/docs/**/*'
-    - '*.md'
+    - '**/*.md'
+    - '**/*.rst'
+    - '**/.readthedocs.yaml'
+
+"ci:docs-only":
+- changed-files:
+  - any-glob-to-all-files:
+    - '{**/*.md,**/*.rst,**/docs/**/*,**/.readthedocs.yaml}'
 
 External CI:
 - changed-files:

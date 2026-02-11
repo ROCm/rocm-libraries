@@ -57,38 +57,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config,
-         bool InPlace,
-         bool Right,
-         typename InputIt,
-         typename OutputIt,
-         typename BinaryFunction>
-inline hipError_t launch_adjacent_difference(
-    detail::target_arch                                       arch,
-    const InputIt                                             input,
-    const OutputIt                                            output,
-    const std::size_t                                         size,
-    const BinaryFunction                                      op,
-    const typename std::iterator_traits<InputIt>::value_type* previous_values,
-    const std::size_t                                         starting_block,
-    dim3                                                      grid,
-    dim3                                                      block,
-    size_t                                                    shmem,
-    hipStream_t                                               stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        adjacent_difference_kernel_impl<decltype(arch_config), InPlace, Right>(input,
-                                                                               output,
-                                                                               size,
-                                                                               op,
-                                                                               previous_values,
-                                                                               starting_block);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
 template<typename Config,
          bool InPlace,
          bool Right,
@@ -109,17 +77,17 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
     using larger_type
         = std::conditional_t<(sizeof(value_type) >= sizeof(output_type)), value_type, output_type>;
 
-    using config = wrapped_adjacent_difference_config<Config, InPlace, larger_type>;
+    using Selector = adjacent_difference_config_selector<InPlace, larger_type>;
 
     detail::target_arch target_arch;
-    hipError_t          result = detail::host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
+    ROCPRIM_RETURN_ON_ERROR(detail::host_target_arch(stream, target_arch));
 
-    const detail::adjacent_difference_config_params params
-        = detail::dispatch_target_arch<config, false>(target_arch);
+    detail::gpu target_gpu;
+    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+
+    const target current_target(target_arch, target_gpu);
+
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int block_size          = params.kernel_config.block_size;
     const unsigned int items_per_thread    = params.kernel_config.items_per_thread;
@@ -204,18 +172,24 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
             start = std::chrono::steady_clock::now();
         }
 
-        ROCPRIM_RETURN_ON_ERROR(
-            launch_adjacent_difference<config, InPlace, Right>(target_arch,
-                                                               input + offset,
-                                                               output + offset,
-                                                               size,
-                                                               op,
-                                                               previous_values + starting_block,
-                                                               starting_block,
-                                                               current_blocks,
-                                                               block_size,
-                                                               0,
-                                                               stream));
+        auto adjacent_difference_kernel = [=](auto arch_config)
+        {
+            adjacent_difference_kernel_impl<decltype(arch_config), InPlace, Right>(
+                input + offset,
+                output + offset,
+                size,
+                op,
+                previous_values + starting_block,
+                starting_block);
+        };
+
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      adjacent_difference_kernel,
+                                                                      current_blocks,
+                                                                      block_size,
+                                                                      0,
+                                                                      stream));
+
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("adjacent_difference_kernel",
                                                     current_size,
                                                     start);

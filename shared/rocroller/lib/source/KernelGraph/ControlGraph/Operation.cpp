@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,11 @@
 
 namespace rocRoller::KernelGraph::ControlGraph
 {
+    static_assert(!COperationWithBody<Assign>);
+    static_assert(!COperationWithBody<Multiply>);
+    static_assert(COperationWithBody<ForLoopOp>);
+    static_assert(COperationWithBody<Kernel>);
+
     VariableType getVariableType(Operation const& op)
     {
         auto visitor = [](auto const& op) -> VariableType {
@@ -113,12 +118,8 @@ namespace rocRoller::KernelGraph::ControlGraph
     }
 
     LoadTiled::LoadTiled() = default;
-    LoadTiled::LoadTiled(rocRoller::VariableType const varType,
-                         bool const                    isTransposedTile,
-                         bool const                    isDirect2LDS)
+    LoadTiled::LoadTiled(rocRoller::VariableType const varType)
         : varType(varType)
-        , isTransposedTile(isTransposedTile)
-        , isDirect2LDS(isDirect2LDS)
     {
     }
 
@@ -220,7 +221,6 @@ namespace rocRoller::KernelGraph::ControlGraph
 
     RR_CLASS_NAME_IMPL(AssertOp);
     RR_CLASS_NAME_IMPL(Assign);
-    RR_CLASS_NAME_IMPL(ComputeIndex);
     RR_CLASS_NAME_IMPL(ConditionalOp);
     RR_CLASS_NAME_IMPL(Deallocate);
     RR_CLASS_NAME_IMPL(DoWhileOp);

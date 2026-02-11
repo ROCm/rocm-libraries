@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -138,6 +138,7 @@ Datatypes:
         rocsparse_format_ell: 4
         rocsparse_format_bell: 5
         rocsparse_format_bsr: 6
+        rocsparse_format_sell: 7
   - rocsparse_itilu0_alg:
       bases: [c_int ]
       attr:
@@ -162,10 +163,15 @@ Datatypes:
         rocsparse_spmv_alg_bsr: 6
         rocsparse_spmv_alg_csr_lrb: 7
         rocsparse_spmv_alg_csr_nnzsplit: 8
+        rocsparse_spmv_alg_sell: 9
   - rocsparse_spsv_alg:
       bases: [c_int ]
       attr:
         rocsparse_spsv_alg_default: 0
+  - rocsparse_sptrsv_alg:
+      bases: [c_int ]
+      attr:
+        rocsparse_sptrsv_alg_default: 0
   - rocsparse_spitsv_alg:
       bases: [c_int ]
       attr:
@@ -174,6 +180,10 @@ Datatypes:
       bases: [c_int ]
       attr:
         rocsparse_spsm_alg_default: 0
+  - rocsparse_sptrsm_alg:
+      bases: [c_int ]
+      attr:
+        rocsparse_sptrsm_alg_default: 0
   - rocsparse_spmm_alg:
       bases: [c_int ]
       attr:
@@ -259,8 +269,12 @@ Real precisions: &real_precisions
     { a_type: i8_r, x_type: i8_r, y_type: f32_r, compute_type: f32_r }
   - &float16_float16_float32_float32_axyt_precision
     { a_type: f16_r, x_type: f16_r, y_type: f32_r, compute_type: f32_r }
+  - &float16_float16_float16_float32_axyt_precision
+    { a_type: f16_r, x_type: f16_r, y_type: f16_r, compute_type: f32_r }
   - &bfloat16_bfloat16_float32_float32_axyt_precision
     { a_type: bf16_r, x_type: bf16_r, y_type: f32_r, compute_type: f32_r }
+  - &bfloat16_bfloat16_bfloat16_float32_axyt_precision
+    { a_type: bf16_r, x_type: bf16_r, y_type: bf16_r, compute_type: f32_r }
   - &int8_int8_int32_int32_abct_precision
     { a_type: i8_r, b_type: i8_r, c_type: i32_r, compute_type: i32_r }
   - &int8_int8_float32_float32_abct_precision
@@ -273,6 +287,8 @@ Real precisions: &real_precisions
     { a_type: f16_r, b_type: f16_r, c_type: f16_r, compute_type: f16_r }
   - &bfloat16_bfloat16_float32_float32_abct_precision
     { a_type: bf16_r, b_type: bf16_r, c_type: f32_r, compute_type: f32_r }
+  - &bfloat16_bfloat16_bfloat16_float32_abct_precision
+    { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, compute_type: f32_r }
   - &int8_precision
     { a_type: i8_r, b_type: i8_r, c_type: i8_r, x_type: i8_r, y_type: i8_r, compute_type: i8_r }
   - &half_precision
@@ -404,7 +420,8 @@ All rocsparse_format: &all_rocsparse_format
          rocsparse_format_csc,
          rocsparse_format_ell,
          rocsparse_format_bell,
-         rocsparse_format_bsr]
+         rocsparse_format_bsr,
+         rocsparse_format_sell]
 
 All rocsparse_itilu0_alg: &all_rocsparse_itilu0_alg
         [rocsparse_itilu0_alg_default,
@@ -425,7 +442,8 @@ All rocsparse_spmv_alg: &all_rocsparse_spmv_alg
          rocsparse_spmv_alg_coo_atomic,
          rocsparse_spmv_alg_bsr,
          rocsparse_spmv_alg_csr_lrb,
-         rocsparse_spmv_alg_csr_nnzsplit]
+         rocsparse_spmv_alg_csr_nnzsplit,
+         rocsparse_spmv_alg_sell]
 
 All rocsparse_spmv_alg_csr: &all_rocsparse_spmv_alg_csr
         [rocsparse_spmv_alg_csr_adaptive,
@@ -436,11 +454,17 @@ All rocsparse_spmv_alg_csr: &all_rocsparse_spmv_alg_csr
 All rocsparse_spsv_alg: &all_rocsparse_spsv_alg
         [rocsparse_spsv_alg_default]
 
+All rocsparse_sptrsv_alg: &all_rocsparse_sptrsv_alg
+        [rocsparse_sptrsv_alg_default]
+
 All rocsparse_spitsv_alg: &all_rocsparse_spitsv_alg
         [rocsparse_spitsv_alg_default]
 
 All rocsparse_spsm_alg: &all_rocsparse_spsm_alg
         [rocsparse_spsm_alg_default]
+
+All rocsparse_sptrsm_alg: &all_rocsparse_sptrsm_alg
+        [rocsparse_sptrsm_alg_default]
 
 All rocsparse_spmm_alg: &all_rocsparse_spmm_alg
         [rocsparse_spmm_alg_default,
@@ -491,6 +515,7 @@ Arguments:
   - col_block_dimA: rocsparse_int
   - row_block_dimB: rocsparse_int
   - col_block_dimB: rocsparse_int
+  - sell_slice_size: rocsparse_int
   - dimx: rocsparse_int
   - dimy: rocsparse_int
   - dimz: rocsparse_int
@@ -543,8 +568,10 @@ Arguments:
   - sddmm_alg: rocsparse_sddmm_alg
   - spmv_alg: rocsparse_spmv_alg
   - spsv_alg: rocsparse_spsv_alg
+  - sptrsv_alg: rocsparse_sptrsv_alg
   - spitsv_alg: rocsparse_spitsv_alg
   - spsm_alg: rocsparse_spsm_alg
+  - sptrsm_alg: rocsparse_sptrsm_alg
   - spmm_alg: rocsparse_spmm_alg
   - spgemm_alg: rocsparse_spgemm_alg
   - spgeam_alg: rocsparse_spgeam_alg
@@ -574,6 +601,8 @@ Arguments:
   - boostval: c_double
   - boostvali: c_double
   - tolm: c_double
+  - rand_gen_min: c_double
+  - rand_gen_max: c_double
   - graph_test: c_bool
   - skip_reproducibility: c_bool
   - sparsity_pattern_statistics: c_bool
@@ -585,7 +614,8 @@ Arguments:
   - category: c_char*32
   - hardware: c_char*32
   - skip_hardware: c_char*32
-  - req_memory: c_uint
+  - host_memory_gb: c_uint
+  - device_memory_gb: c_uint
 
 # These named dictionary lists [ {dict1}, {dict2}, etc. ] supply subsets of
 # test arguments in a structured way. The dictionaries are applied to the test
@@ -638,6 +668,7 @@ Defaults:
   col_block_dimA: 2
   row_block_dimB: 2
   col_block_dimB: 2
+  sell_slice_size: 2
   dimx: 1
   dimy: 1
   dimz: 1
@@ -691,8 +722,10 @@ Defaults:
   sddmm_alg: rocsparse_sddmm_alg_default
   spmv_alg: rocsparse_spmv_alg_default
   spsv_alg: rocsparse_spsv_alg_default
+  sptrsv_alg: rocsparse_sptrsv_alg_default
   spitsv_alg: rocsparse_spitsv_alg_default
   spsm_alg: rocsparse_spsm_alg_default
+  sptrsm_alg: rocsparse_sptrsm_alg_default
   spmm_alg: rocsparse_spmm_alg_default
   spgemm_alg: rocsparse_spgemm_alg_default
   spgeam_alg: rocsparse_spgeam_alg_default
@@ -722,6 +755,8 @@ Defaults:
   boostval: 1.0
   boostvali: 0.0
   tolm: 1.0
+  rand_gen_min: 0.0
+  rand_gen_max: 1.0
   graph_test: false
   skip_reproducibility: false
   sparsity_pattern_statistics: false
@@ -731,6 +766,7 @@ Defaults:
   category: nightly
   hardware: all
   skip_hardware: none
-  req_memory: 4
+  host_memory_gb: 4
+  device_memory_gb: 4
   filename: '*'
   name: '*'

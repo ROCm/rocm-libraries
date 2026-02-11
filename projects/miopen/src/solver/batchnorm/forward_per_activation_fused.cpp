@@ -77,12 +77,12 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
         const auto mode    = bn_problem.GetMode();
         if(mode == miopenBNSpatial)
         { // SPATIAL kernels
-            kernel.kernel_file += "Spatial.cl";
+            kernel.kernel_file += "Spatial.cpp";
             kernel.kernel_name += "Spatial";
         }
         else
         { // PER ACTIVATION
-            kernel.kernel_file += "PerAct.cl";
+            kernel.kernel_file += "PerAct.cpp";
             kernel.kernel_name += "PerActivation";
         }
         size_t xlocalsize, ylocalsize, zlocalsize;
@@ -90,6 +90,8 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
         input_type             = input_desc.GetType();
         std::tie(n, c, h, w)   = tien<4>(input_desc.GetLengths());
         size_t in_cstride      = static_cast<size_t>(h) * w;
+        size_t in_nstride      = c * in_cstride;
+        size_t in_nchw         = n * in_nstride;
 
         xlocalsize = 1024;
         ylocalsize = 1;
@@ -104,8 +106,10 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
         }
         else
         {
-            xlocalsize = 1;
-            ylocalsize = 256;
+            // Kernel threads to process continous pixels. Based on the test in the miopen repo this
+            // approach performced better than the HW block per thead block apporach.
+            xlocalsize = 128;
+            ylocalsize = 1;
         }
         kernel.l_wk = {xlocalsize, ylocalsize, zlocalsize};
 
@@ -115,14 +119,12 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
 
         if(mode != miopenBNSpatial)
         {
-            auto segment = int(std::ceil(double(in_cstride) / double(ylocalsize)));
-            xgridsize    = c;
-            ygridsize    = segment * ylocalsize;
+            xgridsize = ((in_nstride - 1) / xlocalsize + 1) * xlocalsize;
+            zgridsize = 1;
+            ygridsize = 1;
         }
 
-        kernel.g_wk       = {xgridsize, ygridsize, zgridsize};
-        size_t in_nstride = c * in_cstride;
-        size_t in_nchw    = n * in_nstride;
+        kernel.g_wk = {xgridsize, ygridsize, zgridsize};
 
         unsigned int ldsgcn   = xlocalsize / 64;
         unsigned int ldsnogcn = xlocalsize;
@@ -172,17 +174,16 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
             {"MIO_BN_GFX103X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx103"))},
             {"MIO_BN_GFX110X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx110"))},
             {"MIO_BN_GFX120X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx120"))},
+            {"MIO_BN_GFX115X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx115"))},
             {"MIOPEN_YES_ACTIV", static_cast<int>(1)},
             {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_op.activMode)},
             {"MIOPEN_USE_FP16", static_cast<int>(input_desc.GetType() == miopenHalf)},
             {"MIOPEN_USE_FP32", static_cast<int>(input_desc.GetType() == miopenFloat)}};
-        kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
         if(bn_problem.GetMode() == miopenBNSpatial)
             kernel.comp_options += " -DSPATIAL_BN";
         else
             kernel.comp_options += " -DPERACT_BN";
-        if(input_desc.GetType() == miopenHalf)
-            kernel.comp_options += " -DMIOPEN_USE_FPMIX=1";
 
         result.construction_params.push_back(kernel);
     }

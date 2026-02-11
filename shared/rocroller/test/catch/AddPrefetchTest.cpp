@@ -54,7 +54,6 @@ namespace AddPrefetchTest
         example.setTileSize(256, 64, 16);
         example.setMFMA(32, 32, 2, 1);
         example.setUseLDS(true, true, false);
-        example.setUnroll(2, 2);
         example.setPrefetch(true, prefetchInFlight, prefetchLDSFactor, prefetchMixMemOps);
 
         auto graph  = example.getKernelGraph();
@@ -71,8 +70,8 @@ namespace AddPrefetchTest
 
         graph = transform<ConstantPropagation>(graph);
         graph = transform<FuseExpressions>(graph);
-        graph = transform<ConnectWorkgroups>(
-            graph, context.get(), params->workgroupMappingDim, params->workgroupRemapXCC);
+        graph = transform<ConnectWorkgroups>(graph, context.get());
+        graph = transform<WorkgroupRemapXCC>(graph, context.get(), params->workgroupRemapXCC);
         graph = transform<UnrollLoops>(graph, params, context.get());
         graph = transform<FuseLoops>(graph);
         graph = transform<RemoveDuplicates>(graph);

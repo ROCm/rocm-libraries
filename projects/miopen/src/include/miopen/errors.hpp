@@ -31,6 +31,7 @@
 #include <miopen/miopen.h>
 #include <miopen/object.hpp>
 #include <miopen/returns.hpp>
+#include <miopen/sysinfo_utils.hpp>
 #include <string>
 #include <tuple>
 
@@ -46,7 +47,9 @@ struct Exception : std::exception
 
     Exception SetContext(const std::string& file, int line)
     {
-        message = file + ":" + std::to_string(line) + ": " + message;
+        std::string hostname = sysinfo::GetSystemHostname();
+
+        message = hostname + ":" + file + ":" + std::to_string(line) + ": " + message;
         return *this;
     }
 
@@ -114,8 +117,9 @@ miopenStatus_t try_(F f, bool output = true)
 }
 
 template <class T>
-auto deref(T&& x, [[maybe_unused]] miopenStatus_t err = miopenStatusBadParm)
-    -> decltype((x == nullptr), get_object(*x))
+auto deref(T&& x,
+           [[maybe_unused]] miopenStatus_t err = miopenStatusBadParm) -> decltype((x == nullptr),
+                                                                                  get_object(*x))
 {
     if(x == nullptr)
     {

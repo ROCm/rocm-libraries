@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/pooling/solvers.hpp>
 
@@ -31,6 +8,7 @@
 #include <miopen/pooling.hpp>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/mlo_internal.hpp>
+#include <miopen/solver/implicitgemm_util.hpp>
 
 #define WORKAROUND_ISSUE_MIFIN_80 1 // https://github.com/ROCm/MIFin/issues/80
 
@@ -48,7 +26,8 @@ bool PoolingBackwardNd::IsApplicable(const ExecutionContext&,
     return problem.GetDirection() == miopen::pooling::Direction::Backward          //
            && problem.GetXDesc().GetType() == problem.GetYDesc().GetType()         //
            && (problem.GetXDesc().GetType() == miopenFloat                         //
-               || problem.GetXDesc().GetType() == miopenHalf)                      //
+               || problem.GetXDesc().GetType() == miopenHalf                       //
+               || problem.GetXDesc().GetType() == miopenBFloat16)                  //
            && (problem.GetPooling().GetMode() == miopenPoolingMax                  //
                || problem.GetPooling().GetMode() == miopenPoolingAverage           //
                || problem.GetPooling().GetMode() == miopenPoolingAverageInclusive) //
@@ -66,14 +45,14 @@ bool PoolingBackwardNd::IsApplicable(const ExecutionContext&,
                 && problem.GetPooling().GetWorkspaceIndexMode() == miopenPoolingWorkspaceIndexMask);
 }
 
-ConvSolution
-PoolingBackwardNd::GetSolution(const ExecutionContext&,
-                               const miopen::pooling::ProblemDescription& problem) const
+ConvSolution PoolingBackwardNd::GetSolution(const ExecutionContext&,
+                                            const miopen::pooling::ProblemDescription& problem,
+                                            const PerformanceConfigPoolingNdBackward& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
     auto kernel        = KernelInfo{};
-    kernel.kernel_file = "MIOpenPoolingBwdND.cl";
+    kernel.kernel_file = "MIOpenPoolingBwdND.cpp";
     kernel.kernel_name = "mloPoolingND";
 
     if(problem.GetPooling().GetMode() == miopenPoolingMax)
@@ -98,9 +77,9 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
                                           ? MLO_POOLING_OP_AVE
                                           : MLO_POOLING_OP_AVE_INCLUSIVE);
 
-    int pix_w_per_work = 1;
-    int pix_h_per_work = 4;
-    int pix_d_per_work = 2;
+    int pix_w_per_work = config.pix_w_per_work;
+    int pix_h_per_work = config.pix_h_per_work;
+    int pix_d_per_work = config.pix_d_per_work;
 
     int batch = top.GetLengths()[0];
     int chal  = top.GetLengths()[1];
@@ -120,11 +99,12 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
     int activ_work         = std::min(total_work, max_activ_workitem);
 
 #if WORKAROUND_ISSUE_MIFIN_80
-    const std::size_t wavesize = 64;
+    const std::size_t lcl_work = config.local_size;
 #else
     const std::size_t wavesize = context.GetStream().GetWavefrontWidth();
+    const std::size_t lcl_work = wavesize;
 #endif
-    size_t grp_num = (activ_work + wavesize - 1) / wavesize;
+    size_t grp_num = (activ_work + lcl_work - 1) / lcl_work;
 
     auto strides = problem.GetPooling().strides;
     auto lens    = problem.GetPooling().lens;
@@ -150,7 +130,7 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
         KernelBuildParameters{
             {"MLO_POOLING_OP_ID", pooling_method},
             {"MAX_ACTIV_WORKITEM", max_activ_workitem},
-            {"MLO_POOLING_GROUP_SZ0", wavesize},
+            {"MLO_POOLING_GROUP_SZ0", lcl_work},
             {"MLO_POOLING_GROUP_SZ1", 1},
             {"MLO_POOLING_GROUP_SZ2", 1},
             {"PIX_W_PER_WORK", pix_w_per_work},
@@ -165,15 +145,13 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
             {"TERRITORY_OVERLAP", static_cast<int>(territory_overlap)},
             {"MLO_POOLING_INDEX_TYPE",
              get_pooling_index_type_name(problem.GetPooling().GetIndexType())},
-            {"MLO_POOLING_INDEX_MAX",
-             get_pooling_index_type_max_name(problem.GetPooling().GetIndexType())},
         }
         << GetDataTypeKBP(problem.GetDYDesc().GetType());
 
-    kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+    kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
-    kernel.l_wk = {wavesize, 1, 1};
-    kernel.g_wk = {wavesize * grp_num, 1, 1};
+    kernel.l_wk = {lcl_work, 1, 1};
+    kernel.g_wk = {lcl_work * grp_num, 1, 1};
 
     result.construction_params.push_back(kernel);
 
@@ -267,6 +245,62 @@ PoolingBackwardNd::GetWorkspaceSize(const ExecutionContext&,
     if(problem.GetPooling().GetMode() != miopenPoolingMax)
         return 0;
     return problem.GetYDesc().GetElementSize() * get_data_size(problem.GetPooling().GetIndexType());
+}
+
+bool PerformanceConfigPoolingNdBackward::SetNextValue(const miopen::pooling::ProblemDescription&)
+{
+#if !MIOPEN_BACKEND_HIP
+    return false;
+#else
+#if WORKAROUND_ISSUE_MIFIN_80
+    constexpr std::size_t wavesize = 64;
+    if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_w_per_work))
+        return true;
+    if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_h_per_work))
+        return true;
+    if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_d_per_work))
+        return true;
+    if(!NextTwoPower<1, wavesize>(local_size))
+        return true;
+    return false;
+#else
+    return false;
+#endif
+#endif
+}
+
+bool PerformanceConfigPoolingNdBackward::IsValidValue() const
+{
+#if WORKAROUND_ISSUE_MIFIN_80
+    constexpr std::size_t wavesize = 64;
+    if(!IsTwoPower<min_pix_per_work, max_pix_per_work>(pix_w_per_work))
+        return false;
+    if(!IsTwoPower<min_pix_per_work, max_pix_per_work>(pix_h_per_work))
+        return false;
+    if(!IsTwoPower<min_pix_per_work, max_pix_per_work>(pix_d_per_work))
+        return false;
+    if(!IsTwoPower<1, wavesize>(local_size))
+        return false;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool PoolingBackwardNd::IsValidPerformanceConfig(
+    const ExecutionContext& context,
+    const miopen::pooling::ProblemDescription& problem,
+    const PerformanceConfigPoolingNdBackward& config) const
+{
+    return config.IsValid(context, problem);
+}
+
+PerformanceConfigPoolingNdBackward PoolingBackwardNd::GetDefaultPerformanceConfig(
+    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
+{
+    PerformanceConfigPoolingNdBackward config;
+    config.HeuristicInit(problem);
+    return config;
 }
 
 } // namespace pooling

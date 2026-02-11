@@ -67,11 +67,11 @@ hipsparseStatus_t hipsparseSpSV_destroyDescr(hipsparseSpSVDescr_t descr);
 *  @param[in]
 *  alpha               scalar \f$\alpha\f$.
 *  @param[in]
-*  matA                matrix descriptor.
+*  matA                sparse matrix descriptor.
 *  @param[in]
-*  x                   vector descriptor.
+*  x                   dense vector descriptor.
 *  @param[inout]
-*  y                   vector descriptor.
+*  y                   dense vector descriptor.
 *  @param[in]
 *  computeType         floating point precision for the SpSV computation.
 *  @param[in]
@@ -81,11 +81,11 @@ hipsparseStatus_t hipsparseSpSV_destroyDescr(hipsparseSpSVDescr_t descr);
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
 *
-*  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p y, \p spsvDescr or
-*               \p pBufferSizeInBytes pointer is invalid.
-*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType or \p alg is
-*               currently not supported.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p y, \p spsvDescr or
+*          \p pBufferSizeInBytes is nullptr, or \p opA is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType or \p alg is currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
@@ -243,136 +243,6 @@ hipsparseStatus_t hipsparseSpSV_analysis(hipsparseHandle_t           handle,
 *               pointer is invalid.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType or \p alg is
 *               currently not supported.
-*
-*  \par Example
-*  \code{.c}
-*   //     1 0 0 0
-*    // A = 4 2 0 0
-*    //     0 3 7 0
-*    //     0 0 0 1
-*    int m   = 4;
-*
-*    std::vector<int> hcsr_row_ptr = {0, 1, 3, 5, 6};
-*    std::vector<int> hcsr_col_ind = {0, 0, 1, 1, 2, 3};
-*    std::vector<float> hcsr_val   = {1, 4, 2, 3, 7, 1};
-*    std::vector<float> hx(m, 1.0f);
-*    std::vector<float> hy(m, 0.0f);
-*
-*    // Scalar alpha
-*    float alpha = 1.0f;
-*
-*    int nnz = hcsr_row_ptr[m] - hcsr_row_ptr[0];
-*
-*    // Offload data to device
-*    int* dcsr_row_ptr;
-*    int* dcsr_col_ind;
-*    float* dcsr_val;
-*    float* dx;
-*    float* dy;
-*    hipMalloc((void**)&dcsr_row_ptr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsr_col_ind, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsr_val, sizeof(float) * nnz);
-*    hipMalloc((void**)&dx, sizeof(float) * m);
-*    hipMalloc((void**)&dy, sizeof(float) * m);
-*
-*    hipMemcpy(dcsr_row_ptr, hcsr_row_ptr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dx, hx.data(), sizeof(float) * m, hipMemcpyHostToDevice);
-*
-*    hipsparseHandle_t     handle;
-*    hipsparseSpMatDescr_t matA;
-*    hipsparseDnVecDescr_t vecX;
-*    hipsparseDnVecDescr_t vecY;
-*
-*    hipsparseIndexType_t row_idx_type = HIPSPARSE_INDEX_32I;
-*    hipsparseIndexType_t col_idx_type = HIPSPARSE_INDEX_32I;
-*    hipDataType  data_type = HIP_R_32F;
-*    hipDataType  computeType = HIP_R_32F;
-*    hipsparseIndexBase_t idx_base = HIPSPARSE_INDEX_BASE_ZERO;
-*    hipsparseOperation_t trans = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*
-*    hipsparseCreate(&handle);
-*
-*    // Create sparse matrix A
-*    hipsparseCreateCsr(&matA,
-*                        m,
-*                        m,
-*                        nnz,
-*                        dcsr_row_ptr,
-*                        dcsr_col_ind,
-*                        dcsr_val,
-*                        row_idx_type,
-*                        col_idx_type,
-*                        idx_base,
-*                        data_type);
-*
-*    // Create dense vector X
-*    hipsparseCreateDnVec(&vecX, m, dx, data_type);
-*
-*    // Create dense vector Y
-*    hipsparseCreateDnVec(&vecY, m, dy, data_type);
-*
-*    hipsparseSpSVDescr_t descr;
-*    hipsparseSpSV_createDescr(&descr);
-*
-*    // Call spsv to get buffer size
-*    size_t buffer_size;
-*    hipsparseSpSV_bufferSize(handle,
-*                    trans,
-*                    &alpha,
-*                    matA,
-*                    vecX,
-*                    vecY,
-*                    computeType,
-*                    HIPSPARSE_SPSV_ALG_DEFAULT,
-*                    descr,
-*                    &buffer_size);
-*
-*    void* temp_buffer;
-*    hipMalloc((void**)&temp_buffer, buffer_size);
-*
-*    // Call spsv to perform analysis
-*    hipsparseSpSV_analysis(handle,
-*                        trans,
-*                        &alpha,
-*                        matA,
-*                        vecX,
-*                        vecY,
-*                        computeType,
-*                        HIPSPARSE_SPSV_ALG_DEFAULT,
-*                        descr,
-*                        temp_buffer);
-*
-*    // Call spsv to perform computation
-*    hipsparseSpSV_solve(handle,
-*                        trans,
-*                        &alpha,
-*                        matA,
-*                        vecX,
-*                        vecY,
-*                        computeType,
-*                        HIPSPARSE_SPSV_ALG_DEFAULT,
-*                        descr);
-*
-*    // Copy result back to host
-*    hipMemcpy(hy.data(), dy, sizeof(float) * m, hipMemcpyDeviceToHost);
-*
-*    // Clear hipSPARSE
-*    hipsparseSpSV_destroyDescr(descr);
-*    hipsparseDestroyMatDescr(matA);
-*    hipsparseDestroyDnVec(vecX);
-*    hipsparseDestroyDnVec(vecY);
-*    hipsparseDestroy(handle);
-*
-*    // Clear device memory
-*    hipFree(dcsr_row_ptr);
-*    hipFree(dcsr_col_ind);
-*    hipFree(dcsr_val);
-*    hipFree(dx);
-*    hipFree(dy);
-*    hipFree(temp_buffer);
-*  \endcode
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

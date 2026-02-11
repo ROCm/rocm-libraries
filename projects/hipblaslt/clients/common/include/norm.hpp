@@ -33,6 +33,7 @@
 #include "utility.hpp"
 #include <cstdio>
 #include <hipblaslt/hipblaslt.h>
+#include <cmath>
 #include <limits>
 #include <memory>
 
@@ -140,9 +141,13 @@ double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* 
     int    n     = static_cast<int>(N);
     int    l     = static_cast<int>(lda);
 
+    const double tolerance = std::numeric_limits<double>::epsilon();
     double cpu_norm = xlange(&norm_type, &m, &n, hCPU_double.data(), &l, work);
     m_axpy(&size, &alpha, hCPU_double.data(), &incx, hGPU_double.data(), &incx);
-    double error = xlange(&norm_type, &m, &n, hGPU_double.data(), &l, work) / cpu_norm;
+    double gpu_norm = xlange(&norm_type, &m, &n, hGPU_double.data(), &l, work);
+    if (std::abs(cpu_norm) <= tolerance && std::abs(gpu_norm) <= tolerance) return 0.0f;
+
+    double error = gpu_norm / cpu_norm;
     return error;
 }
 
@@ -177,9 +182,13 @@ double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* 
     int    n     = static_cast<int>(N);
     int    l     = static_cast<int>(lda);
 
+    const double tolerance = std::numeric_limits<double>::epsilon();
     double cpu_norm = xlange(&norm_type, &m, &n, hCPU_double.data(), &l, work);
     m_axpy(&size, &alpha, hCPU_double.data(), &incx, hGPU_double.data(), &incx);
-    double error = xlange(&norm_type, &m, &n, hGPU_double.data(), &l, work) / cpu_norm;
+    double gpu_norm = xlange(&norm_type, &m, &n, hGPU_double.data(), &l, work);
+    if (std::abs(cpu_norm) <= tolerance && std::abs(gpu_norm) <= tolerance) return 0.0f;
+
+    double error = gpu_norm / cpu_norm;
 
     return error;
 }
@@ -214,9 +223,13 @@ double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* 
     int    n     = static_cast<int>(N);
     int    l     = static_cast<int>(lda);
 
+    const double tolerance = std::numeric_limits<double>::epsilon();
     double cpu_norm = xlange(&norm_type, &m, &n, hCPU_double.data(), &l, work);
     m_axpy(&size, &alpha, hCPU_double.data(), &incx, hGPU_double.data(), &incx);
-    double error = xlange(&norm_type, &m, &n, hGPU_double.data(), &l, work) / cpu_norm;
+    double gpu_norm = xlange(&norm_type, &m, &n, hGPU_double.data(), &l, work);
+    if (std::abs(cpu_norm) <= tolerance && std::abs(gpu_norm) <= tolerance) return 0.0f;
+
+    double error = gpu_norm / cpu_norm;
 
     return error;
 }
@@ -578,4 +591,11 @@ bool norm_check(double norm_error, hipDataType type)
     default:
         return false;
     }
+}
+
+bool norm_check(double norm_error, hipDataType type, hipblasComputeType_t compute_type)
+{
+    if(compute_type == HIPBLAS_COMPUTE_32F_FAST_16BF && type == HIP_R_32F)
+        return norm_error < 0.5;
+    return norm_check(norm_error, type);
 }

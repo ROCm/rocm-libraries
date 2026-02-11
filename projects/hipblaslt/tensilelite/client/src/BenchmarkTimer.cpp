@@ -27,6 +27,7 @@
 #include "BenchmarkTimer.hpp"
 #include "PerformanceReporter.hpp"
 #include "ResultReporter.hpp"
+#include "TimingInstrumentation.hpp"
 
 #include "Reference.hpp"
 
@@ -116,7 +117,7 @@ namespace TensileLite
             }
         }
 
-        void BenchmarkTimer::preSolution(ContractionSolution const& solution)
+        void BenchmarkTimer::preSolution(ContractionSolution* const solution)
         {
             m_numEnqueuesInSolution = 0;
             m_timeInSolution        = double_millis::zero();
@@ -132,11 +133,11 @@ namespace TensileLite
 
             if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
             {
-                pp = solution.projectedPerformance(problem->gemms[0], m_hardware);
+                pp = solution->projectedPerformance(problem->gemms[0], m_hardware);
             }
             else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
-                pp = solution.projectedPerformance(*problem, m_hardware);
+                pp = solution->projectedPerformance(*problem, m_hardware);
             }
             else
             {
@@ -170,12 +171,12 @@ namespace TensileLite
             double                                    flopCount = 0;
             if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
             {
-                pp        = m_solution.projectedPerformance(problem->gemms[0], m_hardware);
+                pp        = m_solution->projectedPerformance(problem->gemms[0], m_hardware);
                 flopCount = problem->gemms[0].flopCount();
             }
             else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
-                pp        = m_solution.projectedPerformance(*problem, m_hardware);
+                pp        = m_solution->projectedPerformance(*problem, m_hardware);
                 flopCount = problem->flopCount();
             }
             else
@@ -383,6 +384,9 @@ namespace TensileLite
             m_timeInSolution += totalTime;
             m_totalGPUTime += totalTime;
             m_numEnqueuesInSolution += startEvents->size();
+
+            // Report GPU execution time for timing instrumentation
+            reportTiming("gpu_kernel_execution", totalTime.count());
 
             if(m_sleepPercent > 0)
             {

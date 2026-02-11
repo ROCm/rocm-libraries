@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -389,7 +389,7 @@ rocfft_ostream::worker::worker(int fd)
     }
 
     // Create a worker thread, capturing *this
-    thread = std::thread([=] { thread_function(); });
+    thread = std::thread([=, this] { thread_function(); });
 
     // Detatch from the worker thread
     thread.detach();
@@ -399,6 +399,18 @@ rocfft_ostream::worker::~worker()
 {
     // Tell worker thread to exit, by sending it an empty string
     send({});
+
+    // drain the queue to ensure that outstanding std::promises
+    // aren't broken when all of these tasks are torn down
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        while(!queue.empty())
+        {
+            task_t task = std::move(queue.front());
+            queue.pop();
+            task.set_value();
+        }
+    }
 
     // Close the FILE
     if(file)

@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <typename T, typename S, typename U>
 void stein_checkBadArgs(const rocblas_handle handle,
@@ -389,7 +390,7 @@ void stein_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -406,12 +407,12 @@ void stein_getPerfData(const rocblas_handle handle,
         stein_initData<false, true, T>(handle, n, nev, dD, dE, dNev, dW, dIblock, dIsplit, hD, hE,
                                        hNev, hW, hIblock, hIsplit);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_stein(handle, n, dD.data(), dE.data(), dNev.data(), dW.data(), dIblock.data(),
                         dIsplit.data(), dZ.data(), ldz, dIfail.data(), dInfo.data());
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <typename T>
@@ -536,7 +537,7 @@ void testing_stein(Arguments& argus)
                           hInfo, hInfoRes, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         stein_getPerfData<T>(handle, n, nev, dD, dE, dNev, dW, dIblock, dIsplit, dZ, ldz, dIfail,
                              dInfo, hD, hE, hNev, hW, hIblock, hIsplit, hZ, hIfail, hInfo,
                              &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,

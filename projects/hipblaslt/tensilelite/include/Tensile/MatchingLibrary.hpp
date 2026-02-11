@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <set>
 #include <vector>
 
@@ -46,7 +47,8 @@ namespace TensileLite
     {
         using Element = std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>;
         using Table   = Matching::MatchingTable<MyProblem, Element, std::shared_ptr<MySolution>>;
-        std::shared_ptr<Table> table;
+        std::shared_ptr<Table>    table;
+        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         static std::string Type()
         {
@@ -83,27 +85,16 @@ namespace TensileLite
                                                              double*          fitness
                                                              = nullptr) const override
         {
-            bool useDebugSelection = Debug::Instance().enableDebugSelection();
-
             typename Table::Transform transform
                 = [&](Element library) -> std::shared_ptr<MySolution> {
                 return library->findBestSolution(problem, hardware);
             };
 
-            if(useDebugSelection)
-            {
-                std::shared_ptr<MySolution> evaluationSolution
-                    = table->findBestEvaluationSolution(problem, hardware, transform);
-                return evaluationSolution;
-            }
-            else
-            {
-                double localFitness = std::numeric_limits<double>::max();
-                fitness             = (fitness) ? fitness : &localFitness;
-                std::shared_ptr<MySolution> solution;
-                std::tie(solution, *fitness) = table->findBestMatch(problem, transform);
-                return solution;
-            }
+            double localFitness = std::numeric_limits<double>::max();
+            fitness             = (fitness) ? fitness : &localFitness;
+            std::shared_ptr<MySolution> solution;
+            std::tie(solution, *fitness) = table->findBestMatch(problem, transform);
+            return solution;
         }
 
         virtual SolutionSet<MySolution>
@@ -112,8 +103,6 @@ namespace TensileLite
                              SolutionLibrarySearchType searchType
                              = SolutionLibrarySearchType::DEFAULT) const override
         {
-            bool debug = Debug::Instance().printPropertyEvaluation();
-
             SolutionSet<MySolution> rv;
 
             auto matches = searchType != SolutionLibrarySearchType::DEFAULT
@@ -122,14 +111,8 @@ namespace TensileLite
 
             for(auto const& row : matches)
             {
-                if(debug)
-                    std::cout << row->description() << std::endl;
-
                 auto rowSolutions = row->findAllSolutions(problem, hardware, searchType);
                 rv.insert(rowSolutions.begin(), rowSolutions.end());
-
-                if(debug)
-                    std::cout << std::endl;
             }
 
             return rv;
@@ -141,8 +124,6 @@ namespace TensileLite
                                         SolutionLibrarySearchType     searchType
                                         = SolutionLibrarySearchType::DEFAULT) const override
         {
-            bool debug = Debug::Instance().printPropertyEvaluation();
-
             SolutionSet<MySolution> rv;
 
             auto matches = searchType != SolutionLibrarySearchType::DEFAULT
@@ -151,15 +132,9 @@ namespace TensileLite
 
             for(auto const& row : matches)
             {
-                if(debug)
-                    std::cout << row->description() << std::endl;
-
                 auto rowSolutions
                     = row->findAllSolutionsGroupedGemm(problems, hardware, searchType);
                 rv.insert(rowSolutions.begin(), rowSolutions.end());
-
-                if(debug)
-                    std::cout << std::endl;
             }
 
             return rv;
@@ -187,7 +162,15 @@ namespace TensileLite
                 else
                     std::cout << "No solution found" << std::endl;
             }
+
+            // can't reach the requested number, means findTop already done its best
+            lastFindTopRetAll = (solutions.size() < numSolutions);
             return solutions;
+        }
+
+        virtual bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>

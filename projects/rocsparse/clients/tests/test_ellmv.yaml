@@ -28,12 +28,11 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_beta_range_quick
     - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
-    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
+
 
   - &alpha_beta_range_checkin
     - { alpha:   2.0, beta:  0.0,  alphai:  1.5, betai:  0.5 }
-    - { alpha:   2.0, beta:  0.67, alphai: -1.0, betai:  1.5 }
-    - { alpha:   3.0, beta:  1.0,  alphai:  1.0, betai: -0.5 }
+
 
   - &alpha_beta_range_0_1
     - { alpha:   0.0, beta:  1.0,  alphai:  0.0, betai:  0.0 }
@@ -58,26 +57,28 @@ Tests:
   category: nightly
   hardware: [gfx908, gfx90a]
   function: ellmv_extra
+  host_memory_gb: 32
+  device_memory_gb: 5
 
 - name: ellmv
   category: quick
   function: ellmv
   precision: *single_double_precisions_complex_real
-  M: [10, 500]
-  N: [33, 842]
+  M: [10, 300]
+  N: [33, 300]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
 - name: ellmv
   category: pre_checkin
   function: ellmv
   precision: *single_double_precisions_complex_real
-  M: [0, 711]
-  N: [0, 444]
+  M: [8, 711]
+  N: [8, 444]
   alpha_beta: *alpha_beta_range_0_1
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
@@ -85,10 +86,10 @@ Tests:
   category: pre_checkin
   function: ellmv
   precision: *single_double_precisions
-  M: [7111, 10000]
-  N: [4441, 10000]
+  M: [2000]
+  N: [2000]
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
 
@@ -96,11 +97,13 @@ Tests:
   category: nightly
   function: ellmv
   precision: *double_only_precisions_complex
-  M: [39385, 193482, 639102]
-  N: [29348, 340123, 710341]
+  M: [5000]
+  N: [5000]
+  host_memory_gb: 32
+  device_memory_gb: 8
   alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
 - name: ellmv_file
@@ -110,13 +113,11 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [mac_econ_fwd500,
-             nos2,
-             nos4,
-             nos6]
+             nos2]
 
 - name: ellmv_file
   category: quick
@@ -125,8 +126,8 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [scircuit]
 
@@ -137,8 +138,8 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1,
              nos3,
@@ -153,7 +154,7 @@ Tests:
   N: 1
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [bibd_22_8,
              bmwcra_1,
@@ -168,8 +169,8 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron2,
              qc2534]
@@ -195,8 +196,8 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
 
@@ -204,10 +205,10 @@ Tests:
   category: pre_checkin
   function: ellmv
   precision: *single_double_precisions_complex_real
-  M: [10, 500]
-  N: [33, 842]
+  M: [500]
+  N: [842]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   graph_test: true

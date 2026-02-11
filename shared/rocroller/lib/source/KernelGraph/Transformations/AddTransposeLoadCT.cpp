@@ -71,7 +71,7 @@ namespace rocRoller
                    && hasTransposeInstructionForType(type);
         };
 
-        /** @brief Sets isTransposedTile field of LoadTiled/LoadLDSTile ops
+        /** @brief Sets isTransposedTile field of LoadLDSTile op
          * connected to MacroTile @tileTag in Coordinate Graph @graph.
          */
         void setIsTransposedLoad(int tileTag, KernelGraph& graph)
@@ -83,12 +83,7 @@ namespace rocRoller
                         ") is connected to more than 1 operation in control graph!");
             auto opTag = conns[0].control;
             auto e     = graph.control.getElement(opTag);
-            std::visit(rocRoller::overloaded{[&](LoadTiled& op) {
-                                                 auto newLoadTiled(op);
-                                                 newLoadTiled.isTransposedTile = true;
-                                                 graph.control.setElement(opTag, newLoadTiled);
-                                             },
-                                             [&](LoadLDSTile& op) {
+            std::visit(rocRoller::overloaded{[&](LoadLDSTile& op) {
                                                  auto newLoadLDSTile(op);
                                                  newLoadLDSTile.isTransposedTile = true;
                                                  graph.control.setElement(opTag, newLoadLDSTile);

@@ -42,6 +42,8 @@ Datatypes:
         hpl: 333
         special: 444
         zero: 555
+        norm_dist: 666
+        uniform_01: 777
   - hipblaslt_activation_type:
       bases: [ c_int ]
       attr:
@@ -50,6 +52,7 @@ Datatypes:
         gelu: 2
         swish: 3
         clamp: 4
+        sigmoid: 5
   - hipblaslt_bias_source:
       bases: [ c_int ]
       attr:
@@ -274,6 +277,8 @@ Real precisions swizzleB support: &real_precisions_swizzleB_support
 Real precisions f32_bf16_r: &real_precisions_intermeddiate_bf16
   - &hpa_half_fp16dst_bf16computeIn_precision
     { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_fast_bf16_r, scale_type: f32_r}
+  - &single_precision_bf16computeIn_precision
+    { a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_fast_bf16_r, scale_type: f32_r}
 
 Real precisions f32_f8_fnuz_r: &real_precisions_intermeddiate_f8_fnuz
   - &hpa_half_fp16dst_f8_fnuz_computeIn_precision
@@ -565,10 +570,7 @@ Arguments:
   - norm_check_assert: c_bool
   - swizzle_a: c_bool
   - swizzle_b: c_bool
-  - scaleABlockRowSize: c_uint32
-  - scaleABlockColSize: c_uint32
-  - scaleBBlockRowSize: c_uint32
-  - scaleBBlockColSize: c_uint32
+  - dump_matrix: c_bool
   - use_ext: c_bool
   - use_ext_setproblem: c_bool
   - algo_method: c_int32
@@ -674,10 +676,7 @@ Defaults:
   norm_check_assert: true
   swizzle_a: false
   swizzle_b: false
-  scaleABlockRowSize: 32
-  scaleABlockColSize: 1
-  scaleBBlockRowSize: 1
-  scaleBBlockColSize: 32
+  dump_matrix: false
   use_ext: false
   use_ext_setproblem: false
   algo_method: 0

@@ -38,9 +38,9 @@ import sys
 from pathlib import Path
 from typing import List
 
+import rrperf.args as args
 from rrperf import compare, git
 from rrperf import run as suite_run
-import rrperf.args as args
 
 
 def build_rocroller(
@@ -65,27 +65,6 @@ def build_rocroller(
     build_dir = project_dir / "build_perf"
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    mx_datagen_git_url_env_var = "ROCROLLER_MXDATAGENERATOR_GIT_URL"
-    mx_datagen_git_tag_env_var = "ROCROLLER_MXDATAGENERATOR_GIT_TAG"
-    mx_datagen_git_url = os.environ.get(mx_datagen_git_url_env_var)
-    mx_datagen_git_tag = os.environ.get(mx_datagen_git_tag_env_var)
-
-    if not mx_datagen_git_url:
-        print(
-            f"Warning: {mx_datagen_git_url_env_var} not defined. Using mxDataGeneator Git URL in CMakeLists.txt."
-        )
-    if not mx_datagen_git_tag:
-        print(
-            f"Warning: {mx_datagen_git_tag_env_var} not defined. Using mxDataGeneator Git tag in CMakeLists.txt."
-        )
-
-    mx_datagen_git_url_flag = (
-        "-DMXDATAGENERATOR_GIT_URL=" + mx_datagen_git_url if mx_datagen_git_url else ""
-    )
-    mx_datagen_git_tag_flag = (
-        "-DMXDATAGENERATOR_GIT_TAG=" + mx_datagen_git_tag if mx_datagen_git_tag else ""
-    )
-
     subprocess.run(
         [
             "cmake",
@@ -98,8 +77,6 @@ def build_rocroller(
             "-DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++",
             "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
             "-DROCROLLER_ENABLE_CPPCHECK=OFF",
-            mx_datagen_git_url_flag,
-            mx_datagen_git_tag_flag,
             "../",
         ],
         cwd=str(project_dir),
@@ -147,6 +124,7 @@ def get_args(parser: argparse.ArgumentParser):
         args.group_results,
         args.rundir,
         args.suite,
+        args.id_filter,
     ]
     for arg in common_args:
         arg(parser)
@@ -195,7 +173,7 @@ def autoperf(
     current: bool = False,
     ancestral: bool = False,
     suite: str = None,
-    filter=None,
+    id_filter=None,
     normalize=False,
     y_zero=False,
     plot_median=False,
@@ -243,7 +221,11 @@ def autoperf(
             target,
         )
         target_success, result_dir = suite_run.run_cli(
-            build_dir=build_dir, rundir=rundir, suite=suite, filter=filter, recast=True
+            build_dir=build_dir,
+            rundir=rundir,
+            suite=suite,
+            id_filter=id_filter,
+            recast=True,
         )
         if target in no_fail_targets:
             success_no_fail &= target_success

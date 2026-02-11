@@ -375,6 +375,12 @@ namespace rocRoller
     template <CCountedEnum T>
     T fromString(std::string const& str);
 
+    /**
+     * @brief Generate a set of valid string values for a CCountedEnum type.
+     */
+    template <CCountedEnum T>
+    std::set<std::string> enumStrings();
+
     template <CHasName T>
     requires(std::default_initializable<T>) std::string name()
     {
@@ -385,8 +391,6 @@ namespace rocRoller
     std::string escapeSymbolName(std::string name);
 
     std::vector<char> readFile(std::string const&);
-
-    std::string readMetaDataFromCodeObject(std::string const& fileName);
 
     template <typename Variant, typename Alternative, size_t Index = 0>
     consteval size_t variantIndex()

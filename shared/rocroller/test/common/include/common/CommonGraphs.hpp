@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include <map>
 #include <vector>
 
 #include <rocRoller/CommandSolution.hpp>
@@ -39,6 +40,7 @@
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
+#include <rocRoller/Operations/Scratch_fwd.hpp>
 
 #include <common/GEMMProblem.hpp>
 
@@ -163,9 +165,11 @@ namespace rocRollerTest
             rocRoller::Operations::ScaleMode m_aMode;
             rocRoller::Operations::ScaleMode m_bMode;
 
-            int  m_macM, m_macN, m_macK;
-            int  m_waveM, m_waveN, m_waveK, m_waveB;
-            bool m_useLDSA = false, m_useLDSB = false, m_useLDSD = false;
+            int                      m_macM, m_macN, m_macK;
+            int                      m_waveM, m_waveN, m_waveK, m_waveB;
+            SolutionParams::LoadPath m_loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+            SolutionParams::LoadPath m_loadPathB = SolutionParams::LoadPath::BufferToVGPR;
+            bool                     m_useLDSD   = false;
 
             rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagD;
             rocRoller::Operations::OperationTag m_tagScaleA, m_tagScaleB;
@@ -200,11 +204,21 @@ namespace rocRollerTest
             void setTileSize(int m, int n, int k);
             void setMFMA(int m, int n, int k, int b);
             void setUseLDS(bool a, bool b, bool d);
-            void setUnroll(unsigned int unrollX, unsigned int unrollY);
+            void setUnroll(unsigned int unrollK);
+            void setStreamK(rocRoller::StreamKMode streamKMode);
             void setPrefetch(bool prefetch,
                              int  prefetchInFlight,
                              int  prefetchLDSFactor,
                              bool prefetchMixMemOps);
+            void setScaling(rocRoller::Operations::ScaleMode aMode,
+                            rocRoller::Operations::ScaleMode bMode,
+                            DataType                         scaleTypeA,
+                            DataType                         scaleTypeB,
+                            int                              scaleBlockSize);
+            void setScaleLoadPaths(SolutionParams::LoadPath scalePathA,
+                                   SolutionParams::LoadPath scalePathB);
+            void setSwizzle(int m, int n, int k, int b, bool prefetch);
+            void setTranspose(std::string const& transA, std::string const& transB);
 
             GEMMProblem const& getProblem() const
             {
@@ -212,7 +226,18 @@ namespace rocRollerTest
             };
             void setProblem(GEMMProblem const& problem);
 
+            int getFlattenedWorkgroupSize() const;
+
             CommandParametersPtr getCommandParameters() const;
+            std::tuple<rocRoller::Operations::OperationTag,
+                       rocRoller::Operations::OperationTag,
+                       rocRoller::Operations::OperationTag,
+                       rocRoller::Operations::OperationTag>
+                getOperationTags() const;
+
+            std::pair<std::optional<rocRoller::Operations::OperationTag>,
+                      std::optional<rocRoller::Operations::OperationTag>>
+                getABScaleTags() const;
 
         private:
             void createCommand();
@@ -221,12 +246,12 @@ namespace rocRollerTest
 
             GEMMProblem m_problem;
 
-            // int  m_macM, m_macN, m_macK;
-            // int  m_waveM, m_waveN, m_waveK, m_waveB;
-            // bool m_useLDSA = false, m_useLDSB = false, m_useLDSD = false;
-
             rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
+            rocRoller::Operations::OperationTag m_tagScaleA, m_tagScaleB;
             rocRoller::Operations::OperationTag m_tagNumWGs;
+
+            std::map<rocRoller::Operations::ScratchPolicy, rocRoller::Operations::OperationTag>
+                m_scratchTags;
 
             CommandPtr m_command;
         };

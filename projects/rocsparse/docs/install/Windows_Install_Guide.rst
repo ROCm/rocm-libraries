@@ -129,7 +129,7 @@ longer but is recommended for those working with a large number of libraries.
 
 .. note::
 
-   To build ROCm 6.4.2 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
+   To build ROCm 6.4.3 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
    For more information, see the documentation associated with the release you want to build.
 
 Add the SDK tools to your path with an entry like the following:
@@ -158,6 +158,10 @@ The following table lists the common ways to use ``rmake.py`` to build the rocSP
 .. note::
 
    You can run ``rmake.py`` from the ``projects\rocsparse`` directory.
+
+   By default, rocBLAS is a dependency and the build will fail if it isn't found.
+   To opt out of using rocBLAS when building from source with
+   the ``rmake.py`` script, use the ``no-rocblas`` option. 
 
 .. csv-table::
    :header: "Command","Description"

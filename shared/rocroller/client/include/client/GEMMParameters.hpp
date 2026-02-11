@@ -32,9 +32,13 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
+#include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/StoreOption.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 #include "client/BenchmarkSolution.hpp"
+#include <mxDataGenerator/DataGenerator.hpp>
 
 namespace rocRoller
 {
@@ -51,6 +55,27 @@ namespace rocRoller
                 N,
 
                 Count
+            };
+
+            struct MNKTuple
+            {
+                int m, n, k;
+            };
+
+            struct MNKBTuple
+            {
+                int m, n, k, b;
+            };
+
+            struct MKNLTuple
+            {
+                int m, k, n, l;
+            };
+
+            struct KernelNames
+            {
+                std::string fullName;
+                std::string shortName;
             };
 
             std::string toString(TransposeType trans);
@@ -74,6 +99,9 @@ namespace rocRoller
                 int scaleBlockSize = -1;
 
                 bool scaleSkipPermlane = false;
+
+                std::vector<size_t> scalePretileA;
+                std::vector<size_t> scalePretileB;
 
                 // Order: M/N, K tile, K subtile
                 std::vector<size_t> scaleShuffleTileA;
@@ -103,6 +131,8 @@ namespace rocRoller
 
                 // When scaleA/B is ScaleMode::SingleScale
                 float scaleValueA, scaleValueB;
+
+                DGen::DataInitMode initModeA, initModeB, initModeC;
 
                 int workgroupMappingDim;
             };
@@ -136,19 +166,25 @@ namespace rocRoller
                 // Datatype of inputs and outputs
                 TypeParameters types;
 
-                bool loadLDSScaleA = false;
-                bool loadLDSScaleB = false;
+                Parameters::Solution::LoadPath loadPathAScale{
+                    Parameters::Solution::LoadPath::BufferToVGPR};
+                Parameters::Solution::LoadPath loadPathBScale{
+                    Parameters::Solution::LoadPath::BufferToVGPR};
 
-                bool swizzleScale  = false;
-                bool prefetchScale = false;
+                bool      swizzleScale    = false;
+                MKNLTuple swizzleTileSize = {0, 0, 0, 0};
+                bool      prefetchScale   = false;
 
                 // Other options
-                bool loadLDSA  = true;
-                bool loadLDSB  = true;
-                bool storeLDSD = true;
+                Parameters::Solution::LoadPath loadPathA{
+                    Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
+                Parameters::Solution::LoadPath loadPathB{
+                    Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
+                Parameters::Solution::StorePath storePath{
+                    Parameters::Solution::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer};
 
-                bool direct2LDSA = false;
-                bool direct2LDSB = false;
+                std::pair<int, int> padLDSA = {0, 0};
+                std::pair<int, int> padLDSB = {0, 0};
 
                 bool prefetch          = false;
                 int  prefetchInFlight  = 2;
@@ -156,20 +192,17 @@ namespace rocRoller
                 bool prefetchMixMemOps = false;
                 bool betaInFma         = true;
 
-                // Unroll Options
-                unsigned int unrollX = 0;
-                unsigned int unrollY = 0;
-
                 std::string scheduler;
                 std::string schedulerCost;
                 bool        matchMemoryAccess;
 
-                bool streamK        = false;
-                bool streamKTwoTile = false;
+                bool tailLoops = true;
+
+                StreamKMode streamK = StreamKMode::None;
 
                 std::string version;
 
-                std::string generateKernelName() const;
+                KernelNames generateKernelName() const;
             };
 
             struct Result
@@ -179,10 +212,54 @@ namespace rocRoller
                 rocRoller::Client::BenchmarkResults benchmarkResults;
             };
 
+            std::ostream& operator<<(std::ostream& s, MNKTuple const& x);
+            std::ostream& operator<<(std::ostream& s, MNKBTuple const& x);
+            std::ostream& operator<<(std::ostream& s, MKNLTuple const& x);
             std::ostream& operator<<(std::ostream& s, TransposeType const& x);
             std::ostream& operator<<(std::ostream& s, TypeParameters const& x);
             std::ostream& operator<<(std::ostream& s, ProblemParameters const& x);
             std::ostream& operator<<(std::ostream& s, SolutionParameters const& x);
         }
     }
+}
+
+namespace rocRoller::Client::GEMMClient::CLI
+{
+    constexpr bool PARSE_SUCCESS = true;
+    constexpr bool PARSE_FAILURE = false;
+
+    /**
+     * @brief Parse an XxY pair.
+     */
+    bool ParseIntPair(const std::string& arg, std::pair<int, int>& x);
+
+    /**
+     * @brief Parse an MxNxK or MxNxKxB tuple from a string.
+     *
+     * If B is missing, it is set to 1.
+     *
+     * Asserts that all values are positive.
+     */
+    bool ParseMNKB(const std::string& arg, rocRoller::Client::GEMMClient::MNKBTuple& x);
+
+    /**
+     * @brief Parse an MxNxK tuple from a string.
+     *
+     * Asserts that all values are positive.
+     */
+    bool ParseMNK(const std::string& arg, rocRoller::Client::GEMMClient::MNKTuple& x);
+
+    /**
+     * @brief Parse an MxK/NxL tuple from a string.
+     *
+     * Asserts that all values are positive.
+     */
+    bool ParseMKNL(const std::string& arg, rocRoller::Client::GEMMClient::MKNLTuple& x);
+
+    /**
+     * @brief Parse a DataInitMode variant from a string.
+     *
+     * Asserts that argument is well-formed.
+     */
+    bool ParseInitMode(const std::string& arg, DGen::DataInitMode& result);
 }

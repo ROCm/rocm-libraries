@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -239,39 +239,12 @@ namespace rocRoller::KernelGraph
             return std::visit(rocRoller::overloaded{
                                   [](std::monostate const&) { return "none"; },
                                   [](JustNaryArgument const&) { return "NaryArgument"; },
-                                  [](ComputeIndex const&) { return "ComputeIndex"; },
                                   [](TypeAndSubDimension const&) { return "TypeAndSubDimension"; },
                                   [](TypeAndNaryArgument const&) { return "TypeAndNaryArgument"; },
                                   [](UnrollStride const&) { return "UnrollStride"; },
                                   [](BaseOffset const&) { return "BaseOffset"; },
                               },
                               cs);
-        }
-
-        std::string toString(ComputeIndexArgument cia)
-        {
-            switch(cia)
-            {
-            case ComputeIndexArgument::TARGET:
-                return "TARGET";
-            case ComputeIndexArgument::INCREMENT:
-                return "INCREMENT";
-            case ComputeIndexArgument::BASE:
-                return "BASE";
-            case ComputeIndexArgument::OFFSET:
-                return "OFFSET";
-            case ComputeIndexArgument::STRIDE:
-                return "STRIDE";
-            case ComputeIndexArgument::BUFFER:
-                return "BUFFER";
-            default:
-                return "Invalid";
-            }
-        }
-
-        std::ostream& operator<<(std::ostream& stream, ComputeIndexArgument const& cia)
-        {
-            return stream << toString(cia);
         }
 
         struct CSToStringVisitor
@@ -284,11 +257,6 @@ namespace rocRoller::KernelGraph
             std::string operator()(JustNaryArgument const& n) const
             {
                 return toString(n.argument);
-            }
-
-            std::string operator()(ComputeIndex const& ci) const
-            {
-                return concatenate(ci.argument, ": (", ci.index, ")");
             }
 
             std::string operator()(TypeAndSubDimension const& ci) const
@@ -321,6 +289,16 @@ namespace rocRoller::KernelGraph
         {
             return stream << toString(cs);
         }
+
+        NaryArgument getNaryArgument(Connections::ConnectionSpec const& conn)
+        {
+            auto visitor
+                = rocRoller::overloaded{[](JustNaryArgument const& arg) { return arg.argument; },
+                                        [](TypeAndNaryArgument const& arg) { return arg.argument; },
+                                        [](auto const& other) { return NaryArgument::None; }};
+
+            return std::visit(visitor, conn);
+        }
     }
 
     std::string toString(ControlToCoordinateMapper::Connection const& conn)
@@ -330,4 +308,10 @@ namespace rocRoller::KernelGraph
                            conn.coordinate,
                            toString(conn.connection));
     }
+
+    NaryArgument getNaryArgument(ControlToCoordinateMapper::Connection const& conn)
+    {
+        return getNaryArgument(conn.connection);
+    }
+
 }

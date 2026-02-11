@@ -530,8 +530,8 @@ namespace rocRoller
     /**
      * Yields the first `n` values from `gen`
      */
-    template <typename T>
-    Generator<T> take(size_t n, Generator<T> gen);
+    template <std::ranges::input_range T>
+    Generator<std::ranges::range_value_t<T>> take(size_t n, T gen);
 
     /**
      * @brief Return first value of range.
@@ -561,6 +561,31 @@ namespace rocRoller
     template <std::ranges::input_range Range>
     inline constexpr bool empty(Range range);
 
+    /**
+     * Yields a series of tuples containing the next element from each range
+     * until one of the ranges has been exhausted.
+     *
+     * zip({1, 2, 3}, {4, 5, 6, 7}) will yield:
+     * [1, 4]
+     * [2, 5]
+     * [3, 6]
+     */
+    template <std::ranges::forward_range ARange, std::ranges::forward_range... Rest>
+    Generator<std::tuple<std::ranges::range_value_t<ARange>, std::ranges::range_value_t<Rest>...>>
+        zip(ARange const& a, Rest const&... rest);
+
+    /**
+     * Yields a series of tuples containing the next element from each range
+     * until one of the ranges has been exhausted.
+     *
+     * zip({1, 2, 3}, {4, 5, 6, 7}) will yield:
+     * [1, 4]
+     * [2, 5]
+     * [3, 6]
+     */
+    template <std::ranges::input_range ARange, std::ranges::input_range... Rest>
+    Generator<std::tuple<std::ranges::range_value_t<ARange>, std::ranges::range_value_t<Rest>...>>
+        zip(ARange&& a, Rest&&... rest);
 }
 
 #include <rocRoller/Utilities/Generator_impl.hpp>

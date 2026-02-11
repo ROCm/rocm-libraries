@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -18,25 +18,30 @@ template <typename ADataType_,
           typename CDataType_,
           typename BlockGemmShape_,
           typename Traits_,
-          uint32_t QuantGroupSize_,
+          typename AQuantGroupSize_,
+          typename BQuantGroupSize_,
           bool TransposeC_,
-          typename ComputeDataType_        = BDataType_,
+          typename ComputeDataType_        = void,
           GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave,
           bool HasHotLoop_                 = true,
           TailNumber TailNum_              = TailNumber::Full>
-struct GemmQuantPipelineProblemBase : public GemmPipelineProblemBase<ADataType_,
-                                                                     BDataType_,
-                                                                     CDataType_,
-                                                                     BlockGemmShape_,
-                                                                     Traits_,
-                                                                     ComputeDataType_>
+struct GemmQuantPipelineProblemBase
+    : public GemmPipelineProblemBase<
+          ADataType_,
+          BDataType_,
+          CDataType_,
+          BlockGemmShape_,
+          Traits_,
+          mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>
 {
-    using Base = GemmPipelineProblemBase<ADataType_,
-                                         BDataType_,
-                                         CDataType_,
-                                         BlockGemmShape_,
-                                         Traits_,
-                                         ComputeDataType_>;
+
+    using Base = GemmPipelineProblemBase<
+        ADataType_,
+        BDataType_,
+        CDataType_,
+        BlockGemmShape_,
+        Traits_,
+        mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>;
 
     using Traits = typename Base::Traits;
 
@@ -48,32 +53,39 @@ struct GemmQuantPipelineProblemBase : public GemmPipelineProblemBase<ADataType_,
     using BQDataType = remove_cvref_t<BQDataType_>;
 
     using BlockGemmShape = typename Base::BlockGemmShape;
+    using AQuantGroupSize =
+        std::conditional_t<!std::is_void_v<AQuantGroupSize_>, AQuantGroupSize_, BQuantGroupSize_>;
+    using BQuantGroupSize =
+        std::conditional_t<!std::is_void_v<BQuantGroupSize_>, BQuantGroupSize_, AQuantGroupSize_>;
+    // Unified alias for 1D quantization usage, to avoid forcing users to pick one.
+    using QuantGroupSize = BQuantGroupSize;
 
     using typename Base::ALayout;
     using typename Base::BLayout;
     using typename Base::CLayout;
 
-    static constexpr bool TransposeC = TransposeC_;
-
+    static constexpr bool TransposeC       = TransposeC_;
+    static constexpr bool PreshuffleB      = Traits::PreshuffleB;
+    static constexpr bool DoubleSmemBuffer = Traits::DoubleSmemBuffer;
     using Base::kBlockSize;
 
     using Base::kPadK;
     using Base::kPadM;
     using Base::kPadN;
 
-    using Base::DoubleSmemBuffer;
     using Base::VectorLoadSize;
 
     using AQLayout = remove_cvref_t<typename Traits::AQLayout>;
     using BQLayout = remove_cvref_t<typename Traits::BQLayout>;
 
-    static constexpr uint32_t kQuantGroupSize = QuantGroupSize_;
-    static constexpr auto Scheduler           = Scheduler_;
-    static constexpr auto HasHotLoop          = HasHotLoop_;
-    static constexpr auto TailNum             = TailNum_;
+    static constexpr auto Scheduler  = Scheduler_;
+    static constexpr auto HasHotLoop = HasHotLoop_;
+    static constexpr auto TailNum    = TailNum_;
 
-    static_assert(BlockGemmShape::kK % kQuantGroupSize == 0);
-    static_assert(Scheduler == GemmPipelineScheduler::Intrawave);
+    static_assert(BlockGemmShape::kM % AQuantGroupSize::kM == 0);
+    static_assert(BlockGemmShape::kK % AQuantGroupSize::kK == 0);
+    static_assert(BlockGemmShape::kM % BQuantGroupSize::kM == 0);
+    static_assert(BlockGemmShape::kK % BQuantGroupSize::kK == 0);
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
@@ -82,8 +94,8 @@ struct GemmQuantPipelineProblemBase : public GemmPipelineProblemBase<ADataType_,
                       concat('x', VectorLoadSize, kBlockSize),
                       concat('x', kPadM, kPadN, kPadK),
                       Scheduler,
-                      "QuantGroupSize",
-                      kQuantGroupSize);
+                      AQuantGroupSize::GetName(),
+                      BQuantGroupSize::GetName());
         // clang-format on
     }
 
@@ -112,7 +124,7 @@ template <typename ADataType_,
           typename CDataType_,
           typename BlockGemmShape_,
           typename Traits_,
-          uint32_t QuantGroupSize_,
+          typename AQuantGroupSize_,
           bool TransposeC_,
           typename ComputeDataType_        = BDataType_,
           GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave,
@@ -125,7 +137,8 @@ using GemmAQuantPipelineProblem = GemmQuantPipelineProblemBase<ADataType_,
                                                                CDataType_,
                                                                BlockGemmShape_,
                                                                Traits_,
-                                                               QuantGroupSize_,
+                                                               AQuantGroupSize_,
+                                                               void,
                                                                TransposeC_,
                                                                ComputeDataType_,
                                                                Scheduler_,
@@ -138,7 +151,7 @@ template <typename ADataType_,
           typename CDataType_,
           typename BlockGemmShape_,
           typename Traits_,
-          uint32_t QuantGroupSize_,
+          typename BQuantGroupSize_,
           typename ComputeDataType_        = ADataType_,
           GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave,
           bool HasHotLoop_                 = true,
@@ -150,12 +163,42 @@ using GemmBQuantPipelineProblem = GemmQuantPipelineProblemBase<ADataType_,
                                                                CDataType_,
                                                                BlockGemmShape_,
                                                                Traits_,
-                                                               QuantGroupSize_,
+                                                               void,
+                                                               BQuantGroupSize_,
                                                                false, // no TransposeC
                                                                ComputeDataType_,
                                                                Scheduler_,
                                                                HasHotLoop_,
                                                                TailNum_>;
+
+template <typename ADataType_,
+          typename AQDataType_,
+          typename BDataType_,
+          typename BQDataType_,
+          typename CDataType_,
+          typename BlockGemmShape_,
+          typename Traits_,
+          typename AQuantGroupSize_,
+          typename BQuantGroupSize_,
+          bool TransposeC_,
+          typename ComputeDataType_        = ADataType_,
+          GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave,
+          bool HasHotLoop_                 = true,
+          TailNumber TailNum_              = TailNumber::Full>
+using GemmABQuantPipelineProblem = GemmQuantPipelineProblemBase<ADataType_,
+                                                                AQDataType_,
+                                                                BDataType_,
+                                                                BQDataType_,
+                                                                CDataType_,
+                                                                BlockGemmShape_,
+                                                                Traits_,
+                                                                AQuantGroupSize_,
+                                                                BQuantGroupSize_,
+                                                                TransposeC_,
+                                                                ComputeDataType_,
+                                                                Scheduler_,
+                                                                HasHotLoop_,
+                                                                TailNum_>;
 
 template <typename ADataType_,
           typename BDataType_,
@@ -176,7 +219,8 @@ using GemmRowColTensorQuantPipelineProblem =
                                  CDataType_,
                                  BlockGemmShape_,
                                  Traits_,
-                                 1, // no group size applicable
+                                 void,
+                                 QuantGroupShape<sequence<1, 1, 1>>, // no group size applicable
                                  TransposeC_,
                                  ComputeDataType_,
                                  Scheduler_,

@@ -1,11 +1,14 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "utils/tensor_utils.hpp"
 #include "utils/tensor_partition.hpp"
 #include "utils/layout_utils.hpp"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 // Disable from doxygen docs generation
 /// @cond INTERNAL
@@ -441,3 +444,4 @@ struct Tensor
 
 } // namespace wrapper
 } // namespace ck
+#pragma clang diagnostic pop

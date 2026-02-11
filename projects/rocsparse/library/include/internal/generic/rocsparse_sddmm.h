@@ -226,6 +226,9 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  \note
 *  This routine supports execution in a hipGraph context only when \p alg == \ref rocsparse_sddmm_alg_default.
 *
+*  \note
+*  This routine does not support batched computation.
+*
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.
 *  @param[in]

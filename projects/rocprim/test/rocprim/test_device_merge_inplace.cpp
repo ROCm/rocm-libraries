@@ -48,6 +48,16 @@
 #include <type_traits>
 #include <vector>
 
+#if !defined(_WIN32)
+#include <unistd.h>
+
+unsigned long long get_available_host_memory()
+{
+    // See "man sysconf 3" for more information on this system call.
+    return sysconf(_SC_AVPHYS_PAGES) * sysconf(_SC_PAGE_SIZE);
+}
+#endif
+
 TEST(RocprimDeviceMergeInplaceTests, Basic)
 {
     using value_type    = int;
@@ -72,8 +82,8 @@ TEST(RocprimDeviceMergeInplaceTests, Basic)
         h_data[left_size + i] = i * 2 + 1;
     }
 
-    common::device_ptr<value_type>     d_data(h_data);
-    std::vector<value_type>            h_expected(h_data);
+    common::device_ptr<value_type> d_data(h_data);
+    std::vector<value_type>        h_expected(h_data);
 
     // get temporary storage
     HIP_CHECK(rocprim::merge_inplace(nullptr, storage_size, d_data.get(), left_size, right_size));
@@ -90,6 +100,7 @@ TEST(RocprimDeviceMergeInplaceTests, Basic)
 
     h_data = d_data.load();
     d_data.free_manually();
+    d_temp_storage.free_manually();
 
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(h_data, h_expected));
 }
@@ -163,12 +174,12 @@ struct random_data_generator
 
         // not all integral types are valid for int distribution
         using dist_value_type
-            = std::conditional_t<std::is_integral<T>::value
+            = std::conditional_t<rocprim::is_integral<T>::value
                                      && !common::is_valid_for_int_distribution<value_type>::value,
                                  int,
                                  value_type>;
 
-        using val_dist_type = std::conditional_t<std::is_integral<T>::value,
+        using val_dist_type = std::conditional_t<rocprim::is_integral<T>::value,
                                                  common::uniform_int_distribution<dist_value_type>,
                                                  std::uniform_real_distribution<dist_value_type>>;
         using dup_dist_type = common::uniform_int_distribution<int>;
@@ -316,7 +327,10 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
 
     binary_op compare_op{};
 
-    hipStream_t stream = hipStreamDefault;
+    hipStream_t stream = 0;
+
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    HIP_CHECK(hipSetDevice(device_id));
 
     for(auto size : sizes)
     {
@@ -325,6 +339,13 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
         size_t size_a     = std::get<0>(size);
         size_t size_b     = std::get<1>(size);
         size_t size_total = size_a + size_b;
+        size_t total_bytes = sizeof(value_type) * size_total;
+
+#if HAS_VALGRIND_H
+        //Disable large tests to reduce valgrind run time
+        if(RUNNING_ON_VALGRIND && total_bytes > (1LL << 25) /* Anything bigger than 32 MB*/)
+            continue;
+#endif // HAS_VALGRIND_H
 
         // hipMallocManaged() currently doesnt support zero byte allocation
         if((size_a == 0 || size_b == 0) && common::use_hmm())
@@ -341,12 +362,34 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
             continue;
         }
 
-        std::vector<value_type> h_data(size_total);
-
-        size_t total_bytes = sizeof(value_type) * size_total;
-
         // Limit the total size to slightly saner numbers.
         if(total_bytes >= 1LL << 35 /* 32 GiB */)
+        {
+            continue;
+        }
+
+        // For large sizes, we may run out of host memory.
+        // Currently, on Linux, std::vector::resize may not always throw an
+        // exception in this case (it may hang instead).
+        // Because of this, manually check if we have enough available
+        // here - if not, skip this size.
+        // This problem does not currently occur on Windows.
+#if !defined(_WIN32)
+        if (total_bytes > get_available_host_memory())
+        {
+            std::cout << "skipping - not enough host mem" << std::endl;
+            continue;
+        }
+#endif
+
+        // Wrap the host vector allocation in a try/catch, since
+        // std::vector may throw an exception if we run out of host memory.
+        std::vector<value_type> h_data(0);
+        try
+        {
+            h_data.resize(size_total);
+        }
+        catch (const std::bad_alloc& err)
         {
             continue;
         }
@@ -360,8 +403,7 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
                                          compare_op,
                                          stream));
 
-        // ensure tests always fit on device
-        HIP_CHECK(hipSetDevice(hipGetStreamDeviceId(stream)));
+        // Check if we have enough available device memory.
         size_t free_vram;
         size_t available_vram;
         HIP_CHECK(hipMemGetInfo(&free_vram, &available_vram));
@@ -410,29 +452,6 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
             bool is_sorted
                 = test_utils::device_sort_check(d_data.get(), size_total, compare_op, stream);
 
-            // skip host-side reference check with large inputs
-            if(size_total > 16ULL * 1024 * 1024)
-            {
-                // input too big, only check device sort
-                ASSERT_TRUE(is_sorted);
-                continue;
-            }
-
-            // compare with reference
-            auto h_output = d_data.load_async(stream);
-
-            // compute reference
-            std::vector<value_type> h_reference(size_a + size_b);
-            std::merge(h_data.begin(),
-                       h_data.begin() + size_a,
-                       h_data.begin() + size_a,
-                       h_data.end(),
-                       h_reference.begin());
-
-            // assert on host first, as this will print the offending value and index
-            ASSERT_NO_FATAL_FAILURE((test_utils::assert_eq(h_output, h_reference)));
-
-            // then check the result from device for good measure
             ASSERT_TRUE(is_sorted);
         }
 

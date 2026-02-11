@@ -26518,4 +26518,62 @@ contains
                                             stride_d, batch_count, compute_type, algo, solution_index, flags)
     end function rocblas_gemm_strided_batched_ex_64_fortran
 
+    ! syrk_ex
+    function rocblas_syrk_ex_fortran(handle, uplo, transA, n, k, alpha, a, a_type, lda, &
+                                     beta, c, c_type, ldc, &
+                                     compute_type) &
+        bind(c, name='rocblas_syrk_ex_fortran')
+        use iso_c_binding
+        use rocblas_enums
+        implicit none
+        integer(kind(rocblas_status_success)) :: rocblas_syrk_ex_fortran
+        type(c_ptr), value :: handle
+        integer(kind(rocblas_fill_full)), value :: uplo
+        integer(kind(rocblas_operation_none)), value :: transA
+        integer(c_int), value :: n
+        integer(c_int), value :: k
+        type(c_ptr), value :: alpha
+        type(c_ptr), value :: a
+        integer(kind(rocblas_datatype_f16_r)), value :: a_type
+        integer(c_int), value :: lda
+        type(c_ptr), value :: beta
+        type(c_ptr), value :: c
+        integer(kind(rocblas_datatype_f16_r)), value :: c_type
+        integer(c_int), value :: ldc
+        integer(kind(rocblas_datatype_f16_r)), value :: compute_type
+        rocblas_syrk_ex_fortran = &
+            rocblas_syrk_ex(handle, uplo, transA, n, k, alpha, a, a_type, lda, &
+                            beta, c, c_type, ldc, &
+                            compute_type)
+    end function rocblas_syrk_ex_fortran
+
+    ! herk_ex
+    function rocblas_herk_ex_fortran(handle, uplo, transA, n, k, alpha, a, a_type, lda, &
+                                     beta, c, c_type, ldc, &
+                                     compute_type) &
+        bind(c, name='rocblas_herk_ex_fortran')
+        use iso_c_binding
+        use rocblas_enums
+        implicit none
+        integer(kind(rocblas_status_success)) :: rocblas_herk_ex_fortran
+        type(c_ptr), value :: handle
+        integer(kind(rocblas_fill_full)), value :: uplo
+        integer(kind(rocblas_operation_none)), value :: transA
+        integer(c_int), value :: n
+        integer(c_int), value :: k
+        type(c_ptr), value :: alpha
+        type(c_ptr), value :: a
+        integer(kind(rocblas_datatype_f16_r)), value :: a_type
+        integer(c_int), value :: lda
+        type(c_ptr), value :: beta
+        type(c_ptr), value :: c
+        integer(kind(rocblas_datatype_f16_r)), value :: c_type
+        integer(c_int), value :: ldc
+        integer(kind(rocblas_datatype_f16_r)), value :: compute_type
+        rocblas_herk_ex_fortran = &
+            rocblas_herk_ex(handle, uplo, transA, n, k, alpha, a, a_type, lda, &
+                            beta, c, c_type, ldc, &
+                            compute_type)
+    end function rocblas_herk_ex_fortran
+
 end module rocblas_interface

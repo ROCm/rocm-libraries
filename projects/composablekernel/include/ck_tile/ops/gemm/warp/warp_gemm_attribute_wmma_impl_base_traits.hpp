@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 namespace ck_tile {
@@ -10,6 +10,8 @@ struct WmmaTraitsBase;
 template <typename ADType, typename BDType, typename CDType>
 struct WmmaTraitsBase<gfx11_t, ADType, BDType, CDType>
 {
+    using ArchType = gfx11_t;
+
     using ADataType = ADType;
     using BDataType = BDType;
     using CDataType = CDType;
@@ -46,12 +48,19 @@ struct WmmaTraitsBase<gfx11_t, ADType, BDType, CDType>
     using kCPs2RHssMinor = sequence<1, 0>;
     using kCYs2RHsMajor  = sequence<1, 1>;
     using kCYs2RHsMinor  = sequence<0, 2>;
+
+    using kCTPs2RHssMajor = sequence<2, 1>;
+    using kCTPs2RHssMinor = sequence<1, 0>;
+    using kCTYs2RHsMajor  = sequence<2, 2>;
+    using kCTYs2RHsMinor  = sequence<0, 2>;
 };
 
 // GFX12 specialization
 template <typename ADType, typename BDType, typename CDType>
 struct WmmaTraitsBase<gfx12_t, ADType, BDType, CDType>
 {
+    using ArchType = gfx12_t;
+
     using ADataType = ADType;
     using BDataType = BDType;
     using CDataType = CDType;
@@ -88,5 +97,10 @@ struct WmmaTraitsBase<gfx12_t, ADType, BDType, CDType>
     using kCPs2RHssMinor = sequence<1, 0>;
     using kCYs2RHsMajor  = sequence<1, 1>;
     using kCYs2RHsMinor  = sequence<0, 2>;
+
+    using kCTPs2RHssMajor = sequence<2, 1>;
+    using kCTPs2RHssMinor = sequence<1, 0>;
+    using kCTYs2RHsMajor  = sequence<2, 2>;
+    using kCTYs2RHsMinor  = sequence<0, 2>;
 };
 } // namespace ck_tile

@@ -139,6 +139,131 @@
     #define ROCPRIM_TARGET_UNKNOWN 1
 #endif
 
+#if defined(ROCPRIM_TARGET_SPIRV) && ROCPRIM_TARGET_SPIRV == 1
+    #define ROCPRIM_AMDGCN_CONSTEXPR
+#else
+    #define ROCPRIM_AMDGCN_CONSTEXPR constexpr
+#endif
+
+#if __has_builtin(__builtin_amdgcn_processor_is)
+    #if !defined(ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS)
+        #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 1
+    #endif
+    #if !defined(ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS)
+        #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 1
+    #endif
+    #define ROCPRIM_IS_CDNA3()                                                              \
+        (__builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950") \
+         || __builtin_amdgcn_processor_is("gfx9-4-generic"))
+    #define ROCPRIM_IS_CDNA2() (__builtin_amdgcn_processor_is("gfx90a"))
+    #define ROCPRIM_IS_CDNA1() (__builtin_amdgcn_processor_is("gfx908"))
+    #define ROCPRIM_IS_GCN5()                                                                  \
+        (__builtin_amdgcn_processor_is("gfx900") || __builtin_amdgcn_processor_is("gfx902")    \
+         || __builtin_amdgcn_processor_is("gfx904") || __builtin_amdgcn_processor_is("gfx906") \
+         || __builtin_amdgcn_processor_is("gfx90c")                                            \
+         || __builtin_amdgcn_processor_is("gfx9-generic"))
+    #define ROCPRIM_IS_RDNA4()                                                                \
+        (__builtin_amdgcn_processor_is("gfx1200") || __builtin_amdgcn_processor_is("gfx1201") \
+         || __builtin_amdgcn_processor_is(                                                    \
+             "gfx12-generic")) // TODO: Re-enable gfx1250 when supported by compiler
+    #define ROCPRIM_IS_RDNA3()                                                                   \
+        (__builtin_amdgcn_processor_is("gfx1100") || __builtin_amdgcn_processor_is("gfx1101")    \
+         || __builtin_amdgcn_processor_is("gfx1102") || __builtin_amdgcn_processor_is("gfx1103") \
+         || __builtin_amdgcn_processor_is("gfx1150") || __builtin_amdgcn_processor_is("gfx1151") \
+         || __builtin_amdgcn_processor_is("gfx1152") || __builtin_amdgcn_processor_is("gfx1153") \
+         || __builtin_amdgcn_processor_is("gfx11-generic"))
+    #define ROCPRIM_IS_RDNA2()                                                                   \
+        (__builtin_amdgcn_processor_is("gfx1030") || __builtin_amdgcn_processor_is("gfx1031")    \
+         || __builtin_amdgcn_processor_is("gfx1032") || __builtin_amdgcn_processor_is("gfx1033") \
+         || __builtin_amdgcn_processor_is("gfx1034") || __builtin_amdgcn_processor_is("gfx1035") \
+         || __builtin_amdgcn_processor_is("gfx1036")                                             \
+         || __builtin_amdgcn_processor_is("gfx10-3-generic"))
+    #define ROCPRIM_IS_RDNA1()                                                                   \
+        (__builtin_amdgcn_processor_is("gfx1010") || __builtin_amdgcn_processor_is("gfx1011")    \
+         || __builtin_amdgcn_processor_is("gfx1012") || __builtin_amdgcn_processor_is("gfx1013") \
+         || __builtin_amdgcn_processor_is("gfx10-1-generic"))
+    #define ROCPRIM_IS_GCN3()                                                                  \
+        (__builtin_amdgcn_processor_is("gfx801") || __builtin_amdgcn_processor_is("gfx802")    \
+         || __builtin_amdgcn_processor_is("gfx803") || __builtin_amdgcn_processor_is("gfx805") \
+         || __builtin_amdgcn_processor_is("gfx810"))
+    #define ROCPRIM_IS_GENERIC()                             \
+        (__builtin_amdgcn_processor_is("gfx9-4-generic")     \
+         || __builtin_amdgcn_processor_is("gfx9-generic")    \
+         || __builtin_amdgcn_processor_is("gfx11-generic")   \
+         || __builtin_amdgcn_processor_is("gfx10-3-generic") \
+         || __builtin_amdgcn_processor_is("gfx10-1-generic") \
+         || __builtin_amdgcn_processor_is("gfx12-generic"))
+#else
+    #if defined(ROCPRIM_TARGET_CDNA3)
+        #define ROCPRIM_IS_CDNA3() 1
+    #else
+        #define ROCPRIM_IS_CDNA3() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_CDNA2)
+        #define ROCPRIM_IS_CDNA2() 1
+    #else
+        #define ROCPRIM_IS_CDNA2() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_CDNA1)
+        #define ROCPRIM_IS_CDNA1() 1
+    #else
+        #define ROCPRIM_IS_CDNA1() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_GCN5)
+        #define ROCPRIM_IS_GCN5() 1
+    #else
+        #define ROCPRIM_IS_GCN5() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_RDNA4)
+        #define ROCPRIM_IS_RDNA4() 1
+    #else
+        #define ROCPRIM_IS_RDNA4() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_RDNA3)
+        #define ROCPRIM_IS_RDNA3() 1
+    #else
+        #define ROCPRIM_IS_RDNA3() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_RDNA2)
+        #define ROCPRIM_IS_RDNA2() 1
+    #else
+        #define ROCPRIM_IS_RDNA2() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_RDNA1)
+        #define ROCPRIM_IS_RDNA1() 1
+    #else
+        #define ROCPRIM_IS_RDNA1() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_GCN3)
+        #define ROCPRIM_IS_GCN3() 1
+    #else
+        #define ROCPRIM_IS_GCN3() 0
+    #endif
+
+    #if defined(__gfx9_generic__) || defined(__gfx9_4_generic__) || defined(__gfx10_1_generic__) \
+        || defined(__gfx10_3_generic__) || defined(__gfx11_generic__)                            \
+        || defined(__gfx12_generic__)
+        #define ROCPRIM_IS_GENERIC() 1
+    #else
+        #define ROCPRIM_IS_GENERIC() 0
+    #endif
+
+    #if !defined(ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS)
+        #if defined(ROCPRIM_TARGET_SPIRV)
+            #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 0
+        #else
+            #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 1
+        #endif
+    #endif
+    #if !defined(ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS)
+        #if defined(ROCPRIM_TARGET_SPIRV)
+            #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 0
+        #else
+            #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 1
+        #endif
+    #endif
+#endif
+
 // SPIR-V and unknown targets do not support 128-bit atomics.
 #if defined(ROCPRIM_TARGET_UNKNOWN) || defined(ROCPRIM_TARGET_SPIRV)
     #define ROCPRIM_MAX_ATOMIC_SIZE 8
@@ -150,8 +275,7 @@
 // Only defined when support is present, in contrast to ROCPRIM_DETAIL_USE_DPP, which should be
 // always defined
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) \
-    && (!defined(__GFX6__) && !defined(__GFX7__))          \
-    && !(defined(ROCPRIM_TARGET_SPIRV) && ROCPRIM_TARGET_SPIRV == 1)
+    && (!defined(__GFX6__) && !defined(__GFX7__))
     #define ROCPRIM_DETAIL_HAS_DPP 1
 #endif
 
@@ -160,22 +284,6 @@
     #define ROCPRIM_DETAIL_USE_DPP 1
 #else
     #define ROCPRIM_DETAIL_USE_DPP 0
-#endif
-
-#if defined(ROCPRIM_DETAIL_HAS_DPP) && (defined(__GFX8__) || defined(__GFX9__))
-    #define ROCPRIM_DETAIL_HAS_DPP_BROADCAST 1
-#endif
-
-#if defined(ROCPRIM_DETAIL_HAS_DPP) && (defined(__GFX8__) || defined(__GFX9__))
-    #define ROCPRIM_DETAIL_HAS_DPP_WF 1
-#endif
-
-#if !defined(ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS) && !defined(ROCPRIM_TARGET_SPIRV)
-    #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 1
-#endif
-
-#if !defined(ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS) && !defined(ROCPRIM_TARGET_SPIRV)
-    #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 1
 #endif
 
 #ifndef ROCPRIM_NAVI
@@ -273,6 +381,25 @@
     #define ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH \
         ROCPRIM_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated-declarations")
     #define ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP ROCPRIM_CLANG_SUPPRESS_WARNING_POP
+#endif
+
+#if __has_builtin(__builtin_amdgcn_is_invocable)
+    #define ROCPRIM_HAS_DPP() __builtin_amdgcn_is_invocable(__builtin_amdgcn_mov_dpp)
+    #define ROCPRIM_HAS_PERMLANE() __builtin_amdgcn_is_invocable(__builtin_amdgcn_permlane16)
+#elif defined(ROCPRIM_TARGET_SPIRV) && ROCPRIM_TARGET_SPIRV == 1
+    #define ROCPRIM_HAS_DPP() false
+    #define ROCPRIM_HAS_PERMLANE() false
+#else
+    #if defined(ROCPRIM_DETAIL_HAS_DPP) && ROCPRIM_DETAIL_HAS_DPP == 1
+        #define ROCPRIM_HAS_DPP() true
+    #else
+        #define ROCPRIM_HAS_DPP() false
+    #endif
+    #if defined(__GFX8__) || defined(__GFX9__)
+        #define ROCPRIM_HAS_PERMLANE() false
+    #else
+        #define ROCPRIM_HAS_PERMLANE() true
+    #endif
 #endif
 
 #endif // ROCPRIM_CONFIG_HPP_

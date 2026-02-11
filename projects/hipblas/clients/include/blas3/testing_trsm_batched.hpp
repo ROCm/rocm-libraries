@@ -386,7 +386,7 @@ void testing_trsm_batched(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dB.memcheck());
     CHECK_DEVICE_ALLOCATION(d_alpha.memcheck());
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Initial data on CPU
     hipblas_init_matrix(

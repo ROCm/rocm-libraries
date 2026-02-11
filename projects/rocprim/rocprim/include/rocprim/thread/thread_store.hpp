@@ -77,50 +77,50 @@ void asm_thread_store(void* ptr, T val)
 
     // Important for syncing. Check section 9.2.2 or 7.3 in the following document
     // http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
-    #define ROCPRIM_ASM_THREAD_STORE(cache_modifier,                                            \
-                                     llvm_cache_modifier,                                       \
-                                     type,                                                      \
-                                     interim_type,                                              \
-                                     asm_operator,                                              \
-                                     output_modifier,                                           \
-                                     wait_inst,                                                 \
-                                     wait_cmd)                                                  \
-        template<>                                                                              \
-        ROCPRIM_DEVICE __forceinline__ void asm_thread_store<cache_modifier, type>(void* ptr,   \
-                                                                                   type  val)   \
-        {                                                                                       \
-            interim_type temp_val = *bit_cast<interim_type*>(&val);                             \
-            asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier "\n\t" wait_inst wait_cmd \
-                                       "(%2)"                                                   \
-                         :                                                                      \
-                         : "v"(ptr), #output_modifier(temp_val), "I"(0x00));                    \
+    #define ROCPRIM_ASM_THREAD_STORE(cache_modifier, type, interim_type, asm_operator)        \
+        template<>                                                                            \
+        ROCPRIM_DEVICE __forceinline__ void asm_thread_store<cache_modifier, type>(void* ptr, \
+                                                                                   type  val) \
+        {                                                                                     \
+            interim_type temp_val = *bit_cast<interim_type*>(&val);                           \
+            if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_RDNA4())                                   \
+            {                                                                                 \
+                asm volatile(#asm_operator " %0, %1 th:TH_DEFAULT scope:SCOPE_DEV\n\t"        \
+                                           "s_wait_storecnt_dscnt(%2)"                        \
+                             :                                                                \
+                             : "v"(ptr), "v"(temp_val), "I"(0x00));                           \
+            }                                                                                 \
+            else if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_CDNA3())                              \
+            {                                                                                 \
+                asm volatile(#asm_operator " %0, %1 sc0 nt\n\t"                               \
+                                           "s_waitcnt(%2)"                                    \
+                             :                                                                \
+                             : "v"(ptr), "v"(temp_val), "I"(0x00));                           \
+            }                                                                                 \
+            else                                                                              \
+            {                                                                                 \
+                asm volatile(#asm_operator " %0, %1 glc slc\n\t"                              \
+                                           "s_waitcnt(%2)"                                    \
+                             :                                                                \
+                             : "v"(ptr), "v"(temp_val), "I"(0x00));                           \
+            }                                                                                 \
         }
 
     // TODO fix flat_store_ubyte and flat_store_sbyte issues
     // TODO Add specialization for custom larger data types
     // clang-format off
-#define ROCPRIM_ASM_THREAD_STORE_GROUP(cache_modifier, llvm_cache_modifier, wait_inst, wait_cmd)                                   \
-    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, int8_t, int16_t, flat_store_byte, v, wait_inst, wait_cmd);       \
-    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, int16_t, int16_t, flat_store_short, v, wait_inst, wait_cmd);     \
-    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint8_t, uint16_t, flat_store_byte, v, wait_inst, wait_cmd);     \
-    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint16_t, uint16_t, flat_store_short, v, wait_inst, wait_cmd);   \
-    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint32_t, uint32_t, flat_store_dword, v, wait_inst, wait_cmd);   \
-    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, float, uint32_t, flat_store_dword, v, wait_inst, wait_cmd);      \
-    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint64_t, uint64_t, flat_store_dwordx2, v, wait_inst, wait_cmd); \
-    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_store_dwordx2, v, wait_inst, wait_cmd);
-    // clang-format on
+#define ROCPRIM_ASM_THREAD_STORE_GROUP(cache_modifier)                                      \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, int8_t,   int16_t,  flat_store_byte);          \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, int16_t,  int16_t,  flat_store_short);         \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, uint8_t,  uint16_t, flat_store_byte);          \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, uint16_t, uint16_t, flat_store_short);         \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, uint32_t, uint32_t, flat_store_dword);         \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, float,    uint32_t, flat_store_dword);         \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, uint64_t, uint64_t, flat_store_dwordx2);       \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, double,   uint64_t, flat_store_dwordx2)
+// clang-format on
 
-    #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
-ROCPRIM_ASM_THREAD_STORE_GROUP(store_cg, "sc0 nt", "s_waitcnt", "");
-    #elif defined(__GFX12__)
-ROCPRIM_ASM_THREAD_STORE_GROUP(store_cg,
-                               "th:TH_DEFAULT scope:SCOPE_DEV",
-                               "s_wait_storecnt_dscnt",
-                               "");
-    #else
-ROCPRIM_ASM_THREAD_STORE_GROUP(store_cg, "glc slc", "s_waitcnt", "");
-    #endif
-
+ROCPRIM_ASM_THREAD_STORE_GROUP(store_cg);
 #endif
 
 } // namespace detail

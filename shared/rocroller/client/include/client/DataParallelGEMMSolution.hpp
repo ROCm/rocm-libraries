@@ -43,7 +43,8 @@ namespace rocRoller
         {
             class DataParallelGEMMSolution : public GEMMSolution
             {
-                Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
+                Operations::OperationTag                m_tagA, m_tagB, m_tagC, m_tagD;
+                std::optional<Operations::OperationTag> m_tagCvt;
                 Operations::OperationTag m_tagTensorA, m_tagTensorB, m_tagTensorC, m_tagScalarAlpha,
                     m_tagScalarBeta, m_tagTensorD;
 
@@ -89,11 +90,11 @@ namespace rocRoller
                     };
 
                     m_tagTensorA = command->addOperation(
-                        Operations::Tensor(2, typeA, unitStrides(solutionParams.types.transA)));
+                        Operations::Tensor(2, typeA, {}, unitStrides(solutionParams.types.transA)));
                     m_tagA = command->addOperation(Operations::T_Load_Tiled(m_tagTensorA));
 
                     m_tagTensorB = command->addOperation(
-                        Operations::Tensor(2, typeB, unitStrides(solutionParams.types.transB)));
+                        Operations::Tensor(2, typeB, {}, unitStrides(solutionParams.types.transB)));
                     m_tagB = command->addOperation(Operations::T_Load_Tiled(m_tagTensorB));
 
                     auto mulInputA = m_tagA;
@@ -126,11 +127,28 @@ namespace rocRoller
 
                     if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
                     {
-                        m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                            2,
-                            solutionParams.types.scaleTypeA,
-                            unitStrides(solutionParams.types.transA)));
-                        m_tagLoadScaleA   = command->addOperation(
+                        if(not solutionParams.types.scalePretileA.empty())
+                        {
+                            size_t stride = solutionParams.types.scalePretileA[1];
+                            AssertFatal(solutionParams.types.transA == TransposeType::T);
+                            m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
+                                4,
+                                solutionParams.types.scaleTypeA,
+                                std::vector<size_t>{0ull,
+                                                    0ull,
+                                                    solutionParams.types.scalePretileA[0],
+                                                    solutionParams.types.scalePretileA[1]},
+                                std::vector<size_t>{0ull, 0ull, stride, 1ull}));
+                        }
+                        else
+                        {
+                            m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
+                                2,
+                                solutionParams.types.scaleTypeA,
+                                {},
+                                unitStrides(solutionParams.types.transA)));
+                        }
+                        m_tagLoadScaleA = command->addOperation(
                             rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleA.value()));
 
                         auto scaleInputA = m_tagLoadScaleA;
@@ -165,11 +183,29 @@ namespace rocRoller
 
                     if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
                     {
-                        m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                            2,
-                            solutionParams.types.scaleTypeB,
-                            unitStrides(solutionParams.types.transB)));
-                        m_tagLoadScaleB   = command->addOperation(
+                        if(not solutionParams.types.scalePretileB.empty())
+                        {
+                            size_t stride = solutionParams.types.scalePretileB[0];
+                            AssertFatal(solutionParams.types.transB == TransposeType::N);
+                            m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
+                                4,
+                                solutionParams.types.scaleTypeB,
+                                std::vector<size_t>{0ull,
+                                                    0ull,
+                                                    solutionParams.types.scalePretileB[0],
+                                                    solutionParams.types.scalePretileB[1]},
+
+                                std::vector<size_t>{0ull, 0ull, 1ull, stride}));
+                        }
+                        else
+                        {
+                            m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
+                                2,
+                                solutionParams.types.scaleTypeB,
+                                {},
+                                unitStrides(solutionParams.types.transB)));
+                        }
+                        m_tagLoadScaleB = command->addOperation(
                             rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleB.value()));
 
                         auto scaleInputB = m_tagLoadScaleB;
@@ -202,7 +238,7 @@ namespace rocRoller
                     }
 
                     m_tagTensorC
-                        = command->addOperation(Operations::Tensor(2, typeC, {(size_t)1})); // C
+                        = command->addOperation(Operations::Tensor(2, typeC, {}, {(size_t)1})); // C
                     m_tagC = command->addOperation(Operations::T_Load_Tiled(m_tagTensorC));
 
                     m_tagScalarAlpha
@@ -236,8 +272,22 @@ namespace rocRoller
                     command->addOperation(std::move(execute));
 
                     m_tagTensorD
-                        = command->addOperation(Operations::Tensor(2, typeD, {(size_t)1})); // D
-                    command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+                        = command->addOperation(Operations::Tensor(2, typeD, {}, {(size_t)1})); // D
+                    // command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+                    if(solutionParams.types.typeAcc == solutionParams.types.typeD)
+                    {
+                        command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+                    }
+                    else
+                    {
+                        // If Matrix C and D are of different types, an explicit type conversion is required
+
+                        auto cvtOp = Operations::T_Execute(command->getNextTag());
+                        // (SR)Convert( alpha * (A * B) + beta * C )
+                        auto tagCvt = cvtOp.addXOp(Operations::E_Cvt(m_tagD, typeD));
+                        command->addOperation(std::move(cvtOp));
+                        command->addOperation(Operations::T_Store_Tiled(tagCvt, m_tagTensorD));
+                    }
 
                     if(solutionParams.workgroupMappingDim != -1)
                     {
@@ -257,6 +307,8 @@ namespace rocRoller
                                           SolutionParameters const& solutionParams) override
                 {
                     auto params = std::make_shared<CommandParameters>();
+
+                    params->tailLoops = solutionParams.tailLoops;
 
                     int wave_m = 0, wave_n = 0, wave_k = 0, wave_b = 0;
 
@@ -379,19 +431,46 @@ namespace rocRoller
                                             solutionParams.architecture.toString(),
                                             toString(solutionParams.types.scaleTypeB)));
 
+                    if(solutionParams.swizzleScale)
+                    {
+                        if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
+                        {
+                            AssertFatal(solutionParams.swizzleTileSize.m > 0
+                                            && solutionParams.swizzleTileSize.k > 0,
+                                        "Invalid SwizzleTileSize for A.",
+                                        ShowValue(solutionParams.swizzleTileSize.m),
+                                        ShowValue(solutionParams.swizzleTileSize.k));
+                        }
+
+                        if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
+                        {
+                            AssertFatal(solutionParams.swizzleTileSize.n > 0
+                                            && solutionParams.swizzleTileSize.l > 0,
+                                        "Invalid SwizzleTileSize for B.",
+                                        ShowValue(solutionParams.swizzleTileSize.n),
+                                        ShowValue(solutionParams.swizzleTileSize.l));
+                        }
+                    }
+
                     params->setManualKernelDimension(2);
                     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
-                    auto memoryTypeA = MemoryType::WAVE;
-                    auto memoryTypeB = MemoryType::WAVE;
-                    if(solutionParams.direct2LDSA)
-                        memoryTypeA = MemoryType::WAVE_Direct2LDS;
-                    else if(solutionParams.loadLDSA)
-                        memoryTypeA = MemoryType::LDS;
-                    if(solutionParams.direct2LDSA)
-                        memoryTypeB = MemoryType::WAVE_Direct2LDS;
-                    else if(solutionParams.loadLDSB)
-                        memoryTypeB = MemoryType::LDS;
+                    auto memoryTypeA = GetMemoryType(solutionParams.loadPathA);
+                    auto memoryTypeB = GetMemoryType(solutionParams.loadPathB);
+
+                    AssertFatal(solutionParams.padLDSA.first >= -1
+                                    && solutionParams.padLDSA.second >= -1,
+                                "Invalid LDS padding (A)",
+                                ShowValue(solutionParams.padLDSA.first),
+                                ShowValue(solutionParams.padLDSA.second));
+                    AssertFatal(solutionParams.padLDSB.first >= -1
+                                    && solutionParams.padLDSB.second >= -1,
+                                "Invalid LDS padding (B)",
+                                ShowValue(solutionParams.padLDSB.first),
+                                ShowValue(solutionParams.padLDSB.second));
+
+                    params->ldsPadding[LayoutType::MATRIX_A] = solutionParams.padLDSA;
+                    params->ldsPadding[LayoutType::MATRIX_B] = solutionParams.padLDSB;
 
                     auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macK},
@@ -407,19 +486,44 @@ namespace rocRoller
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b});
-                    auto macTileD = KernelGraph::CoordinateGraph::MacroTile(
+
+                    // Determine if type conversion is needed
+                    bool needsConversion
+                        = (solutionParams.types.typeAcc != solutionParams.types.typeD);
+
+                    // m_tagD: If conversion is needed, use WAVE (not LDS) since it won't be stored directly
+                    auto memoryTypeD = GetMemoryType(solutionParams.storePath);
+                    auto macTileD    = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b},
-                        solutionParams.storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                        (IsLDSStore(solutionParams.storePath) && !needsConversion)
+                               ? memoryTypeD
+                               : MemoryType::WAVE);
 
                     params->setDimensionInfo(m_tagA, macTileA);
                     params->setDimensionInfo(m_tagB, macTileB);
                     params->setDimensionInfo(m_tagC, macTileC);
                     params->setDimensionInfo(m_tagD, macTileD);
 
+                    if(m_tagCvt.has_value())
+                    {
+                        // For type conversion, this is what gets stored - use LDS store path if specified
+                        auto macTileCvt = KernelGraph::CoordinateGraph::MacroTile(
+                            {solutionParams.macM, solutionParams.macN},
+                            LayoutType::MATRIX_ACCUMULATOR,
+                            {wave_m, wave_n, wave_k, wave_b},
+                            IsLDSStore(solutionParams.storePath) ? memoryTypeD : MemoryType::WAVE);
+                        params->setDimensionInfo(*m_tagCvt, macTileCvt);
+                    }
+
                     if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
                     {
+                        AssertFatal(
+                            solutionParams.loadPathAScale
+                                    != Parameters::Solution::LoadPath::BufferToLDS
+                                || solutionParams.swizzleScale,
+                            "If loadPathAScale is BufferToLDS, swizzleScale must be enabled");
                         auto macTileAScale = KernelGraph::CoordinateGraph::MacroTile(
                             {solutionParams.macM,
                              solutionParams.macK / solutionParams.types.scaleBlockSize},
@@ -428,11 +532,21 @@ namespace rocRoller
                              solutionParams.waveN,
                              solutionParams.waveK / solutionParams.types.scaleBlockSize,
                              solutionParams.waveB},
-                            solutionParams.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE);
+                            GetMemoryType(solutionParams.loadPathAScale),
+                            {},
+                            {solutionParams.swizzleTileSize.m,
+                             solutionParams.swizzleTileSize.n,
+                             solutionParams.swizzleTileSize.k,
+                             1});
                         params->setDimensionInfo(*m_tagLoadScaleA, macTileAScale);
                     }
                     if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
                     {
+                        AssertFatal(
+                            solutionParams.loadPathBScale
+                                    != Parameters::Solution::LoadPath::BufferToLDS
+                                || solutionParams.swizzleScale,
+                            "If loadPathBScale is BufferToLDS, swizzleScale must be enabled");
                         auto macTileBScale = KernelGraph::CoordinateGraph::MacroTile(
                             {solutionParams.macK / solutionParams.types.scaleBlockSize,
                              solutionParams.macN},
@@ -441,12 +555,15 @@ namespace rocRoller
                              solutionParams.waveN,
                              solutionParams.waveK / solutionParams.types.scaleBlockSize,
                              solutionParams.waveB},
-                            solutionParams.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE);
+                            GetMemoryType(solutionParams.loadPathBScale),
+                            {},
+                            {solutionParams.swizzleTileSize.m,
+                             solutionParams.swizzleTileSize.n,
+                             solutionParams.swizzleTileSize.l,
+                             1});
                         params->setDimensionInfo(*m_tagLoadScaleB, macTileBScale);
                     }
 
-                    params->unrollX       = solutionParams.unrollX;
-                    params->unrollY       = solutionParams.unrollY;
                     params->swizzleScale  = solutionParams.swizzleScale;
                     params->prefetchScale = solutionParams.prefetchScale;
 
@@ -602,7 +719,7 @@ namespace rocRoller
                     // predicates
                     // unrollK size match predicates
 
-                    if(params->unrollX <= 1 && params->unrollY <= 1 && !params->streamK)
+                    if(params->tailLoops and not params->streamK)
                     {
                         auto unrollKPredicate = (aSizeExps[1] % macKExp == zero);
                         setComment(unrollKPredicate, "K must be a multiple of macK.");

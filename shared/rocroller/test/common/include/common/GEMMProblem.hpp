@@ -28,7 +28,12 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
+#include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/StoreOption.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <string>
+
+namespace SolutionParams = rocRoller::Parameters::Solution;
 
 struct GEMMProblem
 {
@@ -61,15 +66,12 @@ struct GEMMProblem
     std::string transB = "T";
 
     // Unroll Sizes
-    unsigned int unrollX = 0;
-    unsigned int unrollY = 0;
     unsigned int unrollK = 0;
 
-    bool loadLDSA    = true;
-    bool loadLDSB    = true;
-    bool storeLDSD   = true;
-    bool direct2LDSA = false;
-    bool direct2LDSB = false;
+    SolutionParams::StorePath storePath{
+        SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer};
+    SolutionParams::LoadPath loadPathA{SolutionParams::LoadPath::BufferToLDSViaVGPR};
+    SolutionParams::LoadPath loadPathB{SolutionParams::LoadPath::BufferToLDSViaVGPR};
 
     bool fuseLoops                 = true;
     bool tailLoops                 = true;
@@ -79,6 +81,11 @@ struct GEMMProblem
 
     bool swizzleScale  = false;
     bool prefetchScale = false;
+    // Swizzle tile size
+    int swizzleM = 64;
+    int swizzleN = 64;
+    int swizzleK = 4;
+    int swizzleB = 1;
 
     bool prefetch          = false;
     int  prefetchInFlight  = 1;
@@ -87,14 +94,14 @@ struct GEMMProblem
 
     bool packMultipleElementsInto1VGPR = true;
 
-    bool loopOverTiles  = false;
-    bool streamK        = false;
-    bool streamKTwoTile = false;
+    bool loopOverTiles = false;
+
+    rocRoller::StreamKConfig streamK{rocRoller::StreamKMode::None};
 
     bool splitStoreTileIntoWaveBlocks = false;
 
-    bool loadLDSScaleA = false;
-    bool loadLDSScaleB = false;
+    SolutionParams::LoadPath loadScalePathA{SolutionParams::LoadPath::BufferToVGPR};
+    SolutionParams::LoadPath loadScalePathB{SolutionParams::LoadPath::BufferToVGPR};
 
     int  workgroupMappingDim   = -1;
     int  workgroupMappingValue = -1;
@@ -107,6 +114,10 @@ struct GEMMProblem
     rocRoller::DataType scaleTypeB = rocRoller::DataType::None;
 
     int scaleBlockSize = -1;
+
+    // LDS padding for MATRIX_A and MATRIX_B; default no padding
+    std::pair<int, int> padA = {0, 0};
+    std::pair<int, int> padB = {0, 0};
 
     auto operator<=>(GEMMProblem const& rhs) const = default;
 };

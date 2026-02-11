@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -173,7 +173,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
         const auto ds_batch_offset = compute_ptr_offset_of_batch.GetDsPtrOffset(g_idx);
         const auto rs_batch_offset = compute_ptr_offset_of_batch.GetRsPtrOffset(g_idx);
 
-        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
+        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
 
         DsPointer p_ds_grid_grp;
 
@@ -369,11 +369,10 @@ struct DeviceGroupedConvFwdMultipleDMultipleR_Xdl_CShuffle
                      GemmSpec == GemmSpecialization::MNKPadding)
         {
             // pad M
-            return transform_tensor_descriptor(
-                descriptor,
-                make_tuple(make_right_pad_transform(descriptor, MPad)),
-                make_tuple(Sequence<0>{}),
-                make_tuple(Sequence<0>{}));
+            return transform_tensor_descriptor(descriptor,
+                                               make_tuple(make_right_pad_transform(MRaw, MPad)),
+                                               make_tuple(Sequence<0>{}),
+                                               make_tuple(Sequence<0>{}));
         }
         else
         {
@@ -616,7 +615,8 @@ struct DeviceGroupedConvFwdMultipleDMultipleR_Xdl_CShuffle
                 using RDataType = remove_cvref_t<tuple_element_t<i.value, RsDataType>>;
 
                 // R pointer
-                p_rs_grid_(i) = static_cast<RDataType*>(p_rs[i]);
+                p_rs_grid_(i)                                  = static_cast<RDataType*>(p_rs[i]);
+                compute_ptr_offset_of_batch_.BatchStrideRs_(i) = r_g_n_wos_strides[0];
             });
         }
 

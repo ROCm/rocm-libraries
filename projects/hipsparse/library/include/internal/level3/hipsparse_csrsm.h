@@ -43,6 +43,10 @@ extern "C" {
 *  \note \p hipsparseXcsrsm2_zeroPivot is a blocking function. It might influence
 *  performance negatively.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 11.0+) and will be 
+*  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle      handle to the hipsparse library context queue.
 *  @param[in]
@@ -50,10 +54,11 @@ extern "C" {
 *  @param[inout]
 *  position    pointer to zero pivot \f$j\f$, can be in host or device memory.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info or \p position is invalid.
-*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
-*  \retval     HIPSPARSE_STATUS_ZERO_PIVOT zero pivot has been found.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info or \p position is nullptr.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*  \retval HIPSPARSE_STATUS_ZERO_PIVOT zero pivot has been found.
 */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
@@ -525,168 +530,6 @@ hipsparseStatus_t hipsparseZcsrsm2_analysis(hipsparseHandle_t         handle,
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE,
 *              \p transB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
-*
-*  \par Example
-*  \code{.c}
-*      // hipSPARSE handle
-*      hipsparseHandle_t handle;
-*      hipsparseCreate(&handle);
-*
-*      // A = ( 1.0  0.0  0.0  0.0 )
-*      //     ( 2.0  3.0  0.0  0.0 )
-*      //     ( 4.0  5.0  6.0  0.0 )
-*      //     ( 7.0  0.0  8.0  9.0 )
-*
-*      // Number of rows and columns
-*      int m = 4;
-*      int n = 4;
-*
-*      // Number of right-hand-sides
-*      int nrhs = 4;
-*
-*      // Number of non-zeros
-*      int nnz = 9;
-*
-*      // CSR row pointers
-*      int hcsrRowPtr[5] = {0, 1, 3, 6, 9};
-*
-*      // CSR column indices
-*      int hcsrColInd[9] = {0, 0, 1, 0, 1, 2, 0, 2, 3};
-*
-*      // CSR values
-*      double hcsrVal[9] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0};
-*
-*      // Transposition of the matrix and rhs matrix
-*      hipsparseOperation_t transA = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*      hipsparseOperation_t transB = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*
-*      // Solve policy
-*      hipsparseSolvePolicy_t solve_policy = HIPSPARSE_SOLVE_POLICY_NO_LEVEL;
-*
-*      // Scalar alpha and beta
-*      double alpha = 1.0;
-*
-*      // rhs and solution matrix
-*      int ldb = n;
-*
-*      double hB[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
-*
-*      // Offload data to device
-*      int* dcsrRowPtr;
-*      int* dcsrColInd;
-*      double*        dcsrVal;
-*      double*        dB;
-*
-*      hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*      hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*      hipMalloc((void**)&dcsrVal, sizeof(double) * nnz);
-*      hipMalloc((void**)&dB, sizeof(double) * n * nrhs);
-*
-*      hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*      hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dcsrVal, hcsrVal, sizeof(double) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dB, hB, sizeof(double) * n * nrhs, hipMemcpyHostToDevice);
-*
-*      // Matrix descriptor
-*      hipsparseMatDescr_t descr;
-*      hipsparseCreateMatDescr(&descr);
-*
-*      // Matrix fill mode
-*      hipsparseSetMatFillMode(descr, HIPSPARSE_FILL_MODE_LOWER);
-*
-*      // Matrix diagonal type
-*      hipsparseSetMatDiagType(descr, HIPSPARSE_DIAG_TYPE_NON_UNIT);
-*
-*      // Matrix info structure
-*      csrsm2Info_t info;
-*      hipsparseCreateCsrsm2Info(&info);
-*
-*      // Obtain required buffer size
-*      size_t buffer_size;
-*      hipsparseDcsrsm2_bufferSizeExt(handle,
-*                                     0,
-*                                     transA,
-*                                     transB,
-*                                     m,
-*                                     nrhs,
-*                                     nnz,
-*                                     &alpha,
-*                                     descr,
-*                                     dcsrVal,
-*                                     dcsrRowPtr,
-*                                     dcsrColInd,
-*                                     dB,
-*                                     ldb,
-*                                     info,
-*                                     solve_policy,
-*                                     &buffer_size);
-*
-*      // Allocate temporary buffer
-*      void* dbuffer;
-*      hipMalloc(&dbuffer, buffer_size);
-*
-*      // Perform analysis step
-*      hipsparseDcsrsm2_analysis(handle,
-*                                0,
-*                                transA,
-*                                transB,
-*                                m,
-*                                nrhs,
-*                                nnz,
-*                                &alpha,
-*                                descr,
-*                                dcsrVal,
-*                                dcsrRowPtr,
-*                                dcsrColInd,
-*                                dB,
-*                                ldb,
-*                                info,
-*                                solve_policy,
-*                                dbuffer);
-*
-*      // Call dcsrsm to perform lower triangular solve LB = B
-*      hipsparseDcsrsm2_solve(handle,
-*                             0,
-*                             transA,
-*                             transB,
-*                             m,
-*                             nrhs,
-*                             nnz,
-*                             &alpha,
-*                             descr,
-*                             dcsrVal,
-*                             dcsrRowPtr,
-*                             dcsrColInd,
-*                             dB,
-*                             ldb,
-*                             info,
-*                             solve_policy,
-*                             dbuffer);
-*
-*      // Check for zero pivots
-*      int    pivot;
-*      hipsparseStatus_t status = hipsparseXcsrsm2_zeroPivot(handle, info, &pivot);
-*
-*      if(status == HIPSPARSE_STATUS_ZERO_PIVOT)
-*      {
-*          std::cout << "Found zero pivot in matrix row " << pivot << std::endl;
-*      }
-*
-*      // Copy result back to host
-*      hipMemcpy(hB, dB, sizeof(double) * m * nrhs, hipMemcpyDeviceToHost);
-*
-*      // Clear hipSPARSE
-*      hipsparseDestroyCsrsm2Info(info);
-*      hipsparseDestroyMatDescr(descr);
-*      hipsparseDestroy(handle);
-*
-*      // Clear device memory
-*      hipFree(dcsrRowPtr);
-*      hipFree(dcsrColInd);
-*      hipFree(dcsrVal);
-*      hipFree(dB);
-*      hipFree(dbuffer);
-*  \endcode
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

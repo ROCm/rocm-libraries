@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2021-2025 AMD ROCm(TM) Software
+ * Copyright 2021-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/Expression_evaluate_detail.hpp>
 
 #include <rocRoller/AssemblyKernelArgument.hpp>
@@ -72,9 +73,13 @@ namespace rocRoller
                 throw std::runtime_error("N-ary operation present in runtime expression");
             }
 
-            CommandArgumentValue operator()(BitFieldExtract const& expr)
+            CommandArgumentValue operator()(BitfieldCombine const& expr)
             {
-                throw std::runtime_error("BitFieldExtract present in runtime expression.");
+                BitfieldCombine cpy = expr;
+                cpy.lhs             = std::make_shared<Expression>(call(expr.lhs));
+                cpy.rhs             = std::make_shared<Expression>(call(expr.rhs));
+
+                return evaluate(lowerBitfieldCombine(std::make_shared<Expression>(cpy)));
             }
 
             CommandArgumentValue operator()(MatrixMultiply const& expr)
@@ -112,7 +117,7 @@ namespace rocRoller
 
             CommandArgumentValue operator()(AssemblyKernelArgumentPtr const& expr)
             {
-                return call(expr->expression);
+                return call(expr->getExpression());
             }
 
             CommandArgumentValue operator()(DataFlowTag const& expr)
@@ -190,6 +195,18 @@ namespace rocRoller
                 return evaluate(expr) == val;
             }
             return false;
+        }
+
+        std::optional<CommandArgumentValue> tryEvaluate(ExpressionPtr const& expr)
+        {
+            return expr ? tryEvaluate(*expr) : std::nullopt;
+        }
+
+        std::optional<CommandArgumentValue> tryEvaluate(Expression const& expr)
+        {
+            if(evaluationTimes(expr)[EvaluationTime::Translate])
+                return evaluate(expr);
+            return std::nullopt;
         }
     }
 }

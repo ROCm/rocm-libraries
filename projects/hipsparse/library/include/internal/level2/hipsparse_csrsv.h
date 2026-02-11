@@ -43,6 +43,10 @@ extern "C" {
 *  \note \p hipsparseXcsrsv2_zeroPivot is a blocking function. It might influence
 *  performance negatively.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 11.0+) and will be 
+*  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle      handle to the hipsparse library context queue.
 *  @param[in]
@@ -50,10 +54,11 @@ extern "C" {
 *  @param[inout]
 *  position    pointer to zero pivot \f$j\f$, can be in host or device memory.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle \p info or \p position is invalid.
-*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
-*  \retval     HIPSPARSE_STATUS_ZERO_PIVOT zero pivot has been found.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info or \p position is nullptr.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*  \retval HIPSPARSE_STATUS_ZERO_PIVOT zero pivot has been found.
 */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
@@ -447,135 +452,6 @@ hipsparseStatus_t hipsparseZcsrsv2_analysis(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
-*
-*  \par Example
-*  \code{.c}
-*      // hipSPARSE handle
-*      hipsparseHandle_t handle;
-*      hipsparseCreate(&handle);
-*
-*      // alpha * ( 1.0  0.0  2.0  0.0 ) * ( x_0 ) = ( 32.0 )
-*      //         ( 3.0  2.0  4.0  1.0 ) * ( x_1 ) = ( 14.7 )
-*      //         ( 5.0  6.0  1.0  3.0 ) * ( x_2 ) = ( 33.6 )
-*      //         ( 7.0  0.0  8.0  0.6 ) * ( x_3 ) = ( 10.0 )
-*
-*      int m = 4;
-*      int nnz = 13;
-*
-*      // CSR row pointers
-*      int hcsrRowPtr[5] = {0, 2, 6, 10, 13};
-*
-*      // CSR column indices
-*      int hcsrColInd[13] = {0, 2, 0, 1, 2, 3, 0, 1, 2, 3, 0, 2, 3};
-*
-*      // CSR values
-*      double hcsrVal[13] = {1.0, 2.0, 3.0, 2.0, 4.0, 1.0, 5.0, 6.0, 1.0, 3.0, 7.0, 8.0, 0.6};
-*
-*      // Transposition of the matrix
-*      hipsparseOperation_t trans = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*      hipsparseSolvePolicy_t policy = HIPSPARSE_SOLVE_POLICY_USE_LEVEL;
-*
-*      // Scalar alpha
-*      double alpha = 1.0;
-*
-*      // f and x
-*      double hf[4] = {32.0, 14.7, 33.6, 10.0};
-*      double hx[4];
-*
-*      // Matrix descriptor
-*      hipsparseMatDescr_t descr;
-*      hipsparseCreateMatDescr(&descr);
-*
-*      // Set index base on descriptor
-*      hipsparseSetMatIndexBase(descr, HIPSPARSE_INDEX_BASE_ZERO);
-*
-*      // Set fill mode on descriptor
-*      hipsparseSetMatFillMode(descr, HIPSPARSE_FILL_MODE_LOWER);
-*
-*      // Set diag type on descriptor
-*      hipsparseSetMatDiagType(descr, HIPSPARSE_DIAG_TYPE_UNIT);
-*
-*      // Csrsv info
-*      csrsv2Info_t info;
-*      hipsparseCreateCsrsv2Info(&info);
-*
-*      // Offload data to device
-*      int* dcsrRowPtr;
-*      int* dcsrColInd;
-*      double*        dcsrVal;
-*      double*        df;
-*      double*        dx;
-*
-*      hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*      hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*      hipMalloc((void**)&dcsrVal, sizeof(double) * nnz);
-*      hipMalloc((void**)&df, sizeof(double) * m);
-*      hipMalloc((void**)&dx, sizeof(double) * m);
-*
-*      hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*      hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dcsrVal, hcsrVal, sizeof(double) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(df, hf, sizeof(double) * m, hipMemcpyHostToDevice);
-*
-*      int bufferSize = 0;
-*      hipsparseDcsrsv2_bufferSize(handle,
-*                                  trans,
-*                                  m,
-*                                  nnz,
-*                                  descr,
-*                                  dcsrVal,
-*                                  dcsrRowPtr,
-*                                  dcsrColInd,
-*                                  info,
-*                                  &bufferSize);
-*
-*      void* dbuffer = nullptr;
-*      hipMalloc((void**)&dbuffer, bufferSize);
-*
-*      hipsparseDcsrsv2_analysis(handle,
-*                                trans,
-*                                m,
-*                                nnz,
-*                                descr,
-*                                dcsrVal,
-*                                dcsrRowPtr,
-*                                dcsrColInd,
-*                                info,
-*                                policy,
-*                                dbuffer);
-*
-*      // Call dcsrsv to perform alpha * A * x = f
-*      hipsparseDcsrsv2_solve(handle,
-*                             trans,
-*                             m,
-*                             nnz,
-*                             &alpha,
-*                             descr,
-*                             dcsrVal,
-*                             dcsrRowPtr,
-*                             dcsrColInd,
-*                             info,
-*                             df,
-*                             dx,
-*                             policy,
-*                             dbuffer);
-*
-*      // Copy result back to host
-*      hipMemcpy(hx, dx, sizeof(double) * m, hipMemcpyDeviceToHost);
-*
-*      // Clear hipSPARSE
-*      hipsparseDestroyMatDescr(descr);
-*      hipsparseDestroyCsrsv2Info(info);
-*      hipsparseDestroy(handle);
-*
-*      // Clear device memory
-*      hipFree(dcsrRowPtr);
-*      hipFree(dcsrColInd);
-*      hipFree(dcsrVal);
-*      hipFree(df);
-*      hipFree(dx);
-*      hipFree(dbuffer);
-*  \endcode
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

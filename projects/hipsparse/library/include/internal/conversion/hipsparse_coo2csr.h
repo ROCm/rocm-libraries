@@ -65,58 +65,21 @@ extern "C" {
 *  cooRowInd   array of \p nnz elements containing the row indices of the sparse COO
 *              matrix.
 *  @param[in]
-*  nnz         number of non-zero entries of the sparse CSR matrix.
+*  nnz         number of non-zero entries of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  m           number of rows of the sparse CSR matrix.
+*  m           number of rows of the sparse CSR matrix. Must be non-negative.
 *  @param[out]
 *  csrRowPtr   array of \p m+1 elements that point to the start of every row of the
 *              sparse CSR matrix.
 *  @param[in]
-*  idxBase    \ref HIPSPARSE_INDEX_BASE_ZERO or \ref HIPSPARSE_INDEX_BASE_ONE.
+*  idxBase     index base. \ref HIPSPARSE_INDEX_BASE_ZERO for zero-based indexing or
+*              \ref HIPSPARSE_INDEX_BASE_ONE for one-based indexing.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p cooRowInd or \p csrRowPtr
-*              pointer is invalid.
-*
-*  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Sparse matrix in COO format
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    int hcooRowInd[8] = {0, 0, 0, 1, 1, 2, 2, 2};
-*    int hcooColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcooVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int nnz       = 8;
-*    hipsparseIndexBase_t base = HIPSPARSE_INDEX_BASE_ZERO;
-*
-*    int* dcooRowInd = nullptr;
-*    int* dcooColInd = nullptr;
-*    hipMalloc((void**)&dcooRowInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcooColInd, sizeof(int) * nnz);
-*
-*    hipMemcpy(dcooRowInd, hcooRowInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcooColInd, hcooColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*
-*    int* dcsrRowPtr = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*
-*    hipsparseXcoo2csr(handle, dcooRowInd, nnz, m, dcsrRowPtr, base);
-*
-*    hipFree(dcooRowInd);
-*    hipFree(dcooColInd);
-*
-*    hipFree(dcsrRowPtr);
-*
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p m or \p nnz is negative,
+*          \p cooRowInd or \p csrRowPtr is nullptr when \p nnz is greater than zero, or
+*          \p idxBase is neither \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcoo2csr(hipsparseHandle_t    handle,

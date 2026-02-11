@@ -202,9 +202,7 @@ void testing_dot_ex(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dy.memcheck());
     CHECK_DEVICE_ALLOCATION(d_hipblas_result.memcheck());
 
-    Tr cpu_result, hipblas_result_host, hipblas_result_device;
-
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Initial Data on CPU
     hipblas_init_vector(hx, arg, hipblas_client_alpha_sets_nan, true, false);
@@ -216,6 +214,8 @@ void testing_dot_ex(const Arguments& arg)
 
     if(arg.unit_check || arg.norm_check)
     {
+        Tr cpu_result, hipblas_result_host, hipblas_result_device;
+
         /* =====================================================================
             HIPBLAS
         =================================================================== */

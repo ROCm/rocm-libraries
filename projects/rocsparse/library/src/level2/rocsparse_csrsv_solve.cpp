@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,430 +22,171 @@
  *
  * ************************************************************************ */
 
-#include "internal/level2/rocsparse_csrsv.h"
-#include "rocsparse_csrsv.hpp"
-
 #include "../level1/rocsparse_gthr.hpp"
 #include "csrsv_device.h"
 #include "rocsparse_assign_async.hpp"
 #include "rocsparse_common.h"
 #include "rocsparse_control.hpp"
+#include "rocsparse_csrsv.hpp"
+#include "rocsparse_csrsv_solve_kernel.hpp"
 #include "rocsparse_utility.hpp"
 
-namespace rocsparse
-{
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrsv_kernel(J m,
-                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                      const I* __restrict__ csr_row_ptr,
-                      const J* __restrict__ csr_col_ind,
-                      const T* __restrict__ csr_val,
-                      const T* __restrict__ x,
-                      int64_t x_inc,
-                      T* __restrict__ y,
-                      int* __restrict__ done_array,
-                      const J* __restrict__ map,
-                      int offset,
-                      J* __restrict__ zero_pivot,
-                      rocsparse_index_base idx_base,
-                      rocsparse_fill_mode  fill_mode,
-                      rocsparse_diag_type  diag_type,
-                      bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        rocsparse::csrsv_device<BLOCKSIZE, WF_SIZE, SLEEP>(m,
-                                                           alpha,
-                                                           csr_row_ptr,
-                                                           csr_col_ind,
-                                                           csr_val,
-                                                           x,
-                                                           x_inc,
-                                                           y,
-                                                           done_array,
-                                                           map,
-                                                           offset,
-                                                           zero_pivot,
-                                                           idx_base,
-                                                           fill_mode,
-                                                           diag_type);
-    }
-
-    template <typename I, typename J, typename T>
-    rocsparse_status csrsv_solve_dispatch(rocsparse_handle          handle,
-                                          rocsparse_operation       trans,
-                                          J                         m,
-                                          I                         nnz,
-                                          const T*                  alpha_device_host,
-                                          const rocsparse_mat_descr descr,
-                                          const T*                  csr_val,
-                                          const I*                  csr_row_ptr,
-                                          const J*                  csr_col_ind,
-                                          rocsparse_mat_info        info,
-                                          const T*                  x,
-                                          int64_t                   x_inc,
-                                          T*                        y,
-                                          rocsparse_solve_policy    policy,
-                                          void*                     temp_buffer)
-    {
-        ROCSPARSE_ROUTINE_TRACE;
-
-        // Stream
-        hipStream_t stream = handle->stream;
-
-        // Buffer
-        char* ptr = reinterpret_cast<char*>(temp_buffer);
-
-        ptr += 256;
-
-        // done array
-        int* done_array = reinterpret_cast<int*>(ptr);
-        ptr += ((sizeof(int) * m - 1) / 256 + 1) * 256;
-
-        // Initialize buffers
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * m, stream));
-
-        const rocsparse::trm_info_t* csrsv
-            = (descr->fill_mode == rocsparse_fill_mode_upper)
-                  ? ((trans == rocsparse_operation_none) ? info->csrsv_upper_info
-                                                         : info->csrsvt_upper_info)
-                  : ((trans == rocsparse_operation_none) ? info->csrsv_lower_info
-                                                         : info->csrsvt_lower_info);
-
-        if(csrsv == nullptr)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
-        }
-
-        // If diag type is unit, re-initialize zero pivot to remove structural zeros
-        if(descr->diag_type == rocsparse_diag_type_unit)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_async(
-                reinterpret_cast<J*>(info->zero_pivot), std::numeric_limits<J>::max(), stream));
-        }
-
-        // Pointers to differentiate between transpose mode
-        const I* local_csr_row_ptr = csr_row_ptr;
-        const J* local_csr_col_ind = csr_col_ind;
-        const T* local_csr_val     = csr_val;
-
-        rocsparse_fill_mode fill_mode = descr->fill_mode;
-
-        // When computing transposed triangular solve, we first need to update the
-        // transposed matrix values
-        if(trans == rocsparse_operation_transpose
-           || trans == rocsparse_operation_conjugate_transpose)
-        {
-            T* csrt_val = reinterpret_cast<T*>(ptr);
-
-            // Gather values
-            RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::gthr_template<I, T>(handle,
-                                                nnz,
-                                                csr_val,
-                                                csrt_val,
-                                                (const I*)csrsv->get_transposed_perm(),
-                                                rocsparse_index_base_zero)));
-
-            if(trans == rocsparse_operation_conjugate_transpose)
-            {
-                // conjugate csrt_val
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::conjugate(handle, nnz, csrt_val));
-            }
-
-            local_csr_row_ptr = (const I*)csrsv->get_transposed_row_ptr();
-            local_csr_col_ind = (const J*)csrsv->get_transposed_col_ind();
-            local_csr_val     = (const T*)csrt_val;
-
-            fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                                 : rocsparse_fill_mode_lower;
-        }
-
-        // Determine gcn_arch
-        const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
-        const int         asicRev       = handle->asic_rev;
-
-#define CSRSV_DIM 1024
-        dim3 csrsv_blocks(((int64_t)handle->wavefront_size * m - 1) / CSRSV_DIM + 1);
-        dim3 csrsv_threads(CSRSV_DIM);
-
-        // gfx908
-        if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
-        {
-            // LCOV_EXCL_START
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::csrsv_kernel<CSRSV_DIM, 64, true>),
-                csrsv_blocks,
-                csrsv_threads,
-                0,
-                stream,
-                m,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                local_csr_row_ptr,
-                local_csr_col_ind,
-                local_csr_val,
-                x,
-                x_inc,
-                y,
-                done_array,
-                (const J*)csrsv->get_row_map(),
-                0,
-                (J*)info->zero_pivot,
-                descr->base,
-                fill_mode,
-                descr->diag_type,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
-            // LCOV_EXCL_STOP
-        }
-        else
-        {
-            // rocsparse_pointer_mode_device
-            if(handle->wavefront_size == 32)
-            {
-                // LCOV_EXCL_START
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::csrsv_kernel<CSRSV_DIM, 32, false>),
-                    csrsv_blocks,
-                    csrsv_threads,
-                    0,
-                    stream,
-                    m,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                    local_csr_row_ptr,
-                    local_csr_col_ind,
-                    local_csr_val,
-                    x,
-                    x_inc,
-                    y,
-                    done_array,
-                    (const J*)csrsv->get_row_map(),
-                    0,
-                    (J*)info->zero_pivot,
-                    descr->base,
-                    fill_mode,
-                    descr->diag_type,
-                    handle->pointer_mode == rocsparse_pointer_mode_host);
-                // LCOV_EXCL_STOP
-            }
-            else
-            {
-                rocsparse_host_assert(handle->wavefront_size == 64,
-                                      "Wrong wavefront size dispatch.");
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::csrsv_kernel<CSRSV_DIM, 64, false>),
-                    csrsv_blocks,
-                    csrsv_threads,
-                    0,
-                    stream,
-                    m,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                    local_csr_row_ptr,
-                    local_csr_col_ind,
-                    local_csr_val,
-                    x,
-                    x_inc,
-                    y,
-                    done_array,
-                    (const J*)csrsv->get_row_map(),
-                    0,
-                    (J*)info->zero_pivot,
-                    descr->base,
-                    fill_mode,
-                    descr->diag_type,
-                    handle->pointer_mode == rocsparse_pointer_mode_host);
-            }
-        }
-#undef CSRSV_DIM
-
-        return rocsparse_status_success;
-    }
-}
-
-template <typename I, typename J, typename T>
-rocsparse_status rocsparse::csrsv_solve_template(rocsparse_handle          handle, //0
-                                                 rocsparse_operation       trans, //1
-                                                 J                         m, //2
-                                                 I                         nnz, //3
-                                                 const T*                  alpha_device_host, //4
-                                                 const rocsparse_mat_descr descr, //5
-                                                 const T*                  csr_val, //6
-                                                 const I*                  csr_row_ptr, //7
-                                                 const J*                  csr_col_ind, //8
-                                                 rocsparse_mat_info        info, //9
-                                                 const T*                  x, //10
-                                                 int64_t                   x_inc, // non-classified
-                                                 T*                        y, //11
-                                                 rocsparse_solve_policy    policy, //12
-                                                 void*                     temp_buffer) //13
+rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
+                                        rocsparse_operation         trans,
+                                        rocsparse_datatype          alpha_datatype,
+                                        const void*                 alpha,
+                                        int64_t                     alpha_stride,
+                                        rocsparse_const_spmat_descr A,
+                                        rocsparse_const_dnvec_descr x,
+                                        rocsparse_dnvec_descr       y,
+                                        rocsparse_solve_policy      policy,
+                                        rocsparse_csrsv_info        csrsv_info,
+                                        void*                       temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // Check for valid handle and matrix descriptor
-    ROCSPARSE_CHECKARG_HANDLE(0, handle);
-    ROCSPARSE_CHECKARG_POINTER(5, descr);
-    ROCSPARSE_CHECKARG_POINTER(9, info);
+    const int64_t batch_count = y->batch_count;
 
-    // Logging
-    rocsparse::log_trace(handle,
-                         rocsparse::replaceX<T>("rocsparse_Xcsrsv"),
-                         trans,
-                         m,
-                         nnz,
-                         LOG_TRACE_SCALAR_VALUE(handle, alpha_device_host),
-                         (const void*&)descr,
-                         (const void*&)csr_val,
-                         (const void*&)csr_row_ptr,
-                         (const void*&)csr_col_ind,
-                         (const void*&)info,
-                         (const void*&)x,
-                         (const void*&)y,
-                         policy,
-                         (const void*&)temp_buffer);
+    // Quick return if possible
+    if(A->rows == 0 || batch_count == 0)
+    {
+        return rocsparse_status_success;
+    }
 
-    ROCSPARSE_CHECKARG_ENUM(1, trans);
-    ROCSPARSE_CHECKARG_ENUM(12, policy);
-
+    rocsparse_mat_descr descr = A->descr;
     // Check matrix type
-    ROCSPARSE_CHECKARG(5,
+    ROCSPARSE_CHECKARG(8,
                        descr,
                        (descr->type != rocsparse_matrix_type_general
                         && descr->type != rocsparse_matrix_type_triangular),
                        rocsparse_status_not_implemented);
 
     // Check matrix sorting mode
-
-    ROCSPARSE_CHECKARG(5,
+    ROCSPARSE_CHECKARG(8,
                        descr,
                        (descr->storage_mode != rocsparse_storage_mode_sorted),
                        rocsparse_status_requires_sorted_storage);
 
-    // Check sizes
-    ROCSPARSE_CHECKARG_SIZE(2, m);
-    ROCSPARSE_CHECKARG_SIZE(3, nnz);
+    // Stream
+    hipStream_t stream = handle->stream;
 
-    // Quick return if possible
-    if(m == 0)
+    const rocsparse_diag_type diag_type = descr->diag_type;
+
+    // Buffer
+    char* ptr = reinterpret_cast<char*>(temp_buffer);
+
+    ptr += 256;
+
+    // done array
+    int32_t*     done_array = reinterpret_cast<int32_t*>(ptr);
+    const size_t done_array_size_in_bytes
+        = ((sizeof(int32_t) * A->rows * A->batch_count - 1) / 256 + 1) * 256;
+    ptr += done_array_size_in_bytes;
+
+    // Initialize buffers
+    RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, done_array_size_in_bytes, stream));
+
+    const rocsparse::trm_info_t* csrsv = csrsv_info->get(trans, descr->fill_mode);
+    if(csrsv == nullptr)
     {
-        return rocsparse_status_success;
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
     }
 
-    // Check pointer arguments
-    ROCSPARSE_CHECKARG_ARRAY(10, m, x);
-    ROCSPARSE_CHECKARG_ARRAY(11, m, y);
+    csrsv_info->set_pivot_batch_count(batch_count, stream);
 
-    ROCSPARSE_CHECKARG_ARRAY(6, nnz, csr_val);
-    ROCSPARSE_CHECKARG_ARRAY(7, m, csr_row_ptr);
-    ROCSPARSE_CHECKARG_ARRAY(8, nnz, csr_col_ind);
-    ROCSPARSE_CHECKARG_POINTER(13, temp_buffer);
-    ROCSPARSE_CHECKARG_POINTER(4, alpha_device_host);
+    // If diag type is unit, re-initialize zero pivot to remove structural zeros
+    switch(diag_type)
+    {
+    case rocsparse_diag_type_unit:
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
+            batch_count, A->col_type, csrsv_info->get_zero_pivot(), stream));
+        break;
+    }
+    case rocsparse_diag_type_non_unit:
+    {
+        break;
+    }
+    }
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve_dispatch(handle,
-                                                              trans,
-                                                              m,
-                                                              nnz,
-                                                              alpha_device_host,
-                                                              descr,
-                                                              csr_val,
-                                                              csr_row_ptr,
-                                                              csr_col_ind,
-                                                              info,
-                                                              x,
-                                                              x_inc,
-                                                              y,
-                                                              policy,
-                                                              temp_buffer));
+    // Pointers to differentiate between transpose mode
+    const void* local_row_data = A->const_row_data;
+    const void* local_col_data = A->const_col_data;
+    const void* local_val_data = A->const_val_data;
+
+    int64_t             local_val_data_inc    = 1;
+    int64_t             local_val_data_stride = A->batch_stride;
+    rocsparse_fill_mode fill_mode             = descr->fill_mode;
+
+    // When computing transposed triangular solve, we first need to update the
+    // transposed matrix values
+    if(trans == rocsparse_operation_transpose || trans == rocsparse_operation_conjugate_transpose)
+    {
+        void*                    csrt_val          = ptr;
+        const int64_t            csrt_val_stride   = A->nnz;
+        const rocsparse_datatype csrt_val_datatype = A->data_type;
+
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::gthr_strided_batched(handle,
+                                                                   A->batch_count,
+                                                                   A->nnz,
+                                                                   A->data_type,
+                                                                   A->const_val_data,
+                                                                   A->batch_stride,
+                                                                   csrt_val_datatype,
+                                                                   csrt_val,
+                                                                   csrt_val_stride,
+                                                                   A->row_type,
+                                                                   csrsv->get_transposed_perm(),
+                                                                   rocsparse_index_base_zero)));
+
+        if(trans == rocsparse_operation_conjugate_transpose)
+        {
+            RETURN_IF_ROCSPARSE_ERROR((rocsparse::conjugate_strided_batched(
+                handle, A->batch_count, A->nnz, A->data_type, csrt_val, csrt_val_stride)));
+        }
+
+        local_row_data        = csrsv->get_transposed_row_ptr();
+        local_col_data        = csrsv->get_transposed_col_ind();
+        local_val_data        = csrt_val;
+        local_val_data_stride = A->nnz;
+        fill_mode             = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
+                                                                         : rocsparse_fill_mode_lower;
+    }
+
+    const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
+    const int         asicRev       = handle->asic_rev;
+    const bool        sleep_  = (gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2);
+    const uint32_t    wfsize_ = sleep_ ? 64 : handle->wavefront_size;
+    rocsparse::csrsv_launch_kernel_t csrsv_launch_kernel{};
+    RETURN_IF_ROCSPARSE_ERROR(csrsv_launch_kernel_find(
+        &csrsv_launch_kernel, 1024, wfsize_, sleep_, A->row_type, A->col_type, A->data_type));
+
+#undef CSRSV_DIM
+
+    csrsv_launch_kernel(handle,
+                        A->batch_count,
+                        A->rows,
+                        alpha,
+                        alpha_stride,
+                        local_row_data,
+                        local_col_data,
+                        local_val_data,
+                        local_val_data_inc,
+                        local_val_data_stride,
+                        x->const_values,
+                        x->inc,
+                        x->batch_stride,
+                        y->values,
+                        y->inc,
+                        y->batch_stride,
+                        done_array,
+                        csrsv->get_row_map(),
+                        0,
+                        csrsv_info->get_zero_pivot(),
+                        descr->base,
+                        fill_mode,
+                        descr->diag_type,
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
+
     return rocsparse_status_success;
 }
-
-#define INSTANTIATE(ITYPE, JTYPE, TTYPE)                                            \
-    template rocsparse_status rocsparse::csrsv_solve_template<ITYPE, JTYPE, TTYPE>( \
-        rocsparse_handle          handle,                                           \
-        rocsparse_operation       trans,                                            \
-        JTYPE                     m,                                                \
-        ITYPE                     nnz,                                              \
-        const TTYPE*              alpha_device_host,                                \
-        const rocsparse_mat_descr descr,                                            \
-        const TTYPE*              csr_val,                                          \
-        const ITYPE*              csr_row_ptr,                                      \
-        const JTYPE*              csr_col_ind,                                      \
-        rocsparse_mat_info        info,                                             \
-        const TTYPE*              x,                                                \
-        int64_t                   x_inc,                                            \
-        TTYPE*                    y,                                                \
-        rocsparse_solve_policy    policy,                                           \
-        void*                     temp_buffer);
-
-INSTANTIATE(int32_t, int32_t, float);
-INSTANTIATE(int32_t, int32_t, double);
-INSTANTIATE(int32_t, int32_t, rocsparse_float_complex);
-INSTANTIATE(int32_t, int32_t, rocsparse_double_complex);
-
-INSTANTIATE(int64_t, int32_t, float);
-INSTANTIATE(int64_t, int32_t, double);
-INSTANTIATE(int64_t, int32_t, rocsparse_float_complex);
-INSTANTIATE(int64_t, int32_t, rocsparse_double_complex);
-
-INSTANTIATE(int64_t, int64_t, float);
-INSTANTIATE(int64_t, int64_t, double);
-INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);
-INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
-
-INSTANTIATE(int32_t, int64_t, float);
-INSTANTIATE(int32_t, int64_t, double);
-INSTANTIATE(int32_t, int64_t, rocsparse_float_complex);
-INSTANTIATE(int32_t, int64_t, rocsparse_double_complex);
-
-#undef INSTANTIATE
-
-/*
- * ===========================================================================
- *    C wrapper
- * ===========================================================================
- */
-
-#define C_IMPL(NAME, TYPE)                                                       \
-    extern "C" rocsparse_status NAME(rocsparse_handle          handle,           \
-                                     rocsparse_operation       trans,            \
-                                     rocsparse_int             m,                \
-                                     rocsparse_int             nnz,              \
-                                     const TYPE*               alpha,            \
-                                     const rocsparse_mat_descr descr,            \
-                                     const TYPE*               csr_val,          \
-                                     const rocsparse_int*      csr_row_ptr,      \
-                                     const rocsparse_int*      csr_col_ind,      \
-                                     rocsparse_mat_info        info,             \
-                                     const TYPE*               x,                \
-                                     TYPE*                     y,                \
-                                     rocsparse_solve_policy    policy,           \
-                                     void*                     temp_buffer)      \
-    try                                                                          \
-    {                                                                            \
-        ROCSPARSE_ROUTINE_TRACE;                                                 \
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve_template(handle,        \
-                                                                  trans,         \
-                                                                  m,             \
-                                                                  nnz,           \
-                                                                  alpha,         \
-                                                                  descr,         \
-                                                                  csr_val,       \
-                                                                  csr_row_ptr,   \
-                                                                  csr_col_ind,   \
-                                                                  info,          \
-                                                                  x,             \
-                                                                  (int64_t)1,    \
-                                                                  y,             \
-                                                                  policy,        \
-                                                                  temp_buffer)); \
-        return rocsparse_status_success;                                         \
-    }                                                                            \
-    catch(...)                                                                   \
-    {                                                                            \
-        RETURN_ROCSPARSE_EXCEPTION();                                            \
-    }
-
-C_IMPL(rocsparse_scsrsv_solve, float);
-C_IMPL(rocsparse_dcsrsv_solve, double);
-C_IMPL(rocsparse_ccsrsv_solve, rocsparse_float_complex);
-C_IMPL(rocsparse_zcsrsv_solve, rocsparse_double_complex);
-
-#undef C_IMPL

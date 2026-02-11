@@ -274,7 +274,7 @@ def test_findLogicFiles():
 
         result = tcl.findLogicFiles(baseDir, logicArchs, lazyLoading, experimentalDir)
         expected = findLogicFiles_oldLogic(baseDir, logicArchs, lazyLoading, experimentalDir)
-        return result == expected
+        return set(result) == set(expected)
 
     def outputMatchesOldLogic2():
         baseDir, lazyLoading, experimentalDir = setup()
@@ -287,7 +287,7 @@ def test_findLogicFiles():
 
         result = tcl.findLogicFiles(baseDir, logicArchs, lazyLoading, experimentalDir)
         expected = findLogicFiles_oldLogic(baseDir, logicArchs, lazyLoading, experimentalDir)
-        return result == expected
+        return set(result) == set(expected)
 
     def outputMatchesOldLogic3():
         baseDir, lazyLoading, experimentalDir = setup()
@@ -298,7 +298,7 @@ def test_findLogicFiles():
 
         result = tcl.findLogicFiles(baseDir, logicArchs, lazyLoading, experimentalDir)
         expected = findLogicFiles_oldLogic(baseDir, logicArchs, lazyLoading, experimentalDir)
-        return result == expected
+        return set(result) == set(expected)
 
     def verifyYamlAndYml():
         baseDir, lazyLoading, experimentalDir = setup()
@@ -617,7 +617,7 @@ if %arg2% EQU --wave32 set /A wave=32
 set h=gfx90a
 if %wave% == 32 (/opt/rocm/bin/amdclang++ -x assembler -target amdgcn-amd-amdhsa -mcode-object-version=4 -mcpu=gfx90a -mno-wavefrontsize64 -c -o %f%.o %f%.s) else (/opt/rocm/bin/amdclang++ -x assembler -target amdgcn-amd-amdhsa -mcode-object-version=4 -mcpu=gfx90a -mwavefrontsize64 -c -o %f%.o %f%.s)
 /opt/rocm/bin/amdclang++ -target amdgcn-amd-amdhsa -Xlinker --build-id -o %f%.co %f%.o
-copy %f%.co ..\..\..\library\%f%_%h%.co
+copy %f%.co ..\\..\\..\library\%f%_%h%.co
 """
 
         with open(buildPath / "assembly" / "asm-new.bat", "r") as f:

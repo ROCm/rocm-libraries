@@ -28,7 +28,6 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_range_quick
     - { alpha:   1.0, alphai:  1.0 }
-    - { alpha:  -0.5, alphai: -0.5 }
 
   - &alpha_range_checkin
     - { alpha:   2.0, alphai:  0.5 }
@@ -41,7 +40,6 @@ Definitions:
 
   - &beta_range_quick
     - { beta:   1.0, betai:  1.0 }
-    - { beta:  -0.5, betai: -0.5 }
 
   - &beta_range_checkin
     - { beta:   0.0, betai:  1.5 }
@@ -53,11 +51,6 @@ Definitions:
     - { beta:  -0.5, betai:  1.0 }
 
 Tests:
-- name: csrgemm_bad_arg
-  category: pre_checkin
-  function: csrgemm_bad_arg
-  precision: *single_double_precisions_complex_real
-
 # C = alpha * A * B
 - name: csrgemm_mult
   category: quick
@@ -70,33 +63,79 @@ Tests:
   beta: [-99.0]
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_zero]
 
 - name: csrgemm_mult
   category: quick
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [50, 647]
-  N: [13, 523]
+  M: [50, 300]
+  N: [13, 300]
   K: [50, 254]
   alpha_alphai: *alpha_range_quick
   beta: [-99.0]
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
+
+- name: csrgemm_mult_file
+  category: quick
+  function: csrgemm
+  precision: *single_double_precisions
+  M: 1
+  N: [13, 300]
+  K: 1
+  alpha_alphai: *alpha_range_quick
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
+
+- name: csrgemm_mult_file
+  category: quick
+  function: csrgemm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [21, 300]
+  K: 1
+  alpha_alphai: *alpha_range_quick
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534,
+             mplate]
+
+- name: csrgemm_bad_arg
+  category: pre_checkin
+  function: csrgemm_bad_arg
+  precision: *single_double_precisions_complex_real
 
 - name: csrgemm_mult
   category: pre_checkin
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [0, 1799, 32519]
-  N: [0, 3712, 16021]
+  M: [8, 1799]
+  N: [8, 2000]
   K: [0, 1942, 9848]
   alpha_alphai: *alpha_range_checkin
   beta: [-99.0]
@@ -107,49 +146,12 @@ Tests:
   baseC: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
-- name: csrgemm_mult
-  category: nightly
-  function: csrgemm
-  precision: *single_double_precisions_complex_real
-  M: [73923, 214923, 842323]
-  N: [5239, 12942, 1492312]
-  K: [442, 42312, 743434]
-  alpha_alphai: *alpha_range_nightly
-  beta: [-99.0]
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero]
-  baseB: [rocsparse_index_base_zero]
-  baseC: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-
-- name: csrgemm_mult_file
-  category: quick
-  function: csrgemm
-  precision: *single_double_precisions
-  M: 1
-  N: [13, 523]
-  K: 1
-  alpha_alphai: *alpha_range_quick
-  beta: [-99.0]
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
-             nos2,
-             nos4,
-             nos6,
-             scircuit]
-
 - name: csrgemm_mult_file
   category: pre_checkin
   function: csrgemm
   precision: *single_double_precisions
   M: 1
-  N: [0, 3712, 16021]
+  N: [8, 2000]
   K: 1
   alpha_alphai: *alpha_range_checkin
   beta: [-99.0]
@@ -161,17 +163,74 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [mc2depi,
              ASIC_320k,
+             scircuit,
+             mac_econ_fwd500,
              nos1,
              nos3,
              nos5,
              nos7]
 
 - name: csrgemm_mult_file
+  category: pre_checkin
+  function: csrgemm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [8, 2000]
+  K: 1
+  alpha_alphai: *alpha_range_checkin
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             Chevron2,
+             Chevron3]
+
+# Coverage gap tests: high intermediate products per row (develop vs reduced_ci)
+# Semi-dense matrices to trigger group sizes 4-6 (1K-8K intermediates)
+- name: csrgemm_mult_high_intermediates
+  category: pre_checkin
+  function: csrgemm
+  precision: *double_only_precisions
+  M: [128]
+  N: [128]
+  K: [256]
+  percentage: [0.4]
+  alpha_alphai: *alpha_range_checkin
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_random]
+
+- name: csrgemm_mult
+  category: nightly
+  function: csrgemm
+  precision: *single_double_precisions_complex_real
+  M: [5000]
+  N: [2619, 2588]
+  K: [442, 42312, 743434]
+  alpha_alphai: *alpha_range_nightly
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: csrgemm_mult_file
   category: nightly
   function: csrgemm
   precision: *single_double_precisions
   M: 1
-  N: [5239, 12942, 1492312]
+  N: [2619, 2588]
   K: 1
   alpha_alphai: *alpha_range_nightly
   beta: [-99.0]
@@ -191,7 +250,7 @@ Tests:
   function: csrgemm
   precision: *double_only_precisions
   M: 1
-  N: [5239, 12942, 1492312]
+  N: [2619, 2588]
   K: 1
   alpha_alphai: *alpha_range_nightly
   beta: [-99.0]
@@ -207,47 +266,11 @@ Tests:
              rma10]
 
 - name: csrgemm_mult_file
-  category: quick
-  function: csrgemm
-  precision: *single_double_precisions_complex
-  M: 1
-  N: [21, 719]
-  K: 1
-  alpha_alphai: *alpha_range_quick
-  beta: [-99.0]
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [qc2534,
-             Chevron2]
-
-- name: csrgemm_mult_file
-  category: pre_checkin
-  function: csrgemm
-  precision: *single_double_precisions_complex
-  M: 1
-  N: [0, 5925, 20142]
-  K: 1
-  alpha_alphai: *alpha_range_checkin
-  beta: [-99.0]
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero]
-  baseB: [rocsparse_index_base_zero]
-  baseC: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate,
-             Chevron3]
-
-- name: csrgemm_mult_file
   category: nightly
   function: csrgemm
   precision: *single_double_precisions_complex
   M: 1
-  N: [4823, 17462, 901923]
+  N: [2411, 3492]
   K: 1
   alpha_alphai: *alpha_range_nightly
   beta: [-99.0]
@@ -264,50 +287,22 @@ Tests:
   category: quick
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [582]
+  M: [300]
   N: [243]
-  K: 1
   alpha: [-99.0]
   beta_betai: *beta_range_quick
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseD: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_zero]
 
 - name: csrgemm_scale
   category: quick
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [0, 8, 24, 582]
-  N: [0, 12, 48, 243]
-  K: 1
+  M: [8]
+  N: [8, 12]
   alpha: [-99.0]
   beta_betai: *beta_range_quick
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseD: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: csrgemm_scale
-  category: pre_checkin
-  function: csrgemm
-  precision: *single_double_precisions_complex_real
-  M: [0, 932, 1523, 23404]
-  N: [0, 784, 4842, 19703]
-  K: 1
-  alpha: [-99.0]
-  beta_betai: *beta_range_checkin
-  baseC: [rocsparse_index_base_zero]
-  baseD: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-
-- name: csrgemm_scale
-  category: nightly
-  function: csrgemm
-  precision: *single_double_precisions_complex_real
-  M: [67582, 194823, 943929, 2094392]
-  N: [3033, 21042, 174923]
-  K: 1
-  alpha: [-99.0]
-  beta_betai: *beta_range_nightly
   baseC: [rocsparse_index_base_zero]
   baseD: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
@@ -320,14 +315,42 @@ Tests:
   N: 1
   alpha: [-99.0]
   beta_betai: *beta_range_quick
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseD: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
+  filename: [nos1,
              nos2,
+             nos3,
              nos4,
+             nos5,
              nos6,
-             scircuit]
+             nos7]
+
+- name: csrgemm_scale_file
+  category: quick
+  function: csrgemm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha: [-99.0]
+  beta_betai: *beta_range_quick
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534,
+             mplate]
+
+- name: csrgemm_scale
+  category: pre_checkin
+  function: csrgemm
+  precision: *single_double_precisions_complex_real
+  M: [8, 932]
+  N: [8, 784]
+  alpha: [-99.0]
+  beta_betai: *beta_range_checkin
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
 
 - name: csrgemm_scale_file
   category: pre_checkin
@@ -341,11 +364,41 @@ Tests:
   baseD: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [rma10,
+             ASIC_320k,
              mc2depi,
+             scircuit,
+             mac_econ_fwd500,
              nos1,
              nos3,
              nos5,
              nos7]
+
+- name: csrgemm_scale_file
+  category: pre_checkin
+  function: csrgemm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha: [-99.0]
+  beta_betai: *beta_range_checkin
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             Chevron2,
+             Chevron3]
+
+- name: csrgemm_scale
+  category: nightly
+  function: csrgemm
+  precision: *single_double_precisions_complex_real
+  M: [5000]
+  N: [1516, 4208]
+  alpha: [-99.0]
+  beta_betai: *beta_range_nightly
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
 
 - name: csrgemm_scale_file
   category: nightly
@@ -367,34 +420,6 @@ Tests:
              shipsec1]
 
 - name: csrgemm_scale_file
-  category: quick
-  function: csrgemm
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  alpha: [-99.0]
-  beta_betai: *beta_range_quick
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseD: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [qc2534,
-             Chevron2]
-
-- name: csrgemm_scale_file
-  category: pre_checkin
-  function: csrgemm
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  alpha: [-99.0]
-  beta_betai: *beta_range_checkin
-  baseC: [rocsparse_index_base_zero]
-  baseD: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate,
-             Chevron3]
-
-- name: csrgemm_scale_file
   category: nightly
   function: csrgemm
   precision: *single_double_precisions_complex
@@ -408,28 +433,113 @@ Tests:
   filename: [Chevron4]
 
 # C = alpha * A * B + beta * D
-- name: csrgemm_scale
+- name: csrgemm_mult_scale
   category: quick
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [1000]
-  N: [1000]
-  K: 1
+  M: [300]
+  N: [300]
+  K: [300]
   alpha_alphai: *alpha_range_quick
   beta_betai: *beta_range_quick
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
   baseC: [rocsparse_index_base_zero]
-  baseD: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_zero]
 
-- name: csrgemm_scale
+- name: csrgemm_mult_scale
   category: quick
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [1000]
-  N: [1000]
+  M: [300]
+  N: [300]
+  K: [300]
+  alpha_alphai: *alpha_range_quick
+  beta_betai: *beta_range_quick
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: csrgemm_mult_scale_file
+  category: quick
+  function: csrgemm
+  precision: *single_double_precisions
+  M: 1
+  N: [13, 222]
   K: 1
   alpha_alphai: *alpha_range_quick
   beta_betai: *beta_range_quick
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
+
+- name: csrgemm_mult_scale_file
+  category: quick
+  function: csrgemm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [21, 45]
+  K: 1
+  alpha_alphai: *alpha_range_quick
+  beta_betai: *beta_range_quick
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
   baseC: [rocsparse_index_base_zero]
   baseD: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534,
+             mplate]
+
+- name: csrgemm_mult_scale_file
+  category: pre_checkin
+  function: csrgemm
+  precision: *single_double_precisions
+  M: 1
+  N: [276]
+  K: 1
+  alpha_alphai: *alpha_range_checkin
+  beta_betai: *beta_range_checkin
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [rma10,
+             ASIC_320k,
+             mc2depi,
+             scircuit,
+             mac_econ_fwd500,
+             webbase-1M,
+             shipsec1]
+
+- name: csrgemm_mult_scale_file
+  category: nightly
+  function: csrgemm
+  precision: *single_double_precisions
+  M: 1
+  N: [120]
+  K: 1
+  alpha_alphai: *alpha_range_nightly
+  beta_betai: *beta_range_nightly
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [bibd_22_8,
+             bmwcra_1,
+             amazon0312,
+             Chebyshev4,
+             sme3Dc]

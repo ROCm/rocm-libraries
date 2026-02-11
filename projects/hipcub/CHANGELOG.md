@@ -2,6 +2,26 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-4.3.0 for ROCm 8.0
+
+### Added
+
+* Added `generate_resource_spec.cpp` to the test directory. It is now built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
+
+### Changed
+
+* Updated the documentation on how to run hipCUB tests on multiple GPUs in parallel.
+
+### Removed
+
+* Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code mentioned above.
+
+## hipCUB-4.2.0 for ROCm 7.2
+ 
+### Resolved issues
+ 
+* Fixed memory leak issues with some unit tests.
+
 ## hipCUB-4.1.0 for ROCm 7.1
 
 ### Added
@@ -10,6 +30,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added `::hipcub::extents`, with limited parity to C++23's `std::extents`. Only `static extents` is supported; `dynamic extents` is not. Helper structs have been created to perform computations on `::hipcub::extents` only when the backend is rocPRIM. For the CUDA backend, similar functionality exists.
 * Added `projects/hipcub/hipcub/include/hipcub/backend/rocprim/util_mdspan.hpp` to support `::hipcub::extents`.
 * Added `::hipcub::ForEachInExtents` API.
+* Added `hipcub::DeviceTransform::Transform` and `hipcub::DeviceTransform::TransformStableArgumentAddresses`.
 
 * hipCUB and its dependency rocPRIM have been moved into the new rocm-libraries "monorepo" repository (https://github.com/ROCm/rocm-libraries). This repository contains a number of ROCm libraries that are frequently used together.
   * The repository migration requires a few changes to the way that hipCUB fetches library dependencies.

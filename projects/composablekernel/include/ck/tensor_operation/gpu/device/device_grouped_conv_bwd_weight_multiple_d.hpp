@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -10,8 +10,6 @@
 namespace ck {
 namespace tensor_operation {
 namespace device {
-
-#define DISABLE_SPLIT_K_AUTODEDUCE_FOR_ONE_STAGE_KERNELS 1
 
 template <ck::index_t NDimSpatial,
           typename InLayout,

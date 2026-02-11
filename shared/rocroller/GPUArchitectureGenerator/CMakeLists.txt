@@ -14,7 +14,6 @@ target_include_directories(isa-spec-manager
         "${CMAKE_CURRENT_SOURCE_DIR}/isa_spec_manager"
 )
 add_executable(GPUArchitectureGenerator
-    "${CMAKE_CURRENT_SOURCE_DIR}/source/GPUArchitectureGenerator.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/GPUArchitecture.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/GPUArchitectureLibrary.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/Assemblers/Assembler.cpp"
@@ -32,6 +31,8 @@ add_executable(GPUArchitectureGenerator
     "${PROJECT_SOURCE_DIR}/lib/source/Utilities/Utils.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/Timer.cpp"
 )
+add_subdirectory(include)
+add_subdirectory(source)
 
 if(ROCROLLER_ENABLE_LLVM)
     target_compile_definitions(GPUArchitectureGenerator PRIVATE ROCROLLER_USE_LLVM)
@@ -66,7 +67,6 @@ target_compile_definitions(GPUArchitectureGenerator
 
 if(ROCROLLER_ENABLE_TIMERS)
     target_compile_definitions(GPUArchitectureGenerator PRIVATE ROCROLLER_ENABLE_TIMERS)
-    target_compile_options(GPUArchitectureGenerator PRIVATE -pg -fno-omit-frame-pointer)
 endif()
 
 if(NOT ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF)

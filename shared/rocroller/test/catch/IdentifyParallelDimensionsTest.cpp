@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -48,11 +48,6 @@ TEST_CASE("identifyParallelDimensionSets works for MatrixMultiply",
 
     auto kgraph = KernelGraph::translate(example.getCommand());
 
-    {
-        std::ofstream file("graph_mm.dot");
-        file << kgraph.toDOT(true);
-    }
-
     SECTION("reachableNodes")
     {
         auto sameDimensionLoadTiledNodes
@@ -81,11 +76,6 @@ TEST_CASE("identifyParallelDimensionSets works for GEMM", "[kernel-graph]")
 
     auto kgraph = KernelGraph::translate(example.getCommand());
 
-    {
-        std::ofstream file("graph_gemm.dot");
-        file << kgraph.toDOT(true);
-    }
-
     auto redundantArgs = KernelGraph::identifyParallelDimensionSets(kgraph);
 
     std::vector<std::set<int>> ra2 = {{3, 9}, {2, 36}, {10, 37}, {16, 36}, {17, 37}};
@@ -104,7 +94,7 @@ struct HasKernelArgMatcher : Catch::Matchers::MatcherGenericBase
     {
         for(auto const& arg : kargs)
         {
-            if(arg.name.starts_with(name))
+            if(arg.getName().starts_with(name))
                 return true;
         }
 

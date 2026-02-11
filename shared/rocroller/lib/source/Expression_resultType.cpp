@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -72,6 +72,11 @@ namespace rocRoller
                 if constexpr(CShift<T>)
                 {
                     varType = lhsVal.varType;
+                }
+                // A bitfieldCombine's type is the same as the destination type.
+                else if constexpr(std::same_as<T, BitfieldCombine>)
+                {
+                    varType = rhsVal.varType;
                 }
                 else if(std::same_as<T, Subtract> && lhsVal.varType.isPointer()
                         && lhsVal.varType == rhsVal.varType)
@@ -156,6 +161,12 @@ namespace rocRoller
             }
 
             ResultType operator()(Convert const& expr)
+            {
+                auto argVal = call(expr.arg);
+                return {argVal.regType, expr.destinationType};
+            }
+
+            ResultType operator()(Reinterpret const& expr)
             {
                 auto argVal = call(expr.arg);
                 return {argVal.regType, expr.destinationType};
@@ -328,7 +339,7 @@ namespace rocRoller
             ResultType operator()(Concatenate const& expr)
             {
                 auto         registerType = Register::Type::Literal;
-                VariableType variableType{expr.destinationType};
+                VariableType variableType = expr.destinationType;
 
                 auto expectedNumRegister   = DataTypeInfo::Get(expr.destinationType).registerCount;
                 unsigned actualNumRegister = 0;
@@ -350,8 +361,7 @@ namespace rocRoller
 
                     registerType = Register::PromoteType(registerType, operandRegisterType);
                     actualNumRegister
-                        = actualNumRegister
-                          + DataTypeInfo::Get(operandVariableType.dataType).registerCount;
+                        = actualNumRegister + DataTypeInfo::Get(operandVariableType).registerCount;
                 }
 
                 AssertFatal(expectedNumRegister == actualNumRegister,
@@ -375,7 +385,7 @@ namespace rocRoller
                 if(expr == nullptr)
                     return {Register::Type::Count, DataType::Count};
 
-                return {Register::Type::Scalar, expr->variableType};
+                return {Register::Type::Scalar, expr->getVariableType()};
             }
 
             ResultType operator()(CommandArgumentValue const& expr)

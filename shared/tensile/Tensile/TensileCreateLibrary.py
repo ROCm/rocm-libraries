@@ -174,7 +174,7 @@ def prepAsm(
 
             assemblerFile.write(f"if %wave% == 32 ({cArgs32}) else ({cArgs64})\n")
             assemblerFile.write(f"{lArgs}\n")
-            assemblerFile.write("copy %f%.co ..\..\..\library\%f%_%h%.co\n")
+            assemblerFile.write("copy %f%.co ..\\..\\..\\library\\%f%_%h%.co\n")
     os.chmod(assemblerFileName, 0o777)
 
 
@@ -488,6 +488,7 @@ def writeKernels(
         os.name != "nt",
         # Use globalParameters here, not params
         Path(globalParameters["WorkingPath"]),
+        # This won't affect the ISA for code-gen, only for post-build assembly kernel compilation
         globalParameters["CurrentISA"],
         params["PrintLevel"],
     )

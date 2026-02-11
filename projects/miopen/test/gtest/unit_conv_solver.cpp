@@ -28,67 +28,31 @@
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/generic_search.hpp>
+#include <miopen/any_solver.hpp>
 
 #include "unit_conv_solver.hpp"
 
 #include "get_handle.hpp"
+#include "../gpu_conv.hpp"
 #include "conv_common.hpp"
 #include "conv_tensor_gen.hpp"
 #include "tensor_holder.hpp"
 
 #include "../workspace.hpp"
 
-MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_ENABLE_DEPRECATED_SOLVERS)
-
 namespace miopen {
 namespace unit_tests {
 
 namespace {
 
-class DeprecatedSolversScopedEnabler
-{
-public:
-    DeprecatedSolversScopedEnabler() noexcept {}
-    DeprecatedSolversScopedEnabler(const DeprecatedSolversScopedEnabler&) = delete;
-    DeprecatedSolversScopedEnabler(DeprecatedSolversScopedEnabler&&)      = delete;
-    DeprecatedSolversScopedEnabler& operator=(const DeprecatedSolversScopedEnabler&) = delete;
-    DeprecatedSolversScopedEnabler& operator=(DeprecatedSolversScopedEnabler&&) = delete;
-
-    ~DeprecatedSolversScopedEnabler()
-    {
-        if(changed)
-        {
-            if(prev)
-                lib_env::update(MIOPEN_DEBUG_ENABLE_DEPRECATED_SOLVERS, false);
-            else
-                lib_env::clear(MIOPEN_DEBUG_ENABLE_DEPRECATED_SOLVERS);
-        }
-    }
-
-    void Enable()
-    {
-        if(MIOPEN_DEBUG_ENABLE_DEPRECATED_SOLVERS)
-            prev = lib_env::value<bool>(MIOPEN_DEBUG_ENABLE_DEPRECATED_SOLVERS);
-        if(prev != true)
-        {
-            lib_env::update(MIOPEN_DEBUG_ENABLE_DEPRECATED_SOLVERS, true);
-            changed = true;
-        }
-    }
-
-private:
-    std::optional<bool> prev;
-    bool changed = false;
-};
-
 class ConvAttrFp16AltScopedSetter
 {
 public:
     ConvAttrFp16AltScopedSetter() noexcept {}
-    ConvAttrFp16AltScopedSetter(const ConvAttrFp16AltScopedSetter&) = delete;
-    ConvAttrFp16AltScopedSetter(ConvAttrFp16AltScopedSetter&&)      = delete;
+    ConvAttrFp16AltScopedSetter(const ConvAttrFp16AltScopedSetter&)            = delete;
+    ConvAttrFp16AltScopedSetter(ConvAttrFp16AltScopedSetter&&)                 = delete;
     ConvAttrFp16AltScopedSetter& operator=(const ConvAttrFp16AltScopedSetter&) = delete;
-    ConvAttrFp16AltScopedSetter& operator=(ConvAttrFp16AltScopedSetter&&) = delete;
+    ConvAttrFp16AltScopedSetter& operator=(ConvAttrFp16AltScopedSetter&&)      = delete;
 
     ~ConvAttrFp16AltScopedSetter()
     {
@@ -129,7 +93,7 @@ bool IsDeviceSupported(Gpu supported_devs, Gpu dev)
 // ConvTestCase
 //************************************************************************************
 
-ConvTestCase::ConvTestCase() : x(miopenHalf, {}), w(miopenHalf, {}), conv({}, {}, {}){};
+ConvTestCase::ConvTestCase() : x(miopenHalf, {}), w(miopenHalf, {}), conv({}, {}, {}) {};
 
 ConvTestCase::ConvTestCase(std::vector<size_t>&& x_,
                            std::vector<size_t>&& w_,
@@ -306,7 +270,7 @@ UnitTestConvSolverParams::UnitTestConvSolverParams() : UnitTestConvSolverParams(
 UnitTestConvSolverParams::UnitTestConvSolverParams(Gpu supported_devs_)
     : supported_devs(supported_devs_),
       use_cpu_ref(false),
-      enable_deprecated_solvers(false),
+      use_gpu_ref(false),
       tunable(false),
       check_xnack_disabled(false)
 {
@@ -314,7 +278,7 @@ UnitTestConvSolverParams::UnitTestConvSolverParams(Gpu supported_devs_)
 
 void UnitTestConvSolverParams::UseCpuRef() { use_cpu_ref = true; }
 
-void UnitTestConvSolverParams::EnableDeprecatedSolvers() { enable_deprecated_solvers = true; }
+void UnitTestConvSolverParams::UseGpuRef() { use_gpu_ref = true; }
 
 void UnitTestConvSolverParams::Tunable(std::size_t iterations_max_)
 {
@@ -339,8 +303,6 @@ std::ostream& operator<<(std::ostream& os, const UnitTestConvSolverParams& p)
        << std::dec;
     if(p.use_cpu_ref)
         os << ", CpuRef:" << p.use_cpu_ref;
-    if(p.enable_deprecated_solvers)
-        os << ", EnDerpSolver:" << p.enable_deprecated_solvers;
     if(p.tunable)
         os << ", IterMax:" << p.tuning_iterations_max;
     if(p.check_xnack_disabled)
@@ -379,10 +341,18 @@ miopen::solver::ConvSolution FindSolution(const miopen::solver::conv::ConvSolver
 template <typename T>
 double GetThreshold(miopenConvAlgorithm_t algo,
                     miopen::conv::Direction direction,
-                    const Tolerances& tolerances)
+                    const Tolerances& tolerances,
+                    const bool use_tf32_compute)
 {
     double tolerance = tolerances.Get(GetDevGpuType(), miopen_type<T>{});
     double threshold = std::numeric_limits<T>::epsilon() * tolerance;
+    if constexpr(std::is_same_v<T, float>)
+    {
+        if(use_tf32_compute)
+        {
+            threshold = std::numeric_limits<half_float::half>::epsilon() * tolerance;
+        }
+    }
     return threshold;
 }
 
@@ -391,7 +361,8 @@ void VerifyData(const std::vector<T>& data,
                 const std::vector<Tref>& ref_data,
                 miopenConvAlgorithm_t algo,
                 miopen::conv::Direction direction,
-                const Tolerances& tolerances)
+                const Tolerances& tolerances,
+                bool use_tf32_compute = false)
 {
     ASSERT_FALSE(miopen::range_zero(ref_data)) << "Reference data is all zeros";
     if constexpr(!std::is_integral_v<T>)
@@ -418,7 +389,7 @@ void VerifyData(const std::vector<T>& data,
     else
     {
         const auto error       = miopen::rms_range(ref_data, data);
-        const double threshold = GetThreshold<T>(algo, direction, tolerances);
+        const double threshold = GetThreshold<T>(algo, direction, tolerances, use_tf32_compute);
         ASSERT_LT(error, threshold) << "Error beyond tolerance";
         // std::cout << "error: " << error << " threshold: " << threshold << std::endl;
     }
@@ -474,8 +445,17 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
     const auto ctx = [&] {
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
+        problem.SetupComputeType(tmp);
         return tmp;
     }();
+
+    auto device_name = ctx.GetStream().GetDeviceName();
+    if(!(miopen::StartsWith(device_name, "gfx942") || miopen::StartsWith(device_name, "gfx950")) &&
+       conv_config.GetXDataType() == miopenFloat &&
+       conv_config.GetConv().GetMathType() == miopenMathDefault)
+    {
+        GTEST_SKIP() << "TF32 test is not supported on this device";
+    }
 
     if(!solv.IsApplicable(ctx, problem))
     {
@@ -517,6 +497,14 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
                                 conv_desc.GetConvDilations(),
                                 conv_desc.GetGroupCount());
     }
+    else if(params.use_gpu_ref)
+    {
+        const bool gpu_ref_used = gpu_ref_convolution_fwd(input, weights, ref_out, conv_desc);
+        if(!gpu_ref_used)
+        {
+            throw std::runtime_error("GPU reference not available for this configuration");
+        }
+    }
     else
     {
         ref_out = ref_conv_fwd(input, weights, ref_out, conv_desc);
@@ -524,8 +512,12 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
 
     output.data = handle.Read<Tout>(out_dev, output.data.size());
 
-    VerifyData(
-        output.data, ref_out.data, algo, miopen::conv::Direction::Forward, params.tolerances);
+    VerifyData(output.data,
+               ref_out.data,
+               algo,
+               miopen::conv::Direction::Forward,
+               params.tolerances,
+               problem.UseTF32());
 }
 
 template <typename T, typename Tref>
@@ -587,6 +579,7 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
     const auto ctx = [&] {
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
+        problem.SetupComputeType(tmp);
         return tmp;
     }();
 
@@ -630,6 +623,14 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
                                       conv_desc.GetConvDilations(),
                                       conv_desc.GetGroupCount());
     }
+    else if(params.use_gpu_ref)
+    {
+        const bool gpu_ref_used = gpu_ref_convolution_bwd(ref_in, weights, output, conv_desc);
+        if(!gpu_ref_used)
+        {
+            throw std::runtime_error("GPU reference not available for this configuration");
+        }
+    }
     else
     {
         ref_in = ref_conv_bwd(ref_in, weights, output, conv_desc);
@@ -637,8 +638,12 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
 
     input.data = handle.Read<Tin>(in_dev, input.data.size());
 
-    VerifyData(
-        input.data, ref_in.data, algo, miopen::conv::Direction::BackwardData, params.tolerances);
+    VerifyData(input.data,
+               ref_in.data,
+               algo,
+               miopen::conv::Direction::BackwardData,
+               params.tolerances,
+               problem.UseTF32());
 }
 
 template <typename T, typename Tref>
@@ -700,6 +705,7 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
     const auto ctx = [&] {
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
+        problem.SetupComputeType(tmp);
         return tmp;
     }();
 
@@ -707,7 +713,7 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
     {
         // Do not put GTEST_SKIP here.
         // The usage of non-applicable config should be considered as a bug in the test.
-        GTEST_FAIL();
+        GTEST_FAIL() << "IsApplicable failed!";
     }
 
     Workspace wspace;
@@ -743,6 +749,14 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
                                         conv_desc.GetConvDilations(),
                                         conv_desc.GetGroupCount());
     }
+    else if(params.use_gpu_ref)
+    {
+        const bool gpu_ref_used = gpu_ref_convolution_wrw(input, ref_weights, output, conv_desc);
+        if(!gpu_ref_used)
+        {
+            throw std::runtime_error("GPU reference not available for this configuration");
+        }
+    }
     else
     {
         ref_weights = ref_conv_wrw(input, ref_weights, output, conv_desc);
@@ -754,7 +768,8 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
                ref_weights.data,
                algo,
                miopen::conv::Direction::BackwardWeights,
-               params.tolerances);
+               params.tolerances,
+               problem.UseTF32());
 }
 
 template <typename T, typename Tref>
@@ -851,12 +866,6 @@ void UnitTestConvSolverBase::RunTestImpl(const miopen::solver::conv::ConvSolverI
                                          const ConvTestCase& conv_config,
                                          miopenConvAlgorithm_t algo)
 {
-    DeprecatedSolversScopedEnabler deprecated_solv_enabler;
-    if(params.enable_deprecated_solvers)
-    {
-        deprecated_solv_enabler.Enable();
-    }
-
     ConvAttrFp16AltScopedSetter conv_attr_fp16_alt_setter;
     if(params.conv_attr_fp16_alt)
         conv_attr_fp16_alt_setter.SetValue(params.conv_attr_fp16_alt.value());
@@ -874,12 +883,6 @@ void UnitTestConvSolverDevApplicabilityBase::RunTestImpl(
     miopen::conv::Direction direction,
     const ConvTestCase& conv_config)
 {
-    DeprecatedSolversScopedEnabler deprecated_solv_enabler;
-    if(params.enable_deprecated_solvers)
-    {
-        deprecated_solv_enabler.Enable();
-    }
-
     ConvAttrFp16AltScopedSetter conv_attr_fp16_alt_setter;
     if(params.conv_attr_fp16_alt)
         conv_attr_fp16_alt_setter.SetValue(params.conv_attr_fp16_alt.value());
@@ -896,6 +899,7 @@ void UnitTestConvSolverDevApplicabilityBase::RunTestImpl(
         const auto ctx = [&] {
             auto tmp = miopen::ExecutionContext{&handle};
             problem.SetupFloats(tmp);
+            problem.SetupComputeType(tmp);
             return tmp;
         }();
 

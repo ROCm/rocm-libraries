@@ -80,7 +80,7 @@
   UseScaleCD: false
 - - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -269,7 +269,7 @@
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: true
+    UseCustomMainLoopSchedule: 1
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -311,7 +311,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -500,7 +500,7 @@
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: true
+    UseCustomMainLoopSchedule: 1
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false

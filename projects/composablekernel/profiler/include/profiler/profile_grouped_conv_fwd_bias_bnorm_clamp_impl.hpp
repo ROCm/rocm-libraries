@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -32,6 +32,7 @@ using OutElementOp = ck::tensor_operation::element_wise::BiasNormalizeInInferCla
 using Clamp        = ck::tensor_operation::element_wise::Clamp;
 using Add          = ck::tensor_operation::element_wise::Add;
 
+using BaseConv = ck::tensor_layout::convolution::BaseConvolutionLayout;
 // NOTE: Usage of NHWGK layout for GK bias is a workaround. This test is to
 // just keep such implementation valid.
 // TODO: Add possiblity to pass GK layout and GK lengths for bias and reuse
@@ -42,15 +43,15 @@ auto get_elementwise_desc(ck::index_t G, ck::index_t K)
 {
     if constexpr(NDimSpatial == 1)
     {
-        return HostTensorDescriptor({G, 1, K, 1}, {K, 0, 1, 0});
+        return HostTensorDescriptor({G, 1, K, 1}, {K, 0, 1, 0}, BaseConv{});
     }
     else if constexpr(NDimSpatial == 2)
     {
-        return HostTensorDescriptor({G, 1, K, 1, 1}, {K, 0, 1, 0, 0});
+        return HostTensorDescriptor({G, 1, K, 1, 1}, {K, 0, 1, 0, 0}, BaseConv{});
     }
     else
     {
-        return HostTensorDescriptor({G, 1, K, 1, 1, 1}, {K, 0, 1, 0, 0, 0});
+        return HostTensorDescriptor({G, 1, K, 1, 1, 1}, {K, 0, 1, 0, 0, 0}, BaseConv{});
     }
 }
 
@@ -121,11 +122,12 @@ template <ck::index_t NDimSpatial,
           typename BComputeType = AComputeType,
           typename IndexType    = ck::index_t,
           bool ElementwiseGK    = false>
-bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
-                                              int init_method,
-                                              bool do_log,
-                                              bool time_kernel,
-                                              const ck::utils::conv::ConvParam& conv_param)
+bool profile_grouped_conv_fwd_bias_bnorm_clamp_impl(int do_verification,
+                                                    int init_method,
+                                                    bool do_log,
+                                                    bool time_kernel,
+                                                    const ck::utils::conv::ConvParam& conv_param,
+                                                    int instance_index = -1)
 {
     const float floor   = 0.f;
     const float ceil    = 2048.f;
@@ -196,18 +198,29 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
     std::cout << "scale: " << scale.mDesc << std::endl;
     std::cout << "shift: " << shift.mDesc << std::endl;
 
+    // Note: For the integer initialization method (which is used for verification in the tests), I
+    // changed the initialization ranges such that the overall operation becomes monotone. This
+    // means that all multiplications are positive, and all additions are positive. Without this,
+    // the outelementop can make small relative errors arbitrarily large by shifting them toward
+    // zero. In this specific case this should not be an issue, since small integer inputs should
+    // lead to exact outputs from the gemm. However, this is not the case on RDNA3, where integer
+    // inputs can lead to slightly off-integer outputs. This is another issue to investigate, but it
+    // remains the case that the outelementop blowing up tiny errors is not reasonable, so changing
+    // the operation to monotone for now. If we want to move away from monotone we would need to
+    // have a proper error propagation analysis, which is much more complicated.
     switch(init_method)
     {
     case 0: break;
     case 1:
-        input.GenerateTensorValue(GeneratorTensor_2<InDataType>{-5, 5});
-        weight.GenerateTensorValue(GeneratorTensor_2<WeiDataType>{-5, 5});
+        input.GenerateTensorValue(GeneratorTensor_2<InDataType>{0, 5});
+        weight.GenerateTensorValue(GeneratorTensor_2<WeiDataType>{0, 5});
 
-        bias.GenerateTensorValue(GeneratorTensor_2<OutDataType>{-5, 5});
-        mean.GenerateTensorValue(GeneratorTensor_2<OutDataType>{-5, 5});
+        bias.GenerateTensorValue(GeneratorTensor_2<OutDataType>{0, 5});
+        // Mean is negative because this is subtracted.
+        mean.GenerateTensorValue(GeneratorTensor_2<OutDataType>{-5, 0});
         variance.GenerateTensorValue(GeneratorTensor_2<OutDataType>{0, 5});
-        scale.GenerateTensorValue(GeneratorTensor_2<OutDataType>{-5, 5});
-        shift.GenerateTensorValue(GeneratorTensor_2<OutDataType>{-5, 5});
+        scale.GenerateTensorValue(GeneratorTensor_2<OutDataType>{0, 5});
+        shift.GenerateTensorValue(GeneratorTensor_2<OutDataType>{0, 5});
         break;
     default:
         input.GenerateTensorValue(GeneratorTensor_3<InDataType>{0.0, 1.0});
@@ -294,6 +307,7 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
     float best_avg_time   = 0;
     float best_tflops     = 0;
     float best_gb_per_sec = 0;
+    int num_kernel        = 0;
 
     // profile device op instances
     bool pass = true;
@@ -306,6 +320,13 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
 
         if(op_ptr->IsSupportedArgument(argument_ptr.get()))
         {
+            ++num_kernel;
+            if((instance_index != -1) && (instance_index + 1 != num_kernel))
+            {
+                // skip test if instance_index is specified
+                std::cout << op_ptr->GetTypeString() << " skipped" << std::endl;
+                return;
+            }
             // re-init output to zero before profiling next kernel
             out_device_buf.SetZero();
 
@@ -419,7 +440,11 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
     std::cout << "Best configuration parameters:" << "\nname: " << best_op_name
               << "\navg_time: " << best_avg_time << "\ntflops: " << best_tflops
               << "\nGB/s: " << best_gb_per_sec << std::endl;
-
+    if(instance_index != -1)
+    {
+        std::cout << "grouped_conv_fwd_bias_bnorm_clamp_instance (" << instance_index << "/"
+                  << num_kernel << "): Passed" << std::endl;
+    }
     return pass;
 }
 

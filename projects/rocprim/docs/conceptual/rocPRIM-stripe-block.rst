@@ -3,7 +3,7 @@
   :keywords: rocPRIM, ROCm, API, documentation, block, stripe, stride
 
 ********************************************************************
-Block and stripe configurations
+Block and stripe arrangements
 ********************************************************************
 
 There are two arrangements that can be used to assign items to threads for processing.

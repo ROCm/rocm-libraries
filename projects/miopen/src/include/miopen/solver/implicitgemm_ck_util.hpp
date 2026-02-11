@@ -33,6 +33,7 @@
 #include <miopen/tensor_ops.hpp>
 #include <miopen/miopen_internal.h>
 #include <miopen/fusion/fusion_invoke_params.hpp>
+#include <miopen/solver/implicitgemm_util.hpp>
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <ck/utility/data_type.hpp>
@@ -50,9 +51,32 @@ struct ProblemDescription;
 } // namespace conv
 
 namespace solver {
+
+static constexpr int CkSplitkAutoDeduce = -1;
+
+template <int L, int H>
+inline static bool NextCKSplitkValue(int& v)
+{
+    assert((IsTwoPower<L, H>(v) || v == CkSplitkAutoDeduce));
+    if(v == H)
+    {
+        v = CkSplitkAutoDeduce;
+        return false;
+    }
+    if(v == CkSplitkAutoDeduce)
+    {
+        v = L;
+        return true;
+    }
+
+    v *= 2;
+    return false;
+}
+
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+
 namespace conv {
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGWrw = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<
     2,
     ck::tensor_layout::convolution::NHWGC,
@@ -63,12 +87,13 @@ using DeviceOpGWrw = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<
     DataType,
     ck::tensor_operation::element_wise::PassThrough,
     ck::tensor_operation::element_wise::PassThrough,
-    ck::tensor_operation::element_wise::PassThrough>;
-template <typename DataType>
-using DeviceOpGWrwPtrs =
-    ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<DeviceOpGWrw<DataType>>;
+    ck::tensor_operation::element_wise::PassThrough,
+    ComputeType>;
+template <typename DataType, typename ComputeType = DataType>
+using DeviceOpGWrwPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+    DeviceOpGWrw<DataType, ComputeType>>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwd = ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD<
     2,
     ck::tensor_layout::convolution::NHWGK,
@@ -81,11 +106,12 @@ using DeviceOpGBwd = ck::tensor_operation::device::DeviceGroupedConvBwdDataMulti
     DataType,
     ck::tensor_operation::element_wise::PassThrough,
     ck::tensor_operation::element_wise::PassThrough,
-    ck::tensor_operation::element_wise::PassThrough>;
+    ck::tensor_operation::element_wise::PassThrough,
+    ComputeType>;
 
-template <typename DataType>
-using DeviceOpGBwdPtrs =
-    ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<DeviceOpGBwd<DataType>>;
+template <typename DataType, typename ComputeType = DataType>
+using DeviceOpGBwdPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+    DeviceOpGBwd<DataType, ComputeType>>;
 
 using InLayout    = ck::tensor_layout::convolution::NDHWGC;
 using WeiLayout   = ck::tensor_layout::convolution::GKZYXC;
@@ -94,7 +120,7 @@ using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 using Bilinear    = ck::tensor_operation::element_wise::Bilinear;
 using Scale       = ck::tensor_operation::element_wise::Scale;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightDefault =
     ck::tensor_operation::device::DeviceGroupedConvBwdWeight<3,
                                                              InLayout,
@@ -105,9 +131,10 @@ using DeviceOpGBwdWeightDefault =
                                                              DataType,
                                                              PassThrough,
                                                              PassThrough,
-                                                             PassThrough>;
+                                                             PassThrough,
+                                                             ComputeType>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightBilinear =
     ck::tensor_operation::device::DeviceGroupedConvBwdWeightMultipleD<3,
                                                                       InLayout,
@@ -120,9 +147,10 @@ using DeviceOpGBwdWeightBilinear =
                                                                       ck::Tuple<DataType>,
                                                                       PassThrough,
                                                                       Bilinear,
-                                                                      PassThrough>;
+                                                                      PassThrough,
+                                                                      ComputeType>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightScale =
     ck::tensor_operation::device::DeviceGroupedConvBwdWeightMultipleD<3,
                                                                       InLayout,
@@ -135,22 +163,23 @@ using DeviceOpGBwdWeightScale =
                                                                       ck::Tuple<>,
                                                                       PassThrough,
                                                                       Scale,
-                                                                      PassThrough>;
+                                                                      PassThrough,
+                                                                      ComputeType>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightDefaultPtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOpGBwdWeightDefault<DataType>>;
+        DeviceOpGBwdWeightDefault<DataType, ComputeType>>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightBilinearPtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOpGBwdWeightBilinear<DataType>>;
+        DeviceOpGBwdWeightBilinear<DataType, ComputeType>>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightScalePtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOpGBwdWeightScale<DataType>>;
+        DeviceOpGBwdWeightScale<DataType, ComputeType>>;
 
 } // namespace conv
 
@@ -222,22 +251,27 @@ inline constexpr bool IsSplitKNeeded()
 {
     return std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<ck::bhalf_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<ck::bhalf_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<ck::bhalf_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<ck::bhalf_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<ck::bhalf_t>>;
 }
@@ -300,6 +334,35 @@ bool IsCKApplicable(const ProblemDescriptionType& problem)
         ptrs.begin(), ptrs.end(), [&args](auto& ptr) { return args.IsSupportedBy(ptr); });
 }
 
+template <typename DeviceOpType,
+          typename CKArgsType,
+          typename ProblemDescriptionType = miopen::conv::ProblemDescription>
+size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
+{
+    const auto args         = CKArgsType{problem};
+    auto max_workspace_size = 0;
+
+    const auto ptrs = DeviceOpType::GetInstances();
+    for(auto& ptr : ptrs)
+    {
+        // Cycle `split_k` over {1,2,4,...,128} then `CkSplitkAutoDeduce`.
+        // The loop then restarts from 1 for the next conv instance.
+        auto split_k = 1;
+        do
+        {
+            if(args.IsSupportedBySplitK(ptr, split_k))
+            {
+                auto workspace_size = args.GetCKSplitkWorkspaceSize(ptr, split_k);
+                if(workspace_size > max_workspace_size)
+                    max_workspace_size = workspace_size;
+            }
+        } while(!NextCKSplitkValue<1, 128>(split_k));
+    }
+
+    MIOPEN_LOG_I("Max workspace size reported by CK: " << max_workspace_size);
+    return max_workspace_size;
+}
+
 #define WORKAROUND_CK_ISSUE_1184 1
 #if WORKAROUND_CK_ISSUE_1184
 using WorkAroundHipEventProfiler = HipEventProfiler;
@@ -331,6 +394,15 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
         return {miopenStatusInvalidValue};
 
     ConvSolution result;
+#ifdef CK_EXPERIMENTAL_BUILDER
+    std::string description = (*ptr_iter)->describe()->detailed();
+
+    if(!description.empty())
+    {
+        MIOPEN_LOG_I(description);
+    }
+#endif
+
     result.invoker_factory =
         [ck_args     = CKArgsType{problem},
          sh_conv_ptr = std::shared_ptr{std::move(*ptr_iter)}](const std::vector<Kernel>&) mutable {
@@ -744,13 +816,14 @@ inline bool CKWrwRequireWorkspace(
 }
 
 /// \todo move to a cpp file
-inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDescription& problem)
+inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDescription& problem,
+                                                  size_t ck_ws_size = 0)
 {
     if(problem.IsLayoutNHWC())
     {
         if(problem.GetDirection() == ::miopen::conv::Direction::BackwardWeights)
         {
-            return GetCKAlphaBetaWorkspace(problem);
+            return (ck_ws_size > 0) ? ck_ws_size : GetCKAlphaBetaWorkspace(problem);
         }
         return 0;
     }
@@ -759,10 +832,11 @@ inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDes
 
     if(problem.GetDirection() == ::miopen::conv::Direction::BackwardWeights)
     {
-        MultiBufferWorkspaceTraits wt({GetPackedSize(problem.GetIn()),
-                                       GetPackedSize(problem.GetWeights()),
-                                       GetPackedSize(problem.GetOut()),
-                                       GetCKAlphaBetaWorkspace(problem)});
+        MultiBufferWorkspaceTraits wt(
+            {GetPackedSize(problem.GetIn()),
+             GetPackedSize(problem.GetWeights()),
+             GetPackedSize(problem.GetOut()),
+             (ck_ws_size > 0) ? ck_ws_size : GetCKAlphaBetaWorkspace(problem)});
         return wt.GetSize();
     }
 
@@ -1079,16 +1153,31 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
 
     std::optional<CKBWDWeightBufferDescriptor> _ck_buff_des;
 
-    if(problem.IsDirectionBackwardWrW())
-    {
-        _ck_buff_des.emplace(GetCKAlphaBetaWorkspace(problem), 0);
-    }
-
     auto ptr_iter = FindConvPtrByID(conv_ptrs, id_string);
     if(ptr_iter == conv_ptrs.end())
     {
         MIOPEN_LOG_E("PerformanceConfig kernel '" + kernel_id + "' does not exist.");
         return {miopenStatusInvalidValue};
+    }
+
+#ifdef CK_EXPERIMENTAL_BUILDER
+    std::string description = (*ptr_iter)->describe()->detailed();
+
+    if(!description.empty())
+    {
+        MIOPEN_LOG_I(description);
+    }
+#endif
+
+    if constexpr(std::is_same_v<CastType, miopen::conv::WrWInvokeParams>)
+    {
+        auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value_or(1));
+        _ck_buff_des.emplace(ck_ws_size, 0);
+        result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
+    }
+    else
+    {
+        result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem);
     }
 
     auto [_input1_tr_inst, _input2_tr_inst, _output_tr_inst, _output_init_tr_inst] =
@@ -1197,8 +1286,6 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             output_tr_inst.ConvertTo(handle, kernels, conv_tensors);
         };
     };
-
-    result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem);
 #endif
     return result;
 }
@@ -1230,13 +1317,22 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
         return {miopenStatusInvalidValue};
     }
 
+    ConvSolution result;
+#ifdef CK_EXPERIMENTAL_BUILDER
+    std::string description = (*ptr_iter)->describe()->detailed();
+
+    if(!description.empty())
+    {
+        MIOPEN_LOG_I(description);
+    }
+#endif
     if constexpr(std::is_same_v<CastType, miopen::conv::WrWInvokeParams>)
     {
-        ConvSolution result;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
         miopenAlphaBetaCase_t alpha_beta_case = problem.GetAlphaBetaCase();
-        [[maybe_unused]] bool should_allocated_wrw_buffer =
-            ShouldAllocateWorkSpaceBufferForWRW(problem);
+        auto ck_args                          = CKArgsType{problem};
+        auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value_or(1));
+        [[maybe_unused]] bool should_allocated_wrw_buffer = ck_ws_size > 0;
 
         result.invoker_factory = [kernel_id                   = kernel_id,
                                   split_k                     = split_k,
@@ -1297,13 +1393,12 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 }
             };
         };
-        result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem);
+        result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
 #endif
         return result;
     }
     else
     {
-        ConvSolution result;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
         result.invoker_factory = [kernel_id   = kernel_id,
                                   split_k     = split_k,
@@ -1409,7 +1504,8 @@ template <typename InvokerFactoryMakerNCHW, typename InvokerFactoryMakerNHWC>
 ConvSolution
 MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& problem,
                                         InvokerFactoryMakerNCHW&& invoker_factory_maker_ncdhw,
-                                        InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc)
+                                        InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc,
+                                        const bool use_tf32 = false)
 {
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -1417,10 +1513,14 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
     {
         switch(problem.GetInDataType())
         {
-        case miopenInt8: return invoker_factory_maker_ncdhw(int8_t{});
-        case miopenHalf: return invoker_factory_maker_ncdhw(ck::half_t{});
-        case miopenFloat: return invoker_factory_maker_ncdhw(float{});
-        case miopenBFloat16: return invoker_factory_maker_ncdhw(ck::bhalf_t{});
+        case miopenInt8: return invoker_factory_maker_ncdhw(int8_t{}, int8_t{});
+        case miopenHalf: return invoker_factory_maker_ncdhw(ck::half_t{}, ck::half_t{});
+        case miopenFloat:
+            if(use_tf32)
+                return invoker_factory_maker_ncdhw(float{}, ck::tf32_t{});
+            else
+                return invoker_factory_maker_ncdhw(float{}, float{});
+        case miopenBFloat16: return invoker_factory_maker_ncdhw(ck::bhalf_t{}, ck::bhalf_t{});
         case miopenInt64:
         case miopenInt32:
         case miopenDouble:
@@ -1436,10 +1536,14 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
     {
         switch(problem.GetInDataType())
         {
-        case miopenInt8: return invoker_factory_maker_ndhwc(int8_t{});
-        case miopenHalf: return invoker_factory_maker_ndhwc(ck::half_t{});
-        case miopenFloat: return invoker_factory_maker_ndhwc(float{});
-        case miopenBFloat16: return invoker_factory_maker_ndhwc(ck::bhalf_t{});
+        case miopenInt8: return invoker_factory_maker_ndhwc(int8_t{}, int8_t{});
+        case miopenHalf: return invoker_factory_maker_ndhwc(ck::half_t{}, ck::half_t{});
+        case miopenFloat:
+            if(use_tf32)
+                return invoker_factory_maker_ndhwc(float{}, ck::tf32_t{});
+            else
+                return invoker_factory_maker_ndhwc(float{}, float{});
+        case miopenBFloat16: return invoker_factory_maker_ndhwc(ck::bhalf_t{}, ck::bhalf_t{});
         case miopenInt64:
         case miopenInt32:
         case miopenDouble:

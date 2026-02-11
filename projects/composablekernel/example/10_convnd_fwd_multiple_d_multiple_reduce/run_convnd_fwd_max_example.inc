@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2023, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -23,7 +23,7 @@ using RsGlobalReduceOp =
 static constexpr auto ConvSpec =
     ck::tensor_operation::device::ConvolutionForwardSpecialization::Default;
 
-static constexpr auto GemmDefault = ck::tensor_operation::device::GemmSpecialization::Default;
+static constexpr auto GemmDefault = ck::tensor_operation::device::GemmSpecialization::MNKPadding;
 
 // clang-format off
 template <ck::index_t NDimSpatial>

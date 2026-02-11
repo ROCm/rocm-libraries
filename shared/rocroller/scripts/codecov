@@ -123,18 +123,26 @@ else
     rm -rf ${build_path}/*.profraw
     rm -rf ${code_cov_path}/*.profraw
 
-    # Add the node install to our PATH.
-    source ${script_path}/../docker/setup-node
-
     # The `%m` creates a different prof file for each object file. So one for
     # rocroller.so and one for rocroller-tests.
-    # Also had to switch to using ctest so seg faults can be handled gracefully.
+    # Using sharded test runner with codecov profile for better parallelization
+    # and centralized test filtering configuration.
+    #
+    # The codecov profile excludes slow/exhaustive tests to reduce execution time
+    # while maintaining good coverage validation (basic tests still run).
 
-    echo Using $(nproc) threads for code coverage tests.
-    OMP_NUM_THREADS=8 LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw ctest \
-        -j $(nproc) \
+    echo Using sharded test runner with codecov profile.
+    LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw \
+        ${script_path}/run-tests-sharded \
+        ${build_path} \
+        --profile codecov
+
+    # Now do pytests etc
+    OMP_NUM_THREADS=2 LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw ctest \
+        -j $(($(nproc)/2)) \
         --test-dir ${build_path} \
         --output-on-failure \
+        -LE "GTEST|CATCH" \
         ${ctest_re_flag} "${ctest_re}"
 
     # this combines them back together.
@@ -285,23 +293,19 @@ else
         wc -l ./code_cov_${gpu}.diff
 
         if [ -s ./code_cov_${gpu}.diff ]; then
-            # Add the node install to our PATH.
-            source ../docker/setup-node
-            diff2html -s side -i file -F ./code_cov_diff_${gpu}.html -- ./code_cov_${gpu}.diff
-            wc -l ./code_cov_diff_${gpu}.html
-
             cat ./code_cov_${gpu}.diff | grep -E "^\\+.*-ZERO-\\|" | wc -l > new_uncovered_lines.txt
         else
             mkdir -p ../python_cov_html
             touch ../python_cov_html/index.html
             mkdir -p ./code_cov_${gpu}_html
             touch ./code_cov_${gpu}_html/index.html
-            touch ./code_cov_diff_${gpu}.html
             echo "## Error encountered generating coverage report" > ./code_cov_${gpu}.formatted
             echo "There was an empty ./code_cov_${gpu}.diff." >> ./code_cov_${gpu}.formatted
             echo "0" > new_uncovered_lines.txt
             echo "There was an empty ./code_cov_${gpu}.diff."
         fi
+        # TODO: Temporarily disabling code_cov_diff_*.html generation
+        touch ./code_cov_diff_${gpu}.html
     else
         mkdir -p ../python_cov_html
         touch ../python_cov_html/index.html

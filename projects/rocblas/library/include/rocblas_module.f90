@@ -25603,6 +25603,60 @@ module rocblas
         end function rocblas_geam_ex
     end interface
 
+    ! syrk_ex
+    interface
+        function rocblas_syrk_ex(handle, uplo, transA, n, k, alpha, a, a_type, lda, &
+                                 beta, c, c_type, ldc, &
+                                 compute_type) &
+            bind(c, name='rocblas_syrk_ex')
+            use iso_c_binding
+            use rocblas_enums
+            implicit none
+            integer(kind(rocblas_status_success)) :: rocblas_syrk_ex
+            type(c_ptr), value :: handle
+            integer(kind(rocblas_fill_upper)), value :: uplo
+            integer(kind(rocblas_operation_none)), value :: transA
+            integer(c_int), value :: n
+            integer(c_int), value :: k
+            type(c_ptr), value :: alpha
+            type(c_ptr), value :: a
+            integer(kind(rocblas_datatype_f16_r)), value :: a_type
+            integer(c_int), value :: lda
+            type(c_ptr), value :: beta
+            type(c_ptr), value :: c
+            integer(kind(rocblas_datatype_f16_r)), value :: c_type
+            integer(c_int), value :: ldc
+            integer(kind(rocblas_datatype_f16_r)), value :: compute_type
+        end function rocblas_syrk_ex
+    end interface
+
+    ! herk_ex
+    interface
+        function rocblas_herk_ex(handle, uplo, transA, n, k, alpha, a, a_type, lda, &
+                                 beta, c, c_type, ldc, &
+                                 compute_type) &
+            bind(c, name='rocblas_herk_ex')
+            use iso_c_binding
+            use rocblas_enums
+            implicit none
+            integer(kind(rocblas_status_success)) :: rocblas_herk_ex
+            type(c_ptr), value :: handle
+            integer(kind(rocblas_fill_upper)), value :: uplo
+            integer(kind(rocblas_operation_none)), value :: transA
+            integer(c_int), value :: n
+            integer(c_int), value :: k
+            type(c_ptr), value :: alpha
+            type(c_ptr), value :: a
+            integer(kind(rocblas_datatype_f16_r)), value :: a_type
+            integer(c_int), value :: lda
+            type(c_ptr), value :: beta
+            type(c_ptr), value :: c
+            integer(kind(rocblas_datatype_f16_r)), value :: c_type
+            integer(c_int), value :: ldc
+            integer(kind(rocblas_datatype_f16_r)), value :: compute_type
+        end function rocblas_herk_ex
+    end interface
+
     ! trsm_ex
     interface
         function rocblas_trsm_ex(handle, side, uplo, transA, diag, m, n, alpha, A, lda, &

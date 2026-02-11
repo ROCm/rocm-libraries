@@ -27,32 +27,38 @@
 #include <vector>
 #include <cstdint>
 
-#include <miopen/conv/solvers.hpp>
 #include <miopen/env.hpp>
+
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR)
+
+#include <miopen/conv/solvers.hpp>
 #include <miopen/generic_search.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <miopen/solver/ck_utility_common.hpp>
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+#include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/conv/heuristics/ai_candidate_selection.hpp>
+#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
+#endif
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS)
 
 namespace miopen {
 namespace solver {
 namespace conv {
 
-using ProblemDescription = miopen::conv::ProblemDescription;
-
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 namespace {
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 struct CKArgs
 {
-    CKArgs(const ProblemDescription& problem)
+    CKArgs(const ::miopen::conv::ProblemDescription& problem)
     {
         G               = ProblemInterpreter::GetGroupCountG(problem);
         N               = ProblemInterpreter::GetBatchN(problem);
@@ -109,20 +115,20 @@ struct CKArgs
         }
 
         filter_strides   = {ProblemInterpreter::GetAdjustedConvolutionStrideD(problem),
-                          ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
-                          ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
+                            ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
+                            ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
         filter_dilations = {ProblemInterpreter::GetAdjustedConvolutionDilationD(problem),
                             ProblemInterpreter::GetAdjustedConvolutionDilationH(problem),
                             ProblemInterpreter::GetAdjustedConvolutionDilationW(problem)};
         lPadding         = {ProblemInterpreter::GetInputLeftPadD(problem),
-                    ProblemInterpreter::GetInputLeftPadH(problem),
-                    ProblemInterpreter::GetInputLeftPadW(problem)};
+                            ProblemInterpreter::GetInputLeftPadH(problem),
+                            ProblemInterpreter::GetInputLeftPadW(problem)};
         rPadding         = {ProblemInterpreter::GetAdjustedInputRightPadD(problem),
-                    ProblemInterpreter::GetAdjustedInputRightPadH(problem),
-                    ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
+                            ProblemInterpreter::GetAdjustedInputRightPadH(problem),
+                            ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
     }
-    CKArgs(const CKArgs&) = default;
-    CKArgs(CKArgs&&)      = default;
+    CKArgs(const CKArgs&)            = default;
+    CKArgs(CKArgs&&)                 = default;
     CKArgs& operator=(const CKArgs&) = default;
 
     template <typename ConvPtr>
@@ -135,11 +141,11 @@ struct CKArgs
                     int split_k) const
     {
         using DeviceP = std::remove_pointer_t<decltype(conv_ptr.get())>;
-        if constexpr(std::is_same_v<DeviceP, DeviceOpGBwdWeightBilinear<DataType>>)
+        if constexpr(std::is_same_v<DeviceP, DeviceOpGBwdWeightBilinear<DataType, ComputeType>>)
         {
             return MakeBilinearArgPtr(conv_ptr, x, dw, dy, alpha, beta, split_k);
         }
-        else if constexpr(std::is_same_v<DeviceP, DeviceOpGBwdWeightScale<DataType>>)
+        else if constexpr(std::is_same_v<DeviceP, DeviceOpGBwdWeightScale<DataType, ComputeType>>)
         {
             (void)beta;
             return MakeScaleArgPtr(conv_ptr, x, dw, dy, alpha, split_k);
@@ -148,7 +154,7 @@ struct CKArgs
         {
             (void)alpha;
             (void)beta;
-            static_assert(std::is_same_v<DeviceP, DeviceOpGBwdWeightDefault<DataType>>,
+            static_assert(std::is_same_v<DeviceP, DeviceOpGBwdWeightDefault<DataType, ComputeType>>,
                           "Default should be wrw pass through");
             return MakeDefaultArgPtr(conv_ptr, x, dw, dy, split_k);
         }
@@ -250,27 +256,30 @@ struct CKArgs
     template <typename ConvPtr>
     bool IsSupportedBy(const ConvPtr& conv_ptr) const
     {
-        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, 1);
-        // Creat dummy workspace to pass the ck IsSupportedArgument check.
-
-        int dummy_var = 1;
-        conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &dummy_var);
-
+        auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, 1);
+        auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
+        if(workspace_size != 0)
+            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &workspace_size);
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 
     template <typename ConvPtr>
     bool IsSupportedBySplitK(const ConvPtr& conv_ptr, int split_k) const
     {
-        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
-
-        if(CKWrwRequireWorkspace(G, C1, K1, data_type, alpha_beta_case))
+        auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
+        auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
+        if(workspace_size != 0)
         {
-            // Creat dummy workspace to pass the ck IsSupportedArgument check.
-            int dummy_var = 1;
-            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &dummy_var);
+            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &workspace_size);
         }
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
+    }
+
+    template <typename ConvPtr>
+    std::size_t GetCKSplitkWorkspaceSize(const ConvPtr& conv_ptr, int split_k) const
+    {
+        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
+        return conv_ptr->GetWorkSpaceSize(arg_ptr.get());
     }
 
     int G;
@@ -301,104 +310,297 @@ struct CKArgs
     std::array<ck::index_t, 3> lPadding;
     std::array<ck::index_t, 3> rPadding;
 };
-} // namespace
 
-template <typename DataType>
-void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::Init(const ProblemDescription& problem)
+template <typename DataType, typename ComputeType>
+std::vector<std::string>
+FillValidKernelsByAlphaBeta(const ::miopen::conv::ProblemDescription& problem)
 {
     switch(problem.GetAlphaBetaCase())
     {
     case BILINEAR:
-        valid_kernels =
-            FillValidKernelsIDs<DeviceOpGBwdWeightBilinearPtrs<DataType>, CKArgs<DataType>>(
-                problem);
-        break;
+        return FillValidKernelsIDs<DeviceOpGBwdWeightBilinearPtrs<DataType, ComputeType>,
+                                   CKArgs<DataType, ComputeType>>(problem);
     case SCALE:
-        valid_kernels =
-            FillValidKernelsIDs<DeviceOpGBwdWeightScalePtrs<DataType>, CKArgs<DataType>>(problem);
-        break;
+        return FillValidKernelsIDs<DeviceOpGBwdWeightScalePtrs<DataType, ComputeType>,
+                                   CKArgs<DataType, ComputeType>>(problem);
     default:
-        valid_kernels =
-            FillValidKernelsIDs<DeviceOpGBwdWeightDefaultPtrs<DataType>, CKArgs<DataType>>(problem);
-        break;
+        return FillValidKernelsIDs<DeviceOpGBwdWeightDefaultPtrs<DataType, ComputeType>,
+                                   CKArgs<DataType, ComputeType>>(problem);
     }
+}
+} // namespace
+
+// Test helper: Get all WRW kernel TypeStrings without filtering
+// Used for metadata validation tests
+std::vector<std::string> GetAllWrwKernelTypeStrings()
+{
+    std::vector<std::string> all_kernels;
+
+    auto bilinear_ptrs = DeviceOpGBwdWeightBilinearPtrs<float>::GetInstances();
+    auto scale_ptrs    = DeviceOpGBwdWeightScalePtrs<float>::GetInstances();
+    auto default_ptrs  = DeviceOpGBwdWeightDefaultPtrs<float>::GetInstances();
+
+    all_kernels.reserve(bilinear_ptrs.size() + scale_ptrs.size() + default_ptrs.size());
+
+    for(const auto& ptr : bilinear_ptrs)
+        all_kernels.push_back(ptr->GetTypeString());
+    for(const auto& ptr : scale_ptrs)
+        all_kernels.push_back(ptr->GetTypeString());
+    for(const auto& ptr : default_ptrs)
+        all_kernels.push_back(ptr->GetTypeString());
+
+    return all_kernels;
+}
+
+template <typename DataType, typename ComputeType>
+bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::Init(
+    const ::miopen::conv::ProblemDescription& problem)
+{
+    valid_kernels = FillValidKernelsByAlphaBeta<DataType, ComputeType>(problem);
+    if(valid_kernels.empty())
+        return false;
     index     = 0;
     split_k   = 1;
     kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
+    return true;
 }
 
-template <typename DataType>
+template <typename DataType, typename ComputeType>
 bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::CheckIsSupportCKArgs(
-    const ProblemDescription& problem) const
+    const ::miopen::conv::ProblemDescription& problem) const
 {
     switch(problem.GetAlphaBetaCase())
     {
     case BILINEAR:
-        return IsCKArgsSupported<DeviceOpGBwdWeightBilinearPtrs<DataType>, CKArgs<DataType>>(
-            problem, kernel_id);
+        return IsCKArgsSupported<DeviceOpGBwdWeightBilinearPtrs<DataType, ComputeType>,
+                                 CKArgs<DataType, ComputeType>>(problem, kernel_id);
     case SCALE:
-        return IsCKArgsSupported<DeviceOpGBwdWeightScalePtrs<DataType>, CKArgs<DataType>>(
-            problem, kernel_id);
+        return IsCKArgsSupported<DeviceOpGBwdWeightScalePtrs<DataType, ComputeType>,
+                                 CKArgs<DataType, ComputeType>>(problem, kernel_id);
     default:
-        return IsCKArgsSupported<DeviceOpGBwdWeightDefaultPtrs<DataType>, CKArgs<DataType>>(
-            problem, kernel_id);
+        return IsCKArgsSupported<DeviceOpGBwdWeightDefaultPtrs<DataType, ComputeType>,
+                                 CKArgs<DataType, ComputeType>>(problem, kernel_id);
     }
 }
 
-template <typename DataType>
+template <typename DataType, typename ComputeType>
 bool ConvHipImplicitGemm3DGroupWrwXdlops::CheckCKApplicability(
-    const ProblemDescription& problem) const
+    const ::miopen::conv::ProblemDescription& problem) const
 {
     switch(problem.GetAlphaBetaCase())
     {
     case BILINEAR:
-        return IsCKApplicable<DeviceOpGBwdWeightBilinearPtrs<DataType>, CKArgs<DataType>>(problem);
+        return IsCKApplicable<DeviceOpGBwdWeightBilinearPtrs<DataType, ComputeType>,
+                              CKArgs<DataType, ComputeType>>(problem);
     case SCALE:
-        return IsCKApplicable<DeviceOpGBwdWeightScalePtrs<DataType>, CKArgs<DataType>>(problem);
+        return IsCKApplicable<DeviceOpGBwdWeightScalePtrs<DataType, ComputeType>,
+                              CKArgs<DataType, ComputeType>>(problem);
     default:
-        return IsCKApplicable<DeviceOpGBwdWeightDefaultPtrs<DataType>, CKArgs<DataType>>(problem);
+        return IsCKApplicable<DeviceOpGBwdWeightDefaultPtrs<DataType, ComputeType>,
+                              CKArgs<DataType, ComputeType>>(problem);
+    }
+}
+void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
+    const ::miopen::conv::ProblemDescription& problem)
+{
+    switch(problem.GetInDataType())
+    {
+    case miopenHalf: Init<ck::half_t>(problem); break;
+    case miopenFloat:
+        if(problem.UseTF32() && Init<float, ck::tf32_t>(problem))
+        {
+            use_tf32 = true;
+        }
+        else
+        {
+            use_tf32 = false;
+            Init<float>(problem);
+        }
+        break;
+    case miopenInt8: Init<int8_t>(problem); break;
+    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
+    default: break; // Unsupported data types - valid_kernels remains empty
     }
 }
 #endif
 
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
-    [[maybe_unused]] const ProblemDescription& problem)
+    [[maybe_unused]] const miopen::ExecutionContext& ctx,
+    const ::miopen::conv::ProblemDescription& problem)
 {
     index     = 0;
+    kernel_id = "None";
     split_k   = 1;
-    kernel_id = "";
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    switch(problem.GetInDataType())
+    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    if(&ctx != &GetDummyCtx() &&
+       !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR))
     {
-    case miopenHalf: Init<ck::half_t>(problem); break;
-    case miopenFloat: Init<float>(problem); break;
-    case miopenInt8: Init<int8_t>(problem); break;
-    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
-    case miopenInt64:
-    case miopenInt32:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenDouble: break;
+        MIOPEN_LOG_I2(
+            "Step 1: Attempting AI heuristics for data type: " << problem.GetInDataType());
+
+        std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
+
+        bool ai_success = false;
+        miopen::ai::tuning::candidate_selection::CandidateSelectionResult result;
+
+        auto run_ai_heuristics = [&](auto CKDataType, auto CKComputeType) {
+            using T        = decltype(CKDataType);
+            using TCompute = decltype(CKComputeType);
+            auto fill_valid_kernels =
+                [=](const ::miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
+                return FillValidKernelsByAlphaBeta<T, TCompute>(problem);
+            };
+
+            // Validation lambda for AI-predicted kernel + split_k combinations
+            auto is_kernel_split_k_valid = [&](int kernel_index, int split_k_value) -> bool {
+                if(kernel_index < 0 || kernel_index >= static_cast<int>(valid_kernels.size()))
+                    return false;
+
+                std::string test_kernel_id =
+                    valid_kernels[kernel_index] + "+" + std::to_string(split_k_value);
+
+                switch(problem.GetAlphaBetaCase())
+                {
+                case BILINEAR:
+                    return IsCKArgsSupported<DeviceOpGBwdWeightBilinearPtrs<T>,
+                                             CKArgs<T>,
+                                             miopen::conv::ProblemDescription,
+                                             true>(problem, test_kernel_id);
+                case SCALE:
+                    return IsCKArgsSupported<DeviceOpGBwdWeightScalePtrs<T>,
+                                             CKArgs<T>,
+                                             miopen::conv::ProblemDescription,
+                                             true>(problem, test_kernel_id);
+                default:
+                    return IsCKArgsSupported<DeviceOpGBwdWeightDefaultPtrs<T>,
+                                             CKArgs<T>,
+                                             miopen::conv::ProblemDescription,
+                                             true>(problem, test_kernel_id);
+                }
+            };
+            return miopen::solver::conv::RunParameterPredictionModel<T>(ctx,
+                                                                        problem,
+                                                                        valid_kernels,
+                                                                        index,
+                                                                        split_k,
+                                                                        kernel_id,
+                                                                        fill_valid_kernels,
+                                                                        solver_name,
+                                                                        is_kernel_split_k_valid);
+        };
+        switch(problem.GetInDataType())
+        {
+        case miopenHalf:
+            std::tie(ai_success, result) = run_ai_heuristics(ck::half_t{}, ck::half_t{});
+            break;
+        case miopenFloat:
+            if(problem.UseTF32())
+            {
+                std::tie(ai_success, result) = run_ai_heuristics(float{}, ck::tf32_t{});
+                if(!ai_success || result.IsEmpty())
+                {
+                    MIOPEN_LOG_I2("Step 3: AI heuristics with TF32 failed, retrying with FP32");
+                    std::tie(ai_success, result) = run_ai_heuristics(float{}, float{});
+                }
+            }
+            else
+            {
+                std::tie(ai_success, result) = run_ai_heuristics(float{}, float{});
+            }
+            break;
+        case miopenBFloat16:
+            std::tie(ai_success, result) = run_ai_heuristics(ck::bhalf_t{}, ck::bhalf_t{});
+            break;
+        default: break;
+        }
+
+        if(ai_success && !result.IsEmpty())
+        {
+            MIOPEN_LOG_I("Step 1: AI heuristics selected kernel: " << kernel_id);
+            if(is_deterministic && split_k != 1)
+            {
+                MIOPEN_LOG_I("Deterministic mode: Overriding AI-predicted split_k="
+                             << split_k << " to split_k=1");
+                split_k = 1;
+                if(!valid_kernels.empty())
+                    kernel_id = valid_kernels[index] + "+1";
+            }
+            return;
+        }
+        else
+        {
+            MIOPEN_LOG_I2("Step 1: AI heuristics failed, proceeding to default initialization");
+            // print results to log to help debugging
+            if(!ai_success)
+                MIOPEN_LOG_I2("Step 1: AI heuristics internal failure");
+            else if(result.IsEmpty())
+                MIOPEN_LOG_I2("Step 1: AI heuristics returned empty result");
+        }
     }
+    else
+    {
+        MIOPEN_LOG_I2("Step 1: AI heuristics skipped (disabled or dummy context)");
+    }
+#else
+    MIOPEN_LOG_I2("Step 1: AI heuristics not available (MIOPEN_ENABLE_AI_KERNEL_TUNING disabled)");
+#endif
+
+    MIOPEN_LOG_I2("Step 2: Using default initialization (index=0)");
+    InitValidKernels(problem);
+    if(!valid_kernels.empty())
+    {
+        index     = 0;
+        split_k   = 1;
+        kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
+        MIOPEN_LOG_I("Step 2: Default initialization selected kernel: " << kernel_id
+                                                                        << " at index: 0");
+    }
+    else
+    {
+        MIOPEN_LOG_W("Step 2: Default initialization failed - no valid kernels found");
+    }
+
+    // Invariant: split_k must always be 1 in deterministic mode
+    assert(!is_deterministic || split_k == 1);
 #endif
 }
 
 bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
-    const ProblemDescription& problem)
+    const ::miopen::conv::ProblemDescription& problem)
 {
 #if MIOPEN_USE_COMPOSABLEKERNEL
     if(valid_kernels.empty())
     {
-        HeuristicInit(problem);
+        InitValidKernels(problem);
         if(valid_kernels.empty())
         {
             return false;
         }
     }
+
+    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+
+    // Deterministic mode: only iterate over kernels (index), split_k is always 1
+    if(is_deterministic)
+    {
+        if(!NextLinear(0, valid_kernels.size() - 1, index))
+        {
+            return false; // All kernels exhausted
+        }
+        split_k   = 1;
+        kernel_id = valid_kernels[index] + "+1";
+        return true;
+    }
+
+    // General (non-deterministic) mode: iterate over both split_k and kernels
     do
     {
-        bool flag = NextTwoPower<1, 128>(split_k);
+        bool flag = NextCKSplitkValue<1, 128>(split_k);
+
         if(!flag)
         {
             kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
@@ -423,13 +625,50 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::IsValidValue() const
 }
 
 bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::IsValid(
-    [[maybe_unused]] const ProblemDescription& problem) const
+    [[maybe_unused]] const ::miopen::conv::ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    // Database validation: Reject configurations with split_k > 1 in deterministic mode.
+    // This is necessary because the performance database may contain configurations
+    // from non-deterministic tuning runs that used split_k > 1, which are not valid
+    // for deterministic execution even though CK could technically run them.
+    if(problem.GetConv().attribute.deterministic)
+    {
+        size_t plus_pos = kernel_id.find_last_of('+');
+        if(plus_pos != std::string::npos)
+        {
+            try
+            {
+                int split_k_from_id = std::stoi(kernel_id.substr(plus_pos + 1));
+                if(split_k_from_id != 1)
+                {
+                    MIOPEN_LOG_I("Invalid configuration for deterministic mode: split_k="
+                                 << split_k_from_id << " (must be 1)");
+                    return false;
+                }
+            }
+            catch(const std::exception&)
+            {
+                MIOPEN_LOG_E("Failed to parse split_k from kernel_id: " << kernel_id);
+                return false;
+            }
+        }
+    }
+
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
-    case miopenFloat: return CheckIsSupportCKArgs<float>(problem);
+    case miopenFloat:
+        if(problem.UseTF32() && CheckIsSupportCKArgs<float, ck::tf32_t>(problem))
+        {
+            use_tf32 = true;
+            return true;
+        }
+        else
+        {
+            use_tf32 = false;
+            return CheckIsSupportCKArgs<float>(problem);
+        }
     case miopenInt8: return CheckIsSupportCKArgs<int8_t>(problem);
     case miopenBFloat16: return CheckIsSupportCKArgs<ck::bhalf_t>(problem);
     case miopenInt64:
@@ -450,31 +689,75 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::operator==(
 
 PerformanceConfigHipImplicitGemm3DGroupWrwXdlops
 ConvHipImplicitGemm3DGroupWrwXdlops::GetDefaultPerformanceConfig(
-    const ExecutionContext&, const ProblemDescription& problem) const
+    const ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem) const
 {
     PerformanceConfigHipImplicitGemm3DGroupWrwXdlops pp;
-    pp.HeuristicInit(problem);
+    pp.HeuristicInit(ctx, problem);
     return pp;
 }
 
 bool ConvHipImplicitGemm3DGroupWrwXdlops::IsValidPerformanceConfig(
     const ExecutionContext&,
-    const ProblemDescription& problem,
+    const ::miopen::conv::ProblemDescription& problem,
     const PerformanceConfigHipImplicitGemm3DGroupWrwXdlops& config) const
 {
     return config.IsValid(problem);
 }
 
-size_t
-ConvHipImplicitGemm3DGroupWrwXdlops::GetWorkspaceSize(const ExecutionContext&,
-                                                      const ProblemDescription& problem) const
+template <typename DataType, typename ComputeType>
+size_t ConvHipImplicitGemm3DGroupWrwXdlops::GetCKMaxWorkspaceSize(
+    const ::miopen::conv::ProblemDescription& problem) const
 {
-    return GetWorkspaceSizeLayoutTransformConv(problem);
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    switch(problem.GetAlphaBetaCase())
+    {
+    case BILINEAR:
+        return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdWeightBilinearPtrs<DataType, ComputeType>,
+                                           CKArgs<DataType, ComputeType>>(problem);
+    case SCALE:
+        return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdWeightScalePtrs<DataType, ComputeType>,
+                                           CKArgs<DataType, ComputeType>>(problem);
+    default:
+        return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdWeightDefaultPtrs<DataType, ComputeType>,
+                                           CKArgs<DataType, ComputeType>>(problem);
+    }
+#else
+    return 0;
+#endif
+}
+
+size_t ConvHipImplicitGemm3DGroupWrwXdlops::GetCKMaxWorkspaceSize(
+    const ::miopen::conv::ProblemDescription& problem) const
+{
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    switch(problem.GetInDataType())
+    {
+    case miopenHalf: return GetCKMaxWorkspaceSize<ck::half_t>(problem);
+    case miopenFloat:
+        // fp32 and tf32 use same workspace size
+        return GetCKMaxWorkspaceSize<float>(problem);
+    case miopenInt8: return GetCKMaxWorkspaceSize<int8_t>(problem);
+    case miopenBFloat16: return GetCKMaxWorkspaceSize<ck::bhalf_t>(problem);
+    case miopenInt64:
+    case miopenInt32:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenDouble: break;
+    }
+#endif
+    return 0; // other types not applicable for this solver
+}
+
+size_t ConvHipImplicitGemm3DGroupWrwXdlops::GetWorkspaceSize(
+    const ExecutionContext&, const ::miopen::conv::ProblemDescription& problem) const
+{
+    auto ck_ws_size = GetCKMaxWorkspaceSize(problem);
+    return GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
 }
 
 PerformanceConfigHipImplicitGemm3DGroupWrwXdlops
 ConvHipImplicitGemm3DGroupWrwXdlops::Search(const ExecutionContext& ctx,
-                                            const ProblemDescription& problem,
+                                            const ::miopen::conv::ProblemDescription& problem,
                                             const AnyInvokeParams& invoke_ctx) const
 {
     return GenericSearch(*this, ctx, problem, invoke_ctx);
@@ -482,12 +765,10 @@ ConvHipImplicitGemm3DGroupWrwXdlops::Search(const ExecutionContext& ctx,
 
 bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
     [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem) const
+    [[maybe_unused]] const ::miopen::conv::ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS))
-        return false;
-    if(problem.GetConv().attribute.deterministic)
         return false;
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
@@ -507,12 +788,17 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
-    case miopenFloat: return CheckCKApplicability<float>(problem);
+    case miopenFloat:
+        if(problem.UseTF32() && CheckCKApplicability<float, ck::tf32_t>(problem))
+        {
+            return true;
+        }
+        else
+        {
+            return CheckCKApplicability<float>(problem);
+        }
     case miopenInt8: return CheckCKApplicability<int8_t>(problem);
-    case miopenBFloat16:
-        return (ctx.GetStream().GetDeviceName() == "gfx942" ||
-                StartsWith(ctx.GetStream().GetDeviceName(), "gfx95")) &&
-               CheckCKApplicability<ck::bhalf_t>(problem);
+    case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
     case miopenInt64:
     case miopenInt32:
     case miopenFloat8_fnuz:
@@ -525,68 +811,79 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
 
 ConvSolution ConvHipImplicitGemm3DGroupWrwXdlops::GetSolution(
     [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem,
+    [[maybe_unused]] const ::miopen::conv::ProblemDescription& problem,
     [[maybe_unused]] const PerformanceConfigHipImplicitGemm3DGroupWrwXdlops& config) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return MakeSolutionGroupConvImplicitGemmXdlops(
         problem,
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
+        [&](auto data_type_val, auto compute_type_val) {
+            using T        = decltype(data_type_val);
+            using TCompute = decltype(compute_type_val);
             switch(problem.GetAlphaBetaCase())
             {
             case BILINEAR:
                 return InitInvokerFactoryWrwNCHW<3,
                                                  false,
-                                                 DeviceOpGBwdWeightBilinearPtrs<T>,
-                                                 CKArgs<T>,
+                                                 DeviceOpGBwdWeightBilinearPtrs<T, TCompute>,
+                                                 CKArgs<T, TCompute>,
                                                  miopen::conv::WrWInvokeParams>(
                     ctx, problem, config.kernel_id);
             case SCALE:
                 return InitInvokerFactoryWrwNCHW<3,
                                                  false,
-                                                 DeviceOpGBwdWeightScalePtrs<T>,
-                                                 CKArgs<T>,
+                                                 DeviceOpGBwdWeightScalePtrs<T, TCompute>,
+                                                 CKArgs<T, TCompute>,
                                                  miopen::conv::WrWInvokeParams>(
                     ctx, problem, config.kernel_id);
             default:
                 return InitInvokerFactoryWrwNCHW<3,
                                                  false,
-                                                 DeviceOpGBwdWeightDefaultPtrs<T>,
-                                                 CKArgs<T>,
+                                                 DeviceOpGBwdWeightDefaultPtrs<T, TCompute>,
+                                                 CKArgs<T, TCompute>,
                                                  miopen::conv::WrWInvokeParams>(
                     ctx, problem, config.kernel_id);
             }
         },
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
+        [&](auto data_type_val, auto compute_type_val) {
+            using T        = decltype(data_type_val);
+            using TCompute = decltype(compute_type_val);
             switch(problem.GetAlphaBetaCase())
             {
             case BILINEAR:
                 return InitInvokerFactoryNHWC<false,
-                                              DeviceOpGBwdWeightBilinearPtrs<T>,
-                                              CKArgs<T>,
+                                              DeviceOpGBwdWeightBilinearPtrs<T, TCompute>,
+                                              CKArgs<T, TCompute>,
                                               miopen::conv::WrWInvokeParams>(
                     ctx, problem, config.kernel_id);
             case SCALE:
                 return InitInvokerFactoryNHWC<false,
-                                              DeviceOpGBwdWeightScalePtrs<T>,
-                                              CKArgs<T>,
+                                              DeviceOpGBwdWeightScalePtrs<T, TCompute>,
+                                              CKArgs<T, TCompute>,
                                               miopen::conv::WrWInvokeParams>(
                     ctx, problem, config.kernel_id);
             default:
                 return InitInvokerFactoryNHWC<false,
-                                              DeviceOpGBwdWeightDefaultPtrs<T>,
-                                              CKArgs<T>,
+                                              DeviceOpGBwdWeightDefaultPtrs<T, TCompute>,
+                                              CKArgs<T, TCompute>,
                                               miopen::conv::WrWInvokeParams>(
                     ctx, problem, config.kernel_id);
             }
-        });
+        },
+        config.UseTF32());
 
 #else
     return {};
 #endif
 }
+
+#if !(MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL)
+void miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
+    const ::miopen::conv::ProblemDescription&)
+{
+    // No-op stub for non-CK builds
+}
+#endif
 
 } // namespace conv
 } // namespace solver

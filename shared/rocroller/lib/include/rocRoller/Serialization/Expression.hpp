@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -111,6 +111,57 @@ namespace rocRoller
             }
 
             static void mapping(IO& io, Expression::Convert& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<Expression::Reinterpret, IO, Context>
+        {
+            static const bool flow = true;
+            using iot              = IOTraits<IO>;
+
+            static void mapping(IO& io, Expression::Reinterpret& exp, Context& ctx)
+            {
+                iot::mapRequired(io, "arg", exp.arg, ctx);
+                iot::mapRequired(io, "dataType", exp.destinationType);
+            }
+
+            static void mapping(IO& io, Expression::Reinterpret& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<Expression::BitfieldCombine, IO, Context>
+        {
+            static const bool flow = true;
+            using iot              = IOTraits<IO>;
+
+            static void mapping(IO& io, Expression::BitfieldCombine& exp, Context& ctx)
+            {
+                iot::mapRequired(io, "lhs", exp.lhs, ctx);
+                iot::mapRequired(io, "rhs", exp.rhs, ctx);
+
+                iot::mapRequired(io, "srcOffset", exp.srcOffset);
+                iot::mapRequired(io, "dstOffset", exp.dstOffset);
+                iot::mapRequired(io, "width", exp.width);
+
+                if(exp.srcIsZero.has_value())
+                    iot::mapRequired(io, "srcIsZero", exp.srcIsZero.value());
+                if(exp.dstIsZero.has_value())
+                    iot::mapRequired(io, "dstIsZero", exp.dstIsZero.value());
+            }
+
+            static void mapping(IO& io, Expression::BitfieldCombine& val)
             {
                 AssertFatal((std::same_as<EmptyContext, Context>));
 
@@ -278,6 +329,49 @@ namespace rocRoller
         };
 
         template <typename IO, typename Context>
+        struct MappingTraits<Buffer, IO, Context>
+        {
+            static const bool flow = false;
+            using iot              = IOTraits<IO>;
+
+            static void mapping(IO& io, Buffer& buffer, Context& ctx)
+            {
+                iot::mapRequired(io, "desc0", buffer.desc0);
+                iot::mapRequired(io, "desc1", buffer.desc1);
+                iot::mapRequired(io, "desc2", buffer.desc2);
+                iot::mapRequired(io, "desc3", buffer.desc3);
+            }
+
+            static void mapping(IO& io, Buffer& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<Raw32, IO, Context>
+        {
+            static const bool flow = false;
+            using iot              = IOTraits<IO>;
+
+            static void mapping(IO& io, Raw32& val, Context& ctx)
+            {
+                iot::mapRequired(io, "value", val.value);
+            }
+
+            static void mapping(IO& io, Raw32& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
         struct MappingTraits<CommandArgumentPtr, IO, Context>
         {
             static const bool flow = true;
@@ -394,12 +488,12 @@ namespace rocRoller
                 if(!iot::outputting(io))
                     val = std::make_shared<AssemblyKernelArgument>();
 
-                iot::mapRequired(io, "name", val->name);
-                iot::mapRequired(io, "variableType", val->variableType);
-                iot::mapRequired(io, "dataDirection", val->dataDirection);
-                iot::mapRequired(io, "expression", val->expression);
-                iot::mapRequired(io, "offset", val->offset);
-                iot::mapRequired(io, "size", val->size);
+                iot::mapRequired(io, "name", val->m_name);
+                iot::mapRequired(io, "variableType", val->m_variableType);
+                iot::mapRequired(io, "dataDirection", val->m_dataDirection);
+                iot::mapRequired(io, "expression", val->m_expression);
+                iot::mapRequired(io, "offset", val->m_offset);
+                iot::mapRequired(io, "size", val->m_size);
             }
 
             static void mapping(IO& io, AssemblyKernelArgumentPtr& val)

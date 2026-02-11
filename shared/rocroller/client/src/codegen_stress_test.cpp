@@ -116,13 +116,13 @@ Generator<Instruction> simple_mi(ContextPtr m_context)
     {
         mi_mnemonic = "v_mfma_f32_32x32x1f32";
     }
-    else if(arch.HasCapability(GPUCapability::HasWMMA) && arch.target().isRDNA4GPU())
+    else if(arch.HasCapability(GPUCapability::HasWMMA_f32_16x16x16_f16))
     {
         mi_mnemonic = "v_wmma_f32_16x16x16_f16";
     }
     else
     {
-        AssertFatal(false, concatenate("Arch not supported: ", arch.target().toString()));
+        Throw<FatalError>(concatenate("Arch not supported: ", arch.target().toString()));
     }
     auto v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 4);
     while(true)
@@ -140,13 +140,13 @@ Generator<Instruction> complex_mi_with_coop(ContextPtr m_context)
     {
         mi_mnemonic = "v_mfma_f32_32x32x1f32";
     }
-    else if(arch.HasCapability(GPUCapability::HasWMMA) && arch.target().isRDNA4GPU())
+    else if(arch.HasCapability(GPUCapability::HasWMMA_f32_16x16x16_f16))
     {
         mi_mnemonic = "v_wmma_f32_16x16x16_f16";
     }
     else
     {
-        AssertFatal(false, concatenate("Arch not supported: ", arch.target().toString()));
+        Throw<FatalError>(concatenate("Arch not supported: ", arch.target().toString()));
     }
     auto mi_v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 16);
     auto or_v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 4);
@@ -216,7 +216,7 @@ CodeGenResult CodeGen(CodeGenProblem const& prob)
     }
     else
     {
-        AssertFatal(false, "Invalid instructions selection.");
+        Throw<FatalError>("Invalid instructions selection.");
     }
 
     auto Program = [&](ContextPtr m_context) -> Generator<Instruction> {

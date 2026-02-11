@@ -114,7 +114,12 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 auto cpy = expr;
-                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                std::ranges::for_each(cpy.operands, [this](auto& op) {
+                    if(op)
+                    {
+                        op = call(op);
+                    }
+                });
                 return std::make_shared<Expression>(std::move(cpy));
             }
 
@@ -226,7 +231,12 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 auto cpy = expr;
-                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                std::ranges::for_each(cpy.operands, [this](auto& op) {
+                    if(op)
+                    {
+                        op = call(op);
+                    }
+                });
                 return std::make_shared<Expression>(std::move(cpy));
             }
 
@@ -324,6 +334,103 @@ namespace rocRoller
 
                         tree.back().reg = reg;
                     }
+                    else if(depTypeInfo.isIntegral && expTypeInfo.isIntegral
+                            && depTypeInfo.elementBits == 64 && expTypeInfo.elementBits == 32)
+                    {
+                        std::vector<int> indices;
+                        for(int i = 0; i < depTypeInfo.registerCount;
+                            i += depTypeInfo.elementBits / Register::bitsPerRegister)
+                        {
+                            indices.push_back(i);
+                        }
+                        auto reg = dep.reg->subset(indices);
+                        reg->setVariableType(expr.destinationType);
+                        auto regWithName = tree.back().reg ? tree.back().reg : reg;
+                        reg->setName(regWithName->name() + " convertForwardSubset");
+                        tree.back().reg = reg;
+                    }
+                }
+
+                return tree;
+            }
+
+            ExpressionTree operator()(Reinterpret const& expr) const
+            {
+                auto tree = callUnary(expr);
+                if(tree.empty())
+                {
+                    // Bail
+                    return {};
+                }
+
+                AssertFatal(tree.back().deps.size() == 1);
+                auto        depIdx = *tree.back().deps.begin();
+                auto const& dep    = tree.at(depIdx);
+
+                auto depTypeInfo = DataTypeInfo::Get(dep.reg->variableType());
+                auto expTypeInfo = DataTypeInfo::Get(expr.destinationType);
+
+                AssertFatal(depTypeInfo.elementBytes == expTypeInfo.elementBytes,
+                            "Reinterpret requires same size types: source type ",
+                            toString(dep.reg->variableType().dataType),
+                            " (",
+                            depTypeInfo.elementBytes,
+                            " bytes) != destination type ",
+                            toString(expr.destinationType),
+                            " (",
+                            expTypeInfo.elementBytes,
+                            " bytes)");
+
+                auto registerCount = dep.reg->registerCount();
+                AssertFatal(registerCount == expTypeInfo.registerCount,
+                            "Reinterpret requires same number of registers: source type ",
+                            toString(dep.reg->variableType().dataType),
+                            " (",
+                            registerCount,
+                            " registers) != destination type ",
+                            toString(expr.destinationType),
+                            " (",
+                            expTypeInfo.registerCount,
+                            " registers)");
+
+                // Sets the destination register for Reinterpret as the argument register
+                // but with the reinterpreted type
+                Register::ValuePtr reg
+                    = std::make_shared<Register::Value>(dep.reg->allocation(),
+                                                        dep.reg->regType(),
+                                                        expr.destinationType,
+                                                        dep.reg->allocationCoord());
+                tree.back().reg = reg;
+
+                dep.reg->setName(dep.reg->name() + " reinterpret");
+                Log::trace("Reinterpreting {} to {}",
+                           dep.reg->description(),
+                           tree.back().reg->description());
+
+                return tree;
+            }
+
+            ExpressionTree operator()(BitFieldExtract const& expr) const
+            {
+                auto tree = callUnary(expr);
+                if(tree.empty())
+                    return {};
+
+                AssertFatal(tree.back().deps.size() == 1, ShowValue(tree.back().deps.size()));
+
+                auto        deps               = tree.back().deps;
+                auto        consolidationCount = tree.back().consolidationCount;
+                auto        depIdx             = *deps.begin();
+                auto const& dep                = tree.at(depIdx);
+
+                // Try to simplify BitFieldExtract to a subset
+                if(auto subset = bfeToSubset(expr, dep.reg))
+                {
+                    Log::trace("Eliminating BitFieldExtract of full registers {}",
+                               subset.value()->description());
+                    tree.pop_back();
+                    auto value = subset.value();
+                    tree.push_back({value, value->expression(), deps, consolidationCount});
                 }
 
                 return tree;
@@ -472,6 +579,14 @@ namespace rocRoller
                 return tree;
             }
 
+            ExpressionTree operator()(BitfieldCombine const& expr) const
+            {
+                AssertFatal(
+                    false,
+                    "BitfieldCombine should be lowered to shift and bitwise AND/OR epxressions");
+                return {};
+            }
+
             template <CNary Expr>
             ExpressionTree operator()(Expr const& expr) const
             {
@@ -585,6 +700,43 @@ namespace rocRoller
 
         private:
             ContextPtr m_context;
+
+            /**
+             * @brief Attempts to simplify a BitFieldExtract to a register subset
+             *
+             * @param expr The BitFieldExtract expression
+             * @param reg The source register
+             * @return std::optional<Register::ValuePtr> The subset register if simplification is possible, nullopt otherwise
+             */
+            std::optional<Register::ValuePtr> bfeToSubset(BitFieldExtract const& expr,
+                                                          Register::ValuePtr     reg) const
+            {
+                // Check if extraction is aligned to register boundaries
+                if(expr.offset % Register::bitsPerRegister != 0
+                   || expr.width % Register::bitsPerRegister != 0)
+                    return std::nullopt;
+
+                uint registerOffset = expr.offset / Register::bitsPerRegister;
+                uint registerCount  = expr.width / Register::bitsPerRegister;
+
+                // Only simplify if the register count matches the expected output data type
+                if(DataTypeInfo::Get(expr.outputDataType).registerCount != registerCount)
+                    return std::nullopt;
+
+                AssertFatal(registerOffset + registerCount <= reg->registerCount(),
+                            "BitFieldExtract offset and width are out of bounds: ",
+                            ShowValue(registerOffset),
+                            ShowValue(registerCount),
+                            ShowValue(reg->registerCount()));
+
+                // Create subset of registers
+                std::vector<int> indices(registerCount);
+                std::iota(indices.begin(), indices.end(), registerOffset);
+                auto subset = reg->subset(indices);
+                subset->setVariableType(expr.outputDataType);
+
+                return subset;
+            }
 
             Register::ValuePtr resultPlaceholder(ResultType const& resType,
                                                  bool              allowSpecial = true,

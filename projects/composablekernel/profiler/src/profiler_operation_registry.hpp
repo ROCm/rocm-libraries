@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2023, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <functional>
 #include <iostream>
@@ -8,6 +8,9 @@
 #include <optional>
 #include <string_view>
 #include <utility>
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 class ProfilerOperationRegistry final
 {
@@ -74,6 +77,13 @@ class ProfilerOperationRegistry final
 #define PP_CONCAT(x, y) PP_CONCAT_IMPL(x, y)
 #define PP_CONCAT_IMPL(x, y) x##y
 
-#define REGISTER_PROFILER_OPERATION(name, description, operation)              \
-    static const bool PP_CONCAT(operation_registration_result_, __COUNTER__) = \
-        ::ProfilerOperationRegistry::GetInstance().Add(name, description, operation)
+// clang-format off
+#define REGISTER_PROFILER_OPERATION(name, description, operation)                             \
+    _Pragma("clang diagnostic push")                                                          \
+    _Pragma("clang diagnostic ignored \"-Wpre-c2y-compat\"")                                  \
+    _Pragma("clang diagnostic ignored \"-Wc2y-extensions\"") static const bool                \
+        PP_CONCAT(operation_registration_result_, __COUNTER__) =                              \
+            ::ProfilerOperationRegistry::GetInstance().Add(name, description, operation)      \
+                _Pragma("clang diagnostic pop")
+// clang-format on
+#pragma clang diagnostic pop

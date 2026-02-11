@@ -74,14 +74,21 @@ function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
   )
   if(GPU_TEST_TARGETS)
     foreach(GPU_TARGET IN LISTS GPU_TEST_TARGETS)
-      add_relative_test("${GPU_TARGET}-${TEST_NAME}" ${TEST_TARGET})
+      add_relative_test("${GPU_TARGET}-${TEST_NAME}" ${TEST_TARGET} ${GPU_TARGET})
+      # note: the set_tests_properties call below will set the test properties in the build directory.
+      # They also need to be set in the install directory. This is done in the call to add_relative_test (above),
+      # by writing to the install_CTestTestfile.cmake file used in the install).
       set_tests_properties("${GPU_TARGET}-${TEST_NAME}"
           PROPERTIES
               RESOURCE_GROUPS "1,${GPU_TARGET}:1"
       )
     endforeach()
   else()
-      add_relative_test(${TEST_NAME} ${TEST_TARGET})
+      add_relative_test(${TEST_NAME} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
+      set_tests_properties(${TEST_NAME}
+          PROPERTIES
+              RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
+      )
   endif()
 
   if (WIN32 AND NOT DEFINED DLLS_COPIED)
@@ -240,6 +247,7 @@ add_hipcub_test("hipcub.DeviceSegmentedReduce" test_hipcub_device_segmented_redu
 add_hipcub_test_parallel("hipcub.DeviceSegmentedSort" test_hipcub_device_segmented_sort.cpp.in)
 add_hipcub_test("hipcub.DeviceSelect" test_hipcub_device_select.cpp)
 add_hipcub_test("hipcub.DeviceSpmv" test_hipcub_device_spmv.cpp)
+add_hipcub_test("hipcub.DeviceTransform" test_hipcub_device_transform.cpp)
 add_hipcub_test("hipcub.DevicePartition" test_hipcub_device_partition.cpp)
 add_hipcub_test("hipcub.Grid" test_hipcub_grid.cpp)
 add_hipcub_test("hipcub.UtilPtx" test_hipcub_util_ptx.cpp)

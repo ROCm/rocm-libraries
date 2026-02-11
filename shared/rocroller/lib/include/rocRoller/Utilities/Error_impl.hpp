@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,15 +38,47 @@ namespace rocRoller
     }
 
     template <typename T_Exception, typename... Ts>
-    [[noreturn]] void Throw(Ts const&... message)
+    [[noreturn]] void Throw(std::source_location location,
+                            const char*          exceptionTag,
+                            const char*          conditionText,
+                            Ts const&... message)
     {
+        auto prefix = concatenate(GetBaseFileName(location.file_name()),
+                                  ":",
+                                  location.line(),
+                                  ": ",
+                                  exceptionTag,
+                                  "(",
+                                  conditionText,
+                                  ")\n");
+
+        auto fullMessage = concatenate(prefix, message...);
+
         bool var = Error::BreakOnThrow();
         if(var)
         {
-            std::cerr << concatenate(message...) << std::endl;
+            std::cerr << fullMessage << std::endl;
             Crash();
         }
 
-        throw T_Exception(message...);
+        throw T_Exception(fullMessage);
+    }
+
+    template <typename T_Exception, typename... Ts>
+    [[noreturn]] void Throw(MessageWithLocation leadingMessage, Ts const&... messageParts)
+    {
+        auto prefix = concatenate(
+            GetBaseFileName(leadingMessage.loc.file_name()), ":", leadingMessage.loc.line(), ": ");
+
+        auto fullMessage = concatenate(prefix, leadingMessage.message, messageParts...);
+
+        bool var = Error::BreakOnThrow();
+        if(var)
+        {
+            std::cerr << fullMessage << std::endl;
+            Crash();
+        }
+
+        throw T_Exception(fullMessage);
     }
 }
