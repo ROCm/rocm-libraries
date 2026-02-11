@@ -6,8 +6,10 @@
 #include "CallbackTypes.h"
 #include <hipdnn_data_sdk/Visibility.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 #include <atomic>
+#include <optional>
 #include <string>
 
 namespace hipdnn_data_sdk::logging
@@ -29,25 +31,53 @@ HIPDNN_HIDDEN inline std::atomic<bool>& getLogLevelInitialized()
     return s_initialized;
 }
 
-inline hipdnnSeverity_t stringToSeverity(const std::string& level)
+/**
+ * @brief Convert a log level string to severity enum
+ *
+ * Valid levels are: "off", "info", "warn", "error", "fatal" (case-insensitive, whitespace-tolerant)
+ *
+ * @param level The log level string to convert
+ * @return The severity enum if valid, std::nullopt if the string is not a valid log level
+ */
+inline std::optional<hipdnnSeverity_t> stringToSeverity(const std::string& level)
 {
-    if(level == "info")
+    // Normalize input: trim whitespace and convert to lowercase
+    std::string normalized = utilities::toLower(utilities::trim(level));
+
+    if(normalized == "off")
+    {
+        return HIPDNN_SEV_OFF;
+    }
+    if(normalized == "info")
     {
         return HIPDNN_SEV_INFO;
     }
-    if(level == "warn")
+    if(normalized == "warn")
     {
         return HIPDNN_SEV_WARN;
     }
-    if(level == "error")
+    if(normalized == "error")
     {
         return HIPDNN_SEV_ERROR;
     }
-    if(level == "fatal")
+    if(normalized == "fatal")
     {
         return HIPDNN_SEV_FATAL;
     }
-    return HIPDNN_SEV_OFF;
+    return std::nullopt;
+}
+
+/**
+ * @brief Convert a log level string to severity enum, defaulting to OFF for invalid input
+ *
+ * This is a convenience wrapper around stringToSeverity() that treats invalid input as OFF.
+ *
+ * @param level The log level string to convert
+ * @return The severity enum, or HIPDNN_SEV_OFF if the string is not a valid log level
+ */
+inline hipdnnSeverity_t stringToSeverityOrOff(const std::string& level)
+{
+    return stringToSeverity(level).value_or(HIPDNN_SEV_OFF);
 }
 
 } // namespace detail
@@ -65,7 +95,8 @@ inline void initializeLogLevel()
     }
 
     std::string logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
-    detail::getLogLevelCache().store(detail::stringToSeverity(logLevel), std::memory_order_relaxed);
+    detail::getLogLevelCache().store(detail::stringToSeverityOrOff(logLevel),
+                                     std::memory_order_relaxed);
 }
 
 /**
