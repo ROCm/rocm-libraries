@@ -13,6 +13,11 @@
 namespace miopen_plugin
 {
 
+MiopenConvFwdBiasActivPlanBuilder::MiopenConvFwdBiasActivPlanBuilder(bool deterministic)
+    : _deterministic(deterministic)
+{
+}
+
 namespace
 {
 
@@ -386,6 +391,7 @@ bool checkComputeTypesLogErrors(
         return false;
     }
 }
+
 } // namespace
 
 bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
@@ -419,7 +425,8 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
         ConvFwdBiasActivParams params(std::get<0>(nodeAttrs.value()),
                                       std::get<1>(nodeAttrs.value()),
                                       std::get<2>(nodeAttrs.value()),
-                                      opGraph.getTensorMap());
+                                      opGraph.getTensorMap(),
+                                      _deterministic);
         ConvFwdBiasActivPlan plan(handle, std::move(params), true, false, false);
         return true;
     }
@@ -437,7 +444,8 @@ size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 
-    ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
+    ConvFwdBiasActivParams params(
+        convAttr, biasAttr, activAttr, opGraph.getTensorMap(), _deterministic);
     ConvFwdBiasActivPlan plan(handle, std::move(params), false, true, false);
     return plan.getWorkspaceSize(handle);
 }
@@ -451,7 +459,8 @@ void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 
-    ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
+    ConvFwdBiasActivParams params(
+        convAttr, biasAttr, activAttr, opGraph.getTensorMap(), _deterministic);
     auto plan = std::make_unique<ConvFwdBiasActivPlan>(
         handle, std::move(params), true, true, executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));

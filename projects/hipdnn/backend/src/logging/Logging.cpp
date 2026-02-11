@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Logging.hpp"
-#include "ComponentFormatter.hpp"
 #include "PlatformUtils.hpp"
 
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
@@ -31,7 +30,16 @@ namespace
 std::mutex s_loggingInitMutex; // NOLINT(readability-identifier-naming)
 bool s_loggingInitialized = false; // NOLINT(readability-identifier-naming)
 const std::string S_BACKEND_LOGGER_NAME = "hipdnn_backend";
-const std::string S_CALLBACK_RECEIVER_LOGGER_NAME = "hipdnn_callback_receiver";
+
+// Pattern string for the backend logger.
+// Component name is already included in messages (e.g., "[hipdnn_backend] ..."),
+// so the pattern includes timestamp, thread ID, and log level, but not a component name.
+constexpr const char* BACKEND_LOGGER_PATTERN = "[%Y-%m-%d %H:%M:%S.%e] [tid %t] [%l] %v";
+
+std::shared_ptr<spdlog::logger> getBackendLogger()
+{
+    return spdlog::get(S_BACKEND_LOGGER_NAME);
+}
 
 } // namespace
 
@@ -99,10 +107,12 @@ void initialize()
         // Register the global callback so non-backend components can send logs to the backend
         hipdnn_data_sdk::logging::registerLoggingCallback(hipdnnLoggingCallback);
 
-        std::string logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
+        std::string logLevelStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
+        hipdnnSeverity_t logLevel
+            = hipdnn_data_sdk::logging::detail::stringToSeverityOrOff(logLevelStr);
 
         // It doesn't need to return if logLevel == off, but it avoids unnecessary initialization
-        if(logLevel == "off")
+        if(logLevel == HIPDNN_SEV_OFF)
         {
             s_loggingInitialized = true;
             return;
@@ -128,21 +138,19 @@ void initialize()
         auto backendLogger = std::make_shared<spdlog::async_logger>(
             S_BACKEND_LOGGER_NAME, sharedSink, spdlog::thread_pool());
 
-        // In spdlog, the formatting is a property of the underlying sink, not the logger.
-        // However, we need one destination sink for thread safety because the mutex is attached to the sink.
-        // Therefore, we implement a custom formatter to have distinct formatting for the backend, which does not use a callback sink.
-        backendLogger->set_formatter(
-            std::make_unique<hipdnn::backend::logging::ComponentFormatter>());
+        // Use a simple pattern formatter for the single unified logger
+        // Component name is already included in the message (e.g., "[hipdnn_backend] ...")
+        backendLogger->set_pattern(BACKEND_LOGGER_PATTERN);
+
+        // Set spdlog to accept all messages (trace is most verbose)
+        // Actual filtering is done in HIPDNN_BACKEND_LOG*() macro via isLogLevelEnabled()
+        backendLogger->set_level(spdlog::level::trace);
+
         spdlog::register_logger(backendLogger);
 
-        auto callbackReceiverLogger = std::make_shared<spdlog::async_logger>(
-            S_CALLBACK_RECEIVER_LOGGER_NAME, sharedSink, spdlog::thread_pool());
-        // Use ComponentFormatter which detects "hipdnn_callback_receiver" and applies appropriate formatting
-        callbackReceiverLogger->set_formatter(
-            std::make_unique<hipdnn::backend::logging::ComponentFormatter>());
-        spdlog::register_logger(callbackReceiverLogger);
-
-        setLogLevel(logLevel);
+        // Update the data_sdk log level cache for use by the
+        // HIPDNN_BACKEND_LOG*() macros to filter-out logs based on level.
+        hipdnn_data_sdk::logging::setLogLevel(logLevel);
 
         s_loggingInitialized = true;
 
@@ -165,64 +173,47 @@ void cleanup()
     s_loggingInitialized = false;
 }
 
-void setLogLevel(const std::string& level)
+namespace
 {
-    if(level == "off")
+// Helper to convert hipdnnSeverity_t to spdlog level
+spdlog::level::level_enum toSpdlogLevel(hipdnnSeverity_t severity)
+{
+    switch(severity)
     {
-        spdlog::set_level(spdlog::level::off);
-    }
-    else if(level == "info")
-    {
-        spdlog::set_level(spdlog::level::info);
-    }
-    else if(level == "warn")
-    {
-        spdlog::set_level(spdlog::level::warn);
-    }
-    else if(level == "error")
-    {
-        spdlog::set_level(spdlog::level::err);
-    }
-    else if(level == "fatal")
-    {
-        spdlog::set_level(spdlog::level::critical);
+    case HIPDNN_SEV_FATAL:
+        return spdlog::level::critical;
+    case HIPDNN_SEV_ERROR:
+        return spdlog::level::err;
+    case HIPDNN_SEV_WARN:
+        return spdlog::level::warn;
+    case HIPDNN_SEV_INFO:
+        return spdlog::level::info;
+    case HIPDNN_SEV_OFF:
+    default:
+        return spdlog::level::off;
     }
 }
+} // namespace
 
-std::shared_ptr<spdlog::logger> getCallbackReceiverLogger()
+void logMessage(hipdnnSeverity_t severity, const std::string& message)
 {
-    return spdlog::get(S_CALLBACK_RECEIVER_LOGGER_NAME);
-}
+    // Check log level using data_sdk infrastructure
+    if(!hipdnn_data_sdk::logging::isLogLevelEnabled(severity))
+    {
+        return;
+    }
 
-std::shared_ptr<spdlog::logger> getBackendLogger()
-{
-    return spdlog::get(S_BACKEND_LOGGER_NAME);
+    if(auto logger = getBackendLogger())
+    {
+        logger->log(toSpdlogLevel(severity), message);
+    }
 }
 
 void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg)
 {
-    initialize();
-
-    if(auto logger = getCallbackReceiverLogger())
-    {
-        switch(severity)
-        {
-        case HIPDNN_SEV_FATAL:
-            logger->critical(msg);
-            break;
-        case HIPDNN_SEV_ERROR:
-            logger->error(msg);
-            break;
-        case HIPDNN_SEV_WARN:
-            logger->warn(msg);
-            break;
-        case HIPDNN_SEV_OFF:
-            break;
-        default:
-            logger->info(msg);
-            break;
-        }
-    }
+    // Message already includes component name from source (frontend/plugins)
+    // Route through central backend logMessage function
+    logMessage(severity, msg);
 }
 
 } // namespace logging
