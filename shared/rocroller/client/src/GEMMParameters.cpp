@@ -127,9 +127,6 @@ namespace rocRoller
                 fullName << "_LSA" << loadPathAScale;
                 fullName << "_LSB" << loadPathBScale;
 
-                fullName << "_UNROLL";
-                rocRoller::streamJoin(fullName, std::vector{unrollX, unrollY}, "x");
-
                 fullName << "_SwizzleScale" << swizzleScale << prefetchScale;
                 fullName << "_SwizzleTileSize" << swizzleTileSize;
 
@@ -287,7 +284,6 @@ namespace rocRoller
                   << "enabled:" << x.prefetch << " inflight:" << x.prefetchInFlight
                   << " LDS:" << x.prefetchLDSFactor << " mixMemOps: " << x.prefetchMixMemOps
                   << std::endl;
-                s << "Unroll:          X:" << x.unrollX << " Y:" << x.unrollY << std::endl;
                 s << "Scheduler:       " << x.scheduler << std::endl;
                 s << "WG size:         " << x.workgroupSizeX * x.workgroupSizeY << std::endl;
                 s << "WG Mapping Dim:  " << x.workgroupMappingDim << std::endl;
