@@ -26,6 +26,7 @@
 
 #include "rocRoller/AssemblyKernelArgument.hpp"
 #include <rocRoller/KernelGraph/Transforms/SortArguments.hpp>
+#include <rocRoller/KernelGraph/Transforms/SortArguments_detail.hpp>
 
 #include <rocRoller/KernelGraph/TopoVisitor.hpp>
 
@@ -33,9 +34,9 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer.hpp>
 
-namespace rocRoller
+namespace rocRoller::KernelGraph
 {
-    namespace KernelGraph
+    namespace SortArguments_detail
     {
         class ArgumentFirstUseVisitor : public TopoControlGraphVisitor<ArgumentFirstUseVisitor>
         {
@@ -77,45 +78,47 @@ namespace rocRoller
             ArgumentFirstUseVisitor visitor(graph, kernel);
             visitor.walk();
 
-            std::ranges::sort(arguments, [&](auto const& a, auto const& b) {
+            std::ranges::stable_sort(arguments, [&](auto const& a, auto const& b) {
                 return visitor.argumentFirstUse(a.name) < visitor.argumentFirstUse(b.name);
             });
         }
+    }
 
-        KernelGraph SortArguments::apply(KernelGraph const& graph)
+    KernelGraph SortArguments::apply(KernelGraph const& graph)
+    {
+        auto kernel    = m_context->kernel();
+        auto arguments = kernel->arguments();
+
+        Log::debug("SortArguments: Before sorting by first use:");
+        for(auto const& arg : arguments)
         {
-            auto kernel    = m_context->kernel();
-            auto arguments = kernel->arguments();
-
-            Log::debug("SortArguments: Before sorting by first use:");
-            for(auto const& arg : arguments)
-            {
-                Log::debug("Argument: {} ({})", arg.name, arg.size);
-            }
-
-            sortArgumentsByFirstUse(graph, kernel, arguments);
-
-            Log::debug("SortArguments: After sorting by first use:");
-            for(auto const& arg : arguments)
-            {
-                Log::debug("Argument: {} ({})", arg.name, arg.size);
-            }
-
-            m_context->argLoader()->decidePreloadedKernargs(arguments);
-
-            Log::debug("SortArguments: After deciding preloaded kernargs:");
-            for(auto const& arg : arguments)
-            {
-                Log::debug("Argument: {} ({})", arg.name, arg.size);
-            }
-
-            for(auto& arg : arguments)
-            {
-                arg.offset = -1;
-                m_context->kernel()->addArgument(arg);
-            }
-
-            return graph;
+            Log::debug("Argument: {} ({})", arg.name, arg.size);
         }
+
+        SortArguments_detail::sortArgumentsByFirstUse(graph, kernel, arguments);
+
+        Log::debug("SortArguments: After sorting by first use:");
+        for(auto const& arg : arguments)
+        {
+            Log::debug("Argument: {} ({})", arg.name, arg.size);
+        }
+
+        m_context->argLoader()->decidePreloadedKernargs(arguments);
+
+        Log::debug("SortArguments: After deciding preloaded kernargs:");
+        for(auto const& arg : arguments)
+        {
+            Log::debug("Argument: {} ({})", arg.name, arg.size);
+        }
+
+        kernel->resetArguments();
+
+        for(auto& arg : arguments)
+        {
+            arg.offset = -1;
+            m_context->kernel()->addArgument(arg);
+        }
+
+        return graph;
     }
 }

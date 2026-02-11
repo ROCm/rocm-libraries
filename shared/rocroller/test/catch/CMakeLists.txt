@@ -71,6 +71,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphConstraintsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphRemoveDuplicatesTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphSimplifyTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SortArgumentsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphUtilsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSAllocationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSBankModelTest.cpp"
