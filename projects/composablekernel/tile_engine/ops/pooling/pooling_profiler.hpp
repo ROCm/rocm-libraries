@@ -11,7 +11,7 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/pooling.hpp"
 #include "ck_tile/host/reference/reference_pool.hpp"
-#include "tile_engine/ops/pooling/pooling_benchmark.hpp"
+#include "pooling_benchmark.hpp"
 
 namespace ck_tile {
 

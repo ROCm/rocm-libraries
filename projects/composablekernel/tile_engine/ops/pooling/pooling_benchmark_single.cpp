@@ -17,8 +17,8 @@
  #include "ck_tile/host.hpp"
  #include "ck_tile/ops/pooling.hpp"
  #include "ck_tile/host/reference/reference_pool.hpp"
- #include "tile_engine/ops/pooling/pooling_common.hpp"
- #include "tile_engine/ops/pooling/pooling_benchmark.hpp"
+ #include "pooling_common.hpp"
+ #include "pooling_benchmark.hpp"
  
  // The kernel header is included via compile command line with -include flag
  // It defines: SelectedKernel, KERNEL_NAME, InDataType, OutDataType, etc.
@@ -106,15 +106,15 @@
      d_out_index.SetZero();
  
      // Build host args
-     const auto input_shape      = ck_tile::make_tuple(N, H, W, C);
-     const auto output_shape     = ck_tile::make_tuple(N, Ho, Wo, C);
-     const auto input_strides    = ck_tile::make_tuple(H * W * C, W * C, C, 1);
-     const auto output_strides   = ck_tile::make_tuple(Ho * Wo * C, Wo * C, C, 1);
-     const auto window_lengths   = ck_tile::make_tuple(Y, X);
-     const auto window_strides   = ck_tile::make_tuple(Sy, Sx);
-     const auto window_dilations = ck_tile::make_tuple(Dy, Dx);
-     const auto input_left_pads  = ck_tile::make_tuple(LeftPy, LeftPx);
-     const auto input_right_pads = ck_tile::make_tuple(RightPy, RightPx);
+     auto input_shape      = ck_tile::make_tuple(N, H, W, C);
+     auto output_shape     = ck_tile::make_tuple(N, Ho, Wo, C);
+     auto input_strides    = ck_tile::make_tuple(H * W * C, W * C, C, 1);
+     auto output_strides   = ck_tile::make_tuple(Ho * Wo * C, Wo * C, C, 1);
+     auto window_lengths   = ck_tile::make_tuple(Y, X);
+     auto window_strides   = ck_tile::make_tuple(Sy, Sx);
+     auto window_dilations = ck_tile::make_tuple(Dy, Dx);
+     auto input_left_pads  = ck_tile::make_tuple(LeftPy, LeftPx);
+     auto input_right_pads = ck_tile::make_tuple(RightPy, RightPx);
  
      auto host_args = ck_tile::PoolHostArgs<decltype(input_shape), decltype(window_lengths)>{
          d_in.GetDeviceBuffer(),
@@ -199,4 +199,3 @@
  }
  
  int main(int argc, char* argv[]) { return benchmark_pooling_single(argc, argv); }
- 
