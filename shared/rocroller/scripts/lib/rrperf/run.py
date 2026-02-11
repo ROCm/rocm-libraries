@@ -149,6 +149,8 @@ def generate_missing_attr_value(run, attr):
             return (wgm_dim, wgm_value)
         case "matchMemoryAccess":
             return True
+        case "unroll_x" | "unroll_y":
+            return 0
         case "storeLDS_D":
             store = getattr(run, "store")
             return "LDS" in store
