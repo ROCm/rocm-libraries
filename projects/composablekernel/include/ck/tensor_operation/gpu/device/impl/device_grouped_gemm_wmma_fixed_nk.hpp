@@ -98,12 +98,11 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 
 #if defined(__gfx11__)
     // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
-    using c_data_type = remove_cvref_t<remove_pointer_t<decltype(gemmTransKernelArg.p_e_grid)>>;
     if constexpr(!(CGlobalMemoryDataOperation == InMemoryDataOperationEnum::AtomicAdd &&
-                   (std::is_same_v<c_data_type, ck::half_t> ||
-                    std::is_same_v<c_data_type, ck::bhalf_t>)))
-    {
+                   (std::is_same_v<EDataType, ck::half_t> ||
+                    std::is_same_v<EDataType, ck::bhalf_t>)))
 #endif
+    {
         using KernelArgument = typename GridwiseGemm::Argument;
 
         index_t id_off   = 0;
@@ -155,10 +154,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             id_off += grid_size_grp;
             id_local += grid_size_grp;
         }
-
-#if defined(__gfx11__)
     }
-#endif
 #else
     ignore = gemm_descs_const;
     ignore = group_count;
