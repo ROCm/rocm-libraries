@@ -149,13 +149,13 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
         }
         catch(const std::exception& e)
         {
-            HIPDNN_LOG_WARN("Failed to destroy handle for plugin '{}' during cleanup: {}",
-                            plugin->name(),
-                            e.what());
+            HIPDNN_BACKEND_LOG_WARN("Failed to destroy handle for plugin '{}' during cleanup: {}",
+                                    plugin->name(),
+                                    e.what());
         }
         catch(...)
         {
-            HIPDNN_LOG_WARN(
+            HIPDNN_BACKEND_LOG_WARN(
                 "Failed to destroy handle for plugin '{}' during cleanup: unknown error",
                 plugin->name());
         }
@@ -173,24 +173,25 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
         }
         catch(const std::exception& e)
         {
-            HIPDNN_LOG_ERROR(
+            HIPDNN_BACKEND_LOG_ERROR(
                 "Failed to create handle for plugin '{}': {}", plugin->name(), e.what());
             continue;
         }
 
         if(handle == nullptr)
         {
-            HIPDNN_LOG_ERROR("Plugin '{}' returned null handle", plugin->name());
+            HIPDNN_BACKEND_LOG_ERROR("Plugin '{}' returned null handle", plugin->name());
             continue;
         }
 
         if(_handleToPlugin.find(handle) != _handleToPlugin.end())
         {
             safeDestroyHandle(plugin.get(), handle);
-            HIPDNN_LOG_ERROR("Plugin '{}' returned a handle that collides with another plugin. "
-                             "This may indicate a symbol collision between plugins. "
-                             "Ensure all plugins are built with -fvisibility=hidden.",
-                             plugin->name());
+            HIPDNN_BACKEND_LOG_ERROR(
+                "Plugin '{}' returned a handle that collides with another plugin. "
+                "This may indicate a symbol collision between plugins. "
+                "Ensure all plugins are built with -fvisibility=hidden.",
+                plugin->name());
             continue;
         }
 
@@ -203,7 +204,7 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
         }
         catch(const std::exception& e)
         {
-            HIPDNN_LOG_ERROR(
+            HIPDNN_BACKEND_LOG_ERROR(
                 "Failed to get engine IDs for plugin '{}': {}", plugin->name(), e.what());
             safeDestroyHandle(plugin.get(), handle);
             _handleToPlugin.erase(handle);
@@ -228,7 +229,7 @@ EnginePluginResourceManager::~EnginePluginResourceManager()
         }
         catch(const HipdnnException& e)
         {
-            HIPDNN_LOG_ERROR(e.getMessage());
+            HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
         }
     }
 }
@@ -514,7 +515,7 @@ EngineDetailsWrapper::~EngineDetailsWrapper()
     }
     catch(const HipdnnException& e)
     {
-        HIPDNN_LOG_ERROR(e.getMessage());
+        HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
     }
 }
 
@@ -576,7 +577,7 @@ EngineExecutionContextWrapper::~EngineExecutionContextWrapper()
     }
     catch(const HipdnnException& e)
     {
-        HIPDNN_LOG_ERROR(e.getMessage());
+        HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
     }
 }
 
