@@ -233,6 +233,16 @@ TEST_F(TestHandle, SetStreamOnNullHandle)
     EXPECT_EQ(error.get_code(), ErrorCode::INVALID_VALUE);
 }
 
+TEST_F(TestHandle, GetStreamFromNullHandle)
+{
+    HipdnnHandlePtr handle{nullptr};
+    hipStream_t stream = nullptr;
+
+    auto error = getHipdnnHandleStream(handle, &stream);
+    EXPECT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), ErrorCode::INVALID_VALUE);
+}
+
 TEST_F(TestHandle, GetStreamFromValidHandle)
 {
     auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0xA123);

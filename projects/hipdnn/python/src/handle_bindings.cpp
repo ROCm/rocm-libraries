@@ -4,6 +4,8 @@
 #include <hipdnn_frontend.hpp>
 #include <memory>
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/shared_ptr.h>
+#include <nanobind/stl/string.h>
 #include <stdexcept>
 
 namespace nb = nanobind;
@@ -35,7 +37,8 @@ public:
         auto error = setHipdnnHandleStream(_handle, reinterpret_cast<hipStream_t>(streamPtr));
         if(error.is_bad())
         {
-            throw std::runtime_error("Failed to set stream on hipdnn handle");
+            throw std::runtime_error("Failed to set stream on hipdnn handle: "
+                                     + error.get_message());
         }
     }
 
@@ -45,7 +48,8 @@ public:
         auto error = getHipdnnHandleStream(_handle, &stream);
         if(error.is_bad())
         {
-            throw std::runtime_error("Failed to get stream from hipdnn handle");
+            throw std::runtime_error("Failed to get stream from hipdnn handle: "
+                                     + error.get_message());
         }
         return reinterpret_cast<uintptr_t>(stream);
     }
