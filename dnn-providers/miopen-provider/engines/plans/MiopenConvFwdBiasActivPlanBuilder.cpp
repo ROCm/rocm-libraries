@@ -446,7 +446,8 @@ size_t MiopenConvFwdBiasActivPlanBuilder::getMaxWorkspaceSize(
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 
-    ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap(), _deterministic);
+    ConvFwdBiasActivParams params(
+        convAttr, biasAttr, activAttr, opGraph.getTensorMap(), _deterministic);
     ConvFwdBiasActivPlan plan(handle, std::move(params), executionSettings, false, true);
     return plan.getWorkspaceSize(handle);
 }
