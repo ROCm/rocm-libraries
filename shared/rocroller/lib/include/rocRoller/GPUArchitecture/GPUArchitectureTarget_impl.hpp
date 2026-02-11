@@ -110,6 +110,8 @@ namespace rocRoller
         }
         if(xnack)
         {
+            if(sramecc)
+                rv = concatenate(rv, "_");
             rv = concatenate(rv, "xnack+");
         }
         return rv;
