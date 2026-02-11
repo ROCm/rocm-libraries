@@ -83,10 +83,8 @@ hipDNN includes Doxygen-generated API documentation for the public C++ frontend.
    ```bash
    # Ubuntu/Debian
    sudo apt-get install doxygen
-
-   # Or using package managers
-   brew install doxygen  # macOS
    ```
+   For Windows, download the installer from [doxygen.nl/download](https://www.doxygen.nl/download.html).
 
 2. Generate the documentation:
    ```bash
@@ -99,8 +97,8 @@ hipDNN includes Doxygen-generated API documentation for the public C++ frontend.
    # Linux
    xdg-open build/docs/html/index.html
 
-   # macOS
-   open build/docs/html/index.html
+   # Windows
+   start build\docs\html\index.html
    ```
 
 The documentation covers the frontend API including:
