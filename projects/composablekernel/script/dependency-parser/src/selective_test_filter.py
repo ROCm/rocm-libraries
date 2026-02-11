@@ -160,6 +160,8 @@ def main():
 
     file_to_executables, json_project = load_depmap(depmap_json)
     changed_files = get_changed_files(ref1, ref2, json_project)
+    print("changed_files:",changed_files)
+    print("file_to_executables:",file_to_executables)
     if not changed_files:
         print("No changed files detected.")
         tests = []

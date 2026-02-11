@@ -20,6 +20,8 @@ using F16                         = ck::half_t;
 using BF16                        = ck::bhalf_t;
 using F32                         = float;
 
+// dummy change to test launch_tests script
+
 template <typename Tuple>
 class TestGroupedConvndFwd : public ::testing::Test
 {
