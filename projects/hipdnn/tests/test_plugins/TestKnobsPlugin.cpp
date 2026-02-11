@@ -32,12 +32,78 @@ public:
 
     uint32_t getNumEngines() const override
     {
-        return 1;
+        return 2;
     }
 
     uint32_t getNumApplicableEngines() const override
     {
-        return 1;
+        return 2;
+    }
+
+    // Override enginePluginGetAllEngineIds to return both engines
+    static hipdnnPluginStatus_t
+        getAllEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines)
+    {
+        LOG_API_ENTRY("engineIds=" << static_cast<void*>(engineIds) << ", maxEngines=" << maxEngines
+                                   << ", numEngines=" << static_cast<void*>(numEngines));
+
+        return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            if(maxEngines != 0)
+            {
+                hipdnn_plugin_sdk::throwIfNull(engineIds);
+            }
+            hipdnn_plugin_sdk::throwIfNull(numEngines);
+
+            *numEngines = 2;
+
+            if(maxEngines >= 1)
+            {
+                engineIds[0] = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+            }
+            if(maxEngines >= 2)
+            {
+                engineIds[1] = hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>();
+            }
+
+            LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
+        });
+    }
+
+    // Override enginePluginGetApplicableEngineIds to return both engines
+    static hipdnnPluginStatus_t getApplicableEngineIds(hipdnnEnginePluginHandle_t handle,
+                                                       const hipdnnPluginConstData_t* opGraph,
+                                                       int64_t* engineIds,
+                                                       uint32_t maxEngines,
+                                                       uint32_t* numEngines)
+    {
+        LOG_API_ENTRY("handle=" << static_cast<void*>(handle)
+                                << ", opGraph=" << static_cast<const void*>(opGraph)
+                                << ", engineIds=" << static_cast<void*>(engineIds)
+                                << ", maxEngines=" << maxEngines
+                                << ", numEngines=" << static_cast<void*>(numEngines));
+
+        return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin_sdk::throwIfNull(handle);
+            hipdnn_plugin_sdk::throwIfNull(opGraph);
+            if(maxEngines != 0)
+            {
+                hipdnn_plugin_sdk::throwIfNull(engineIds);
+            }
+            hipdnn_plugin_sdk::throwIfNull(numEngines);
+
+            *numEngines = 2;
+
+            if(maxEngines >= 1)
+            {
+                engineIds[0] = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+            }
+            if(maxEngines >= 2)
+            {
+                engineIds[1] = hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>();
+            }
+
+            LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
+        });
     }
 
     // Override enginePluginGetEngineDetails to return knobs
@@ -68,49 +134,88 @@ public:
             // Create knobs vector using KnobFactory
             std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobOffsets;
 
-            // Knob 1: Integer knob with min/max/step constraints
-            knobOffsets.push_back(
-                hipdnn_plugin_sdk::KnobFactory::createIntKnob(builder,
-                                                              "test.int_knob",
-                                                              "Test integer knob with range 0-100",
-                                                              50, // default value
-                                                              0, // min
-                                                              100, // max
-                                                              10, // step
-                                                              {})); // no explicit valid values
+            if(engineId == hipdnn_tests::plugin_constants::engineId<KnobsPlugin>())
+            {
+                // Engine A (4 unique knobs + 1 shared knob)
 
-            // Knob 2: Float knob with min/max constraints
-            knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createFloatKnob(
+                // Knob 1: Integer knob with min/max/step constraints
+                knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createIntKnob(
+                    builder,
+                    "test.int_knob",
+                    "Test integer knob with range 0-100",
+                    50, // default value
+                    0, // min
+                    100, // max
+                    10, // step
+                    {})); // no explicit valid values
+
+                // Knob 2: Float knob with min/max constraints
+                knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createFloatKnob(
+                    builder,
+                    "test.float_knob",
+                    "Test float knob with range 0.0-1.0",
+                    0.5f, // default value
+                    0.0f, // min
+                    1.0f)); // max
+
+                // Knob 3: String knob with valid_values constraint
+                knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createStringKnob(
+                    builder,
+                    "test.string_knob",
+                    "Test string knob with enum values",
+                    "fast", // default value
+                    {"fast", "accurate", "balanced"})); // valid values
+
+                // Knob 4: Deprecated integer knob
+                knobOffsets.push_back(
+                    hipdnn_plugin_sdk::KnobFactory::createIntKnob(builder,
+                                                                  "test.deprecated_knob",
+                                                                  "Deprecated knob for testing",
+                                                                  0, // default value
+                                                                  0, // min
+                                                                  10, // max
+                                                                  1, // step
+                                                                  {}, // no explicit valid values
+                                                                  true)); // deprecated
+            }
+            else if(engineId == hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>())
+            {
+                // Engine B (2 different unique knobs + 1 shared knob)
+
+                // Knob 1: Int knob with specific value constraint.
+                knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createIntKnob(
+                    builder,
+                    "test.engine_b.block_size",
+                    "Block size for engine B (power of 2)",
+                    16,
+                    0,
+                    0,
+                    1,
+                    {8, 16, 32, 64}));
+
+                // Knob 2: String knob with specific values.
+                knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createStringKnob(
+                    builder,
+                    "test.engine_b.algorithm",
+                    "Algorithm selection for engine B",
+                    "winograd",
+                    {"direct", "winograd", "fft"}));
+            }
+
+            // New shared knob for both engines
+            knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createIntKnob(
                 builder,
-                "test.float_knob",
-                "Test float knob with range 0.0-1.0",
-                0.5f, // default value
-                0.0f, // min
-                1.0f)); // max
-
-            // Knob 3: String knob with valid_values constraint
-            knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createStringKnob(
-                builder,
-                "test.string_knob",
-                "Test string knob with enum values",
-                "fast", // default value
-                {"fast", "accurate", "balanced"})); // valid values
-
-            // Knob 4: Deprecated integer knob
-            knobOffsets.push_back(
-                hipdnn_plugin_sdk::KnobFactory::createIntKnob(builder,
-                                                              "test.deprecated_knob",
-                                                              "Deprecated knob for testing",
-                                                              0, // default value
-                                                              0, // min
-                                                              10, // max
-                                                              1, // step
-                                                              {}, // no explicit valid values
-                                                              true)); // deprecated
+                "test.shared.deterministic",
+                "Enable deterministic execution (shared across engines)",
+                0,
+                0,
+                1,
+                1,
+                {}));
 
             auto knobsVector = builder.CreateVector(knobOffsets);
             auto newEngineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(
-                builder, getInstance()->getEngineId(), knobsVector);
+                builder, engineId, knobsVector);
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
 
@@ -161,7 +266,7 @@ hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)
 hipdnnPluginStatus_t
     hipdnnEnginePluginGetAllEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines)
 {
-    return TestPluginBase::enginePluginGetAllEngineIds(engineIds, maxEngines, numEngines);
+    return KnobsPlugin::getAllEngineIds(engineIds, maxEngines, numEngines);
 }
 
 hipdnnPluginStatus_t hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle)
@@ -187,8 +292,7 @@ hipdnnPluginStatus_t
                                              uint32_t maxEngines,
                                              uint32_t* numEngines)
 {
-    return TestPluginBase::enginePluginGetApplicableEngineIds(
-        handle, opGraph, engineIds, maxEngines, numEngines);
+    return KnobsPlugin::getApplicableEngineIds(handle, opGraph, engineIds, maxEngines, numEngines);
 }
 
 // Override to use KnobsPlugin::getEngineDetails

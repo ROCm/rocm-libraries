@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
 #include <type_traits>
 
 namespace hipdnn_test_sdk::utilities::pointwise
