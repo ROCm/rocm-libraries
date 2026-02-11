@@ -268,7 +268,8 @@
             hipdnn_plugin_sdk::throwIfNull(numEngines);                                            \
                                                                                                    \
             auto& engineManager = handle->getEngineManager();                                      \
-            hipdnn_plugin_sdk::GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);           \
+            hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,       \
+                                                                               opGraph->size);     \
                                                                                                    \
             auto applicableEngines                                                                 \
                 = engineManager.getApplicableEngineIds(*handle, opGraphWrapper);                   \
@@ -309,7 +310,8 @@
             hipdnn_plugin_sdk::throwIfNull(engineDetails);                                         \
                                                                                                    \
             auto& engineManager = handle->getEngineManager();                                      \
-            hipdnn_plugin_sdk::GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);           \
+            hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,       \
+                                                                               opGraph->size);     \
                                                                                                    \
             engineManager.getEngineDetails(*handle, opGraphWrapper, engineId, *engineDetails);     \
                                                                                                    \
@@ -354,9 +356,10 @@
                                                                                                    \
             auto& engineManager = handle->getEngineManager();                                      \
                                                                                                    \
-            hipdnn_plugin_sdk::EngineConfigWrapper engineConfigWrapper(engineConfig->ptr,          \
-                                                                       engineConfig->size);        \
-            hipdnn_plugin_sdk::GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);           \
+            hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(        \
+                engineConfig->ptr, engineConfig->size);                                            \
+            hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,       \
+                                                                               opGraph->size);     \
             *workspaceSize = engineManager.getWorkspaceSize(                                       \
                 *handle, engineConfigWrapper.engineId(), opGraphWrapper);                          \
                                                                                                    \
@@ -381,9 +384,10 @@
             hipdnn_plugin_sdk::throwIfNull(opGraph);                                               \
             hipdnn_plugin_sdk::throwIfNull(executionContext);                                      \
                                                                                                    \
-            hipdnn_plugin_sdk::GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);           \
-            hipdnn_plugin_sdk::EngineConfigWrapper engineConfigWrapper(engineConfig->ptr,          \
-                                                                       engineConfig->size);        \
+            hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,       \
+                                                                               opGraph->size);     \
+            hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(        \
+                engineConfig->ptr, engineConfig->size);                                            \
                                                                                                    \
             auto& engineManager = handle->getEngineManager();                                      \
                                                                                                    \
