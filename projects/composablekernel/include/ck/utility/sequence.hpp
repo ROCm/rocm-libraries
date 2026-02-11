@@ -678,46 +678,53 @@ struct is_valid_sequence_map : is_same<typename arithmetic_sequence_gen<0, SeqMa
 {
 };
 
-// sequence_map_inverse - optimized using constexpr computation
-// Achieves O(1) template instantiation depth instead of O(N)
-namespace detail {
-
-// Compute inverse map at compile time using constexpr
+/**
+ * @brief  Invert a permutation sequence: given X2Y = {a, b, c, ...}, compute Y2X where Y2X[X2Y[i]]
+ * = i Example: Sequence<2,0,1> (meaning pos0->2, pos1->0, pos2->1) inverts to Sequence<1,2,0>
+ *
+ * Why this implementation is faster to compile than recursive templates:
+ *
+ * The old recursive approach created a new template type for each element:
+ *   sequence_map_inverse<Seq<2,0,1>> -> sequence_map_inverse<Seq<0,1>> ->
+ *   sequence_map_inverse<Seq<1>>
+ * Each "->" is a new type the compiler must create, track, and manage. For N elements, that's
+ * N template types, each with overhead (name mangling, debug info, symbol table entries).
+ *
+ * This implementation uses a constexpr for loop to build the inverse in O(N) operations:
+ * For input Sequence<2,0,1>, the loop sets result[input[pos]] = pos for each position:
+ *   pos=0: result[2]=0, pos=1: result[0]=1, pos=2: result[1]=2
+ * This builds the inverse permutation in a single pass with O(1) template instantiation depth.
+ *
+ * @tparam Is The input permutation sequence
+ */
 template <index_t... Is>
-__host__ __device__ constexpr auto compute_map_inverse(Sequence<Is...>)
+struct sequence_map_inverse<Sequence<Is...>>
 {
-    constexpr index_t N = sizeof...(Is);
-    index_array<N> result{};
-    constexpr index_t input[N > 0 ? N : 1] = {Is...};
-
-    // For each position x, set result[input[x]] = x
-    for(index_t x = 0; x < N; ++x)
-    {
-        result.data[input[x]] = x;
-    }
-    return result;
-}
-
-// Build result sequence with O(1) instantiation depth
-template <typename Seq, typename IndexSeq>
-struct build_map_inverse;
-
-template <index_t... Is, index_t... Idxs>
-struct build_map_inverse<Sequence<Is...>, Sequence<Idxs...>>
-{
-    static constexpr auto result = compute_map_inverse(Sequence<Is...>{});
-    using type                   = Sequence<result.data[Idxs]...>;
-};
-
-} // namespace detail
-
-template <typename SeqMap>
-struct sequence_map_inverse
-{
-    static_assert(is_valid_sequence_map<SeqMap>::value,
+    static_assert(is_valid_sequence_map<Sequence<Is...>>::value,
                   "sequence_map_inverse requires SeqMap to be a valid permutation sequence map");
-    using type =
-        typename detail::build_map_inverse<SeqMap, make_index_sequence<SeqMap::Size()>>::type;
+
+    private:
+    static constexpr auto build_inverse()
+    {
+        detail::index_array<sizeof...(Is)> result{};
+        constexpr index_t input[] = {Is...};
+        for(index_t pos = 0; pos < static_cast<index_t>(sizeof...(Is)); ++pos)
+        {
+            result[input[pos]] = pos;
+        }
+        return result;
+    }
+
+    static constexpr auto inverse = build_inverse();
+
+    template <index_t... Positions>
+    static constexpr auto compute(Sequence<Positions...>)
+    {
+        return Sequence<inverse[Positions]...>{};
+    }
+
+    public:
+    using type = decltype(compute(make_index_sequence<sizeof...(Is)>{}));
 };
 
 template <>
