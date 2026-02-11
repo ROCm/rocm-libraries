@@ -123,15 +123,17 @@
      d_out_index.SetZero();
  
      // Build shapes and strides (NHWC layout)
-     const auto input_shape      = ck_tile::make_tuple(N_, H_, W_, C_);
-     const auto output_shape     = ck_tile::make_tuple(N_, Ho_, Wo_, C_);
-     const auto input_strides    = ck_tile::make_tuple(H_ * W_ * C_, W_ * C_, C_, 1);
-     const auto output_strides   = ck_tile::make_tuple(Ho_ * Wo_ * C_, Wo_ * C_, C_, 1);
-     const auto window_lengths   = ck_tile::make_tuple(Y_, X_);
-     const auto window_strides   = ck_tile::make_tuple(stride_h_, stride_w_);
-     const auto window_dilations = ck_tile::make_tuple(dilation_h_, dilation_w_);
-     const auto input_left_pads  = ck_tile::make_tuple(pad_h_left_, pad_w_left_);
-     const auto input_right_pads = ck_tile::make_tuple(pad_h_right_, pad_w_right_);
+     // Note: avoid 'const auto' here so that decltype() deduces non-const tuple types,
+     // matching the PoolHostArgs<TensorShape, WindowShape> expected by SelectedKernel::launch().
+     auto input_shape      = ck_tile::make_tuple(N_, H_, W_, C_);
+     auto output_shape     = ck_tile::make_tuple(N_, Ho_, Wo_, C_);
+     auto input_strides    = ck_tile::make_tuple(H_ * W_ * C_, W_ * C_, C_, 1);
+     auto output_strides   = ck_tile::make_tuple(Ho_ * Wo_ * C_, Wo_ * C_, C_, 1);
+     auto window_lengths   = ck_tile::make_tuple(Y_, X_);
+     auto window_strides   = ck_tile::make_tuple(stride_h_, stride_w_);
+     auto window_dilations = ck_tile::make_tuple(dilation_h_, dilation_w_);
+     auto input_left_pads  = ck_tile::make_tuple(pad_h_left_, pad_w_left_);
+     auto input_right_pads = ck_tile::make_tuple(pad_h_right_, pad_w_right_);
  
      // Build host args for the generated kernel
      auto host_args = ck_tile::PoolHostArgs<decltype(input_shape), decltype(window_lengths)>{
