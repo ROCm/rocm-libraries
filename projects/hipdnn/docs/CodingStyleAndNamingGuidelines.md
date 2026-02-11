@@ -15,6 +15,7 @@ This document defines the canonical project-wide coding and test naming conventi
 - [8. Enums](#8-enums)
 - [9. Constants](#9-constants)
 - [10. Namespaces](#10-namespaces)
+  - [10.1 Detail Namespace](#101-detail-namespace)
 - [11. Test Naming Guidelines](#11-test-naming-guidelines)
   - [11.1 Keywords](#111-keywords)
   - [11.2 Unit Tests](#112-unit-tests)
@@ -127,6 +128,38 @@ If later you add invariants or non-trivial behavior, consider converting to a cl
   - `hipdnn_<component>`: (e.g. hipdnn_frontend) Contains all basic code required for the component
     - `utilities`: Contains code that can aid and assist in using component code
     - `test_utilities`: Contains code that can aid and assist in testing component code
+
+### 10.1 Detail Namespace
+
+The `detail` namespace is used to separate internal implementation code from the public API. Code in the `detail` namespace:
+
+- Is **not** part of the public API
+- Can be changed or removed at any time without a version bump
+- Should only be used by internal library code
+- Changes are considered patch-level (implementation details)
+
+**Pattern:**
+
+```cpp
+namespace hipdnn_frontend::detail
+{
+    // Internal implementation - not part of public API
+    void internalHelper();
+} // namespace hipdnn_frontend::detail
+```
+
+**Where detail namespaces exist:**
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| frontend | `hipdnn_frontend::detail` | Backend wrapper, validation helpers, descriptor management |
+| test_sdk | `hipdnn_test_sdk::detail` | Plan execution infrastructure, CPU reference utilities |
+| data_sdk | `hipdnn_data_sdk::utilities::detail` | Mutable state accessors, type conversion helpers |
+
+**Rules:**
+- Detail types may appear in private class members (transitive exposure is acceptable)
+- Detail types must **never** appear in public API signatures (function parameters, return types)
+- Public utility functions may wrap detail implementations
 
 ## 11. Test Naming Guidelines
 
