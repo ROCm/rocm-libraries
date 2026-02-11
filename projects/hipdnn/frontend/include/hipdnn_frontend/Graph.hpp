@@ -1224,9 +1224,9 @@ public:
     }
 
     /**
-     * @brief Execute the graph with tensor pointers mapped by TensorAttributes
+     * @brief Execute the graph with tensor pointers mapped by tensor handles
      * @param handle The hipDNN handle
-     * @param tensorLookup Map from TensorAttributes to device memory pointers
+     * @param tensorLookup Map from std::shared_ptr<TensorAttributes> (tensor handles) to device memory pointers
      * @param workspace Pointer to workspace memory (can be nullptr if size is 0)
      * @return Error indicating success or failure
      *

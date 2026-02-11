@@ -31,7 +31,7 @@ namespace hipdnn_frontend::graph
  * - Activation functions: RELU, SIGMOID, TANH, GELU, ELU, SWISH, etc.
  * - Arithmetic operations: ADD, MUL, SUB, DIV, etc.
  * - Comparison operations: CMP_EQ, CMP_GT, etc.
- * - Special operations: SOFTMAX, LOG_SOFTMAX, etc.
+ * - Other supported pointwise operations as defined in PointwiseMode
  *
  * @code{.cpp}
  * // ReLU activation

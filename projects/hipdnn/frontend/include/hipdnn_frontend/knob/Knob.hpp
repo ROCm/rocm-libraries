@@ -60,7 +60,7 @@ namespace hipdnn_frontend
  * }
  * @endcode
  *
- * @see KnobSetting, KnobConstraint, Graph::get_available_engines()
+ * @see KnobSetting, IConstraint, Graph::get_available_engines()
  */
 class Knob
 {
