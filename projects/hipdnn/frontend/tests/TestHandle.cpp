@@ -49,7 +49,7 @@ TEST_F(TestHandle, CreateHandleSuccess)
 
     auto handle = createHipdnnHandle();
     EXPECT_NE(handle, nullptr);
-    EXPECT_EQ(handle.get(), fakeHandle);
+    EXPECT_EQ(*handle, fakeHandle);
 }
 
 TEST_F(TestHandle, CreateHandleFailure)
@@ -76,7 +76,7 @@ TEST_F(TestHandle, CreateHandleWithStreamSuccess)
 
     auto handle = createHipdnnHandle(fakeStream);
     EXPECT_NE(handle, nullptr);
-    EXPECT_EQ(handle.get(), fakeHandle);
+    EXPECT_EQ(*handle, fakeHandle);
 }
 
 TEST_F(TestHandle, CreateHandleWithStreamFailure)
@@ -108,7 +108,7 @@ TEST_F(TestHandle, TryCreateHandleSuccess)
     auto [handle, error] = tryCreateHipdnnHandle();
     EXPECT_TRUE(error.is_good());
     EXPECT_NE(handle, nullptr);
-    EXPECT_EQ(handle.get(), fakeHandle);
+    EXPECT_EQ(*handle, fakeHandle);
 }
 
 TEST_F(TestHandle, TryCreateHandleFailure)
@@ -138,7 +138,7 @@ TEST_F(TestHandle, TryCreateHandleWithStreamSuccess)
     auto [handle, error] = tryCreateHipdnnHandle(fakeStream);
     EXPECT_TRUE(error.is_good());
     EXPECT_NE(handle, nullptr);
-    EXPECT_EQ(handle.get(), fakeHandle);
+    EXPECT_EQ(*handle, fakeHandle);
 }
 
 TEST_F(TestHandle, TryCreateHandleWithStreamFailure)
@@ -189,11 +189,11 @@ TEST_F(TestHandle, MoveTransfersOwnership)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     auto handle1 = createHipdnnHandle();
-    EXPECT_EQ(handle1.get(), fakeHandle);
+    EXPECT_EQ(*handle1, fakeHandle);
 
     auto handle2 = std::move(handle1);
-    EXPECT_EQ(handle1.get(), nullptr); // NOLINT(bugprone-use-after-move)
-    EXPECT_EQ(handle2.get(), fakeHandle);
+    EXPECT_EQ(handle1, nullptr); // NOLINT(bugprone-use-after-move)
+    EXPECT_EQ(*handle2, fakeHandle);
 }
 
 TEST_F(TestHandle, NullHandleDeleterIsNoop)

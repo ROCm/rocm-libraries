@@ -149,7 +149,7 @@ int main(int argc, char* argv[])
 
     auto handle = create_hipdnn_handle();
 
-    bool allPassed = run(SampleRunner{handle.get(), config});
+    bool allPassed = run(SampleRunner{*handle, config});
 
     if(allPassed)
     {

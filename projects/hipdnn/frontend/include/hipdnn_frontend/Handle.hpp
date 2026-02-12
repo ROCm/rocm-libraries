@@ -15,41 +15,49 @@ namespace hipdnn_frontend
 
 struct HipdnnHandleDeleter
 {
-    void operator()(hipdnnHandle_t handle) const
+    void operator()(hipdnnHandle_t* handlePtr) const
     {
-        if(handle == nullptr)
+        if(handlePtr == nullptr)
         {
             return;
         }
 
-        auto status = detail::hipdnnBackend()->destroy(handle);
-        if(status != HIPDNN_STATUS_SUCCESS)
+        if(*handlePtr != nullptr)
         {
-            HIPDNN_FE_LOG_ERROR("Failed to destroy hipdnn handle: " << static_cast<int>(status));
+            auto status = detail::hipdnnBackend()->destroy(*handlePtr);
+            if(status != HIPDNN_STATUS_SUCCESS)
+            {
+                HIPDNN_FE_LOG_ERROR(
+                    "Failed to destroy hipdnn handle: " << static_cast<int>(status));
+            }
         }
+
+        delete handlePtr;
     }
 };
 
-using HipdnnHandlePtr = std::unique_ptr<hipdnnHandle, HipdnnHandleDeleter>;
+// Double indirection: unique_ptr holds pointer to hipdnnHandle_t
+using HipdnnHandlePtr = std::unique_ptr<hipdnnHandle_t, HipdnnHandleDeleter>;
 
 // Throwing factories
 
 inline HipdnnHandlePtr createHipdnnHandle()
 {
-    hipdnnHandle_t rawHandle = nullptr;
-    auto status = detail::hipdnnBackend()->create(&rawHandle);
+    auto* handlePtr = new hipdnnHandle_t{nullptr};
+    auto status = detail::hipdnnBackend()->create(handlePtr);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
+        delete handlePtr;
         throw std::runtime_error("Failed to create hipdnn handle: status "
                                  + std::to_string(static_cast<int>(status)));
     }
-    return HipdnnHandlePtr(rawHandle);
+    return HipdnnHandlePtr(handlePtr);
 }
 
 inline HipdnnHandlePtr createHipdnnHandle(hipStream_t stream)
 {
     auto handle = createHipdnnHandle();
-    auto status = detail::hipdnnBackend()->setStream(handle.get(), stream);
+    auto status = detail::hipdnnBackend()->setStream(*handle, stream);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
         throw std::runtime_error("Failed to set stream on hipdnn handle: status "
@@ -62,14 +70,15 @@ inline HipdnnHandlePtr createHipdnnHandle(hipStream_t stream)
 
 inline std::pair<HipdnnHandlePtr, Error> tryCreateHipdnnHandle()
 {
-    hipdnnHandle_t rawHandle = nullptr;
-    auto status = detail::hipdnnBackend()->create(&rawHandle);
+    auto* handlePtr = new hipdnnHandle_t{nullptr};
+    auto status = detail::hipdnnBackend()->create(handlePtr);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
+        delete handlePtr;
         return {HipdnnHandlePtr{},
                 Error{ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to create hipdnn handle"}};
     }
-    return {HipdnnHandlePtr(rawHandle), Error{}};
+    return {HipdnnHandlePtr(handlePtr), Error{}};
 }
 
 inline std::pair<HipdnnHandlePtr, Error> tryCreateHipdnnHandle(hipStream_t stream)
@@ -79,7 +88,7 @@ inline std::pair<HipdnnHandlePtr, Error> tryCreateHipdnnHandle(hipStream_t strea
     {
         return {std::move(handle), error};
     }
-    auto status = detail::hipdnnBackend()->setStream(handle.get(), stream);
+    auto status = detail::hipdnnBackend()->setStream(*handle, stream);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
         return {HipdnnHandlePtr{},
@@ -96,7 +105,7 @@ inline Error setHipdnnHandleStream(const HipdnnHandlePtr& handle, hipStream_t st
     {
         return {ErrorCode::INVALID_VALUE, "Cannot set stream on null handle"};
     }
-    auto status = detail::hipdnnBackend()->setStream(handle.get(), stream);
+    auto status = detail::hipdnnBackend()->setStream(*handle, stream);
     HIPDNN_RETURN_ON_BACKEND_FAILURE(status, "Failed to set stream on hipdnn handle");
     return {};
 }
@@ -111,7 +120,7 @@ inline Error getHipdnnHandleStream(const HipdnnHandlePtr& handle, hipStream_t* s
     {
         return {ErrorCode::INVALID_VALUE, "Stream output pointer is null"};
     }
-    auto status = detail::hipdnnBackend()->getStream(handle.get(), stream);
+    auto status = detail::hipdnnBackend()->getStream(*handle, stream);
     HIPDNN_RETURN_ON_BACKEND_FAILURE(status, "Failed to get stream from hipdnn handle");
     return {};
 }
