@@ -23,16 +23,6 @@ void batchnormFwdFusionCheckTensors(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
-    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
-    static const std::unordered_set<PM> s_supportedActivations = {PM::RELU_FWD};
-
-    if(s_supportedActivations.count(actAttr.operation()) == 0)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm fusion currently only supports RELU_FWD activation");
-    }
-
     // in_0 must be the batchnorm inference output (forward path)
     if(actAttr.in_0_tensor_uid() != bnInfAttr.y_tensor_uid())
     {

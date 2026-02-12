@@ -108,16 +108,13 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
                                         uint32_t numDeviceBuffers,
                                         [[maybe_unused]] void* workspace) const
 {
-    // TODO: This is an initial implementation to get batchnorm working. It needs to be enhanced
-    // to match the full MIOpen solver capabilities.
-
     // Get device and properties
     int device;
     HIP_CHECK(hipGetDevice(&device));
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, device));
 
-    // Determine data type configuration (matching MIOpen solver logic)
+    // Determine data type configuration
     auto xDataType = _inferenceParams.x()->data_type();
     auto scaleDataType = _inferenceParams.scale()->data_type();
 
@@ -131,22 +128,16 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
     const auto* xDims = _inferenceParams.x()->dims();
     const auto* xStrides = _inferenceParams.x()->strides();
 
-    int n;
-    int c;
-    int hw;
-    int nStride;
-    int cStride;
-    int wStride;
+    int n, c, h, w;
+    int nStride, cStride, wStride;
 
     // Check if 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
     if(xDims->size() == 4)
     {
-        // 4D tensor: N, C, H, W
         n = static_cast<int>(xDims->Get(0));
         c = static_cast<int>(xDims->Get(1));
-        int h = static_cast<int>(xDims->Get(2));
-        int w = static_cast<int>(xDims->Get(3));
-        hw = h * w;
+        h = static_cast<int>(xDims->Get(2));
+        w = static_cast<int>(xDims->Get(3));
 
         nStride = static_cast<int>(xStrides->Get(0));
         cStride = static_cast<int>(xStrides->Get(1));
@@ -154,13 +145,13 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
     }
     else if(xDims->size() == 5)
     {
-        // 5D tensor: N, C, D, H, W
         n = static_cast<int>(xDims->Get(0));
         c = static_cast<int>(xDims->Get(1));
         int d = static_cast<int>(xDims->Get(2));
-        int h = static_cast<int>(xDims->Get(3));
-        int w = static_cast<int>(xDims->Get(4));
-        hw = d * h * w; // For 5D, spatial volume is D*H*W
+        h = static_cast<int>(xDims->Get(3));
+        w = static_cast<int>(xDims->Get(4));
+        // For 5D, combine D*H*W into spatial dimension
+        h = d * h;
 
         nStride = static_cast<int>(xStrides->Get(0));
         cStride = static_cast<int>(xStrides->Get(1));
@@ -171,24 +162,60 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
         throw std::runtime_error("Unsupported tensor dimension: " + std::to_string(xDims->size()));
     }
 
-    // Prepare options for compilation
-    // For NCHW spatial mode: GRP0=1 (xlocalsize), GRP1=256 (ylocalsize), GRP2=1 (zlocalsize)
-    std::vector<std::string> options;
-    options.emplace_back("-I/opt/rocm/include");
-    // Only ONE of these can be 1 (FP32, FP16Mix, or BFP16Mix)
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP32=") + (useFp32 ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP16=")
-                         + "0"); // Not used for mixed precision
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_BFP16=")
-                         + "0"); // Not used for mixed precision
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FPMIX=") + (useFp16Mix ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_BFPMIX=") + (useBfp16Mix ? "1" : "0"));
-    options.emplace_back("-DMIO_BN_GRP0=1");
-    options.emplace_back("-DMIO_BN_GRP1=256");
-    options.emplace_back("-DMIO_BN_GRP2=1");
-    options.emplace_back("-DMIO_BN_VEC_SIZE=1");
-    options.emplace_back("-DMIO_LAYOUT_NHWC=0");
+    unsigned int in_cstride = static_cast<unsigned int>(h * w);
 
+    // Detect layout: NHWC has C dimension (index 1) with stride 1, NCHW has stride H*W
+    bool isLayoutNHWC = (xStrides->Get(1) == 1);
+
+    // Calculate vector size based on layout
+    size_t vectorsize = isLayoutNHWC ? (c % 4 == 0 ? 4 : (c % 2 == 0 ? 2 : 1))
+                                     : (in_cstride % 4 == 0 ? 4 : (in_cstride % 2 == 0 ? 2 : 1));
+
+    // Calculate block and grid dimensions
+    size_t xlocalsize, xgridsize, ylocalsize, ygridsize, zlocalsize, zgridsize;
+    size_t max_localsize = 256;
+
+    if(isLayoutNHWC)
+    {
+        xlocalsize = std::min(static_cast<size_t>(c) / vectorsize, max_localsize);
+        xgridsize
+            = ((static_cast<size_t>(c) / vectorsize) + xlocalsize - 1) / xlocalsize * xlocalsize;
+
+        ylocalsize = max_localsize / xlocalsize;
+        ygridsize = (in_cstride + ylocalsize - 1) / ylocalsize * ylocalsize;
+    }
+    else
+    {
+        xlocalsize = 1;
+        xgridsize = ((static_cast<size_t>(c) + xlocalsize - 1) / xlocalsize) * xlocalsize;
+
+        ylocalsize = max_localsize;
+        ygridsize = ((in_cstride / vectorsize + ylocalsize - 1) / ylocalsize) * ylocalsize;
+    }
+
+    zlocalsize = 1;
+    size_t active_threads_xy = xgridsize * ygridsize;
+    size_t max_active_threads
+        = static_cast<size_t>(props.multiProcessorCount) * 32 * static_cast<size_t>(props.warpSize);
+
+    if(active_threads_xy < max_active_threads)
+    {
+        zgridsize
+            = std::min(size_t{max_active_threads / active_threads_xy}, static_cast<size_t>(n));
+    }
+    else
+    {
+        zgridsize = 1;
+    }
+
+    // Detect GPU architecture
+    std::string archName(props.gcnArchName);
+    bool isGfx103X = (archName.find("gfx103") == 0);
+    bool isGfx110X = (archName.find("gfx110") == 0);
+    bool isGfx120X = (archName.find("gfx120") == 0);
+    bool isGfx115X = (archName.find("gfx115") == 0);
+
+    // Get activation parameters
     int nrnOpId = 0;
     float alpha = 0.0f;
     float beta = 0.0f;
@@ -200,16 +227,38 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
         alpha = static_cast<float>(activation.alpha);
         beta = static_cast<float>(activation.beta);
     }
+
+    // Prepare compilation options
+    std::vector<std::string> options;
+    options.emplace_back("-I/opt/rocm/include");
+    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP32=") + (useFp32 ? "1" : "0"));
+    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP16=") + (useFp16Mix ? "1" : "0"));
+    options.emplace_back(std::string("-DHIP_PLUGIN_USE_BFP16=") + (useBfp16Mix ? "1" : "0"));
+    options.emplace_back("-DHIP_PLUGIN_USE_RNE_BFLOAT16=1");
+    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FPMIX=") + (useFp16Mix ? "1" : "0"));
+    options.emplace_back(std::string("-DHIP_PLUGIN_USE_BFPMIX=") + (useBfp16Mix ? "1" : "0"));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP0=") + std::to_string(xlocalsize));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP1=") + std::to_string(ylocalsize));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP2=") + std::to_string(zlocalsize));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_VEC_SIZE=") + std::to_string(vectorsize));
+    options.emplace_back(std::string("-DHIP_PLUGIN_LAYOUT_NHWC=") + (isLayoutNHWC ? "1" : "0"));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX103X=") + (isGfx103X ? "1" : "0"));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX110X=") + (isGfx110X ? "1" : "0"));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX120X=") + (isGfx120X ? "1" : "0"));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX115X=") + (isGfx115X ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_NRN_OP_ID=") + std::to_string(nrnOpId));
     options.emplace_back(std::string("--offload-arch=") + props.gcnArchName);
 
+    // Create and configure kernel
     auto hipProgram = HipProgram("BatchNormFwdInferSpatial.cpp", options);
     auto hipKernel = HipKernel(hipProgram, "BatchNormFwdInferSpatialEstInvVar");
 
-    // Use tensor dimensions extracted earlier
-    auto batchSize = static_cast<unsigned int>(n);
-    auto channels = static_cast<unsigned int>(c);
-    auto hwVolume = static_cast<unsigned int>(hw);
+    hipKernel.SetBlockSize(static_cast<unsigned int>(xlocalsize),
+                           static_cast<unsigned int>(ylocalsize),
+                           static_cast<unsigned int>(zlocalsize));
+    hipKernel.SetGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
+                          static_cast<unsigned int>(ygridsize / ylocalsize),
+                          static_cast<unsigned int>(zgridsize / zlocalsize));
 
     // Get device buffer pointers
     auto xBuffer = hip_kernel_utils::findDeviceBuffer(
@@ -223,31 +272,10 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
     auto invVarianceBuffer = hip_kernel_utils::findDeviceBuffer(
         _inferenceParams.invVariance()->uid(), deviceBuffers, numDeviceBuffers);
 
-    // Calculate grid/block dimensions based on MIOpen solver logic
-    // For NCHW spatial mode:
-    // - x-dimension spans channels (c)
-    // - y-dimension spans spatial elements (h*w)
-    // - z-dimension spans batches (n)
-
-    // Block dimensions (MIO_BN_GRP0, GRP1, GRP2)
-    const unsigned int xlocalsize = 1; // For NCHW spatial
-    const unsigned int ylocalsize = 256; // max_localsize
-    const unsigned int zlocalsize = 1;
-    hipKernel.SetBlockSize(xlocalsize, ylocalsize, zlocalsize);
-
-    // Grid dimensions - must cover all channels, spatial elements, and batches
-    const unsigned int vectorsize
-        = 1; // TODO: Support vectorization (hwVolume % 4 == 0 ? 4 : hwVolume % 2 == 0 ? 2 : 1)
-    unsigned int xgridsize = ((channels + xlocalsize - 1) / xlocalsize) * xlocalsize;
-    unsigned int ygridsize = ((hwVolume / vectorsize + ylocalsize - 1) / ylocalsize) * ylocalsize;
-    unsigned int zgridsize = batchSize; // TODO: Optimize based on GPU compute units
-
-    // Convert to grid dimensions (in blocks, not threads)
-    hipKernel.SetGridSize(xgridsize / xlocalsize, ygridsize / ylocalsize, zgridsize / zlocalsize);
-
     unsigned int hwStride = static_cast<unsigned int>(wStride);
     unsigned int batchStride = static_cast<unsigned int>(nStride);
 
+    // Launch kernel with appropriate output buffer
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
     {
         auto activationOutBuffer = hip_kernel_utils::findDeviceBuffer(
@@ -260,10 +288,10 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
                          invVarianceBuffer.ptr,
                          scaleBuffer.ptr,
                          biasBuffer.ptr,
-                         channels,
-                         hwVolume,
-                         batchSize,
-                         cStride,
+                         static_cast<unsigned int>(c),
+                         static_cast<unsigned int>(in_cstride),
+                         static_cast<unsigned int>(n),
+                         static_cast<unsigned int>(cStride),
                          hwStride,
                          batchStride,
                          alpha,
@@ -281,10 +309,10 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
                          invVarianceBuffer.ptr,
                          scaleBuffer.ptr,
                          biasBuffer.ptr,
-                         channels,
-                         hwVolume,
-                         batchSize,
-                         cStride,
+                         static_cast<unsigned int>(c),
+                         static_cast<unsigned int>(in_cstride),
+                         static_cast<unsigned int>(n),
+                         static_cast<unsigned int>(cStride),
                          hwStride,
                          batchStride,
                          alpha,
