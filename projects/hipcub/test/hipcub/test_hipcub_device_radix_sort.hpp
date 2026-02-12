@@ -62,6 +62,21 @@ This work around is needed for gfx1151 architecture as currently there is an unk
                 exit(error);                                                                    \
             }                                                                                   \
         }
+
+    #define HIP_CHECK(condition)                                                                \
+        {                                                                                       \
+            hipError_t error = condition;                                                       \
+            if(error == hipErrorLaunchFailure){
+                GTEST_SKIP() << "Skipping because: "                                            \
+                << hipGetErrorString(error) << " line: " << __LINE__;                           \
+            }
+            else if(error != hipSuccess)                                                        \
+            {                                                                                   \
+                std::cout << "HIP error: " << hipGetErrorString(error) << " line: " << __LINE__ \
+                        << std::endl;                                                           \
+                exit(error);                                                                    \
+            }                                                                                   \
+        }
 #else
     #define HIP_CHECK_MEMORY(condition)                                                         \
         {                                                                                       \
