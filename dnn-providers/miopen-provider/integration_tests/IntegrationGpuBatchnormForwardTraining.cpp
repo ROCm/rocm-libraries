@@ -15,6 +15,7 @@
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_plugin::test_utilities;
@@ -63,7 +64,7 @@ protected:
     {
         const TestCaseType& testCase = this->GetParam();
 
-        HIPDNN_LOG_INFO("Test is using {} for its random seed", testCase.seed);
+        HIPDNN_PLUGIN_LOG_INFO("Test is using " << testCase.seed << " for its random seed");
 
         hipdnn_frontend::graph::Graph graphObj;
         graphObj.set_name("BatchnormForwardTrainingTest");
@@ -78,18 +79,17 @@ protected:
         auto derivedDims = getDerivedShape(dims);
 
         // Create input tensor attributes
-        auto xAttr
-            = graph::makeTensorAttributes("X", dims, generateStrides(dims, layout.strideOrder));
+        auto xAttr = makeTensorAttributes("X", dims, generateStrides(dims, layout.strideOrder));
         xAttr.set_uid(BatchnormFwdTrainingTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
-        auto scaleAttr = graph::makeTensorAttributes(
+        auto scaleAttr = makeTensorAttributes(
             "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
         scaleAttr.set_uid(BatchnormFwdTrainingTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
-        auto biasAttr = graph::makeTensorAttributes(
+        auto biasAttr = makeTensorAttributes(
             "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
         biasAttr.set_uid(BatchnormFwdTrainingTensorIds::BIAS_UID);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
@@ -107,19 +107,18 @@ protected:
 
         if(scenario == BatchnormTrainingScenario::FULL_TRAINING)
         {
-            auto prevRunningMeanAttr = graph::makeTensorAttributes("prev_running_mean",
-                                                                   intermediateDataType,
-                                                                   derivedDims,
-                                                                   generateStrides(derivedDims));
+            auto prevRunningMeanAttr = makeTensorAttributes("prev_running_mean",
+                                                            intermediateDataType,
+                                                            derivedDims,
+                                                            generateStrides(derivedDims));
             prevRunningMeanAttr.set_uid(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID);
             prevRunningMeanTensorAttr
                 = std::make_shared<graph::TensorAttributes>(std::move(prevRunningMeanAttr));
 
-            auto prevRunningVarianceAttr
-                = graph::makeTensorAttributes("prev_running_variance",
-                                              intermediateDataType,
-                                              derivedDims,
-                                              generateStrides(derivedDims));
+            auto prevRunningVarianceAttr = makeTensorAttributes("prev_running_variance",
+                                                                intermediateDataType,
+                                                                derivedDims,
+                                                                generateStrides(derivedDims));
             prevRunningVarianceAttr.set_uid(
                 BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID);
             prevRunningVarianceTensorAttr

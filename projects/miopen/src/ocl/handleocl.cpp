@@ -251,7 +251,7 @@ Handle::Handle() : impl(new HandleImpl())
     impl->queue = HandleImpl::AqPtr{
         clCreateCommandQueueWithProperties(impl->context.get(), impl->device, cq_props, &status)};
 #else
-    impl->queue  = HandleImpl::AqPtr{clCreateCommandQueue(
+    impl->queue = HandleImpl::AqPtr{clCreateCommandQueue(
         impl->context.get(), impl->device, CL_QUEUE_PROFILING_ENABLE, &status)};
 #endif
     if(status != CL_SUCCESS)

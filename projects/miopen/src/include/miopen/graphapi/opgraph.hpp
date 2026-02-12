@@ -234,11 +234,11 @@ class MIOPEN_INTERNALS_EXPORT OpGraph
     std::vector<Engine> mEngines{};
 
 public:
-    OpGraph(const OpGraph&) = delete;
+    OpGraph(const OpGraph&)            = delete;
     OpGraph& operator=(const OpGraph&) = delete;
 
-    OpGraph()          = default;
-    OpGraph(OpGraph&&) = default;
+    OpGraph()                     = default;
+    OpGraph(OpGraph&&)            = default;
     OpGraph& operator=(OpGraph&&) = default;
     ~OpGraph()                    = default;
 

@@ -50,7 +50,7 @@ void PluginBase::resolveSymbols()
         _funcSetLoggingCallback = nullptr;
 
         // Add name of plugin if ever possible
-        HIPDNN_LOG_INFO("Plugin does not support logging callback");
+        HIPDNN_BACKEND_LOG_INFO("Plugin does not support logging callback");
     }
 
 #ifndef NDEBUG

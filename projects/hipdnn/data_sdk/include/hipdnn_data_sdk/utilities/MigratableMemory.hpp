@@ -245,7 +245,7 @@ private:
     {
         if(err != hipSuccess)
         {
-            HIPDNN_LOG_ERROR("{}: HIP error: {}", msg, hipGetErrorString(err));
+            HIPDNN_SDK_LOG_ERROR(msg << ": HIP error: " << hipGetErrorString(err));
         }
     }
 

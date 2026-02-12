@@ -301,16 +301,16 @@ struct CKArgs
         wei_strides = {Y * X * C, G * Y * X * C, 1, X * C, C};
 
         filter_stride   = {ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
-                         ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
+                           ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
         filter_dilation = {ProblemInterpreter::GetAdjustedConvolutionDilationH(problem),
                            ProblemInterpreter::GetAdjustedConvolutionDilationW(problem)};
         lPadding        = {ProblemInterpreter::GetInputLeftPadH(problem),
-                    ProblemInterpreter::GetInputLeftPadW(problem)};
+                           ProblemInterpreter::GetInputLeftPadW(problem)};
         rPadding        = {ProblemInterpreter::GetAdjustedInputRightPadH(problem),
-                    ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
+                           ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
     }
 
-    CKArgs(const CKArgs&) = default;
+    CKArgs(const CKArgs&)            = default;
     CKArgs& operator=(const CKArgs&) = default;
 
     template <typename ConvPtr>

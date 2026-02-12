@@ -9,7 +9,7 @@
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -29,7 +29,7 @@ struct GraphTensorBundle
                 continue;
             }
 
-            auto tensor = createTensorFromAttribute(*attr);
+            auto tensor = detail::createTensorFromAttribute(*attr);
             tensors.emplace(id, std::move(tensor));
         }
     }

@@ -112,7 +112,7 @@ MIOpenCDFGen(const __global _FLOAT* __restrict bot,
 #if MLO_N_PROCS0 & (MLO_N_PROCS0 - 1)
     uint lcl_proc_id0 = -mad24((int)lcl_proc_id1, MLO_N_PROCS0, -(int)lcl_in_proc_id); //
 #else
-    uint lcl_proc_id0   = lcl_in_proc_id & (MLO_N_PROCS0 - 1); //
+    uint lcl_proc_id0 = lcl_in_proc_id & (MLO_N_PROCS0 - 1); //
 #endif
     uint x_out_lcl = mul24(lcl_proc_id0, (uint)MLO_N_OUT_PIX_SZ0);
     uint y_out_lcl = mul24(lcl_proc_id1, (uint)MLO_N_OUT_PIX_SZ1);
@@ -127,7 +127,7 @@ MIOpenCDFGen(const __global _FLOAT* __restrict bot,
 #if MLO_N_STACKS & (MLO_N_STACKS - 1)
     uint b_id = -mad24((int)o_id, MLO_N_STACKS, -(int)ob); // block of batchs
 #else
-    uint b_id           = ob & (MLO_N_STACKS - 1);             // block of batchs
+    uint b_id = ob & (MLO_N_STACKS - 1); // block of batchs
 #endif
     // my batch
     uint b = b_id * MLO_LCL_N_IN_CHNLS + lcl_proc;

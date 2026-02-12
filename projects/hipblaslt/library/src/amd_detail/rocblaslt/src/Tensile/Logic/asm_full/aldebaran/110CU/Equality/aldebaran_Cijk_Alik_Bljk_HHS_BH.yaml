@@ -174,7 +174,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_MT128x192x16_MI32x32x8x1_SN_MIWT2_3_SU0_SUS0_WSGRA1_WSGRB1_WGM4
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StorePriorityOpt: 1
     StoreRemapVectorWidth: 0
@@ -332,7 +332,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_MT256x128x16_MI32x32x8x1_SN_MIWT4_2_SU0_SUS0_WSGRA1_WSGRB1_WGM8
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StorePriorityOpt: 1
     StoreRemapVectorWidth: 0
@@ -489,7 +489,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_MT96x128x16_MI32x32x8x1_SN_MIWT3_1_SU0_SUS0_WSGRA1_WSGRB0_WGM32
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StorePriorityOpt: 1
     StoreRemapVectorWidth: 0
@@ -647,7 +647,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_MT96x128x16_MI32x32x8x1_SN_MIWT3_1_SU0_SUS0_WSGRA0_WSGRB1_WGM1
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StorePriorityOpt: 1
     StoreRemapVectorWidth: 0
@@ -805,7 +805,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_MT32x64x32_MI16x16x16x1_SN_MIWT1_2_SU0_SUS0_WSGRA1_WSGRB0_WGM1
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StorePriorityOpt: 1
     StoreRemapVectorWidth: 0

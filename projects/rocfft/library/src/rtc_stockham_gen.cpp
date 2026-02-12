@@ -278,9 +278,9 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
                          const std::optional<LoadOps>&    loadOps,
                          const std::optional<StoreOps>&   storeOps)
 {
-    std::unique_ptr<Function> lds2reg, reg2lds, device;
+    std::unique_ptr<Function> lds2reg, reg2lds, device, device_pp;
     std::unique_ptr<Function> lds2reg_pp_steps, reg2lds_pp_steps;
-    std::unique_ptr<Function> twiddle_multiply_pp, local_transpose_pp;
+    std::unique_ptr<Function> local_transpose_pp;
     std::unique_ptr<Function> lds2reg1, reg2lds1, device1;
     std::unique_ptr<Function> bluestein_load, bluestein_intrinsic_load;
     std::unique_ptr<Function> bluestein_store, bluestein_intrinsic_store;
@@ -359,29 +359,28 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
             reg2lds
                 = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_function());
             lds2reg_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_to_reg_input_step_1_2_function());
+                kernel_pp->generate_lds_to_reg_partial_pass_input_function());
             reg2lds_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_from_reg_output_pp_step_1_2_function());
-            twiddle_multiply_pp = std::make_unique<Function>(
-                kernel_pp->generate_twiddle_multiply_pp_function(direction));
-            device = std::make_unique<Function>(kernel_pp->generate_device_function());
+                kernel_pp->generate_lds_from_reg_partial_pass_output_function());
+            device    = std::make_unique<Function>(kernel_pp->generate_device_function());
+            device_pp = std::make_unique<Function>(kernel_pp->generate_pp_device_function());
             break;
         }
         case PPT_SBCC:
         {
             auto kernel_pp = static_cast<StockhamPartialPassKernelCC*>(kernel.get());
 
-            lds2reg
-                = std::make_unique<Function>(kernel_pp->generate_lds_to_reg_input_pp_function());
+            lds2reg = std::make_unique<Function>(kernel_pp->generate_lds_to_reg_input_function());
             reg2lds
-                = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_pp_function());
+                = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_function());
             lds2reg_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_to_reg_input_step_3_4_function());
+                kernel_pp->generate_lds_to_reg_partial_pass_input_function());
             reg2lds_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_from_reg_output_pp_step_3_4_function());
+                kernel_pp->generate_lds_from_reg_partial_pass_output_function());
             local_transpose_pp
                 = std::make_unique<Function>(kernel_pp->generate_local_transpose_pp_function());
-            device = std::make_unique<Function>(kernel_pp->generate_device_function());
+            device    = std::make_unique<Function>(kernel_pp->generate_device_function());
+            device_pp = std::make_unique<Function>(kernel_pp->generate_pp_device_function());
             break;
         }
         default:
@@ -423,6 +422,8 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
         *device = make_inverse(*device);
         if(device1)
             *device1 = make_inverse(*device1);
+        if(device_pp)
+            *device_pp = make_inverse(*device_pp);
         *global = make_inverse(*global);
     }
 
@@ -472,8 +473,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
         src += lds2reg_pp_steps->render();
         src += reg2lds_pp_steps->render();
 
-        if(ppType == PPT_SBRR)
-            src += twiddle_multiply_pp->render();
+        src += device_pp->render();
 
         if(ppType == PPT_SBCC)
             src += local_transpose_pp->render();

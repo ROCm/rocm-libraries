@@ -457,7 +457,7 @@ MIOpenCvBwdWrW(const __global _FLOAT* __restrict top_df,
 #if MLO_N_SPANS_PER_SCAN & (MLO_N_SPANS_PER_SCAN - 1)
     uint spn = iMod(lcl_id, o, MLO_N_SPANS_PER_SCAN);
 #else
-    uint spn            = lcl_id & (MLO_N_SPANS_PER_SCAN - 1);
+    uint spn = lcl_id & (MLO_N_SPANS_PER_SCAN - 1);
 #endif
     //	bool scan_lead = (o*MLO_N_SPANS_PER_SCAN == lcl_id);
 
@@ -748,7 +748,7 @@ MIOpenCvBwdWrW(const __global _FLOAT* __restrict top_df,
             zeroInitLDS(lcl_id, lcl_bot);
 #endif
         } // row-level  loop
-    }     // batch-level loop
+    } // batch-level loop
 
     // final summation over all output maps and each filter row
     // this coudl be done with log but it negligeble anyway

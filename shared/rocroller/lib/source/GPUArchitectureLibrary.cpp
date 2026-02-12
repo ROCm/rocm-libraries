@@ -65,7 +65,7 @@ namespace rocRoller
         }
 #else
         //TODO: Add a way to get specific GPUs. Maybe through env vars.
-        AssertFatal(false, "Non-HIP Path Not Implemented");
+        Throw<FatalError>("Non-HIP Path Not Implemented");
 #endif
     }
 

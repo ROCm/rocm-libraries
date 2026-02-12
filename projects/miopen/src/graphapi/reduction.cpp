@@ -228,7 +228,7 @@ void BackendOperationReductionDescriptor::setAttribute(miopenBackendAttributeNam
         MIOPEN_THROW(miopenStatusNotInitialized);
     }
 
-    using Setter = OperationReductionBuilder& (OperationReductionBuilder::*)(Tensor * tensor);
+    using Setter = OperationReductionBuilder& (OperationReductionBuilder::*)(Tensor* tensor);
 
     auto callSetter = [=](Setter setter, miopenBackendDescriptor_t& outDescriptor) {
         if(attributeType == MIOPEN_TYPE_BACKEND_DESCRIPTOR && elementCount == 1)

@@ -8533,8 +8533,7 @@ void host_csr_to_csr_compress(rocsparse_int                     M,
 
         for(rocsparse_int j = start; j < end; j++)
         {
-            if(std::abs(csr_val_A[j]) > std::real(tol)
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+            if(std::abs(csr_val_A[j]) > std::real(tol))
             {
                 count++;
             }
@@ -8575,8 +8574,7 @@ void host_csr_to_csr_compress(rocsparse_int                     M,
 
         for(rocsparse_int j = start; j < end; j++)
         {
-            if(std::abs(csr_val_A[j]) > std::real(tol)
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+            if(std::abs(csr_val_A[j]) > std::real(tol))
             {
                 csr_col_ind_C[index] = csr_col_ind_A[j];
                 csr_val_C[index]     = csr_val_A[j];
@@ -8614,8 +8612,7 @@ void host_prune_csr_to_csr(rocsparse_int                     M,
         for(rocsparse_int j = csr_row_ptr_A[i] - csr_base_A; j < csr_row_ptr_A[i + 1] - csr_base_A;
             j++)
         {
-            if(std::abs(csr_val_A[j]) > threshold
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+            if(std::abs(csr_val_A[j]) > threshold)
             {
                 csr_row_ptr_C[i + 1]++;
             }
@@ -8638,8 +8635,7 @@ void host_prune_csr_to_csr(rocsparse_int                     M,
         for(rocsparse_int j = csr_row_ptr_A[i] - csr_base_A; j < csr_row_ptr_A[i + 1] - csr_base_A;
             j++)
         {
-            if(std::abs(csr_val_A[j]) > threshold
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+            if(std::abs(csr_val_A[j]) > threshold)
             {
                 csr_col_ind_C[index] = (csr_col_ind_A[j] - csr_base_A) + csr_base_C;
                 csr_val_C[index]     = csr_val_A[j];

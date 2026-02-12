@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -124,26 +124,26 @@ namespace rocRoller
         {
             // Skip loading arguments that are only used at launch time
             // (for expression evaluation) and not during kernel execution
-            if(launchTimeOnly.contains(arg.name))
+            if(launchTimeOnly.contains(arg.getName()))
             {
-                Log::debug("Skipping load of launch-time-only arg {}", arg.name);
+                Log::debug("Skipping load of launch-time-only arg {}", arg.getName());
                 co_yield Instruction::Comment(
-                    concatenate("Skipping load of launch-time-only arg ", arg.name));
+                    concatenate("Skipping load of launch-time-only arg ", arg.getName()));
                 continue;
             }
 
-            Log::debug("Loading argument {}", arg.name);
-            auto numRegisters = std::max(1u, arg.size / (Register::bitsPerRegister / 8));
+            Log::debug("Loading argument {}", arg.getName());
+            auto numRegisters = std::max(1u, arg.getSize() / (Register::bitsPerRegister / 8));
             auto r            = Register::Value::Placeholder(m_context.lock(),
                                                   Register::Type::Scalar,
                                                   DataType::Raw32,
                                                   numRegisters,
                                                   Register::AllocationOptions::FullyContiguous());
             r->allocateNow();
-            r->setName(arg.name);
-            r->setVariableType(arg.variableType);
-            m_loadedValues[arg.name] = r;
-            co_yield m_context.lock()->mem()->loadScalar(r, argPtr, arg.offset, arg.size);
+            r->setName(arg.getName());
+            r->setVariableType(arg.getVariableType());
+            m_loadedValues[arg.getName()] = r;
+            co_yield m_context.lock()->mem()->loadScalar(r, argPtr, arg.getOffset(), arg.getSize());
         }
     }
 
@@ -157,15 +157,15 @@ namespace rocRoller
     Generator<Instruction> ArgumentLoader::loadArgument(AssemblyKernelArgument const& arg)
     {
         Register::ValuePtr value;
-        co_yield Instruction::Comment(concatenate("Loading arg ", arg.name));
-        co_yield loadRange(arg.offset, arg.offset + arg.size, value);
+        co_yield Instruction::Comment(concatenate("Loading arg ", arg.getName()));
+        co_yield loadRange(arg.getOffset(), arg.getOffset() + arg.getSize(), value);
 
         AssertFatal(value);
-        value->setName(arg.name);
+        value->setName(arg.getName());
 
-        value->setVariableType(arg.variableType);
+        value->setVariableType(arg.getVariableType());
 
-        m_loadedValues[arg.name] = value;
+        m_loadedValues[arg.getName()] = value;
     }
 
     void ArgumentLoader::releaseArgument(std::string const& argName)
@@ -181,7 +181,7 @@ namespace rocRoller
     Generator<Instruction> ArgumentLoader::getValue(std::string const&  argName,
                                                     Register::ValuePtr& value)
     {
-        auto realName = m_kernel->findArgument(argName).name;
+        auto realName = m_kernel->findArgument(argName).getName();
 
         if(Settings::Get(Settings::AuditControlTracers))
         {

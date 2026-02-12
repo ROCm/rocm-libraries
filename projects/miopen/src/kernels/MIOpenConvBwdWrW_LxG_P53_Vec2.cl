@@ -440,7 +440,7 @@ MIOpenCvBwdWrW(const __global _FLOAT* __restrict top_df,
     uint o   = iDiv_legacy(lcl_id, MLO_N_SPANS_PER_SCAN);
     uint spn = iMod(lcl_id, o, MLO_N_SPANS_PER_SCAN);
 #else
-    uint o = lcl_id / MLO_N_SPANS_PER_SCAN;
+    uint o   = lcl_id / MLO_N_SPANS_PER_SCAN;
     uint spn = lcl_id & (MLO_N_SPANS_PER_SCAN - 1);
 #endif
     //	bool scan_lead = (o*MLO_N_SPANS_PER_SCAN == lcl_id);
@@ -816,7 +816,7 @@ MIOpenCvBwdWrW_rdc(const __global _FLOAT* __restrict weight_df_tmp,
     uint wei_idx     = iMod(wei_idx0, wei_blk_idx, MLO_WEI_CHANNEL_STRIDE);
 #else
     uint wei_blk_idx = wei_idx0 / MLO_WEI_CHANNEL_STRIDE;
-    uint wei_idx = wei_idx0 & (MLO_WEI_CHANNEL_STRIDE - 1);
+    uint wei_idx     = wei_idx0 & (MLO_WEI_CHANNEL_STRIDE - 1);
 #endif
 
     _FLOAT pvt_accum_wei[MLO_UT_READ_UNIT] = {(_FLOAT)0};

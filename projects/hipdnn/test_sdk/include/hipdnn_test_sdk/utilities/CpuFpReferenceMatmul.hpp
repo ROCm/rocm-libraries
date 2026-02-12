@@ -5,7 +5,7 @@
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
 #include <algorithm>
 #include <vector>
@@ -77,11 +77,11 @@ public:
                       + (static_cast<ComputeDataType>(aVal) * static_cast<ComputeDataType>(bVal));
             }
 
-            c.setHostValue(safeConvert<CDataType>(acc), indices);
+            c.setHostValue(hipdnn_test_sdk::detail::safeConvert<CDataType>(acc), indices);
         };
 
         auto parallelFunc
-            = hipdnn_test_sdk::utilities::makeParallelTensorFunctor(matmulFunc, c.dims());
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(matmulFunc, c.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
         c.memory().markHostModified();

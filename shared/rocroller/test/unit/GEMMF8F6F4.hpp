@@ -78,7 +78,7 @@ struct GEMMProblemF8F6F4 : GEMMProblem
         this->macK            = 2 * this->waveK;
         this->loadPathA       = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         this->loadPathB       = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        this->storeLDSD       = false;
+        this->storePath       = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         this->workgroupSizeX  = 256;
         this->workgroupSizeY  = 1;
         this->m               = 2 * this->macM;
@@ -110,7 +110,7 @@ struct GEMMProblemF8TN : GEMMProblem
 
         this->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         this->loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        this->storeLDSD = false;
+        this->storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         this->workgroupSizeX = 256;
         this->workgroupSizeY = 1;

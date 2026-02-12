@@ -14,6 +14,7 @@
 #include <tuple>
 
 #include "origami/hardware.hpp"
+#include "origami/heuristics.hpp"
 #include "origami/math.hpp"
 #include "origami/types.hpp"
 
@@ -577,29 +578,31 @@ double compute_memory_latency(const problem_t& problem,
   const size_t MT_N = config.mt.n;
   const size_t MT_K = config.mt.k;
 
+  heuristic_params_t heuristic = get_heuristic_params(problem, hardware, config);
+
   // 1) Estimate L2 hit-rate
-  double H_mem1 = estimate_l2_hit(problem, hardware, config, splitting_factor);
+  double H_mem_l2 = estimate_l2_hit(problem, hardware, config, splitting_factor);
 
   // Global cap on L2 hit-rate (prevents impossible cache residency claims)
   // (Assumes capacity is given in KiB, convert to bytes)
-  double H_mem1_global =
+  double H_mem_l2_global =
       compute_l2_hit_rate_global(problem, hardware, config, hardware.L2_capacity * 1024);
 
-  H_mem1 = std::min(H_mem1, H_mem1_global);
+  H_mem_l2 = std::min(H_mem_l2, H_mem_l2_global);
 
-  if (H_mem1 == 0) { H_mem1 = 0.5; }
+  if (H_mem_l2 == 0) { H_mem_l2 = heuristic.l2_min_hit_rate_default; }
 
   // 2) Estimate mall hit-rate
-  double H_mem2 =
+  double H_mem_mall =
       hardware.has_MALL()
           ? estimate_mall_hit(problem, hardware, config, num_active_cus, splitting_factor)
           : 0.0;  // MALL is not supported, so we emulate every read as a miss
 
   // 3) Total loads are loads from A and loads from B
-  size_t Ld_A_value = a_trans ?
-      MT_M * round_elements_to_128B(MT_K, a_bits) : round_elements_to_128B(MT_M, a_bits) * MT_K;
-  size_t Ld_B_value = b_trans ?
-      round_elements_to_128B(MT_N, b_bits) * MT_K : MT_N * round_elements_to_128B(MT_K, b_bits);
+  size_t Ld_A_value = a_trans ? MT_M * round_elements_to_128B(MT_K, a_bits)
+                              : round_elements_to_128B(MT_M, a_bits) * MT_K;
+  size_t Ld_B_value = b_trans ? round_elements_to_128B(MT_N, b_bits) * MT_K
+                              : MT_N * round_elements_to_128B(MT_K, b_bits);
   auto Ld_CU_bytes  = (Ld_A_value * a_bytes)    // A Bytes
                      + (Ld_B_value * b_bytes);  // B Bytes
 
@@ -620,22 +623,23 @@ double compute_memory_latency(const problem_t& problem,
   // 4) total loads by all CUs
   double total_Ld = Ld_CU_bytes * static_cast<double>(num_active_cus);
 
-  // 5) mem1‐limited factor (simple linear model)
-  double mem1_bw_limited = static_cast<double>(num_active_cus) / static_cast<double>(hardware.N_CU);
-  double limited_mem1_bw = (hardware.mem1_perf_ratio * mem1_bw_limited);
+  // 5) mem_l2‐limited factor (simple linear model)
+  double mem_l2_bw_limited =
+      static_cast<double>(num_active_cus) / static_cast<double>(hardware.N_CU);
+  double limited_mem_l2_bw = (hardware.mem1_perf_ratio * mem_l2_bw_limited);
 
-  // 6) mem1 latency
-  double L_mem_mem1 = (limited_mem1_bw > 0) ? (total_Ld / (limited_mem1_bw)) : 0.0;
+  // 6) mem_l2 latency
+  double L_mem_mem_l2 = (limited_mem_l2_bw > 0) ? (total_Ld / (limited_mem_l2_bw)) : 0.0;
 
-  // 7) mem2‐limited from occupancy (Can't Issue enough load/stores)
+  // 7) mem_mall‐limited from occupancy (Can't Issue enough load/stores)
   double bw_limited = compute_mem_bw_from_occupancy(hardware, num_active_cus);
 
   // 8) loads that reach each level
-  double Ld_mem2 =
+  double Ld_mem_mall =
       hardware.has_MALL()
-          ? (1.0 - H_mem1) * total_Ld
+          ? (1.0 - H_mem_l2) * total_Ld
           : 0.0;  // MALL is not supported, we emulate it by saying there are zero loads to MALL
-  double Ld_MEM  = (1.0 - H_mem2) * Ld_mem2;
+  double Ld_mem_dram = (1.0 - H_mem_mall) * Ld_mem_mall;
 
   // 9) enforce whole‐problem minimum loads when we can fit M/N in the CUs.
   // Calculate the tile of workgroups that can run concurrently (logic from estimate_mall_hit).
@@ -661,20 +665,22 @@ double compute_memory_latency(const problem_t& problem,
                                         (mall_n * config.mt.nk() * b_bytes)) *
                     concurrent_batches;  // Apply batching to the minimum load itself.
   // The actual loads cannot be less than this physical minimum.
-  Ld_MEM  = std::max(Ld_MEM, min_load);
-  Ld_mem2 = std::max(Ld_mem2, min_load);
+  Ld_mem_dram = std::max(Ld_mem_dram, min_load);
+  Ld_mem_mall = std::max(Ld_mem_mall, min_load);
 
-  // 10) mem2 latency
-  double limited_mem2_bw = (hardware.mem2_perf_ratio * bw_limited);
-  double L_mem_mem2      = (limited_mem2_bw > 0) ? (Ld_mem2 / limited_mem2_bw) : 0.0;
+  // 10) mem_mall latency
+  double limited_mem_mall_bw = (hardware.mem2_perf_ratio * bw_limited);
+  double L_mem_mem_mall = (limited_mem_mall_bw > 0) ? (Ld_mem_mall / limited_mem_mall_bw) : 0.0;
 
-  // 11) MEM latency
+  // 11) mem_dram latency
   double limited_mem_bw = (hardware.mem3_perf_ratio * bw_limited);
-  double L_mem_MEM      = (limited_mem_bw > 0) ? (Ld_MEM / limited_mem_bw) : 0.0;
-  L_mem_MEM += 200;  // Load Latency
+  double L_mem_mem_dram = (limited_mem_bw > 0) ? (Ld_mem_dram / limited_mem_bw) : 0.0;
+  L_mem_mem_dram += heuristic.main_memory_load_latency;
 
   // 12) pick the worst‐case bound
-  double L_mem = std::max({L_mem_mem1, L_mem_mem2, L_mem_MEM});
+  double L_mem = std::max({L_mem_mem_l2 * heuristic.weight_mem_l2,
+                           L_mem_mem_mall * heuristic.weight_mem_mall,
+                           L_mem_mem_dram * heuristic.weight_mem_dram});
 
   return L_mem;
 }
@@ -699,6 +705,8 @@ double compute_tile_latency(const problem_t& problem,
   const auto b_bits  = datatype_to_bits(problem.b_dtype);
   const auto d_bytes = data_type_to_bytes(problem.d_dtype);
 
+  heuristic_params_t heuristic = get_heuristic_params(problem, hardware, config);
+
   // 1) Compute per-tile latencies
   double L_compute = compute_mt_compute_latency(problem, hardware, config);
 
@@ -713,37 +721,42 @@ double compute_tile_latency(const problem_t& problem,
   double effective_tile_penalty = (utilization > 1e-9) ? (1.0 / (utilization)) : 1.0;
   double output_utilization_penalty =
       (output_utilization > 1e-9) ? (1.0 / (output_utilization)) : 1.0;
+
   // 2) Work-group setup & iteration latencies
   double L_WG_setup = 1;  // WG_setup_Latency
 
-  // 3) Prologue: 2.2× memory latency
-  double L_prologue = 1.5 * L_mem;  // 1.5 chosen emprically
-
-  // L_compute *= std::max(L_compute, L_LDS);
-
-  // 4) Epilogue: writes from all active CUs with limited bandwidth
-  double mem_bw_occ            = compute_mem_bw_from_occupancy(hardware, num_active_cus);
-  double mem_bw_occ_limited    = hardware.mem3_perf_ratio * mem_bw_occ;
-  size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, datatype_to_bits(problem.a_dtype));
-
-  double L_epilogue = (static_cast<double>(num_active_cus / splitting_factor) *
-                       MT_M_rounded_128bytes * MT_N * d_bytes) /
-                      mem_bw_occ_limited;
-  // One compute iteration happens in the prologue
-  L_epilogue += L_compute * effective_tile_penalty;
-  // Epilogue and Prologue overhead are reduced with higher occupancy kernels.
+  // 3) Prologue and Epilogue latencies
+  // Prologue and Epilogue overhead are reduced with higher occupancy kernels.
   int grid_m = static_cast<int>(math::safe_ceil_div(problem.size.m, MT_M));
   int grid_n = static_cast<int>(math::safe_ceil_div(problem.size.n, MT_N));
-
   size_t real_occupancy =
       std::min(std::max(config.occupancy, static_cast<int>(1)),
                static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor,
                                                     hardware.N_CU)));  // Number of WGs per CU.
+  double occupancy_factor = pow(heuristic.occupancy_decay_base, real_occupancy);
 
-  L_prologue = L_prologue * pow(0.95, real_occupancy);  // Factor chosen empirically
-  L_epilogue = L_epilogue * pow(0.95, real_occupancy);  // Factor chosen empirically
-  // 4') K-split reductions are globally coherent, we need to write and read split-1 MT_M*MT_N
-  // tiles to coherent memory
+  // 3-1) Prologue: set as memory latency
+  double L_prologue = L_mem;
+  L_prologue *= effective_tile_penalty;
+  L_prologue *= occupancy_factor;
+
+  // 3-2) Epilogue: writes from all active CUs with limited bandwidth
+  double mem_bw_occ            = compute_mem_bw_from_occupancy(hardware, num_active_cus);
+  double mem_bw_occ_limited    = hardware.mem3_perf_ratio * mem_bw_occ;
+  size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, datatype_to_bits(problem.a_dtype));
+
+  // Each block can be independently calculated and reordered
+  epilogue_components_t epilogue_comp = {};
+
+  // Block 1: Initial memory write latency
+  epilogue_comp.initial_memory_write = (static_cast<double>(num_active_cus / splitting_factor) *
+                                        MT_M_rounded_128bytes * MT_N * d_bytes) /
+                                       mem_bw_occ_limited;
+
+  // Block 2: One compute iteration in the epilogue
+  epilogue_comp.compute_iteration = L_compute * effective_tile_penalty;
+
+  // Block 3: K-split reduction (if applicable)
   if (splitting_factor > 1) {
     size_t n_partials = splitting_factor - 1;
 
@@ -762,10 +775,21 @@ double compute_tile_latency(const problem_t& problem,
     double partial_adds =
         (static_cast<double>(config.mt.mn()) * static_cast<double>(splitting_factor)) / (64);
 
-    double L_reduce = partial_readwrite_bytes / (mem_bw_occ_limited);
-    L_epilogue += L_reduce + partial_adds + 10000;
+    double L_reduce                      = partial_readwrite_bytes / (mem_bw_occ_limited);
+    epilogue_comp.k_split_reduction      = L_reduce + partial_adds;
+    epilogue_comp.k_split_overhead_const = heuristic.k_split_reduction_overhead;
   }
-  // 4'') tf32 emu has some more overhead
+
+  // Block 4: K-padding penalty (if applicable)
+  if (K % MT_K != 0) {
+    const double problem_k_quant = static_cast<double>(K % MT_K) / static_cast<double>(K);
+    epilogue_comp.k_padding      = problem_k_quant * heuristic.k_padding_penalty;
+  }
+
+  double L_epilogue = compose_epilogue(epilogue_comp, heuristic, occupancy_factor);
+
+  // 4) Single-tile latency (apply penalty after finding the bottleneck)
+  // tf32 emu has some more overhead
   double L_cvt = 0;
   if ((problem.mi_dtype == data_type_t::XFloat32) &&
       (hardware.arch == hardware_t::architecture_t::gfx950)) {
@@ -775,41 +799,27 @@ double compute_tile_latency(const problem_t& problem,
   {
     L_cvt = compute_cvt_overhead_x1(problem, hardware, config);
   }
+  double L_tile_single =
+      std::max(L_compute * heuristic.weight_compute, L_mem * heuristic.weight_memory);
+  L_tile_single *= heuristic.main_loop_efficiency;
+  L_tile_single *= effective_tile_penalty;
+  L_tile_single += L_cvt;
 
-  // 5)
-  // 5-0) Look up main_loop_efficiency from hardware map
-  double main_loop_efficiency = 1.0;
-  if (config.custom_mainloop_scheduling) {
-    main_loop_efficiency = hardware.get_adjusted_main_loop_efficiency(problem.a_transpose, 
-                                                                      problem.b_transpose, 
-                                                                      config.mt.m, 
-                                                                      config.mt.n, 
-                                                                      config.mt.k, 
-                                                                      problem.mi_dtype);
-  }
-  // 5-1) Single-tile latency (apply penalty after finding the bottleneck)
-  double L_tile_single = (std::max(L_compute, L_mem) * main_loop_efficiency * effective_tile_penalty) + L_cvt;
-  L_prologue *= effective_tile_penalty;
-
-  // 6) Number of K-iterations (excluding epilogue), at least 1
+  // 5) Number of K-iterations (excluding epilogue), at least 1
   const long k_per_split = static_cast<long>(math::safe_ceil_div(K, splitting_factor));
   long num_iter =
       std::max(static_cast<long>(math::safe_ceil_div(static_cast<size_t>(k_per_split), MT_K) - 1),
                static_cast<long>(1));
-  // Zero Padding in the K dimension on last iteration
-  if (K % MT_K != 0) {
-    const double problem_k_quant = static_cast<double>(K % MT_K) / static_cast<double>(K);
-    L_epilogue += problem_k_quant * 50000;  // Scale by remainder proportion of problem. 50k cycle
-                                            // penalty if have to zero pad all except 1.
-                                            //(Scale Determined Empirically)
-  }
-  // L_epilogue *= output_utilization_penalty;
 
-  // 7) Total tile latency
-  double L_tile_total =
-      (L_tile_single * static_cast<double>(num_iter)) + L_prologue + L_epilogue * 2 + L_WG_setup +
-      (500 * static_cast<double>(
-                 num_iter));  // 7 instructions (each with 4 cycles) at the end of the loop
+  // 6) Total tile latency
+  double L_tile_total = L_tile_single * static_cast<double>(num_iter);
+  L_tile_total += heuristic.weight_prologue * L_prologue;
+  L_tile_total += heuristic.weight_epilogue * L_epilogue;
+  L_tile_total += heuristic.weight_wg_setup * L_WG_setup;
+  L_tile_total += heuristic.weight_loop_overhead * static_cast<double>(num_iter);
+
+  // Apply final tile total weight
+  L_tile_total *= heuristic.weight_tile_total;
 
   return L_tile_total;
 }
@@ -903,56 +913,6 @@ double compute_total_latency(const problem_t& problem,
 
   // Compute latency for all timesteps and return it as the latency for the MT/problem
   double total_latency = L_timestep * num_timesteps;
-
-  // 3) Customized heuristics
-  // TODO These are quantifying effects that don't work in the current math.
-  // TODO THESE SHOULD BE TEMPORARY FIXES AND BE MORE SOLIDLY INTEGRATED LATER
-  bool heuristics = get_runtime_options(config).heuristics_enabled;
-
-  if (heuristics) {
-    if (MT_M == 64 && MT_N == 32 && MT_K == 32 && !b_trans && a_bits == 16) {
-      total_latency = total_latency * 10;
-    }
-
-    bool tf32_emu = ((problem.mi_dtype == data_type_t::XFloat32) &&
-                     (hardware.arch == hardware_t::architecture_t::gfx950));
-
-    //  Heuristics for TF32
-    if (tf32_emu) {
-      double bytes_per_element = a_bytes;
-      double arith             = emulated_tf32_arithmetic_intensity(M, N, K, bytes_per_element);
-      double compute_threshold = 1000;  // threshold empirically determined.
-
-      // The kernel for this is more optimized (Custom kernel NT)
-      if ((!a_trans && b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
-        if (arith < compute_threshold)
-          total_latency = total_latency * 0.6;
-        else
-          total_latency = total_latency * 0.4;
-      }
-
-      // The kernel for this is more optimized (Custom kernel NN)
-      if ((!a_trans && !b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
-        if (arith < compute_threshold)
-          total_latency = total_latency * 0.8;
-        else
-          total_latency = total_latency * 0.4;
-      }
-
-      // The kernel for this is more optimized (Custom kernel TN)
-      if ((a_trans && !b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
-        if (arith < compute_threshold)
-          total_latency = total_latency * 0.8;
-        else
-          total_latency = total_latency * 0.4;
-      }
-
-      // Bias large DU where K-dimension is large and M and N are small.
-      if ((K >= (M * 16) && K >= (N * 16)) && (MT_K >= 128)) {
-        total_latency = total_latency * 0.5;
-      }
-    }
-  }
 
   return total_latency;
 }

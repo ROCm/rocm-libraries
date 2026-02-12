@@ -84,6 +84,17 @@ inline std::string toLower(const std::string& str)
     return lowerStr;
 }
 
+inline std::string trim(const std::string& str)
+{
+    const auto start = str.find_first_not_of(" \t\n\r\f\v");
+    if(start == std::string::npos)
+    {
+        return "";
+    }
+    const auto end = str.find_last_not_of(" \t\n\r\f\v");
+    return str.substr(start, end - start + 1);
+}
+
 inline std::string removeNewlines(const std::string& str)
 {
     std::string result = str;
@@ -123,6 +134,21 @@ inline void vecToStream(std::ostream& os, const std::vector<T>& vec)
         }
     }
 
+    os << "]";
+}
+
+// Converts a vector of strings to an ostream "[ "A", "B" , "C" ...]".
+inline void stringVecToStream(std::ostream& os, const std::vector<std::string>& vec)
+{
+    os << "[";
+    for(size_t i = 0; i < vec.size(); ++i)
+    {
+        if(i > 0)
+        {
+            os << ", ";
+        }
+        os << "\"" << vec[i] << "\"";
+    }
     os << "]";
 }
 

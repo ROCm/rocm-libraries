@@ -384,43 +384,19 @@ void testing_csr2csc_ex2(Arguments argus)
 
         // Host csr2csc conversion
         std::vector<int> hcsc_row_ind_gold(nnz);
-        std::vector<int> hcsc_col_ptr_gold(n + 1, 0);
+        std::vector<int> hcsc_col_ptr_gold(n + 1);
         std::vector<T>   hcsc_val_gold(nnz);
 
-        // Determine nnz per column
-        for(int i = 0; i < nnz; ++i)
-        {
-            ++hcsc_col_ptr_gold[hcsr_col_ind[i] + 1 - idx_base];
-        }
-
-        // Scan
-        for(int i = 0; i < n; ++i)
-        {
-            hcsc_col_ptr_gold[i + 1] += hcsc_col_ptr_gold[i];
-        }
-
-        // Fill row indices and values
-        for(int i = 0; i < m; ++i)
-        {
-            for(int j = hcsr_row_ptr[i]; j < hcsr_row_ptr[i + 1]; ++j)
-            {
-                int col = hcsr_col_ind[j - idx_base] - idx_base;
-                int idx = hcsc_col_ptr_gold[col];
-
-                hcsc_row_ind_gold[idx] = i + idx_base;
-                hcsc_val_gold[idx]     = hcsr_val[j - idx_base];
-
-                ++hcsc_col_ptr_gold[col];
-            }
-        }
-
-        // Shift column pointer array
-        for(int i = n; i > 0; --i)
-        {
-            hcsc_col_ptr_gold[i] = hcsc_col_ptr_gold[i - 1] + idx_base;
-        }
-
-        hcsc_col_ptr_gold[0] = idx_base;
+        host_csr2csc(m,
+                     n,
+                     nnz,
+                     hcsr_row_ptr.data(),
+                     hcsr_col_ind.data(),
+                     hcsr_val.data(),
+                     hcsc_col_ptr_gold.data(),
+                     hcsc_row_ind_gold.data(),
+                     hcsc_val_gold.data(),
+                     idx_base);
 
         // Unit check
         unit_check_general(1, nnz, 1, hcsc_row_ind_gold.data(), hcsc_row_ind.data());

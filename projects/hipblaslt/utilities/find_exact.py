@@ -56,7 +56,7 @@ globalParameters["WorkingDir"] = {}
 globalParameters["WorkingDir"]["Bench"] = "0_Bench"
 globalParameters["WorkingDir"]["LogicYaml"] = "1_LogicYaml"
 globalParameters["WorkingDir"]["GridYaml"] = "2_GridYaml"
-globalParameters["MatchTablePath"] = "/library/src/amd_detail/rocblaslt/src/MatchTable.yaml"
+globalParameters["MatchTablePath"] = "/device-library/MatchTable.yaml"
 
 defaultBenchOptions = {"ProblemType": {
     "TransposeA": 0,

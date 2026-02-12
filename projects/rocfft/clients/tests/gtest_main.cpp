@@ -864,17 +864,21 @@ TEST(manual, bitwise_reproducibility) // MANUAL TESTS HERE
     {
         bitwise_repro(params);
     }
-    catch(std::bad_alloc&)
+    catch(const std::bad_alloc&)
     {
         GTEST_SKIP() << "host memory allocation failure";
     }
-    catch(ROCFFT_SKIP& e)
+    catch(const ROCFFT_SKIP& e)
     {
         GTEST_SKIP() << e.what();
     }
-    catch(ROCFFT_FAIL& e)
+    catch(const ROCFFT_FAIL& e)
     {
         GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
     SUCCEED();
 }

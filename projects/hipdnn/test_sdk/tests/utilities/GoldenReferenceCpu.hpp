@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
@@ -30,7 +31,7 @@ protected:
         // TODO: Temporary fix until reference data can be properly installed
         if(path.empty())
         {
-            HIPDNN_LOG_WARN("Reference not found for Cpu golden reference test");
+            HIPDNN_SDK_LOG_WARN("Reference not found for Cpu golden reference test");
             GTEST_SKIP();
         }
 

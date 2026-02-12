@@ -5,7 +5,7 @@
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -162,7 +162,7 @@ public:
         parallelDims.insert(parallelDims.end(), ySpatialDims.begin(), ySpatialDims.end());
 
         auto parallelFunc
-            = hipdnn_test_sdk::utilities::makeParallelTensorFunctor(convolutionFunc, parallelDims);
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         y.memory().markHostModified();
@@ -296,7 +296,7 @@ public:
         parallelDims.insert(parallelDims.end(), xSpatialDims.begin(), xSpatialDims.end());
 
         auto parallelFunc
-            = hipdnn_test_sdk::utilities::makeParallelTensorFunctor(convolutionFunc, parallelDims);
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         gradX.memory().markHostModified();
@@ -418,7 +418,7 @@ public:
         parallelDims.insert(parallelDims.end(), kernelSpatialDims.begin(), kernelSpatialDims.end());
 
         auto parallelFunc
-            = hipdnn_test_sdk::utilities::makeParallelTensorFunctor(convolutionFunc, parallelDims);
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         gradW.memory().markHostModified();

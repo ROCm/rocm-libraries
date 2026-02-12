@@ -24,7 +24,8 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
+        tensorMap,
+    bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, convAttr.x_tensor_uid())))
     , _x(miopen_utils::createTensor(tensorMap, convAttr.x_tensor_uid()))
@@ -40,7 +41,8 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     const auto wDims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
     const auto groupCount = hipdnn_data_sdk::utilities::calculateGroupCount(xDims, wDims);
 
-    _conv = MiopenConvDescriptor(_spatialDimCount, convAttr, static_cast<int>(groupCount));
+    _conv = MiopenConvDescriptor(
+        _spatialDimCount, convAttr, static_cast<int>(groupCount), deterministicEnabled);
 
     if(biasAttr != nullptr)
     {
@@ -131,7 +133,7 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
             auto status = miopenDestroyFusionPlan(desc);
             if(status != miopenStatusSuccess)
             {
-                HIPDNN_LOG_ERROR(
+                HIPDNN_PLUGIN_LOG_ERROR(
                     "miopenDestroyFusionPlan failed in ConvFwdBiasActivPlan destructor");
             }
         });
@@ -228,7 +230,7 @@ void ConvFwdBiasActivPlan::execute(const HipdnnEnginePluginHandle& handle,
             auto status = miopenDestroyOperatorArgs(args);
             if(status != miopenStatusSuccess)
             {
-                HIPDNN_LOG_ERROR(
+                HIPDNN_PLUGIN_LOG_ERROR(
                     "miopenDestroyOperatorArgs failed in ConvFwdBiasActivPlan destructor");
             }
         });

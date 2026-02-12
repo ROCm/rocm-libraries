@@ -863,7 +863,7 @@ void BackendOperationPointwiseDescriptor::setAttribute(miopenBackendAttributeNam
         MIOPEN_THROW(miopenStatusNotInitialized);
     }
 
-    using TensorSetter = OperationPointwiseBuilder& (OperationPointwiseBuilder::*)(Tensor * tensor);
+    using TensorSetter = OperationPointwiseBuilder& (OperationPointwiseBuilder::*)(Tensor* tensor);
 
     auto callTensorSetter = [=](TensorSetter setter, miopenBackendDescriptor_t& outApiDescriptor) {
         if(attributeType == MIOPEN_TYPE_BACKEND_DESCRIPTOR && elementCount == 1)

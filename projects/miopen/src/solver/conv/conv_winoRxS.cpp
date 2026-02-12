@@ -474,24 +474,22 @@ public:
                                                       Ceil(R * out_h, input_stride_h))},
           is_fp16{problem.IsFp16()},
           is_2x3{IS2X3},
-          out_of_model_scope
-    {
-        !(problem.GetGroupCount() == 1) //
-            || !(U == 1)                //
-            || !(V == 1)                //
-            || !(input_stride_h == 1)   //
-            || !(input_stride_w == 1)   //
-            || !(filter_stride_h == 1)  //
-            || !(filter_stride_w == 1)  //
+          out_of_model_scope{!(problem.GetGroupCount() == 1) //
+                             || !(U == 1)                    //
+                             || !(V == 1)                    //
+                             || !(input_stride_h == 1)       //
+                             || !(input_stride_w == 1)       //
+                             || !(filter_stride_h == 1)      //
+                             || !(filter_stride_w == 1)      //
 #if !WTI_MODEL_ALLOW_ANY_RS
-            || !(R <= 5) //
-            || !(S <= 5) //
+                             || !(R <= 5) //
+                             || !(S <= 5) //
 #endif
 #if !WTI_MODEL_ALLOW_ANY_CK
-            || !(C >= 16) //
-            || !(K >= 16)
+                             || !(C >= 16) //
+                             || !(K >= 16)
 #endif
-    }
+          }
     {
         /// \todo add G to UnifiedDescriptionConv2d
         size_t G = static_cast<size_t>(problem.GetGroupCount());

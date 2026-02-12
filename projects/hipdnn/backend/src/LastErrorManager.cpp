@@ -18,7 +18,7 @@ hipdnnStatus_t hipdnn_backend::LastErrorManager::setLastError(hipdnnStatus_t sta
         return status;
     }
 
-    HIPDNN_LOG_ERROR(
+    HIPDNN_BACKEND_LOG_ERROR(
         "Error occured in status:{} message:{}", hipdnnGetStatusString(status), message);
 
     hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(

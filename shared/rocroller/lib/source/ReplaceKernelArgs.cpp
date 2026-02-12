@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -43,7 +43,7 @@ namespace rocRoller
 
             Generator<Instruction> operator()(AssemblyKernelArgumentPtr const& expr)
             {
-                auto iter = m_values.find(expr->name);
+                auto iter = m_values.find(expr->getName());
                 if(iter != m_values.end())
                 {
                     m_lastResult = iter->second;
@@ -51,11 +51,11 @@ namespace rocRoller
                 }
 
                 Register::ValuePtr reg;
-                co_yield m_context->argLoader()->getValue(expr->name, reg);
+                co_yield m_context->argLoader()->getValue(expr->getName(), reg);
 
-                auto exp             = std::make_shared<Expression>(reg);
-                m_values[expr->name] = exp;
-                m_lastResult         = exp;
+                auto exp                  = std::make_shared<Expression>(reg);
+                m_values[expr->getName()] = exp;
+                m_lastResult              = exp;
             }
 
             template <CUnary T>

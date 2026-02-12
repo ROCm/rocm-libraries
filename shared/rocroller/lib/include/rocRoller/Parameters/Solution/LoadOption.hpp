@@ -47,6 +47,7 @@ namespace rocRoller
 
             std::string   toString(LoadPath path);
             std::ostream& operator<<(std::ostream& stream, LoadPath const& path);
+            std::istream& operator>>(std::istream& stream, LoadPath& path);
 
             MemoryType GetMemoryType(LoadPath const& path);
             bool       IsBufferToLDS(LoadPath const& path);

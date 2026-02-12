@@ -106,11 +106,11 @@ struct MIOPEN_INTERNALS_EXPORT ExecutionContext
     ExecutionContext() { DetectRocm(); }
     ExecutionContext(const Handle* stream_) : stream(stream_) { DetectRocm(); }
 
-    virtual ~ExecutionContext()               = default;
-    ExecutionContext(const ExecutionContext&) = default;
-    ExecutionContext(ExecutionContext&&)      = default;
+    virtual ~ExecutionContext()                          = default;
+    ExecutionContext(const ExecutionContext&)            = default;
+    ExecutionContext(ExecutionContext&&)                 = default;
     ExecutionContext& operator=(const ExecutionContext&) = default;
-    ExecutionContext& operator=(ExecutionContext&&) = default;
+    ExecutionContext& operator=(ExecutionContext&&)      = default;
 
 #if MIOPEN_EMBED_DB
     fs::path GetPerfDbPathEmbed(std::string_view prefix = "") const

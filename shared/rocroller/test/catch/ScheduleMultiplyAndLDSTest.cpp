@@ -72,7 +72,6 @@ namespace ScheduleMultiplyAndLDSTest
             auto context = TestContext::ForDefaultTarget();
 
             example.setUseLDS(true, true, false);
-            example.setUnroll(2, 2);
             example.setPrefetch(true, 2, 1, true);
 
             if(dataTypeAB == DataType::Float)

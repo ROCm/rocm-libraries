@@ -94,8 +94,9 @@ void SharedLibrary::load(const std::filesystem::path& libraryPath)
                                   + _libraryPath.string());
     }
 
-    HIPDNN_LOG_INFO("SharedLibrary: Attempting to load shared library from final absolute path: {}",
-                    _libraryPath.string());
+    HIPDNN_BACKEND_LOG_INFO(
+        "SharedLibrary: Attempting to load shared library from final absolute path: {}",
+        _libraryPath.string());
 
     _libraryHandle = platform_utilities::openLibrary(_libraryPath);
 }

@@ -374,11 +374,11 @@ void RunCTCLossCPUVerify(const int num_class,
     if(verify_path == 1)
     {
         std::vector<int> probsDesc     = {max_time_step,
-                                      batch_size,
-                                      class_sz,
-                                      int(probsStride[0]),
-                                      int(probsStride[1]),
-                                      int(probsStride[2])};
+                                          batch_size,
+                                          class_sz,
+                                          int(probsStride[0]),
+                                          int(probsStride[1]),
+                                          int(probsStride[2])};
         std::vector<int> gradientsDesc = {max_time_step,
                                           batch_size,
                                           class_sz,

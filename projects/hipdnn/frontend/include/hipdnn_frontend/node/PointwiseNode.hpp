@@ -6,9 +6,9 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
-#include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -77,7 +77,7 @@ public:
             }
 
             auto outputDims = out->get_dim();
-            HIPDNN_CHECK_ERROR(findCommonShape(inputShapes, outputDims));
+            HIPDNN_CHECK_ERROR(detail::findCommonShape(inputShapes, outputDims));
             out->set_dim(outputDims);
         }
 
@@ -92,11 +92,10 @@ public:
 
                 if(tensor->get_dim() == out->get_dim())
                 {
-                    HIPDNN_FE_LOG_INFO(
-                        "PointwiseNode {} inferring stride from input tensor {} for output {}",
-                        attributes.get_name(),
-                        tensor->get_name(),
-                        out->get_name());
+                    HIPDNN_FE_LOG_INFO("PointwiseNode " << attributes.get_name()
+                                                        << " inferring stride from input tensor "
+                                                        << tensor->get_name() << " for output "
+                                                        << out->get_name());
                     out->set_stride(tensor->get_stride());
                     break;
                 }

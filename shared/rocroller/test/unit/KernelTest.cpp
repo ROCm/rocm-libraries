@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -88,17 +88,17 @@ namespace rocRollerTest
         auto kernel = m_context->kernel();
 
         kernel->addArgument({"foo", {DataType::Float}});
-        EXPECT_EQ(0, kernel->arguments()[0].offset);
-        EXPECT_EQ(4, kernel->arguments()[0].size);
+        EXPECT_EQ(0, kernel->arguments()[0].getOffset());
+        EXPECT_EQ(4, kernel->arguments()[0].getSize());
 
         kernel->addArgument(
             {"bar", {DataType::Float, PointerType::PointerGlobal}, DataDirection::ReadOnly});
-        EXPECT_EQ(8, kernel->arguments()[1].offset);
-        EXPECT_EQ(8, kernel->arguments()[1].size);
+        EXPECT_EQ(8, kernel->arguments()[1].getOffset());
+        EXPECT_EQ(8, kernel->arguments()[1].getSize());
 
         kernel->addArgument({"baz", {DataType::Double}});
-        EXPECT_EQ(16, kernel->arguments()[2].offset);
-        EXPECT_EQ(8, kernel->arguments()[2].size);
+        EXPECT_EQ(16, kernel->arguments()[2].getOffset());
+        EXPECT_EQ(8, kernel->arguments()[2].getSize());
     }
 
     TEST_F(KernelTest, Postamble)

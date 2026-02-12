@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -59,9 +59,9 @@ namespace rocRollerTest
 
         for(auto& arg : m_context->kernel()->arguments())
         {
-            auto value = Expression::evaluate(arg.expression);
-            EXPECT_EQ(arg.variableType, variableType(value));
-            argsActual.append(arg.name, value);
+            auto value = Expression::evaluate(arg.getExpression());
+            EXPECT_EQ(arg.getVariableType(), variableType(value));
+            argsActual.append(arg.getName(), value);
         }
 
         KernelArguments argsExpected;

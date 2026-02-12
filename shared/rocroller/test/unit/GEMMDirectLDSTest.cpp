@@ -95,7 +95,7 @@ namespace GEMMTests
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
         problem.loadPathB = directLDSB ? SolutionParams::LoadPath::BufferToLDS
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        problem.storeLDSD = false;
+        problem.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
 
@@ -164,7 +164,7 @@ namespace GEMMTests
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
         problem.loadPathB = directLDSB ? SolutionParams::LoadPath::BufferToLDS
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        problem.storeLDSD = false;
+        problem.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         problem.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
@@ -233,7 +233,7 @@ namespace GEMMTests
         GEMMProblem gemm;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.transA    = "T";
         gemm.transB    = "N";
         gemm.m         = 3072;
@@ -275,7 +275,7 @@ namespace GEMMTests
         gemm.transB    = transOp.second;
         gemm.loadPathA = loadPathA;
         gemm.loadPathB = loadPathB;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         basicGEMM<float>(gemm);
 
@@ -312,7 +312,7 @@ namespace GEMMTests
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
         problem.loadPathB = directLDSB ? SolutionParams::LoadPath::BufferToLDS
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        problem.storeLDSD = false;
+        problem.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         problem.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
@@ -376,7 +376,7 @@ namespace GEMMTests
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
         problem.loadPathB = directLDSB ? SolutionParams::LoadPath::BufferToLDS
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        problem.storeLDSD = false;
+        problem.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         problem.prefetch         = true;
         problem.prefetchInFlight = 2;

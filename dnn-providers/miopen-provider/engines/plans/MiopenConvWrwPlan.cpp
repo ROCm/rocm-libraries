@@ -18,7 +18,8 @@ namespace miopen_plugin
 ConvWrwParams::ConvWrwParams(
     const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes& attributes,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
+        tensorMap,
+    bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
     , _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
@@ -35,7 +36,8 @@ ConvWrwParams::ConvWrwParams(
         = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrDW.dims());
     const auto groupCount = hipdnn_data_sdk::utilities::calculateGroupCount(inputDims, weightDims);
 
-    _conv = MiopenConvDescriptor(_spatialDimCount, attributes, static_cast<int>(groupCount));
+    _conv = MiopenConvDescriptor(
+        _spatialDimCount, attributes, static_cast<int>(groupCount), deterministicEnabled);
 
     _tensorsValid = (!attrX.virtual_() && !attrDW.virtual_() && !attrDY.virtual_());
 }
@@ -105,7 +107,7 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
             auto status = miopenDestroySolution(s);
             if(status != miopenStatusSuccess)
             {
-                HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvWrwPlan destructor");
+                HIPDNN_PLUGIN_LOG_ERROR("miopenDestroySolution failed in ConvWrwPlan destructor");
             }
         });
 

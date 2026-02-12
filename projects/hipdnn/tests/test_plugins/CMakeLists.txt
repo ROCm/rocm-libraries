@@ -24,7 +24,7 @@ function(add_test_plugin target_name)
     add_library(${target_name} SHARED ${source_files})
 
     target_compile_definitions(
-        ${target_name} PRIVATE COMPONENT_NAME="${target_name}" __HIP_PLATFORM_AMD__
+        ${target_name} PRIVATE HIPDNN_COMPONENT_NAME="${target_name}" __HIP_PLATFORM_AMD__
     )
 
     target_include_directories(${target_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -40,13 +40,12 @@ function(add_test_plugin target_name)
     endif()
 
     set_target_properties(
-        ${target_name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
-    )
-    set_target_properties(
-        ${target_name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
-    )
-    set_target_properties(
-        ${target_name} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
+        ${target_name}
+        PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
+            RUNTIME_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
+            ARCHIVE_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
+            THEROCK_INSTALL_RPATH_ORIGIN "${${target_name}_INSTALL_DIR}"
     )
 
     install(TARGETS ${target_name} LIBRARY DESTINATION "${${target_name}_INSTALL_DIR}"

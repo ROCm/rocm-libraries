@@ -122,17 +122,7 @@ void testing_coo2csr(Arguments argus)
             hcsr_row_ptr.data(), dcsr_row_ptr, sizeof(int) * (m + 1), hipMemcpyDeviceToHost));
 
         // CPU
-        // coo2csr on host
-        for(int i = 0; i < nnz; ++i)
-        {
-            ++hcsr_row_ptr_gold[hcoo_row_ind[i] + 1 - idx_base];
-        }
-
-        hcsr_row_ptr_gold[0] = idx_base;
-        for(int i = 0; i < m; ++i)
-        {
-            hcsr_row_ptr_gold[i + 1] += hcsr_row_ptr_gold[i];
-        }
+        host_coo2csr(m, nnz, hcoo_row_ind.data(), hcsr_row_ptr_gold.data(), idx_base);
 
         // Unit check
         unit_check_general(1, m + 1, 1, hcsr_row_ptr_gold.data(), hcsr_row_ptr.data());

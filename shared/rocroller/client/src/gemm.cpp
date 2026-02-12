@@ -852,7 +852,7 @@ namespace rocRoller::Client::GEMMClient
 
         auto const& arch = context->targetArchitecture().target();
 
-        if(solution.streamK)
+        if(solution.streamK != StreamKMode::None)
         {
             if(context->targetArchitecture().HasCapability(GPUCapability::ArchAccUnifiedRegs))
             {
@@ -987,7 +987,7 @@ namespace rocRoller::Client::GEMMClient
             HIP_CHECK(hipSetDevice(benchmark.device));
         }
 
-        if(willRunOnGPU && solution.streamK)
+        if(willRunOnGPU && solution.streamK != StreamKMode::None)
         {
             if(run.numWGs == 0)
             {
@@ -996,7 +996,6 @@ namespace rocRoller::Client::GEMMClient
                             == (hipError_t)HIP_SUCCESS);
                 run.numWGs = deviceProperties.multiProcessorCount;
             }
-            AssertFatal(!solution.streamKTwoTile || solution.streamK);
         }
 
         if(doGenerate)
@@ -1250,21 +1249,17 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--load_B", &SolutionParameters::loadPathB),
         std::make_pair("--padLDS_A", &SolutionParameters::padLDSA),
         std::make_pair("--padLDS_B", &SolutionParameters::padLDSB),
-        std::make_pair("--storeLDS_D", &SolutionParameters::storeLDSD),
+        std::make_pair("--store", &SolutionParameters::storePath),
         std::make_pair("--prefetch", &SolutionParameters::prefetch),
         std::make_pair("--prefetchInFlight", &SolutionParameters::prefetchInFlight),
         std::make_pair("--prefetchLDSFactor", &SolutionParameters::prefetchLDSFactor),
         std::make_pair("--prefetchMixMemOps", &SolutionParameters::prefetchMixMemOps),
         std::make_pair("--betaInFMA", &SolutionParameters::betaInFma),
-        std::make_pair("--unroll_x", &SolutionParameters::unrollX),
-        std::make_pair("--unroll_y", &SolutionParameters::unrollY),
         std::make_pair("--scheduler", &SolutionParameters::scheduler),
         std::make_pair("--schedulerCost", &SolutionParameters::schedulerCost),
         std::make_pair("--matchMemoryAccess", &SolutionParameters::matchMemoryAccess),
         std::make_pair("--tailLoops", &SolutionParameters::tailLoops),
-        std::make_pair("--streamK", &SolutionParameters::streamK),
-        std::make_pair("--streamKTwoTile", &SolutionParameters::streamKTwoTile),
-        std::make_pair("--streamKTwoTileDPFirst", &SolutionParameters::streamKTwoTileDPFirst));
+        std::make_pair("--streamK", &SolutionParameters::streamK));
 
     template <typename T, typename U>
     std::string getSolutionParameterArgumentName(U T::*member_ptr)
@@ -1391,14 +1386,14 @@ namespace rocRoller::Client::GEMMClient::CLI
             if(arg.find('B') != std::string::npos)
                 solution.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
-            solution.storeLDSD = false;
+            solution.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
             if(arg.find('D') != std::string::npos)
-                solution.storeLDSD = true;
+                solution.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
         }
 
         update(SN(&SP::loadPathA), solution.loadPathA);
         update(SN(&SP::loadPathB), solution.loadPathB);
-        update(SN(&SP::storeLDSD), solution.storeLDSD);
+        update(SN(&SP::storePath), solution.storePath);
 
         if(app.get_option("--d2lds")->count())
         {
@@ -1465,14 +1460,10 @@ namespace rocRoller::Client::GEMMClient::CLI
         // StreamK
 
         update(SN(&SP::streamK), solution.streamK);
-        update(SN(&SP::streamKTwoTile), solution.streamKTwoTile);
-        update(SN(&SP::streamKTwoTileDPFirst), solution.streamKTwoTileDPFirst);
 
         // Other
 
         update(SN(&SP::betaInFma), solution.betaInFma);
-        update(SN(&SP::unrollX), solution.unrollX);
-        update(SN(&SP::unrollY), solution.unrollY);
         update(SN(&SP::scheduler), solution.scheduler);
         update(SN(&SP::schedulerCost), solution.schedulerCost);
         update(SN(&SP::matchMemoryAccess), solution.matchMemoryAccess);
@@ -1526,7 +1517,7 @@ int main(int argc, const char* argv[])
 
         .loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR,
         .loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR,
-        .storeLDSD = true,
+        .storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer,
 
         .padLDSA = {0u, 0u},
         .padLDSB = {0u, 0u},
@@ -1538,17 +1529,12 @@ int main(int argc, const char* argv[])
 
         .betaInFma = true,
 
-        .unrollX = 0,
-        .unrollY = 0,
-
         .scheduler         = "Priority",
         .matchMemoryAccess = true,
 
         .tailLoops = true,
 
-        .streamK               = false,
-        .streamKTwoTile        = false,
-        .streamKTwoTileDPFirst = false,
+        .streamK = StreamKMode::None,
 
         .version = rocRoller::Version::Git(),
     };
@@ -1742,8 +1728,6 @@ int main(int argc, const char* argv[])
     app.add_flag(SN(&SP::workgroupRemapXCC), "Use an XCC-aware workgroup remapping.");
     app.add_option(SN(&SP::workgroupRemapXCCValue),
                    "Force an XCC-aware workgroup remapping value. (Optional)");
-    app.add_option(SN(&SP::unrollX), "Unroll size in X.");
-    app.add_option(SN(&SP::unrollY), "Unroll size in Y.");
 
     app.add_option(
         SN(&SP::loadPathA),
@@ -1751,7 +1735,11 @@ int main(int argc, const char* argv[])
     app.add_option(
         SN(&SP::loadPathB),
         "How to load B (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: BufferToLDS");
-    app.add_flag(SN(&SP::storeLDSD), "Use LDS when storing D.");
+    app.add_option(SN(&SP::storePath),
+                   "How to store D (VGPRToGlobalMemoryWithBuffer, VGPRToGlobal, "
+                   "VGPRToGlobalMemoryViaLDSWithBuffer, "
+                   "VGPRToGlobalMemoryViaLDSWithGlobal). Default: "
+                   "VGPRToGlobalMemoryViaLDSWithBuffer");
     app.add_option("--lds", "Use LDS for A/B/D.");
     app.add_option("--d2lds", "Use direct-to-LDS for A/B.");
 
@@ -1776,10 +1764,9 @@ int main(int argc, const char* argv[])
                    "Prefetch 1/prefetchLDSFactor of MacroTile from LDS");
     app.add_flag(SN(&SP::prefetchMixMemOps),
                  "Mix global and LDS memory operations during prefetching.");
-    app.add_flag(SN(&SP::streamK), "Enable StreamK algorithm.");
-    app.add_flag(SN(&SP::streamKTwoTile), "Enable two-tile StreamK algorithm.");
-    app.add_flag(SN(&SP::streamKTwoTileDPFirst),
-                 "Execute data-parallel loop first in the two-tile StreamK algorithm.");
+    app.add_option(SN(&SP::streamK),
+                   "StreamK mode (None, Standard, TwoTile, TwoTileDPFirst). Default: None")
+        ->check(CLI::IsMember(rocRoller::enumStrings<StreamKMode>()));
 
     app.add_option(SN(&SP::loadPathAScale),
                    "How to load AScale (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: "

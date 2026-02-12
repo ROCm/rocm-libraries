@@ -72,9 +72,9 @@ struct MD5_CTX
 /*
  * The MD5 transformation for all four rounds.
  */
-#define STEP(f, a, b, c, d, x, t, s)                         \
-    (a) += f((b), (c), (d)) + (x) + (t);                     \
-    (a) = (((a) << (s)) | (((a)&0xffffffff) >> (32 - (s)))); \
+#define STEP(f, a, b, c, d, x, t, s)                           \
+    (a) += f((b), (c), (d)) + (x) + (t);                       \
+    (a) = (((a) << (s)) | (((a) & 0xffffffff) >> (32 - (s)))); \
     (a) += (b);
 
 /*
@@ -93,14 +93,14 @@ struct MD5_CTX
  * their own translation unit avoids the problem.
  */
 #if defined(__i386__) || defined(__x86_64__) || defined(__vax__)
-#define SET(n) (*reinterpret_cast<const uint32_t*>(&ptr[(n)*4]))
+#define SET(n) (*reinterpret_cast<const uint32_t*>(&ptr[(n) * 4]))
 #define GET(n) SET(n)
 #else
-#define SET(n)                                                         \
-    (ctx->block[(n)] = static_cast<uint32_t>(ptr[(n)*4]) |             \
-                       (static_cast<uint32_t>(ptr[(n)*4 + 1]) << 8) |  \
-                       (static_cast<uint32_t>(ptr[(n)*4 + 2]) << 16) | \
-                       (static_cast<uint32_t>(ptr[(n)*4 + 3]) << 24))
+#define SET(n)                                                           \
+    (ctx->block[(n)] = static_cast<uint32_t>(ptr[(n) * 4]) |             \
+                       (static_cast<uint32_t>(ptr[(n) * 4 + 1]) << 8) |  \
+                       (static_cast<uint32_t>(ptr[(n) * 4 + 2]) << 16) | \
+                       (static_cast<uint32_t>(ptr[(n) * 4 + 3]) << 24))
 #define GET(n) (ctx->block[(n)])
 #endif
 

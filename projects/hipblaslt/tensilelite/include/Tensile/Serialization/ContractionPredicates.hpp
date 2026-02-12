@@ -58,6 +58,8 @@ namespace TensileLite
                 SubclassMap rv(
                     {Base::template Pair<Predicates::Contraction::Free0SizeMultiple>(),
                      Base::template Pair<Predicates::Contraction::Free1SizeMultiple>(),
+                     Base::template Pair<Predicates::Contraction::Free1SizeDivByValueLowbitGT1>(),
+                     Base::template Pair<Predicates::Contraction::KRingShiftTailWrapOnly>(),
                      Base::template Pair<Predicates::Contraction::BatchSizeMultiple>(),
                      Base::template Pair<Predicates::Contraction::BatchSizeEqual>(),
                      Base::template Pair<Predicates::Contraction::SynchronizerSizeCheck>(),
@@ -153,6 +155,18 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::Free1SizeMultiple, IO>
             : public AutoMappingTraits<Predicates::Contraction::Free1SizeMultiple, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::Free1SizeDivByValueLowbitGT1, IO>
+            : public AutoMappingTraits<Predicates::Contraction::Free1SizeDivByValueLowbitGT1, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::KRingShiftTailWrapOnly, IO>
+            : public AutoMappingTraits<Predicates::Contraction::KRingShiftTailWrapOnly, IO>
         {
         };
 

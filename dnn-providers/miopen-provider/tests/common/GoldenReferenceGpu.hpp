@@ -37,7 +37,7 @@ protected:
         // TODO: Temporary fix until reference data can be properly installed
         if(path.empty())
         {
-            HIPDNN_LOG_WARN("Reference not found for Gpu golden reference test");
+            HIPDNN_PLUGIN_LOG_WARN("Reference not found for Gpu golden reference test");
             GTEST_SKIP();
         }
 

@@ -156,6 +156,56 @@ TEST_F(TestStringUtil, Fnv1aHashKnownValues)
     EXPECT_NE(hash1, hash2);
 }
 
+// Tests for trim function
+TEST_F(TestStringUtil, TrimRemovesLeadingWhitespace)
+{
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("  hello"), "hello");
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("\thello"), "hello");
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("\nhello"), "hello");
+}
+
+TEST_F(TestStringUtil, TrimRemovesTrailingWhitespace)
+{
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("hello  "), "hello");
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("hello\t"), "hello");
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("hello\n"), "hello");
+}
+
+TEST_F(TestStringUtil, TrimRemovesBothEnds)
+{
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("  hello  "), "hello");
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("\t\nhello\r\n"), "hello");
+}
+
+TEST_F(TestStringUtil, TrimHandlesEmptyString)
+{
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim(""), "");
+}
+
+TEST_F(TestStringUtil, TrimHandlesAllWhitespace)
+{
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("   "), "");
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("\t\n\r"), "");
+}
+
+TEST_F(TestStringUtil, TrimPreservesInternalWhitespace)
+{
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("  hello world  "), "hello world");
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("  hello\tworld  "), "hello\tworld");
+}
+
+TEST_F(TestStringUtil, TrimHandlesVariousWhitespaceTypes)
+{
+    // Test all whitespace characters: space, tab, newline, carriage return, form feed, vertical tab
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim(" \t\n\r\f\vhello \t\n\r\f\v"), "hello");
+}
+
+TEST_F(TestStringUtil, TrimNoOpOnTrimmedString)
+{
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("hello"), "hello");
+    EXPECT_EQ(hipdnn_data_sdk::utilities::trim("hello world"), "hello world");
+}
+
 // Tests for other StringUtil functions (existing functionality)
 TEST_F(TestStringUtil, ToLower)
 {
@@ -186,4 +236,22 @@ TEST_F(TestStringUtil, VecToString)
 
     std::vector<int> emptyVec;
     EXPECT_EQ(hipdnn_data_sdk::utilities::vecToString(emptyVec), "[]");
+}
+
+TEST_F(TestStringUtil, StringVecToStream)
+{
+    std::vector<std::string> strVec = {"hello", "world", "test"};
+    std::ostringstream oss;
+    hipdnn_data_sdk::utilities::stringVecToStream(oss, strVec);
+    EXPECT_EQ(oss.str(), "[\"hello\", \"world\", \"test\"]");
+
+    std::vector<std::string> singleVec = {"single"};
+    std::ostringstream oss2;
+    hipdnn_data_sdk::utilities::stringVecToStream(oss2, singleVec);
+    EXPECT_EQ(oss2.str(), "[\"single\"]");
+
+    std::vector<std::string> emptyVec;
+    std::ostringstream oss3;
+    hipdnn_data_sdk::utilities::stringVecToStream(oss3, emptyVec);
+    EXPECT_EQ(oss3.str(), "[]");
 }

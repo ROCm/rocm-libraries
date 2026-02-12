@@ -78,7 +78,7 @@ List of supported input and output types:
   *
     - int32
     - HIP_R_32I
-    - ❌
+    - ✅
     - ✅
   *
     - tensorfloat32
@@ -174,7 +174,7 @@ List of supported compute types for specific input and output types:
     "HIP_R_16F", "HIP_R_16F", "HIP_R_16F", "HIPSPARSELT_COMPUTE_16F", "CUDA", ""
     "HIP_R_16BF", "HIP_R_16BF", "HIP_R_16BF", "HIPSPARSELT_COMPUTE_32F", "HIP / CUDA", "gfx942, gfx950"
     "HIP_R_8I", "HIP_R_8I", "HIP_R_8I", "HIPSPARSELT_COMPUTE_32I", "HIP / CUDA", "gfx942, gfx950"
-    "HIP_R_8I", "HIP_R_32I", "HIP_R_32I", "HIPSPARSELT_COMPUTE_32I", "CUDA", ""
+    "HIP_R_8I", "HIP_R_32I", "HIP_R_32I", "HIPSPARSELT_COMPUTE_32I", "HIP / CUDA", "gfx942, gfx950"
     "HIP_R_8I", "HIP_R_16F", "HIP_R_16F", "HIPSPARSELT_COMPUTE_32I", "HIP / CUDA", "gfx942, gfx950"
     "HIP_R_8I", "HIP_R_16BF", "HIP_R_16BF", "HIPSPARSELT_COMPUTE_32I", "HIP / CUDA", "gfx942, gfx950"
     "HIP_R_8F_E4M3", "HIP_R_16F", "HIP_R_8F_E4M3", "HIPSPARSELT_COMPUTE_32F", "CUDA", ""

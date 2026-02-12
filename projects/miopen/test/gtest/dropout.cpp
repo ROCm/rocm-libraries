@@ -224,7 +224,7 @@ inline auto GenCases()
 #else
 #define DROPOUT_LARGE_CTEST 0
 
-    std::set<std::vector<int>> get_inputs_set               = get_inputs(1);
+    std::set<std::vector<int>> get_inputs_set = get_inputs(1);
 
 #if DROPOUT_LARGE_CTEST
     std::set<std::vector<int>> get_3d_conv_input_shapes_set = get_3d_conv_input_shapes(1);

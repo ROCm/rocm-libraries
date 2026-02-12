@@ -59,6 +59,4 @@ Tests:
   precision: *single_double_precisions_complex
   M: 1
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  filename: [mplate,
-             qc2534,
-             Chevron2]
+  filename: [Chebyshev4]

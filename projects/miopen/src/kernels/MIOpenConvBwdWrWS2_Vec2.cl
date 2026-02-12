@@ -57,7 +57,7 @@
 
 #define DBG_OUT_OF_RNGE 0
 // number of filter taps in the processing wk_item
-//#define MLO_WEI_WKITEM 5
+// #define MLO_WEI_WKITEM 5
 
 #define MLO_N_OUT_HORIZ_READS (MLO_ALIGNED_OUT_SCAN_LN)
 #define MLO_OUT_HORIZ_PIX_SZ (MLO_N_OUT_HORIZ_READS * MLO_READ_UNIT)
@@ -222,8 +222,8 @@ MIOpenCvBwdWrW(const __global _FLOAT* __restrict top_df,
     // weight starting x
     uint w_x0 = iMod(w_idx, w_y, MLO_WEI_BLK_SZ0);
 #else
-    uint w_y       = w_idx / MLO_WEI_BLK_SZ0;
-    uint w_x0      = w_idx & (MLO_WEI_BLK_SZ0 - 1);
+    uint w_y  = w_idx / MLO_WEI_BLK_SZ0;
+    uint w_x0 = w_idx & (MLO_WEI_BLK_SZ0 - 1);
 #endif
 
     __private _FLOAT2 pvt_accum[(MLO_N_OUT_BLK_GRP * MLO_N_LCL_OUT_MAPS * MLO_WEI_WKITEM)] = {
@@ -617,7 +617,7 @@ MIOpenCvBwdWrW(const __global _FLOAT* __restrict top_df,
                             i_vals[w] = i_vals[w + (MLO_FILTER_STRIDE0 / MLO_WEI_BLK_SZ0)];
                         }
                     } // for (uint i = 0; i < MLO_OUT_WEI_SCAN_BLK; ++i)
-                }     // for (uint j = 0; j < MLO_N_ALIGNED_OUT_SCAN_BLK; ++j)
+                } // for (uint j = 0; j < MLO_N_ALIGNED_OUT_SCAN_BLK; ++j)
 
             } // for(; og < (MLO_N_OUT_BLK_GRP; ++og )
 
@@ -647,7 +647,7 @@ MIOpenCvBwdWrW(const __global _FLOAT* __restrict top_df,
 
         } // for (uint ob = 0; ob < MLO_N_OUT_BLK; ++ob, in_y += (MLO_IN_LCL_HEIGHT -
           // MLO_FILTER_SIZE1 + 1), out_y += MLO_N_ALIGNED_OUT_SCAN_BLK)
-    }     // for (uint b = 0;
+    } // for (uint b = 0;
 
     // send it out
 
@@ -692,10 +692,10 @@ MIOpenCvBwdWrW(const __global _FLOAT* __restrict top_df,
             uint oo    = iDiv_legacy(l, MLO_WEI_CHANNEL_STRIDE);
             uint wei_i = iMod(l, oo, MLO_WEI_CHANNEL_STRIDE);
 #else
-            uint oo      = l / MLO_WEI_CHANNEL_STRIDE;
-            uint wei_i   = l & MLO_WEI_CHANNEL_STRIDE - 1;
+            uint oo    = l / MLO_WEI_CHANNEL_STRIDE;
+            uint wei_i = l & MLO_WEI_CHANNEL_STRIDE - 1;
 #endif
-#if(MLO_FILTER_SIZE0) & ((MLO_FILTER_SIZE0)-1)
+#if(MLO_FILTER_SIZE0) & ((MLO_FILTER_SIZE0) - 1)
             uint wei_i_y = iDiv_legacy(wei_i, (MLO_FILTER_SIZE0));
             uint wei_i_x = iMod(wei_i, wei_i_y, (MLO_FILTER_SIZE0));
 #else

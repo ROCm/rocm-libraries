@@ -167,9 +167,9 @@ struct _rocblaslt_matmul_desc
     //
     rocblaslt_compute_type compute_type;
     rocblaslt_compute_type compute_type_original;
-    hipDataType            compute_input_typeA;
-    hipDataType            compute_input_typeB;
-    hipDataType            scale_type = HIPBLASLT_DATATYPE_INVALID;
+    hipDataType            compute_input_typeA = HIPBLASLT_DATATYPE_INVALID;
+    hipDataType            compute_input_typeB = HIPBLASLT_DATATYPE_INVALID;
+    hipDataType            scale_type          = HIPBLASLT_DATATYPE_INVALID;
 
     RocblasltContractionProblem::ScalingFormat scaleAType
         = RocblasltContractionProblem::ScalingFormat::None;

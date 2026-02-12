@@ -32,12 +32,10 @@ namespace rocRoller
 {
     [[noreturn]] void Crash()
     {
-        auto will_be_null = GetNullPointer();
+        auto will_be_null                         = GetNullPointer();
+        *static_cast<volatile int*>(will_be_null) = 0;
         // cppcheck-suppress [nullPointer, knownConditionTrueFalse]
-        if((*will_be_null = 0))
-            throw std::runtime_error("Impossible 1");
-
-        throw std::runtime_error("Impossible 2");
+        throw std::runtime_error("Impossible!");
     }
 
     int* GetNullPointer()

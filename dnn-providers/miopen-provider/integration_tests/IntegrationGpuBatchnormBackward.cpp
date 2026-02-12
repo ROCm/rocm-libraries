@@ -15,6 +15,7 @@
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_plugin::test_utilities;
@@ -73,18 +74,18 @@ protected:
         graphObj.set_intermediate_data_type(intermediateDataType);
         graphObj.set_io_data_type(dataType);
 
-        auto xAttr = graph::makeTensorAttributes(
+        auto xAttr = makeTensorAttributes(
             "x", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         xAttr.set_uid(BatchnormBwdTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto dyAttr = graph::makeTensorAttributes(
+        auto dyAttr = makeTensorAttributes(
             "dy", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         dyAttr.set_uid(BatchnormBwdTensorIds::DY_UID);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
         // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
-        auto scaleAttr = graph::makeTensorAttributes(
+        auto scaleAttr = makeTensorAttributes(
             "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
         scaleAttr.set_uid(BatchnormBwdTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
@@ -93,12 +94,12 @@ protected:
 
         if(!CalcStats)
         {
-            auto meanAttr = graph::makeTensorAttributes(
+            auto meanAttr = makeTensorAttributes(
                 "mean", intermediateDataType, derivedDims, generateStrides(derivedDims));
             meanAttr.set_uid(BatchnormBwdTensorIds::MEAN_UID);
             auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
-            auto invVarianceAttr = graph::makeTensorAttributes(
+            auto invVarianceAttr = makeTensorAttributes(
                 "inv_variance", intermediateDataType, derivedDims, generateStrides(derivedDims));
             invVarianceAttr.set_uid(BatchnormBwdTensorIds::INV_VARIANCE_UID);
             auto invVarianceTensorAttr

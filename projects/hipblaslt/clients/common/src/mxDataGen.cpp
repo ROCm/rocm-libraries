@@ -28,6 +28,7 @@
 #include <mxDataGenerator/DataGenerator.hpp>
 #include <mxDataGenerator/PreSwizzle.hpp>
 #include <cblas.h>
+#include <cmath>
 
 
 template <typename DT>
@@ -223,6 +224,8 @@ std::vector<float> generateData(T                           dgen,
                                 std::vector<size_t> const&  preSwizzleTile,
                                 std::vector<size_t> const&  preTile)
 {
+    using namespace DGen;
+
     dgen.setSeed(seed);
     dgen.generate(sizes, strides, opt);
 
@@ -232,18 +235,14 @@ std::vector<float> generateData(T                           dgen,
     std::vector<uint8_t> scaleBytes = dgen.getScaleBytes();
 
 #ifdef HIPBLASLT_USE_ROCROLLER
-    // Apply pre-swizzle to scale data if preSwizzleTile is provided
+    // Apply pre-swizzle to scale data
+    size_t scaleRows = sizes[0] / elementsPerMXBlock;
+    size_t scaleCols = sizes[1];
+
     if(preSwizzleTile.size() == 3)
     {
-        // Calculate scale tensor dimensions
-        // sizes = {rowSize, colSize} where:
-        //   - For transposed A: rowSize = K, colSize = M
-        //   - For non-transposed B: rowSize = K, colSize = N
-        // The scale tensor has shape (rowSize/blockSize, colSize)
-        size_t scaleRows = sizes[0] / elementsPerMXBlock; // K / blockSize
-        size_t scaleCols = sizes[1]; // M or N
-
-        scaleBytes = DGen::preSwizzle(scaleBytes, {scaleRows, scaleCols}, preSwizzleTile, preTile);
+        scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {scaleCols, scaleRows});
+        
     }
 #endif
 
@@ -323,10 +322,29 @@ std::vector<float> generateMXInput(hipDataType                dataType,
     opt.min          = initMethod == "uniform_01" ? 0. : (initMethod == "hpl" ? -.5 : min_val);
     opt.max          = initMethod == "uniform_01" ? 1. : (initMethod == "hpl" ? .5 : max_val);
     opt.blockScaling = scaleBlockRowSize * scaleBlockColSize;
-    // TODO initMethod == "hpl" should also be Bounded, but fails some tests
-    opt.initMode = (initMethod == "Bounded" || initMethod == "uniform_01")
-                       ? DataInitMode(Bounded{})
-                       : DataInitMode(TrigonometricFromFloat{});
+
+    // Map string initMethod to DataInitMode
+    if(initMethod == "Sequential")
+        opt.initMode = DataInitMode(Sequential{});
+    else if(initMethod == "RowIndex")
+        opt.initMode = DataInitMode(RowIndex{});
+    else if(initMethod == "ColIndex")
+        opt.initMode = DataInitMode(ColIndex{});
+    else if(initMethod == "Checkerboard")
+        opt.initMode = DataInitMode(Checkerboard{});
+    else if(initMethod == "ScaledDiagonal")
+        opt.initMode = DataInitMode(ScaledDiagonal{});
+    else if(initMethod == "Identity")
+        opt.initMode = DataInitMode(Identity{});
+    else if(initMethod == "Ones")
+        opt.initMode = DataInitMode(Ones{});
+    else if(initMethod == "Zeros")
+        opt.initMode = DataInitMode(Zeros{});
+    else if(initMethod == "Bounded" || initMethod == "uniform_01")
+        opt.initMode = DataInitMode(Bounded{});
+    else
+        // TODO initMethod == "hpl" should also be Bounded, but fails some tests
+        opt.initMode = DataInitMode(TrigonometricFromFloat{});
 
     const uint32_t seed = 1713573849;
 

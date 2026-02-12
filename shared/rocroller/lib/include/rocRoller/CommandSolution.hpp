@@ -121,8 +121,6 @@ namespace rocRoller
 
         bool packMultipleElementsInto1VGPR = true;
 
-        unsigned int unrollX   = 0;
-        unsigned int unrollY   = 0;
         unsigned int unrollK   = 0;
         bool         fuseLoops = true;
         bool         tailLoops = true;

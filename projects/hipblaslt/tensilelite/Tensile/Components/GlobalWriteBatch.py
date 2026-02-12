@@ -1626,13 +1626,13 @@ class GlobalWriteBatchWriter:
           newSumIdx = sumIdxV * 4 - self.parentWriter.states.c.startVgprValu
           vtmp1 = self.parentWriter.vgprPool.checkOutAligned(2, 2)
           vtmp2 = self.parentWriter.vgprPool.checkOutAligned(2, 2)
-          # tmp1 = a.real * b.real
+          # tmp1 = a.real * b.real (t1 = Ar*Cr)
           module.add(VMulF64(dst=vgpr(vtmp1,2), src0=sgpr("Alpha+0",2), src1=vgpr("ValuC+%u"%(newSumIdx+0),2)))
-          # tmp2 = a.imag * b.real
+          # tmp2 = a.imag * b.real (t2 = Ai*Cr)
           module.add(VMulF64(dst=vgpr(vtmp2,2), src0=sgpr("Alpha+2",2), src1=vgpr("ValuC+%u"%(newSumIdx+0),2)))
-          # c.real = a.real * b.real - a.imag * b.imag = tmp1 - a.imag * b.imag
+          # c.real = a.real * b.real - a.imag * b.imag = tmp1 - a.imag * b.imag (Cr = -Ai*Ci + t1).
           module.add(VFmaF64(dst=vgpr("ValuC+%u"%(newSumIdx+0),2), src0=sgpr("Alpha+2",2), src1=vgpr("ValuC+%u"%(newSumIdx+2),2).getMinus(), src2=vgpr(vtmp1,2)))
-          # c.imag = a.real * b.imag + a.imag * b.real = a.real * b.imag + tmp2
+          # c.imag = a.real * b.imag + a.imag * b.real = a.real * b.imag + tmp2 (Ci = Ar*Ci + t2).
           module.add(VFmaF64(dst=vgpr("ValuC+%u"%(newSumIdx+2),2), src0=sgpr("Alpha+0",2), src1=vgpr("ValuC+%u"%(newSumIdx+2),2), src2=vgpr(vtmp2,2)))
           if usePK:
             newSumIdx2 = newSumIdx + 4

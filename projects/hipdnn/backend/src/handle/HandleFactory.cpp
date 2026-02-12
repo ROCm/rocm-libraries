@@ -15,7 +15,7 @@ void HandleFactory::createHandle(hipdnnHandle_t* handle)
 
     *handle = new hipdnnHandle();
 
-    HIPDNN_LOG_INFO("Created handle: {:p}", static_cast<void*>(*handle));
+    HIPDNN_BACKEND_LOG_INFO("Created handle: {:p}", static_cast<void*>(*handle));
 }
 
 void HandleFactory::destroyHandle(hipdnnHandle_t handle)
@@ -24,7 +24,7 @@ void HandleFactory::destroyHandle(hipdnnHandle_t handle)
 
     delete handle;
 
-    HIPDNN_LOG_INFO("Destroyed handle: {:p}", static_cast<void*>(handle));
+    HIPDNN_BACKEND_LOG_INFO("Destroyed handle: {:p}", static_cast<void*>(handle));
 }
 
 } // namespace hipdnn_backend

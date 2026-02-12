@@ -296,121 +296,19 @@ void testing_spmv_csr(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * y_size, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * y_size, hipMemcpyDeviceToHost));
 
-        // Query for warpSize
-        hipDeviceProp_t prop;
-        CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, 0));
-
-        int WF_SIZE;
-        I   nnz_per_row = nnz / m;
-
-        if(prop.warpSize == 32)
-        {
-            if(nnz_per_row < 4)
-                WF_SIZE = 2;
-            else if(nnz_per_row < 8)
-                WF_SIZE = 4;
-            else if(nnz_per_row < 16)
-                WF_SIZE = 8;
-            else if(nnz_per_row < 32)
-                WF_SIZE = 16;
-            else
-                WF_SIZE = 32;
-        }
-        else if(prop.warpSize == 64)
-        {
-            if(nnz_per_row < 4)
-                WF_SIZE = 2;
-            else if(nnz_per_row < 8)
-                WF_SIZE = 4;
-            else if(nnz_per_row < 16)
-                WF_SIZE = 8;
-            else if(nnz_per_row < 32)
-                WF_SIZE = 16;
-            else if(nnz_per_row < 64)
-                WF_SIZE = 32;
-            else
-                WF_SIZE = 64;
-        }
-        else
-        {
-            std::cerr << "Error: Unknown wavefront size" << std::endl;
-            return;
-        }
-
-        // CPU reference computation
-        if(transA == HIPSPARSE_OPERATION_NON_TRANSPOSE)
-        {
-            // y = alpha * A * x + beta * y
-            for(J i = 0; i < m; ++i)
-            {
-                std::vector<T> sum(WF_SIZE, make_DataType<T>(0.0));
-
-                for(I j = hcsr_row_ptr[i] - idx_base; j < hcsr_row_ptr[i + 1] - idx_base;
-                    j += WF_SIZE)
-                {
-                    for(int k = 0; k < WF_SIZE; ++k)
-                    {
-                        if(j + k < hcsr_row_ptr[i + 1] - idx_base)
-                        {
-                            sum[k] = testing_fma(testing_mult(h_alpha, hval[j + k]),
-                                                 hx[hcol_ind[j + k] - idx_base],
-                                                 sum[k]);
-                        }
-                    }
-                }
-
-                for(int j = 1; j < WF_SIZE; j <<= 1)
-                {
-                    for(int k = 0; k < WF_SIZE - j; ++k)
-                    {
-                        sum[k] = sum[k] + sum[k + j];
-                    }
-                }
-
-                if(h_beta == make_DataType<T>(0.0))
-                {
-                    hy_gold[i] = sum[0];
-                }
-                else
-                {
-                    hy_gold[i] = testing_fma(h_beta, hy_gold[i], sum[0]);
-                }
-            }
-        }
-        else
-        {
-            // Transpose or Conjugate Transpose: y = alpha * A^T/A^H * x + beta * y
-            // For transpose, iterate over rows of A and accumulate to y[col]
-            bool conj = (transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE);
-
-            // First apply beta to y
-            if(h_beta == make_DataType<T>(0.0))
-            {
-                for(J j = 0; j < n; ++j)
-                {
-                    hy_gold[j] = make_DataType<T>(0.0);
-                }
-            }
-            else
-            {
-                for(J j = 0; j < n; ++j)
-                {
-                    hy_gold[j] = testing_mult(h_beta, hy_gold[j]);
-                }
-            }
-
-            // Then accumulate alpha * A^T/A^H * x
-            for(J i = 0; i < m; ++i)
-            {
-                T xi = hx[i];
-                for(I j = hcsr_row_ptr[i] - idx_base; j < hcsr_row_ptr[i + 1] - idx_base; ++j)
-                {
-                    J col        = hcol_ind[j] - idx_base;
-                    T val        = conj ? testing_conj(hval[j]) : hval[j];
-                    hy_gold[col] = testing_fma(testing_mult(h_alpha, val), xi, hy_gold[col]);
-                }
-            }
-        }
+        // Host SpMV
+        host_csrmv(transA,
+                   m,
+                   n,
+                   nnz,
+                   h_alpha,
+                   hcsr_row_ptr.data(),
+                   hcol_ind.data(),
+                   hval.data(),
+                   hx.data(),
+                   h_beta,
+                   hy_gold.data(),
+                   idx_base);
 
         unit_check_near(1, y_size, 1, hy_gold.data(), hy_1.data());
         unit_check_near(1, y_size, 1, hy_gold.data(), hy_2.data());

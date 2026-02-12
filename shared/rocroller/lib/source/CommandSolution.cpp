@@ -52,8 +52,6 @@ namespace rocRoller
         msg << ShowValue(transposeMemoryAccess);
         msg << ShowValue(packMultipleElementsInto1VGPR);
 
-        msg << ShowValue(unrollX);
-        msg << ShowValue(unrollY);
         msg << ShowValue(unrollK);
         msg << ShowValue(fuseLoops);
         msg << ShowValue(tailLoops);
@@ -198,21 +196,21 @@ namespace rocRoller
 
         for(auto& arg : argStructs)
         {
-            auto value = Expression::evaluate(arg.expression, args);
+            auto value = Expression::evaluate(arg.getExpression(), args);
 
-            if(variableType(value) != arg.variableType)
+            if(variableType(value) != arg.getVariableType())
             {
                 throw std::runtime_error(concatenate("Evaluated argument type ",
                                                      variableType(value),
                                                      " doesn't match expected type ",
-                                                     arg.variableType,
+                                                     arg.getVariableType(),
                                                      ", Expression: ",
-                                                     toString(arg.expression),
+                                                     toString(arg.getExpression()),
                                                      ", name: ",
-                                                     arg.name));
+                                                     arg.getName()));
             }
 
-            rv.append(arg.name, value);
+            rv.append(arg.getName(), value);
         }
 
         return rv;

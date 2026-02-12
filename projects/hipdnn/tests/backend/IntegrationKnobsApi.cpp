@@ -83,8 +83,8 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoCountFromEngine)
                                         nullptr),
               HIPDNN_STATUS_SUCCESS);
 
-    // The test plugin exposes 4 knobs: int_knob, float_knob, string_knob, deprecated_knob
-    EXPECT_EQ(knobCount, 4);
+    // The test plugin exposes 5 knobs: int_knob, float_knob, string_knob, deprecated_knob, shared.deterministic
+    EXPECT_EQ(knobCount, 5);
 }
 
 TEST_F(IntegrationKnobsApi, GetKnobInfoDataFromEngine)
@@ -100,7 +100,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoDataFromEngine)
                                         &knobCount,
                                         nullptr),
               HIPDNN_STATUS_SUCCESS);
-    ASSERT_EQ(knobCount, 4);
+    ASSERT_EQ(knobCount, 5);
 
     // Now get the actual knob data
     std::vector<hipdnnBackendFlatbufferData_t> knobData(static_cast<size_t>(knobCount));
@@ -112,7 +112,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoDataFromEngine)
                                         &returnedCount,
                                         knobData.data()),
               HIPDNN_STATUS_SUCCESS);
-    EXPECT_EQ(returnedCount, 4);
+    EXPECT_EQ(returnedCount, 5);
 
     // Verify each knob data is valid
     for(size_t i = 0; i < static_cast<size_t>(returnedCount); ++i)

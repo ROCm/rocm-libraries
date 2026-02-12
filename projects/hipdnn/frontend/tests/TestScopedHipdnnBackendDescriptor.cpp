@@ -4,11 +4,12 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
-#include <hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
 #include "fake_backend/MockHipdnnBackend.hpp"
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::detail;
 using namespace ::testing;
 
 class TestScopedHipdnnBackendDescriptor : public ::testing::Test

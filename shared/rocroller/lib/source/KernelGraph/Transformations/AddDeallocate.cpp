@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -86,11 +86,10 @@ namespace rocRoller::KernelGraph
                     else if(rel == NodeOrdering::LeftInBodyOfRight
                             || rel == NodeOrdering::RightInBodyOfLeft)
                     {
-                        AssertFatal(false,
-                                    "Unexpected body relationship between",
-                                    ShowValue(*iterA),
-                                    ShowValue(*iterB),
-                                    ShowValue(rel));
+                        Throw<FatalError>("Unexpected body relationship between",
+                                          ShowValue(*iterA),
+                                          ShowValue(*iterB),
+                                          ShowValue(rel));
                     }
                     else
                     {
@@ -205,15 +204,15 @@ namespace rocRoller::KernelGraph
             }
 
             auto referencedArgs = arguments | std::views::filter([&](auto const& arg) {
-                                      return !neverReferencedArguments.contains(arg.name);
+                                      return !neverReferencedArguments.contains(arg.getName());
                                   });
 
             for(auto& arg : referencedArgs)
             {
-                kernel->addArgument({std::move(arg.name),
-                                     arg.variableType,
-                                     arg.dataDirection,
-                                     std::move(arg.expression)});
+                kernel->addArgument({std::move(arg.getName()),
+                                     arg.getVariableType(),
+                                     arg.getDataDirection(),
+                                     arg.getExpression()});
             }
 
             // Store launch-time-only args so ArgumentLoader can elide the load

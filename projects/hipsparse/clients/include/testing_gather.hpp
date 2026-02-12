@@ -137,10 +137,7 @@ void testing_gather(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hx_val.data(), dx_val, sizeof(T) * nnz, hipMemcpyDeviceToHost));
 
         // CPU
-        for(int64_t i = 0; i < nnz; ++i)
-        {
-            hx_val_gold[i] = hy[hx_ind[i] - idxBase];
-        }
+        host_gthr(nnz, hy.data(), hx_val_gold.data(), hx_ind.data(), idxBase);
 
         // Verify results against host
         unit_check_general(1, nnz, 1, hx_val_gold.data(), hx_val.data());

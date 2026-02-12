@@ -26,10 +26,12 @@ if __name__ == "__main__":
     print("This file can no longer be run as a script.  Run 'Tensile/bin/Tensile' instead.")
     exit(1)
 
+import logging
 import os
 import subprocess
 import sys
 import argparse
+import time
 
 from datetime import datetime
 from pathlib import Path
@@ -51,6 +53,14 @@ from Tensile import BenchmarkProblems
 from Tensile import ClientWriter
 from Tensile import LibraryIO
 from Tensile import LibraryLogic
+
+_timing_logger = logging.getLogger("tensile.timing")
+if not _timing_logger.handlers:
+    _h = logging.StreamHandler(sys.stderr)
+    _h.setFormatter(logging.Formatter("%(message)s"))
+    _timing_logger.addHandler(_h)
+    _timing_logger.setLevel(logging.INFO)
+    _timing_logger.propagate = False
 
 TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 TENSILE_CLIENT_PATH = Path('build_tmp') / 'tensilelite' / 'client' / 'tensilelite-client'
@@ -95,11 +105,15 @@ def executeStepsInConfig(
     """
 
     buildTmpPath = outputPath / "build_tmp"
+    timingEnabled = globalParameters.get("TimingInstrumentation", False)
+
     ##############################################################################
     # Benchmark Problems
     ##############################################################################
     gfxName = isaToGfx(next(iter(isaInfoMap)))
     if "BenchmarkProblems" in config:
+        # Using time_ns() for better precision: https://docs.python.org/3/library/time.html#time.time
+        startTime = time.time_ns()
         BenchmarkProblems.main(
             config["BenchmarkProblems"],
             config["UseCache"],
@@ -114,6 +128,9 @@ def executeStepsInConfig(
             isaInfoMap,
             probSolDict,
         )
+        if timingEnabled:
+            elapsed = (time.time_ns() - startTime) / 1_000_000
+            _timing_logger.info(f"TIMING:python_benchmark_problems:{elapsed:.3f}")
         print1("")
 
     ##############################################################################
@@ -130,6 +147,7 @@ def executeStepsInConfig(
                 libraryLogicConfig = config["LibraryLogic"]
             else:
                 libraryLogicConfig = {}
+            startTime = time.time_ns()
             LibraryLogic.main(
                 libraryLogicConfig,
                 srcToolchain.compiler,
@@ -139,6 +157,9 @@ def executeStepsInConfig(
                 debugConfig.printIndexAssignmentInfo,
                 isaInfoMap,
             )
+            if timingEnabled:
+                elapsed = (time.time_ns() - startTime) / 1_000_000
+                _timing_logger.info(f"TIMING:python_library_logic:{elapsed:.3f}")
             print1("")
         else:
             print1("# LibraryLogic already done.")
@@ -152,6 +173,7 @@ def executeStepsInConfig(
             libraryClientConfig = config["LibraryClient"]
         else:
             libraryClientConfig = {}
+        startTime = time.time_ns()
         ClientWriter.main(
             libraryClientConfig,
             asmToolchain.assembler,
@@ -161,6 +183,9 @@ def executeStepsInConfig(
             deviceId,
             gfxName,
         )
+        if timingEnabled:
+            elapsed = (time.time_ns() - startTime) / 1_000_000
+            _timing_logger.info(f"TIMING:python_client_writer:{elapsed:.3f}")
         print1("")
 
 

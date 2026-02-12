@@ -10,9 +10,9 @@ namespace ck {
 template <typename GridwiseConvFwd, index_t BlockSize>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-    __launch_bounds__(BlockSize)
+__launch_bounds__(BlockSize)
 #endif
-        kernel_grouped_conv_fwd(typename GridwiseConvFwd::Argument arg)
+    kernel_grouped_conv_fwd(typename GridwiseConvFwd::Argument arg)
 {
     __shared__ char p_share_in[GridwiseConvFwd::ShareMemInSize];
     GridwiseConvFwd::template Run<>(arg, p_share_in);

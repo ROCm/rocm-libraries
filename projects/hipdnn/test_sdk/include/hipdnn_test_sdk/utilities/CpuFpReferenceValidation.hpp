@@ -7,9 +7,9 @@
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -55,25 +55,21 @@ public:
             if(absDiff > threshold)
             {
                 // Log error and mark as failed
-                HIPDNN_LOG_ERROR("Validation failed at indices {}: reference value = {}, "
-                                 "implementation value = {}, "
-                                 "absolute difference = {}, threshold = {}, "
-                                 "difference - threshold = {}, (atol={}, rtol={})",
-                                 indices,
-                                 refValue,
-                                 implValue,
-                                 absDiff,
-                                 threshold,
-                                 absDiff - threshold,
-                                 _absoluteTolerance,
-                                 _relativeTolerance);
+                HIPDNN_SDK_LOG_ERROR(
+                    "Validation failed at indices "
+                    << StreamVec(indices) << ": reference value = " << refValue
+                    << ", implementation value = " << implValue
+                    << ", absolute difference = " << absDiff << ", threshold = " << threshold
+                    << ", difference - threshold = " << (absDiff - threshold)
+                    << ", (atol=" << _absoluteTolerance << ", rtol=" << _relativeTolerance << ")");
                 result.store(false, std::memory_order_relaxed);
             }
             return result.load(std::memory_order_relaxed);
         };
 
         // Create and execute parallel functor
-        auto parallelFunc = makeParallelTensorFunctor(validateFunc, reference.dims());
+        auto parallelFunc
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(validateFunc, reference.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
         return result.load();
@@ -116,21 +112,18 @@ public:
             if(absDiff > 0)
             {
                 // Log error and mark as failed
-                HIPDNN_LOG_ERROR("Validation failed for integer values at indices {}: ",
-                                 "reference value = {}, "
-                                 "implementation value = {}, "
-                                 "absolute difference = {}",
-                                 indices,
-                                 refValue,
-                                 implValue,
-                                 absDiff);
+                HIPDNN_SDK_LOG_ERROR("Validation failed for integer values at indices "
+                                     << StreamVec(indices) << ": reference value = " << refValue
+                                     << ", implementation value = " << implValue
+                                     << ", absolute difference = " << absDiff);
                 result.store(false, std::memory_order_relaxed);
             }
             return result.load(std::memory_order_relaxed);
         };
 
         // Create and execute parallel functor
-        auto parallelFunc = makeParallelTensorFunctor(validateFunc, reference.dims());
+        auto parallelFunc
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(validateFunc, reference.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
         return result.load();

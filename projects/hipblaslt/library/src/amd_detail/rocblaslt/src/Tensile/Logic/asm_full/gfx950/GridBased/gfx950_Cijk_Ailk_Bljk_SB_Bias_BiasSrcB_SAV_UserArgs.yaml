@@ -202,7 +202,7 @@
     SolutionNameMin: Cijk_Ailk_Bljk_SB_Bias_BiasSrcB_SAV_MT128x128x16_MI32x32x2x1_SN_1LDSB1_EPS0_GRVWA4_GRVWB4_LPB4_MIWT2_2_PGR2
     SourceSwap: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0

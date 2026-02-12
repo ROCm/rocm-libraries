@@ -172,13 +172,12 @@ int main(int argc, char* argv[])
 
     initializeFrontendLogging();
 
-    auto backend = hipdnnBackend();
     hipdnnHandle_t handle;
-    HIPDNN_CHECK(backend->create(&handle));
+    HIPDNN_CHECK(hipdnnCreate(&handle));
 
     bool allPassed = run(SampleRunner{handle, config});
 
-    HIPDNN_CHECK(backend->destroy(handle));
+    HIPDNN_CHECK(hipdnnDestroy(handle));
 
     if(allPassed)
     {

@@ -6,8 +6,8 @@
 #include <string>
 
 #include <hipblaslt/hipblaslt.h>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "HipblasltMatmulPlan.hpp"
 #include "HipblasltMatmulPlanBuilder.hpp"
@@ -32,7 +32,7 @@ bool checkDataTypes(const hipdnn_data_sdk::flatbuffer_utilities::TensorAttribute
        || std::find(validDataTypes.begin(), validDataTypes.end(), bType) == validDataTypes.end()
        || std::find(validDataTypes.begin(), validDataTypes.end(), cType) == validDataTypes.end())
     {
-        HIPDNN_LOG_INFO("Matmul plan builder: only fp32, fp16 and bf16 are supported");
+        HIPDNN_PLUGIN_LOG_INFO("Matmul plan builder: only fp32, fp16 and bf16 are supported");
         return false;
     }
 
@@ -93,7 +93,7 @@ bool HipblasltMatmulPlanBuilder::isApplicable(
     }
     catch(const std::exception& e)
     {
-        HIPDNN_LOG_INFO(e.what());
+        HIPDNN_PLUGIN_LOG_INFO(e.what());
         return false;
     }
 }
@@ -119,7 +119,7 @@ void HipblasltMatmulPlanBuilder::buildPlan(
     validateGraphConfiguration(opGraph);
 
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
-    HIPDNN_LOG_INFO("Building matmul plan for node: {}", nodeWrapper.name());
+    HIPDNN_PLUGIN_LOG_INFO("Building matmul plan for node: " << nodeWrapper.name());
 
     const auto& attr = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::MatmulAttributes>();
     MatmulParams params(attr, opGraph.getTensorMap());
