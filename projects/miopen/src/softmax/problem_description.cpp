@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "miopen/miopen.h"
+#include "miopen/tensor.hpp"
 #include <miopen/datatype.hpp>
 #include <miopen/softmax/problem_description.hpp>
 #include <miopen/names.hpp>
@@ -12,15 +14,52 @@ namespace miopen {
 
 namespace softmax {
 
+size_t GetStride(const TensorDescriptor& desc, miopenSoftmaxMode_t mode)
+{
+    size_t stride = 1;
+    auto layout   = desc.GetLayoutEnum();
+    auto lengths  = desc.GetLengths();
+    if(layout.has_value() && layout.value() == miopenTensorNCHW &&
+       mode == MIOPEN_SOFTMAX_MODE_CHANNEL)
+    {
+        stride = lengths[2] * lengths[3]; // stride = H * W
+    }
+    return stride;
+}
+
+size_t GetOuterSize(const TensorDescriptor& desc, miopenSoftmaxMode_t mode)
+{
+    auto lengths      = desc.GetLengths();
+    size_t outer_size = lengths[0]; // outer_size = N
+    auto layout       = desc.GetLayoutEnum();
+    if(layout.has_value() && layout.value() == miopenTensorNHWC &&
+       mode == MIOPEN_SOFTMAX_MODE_CHANNEL)
+    {
+        outer_size *= lengths[2] * lengths[3]; // outer_size = N * H * W
+    }
+    return outer_size;
+}
+
+size_t GetInnerSize(const TensorDescriptor& desc, miopenSoftmaxMode_t mode)
+{
+    auto lengths      = desc.GetLengths();
+    size_t inner_size = lengths[1]; // inner_size = C
+    if(mode == MIOPEN_SOFTMAX_MODE_INSTANCE)
+    {
+        inner_size *= lengths[2] * lengths[3]; // inner_size = C * H * W
+    }
+    return inner_size;
+}
+
 NetworkConfig ProblemDescription::MakeNetworkConfig() const
 {
     std::ostringstream ss(isForward ? "sfmfwd-" : "sfmbwd-");
 
     // all the tensors must be the same size and types
     // so we can use only one set of values
-    const auto& desc            = isForward ? xdxDesc : yDesc;
-    const auto [sn, sc, sh, sw] = tien<4>(desc.GetLengths());
-    ss << "n" << sn << "c" << sc << "h" << sh << "w" << sw;
+    const auto& desc = isForward ? xdxDesc : yDesc;
+    ss << "forward" << isForward;
+    ss << "outer_size" << outer_size << "inner_size" << inner_size << "stride" << stride;
     ss << GetDataType(desc.GetType());
     ss << "a" << alpha;
     ss << "b" << beta;
@@ -30,23 +69,6 @@ NetworkConfig ProblemDescription::MakeNetworkConfig() const
     ss << "y_offset" << y_offset;
     ss << "dx_offset" << dx_offset;
     ss << "dy_offset" << dy_offset;
-
-    auto printStrides = [&ss](std::string_view name, const miopen::TensorDescriptor& d) {
-        const auto [n, c, h, w] = tien<4>(d.GetStrides());
-        ss << name << "strides" << n << "x" << c << "x" << h << "x" << w;
-    };
-
-    if(isForward)
-    {
-        printStrides("x", xdxDesc);
-        printStrides("y", yDesc);
-    }
-    else
-    {
-        printStrides("y", yDesc);
-        printStrides("dy", dyDesc);
-        printStrides("dx", xdxDesc);
-    }
 
     return NetworkConfig{ss.str()};
 }
