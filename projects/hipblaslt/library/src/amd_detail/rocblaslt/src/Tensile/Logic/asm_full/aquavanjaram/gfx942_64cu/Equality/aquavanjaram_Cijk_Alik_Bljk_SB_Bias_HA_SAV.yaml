@@ -212,7 +212,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -419,7 +419,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -626,7 +626,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -833,7 +833,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -1040,7 +1040,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -1247,7 +1247,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -1454,7 +1454,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -1661,7 +1661,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -1868,7 +1868,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -2075,7 +2075,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -2282,7 +2282,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -2489,7 +2489,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -2696,7 +2696,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -2903,7 +2903,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -3110,7 +3110,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -3317,7 +3317,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -3524,7 +3524,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -3731,7 +3731,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -3938,7 +3938,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -4135,10 +4135,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 19
-    SolutionNameMin: Cijk_Alik_Bljk_SB_UserArgs_MT16x128x16_MI16x16x1_SN_GRPM1_GRVWB1_GSU1_GSUC0_GSUWGMRR0_K1_LRVW1_LWPM0p26_MIWT1_2_SU4_SUM0_SUS256_SK0_WGM1_WGMXCC1_WGMXCCG8
+    SolutionNameMin: Cijk_Alik_Bljk_SB_UserArgs_MT16x128x16_MI16x16x1_SN_GRPM1_GRVWB1_GSU1_GSUC0_GSUWGMRR0_K1_LRVW1_LWPM0p26_MIWT1_2_SU4_SUM1_SUS256_SK0_WGM1_WGMXCC1_WGMXCCG8
     SourceSwap: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -4348,7 +4348,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -4553,7 +4553,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -4760,7 +4760,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -4967,7 +4967,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -5174,7 +5174,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -5381,7 +5381,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -5588,7 +5588,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -5785,10 +5785,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 27
-    SolutionNameMin: Cijk_Alik_Bljk_SB_UserArgs_MT16x128x16_MI16x16x1_SN_GRVWB1_GSU1_GSUC0_GSUWGMRR0_K1_LRVW1_MIWT1_2_SU4_SUM0_SUS256_WGM1_WGMXCC1_WGMXCCG38
+    SolutionNameMin: Cijk_Alik_Bljk_SB_UserArgs_MT16x128x16_MI16x16x1_SN_GRVWB1_GSU1_GSUC0_GSUWGMRR0_K1_LRVW1_MIWT1_2_SU4_SUM1_SUS256_WGM1_WGMXCC1_WGMXCCG38
     SourceSwap: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -5998,7 +5998,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -6205,7 +6205,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -6412,7 +6412,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -6619,7 +6619,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -6826,7 +6826,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -7033,7 +7033,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
@@ -7240,7 +7240,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StoreCInUnroll: false
     StoreCInUnrollExact: false
