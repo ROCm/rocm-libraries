@@ -576,7 +576,7 @@ namespace rocRoller
             //
             // Prefetch before ForLoop
             //
-            auto preNOP     = graph.control.addElement(NOP());
+            auto preNOP = graph.control.addElement(NOP());
             graph.control.addElement(Sequence(), {preNOP}, {forLoop});
 
             std::vector<int> preChain;
