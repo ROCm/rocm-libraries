@@ -133,7 +133,7 @@ Tests:
   beta: 3
 
 - name: matmul_grid_limit_real
-  category: nightly
+  category: quick
   function:
     matmul: *real_precisions
   matrix_size: *grid_limit_matrix_size_real
@@ -143,7 +143,7 @@ Tests:
   gpu_arch: '1(151|20[0-1])'
 
 - name: matmul_grid_limit_real_1b
-  category: nightly
+  category: quick
   function:
     matmul: *real_precisions_1b
   matrix_size: *grid_limit_matrix_size_real
@@ -153,7 +153,7 @@ Tests:
   gpu_arch: '1(151|20[0-1])'
 
 - name: matmul_grid_limit_double
-  category: nightly
+  category: quick
   function:
     matmul: *double_precision
   matrix_size: *grid_limit_matrix_size_double
