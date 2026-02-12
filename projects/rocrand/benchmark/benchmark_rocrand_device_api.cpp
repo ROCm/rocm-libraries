@@ -185,6 +185,7 @@ struct runner
     }
 };
 
+template<typename T, typename Generator>
 __global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
 void generate_kernel(rocrand_state_mtgp32* states, T* data, const size_t size, Generator generator)
 {
