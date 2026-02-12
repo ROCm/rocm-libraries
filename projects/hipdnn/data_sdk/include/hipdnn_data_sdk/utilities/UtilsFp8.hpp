@@ -4,7 +4,7 @@
 #pragma once
 
 #include <hip/hip_fp8.h>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <ostream>
 #include <string>
 #include <type_traits>
 
@@ -116,12 +116,30 @@ inline __HOST_DEVICE__ hip_fp8_e4m3 max(hip_fp8_e4m3 a, hip_fp8_e4m3 b)
 
 } // namespace std
 
-template <>
-struct fmt::formatter<hip_fp8_e4m3> : fmt::formatter<float>
+namespace hipdnn_data_sdk::utilities
 {
-    template <typename FormatContext>
-    auto format(hip_fp8_e4m3 h, FormatContext& ctx) const
+
+/**
+ * @brief Wrapper for streaming hip_fp8_e4m3 to ostream
+ *
+ * Usage: std::cout << StreamFp8(value);
+ * Usage: HIPDNN_LOG_INFO("value: " << StreamFp8(fp8_val));
+ */
+class StreamFp8
+{
+public:
+    explicit StreamFp8(hip_fp8_e4m3 val)
+        : _val(val)
     {
-        return fmt::formatter<float>::format(static_cast<float>(h), ctx);
     }
+
+    friend std::ostream& operator<<(std::ostream& os, const StreamFp8& wrapper)
+    {
+        return os << static_cast<float>(wrapper._val);
+    }
+
+private:
+    hip_fp8_e4m3 _val;
 };
+
+} // namespace hipdnn_data_sdk::utilities

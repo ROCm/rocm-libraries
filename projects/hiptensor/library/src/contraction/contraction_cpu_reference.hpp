@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,8 @@
 
 #include <hiptensor/hiptensor.h>
 
+#include "contraction_solution.hpp"
+
 hiptensorStatus_t hiptensorContractionReference(const hiptensorPlan_t       plan,
                                                 void const*                 alpha,
                                                 void const*                 A,
@@ -54,5 +56,5 @@ hiptensorStatus_t hiptensorContractionReference(const hiptensorPlan_t       plan
                                                 hiptensorDataType_t         typeB,
                                                 hiptensorDataType_t         typeC,
                                                 hiptensorDataType_t         typeD,
-                                                void*                       workspace);
-
+                                                hiptensor::ContractionUnaryOps const& unaryOps,
+                                                void*                                 workspace);

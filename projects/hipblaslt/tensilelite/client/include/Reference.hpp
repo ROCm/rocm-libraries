@@ -165,5 +165,16 @@ namespace TensileLite
                       ProblemInputs const*      inputs,
                       size_t                    elementsToValidate);
 
+        // Specialized solver for ungrouped GEMM problems. There are currently 2 implementations
+        // of reference CPU GEMM. One is substantially faster but only supports a limited set of
+        // data types and problem configurations. The other is a more general but slower implementation.
+        // When `tryFastPath` is true, the function will attempt to use the fast implementation first,
+        // and fall back to the general implementation if the fast path is not applicable. If `tryFastPath`
+        // is false, the function will directly use the general implementation.
+        void SolveGemmCPU(ContractionProblemGemm const& problem,
+                          ContractionInputs const&      inputs,
+                          size_t                        elementsToValidate,
+                          bool                          tryFastPath = true);
+
     } // namespace Client
 } // namespace TensileLite

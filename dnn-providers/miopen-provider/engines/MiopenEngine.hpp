@@ -10,7 +10,7 @@
 #include "plans/PlanBuilderInterface.hpp"
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class MiopenEngine : public IEngine
@@ -21,16 +21,18 @@ public:
     int64_t id() const override;
 
     bool isApplicable(HipdnnEnginePluginHandle& handle,
-                      const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
     void getDetails(HipdnnEnginePluginHandle& handle,
+                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                     hipdnnPluginConstData_t& detailsOut) const override;
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                            const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+    size_t getWorkspaceSize(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
     void initializeExecutionContext(
         const HipdnnEnginePluginHandle& handle,
-        const hipdnn_plugin_sdk::IGraph& opGraph,
-        const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         HipdnnEnginePluginExecutionContext& executionContext) const override;
 
     void addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder);

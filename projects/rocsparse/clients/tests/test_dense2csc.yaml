@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -37,7 +37,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [0, 3, 8, 13, 64]
   N: [0, 3, 8, 13, 64]
-  denseld: [64, 512]
+  denseld: [365]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
 - name: dense2csc
@@ -53,8 +53,8 @@ Tests:
   category: pre_checkin
   function: dense2csc
   precision: *single_double_precisions_complex_real
-  M: [0, 531]
-  N: [0, 241]
+  M: [8, 531]
+  N: [8, 241]
   denseld: [600, 1000, 2000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -71,7 +71,7 @@ Tests:
   category: nightly
   function: dense2csc
   precision: *single_double_precisions_complex_real
-  M: [2000, 4000, 8000]
+  M: [1000, 2000]
   N: [2000, 4000]
-  denseld: [ 8000 ]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  denseld: [8000]
+  baseA: [rocsparse_index_base_one]

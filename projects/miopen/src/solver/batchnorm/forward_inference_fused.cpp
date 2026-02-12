@@ -56,14 +56,19 @@ bool BnFwdInferActivationFused::IsApplicable(const FusionContext& /*context*/,
         return false;
     if(desc.op_map.at(1)->kind() != miopenFusionOpActivForward)
         return false;
-    if(!(problem.IsFp32() || problem.IsFp16()))
+    if(!(problem.IsFp32() || problem.IsFp16() || problem.IsBFp16()))
         return false;
-    if(!(problem.Is2D() && problem.IsLayoutContiguous()))
+    if(!(problem.Is2D()))
+        return false;
+    if(!(problem.IsLayoutNCHW() || problem.IsLayoutNHWC()))
+        return false;
+    const auto bn_problem = problem.GetBnProblem(0, miopen::batchnorm::Direction::ForwardInference);
+    if(!IsOCLInferTypeValid(bn_problem))
         return false;
     return true;
 }
 
-ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& context,
+ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext&,
                                                     const FusionDescription& problem) const
 {
     const auto bn_problem = problem.GetBnProblem(0, miopen::batchnorm::Direction::ForwardInference);
@@ -82,37 +87,25 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& context
     { // PER ACTIVATION
         kernel.kernel_name += "PerActEst";
     }
-    kernel.l_wk.push_back(256);
-    kernel.l_wk.push_back(1);
-    kernel.l_wk.push_back(1);
 
     int n, c, h, w;
     const auto& input_desc = bn_problem.GetXDesc();
     std::tie(n, c, h, w)   = tien<4>(input_desc.GetLengths());
 
-    size_t read_unit = 1;
-    size_t read_len  = (mode == miopenBNSpatial) ? h * w : c * h * w;
-    read_unit        = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
+    bool is_layout_NHWC  = (input_desc.GetLayout_t() == miopenTensorNHWC);
+    size_t read_len      = (mode == miopenBNSpatial) ? (is_layout_NHWC ? c : h * w) : c * h * w;
+    size_t read_unit     = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
+    size_t max_localsize = 256;
+    size_t xlocalsize    = std::min(size_t{read_len / read_unit}, max_localsize);
+    size_t xgridsize     = AlignUp(size_t{read_len / read_unit}, xlocalsize);
+    size_t ylocalsize    = 1;
+    size_t ygridsize     = (mode == miopenBNSpatial) ? size_t{is_layout_NHWC ? h * w : c} : 1;
+    size_t zlocalsize    = 1;
+    size_t zgridsize     = 1;
 
-    size_t xlocalsize = 256;
-    size_t xgridsize  = read_len / read_unit;
-    size_t ygridsize  = (mode == miopenBNSpatial) ? size_t(c) : 1;
-    size_t zgridsize  = 1;
-
-    // HIP runtime does not support non-uniform blocks
-    // Adjust the xlocalsize and xgridsize accordingly
-    if(xgridsize < xlocalsize)
-    {
-        // round up the xlocalsize to the nearest wavefront size
-        xlocalsize = AlignUp(xgridsize, context.GetStream().GetWavefrontWidth());
-        // launch only one block
-        xgridsize = xlocalsize;
-    }
-    else
-    {
-        xgridsize = AlignUp(xgridsize, xlocalsize);
-    }
-    kernel.l_wk[0] = xlocalsize;
+    kernel.l_wk.push_back(xlocalsize);
+    kernel.l_wk.push_back(ylocalsize);
+    kernel.l_wk.push_back(zlocalsize);
 
     kernel.g_wk.push_back(xgridsize);
     kernel.g_wk.push_back(ygridsize);
@@ -124,21 +117,22 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& context
         {"MIO_BN_CHW", static_cast<int>(c * h * w)},
         {"MIO_BN_HW", static_cast<int>(h * w)},
         {"MIO_BN_N", static_cast<int>(n)},
-        {"MIO_BN_GRP0", kernel.l_wk[0]},
-        {"MIO_BN_GRP1", static_cast<int>(1)},
-        {"MIO_BN_GRP2", static_cast<int>(1)},
+        {"MIO_BN_C", static_cast<int>(c)},
+        {"MIO_BN_GRP0", static_cast<int>(xlocalsize)},
+        {"MIO_BN_GRP1", static_cast<int>(ylocalsize)},
+        {"MIO_BN_GRP2", static_cast<int>(zlocalsize)},
+        {"MIO_LAYOUT_NHWC", static_cast<int>(is_layout_NHWC)},
         {"MIOPEN_READ_UNIT", static_cast<int>(read_unit)},
         {"MIOPEN_SBN_BOUNDS", static_cast<unsigned int>(read_len / read_unit)},
         {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_op.activMode)},
-        {"MIOPEN_USE_FP16", static_cast<int>(input_desc.GetType() == miopenHalf)},
+        {"MIOPEN_USE_BFPMIX", static_cast<int>(input_desc.GetType() == miopenBFloat16)},
+        {"MIOPEN_USE_FPMIX", static_cast<int>(input_desc.GetType() == miopenHalf)},
         {"MIOPEN_USE_FP32", static_cast<int>(input_desc.GetType() == miopenFloat)}};
     kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
     if(bn_problem.GetMode() == miopenBNSpatial)
         kernel.comp_options += " -DSPATIAL_BN";
     else
         kernel.comp_options += " -DPERACT_BN";
-    if(input_desc.GetType() == miopenHalf)
-        kernel.comp_options += " -DMIOPEN_USE_FPMIX=1";
 
     result.construction_params.push_back(kernel);
 
@@ -169,6 +163,12 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& context
                 kern_args.push_back({static_cast<half_float::half>(activ_alpha)});
                 kern_args.push_back({static_cast<half_float::half>(activ_beta)});
                 kern_args.push_back({static_cast<half_float::half>(activ_gamma)});
+            }
+            else if(input_type == miopenBFloat16)
+            {
+                kern_args.push_back({static_cast<bfloat16>(activ_alpha)});
+                kern_args.push_back({static_cast<bfloat16>(activ_beta)});
+                kern_args.push_back({static_cast<bfloat16>(activ_gamma)});
             }
             else
                 MIOPEN_THROW("Unsupported Precision");

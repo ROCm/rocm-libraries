@@ -47,6 +47,7 @@ namespace TensileLite
     public:
         bool printPropertyEvaluation() const;
         bool printPredicateEvaluation() const;
+        bool printPredicateEvaluationVerbose() const;
         bool printDeviceSelection() const;
         bool printCodeObjectInfo() const;
         bool printKernelArguments() const;
