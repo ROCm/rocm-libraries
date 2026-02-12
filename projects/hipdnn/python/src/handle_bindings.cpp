@@ -38,7 +38,7 @@ public:
     hipdnnHandle_t get() const
     {
         checkNotDestroyed();
-        return _handle.get();
+        return *_handle;
     }
 
     bool isValid() const
