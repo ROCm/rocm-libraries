@@ -112,7 +112,7 @@
     InterleaveAlpha: 0
     InternalSupportParams: {SupportCustomWGM: true, SupportUserGSU: true}
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x32x256_MI16x16x1_SN_LDSB0_LBSPPA512_LBSPPB512_MIWT1_1_MO2_NTB0_PKA0_SU0_SUM0_SUS0_SPO0_WG16_8_1
+    KernelNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x32x256_MI16x16x1_SN_LDSB0_LBSPPA512_LBSPPB512_MIWT1_1_MO2_NTB0_PKA0_SU0_SUM1_SUS0_SPO0_WG16_8_1
     LSCA: 256
     LSCB: 256
     LSPA: 2
@@ -207,10 +207,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 0
-    SolutionNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x32x256_MI16x16x1_SN_LDSB0_GSU1_LBSPPA512_LBSPPB512_MIWT1_1_MO2_NTB0_PKA0_SU0_SUM0_SUS0_SPO0_WG16_8_1_WGM1
+    SolutionNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x32x256_MI16x16x1_SN_LDSB0_GSU1_LBSPPA512_LBSPPB512_MIWT1_1_MO2_NTB0_PKA0_SU0_SUM1_SUS0_SPO0_WG16_8_1_WGM1
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -295,7 +295,7 @@
     InterleaveAlpha: 0
     InternalSupportParams: {SupportCustomWGM: true, SupportUserGSU: true}
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x16x256_MI16x16x1_SN_LDSB0_LBSPPA512_LBSPPB512_MIWT1_1_MO2_NTB1_PKA1_SU0_SUM0_SUS0_SPO0_WG16_4_1
+    KernelNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x16x256_MI16x16x1_SN_LDSB0_LBSPPA512_LBSPPB512_MIWT1_1_MO2_NTB1_PKA1_SU0_SUM1_SUS0_SPO0_WG16_4_1
     LSCA: 256
     LSCB: 256
     LSPA: 2
@@ -390,10 +390,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 1
-    SolutionNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x16x256_MI16x16x1_SN_LDSB0_GSU1_LBSPPA512_LBSPPB512_MIWT1_1_MO2_NTB1_PKA1_SU0_SUM0_SUS0_SPO0_WG16_4_1_WGM1
+    SolutionNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x16x256_MI16x16x1_SN_LDSB0_GSU1_LBSPPA512_LBSPPB512_MIWT1_1_MO2_NTB1_PKA1_SU0_SUM1_SUS0_SPO0_WG16_4_1_WGM1
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -478,7 +478,7 @@
     InterleaveAlpha: 0
     InternalSupportParams: {SupportCustomWGM: true, SupportUserGSU: true}
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x32x256_MI16x16x1_SN_LDSB0_LBSPPA512_LBSPPB512_MIWT1_1_MO2_NTB1_PKA1_SU0_SUM0_SUS0_SPO1_WG16_8_1
+    KernelNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x32x256_MI16x16x1_SN_LDSB0_LBSPPA512_LBSPPB512_MIWT1_1_MO2_NTB1_PKA1_SU0_SUM1_SUS0_SPO1_WG16_8_1
     LSCA: 256
     LSCB: 256
     LSPA: 2
@@ -573,10 +573,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 2
-    SolutionNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x32x256_MI16x16x1_SN_LDSB0_GSU1_LBSPPA512_LBSPPB512_MIWT1_1_MO2_NTB1_PKA1_SU0_SUM0_SUS0_SPO1_WG16_8_1_WGM1
+    SolutionNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x32x256_MI16x16x1_SN_LDSB0_GSU1_LBSPPA512_LBSPPB512_MIWT1_1_MO2_NTB1_PKA1_SU0_SUM1_SUS0_SPO1_WG16_8_1_WGM1
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StorePriorityOpt: 1
     StoreRemapVectorWidth: 0
@@ -759,7 +759,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x16x128_MI16x16x1_SN_LDSB0_GSU64_LPA16_LPB16_LRVW8_MIWT1_1_MO1_NTB0_NTD1_PKA0_WG16_4_1_WGM1
     SourceSwap: 1
     StaggerU: 4
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -942,7 +942,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x32x128_MI16x16x1_SN_LDSB0_GSU80_LPA16_LPB16_LRVW8_MIWT1_1_MO2_NTB1_NTD1_PKA1_WG16_8_1_WGM1
     SourceSwap: 1
     StaggerU: 4
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -1125,7 +1125,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x128x128_MI16x16x1_SN_LDSB1_GSU16_LPA16_LPB16_LRVW8_MIWT1_2_MO1_NTB1_NTD1_PKA0_WG16_16_1_WGM1
     SourceSwap: 1
     StaggerU: 4
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -1308,7 +1308,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x128x128_MI16x16x1_SN_LDSB1_GSU19_LPA16_LPB16_LRVW8_MIWT1_2_MO1_NTB0_NTD0_PKA1_WG16_16_1_WGM1
     SourceSwap: 1
     StaggerU: 4
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -1491,7 +1491,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x128x128_MI16x16x1_SN_LDSB1_GSU4_LPA16_LPB16_LRVW8_MIWT1_2_MO1_NTB0_NTD0_PKA1_WG16_16_1_WGM1
     SourceSwap: 1
     StaggerU: 4
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -1674,7 +1674,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_HF8N_HHS_BH_MT16x128x128_MI16x16x1_SN_LDSB1_GSU4_LPA16_LPB16_LRVW8_MIWT1_2_MO40_NTB1_NTD0_PKA1_WG16_16_1_WGM1
     SourceSwap: 1
     StaggerU: 4
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
