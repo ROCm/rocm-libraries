@@ -21,6 +21,12 @@ struct ProblemDescriptionTag
 {
 };
 
+size_t GetStride(const TensorDescriptor& desc, miopenSoftmaxMode_t mode);
+
+size_t GetOuterSize(const TensorDescriptor& desc, miopenSoftmaxMode_t mode);
+
+size_t GetInnerSize(const TensorDescriptor& desc, miopenSoftmaxMode_t mode);
+
 struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
                                                     ProblemDescriptionTag
 #if MIOPEN_ENABLE_SQLITE
@@ -37,7 +43,10 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
                        miopenSoftmaxMode_t mode_,
                        int x_offset_ = 0,
                        int y_offset_ = 0)
-        : isForward(true),
+        : stride(GetStride(xDesc_, mode_)),
+          outer_size(GetOuterSize(xDesc_, mode_)),
+          inner_size(GetInnerSize(xDesc_, mode_)),
+          isForward(true),
           xdxDesc(xDesc_),
           yDesc(yDesc_),
 
@@ -71,7 +80,10 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
                        int y_offset_  = 0,
                        int dy_offset_ = 0,
                        int dx_offset_ = 0)
-        : isForward(false),
+        : stride(GetStride(yDesc_, mode_)),
+          outer_size(GetOuterSize(yDesc_, mode_)),
+          inner_size(GetInnerSize(yDesc_, mode_)),
+          isForward(false),
           xdxDesc(dxDesc_),
           yDesc(yDesc_),
           dyDesc(dyDesc_),
@@ -125,25 +137,18 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
     template <class Self>
     static void Visit(Self&& self, std::function<void(int64_t, std::string)> f)
     {
-        // The column names match the driver command line argument names
         f(static_cast<uint64_t>(self.isForward), "forw");
-        f(self.GetBatchSize(), "batchsize");
-        f(self.GetChannels(), "in_channels");
-        f(self.GetHeight(), "in_h");
-        f(self.GetWidth(), "in_w");
+        f(self.outer_size, "outer_size");
+        f(self.inner_size, "inner_size");
+        f(self.stride, "stride");
         f(static_cast<uint64_t>(self.algorithm), "algorithm");
         f(static_cast<uint64_t>(self.mode), "mode");
-        f(static_cast<uint64_t>(self.x_offset), "x_offset");
-        f(static_cast<uint64_t>(self.y_offset), "y_offset");
-        f(static_cast<uint64_t>(self.dx_offset), "dx_offset");
-        f(static_cast<uint64_t>(self.dy_offset), "dy_offset");
     }
 
     template <class Self>
     static void Visit(Self&& self, std::function<void(std::string, std::string)> f)
     {
         f(GetDataTypeName(self.yDesc.GetType()), "data_type");
-        f(self.GetLayout(), "layout");
     }
 
     template <class Self, class Visitor>
@@ -159,6 +164,11 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
     // It has to be discoverable via ADL from problem description.
     friend auto GetDb(const ExecutionContext& context,
                       const ProblemDescriptionTag&) -> PerformanceDb;
+
+public:
+    const size_t stride;
+    const size_t outer_size;
+    const size_t inner_size;
 
 private:
     void CheckAndAssignAlphaBeta(const void* alpha_, const void* beta_)
