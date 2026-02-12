@@ -53,6 +53,7 @@ try:
         compute_memory_latency,
         compute_l2_tiles,
         compute_mall_tiles,
+        predict_workgroup_mapping,
         wgm_to_grid,
         count_unique_tiles,
         count_unique_tiles_timestep,

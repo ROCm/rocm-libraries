@@ -68,9 +68,8 @@ context_t::context_t(const problem_t& problem,
   tile_elements     = MT_M * MT_N;
   output_tile_bytes = tile_elements * data_type_to_bytes(problem.d_dtype);
 
-  // Workgroup mapping (default)
-  int defaultWGM = batch > 1 ? 1 : static_cast<int>(std::ceil(std::sqrt(N_CU / NUM_XCD)));
-  wgm            = workgroup_mapping_t{0, NUM_XCD, std::max(defaultWGM, 1)};
+  // Workgroup mapping
+  wgm = predict_workgroup_mapping(problem, hardware, config, grid_m, grid_n, splitting_factor);
 
   // Cache tile dimensions
   const size_t wgm_val = static_cast<size_t>(std::abs(wgm.wgm));
@@ -107,7 +106,7 @@ context_t::context_t(const problem_t& problem,
     OLOG_DEBUG("Read Mem BW limited: " << context.mem_bw_limited);
     OLOG_DEBUG("Write Mem BW limited: " << context.write_mem_bw_limited);
 
-    OLOG_DEBUG("WGM: " << int(wgm.wgm));
+    OLOG_DEBUG("CHUNKxXCCxWGM: " << int(wgm.wgmxccchunk) << "x" << int(wgm.wgmxcc) << "x" << int(wgm.wgm));
     OLOG_DEBUG("Mall tile: " << int(mm) << "x" << int(mn));
     OLOG_DEBUG("L2 tile: " << int(lm) << "x" << int(ln));
   }
@@ -193,6 +192,113 @@ size_t round_elements_to_128B(size_t elements, size_t element_size_bits) {
 /* ---------------------------------------------------------------------------------------- */
 /* Misc. functions                                                                          */
 /* ---------------------------------------------------------------------------------------- */
+// Fast WGM prediction: mirrors select_workgroup_mapping's cheap paths, then
+// evaluates L2 working set cost for the last XCD in the first timestep.
+workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
+                                              const hardware_t& hardware,
+                                              const config_t& config,
+                                              size_t grid_m, 
+                                              size_t grid_n,
+                                              size_t splitting_factor) {
+  const size_t N_CU    = hardware.N_CU;
+  const size_t NUM_XCD = hardware.NUM_XCD;
+  const size_t cus_per_xcd = N_CU / NUM_XCD;
+  const size_t numMTs  = grid_m * grid_n;
+  const size_t batch   = problem.batch;
+  const size_t MT_M    = config.mt.m;
+  const size_t MT_N    = config.mt.n;
+  const auto a_bytes   = data_type_to_bytes(problem.a_dtype);
+  const auto b_bytes   = data_type_to_bytes(problem.b_dtype);
+
+  // Batch case
+  if (batch > 1) {
+    size_t numTotalTiles = numMTs * batch;
+    if (numMTs == 1 || numTotalTiles <= NUM_XCD || numMTs % NUM_XCD == 0)
+      return {0, 0, 1};
+    else
+      return {0, NUM_XCD, 1};
+  }
+
+  // WGMXCC
+  size_t out_wgmxcc;
+  if (splitting_factor % NUM_XCD == 0)
+    out_wgmxcc = 0;
+  else if (numMTs <= NUM_XCD)
+    out_wgmxcc = 0;
+  else
+    out_wgmxcc = NUM_XCD;
+
+  // WGM shortcuts
+  if (out_wgmxcc == 0 || grid_m == 1 || grid_n == 1)
+    return {0, out_wgmxcc, 1};
+
+  if (numMTs >= N_CU && grid_n <= 8)
+    return {0, out_wgmxcc, static_cast<int32_t>(grid_n)};
+
+  // Build candidate list
+  size_t numWGsPerXCD = std::min(math::safe_ceil_div(numMTs, NUM_XCD), cus_per_xcd);
+  size_t wgm_cap = std::min(grid_n, numWGsPerXCD / 2);
+  std::vector<size_t> candidates;
+  std::set<size_t> cset;
+  for (size_t v : {1, 4, 6})
+    if (v <= wgm_cap) cset.insert(v);
+  for (size_t i = 1; i * i <= wgm_cap; ++i) {
+    if (wgm_cap % i == 0) {
+      cset.insert(i);
+      cset.insert(wgm_cap / i);
+    }
+  }
+  candidates.assign(cset.begin(), cset.end());
+  if (candidates.empty())
+    return {0, out_wgmxcc, 1};
+
+  // Evaluate L2 cost for last XCD in the first timestep
+  const size_t total = numMTs;
+  const size_t last_xcd = NUM_XCD - 1;
+  const size_t group_size = total >= NUM_XCD ? total / NUM_XCD : total;
+  const size_t tiles_this_xcd = std::min(cus_per_xcd, group_size);
+  const size_t start = last_xcd * group_size;
+  const size_t count = (start < total) ? std::min(tiles_this_xcd, total - start) : 0;
+
+  const double a_cost = static_cast<double>(MT_M) * a_bytes;
+  const double b_cost = static_cast<double>(MT_N) * b_bytes;
+
+  auto l2_cost = [&](size_t W) -> double {
+    size_t W_eff = std::min(W, grid_n);
+    if (W_eff == 0 || count == 0) return std::numeric_limits<double>::max();
+
+    size_t slab_tiles = grid_m * W_eff;
+    size_t s0 = start / slab_tiles;
+    size_t s1 = (start + count - 1) / slab_tiles;
+    size_t m0 = (start % slab_tiles) / W_eff;
+    size_t m1 = ((start + count - 1) % slab_tiles) / W_eff;
+
+    size_t ur, uc;
+    if (s0 == s1) {
+      ur = m1 - m0 + 1;
+      uc = (ur > 1) ? W_eff : std::min(count, W_eff);
+    } else {
+      ur = (s1 - s0 > 1) ? grid_m : std::min(grid_m, (grid_m - m0) + (m1 + 1));
+      uc = std::min((s1 - s0 + 1) * W_eff, grid_n);
+    }
+    ur = std::min(ur, grid_m);
+    uc = std::min(uc, grid_n);
+    return ur * a_cost + uc * b_cost;
+  };
+
+  size_t best_wgm = 1;
+  double best_cost = std::numeric_limits<double>::max();
+  for (size_t w : candidates) {
+    double cost = l2_cost(w);
+    if (cost < best_cost) {
+      best_cost = cost;
+      best_wgm = w;
+    }
+  }
+
+  return {0, out_wgmxcc, static_cast<int32_t>(best_wgm)};
+}
+
 // Compute the launch parameters for the kernel.
 std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameters(
   const problem_t& problem,

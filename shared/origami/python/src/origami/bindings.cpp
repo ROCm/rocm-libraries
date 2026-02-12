@@ -194,8 +194,7 @@ NB_MODULE(origami, m) {
       .def_rw("mem_bw_limited", &origami::context_t::mem_bw_limited)
       .def_rw("tile_elements", &origami::context_t::tile_elements)
       .def_rw("output_tile_bytes", &origami::context_t::output_tile_bytes)
-      .def_rw("wgm", &origami::context_t::wgm)
-;
+      .def_rw("wgm", &origami::context_t::wgm);
 
   nanobind::class_<origami::problem_t>(m, "problem_t")
       .def(nanobind::init<>())
@@ -313,6 +312,9 @@ NB_MODULE(origami, m) {
   m.def("round_elements_to_128B",
         &origami::round_elements_to_128B,
         "Round elements to 128B alignment");
+  m.def("predict_workgroup_mapping",
+        &origami::predict_workgroup_mapping,
+        "Fast WGM prediction based on last-XCD L2 cost minimization");
   m.def("compute_launch_parameters",
         &origami::compute_launch_parameters,
         "Compute launch parameters for the kernel");

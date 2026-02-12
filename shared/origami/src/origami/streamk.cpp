@@ -425,7 +425,8 @@ size_t select_grid_size(const problem_t& problem,
     case grid_selection_t::reduction_cost_aware:
       return streamk::grid_reduction_cost_aware(problem, config, 1, cu_count);
 
-    case grid_selection_t::data_parallel: return streamk::grid_data_parallel(problem, config);
+    case grid_selection_t::data_parallel: 
+      return streamk::grid_data_parallel(problem, config);
 
     case grid_selection_t::analytical:
       return streamk::grid_analytical(problem, hardware, config, 10, max_cus);

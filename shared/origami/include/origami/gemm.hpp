@@ -82,6 +82,26 @@ double calculate_output_utilization(const problem_t& problem, const config_t& co
  */
  size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
 
+ /**
+ * @brief Fast WGM prediction based on last-XCD L2 working set minimization.
+ *
+ * Evaluates a small set of WGM candidates and picks the one that minimizes
+ * the L2 working set for the last XCD in the first timestep.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param grid_m Number of workgroups in M dimension.
+ * @param grid_n Number of workgroups in N dimension.
+ * @param splitting_factor K-split factor.
+ * @return workgroup_mapping_t Predicted workgroup mapping.
+ */
+workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
+                                              const hardware_t& hardware,
+                                              const config_t& config,
+                                              size_t grid_m, 
+                                              size_t grid_n,
+                                              size_t splitting_factor);
 /**
  * @brief Computes the launch parameters for the kernel.
  *
