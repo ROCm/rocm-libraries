@@ -844,20 +844,6 @@ namespace rocRoller
 
                 // Commit in-flight to LDS
                 auto globalStores = loadsByUnroll[ldsPrefetchU];
-                if(separateMemOps)
-                {
-                    graph.control.addElement(Sequence(), {nop}, {globalStores[0].ldsChain});
-                }
-                else if(u == 0)
-                {
-                    graph.control.addElement(
-                        Body(), {segmentBoundaries[u]}, {globalStores[0].ldsChain});
-                }
-                else
-                {
-                    graph.control.addElement(
-                        Sequence(), {segmentBoundaries[u]}, {globalStores[0].ldsChain});
-                }
 
                 logger->debug("  prefetch: in-loop: commit lds {} user {}",
                               ldsPrefetchU,
