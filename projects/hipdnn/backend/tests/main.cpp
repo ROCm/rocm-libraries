@@ -18,6 +18,7 @@ int main(int argc, char** argv)
     hipdnn_backend::logging::initialize();
 
     ::testing::InitGoogleTest(&argc, argv);
+
     hipdnn_backend::plugin::EnginePluginResourceManager::setPluginPaths(
         {}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
