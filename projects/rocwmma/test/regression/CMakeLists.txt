@@ -34,7 +34,8 @@
 # - Minimal boilerplate per test
 # - Flat directory structure (no subdirectories)
 #
-# Adding a new test: Just create issue_<number>.cpp and rebuild - no CMake changes needed
+# Adding a new test: Add a new <name>.cpp file in this directory and rebuild (no CMake changes needed).
+#                    Recommended naming convention: issue_<number>.cpp (for example, issue_4398.cpp).
 
 # Collect all regression test source files
 file(GLOB REGRESSION_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
@@ -106,6 +107,13 @@ if(REGRESSION_TEST_SOURCES)
 
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(regression_tests \"../${EXE_NAME}\")\n")
     file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(regression_tests PROPERTIES SKIP_REGULAR_EXPRESSION \"no ROCm-capable device;unsupported host device\")\n")
+
+  file(APPEND "${INSTALL_SMOKE_TEST_FILE}" "add_test(\"regression_tests\" \"../../${EXE_NAME}\")\n")
+  file(APPEND "${INSTALL_SMOKE_TEST_FILE}" "set_tests_properties(\"regression_tests\" PROPERTIES SKIP_REGULAR_EXPRESSION \"no ROCm-capable device;unsupported host device\")\n")
+
+  file(APPEND "${INSTALL_REGRESSION_TEST_FILE}" "add_test(\"regression_tests\" \"../../${EXE_NAME}\")\n")
+  file(APPEND "${INSTALL_REGRESSION_TEST_FILE}" "set_tests_properties(\"regression_tests\" PROPERTIES SKIP_REGULAR_EXPRESSION \"no ROCm-capable device;unsupported host device\")\n")
+endfunction()
 
     message(STATUS "Regression tests: Enabled (${TEST_TARGET})")
 else()

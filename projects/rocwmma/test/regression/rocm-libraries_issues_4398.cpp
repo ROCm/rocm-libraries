@@ -59,7 +59,7 @@ static __global__ void kernel()
 }
 
 // Example test that verifies basic device functionality
-TEST(RegressionIssue_Example, HalfHalfHalfTest)
+TEST(RegressionIssue_4398, HalfHalfHalfTest)
 {
     // Check if a ROCm device is available
     int deviceCount = 0;
