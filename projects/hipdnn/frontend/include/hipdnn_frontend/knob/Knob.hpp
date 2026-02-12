@@ -8,6 +8,8 @@
 #include <hipdnn_frontend/knob/KnobConstraint.hpp>
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 
+#include <hipdnn_frontend/Utilities.hpp>
+
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/KnobWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
@@ -17,6 +19,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -30,87 +33,12 @@ namespace hipdnn_frontend
 class Knob
 {
 public:
+    // Forward declaration of result type - defined after Knob is complete
+    struct FromFlatbufferResult;
+
     // Factory function to create from flatbuffer
-    static Knob fromFlatbuffer(hipdnnBackendFlatbufferData_t fbData)
-    {
-        if(fbData.ptr == nullptr || fbData.size == 0)
-        {
-            throw std::invalid_argument("Flatbuffer data is nullptr or has zero size");
-        }
-
-        hipdnn_data_sdk::flatbuffer_utilities::KnobWrapper knobWrapper(fbData.ptr, fbData.size);
-
-        if(!knobWrapper.isValid())
-        {
-            throw std::invalid_argument("Knob flatbuffer failed verification");
-        }
-
-        auto fbKnob = &knobWrapper.getKnob();
-
-        // Unpack to native KnobT - all conversions done automatically by FlatBuffers
-        std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> knobT(fbKnob->UnPack());
-
-        // Extract default value from the union
-        KnobValueVariant defaultValue;
-        switch(knobT->default_value.type)
-        {
-        case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
-            defaultValue = knobT->default_value.AsIntValue()->value;
-            break;
-        case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
-            defaultValue = knobT->default_value.AsFloatValue()->value;
-            break;
-        case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
-            defaultValue = knobT->default_value.AsStringValue()->value; // Already std::string
-            break;
-        default:
-            throw std::invalid_argument("Unknown knob value type");
-        }
-
-        // Create the knob - strings are already std::string in KnobT
-        Knob knob(std::move(knobT->knob_id),
-                  std::move(knobT->description),
-                  std::move(defaultValue),
-                  knobT->deprecated);
-
-        // Handle constraints using the native union types
-        switch(knobT->constraint.type)
-        {
-        case hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint:
-        {
-            auto* c = knobT->constraint.AsIntConstraint();
-            // c->valid_values is already std::vector<int64_t>
-            std::unordered_set<int64_t> validValues(c->valid_values.begin(), c->valid_values.end());
-            knob._constraint = std::make_unique<IntConstraint>(
-                c->min_value, c->max_value, c->step, std::move(validValues));
-            break;
-        }
-        case hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint:
-        {
-            auto* c = knobT->constraint.AsFloatConstraint();
-            knob._constraint = std::make_unique<FloatConstraint>(c->min_value, c->max_value);
-            break;
-        }
-        case hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint:
-        {
-            auto* c = knobT->constraint.AsStringConstraint();
-            // c->valid_values is already std::vector<std::string>
-            std::unordered_set<std::string> validValues(c->valid_values.begin(),
-                                                        c->valid_values.end());
-            knob._constraint
-                = std::make_unique<StringConstraint>(c->max_length, std::move(validValues));
-            break;
-        }
-        case hipdnn_data_sdk::data_objects::KnobConstraint::NONE:
-            // No constraint
-            break;
-        default:
-            throw std::invalid_argument("Unknown knob constraint");
-            break;
-        }
-
-        return knob;
-    }
+    // Returns nullopt with error message if the knob is invalid (e.g., NONE default_value)
+    static FromFlatbufferResult fromFlatbuffer(hipdnnBackendFlatbufferData_t fbData);
 
     // Accessors
     const std::string& knobId() const
@@ -214,6 +142,121 @@ private:
     std::shared_ptr<IConstraint> _constraint;
 };
 
+// Result type for Knob::fromFlatbuffer - defined after Knob is complete
+struct Knob::FromFlatbufferResult
+{
+    std::optional<Knob> knob;
+    std::string errorMessage;
+
+    bool hasValue() const
+    {
+        return knob.has_value();
+    }
+
+    bool hasError() const
+    {
+        return !knob.has_value();
+    }
+};
+
+// Factory method implementation - defined after FromFlatbufferResult is complete
+inline Knob::FromFlatbufferResult Knob::fromFlatbuffer(hipdnnBackendFlatbufferData_t fbData)
+{
+    if(fbData.ptr == nullptr || fbData.size == 0)
+    {
+        return {std::nullopt, "Flatbuffer data is nullptr or has zero size"};
+    }
+
+    hipdnn_data_sdk::flatbuffer_utilities::KnobWrapper knobWrapper(fbData.ptr, fbData.size);
+
+    if(!knobWrapper.isValid())
+    {
+        return {std::nullopt, "Knob flatbuffer failed verification"};
+    }
+
+    auto fbKnob = &knobWrapper.getKnob();
+
+    // Unpack to native KnobT - all conversions done automatically by FlatBuffers
+    std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> knobT(fbKnob->UnPack());
+
+    // Get knob_id for error messages
+    std::string knobId = knobT->knob_id;
+
+    // Extract default value from the union
+    KnobValueVariant defaultValue;
+    switch(knobT->default_value.type)
+    {
+    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+        defaultValue = knobT->default_value.AsIntValue()->value;
+        break;
+    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+        defaultValue = knobT->default_value.AsFloatValue()->value;
+        break;
+    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+        defaultValue = knobT->default_value.AsStringValue()->value; // Already std::string
+        break;
+    case hipdnn_data_sdk::data_objects::KnobValue::NONE:
+        // NONE default_value is invalid - knobs must have a default value
+        return {std::nullopt,
+                "Knob '" + knobId + "' has NONE default_value - knobs must have a default value"};
+    default:
+        return {std::nullopt, "Knob '" + knobId + "' has unknown default_value type"};
+    }
+
+    // Create the knob - strings are already std::string in KnobT
+    Knob knob(std::move(knobT->knob_id),
+              std::move(knobT->description),
+              std::move(defaultValue),
+              knobT->deprecated);
+
+    // Handle constraints using the native union types
+    switch(knobT->constraint.type)
+    {
+    case hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint:
+    {
+        auto* c = knobT->constraint.AsIntConstraint();
+        std::unordered_set<int64_t> validValues(c->valid_values.begin(), c->valid_values.end());
+        knob._constraint = std::make_unique<IntConstraint>(
+            c->min_value, c->max_value, c->step, std::move(validValues));
+        break;
+    }
+    case hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint:
+    {
+        auto* c = knobT->constraint.AsFloatConstraint();
+        knob._constraint = std::make_unique<FloatConstraint>(c->min_value, c->max_value);
+        break;
+    }
+    case hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint:
+    {
+        auto* c = knobT->constraint.AsStringConstraint();
+        std::unordered_set<std::string> validValues(c->valid_values.begin(), c->valid_values.end());
+        knob._constraint
+            = std::make_unique<StringConstraint>(c->max_length, std::move(validValues));
+        break;
+    }
+    case hipdnn_data_sdk::data_objects::KnobConstraint::NONE:
+        knob._constraint = std::make_unique<EmptyConstraint>();
+        break;
+    default:
+        return {std::nullopt, "Knob '" + knob._knobId + "' has unknown constraint type"};
+    }
+
+    // Validate that the default_value satisfies the constraint
+    if(knob._constraint)
+    {
+        KnobSetting defaultSetting(knob._knobId, knob._defaultValue);
+        auto validationError = knob._constraint->validateKnobSetting(defaultSetting);
+        if(validationError.code != ErrorCode::OK)
+        {
+            return {std::nullopt,
+                    "Knob '" + knob._knobId + "' has default_value that violates its constraint: "
+                        + validationError.err_msg};
+        }
+    }
+
+    return {std::move(knob), ""};
+}
+
 namespace detail
 {
 inline Error getKnobsForEngine(std::vector<Knob>& knobs, hipdnnBackendDescriptor_t engineDesc)
@@ -259,21 +302,24 @@ inline Error getKnobsForEngine(std::vector<Knob>& knobs, hipdnnBackendDescriptor
 
     for(size_t i = 0; i < static_cast<size_t>(actualCount); ++i)
     {
-        try
+        auto result = Knob::fromFlatbuffer(flatbufferDataArray[i]);
+
+        if(result.hasError())
         {
-            knobs.emplace_back(Knob::fromFlatbuffer(flatbufferDataArray[i]));
-            if(!usedKnobIds.insert(knobs.back().knobId()).second)
-            {
-                return {ErrorCode::INVALID_VALUE,
-                        "Engine description had knob with duplicate ID: " + knobs.back().knobId()};
-            }
+            // Log error and skip this knob - don't fail the entire operation
+            HIPDNN_FE_LOG_ERROR("Skipping invalid knob at index " << i << ": "
+                                                                  << result.errorMessage);
+            continue;
         }
-        catch(const std::exception& e)
+
+        // Check for duplicate knob IDs
+        if(!usedKnobIds.insert(result.knob->knobId()).second)
         {
-            return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                    std::string("Failed to create Knob from flatbuffer at index ")
-                        + std::to_string(i) + ": " + e.what()};
+            HIPDNN_FE_LOG_ERROR("Skipping knob with duplicate ID: " << result.knob->knobId());
+            continue;
         }
+
+        knobs.emplace_back(std::move(*result.knob));
     }
 
     return {ErrorCode::OK, ""};
