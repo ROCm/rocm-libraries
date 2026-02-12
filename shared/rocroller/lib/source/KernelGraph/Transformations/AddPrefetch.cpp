@@ -798,7 +798,7 @@ namespace rocRoller
 
                 auto globalPrefetchU = (u + numInFlight) % numUnroll;
                 auto ldsPrefetchU    = (u + 1) % numUnroll;
-                auto barrier         = graph.control.addElement(Barrier());
+                auto barrier         = graph.control.addElement(NOP());
 
                 auto nop = separateMemOps ? graph.control.addElement(NOP()) : -1;
 
@@ -849,9 +849,6 @@ namespace rocRoller
                               ldsPrefetchU,
                               globalStores[0].user);
 
-                auto ldsTileTag = graph.mapper.get<LDS>(globalStores[0].ldsChain);
-                graph.mapper.connect<LDS>(barrier, ldsTileTag, 0);
-
                 for(int i = 1; i < globalStores.size(); i++)
                 {
                     graph.control.addElement(
@@ -864,9 +861,6 @@ namespace rocRoller
                     logger->debug("  prefetch: in-loop: commit lds {} user {}",
                                   ldsPrefetchU,
                                   globalStores[i].user);
-
-                    auto ldsTileTag = graph.mapper.get<LDS>(globalStores[i].ldsChain);
-                    graph.mapper.connect<LDS>(barrier, ldsTileTag, i);
                 }
 
                 // overlap the direct2lds and load lds when they do not access the same LDS allocation
@@ -972,15 +966,6 @@ namespace rocRoller
                                    firstPrefetchFromLDS);
                         graph.control.addElement(
                             Sequence(), {lastLoadFromLDS}, {firstPrefetchFromLDS});
-
-                        // The last load-from-lds for the current
-                        // iteration must also finish before the barrier.
-                        // If not, an eager wave may enter the next
-                        // segment and over-write LDS.
-                        //
-                        // For prefetch > 2 this is not necessary.
-                        if(numInFlight <= 2)
-                            graph.control.addElement(Sequence(), {lastLoadFromLDS}, {barrier});
                     }
                 }
 
