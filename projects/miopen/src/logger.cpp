@@ -41,11 +41,6 @@
 #include <sys/syscall.h> /* For SYS_xxx definitions */
 #endif
 
-#ifdef _WIN32
-#include <windows.h>
-int getpid() { return _getpid(); }
-#endif
-
 /// Enable logging of the most important function calls.
 /// Name of envvar in a bit inadequate due to historical reasons.
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LOGGING)
