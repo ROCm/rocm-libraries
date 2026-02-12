@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "HipdnnException.hpp"
 #include "PlatformUtils.hpp"
@@ -21,7 +21,7 @@ const auto TEST_PLUGIN_DIR = std::filesystem::path(plugin_constants::getTestPlug
 
 const auto LIBRARY_PATH = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN1_NAME;
 const auto LIBRARY_PATH_LIB_EXT
-    = ".." / TEST_PLUGIN_DIR / hipdnn_sdk::utilities::getLibraryName(TEST_PLUGIN1_NAME);
+    = ".." / TEST_PLUGIN_DIR / hipdnn_data_sdk::utilities::getLibraryName(TEST_PLUGIN1_NAME);
 
 const auto WRONG_LIBRARY_PATH = std::filesystem::path("./wrong_path");
 const auto SYMBOL_NAME = std::string("hipdnnPluginGetName");
@@ -29,7 +29,7 @@ const auto WRONG_SYMBOL_NAME = std::string("wrong_symbol_name");
 
 const auto FULL_LIBRARY_PATH
     = (hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
-       / TEST_PLUGIN_DIR / hipdnn_sdk::utilities::getLibraryName(TEST_PLUGIN1_NAME));
+       / TEST_PLUGIN_DIR / hipdnn_data_sdk::utilities::getLibraryName(TEST_PLUGIN1_NAME));
 
 }
 
@@ -112,7 +112,7 @@ TEST(TestSharedLibrary, GetCurrentModuleDirectoryFromExecutable)
 
     // Only tests that it works from a statically linked binary
     EXPECT_TRUE(std::filesystem::exists(
-        path / hipdnn_sdk::utilities::getExecutableName("hipdnn_backend_tests")));
+        path / hipdnn_data_sdk::utilities::getExecutableName("hipdnn_backend_tests")));
 }
 
 class TestSharedLibraryPaths : public ::testing::TestWithParam<std::string>

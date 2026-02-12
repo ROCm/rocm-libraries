@@ -397,6 +397,8 @@ Tests:
              sme3Dc,
              shipsec1,
              bmwcra_1]
+  host_memory_gb: 32
+  device_memory_gb: 32
 
 - name: sptrsm_coo
   category: quick

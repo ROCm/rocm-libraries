@@ -5,13 +5,11 @@
 
 #include "TestPluginEngineIdMap.hpp"
 #include <filesystem>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <stdexcept>
 #include <string>
 
-namespace hipdnn_tests
-{
-namespace plugin_constants
+namespace hipdnn_tests::plugin_constants
 {
 // Test plugin directory constants relative to backend library location
 inline const std::string& getTestPluginDefaultDir()
@@ -33,8 +31,8 @@ inline std::string getPluginPath(const char* pluginName)
 {
     namespace fs = std::filesystem;
 
-    fs::path pluginFile
-        = fs::path(getTestPluginCustomDir()) / hipdnn_sdk::utilities::getLibraryName(pluginName);
+    fs::path pluginFile = fs::path(getTestPluginCustomDir())
+                          / hipdnn_data_sdk::utilities::getLibraryName(pluginName);
 
     return pluginFile.string();
 }
@@ -43,7 +41,7 @@ inline std::string getDefaultPluginPath()
 {
     namespace fs = std::filesystem;
     return (fs::path(getTestPluginDefaultDir())
-            / hipdnn_sdk::utilities::getLibraryName(TEST_GOOD_DEFAULT_PLUGIN_NAME))
+            / hipdnn_data_sdk::utilities::getLibraryName(TEST_GOOD_DEFAULT_PLUGIN_NAME))
         .string();
 }
 
@@ -95,5 +93,16 @@ inline const std::string& testIncompleteApiPluginPath()
     return s_testIncompleteApiPluginPath;
 }
 
-} // namespace plugin_constants
-} // namespace hipdnn_tests
+inline const std::string& testKnobsPluginPath()
+{
+    static const std::string s_testKnobsPluginPath = getPluginPath(TEST_KNOBS_PLUGIN_NAME);
+    return s_testKnobsPluginPath;
+}
+
+inline const std::string& testKnobConstraintValidationPluginPath()
+{
+    static const std::string s_testKnobConstraintValidationPluginPath
+        = getPluginPath(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME);
+    return s_testKnobConstraintValidationPluginPath;
+}
+} // namespace hipdnn_tests::plugin_constants

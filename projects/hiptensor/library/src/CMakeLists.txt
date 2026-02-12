@@ -2,7 +2,7 @@
  #
  # MIT License
  #
- # Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ # Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  #
  # Permission is hereby granted, free of charge, to any person obtaining a copy
  # of this software and associated documentation files (the "Software"), to deal
@@ -136,12 +136,5 @@ set_target_properties(hiptensor PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 rocm_install_targets(
     TARGETS hiptensor
-    EXPORT hiptensorTargets
     INCLUDE ${PROJECT_SOURCE_DIR}/library/include
-)
-
-rocm_install (EXPORT hiptensorTargets
-    FILE hiptensorTargets.cmake
-    NAMESPACE hiptensor::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hiptensor
 )

@@ -150,17 +150,28 @@ namespace rocRollerTest
 
                 co_yield v_a->allocate();
 
-                auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
-                co_yield bufDesc->setup();
-                co_yield bufDesc->setBasePointer(s_a);
-                co_yield bufDesc->setSize(Register::Value::Literal(N));
-                co_yield bufDesc->setOptions(Register::Value::Literal(0x00020000));
+                Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
+                bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression());
+                bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N));
+                bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
+                                                          Expression::literal(131072)); //0x00020000
+
+                auto bufferRegs = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+                bufferExpr = bufferRegs->expression();
 
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
-                co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
-                co_yield bufDesc->setBasePointer(s_result);
-                co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
+                co_yield m_context->mem()->loadBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
+
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_result->expression());
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+
+                co_yield m_context->mem()->storeBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
             };
 
             m_context->schedule(kb());
@@ -324,12 +335,12 @@ namespace rocRollerTest
 
             auto command = std::make_shared<Command>();
 
-            auto tagTensorA
-                = command->addOperation(rocRoller::Operations::Tensor(2, F6Type, {0, 1})); // Load A
+            auto tagTensorA = command->addOperation(
+                rocRoller::Operations::Tensor(2, F6Type, {}, {0, 1})); // Load A
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(
-                rocRoller::Operations::Tensor(2, F6Type, {0, 1})); // Store B
+                rocRoller::Operations::Tensor(2, F6Type, {}, {0, 1})); // Store B
             command->addOperation(rocRoller::Operations::T_Store_Tiled(tagLoadA, tagTensorB));
 
             auto commandArgs = command->createArguments();
@@ -449,13 +460,6 @@ namespace rocRollerTest
 
     TEST_P(F6Test, GPU_F6TiledLoadStore)
     {
-        auto const& arch = m_context->targetArchitecture().target();
-        if(!arch.isCDNAGPU())
-        {
-            GTEST_SKIP() << "Test not yet supported on "
-                         << m_context->targetArchitecture().target().toString() << std::endl;
-        }
-
         int workitemsPerWorkgroup = 64;
         int elementsPerWorkitem   = 16;
 

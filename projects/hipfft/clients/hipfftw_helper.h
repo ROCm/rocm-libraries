@@ -21,11 +21,14 @@
 #ifndef HIPFFTW_HELPER_H
 #define HIPFFTW_HELPER_H
 
+#include "../shared/array_validator.h"
+#include "../shared/data_layout.h"
 #include "../shared/environment.h"
 #include "../shared/fft_params.h"
 #include <algorithm>
 #include <fftw3.h>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -47,16 +50,18 @@ struct hipfftw_trait;
 template <>
 struct hipfftw_trait<fft_precision_single>
 {
-    using plan_t    = fftwf_plan;
-    using complex_t = fftwf_complex;
-    using real_t    = float;
+    using plan_t                                 = fftwf_plan;
+    using complex_t                              = fftwf_complex;
+    using real_t                                 = float;
+    static constexpr std::string_view prec_label = R"(single)";
 };
 template <>
 struct hipfftw_trait<fft_precision_double>
 {
-    using plan_t    = fftw_plan;
-    using complex_t = fftw_complex;
-    using real_t    = double;
+    using plan_t                                 = fftw_plan;
+    using complex_t                              = fftw_complex;
+    using real_t                                 = double;
+    static constexpr std::string_view prec_label = R"(double)";
 };
 
 template <fft_precision prec>
@@ -240,78 +245,120 @@ struct hipfftw_funcs;
         = dynamically_loaded_function_t<decltype(prefix##func)>(HIPFFTW_STRINGIFY(prefix##func), \
                                                                 &(prefix##func));
 
-#define HIPFFTW_FUNCS_SPECIALIZATION(prefix, specialization)                         \
-    template <>                                                                      \
-    struct hipfftw_funcs<specialization>                                             \
-    {                                                                                \
-    private:                                                                         \
-        hipfftw_funcs()                                                              \
-        {                                                                            \
-            load_implementations(malloc,                                             \
-                                 alloc_real,                                         \
-                                 alloc_complex,                                      \
-                                 free,                                               \
-                                 destroy_plan,                                       \
-                                 cleanup,                                            \
-                                 execute,                                            \
-                                 plan_dft_1d,                                        \
-                                 plan_dft_2d,                                        \
-                                 plan_dft_3d,                                        \
-                                 plan_dft,                                           \
-                                 plan_dft_r2c_1d,                                    \
-                                 plan_dft_r2c_2d,                                    \
-                                 plan_dft_r2c_3d,                                    \
-                                 plan_dft_r2c,                                       \
-                                 plan_dft_c2r_1d,                                    \
-                                 plan_dft_c2r_2d,                                    \
-                                 plan_dft_c2r_3d,                                    \
-                                 plan_dft_c2r,                                       \
-                                 print_plan,                                         \
-                                 set_timelimit,                                      \
-                                 cost,                                               \
-                                 flops,                                              \
-                                 execute_dft,                                        \
-                                 execute_dft_r2c,                                    \
-                                 execute_dft_c2r);                                   \
-        }                                                                            \
-        /* disable copies and moves */                                               \
-        hipfftw_funcs(const hipfftw_funcs&) = delete;                                \
-        hipfftw_funcs& operator=(const hipfftw_funcs&) = delete;                     \
-        hipfftw_funcs(hipfftw_funcs&&)                 = delete;                     \
-        hipfftw_funcs& operator=(hipfftw_funcs&&) = delete;                          \
-                                                                                     \
-    public:                                                                          \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, malloc)          \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, alloc_real)      \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, alloc_complex)   \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, free)            \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, destroy_plan)    \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, cleanup)         \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, execute)         \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_1d)     \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_2d)     \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_3d)     \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft)        \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_r2c_1d) \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_r2c_2d) \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_r2c_3d) \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_r2c)    \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_c2r_1d) \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_c2r_2d) \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_c2r_3d) \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_c2r)    \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, print_plan)      \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, set_timelimit)   \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, cost)            \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, flops)           \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, execute_dft)     \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, execute_dft_r2c) \
-        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, execute_dft_c2r) \
-        static const hipfftw_funcs& get_instance()                                   \
-        {                                                                            \
-            static const hipfftw_funcs instance;                                     \
-            return instance;                                                         \
-        }                                                                            \
+#define HIPFFTW_FUNCS_SPECIALIZATION(prefix, specialization)                             \
+    template <>                                                                          \
+    struct hipfftw_funcs<specialization>                                                 \
+    {                                                                                    \
+    private:                                                                             \
+        hipfftw_funcs()                                                                  \
+        {                                                                                \
+            load_implementations(malloc,                                                 \
+                                 alloc_real,                                             \
+                                 alloc_complex,                                          \
+                                 free,                                                   \
+                                 destroy_plan,                                           \
+                                 cleanup,                                                \
+                                 execute,                                                \
+                                 plan_dft_1d,                                            \
+                                 plan_dft_2d,                                            \
+                                 plan_dft_3d,                                            \
+                                 plan_dft,                                               \
+                                 plan_dft_r2c_1d,                                        \
+                                 plan_dft_r2c_2d,                                        \
+                                 plan_dft_r2c_3d,                                        \
+                                 plan_dft_r2c,                                           \
+                                 plan_dft_c2r_1d,                                        \
+                                 plan_dft_c2r_2d,                                        \
+                                 plan_dft_c2r_3d,                                        \
+                                 plan_dft_c2r,                                           \
+                                 print_plan,                                             \
+                                 set_timelimit,                                          \
+                                 cost,                                                   \
+                                 flops,                                                  \
+                                 execute_dft,                                            \
+                                 execute_dft_r2c,                                        \
+                                 execute_dft_c2r,                                        \
+                                 plan_many_dft,                                          \
+                                 plan_many_dft_r2c,                                      \
+                                 plan_many_dft_c2r,                                      \
+                                 plan_guru_dft,                                          \
+                                 plan_guru_dft_r2c,                                      \
+                                 plan_guru_dft_c2r,                                      \
+                                 plan_guru64_dft,                                        \
+                                 plan_guru64_dft_r2c,                                    \
+                                 plan_guru64_dft_c2r);                                   \
+        }                                                                                \
+        /* disable copies and moves */                                                   \
+        hipfftw_funcs(const hipfftw_funcs&) = delete;                                    \
+        hipfftw_funcs& operator=(const hipfftw_funcs&) = delete;                         \
+        hipfftw_funcs(hipfftw_funcs&&)                 = delete;                         \
+        hipfftw_funcs& operator=(hipfftw_funcs&&) = delete;                              \
+                                                                                         \
+    public:                                                                              \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, malloc)              \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, alloc_real)          \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, alloc_complex)       \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, free)                \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, destroy_plan)        \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, cleanup)             \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, execute)             \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_1d)         \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_2d)         \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_3d)         \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft)            \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_r2c_1d)     \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_r2c_2d)     \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_r2c_3d)     \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_r2c)        \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_c2r_1d)     \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_c2r_2d)     \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_c2r_3d)     \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_dft_c2r)        \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, print_plan)          \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, set_timelimit)       \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, cost)                \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, flops)               \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, execute_dft)         \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, execute_dft_r2c)     \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, execute_dft_c2r)     \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_many_dft)       \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_many_dft_r2c)   \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_many_dft_c2r)   \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_guru_dft)       \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_guru_dft_r2c)   \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_guru_dft_c2r)   \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_guru64_dft)     \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_guru64_dft_r2c) \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, plan_guru64_dft_c2r) \
+        static const hipfftw_funcs& get_instance()                                       \
+        {                                                                                \
+            static const hipfftw_funcs instance;                                         \
+            return instance;                                                             \
+        }                                                                                \
+        template <bool use_guru64>                                                       \
+        const auto& get_plan_guru_dft_r2c() const                                        \
+        {                                                                                \
+            if constexpr(use_guru64)                                                     \
+                return plan_guru64_dft_r2c;                                              \
+            else                                                                         \
+                return plan_guru_dft_r2c;                                                \
+        }                                                                                \
+        template <bool use_guru64>                                                       \
+        const auto& get_plan_guru_dft_c2r() const                                        \
+        {                                                                                \
+            if constexpr(use_guru64)                                                     \
+                return plan_guru64_dft_c2r;                                              \
+            else                                                                         \
+                return plan_guru_dft_c2r;                                                \
+        }                                                                                \
+        template <bool use_guru64>                                                       \
+        const auto& get_plan_guru_dft() const                                            \
+        {                                                                                \
+            if constexpr(use_guru64)                                                     \
+                return plan_guru64_dft;                                                  \
+            else                                                                         \
+                return plan_guru_dft;                                                    \
+        }                                                                                \
     }
 
 HIPFFTW_FUNCS_SPECIALIZATION(fftwf_, fft_precision_single);
@@ -538,7 +585,7 @@ public:
         }
         else if(plan)
         {
-            std::cerr << "WARNING: A " << (prec == fft_precision_single ? "single" : "double")
+            std::cerr << "WARNING: A " << hipfftw_trait<prec>::prec_label
                       << "-precision plan was seemingly created but its destructor cannot be used "
                       << std::endl;
         }
@@ -617,23 +664,33 @@ private:
     // or to re-create the plan at execution if needed or found necessary)
     mutable std::shared_ptr<hipfftw_plan_bundle_t<prec>> plan_bundle;
 
-    fft_transform_type     dft_kind;
-    int                    rank       = 0;
-    int                    batch_rank = 0;
-    std::vector<ptrdiff_t> lengths;
-    std::vector<ptrdiff_t> istrides;
-    std::vector<ptrdiff_t> ostrides;
-    std::vector<ptrdiff_t> batches;
-    std::vector<ptrdiff_t> idist;
-    std::vector<ptrdiff_t> odist;
-    fft_result_placement   plan_placement;
-    int                    sign  = 0;
-    unsigned               flags = std::numeric_limits<unsigned>::max();
+    fft_transform_type                dft_kind;
+    int                               rank       = 0;
+    int                               batch_rank = 0;
+    std::vector<ptrdiff_t>            lengths;
+    std::vector<ptrdiff_t>            istrides;
+    std::vector<ptrdiff_t>            ostrides;
+    std::optional<hipfftw_ionembed_t> ionembed;
+    std::vector<ptrdiff_t>            batches;
+    std::vector<ptrdiff_t>            idist;
+    std::vector<ptrdiff_t>            odist;
+    fft_result_placement              plan_placement;
+    int                               sign  = 0;
+    unsigned                          flags = std::numeric_limits<unsigned>::max();
 
     template <typename T>
     void reset_member_value(T& member, const T& new_value)
     {
         if(new_value != member)
+        {
+            member = new_value;
+            plan_bundle.reset();
+        }
+    }
+    template <typename T>
+    void reset_member_value(std::optional<T>& member, const T& new_value)
+    {
+        if(!member || new_value != *member)
         {
             member = new_value;
             plan_bundle.reset();
@@ -838,18 +895,146 @@ private:
         }
         break;
         case hipfftw_plan_creation_func::PLAN_MANY:
-            [[fallthrough]];
+        {
+            if(!can_use_creation_options(hipfftw_plan_creation_func::PLAN_MANY))
+                throw std::runtime_error("hipfftw_helper::make_plan: "
+                                         "hipfftw_plan_creation_func::PLAN_MANY cannot be used.");
+            if(!ionembed)
+                throw std::logic_error(
+                    "hipfftw_helper::make_plan: hipfftw_plan_creation_func::PLAN_MANY seemingly "
+                    "usable but io_nembed has no value/was not set.");
+
+            const int* inembed = ionembed->get_nembed(fft_io::fft_io_in);
+            const int* onembed = ionembed->get_nembed(fft_io::fft_io_out);
+
+            if(dft_kind == fft_transform_type_real_forward)
+            {
+                return hipfftw_impl.plan_many_dft_r2c.template call<make_reference_plan>(
+                    rank,
+                    int_len_ptr,
+                    static_cast<int>(batches[0]),
+                    static_cast<hipfftw_real_t<prec>*>(in),
+                    inembed,
+                    ionembed->get_elementary_stride(fft_io::fft_io_in),
+                    static_cast<int>(idist[0]),
+                    static_cast<hipfftw_complex_t<prec>*>(out),
+                    onembed,
+                    ionembed->get_elementary_stride(fft_io::fft_io_out),
+                    static_cast<int>(odist[0]),
+                    flags);
+            }
+            else if(dft_kind == fft_transform_type_real_inverse)
+            {
+                return hipfftw_impl.plan_many_dft_c2r.template call<make_reference_plan>(
+                    rank,
+                    int_len_ptr,
+                    static_cast<int>(batches[0]),
+                    static_cast<hipfftw_complex_t<prec>*>(in),
+                    inembed,
+                    ionembed->get_elementary_stride(fft_io::fft_io_in),
+                    static_cast<int>(idist[0]),
+                    static_cast<hipfftw_real_t<prec>*>(out),
+                    onembed,
+                    ionembed->get_elementary_stride(fft_io::fft_io_out),
+                    static_cast<int>(odist[0]),
+                    flags);
+            }
+            else
+            {
+                return hipfftw_impl.plan_many_dft.template call<make_reference_plan>(
+                    rank,
+                    int_len_ptr,
+                    static_cast<int>(batches[0]),
+                    static_cast<hipfftw_complex_t<prec>*>(in),
+                    inembed,
+                    ionembed->get_elementary_stride(fft_io::fft_io_in),
+                    static_cast<int>(idist[0]),
+                    static_cast<hipfftw_complex_t<prec>*>(out),
+                    onembed,
+                    ionembed->get_elementary_stride(fft_io::fft_io_out),
+                    static_cast<int>(odist[0]),
+                    sign,
+                    flags);
+            }
+        }
+        break;
         case hipfftw_plan_creation_func::PLAN_GURU:
-            [[fallthrough]];
+            return create_guru_plan<make_reference_plan, /* use_guru64 = */ false>(in, out);
+            break;
         case hipfftw_plan_creation_func::PLAN_GURU64:
-            throw std::runtime_error(
-                "hipfftw_helper::make_plan: enforced plan creation is not implemented yet");
+            return create_guru_plan<make_reference_plan, /* use_guru64 = */ true>(in, out);
             break;
         default:
             throw std::runtime_error("hipfftw_helper::make_plan: unknown kind of plan creation");
             break;
         }
         // unreachable
+    }
+
+    template <bool make_reference_plan, bool use_guru64>
+    hipfftw_plan_t<prec> create_guru_plan(void* in, void* out) const
+    {
+        if constexpr(use_guru64)
+        {
+            if(!can_use_creation_options(hipfftw_plan_creation_func::PLAN_GURU64))
+                throw std::runtime_error("hipfftw_helper::create_guru_plan: "
+                                         "hipfftw_plan_creation_func::PLAN_GURU64 cannot be used.");
+        }
+        else
+        {
+            if(!can_use_creation_options(hipfftw_plan_creation_func::PLAN_GURU))
+                throw std::runtime_error("hipfftw_helper::create_guru_plan: "
+                                         "hipfftw_plan_creation_func::PLAN_GURU cannot be used.");
+        }
+        // NOTE: fftw_iodim (resp. fftw_iodim64) and fftwf_iodim (resp. fftwf_iodim64) are actually
+        // the same types
+        static_assert(
+            std::is_same_v<fftw_iodim64, fftwf_iodim64> && std::is_same_v<fftw_iodim, fftwf_iodim>);
+        using io_dim_t           = std::conditional_t<use_guru64, fftw_iodim64, fftw_iodim>;
+        const auto& hipfftw_impl = hipfftw_funcs<prec>::get_instance();
+        const auto* dims         = get_guru_dims<io_dim_t>();
+        const auto* howmany_dims = get_guru_howmany_dims<io_dim_t>();
+
+        if(dft_kind == fft_transform_type_real_forward)
+        {
+            const auto& plan_creation_functor
+                = hipfftw_impl.template get_plan_guru_dft_r2c<use_guru64>();
+            return plan_creation_functor.template call<make_reference_plan>(
+                rank,
+                dims,
+                batch_rank,
+                howmany_dims,
+                static_cast<hipfftw_real_t<prec>*>(in),
+                static_cast<hipfftw_complex_t<prec>*>(out),
+                flags);
+        }
+        else if(dft_kind == fft_transform_type_real_inverse)
+        {
+            const auto& plan_creation_functor
+                = hipfftw_impl.template get_plan_guru_dft_c2r<use_guru64>();
+            return plan_creation_functor.template call<make_reference_plan>(
+                rank,
+                dims,
+                batch_rank,
+                howmany_dims,
+                static_cast<hipfftw_complex_t<prec>*>(in),
+                static_cast<hipfftw_real_t<prec>*>(out),
+                flags);
+        }
+        else
+        {
+            const auto& plan_creation_functor
+                = hipfftw_impl.template get_plan_guru_dft<use_guru64>();
+            return plan_creation_functor.template call<make_reference_plan>(
+                rank,
+                dims,
+                batch_rank,
+                howmany_dims,
+                static_cast<hipfftw_complex_t<prec>*>(in),
+                static_cast<hipfftw_complex_t<prec>*>(out),
+                sign,
+                flags);
+        }
     }
 
     // converts vec to an std::vector<T> if it can be done so without underflow/overflow
@@ -870,6 +1055,109 @@ private:
         }
         ret.assign(vec.begin(), vec.end());
         return ret;
+    }
+
+    void reset_io_nembed_from_strides()
+    {
+        try
+        {
+#ifdef __HIP_PLATFORM_AMD__
+            // use nullptr as ionembed for default layouts ~half of the time in order to
+            // guarantee testing thereof
+            std::hash<std::string> hasher;
+            const bool             use_nullptr_for_default_inembed = hasher(token() + "_in") & 1;
+            const bool             use_nullptr_for_default_onembed = hasher(token() + "_out") & 1;
+#else
+            // NOTE: cuFFTW does not accept nullptr for default ionembed
+            constexpr bool use_nullptr_for_default_inembed = false;
+            constexpr bool use_nullptr_for_default_onembed = false;
+#endif
+            hipfftw_ionembed_t tmp(istrides,
+                                   ostrides,
+                                   lengths,
+                                   dft_kind,
+                                   plan_placement,
+                                   use_nullptr_for_default_inembed,
+                                   use_nullptr_for_default_onembed);
+            reset_member_value(ionembed, tmp);
+        }
+        catch(const ionembed_exception& e)
+        {
+            // couldnt' construct the hipfftw_ionembed_t object
+            if(ionembed)
+                plan_bundle.reset();
+            // cannot use ionembed
+            ionembed.reset();
+        }
+    }
+
+    struct cannot_use_guru : std::runtime_error
+    {
+        cannot_use_guru()
+            : std::runtime_error(
+                "guru plan creation functions cannot be used (integral value out of range)."){};
+    };
+
+    template <typename iodim>
+    const iodim* get_guru_dims() const
+    {
+        static_assert(std::is_same_v<iodim, fftw_iodim> || std::is_same_v<iodim, fftw_iodim64>);
+        // cannot generate sensible "dims" from empty lengths and/or with invalid rank
+        if(lengths.empty() || !rank_is_valid_for_hipfftw(rank))
+            return nullptr;
+        if(lengths.size() != static_cast<size_t>(rank)
+           || istrides.size() != static_cast<size_t>(rank)
+           || ostrides.size() != static_cast<size_t>(rank))
+            throw std::logic_error("hipfftw_helper::get_guru_dims(): size mismatch between "
+                                   "lengths, istrides, and/or ostrides.");
+        if constexpr(std::is_same_v<iodim, fftw_iodim>)
+        {
+            for(const auto& vec : {lengths, istrides, ostrides})
+                if(!vector_has_valid_values_as<int>(vec, vec.size()))
+                {
+                    throw cannot_use_guru();
+                }
+        }
+        static std::vector<iodim> dims_vec;
+        dims_vec.resize(rank);
+        for(auto dim = 0; dim < rank; dim++)
+        {
+            dims_vec[dim].n  = lengths[dim];
+            dims_vec[dim].is = istrides[dim];
+            dims_vec[dim].os = ostrides[dim];
+        }
+        return dims_vec.data();
+    }
+
+    template <typename iodim>
+    const iodim* get_guru_howmany_dims() const
+    {
+        static_assert(std::is_same_v<iodim, fftw_iodim> || std::is_same_v<iodim, fftw_iodim64>);
+        // cannot generate sensible "howmany_dims" from empty batches and/or with invalid batch_rank
+        if(batches.empty() || !rank_is_valid_for_hipfftw(batch_rank))
+            return nullptr;
+        if(batches.size() != static_cast<size_t>(batch_rank)
+           || idist.size() != static_cast<size_t>(batch_rank)
+           || odist.size() != static_cast<size_t>(batch_rank))
+            throw std::logic_error("hipfftw_helper::get_guru_dims(): size mismatch between "
+                                   "batches, idist, and/or odist.");
+        if constexpr(std::is_same_v<iodim, fftw_iodim>)
+        {
+            for(const auto& vec : {batches, idist, odist})
+                if(!vector_has_valid_values_as<int>(vec, vec.size()))
+                {
+                    throw cannot_use_guru();
+                }
+        }
+        static std::vector<iodim> howmany_dims_vec;
+        howmany_dims_vec.resize(batch_rank);
+        for(auto batch_dim = 0; batch_dim < batch_rank; batch_dim++)
+        {
+            howmany_dims_vec[batch_dim].n  = batches[batch_dim];
+            howmany_dims_vec[batch_dim].is = idist[batch_dim];
+            howmany_dims_vec[batch_dim].os = odist[batch_dim];
+        }
+        return howmany_dims_vec.data();
     }
 
     // (private) validity checks
@@ -961,7 +1249,6 @@ private:
         constexpr ptrdiff_t min_batch = 1;
         return vector_has_valid_values_as<ptrdiff_t>(batches, batch_rank, min_batch);
     }
-
     bool has_valid_strides(fft_io io, hipfftw_plan_creation_func creation_options) const
     {
         if(io != fft_io::fft_io_in && io != fft_io::fft_io_out)
@@ -1021,12 +1308,48 @@ private:
                 ret = strides == default_strides(dft_kind, plan_placement, io, lengths);
                 break;
             case hipfftw_plan_creation_func::PLAN_MANY:
-                [[fallthrough]];
-            case hipfftw_plan_creation_func::PLAN_GURU64:
-                [[fallthrough]];
+            {
+                bool valid_io_nembed = ionembed.has_value();
+                if(valid_io_nembed && !lengths.empty())
+                {
+                    if(std::any_of(
+                           lengths.begin(), lengths.end(), [](ptrdiff_t len) { return len != 1; })
+                       && (ionembed->get_elementary_stride(fft_io::fft_io_in) == 0
+                           || ionembed->get_elementary_stride(fft_io::fft_io_out) == 0))
+                        valid_io_nembed = false;
+                    for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
+                    {
+                        const int* nembed = ionembed->get_nembed(io);
+                        if(!nembed) // <-- default, always valid
+                            continue;
+                        for(auto dim = lengths.size(); dim-- > 0;)
+                        {
+                            auto min_nembed = lengths[dim];
+                            if(is_real(dft_kind) && dim == lengths.size() - 1)
+                            {
+                                if(is_fwd(dft_kind) == (io == fft_io::fft_io_out))
+                                    min_nembed = lengths[dim] / 2 + 1;
+                                else if(plan_placement == fft_placement_inplace)
+                                    min_nembed = 2 * (lengths[dim] / 2 + 1);
+                            }
+                            if(nembed[dim] < min_nembed)
+                                valid_io_nembed = false;
+                        }
+                    }
+                }
+                ret = valid_io_nembed;
+            }
+            break;
             case hipfftw_plan_creation_func::PLAN_GURU:
-                ret = false; // for now... to be defined when guru apis are enabled
-                break;
+            {
+                ret = vector_has_valid_values_as<int>(strides, rank);
+            }
+            break;
+            case hipfftw_plan_creation_func::PLAN_GURU64:
+            {
+                ret = vector_has_valid_values_as<ptrdiff_t>(strides, rank);
+            }
+            break;
             default:
                 throw std::runtime_error("hipfftw_helper::has_valid_strides: internal error "
                                          "encountered (unexpected value for creation_func)");
@@ -1065,6 +1388,22 @@ private:
         return ret;
     }
 
+    static void create_temp_plan_from_token(const std::string& token)
+    {
+        hipfftw_helper<prec> temp;
+        temp.from_token(token);
+        hostbuf input;
+        input.alloc(temp.get_data_byte_size(fft_io::fft_io_in));
+        if(temp.plan_placement == fft_placement_inplace)
+            temp.create_plan(input.data(), input.data());
+        else
+        {
+            hostbuf output;
+            output.alloc(temp.get_data_byte_size(fft_io::fft_io_out));
+            temp.create_plan(input.data(), output.data());
+        }
+    }
+
 public:
     hipfftw_helper()                       = default;
     ~hipfftw_helper()                      = default;
@@ -1095,6 +1434,53 @@ public:
             std::vector<ptrdiff_t>(1, 1),
             std::vector<ptrdiff_t>(1, 0),
             std::vector<ptrdiff_t>(1, 0));
+    }
+
+    // overload for advanced configurations (compatible with plan_many* funcs)
+    void set_creation_args(fft_transform_type            dft_kind_to_set,
+                           int                           rank_to_set,
+                           const std::vector<ptrdiff_t>& lengths_to_set,
+                           fft_result_placement          placement_to_set,
+                           int                           sign_to_set,
+                           unsigned                      flags_to_set,
+                           const hipfftw_ionembed_t&     ionembed_to_set,
+                           ptrdiff_t                     batch_to_set,
+                           ptrdiff_t                     idist_to_set,
+                           ptrdiff_t                     odist_to_set)
+    {
+        if(rank_is_valid_for_hipfftw(rank_to_set))
+        {
+            if(!lengths_to_set.empty() && lengths_to_set.size() != static_cast<size_t>(rank_to_set))
+                throw std::invalid_argument(
+                    "Inconsistent size for non-empty lengths given to hipfftw::set_creation_args.");
+            for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
+            {
+                if(ionembed_to_set.get_nembed(io)
+                   && ionembed_to_set.get_nembed_size(io) != static_cast<size_t>(rank_to_set))
+                    throw std::invalid_argument("Inconsistent size for non-empty inembed or "
+                                                "onembed given to hipfftw::set_creation_args.");
+            }
+        }
+
+        reset_member_value(dft_kind, dft_kind_to_set);
+        reset_member_value(rank, rank_to_set);
+        reset_member_value(lengths, lengths_to_set);
+        reset_member_value(plan_placement, placement_to_set);
+        reset_member_value(sign, sign_to_set);
+        reset_member_value(flags, flags_to_set);
+        reset_member_value(
+            istrides,
+            ionembed_to_set.as_generalized_strides(
+                fft_io::fft_io_in, dft_kind_to_set, placement_to_set, lengths_to_set));
+        reset_member_value(
+            ostrides,
+            ionembed_to_set.as_generalized_strides(
+                fft_io::fft_io_out, dft_kind_to_set, placement_to_set, lengths_to_set));
+        reset_member_value(ionembed, ionembed_to_set);
+        reset_member_value(batch_rank, 1 /* implicit */);
+        reset_member_value(batches, std::vector<ptrdiff_t>(1, batch_to_set));
+        reset_member_value(idist, std::vector<ptrdiff_t>(1, idist_to_set));
+        reset_member_value(odist, std::vector<ptrdiff_t>(1, odist_to_set));
     }
 
     // most general overload
@@ -1147,6 +1533,7 @@ public:
         reset_member_value(batches, batches_to_set);
         reset_member_value(idist, idist_to_set);
         reset_member_value(odist, odist_to_set);
+        reset_io_nembed_from_strides();
     }
 
     // getters
@@ -1259,7 +1646,7 @@ public:
             // --> parse them individually and find out if any applicable can be used
             return std::any_of(hipfftw_plan_creation_func_candidates.begin(),
                                hipfftw_plan_creation_func_candidates.end(),
-                               [=](const hipfftw_plan_creation_func& candidate) {
+                               [=, this](const hipfftw_plan_creation_func& candidate) {
                                    return (creation_options & candidate)
                                           && can_use_creation_options(candidate);
                                });
@@ -1300,11 +1687,44 @@ public:
                    || (rank >= 1 && rank <= 3);
         }
         case hipfftw_plan_creation_func::PLAN_MANY:
-            [[fallthrough]];
+        {
+            // batch_rank == 1 only
+            if(batch_rank != 1 || batches.size() != 1 || idist.size() != 1 || odist.size() != 1)
+                return false;
+            // only strides that may be represented via inembed/onembed
+            if(!ionembed)
+                return false;
+            // lengths, batches, and distances must be representable as int
+            try
+            {
+                auto tmp = get_lengths_as<int>();
+                tmp      = convert_vector_to<int>(batches);
+                tmp      = convert_vector_to<int>(idist);
+                tmp      = convert_vector_to<int>(odist);
+            }
+            catch(const type_conversion_exception& e)
+            {
+                return false;
+            }
+            return true;
+        }
         case hipfftw_plan_creation_func::PLAN_GURU:
-            [[fallthrough]];
+        {
+            // anything goes provided it can be represented as regular integer(s)
+            try
+            {
+                auto tmp = get_guru_dims<fftw_iodim>();
+                tmp      = get_guru_howmany_dims<fftw_iodim>();
+            }
+            catch(const cannot_use_guru& e)
+            {
+                return false;
+            }
+            return true;
+        }
         case hipfftw_plan_creation_func::PLAN_GURU64:
-            return false;
+            // anything goes!
+            return true;
         default:
             throw std::runtime_error("hipfftw_helper::can_use_creation_options: internal error "
                                      "encountered (unexpected value for creation_options)");
@@ -1327,14 +1747,39 @@ public:
                    && has_valid_distances(fft_io::fft_io_in)
                    && has_valid_distances(fft_io::fft_io_out)
                    && can_use_creation_options(creation_options);
+
+        // If output data layout is entirely defined by non-negative values (hence not "unsupported"),
+        // also check that the output data layout is not self-aliasing
+        if(ret && vector_has_valid_values_as<ptrdiff_t>(lengths, rank, 1)
+           && vector_has_valid_values_as<ptrdiff_t>(ostrides, rank, 1)
+           && vector_has_valid_values_as<ptrdiff_t>(batches, batch_rank, 1)
+           && vector_has_valid_values_as<ptrdiff_t>(odist, batch_rank, 1))
+        {
+            const size_t        gen_size = lengths.size() + batches.size();
+            std::vector<size_t> gen_len(gen_size), gen_strides(gen_size);
+            for(auto dim = lengths.size(); dim-- > 0;)
+            {
+                gen_len[dim]
+                    = dft_kind == fft_transform_type_real_forward && dim == lengths.size() - 1
+                          ? lengths[dim] / 2 + 1
+                          : lengths[dim];
+                gen_strides[dim] = ostrides[dim];
+            }
+            for(auto batch_dim = batches.size(); batch_dim-- > 0;)
+            {
+                gen_len[lengths.size() + batch_dim]     = batches[batch_dim];
+                gen_strides[lengths.size() + batch_dim] = odist[batch_dim];
+            }
+            ret = array_valid(gen_len, gen_strides);
+        }
         return ret;
     }
     bool is_valid_for_creation() const
     {
         return is_valid_for_creation_with(hipfftw_plan_creation_func::ANY);
     }
-    // check expected support by (any of) the given option(s)
-    bool has_unsupported_args_for(hipfftw_plan_creation_func creation_options) const
+    // check expected support
+    bool has_unsupported_args() const
     {
         // extra conditions for valid configurations that are not supported by hipfftw:
         if(rank > 3)
@@ -1361,7 +1806,7 @@ public:
 
         if(!is_valid_for_creation_with(creation_options))
             return false;
-        if(has_unsupported_args_for(creation_options))
+        if(has_unsupported_args())
             return false;
         return true;
     }
@@ -1423,13 +1868,10 @@ public:
         if(!rank_is_valid_for_hipfftw(rank) || lengths.empty())
             ret << "_rank" << (rank < 0 ? "_negative_" : "_") << std::abs(rank);
         append_vec("len", lengths);
-        if constexpr(prec == fft_precision_single)
-            ret << "_single";
-        else
-            ret << "_double";
+        ret << "_" << hipfftw_trait<prec>::prec_label;
         ret << (plan_placement == fft_placement_inplace ? "_ip" : "_op");
         if(batch_rank != 1)
-            ret << "_batch_rank_" << (batch_rank < 0 ? "_negative_" : "_") << std::abs(batch_rank);
+            ret << "_batch_rank" << (batch_rank < 0 ? "_negative_" : "_") << std::abs(batch_rank);
         append_vec("batch", batches);
         append_vec("istride", istrides);
         if(!is_real(dft_kind))
@@ -1462,9 +1904,12 @@ public:
     {
         fft_params tmp;
         tmp.from_token(token);
+        if(tmp.precision != prec)
+            throw std::invalid_argument("hipfftw_helper::from_token: precision mismatch between "
+                                        "token and (specialization of) hipfftw_helper object");
         if(tmp.istride.size() != tmp.ostride.size() || tmp.istride.size() != tmp.length.size())
-            throw std::runtime_error("hipfftw_helper::from_token: unexpected mismatch of vector "
-                                     "sizes in hipfftw_helper::from_token");
+            throw std::runtime_error(
+                "unexpected mismatch of vector sizes in hipfftw_helper::from_token");
         dft_kind   = tmp.transform_type;
         rank       = tmp.length.size();
         batch_rank = 1;
@@ -1492,6 +1937,7 @@ public:
             pos += flags_label.size() + 1;
             flags = std::stoull(token.substr(pos, token.find("_", pos)));
         }
+        reset_io_nembed_from_strides();
     }
 
     // create_plan invokes an hipfftw plan creation function for the object's configuration
@@ -1599,9 +2045,8 @@ public:
                 "invalid in_or_out passed to hipfftw_helper::get_num_elements_in");
         if(!has_valid_rank() || !has_valid_lengths() || !has_valid_batch_rank()
            || !has_valid_batches())
-            throw num_elements_calc_exception(
-                "hipfftw_helper::get_num_elements_in requires valid rank, batch_rank, lengths, and "
-                "batches");
+            throw num_elements_calc_exception("hipfftw_helper::get_num_elements_in requires valid "
+                                              "rank, batch_rank, lengths, and batches");
         const auto& strides   = in_or_out == fft_io::fft_io_in ? istrides : ostrides;
         const auto& distances = in_or_out == fft_io::fft_io_in ? idist : odist;
         if(!vector_has_valid_values_as<ptrdiff_t>(strides, rank, 0)
@@ -1676,6 +2121,18 @@ public:
     {
         using std::runtime_error::runtime_error;
     };
+    friend void create_hipfftw_plan_from_token_using_temp_io(const std::string&, bool);
 };
+
+// trigger a plan creation via hipfftw, without user-defined I/O
+static void create_hipfftw_plan_from_token_using_temp_io(const std::string& token, bool verbose)
+{
+    if(token.find(hipfftw_trait<fft_precision_single>::prec_label) != std::string::npos)
+        hipfftw_helper<fft_precision_single>::create_temp_plan_from_token(token);
+    else if(token.find(hipfftw_trait<fft_precision_double>::prec_label) != std::string::npos)
+        hipfftw_helper<fft_precision_double>::create_temp_plan_from_token(token);
+    else if(verbose)
+        std::cout << "Unknown/unexpected precision from " << token << std::endl;
+}
 
 #endif

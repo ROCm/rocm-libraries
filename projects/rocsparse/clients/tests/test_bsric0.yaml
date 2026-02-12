@@ -27,8 +27,8 @@ include: rocsparse_common.yaml
 
 Definitions:
   - &M_N_range_quick
-    - { M:  50, N:  50 }
-    - { M: 187, N: 187 }
+    - { M:  72, N:  72 }
+    - { M: 360, N: 360 }
 
   - &M_N_range_checkin
     - { M:   0, N:   0 }
@@ -41,11 +41,7 @@ Definitions:
     - { M: 505194, N: 505194 }
 
 Tests:
-- name: bsric0_bad_arg
-  category: pre_checkin
-  function: bsric0_bad_arg
-  precision: *single_double_precisions_complex_real
-
+# Quick
 - name: bsric0
   category: quick
   function: bsric0
@@ -72,6 +68,72 @@ Tests:
   direction: [rocsparse_direction_row, rocsparse_direction_column]
   matrix: [rocsparse_matrix_random]
 
+- name: bsric0_file
+  category: quick
+  function: bsric0
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  block_dim: [2, 4, 5, 10]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos4]
+
+- name: bsric0_file
+  category: quick
+  function: bsric0
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  block_dim: [2, 3, 4, 6]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos5]
+
+- name: bsric0_file
+  category: quick
+  function: bsric0
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  block_dim: [3, 5, 15]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos6]
+
+- name: bsric0_file
+  category: quick
+  function: bsric0
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  block_dim: [3, 9, 27]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos7]
+
+# Pre-checkin
+- name: bsric0_bad_arg
+  category: pre_checkin
+  function: bsric0_bad_arg
+  precision: *single_double_precisions_complex_real
+
 - name: bsric0
   category: pre_checkin
   function: bsric0
@@ -85,21 +147,8 @@ Tests:
   direction: [rocsparse_direction_row, rocsparse_direction_column]
   matrix: [rocsparse_matrix_random]
 
-- name: bsric0
-  category: nightly
-  function: bsric0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_nightly
-  block_dim: [5, 35]
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
-  matrix: [rocsparse_matrix_random]
-
 - name: bsric0_file
-  category: quick
+  category: pre_checkin
   function: bsric0
   precision: *single_double_precisions
   M: 1
@@ -135,6 +184,49 @@ Tests:
              nos7]
 
 - name: bsric0_file
+  category: pre_checkin
+  function: bsric0
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  block_dim: [8, 16]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron2]
+
+- name: bsric0_graph_test
+  category: pre_checkin
+  function: bsric0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  block_dim: [1, 4, 9, 17]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+
+# Nightly
+- name: bsric0
+  category: nightly
+  function: bsric0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_nightly
+  block_dim: [5, 35]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsric0_file
   category: nightly
   function: bsric0
   precision: *single_double_precisions
@@ -167,41 +259,6 @@ Tests:
   skip_hardware: gfx940, gfx941
 
 - name: bsric0_file
-  category: quick
-  function: bsric0
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  block_dim: [7]
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_column]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [ nos1,
-              nos2,
-              nos3,
-              nos5,
-              nos7,
-              Chevron2]
-
-- name: bsric0_file
-  category: pre_checkin
-  function: bsric0
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  block_dim: [8, 16]
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_force]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_row]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron2]
-
-- name: bsric0_file
   category: nightly
   function: bsric0
   precision: *single_double_precisions_complex
@@ -216,20 +273,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
 
-- name: bsric0_graph_test
-  category: pre_checkin
-  function: bsric0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  block_dim: [1, 4, 9]
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
-  matrix: [rocsparse_matrix_random]
-  graph_test: true
-
+# Stress
 - name: bsric0_file
   category: stress
   function: bsric0

@@ -3,14 +3,30 @@
 
 #include "hipdnn_backend.h"
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <test_plugins/TestPluginConstants.hpp>
 #include <vector>
 
 namespace fs = std::filesystem;
 
-TEST(IntegrationBackendDescriptor, CreateAndDestroy)
+class IntegrationBackendDescriptor : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        const std::array<const char*, 1> paths
+            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
+        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
+                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                  HIPDNN_STATUS_SUCCESS);
+    }
+
+    void TearDown() override {}
+};
+
+TEST_F(IntegrationBackendDescriptor, CreateAndDestroy)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
 
@@ -22,7 +38,7 @@ TEST(IntegrationBackendDescriptor, CreateAndDestroy)
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 }
 
-TEST(IntegrationBackendDescriptor, CreateWithNullptr)
+TEST_F(IntegrationBackendDescriptor, CreateWithNullptr)
 {
     hipdnnStatus_t status
         = hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, nullptr);
@@ -30,7 +46,7 @@ TEST(IntegrationBackendDescriptor, CreateWithNullptr)
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(IntegrationBackendDescriptor, WillNotCreateDescriptorIfTypeNotSupported)
+TEST_F(IntegrationBackendDescriptor, WillNotCreateDescriptorIfTypeNotSupported)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
 
@@ -39,7 +55,7 @@ TEST(IntegrationBackendDescriptor, WillNotCreateDescriptorIfTypeNotSupported)
     EXPECT_EQ(status, HIPDNN_STATUS_NOT_SUPPORTED);
 }
 
-TEST(IntegrationBackendDescriptor, WontDestroyDescriptorIfNull)
+TEST_F(IntegrationBackendDescriptor, WontDestroyDescriptorIfNull)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
 
@@ -48,7 +64,7 @@ TEST(IntegrationBackendDescriptor, WontDestroyDescriptorIfNull)
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(IntegrationBackendDescriptor, Finalize)
+TEST_F(IntegrationBackendDescriptor, Finalize)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
 
@@ -57,7 +73,7 @@ TEST(IntegrationBackendDescriptor, Finalize)
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(IntegrationBackendDescriptor, GetAttributeWithNullDescriptor)
+TEST_F(IntegrationBackendDescriptor, GetAttributeWithNullDescriptor)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
     hipdnnBackendAttributeName_t attributeName = HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH;
@@ -76,7 +92,7 @@ TEST(IntegrationBackendDescriptor, GetAttributeWithNullDescriptor)
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(IntegrationBackendDescriptor, SetAttributeWithNullDescriptor)
+TEST_F(IntegrationBackendDescriptor, SetAttributeWithNullDescriptor)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
     hipdnnBackendAttributeName_t attributeName = HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH;
@@ -90,7 +106,7 @@ TEST(IntegrationBackendDescriptor, SetAttributeWithNullDescriptor)
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(IntegrationBackendDescriptor, CreateAndDeserializeGraphExtWithNullGraph)
+TEST_F(IntegrationBackendDescriptor, CreateAndDeserializeGraphExtWithNullGraph)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
 
@@ -100,20 +116,21 @@ TEST(IntegrationBackendDescriptor, CreateAndDeserializeGraphExtWithNullGraph)
     EXPECT_EQ(descriptor, nullptr);
 }
 
-TEST(IntegrationBackendDescriptor, SetOperationGraph)
+TEST_F(IntegrationBackendDescriptor, SetOperationGraph)
 {
     SKIP_IF_NO_DEVICES();
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
-    auto graph
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "Test GRAPH!",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "Test GRAPH!",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graph);
     flatbuffers::DetachedBuffer serializedGraph = builder.Release();
 
@@ -139,7 +156,7 @@ TEST(IntegrationBackendDescriptor, SetOperationGraph)
     EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 }
 
-TEST(IntegrationBackendDescriptor, FinalizeInvalidOperationGraph)
+TEST_F(IntegrationBackendDescriptor, FinalizeInvalidOperationGraph)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
     auto status

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -96,7 +96,6 @@ namespace rocRoller
                               ControlGraph::Assign,
                               ControlGraph::Barrier,
                               ControlGraph::Block,
-                              ControlGraph::ComputeIndex,
                               ControlGraph::ConditionalOp,
                               ControlGraph::Deallocate,
                               ControlGraph::DoWhileOp,

@@ -226,11 +226,13 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="spmv_mixed">Mixed Precisions</caption>
-*  <tr><th>A / X      <th>Y         <th>compute_type
-*  <tr><td>HIP_R_8I   <td>HIP_R_32I <td>HIP_R_32I
-*  <tr><td>HIP_R_8I   <td>HIP_R_32F <td>HIP_R_32F
-*  <tr><td>HIP_R_16F  <td>HIP_R_32F <td>HIP_R_32F
-*  <tr><td>HIP_R_16BF <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><th>A / X      <th>Y          <th>compute_type
+*  <tr><td>HIP_R_8I   <td>HIP_R_32I  <td>HIP_R_32I
+*  <tr><td>HIP_R_8I   <td>HIP_R_32F  <td>HIP_R_32F
+*  <tr><td>HIP_R_16F  <td>HIP_R_32F  <td>HIP_R_32F
+*  <tr><td>HIP_R_16F  <td>HIP_R_16F  <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_32F  <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_16BF <td>HIP_R_32F
 *  </table>
 *
 *  \par Mixed-regular real precisions
@@ -294,9 +296,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *               \p externalBuffer pointer is invalid or if \p opA, \p computeType, \p alg is incorrect.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
-*
-*  \par Example
-*  \snippet example_hipsparse_spmv.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

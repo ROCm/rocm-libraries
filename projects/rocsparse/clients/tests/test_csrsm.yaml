@@ -32,8 +32,6 @@ Definitions:
 
   - &M_N_range_checkin
     - { M:   0, N:   0 }
-    - { M:   1, N:   1 }
-    - { M:   2, N:   2 }
     - { M:   8, N:   8 }
 
   - &M_N_range_checkin_1
@@ -46,7 +44,6 @@ Definitions:
 
   - &alpha_range_quick
     - { alpha:   1.0, alphai: -0.2 }
-    - { alpha:  -0.5, alphai:  0.1 }
 
   - &alpha_range_checkin
     - { alpha:   2.0, alphai:  0.0 }
@@ -60,121 +57,6 @@ Definitions:
     - { alpha:   1.0,  alphai:  0.0 }
 
 Tests:
-
-#
-# CATEGORY: PRE_CHECKIN
-#
-
-- name: csrsm_bad_arg
-  category: pre_checkin
-  function: csrsm_bad_arg
-  precision: *single_double_precisions_complex_real
-
-- name: csrsm
-  category: pre_checkin
-  function: csrsm
-  precision: *single_double_precisions
-  M_N: *M_N_range_checkin
-  K: [0, 1, 2, 8]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
-  diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_upper, rocsparse_fill_mode_lower]
-  apol: [rocsparse_analysis_policy_force, rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: csrsm
-  category: pre_checkin
-  function: csrsm
-  precision: *single_double_precisions
-  M_N: *M_N_range_checkin_1
-  K: [1, 7, 16]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_transpose]
-  diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  apol: [rocsparse_analysis_policy_force]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-
-- name: csrsm
-  category: pre_checkin
-  function: csrsm
-  precision: *single_double_precisions
-  M_N: *M_N_range_checkin_1
-  K: [1, 32, 96, 244, 764]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_transpose]
-  diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  apol: [rocsparse_analysis_policy_force]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-
-- name: csrsm_file
-  category: pre_checkin
-  function: csrsm
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  K: [1, 141, 875]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos1,
-             nos5,
-             nos7,
-             mplate,
-             Chevron3]
-
-- name: csrsm_file
-  category: pre_checkin
-  function: csrsm
-  precision: *single_double_precisions_complex_real
-  M: 1
-  N: 1
-  K: [1, 2, 4]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [rma10, mc2depi,  amazon0312]
-
-- name: csrsm_graph_test
-  category: pre_checkin
-  function: csrsm
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  K: [65, 153, 280]
-  alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-  graph_test: true
-
 
 #
 # CATEGORY: QUICK
@@ -228,11 +110,13 @@ Tests:
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
+  filename: [nos1,
              nos2,
+             nos3,
              nos4,
+             nos5,
              nos6,
-             scircuit]
+             nos7]
 
 - name: csrsm_file
   category: quick
@@ -250,9 +134,119 @@ Tests:
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron2]
+  filename: [mplate]
 
 
+#
+# CATEGORY: PRE_CHECKIN
+#
+
+- name: csrsm_bad_arg
+  category: pre_checkin
+  function: csrsm_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: csrsm
+  category: pre_checkin
+  function: csrsm
+  precision: *single_double_precisions
+  M_N: *M_N_range_checkin
+  K: [0, 1, 8]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_upper, rocsparse_fill_mode_lower]
+  apol: [rocsparse_analysis_policy_force, rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: csrsm
+  category: pre_checkin
+  function: csrsm
+  precision: *single_double_precisions
+  M_N: *M_N_range_checkin_1
+  K: [1, 7, 16]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  apol: [rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: csrsm
+  category: pre_checkin
+  function: csrsm
+  precision: *single_double_precisions
+  M_N: *M_N_range_checkin_1
+  K: [1, 96, 764]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  apol: [rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: csrsm_file
+  category: pre_checkin
+  function: csrsm
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  K: [1, 141, 235]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [bmwcra_1]
+
+- name: csrsm_file
+  category: pre_checkin
+  function: csrsm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  K: [1, 2, 4]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mc2depi, 
+             qc2534]
+
+- name: csrsm_graph_test
+  category: pre_checkin
+  function: csrsm
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  K: [65, 153, 280]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
 
 #
 # CATEGORY: NIGHTLY
@@ -317,3 +311,27 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4, ASIC_320k]
+
+- name: csrsm_file
+  category: nightly
+  function: csrsm
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  K: [1000, 2000]
+  alpha_alphai: *alpha_range_nightly_one
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  apol: [rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]

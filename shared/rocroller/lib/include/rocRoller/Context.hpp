@@ -53,6 +53,7 @@
 #include <rocRoller/KernelGraph/RegisterTagManager_fwd.hpp>
 #include <rocRoller/KernelGraph/ScopeManager_fwd.hpp>
 #include <rocRoller/KernelOptions.hpp>
+#include <rocRoller/Operations/Scratch_fwd.hpp>
 #include <rocRoller/ScheduledInstructions_fwd.hpp>
 #include <rocRoller/Scheduling/Scheduling_fwd.hpp>
 #include <rocRoller/Utilities/Random_fwd.hpp>
@@ -127,18 +128,23 @@ namespace rocRoller
         void setKernel(AssemblyKernelPtr);
 
         /**
-         * @brief Returns an expression representing how much scratch space is required (in bytes)
+         * @brief Allocate scratch space for the specified scratch policy.
          *
-         * @return Expression::ExpressionPtr
+         * @param policy The scratch policy to allocate for
+         * @param size Number of bytes requested
+         * @return Expression::ExpressionPtr The offset before this allocation
          */
-        Expression::ExpressionPtr getScratchAmount() const;
+        Expression::ExpressionPtr allocateScratch(Operations::ScratchPolicy policy,
+                                                  Expression::ExpressionPtr size);
 
         /**
-         * @brief Allocate more scratch space
+         * @brief Returns an expression representing how much scratch space is required (in bytes)
+         *        for the specified scratch policy.
          *
-         * @param size Number of bytes requested
+         * @param policy The scratch policy to query
+         * @return Expression::ExpressionPtr
          */
-        void allocateScratch(Expression::ExpressionPtr size);
+        Expression::ExpressionPtr getScratchAmount(Operations::ScratchPolicy policy) const;
 
         /**
          * @brief Get register scope manager.
@@ -168,14 +174,15 @@ namespace rocRoller
         std::array<std::shared_ptr<Register::Allocator>, static_cast<size_t>(Register::Type::Count)>
             m_allocators;
 
-        std::shared_ptr<Scheduling::IObserver>     m_observer;
-        AssemblyKernelPtr                          m_kernel;
-        std::shared_ptr<ArgumentLoader>            m_argLoader;
-        std::shared_ptr<ScheduledInstructions>     m_instructions;
-        std::shared_ptr<MemoryInstructions>        m_mem;
-        LabelAllocatorPtr                          m_labelAllocator;
-        std::shared_ptr<LDSAllocator>              m_ldsAllocator;
-        Expression::ExpressionPtr                  m_scratchAllocator;
+        std::shared_ptr<Scheduling::IObserver> m_observer;
+        AssemblyKernelPtr                      m_kernel;
+        std::shared_ptr<ArgumentLoader>        m_argLoader;
+        std::shared_ptr<ScheduledInstructions> m_instructions;
+        std::shared_ptr<MemoryInstructions>    m_mem;
+        LabelAllocatorPtr                      m_labelAllocator;
+        std::shared_ptr<LDSAllocator>          m_ldsAllocator;
+        std::array<Expression::ExpressionPtr, static_cast<size_t>(Operations::ScratchPolicy::Count)>
+                                                   m_scratchSizes;
         std::shared_ptr<CopyGenerator>             m_copier;
         std::shared_ptr<BranchGenerator>           m_brancher;
         std::shared_ptr<CrashKernelGenerator>      m_crasher;

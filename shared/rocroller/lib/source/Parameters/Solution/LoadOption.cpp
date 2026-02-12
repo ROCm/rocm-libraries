@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,15 +44,33 @@ namespace rocRoller
                     return MemoryType::WAVE_LDS;
                 case LoadPath::BufferToLDS:
                     return MemoryType::WAVE_Direct2LDS;
+                case LoadPath::GlobalToVGPR:
+                    return MemoryType::WAVE_FROM_GLOBAL;
+                case LoadPath::GlobalToLDSViaVGPR:
+                    return MemoryType::WAVE_LDS_FROM_GLOBAL;
                 case LoadPath::Count:
-                    Throw<FatalError>(fmt::format("No valid MemoryType available for LDS mode {}\n",
-                                                  toString(mode)));
+                    Throw<FatalError>(
+                        fmt::format("No valid MemoryType available for mode {}\n", toString(mode)));
                 }
             }
 
             bool IsBufferToLDS(LoadPath const& mode)
             {
                 return mode == LoadPath::BufferToLDS;
+            }
+
+            bool IsPathToLDS(LoadPath const& mode)
+            {
+                switch(mode)
+                {
+                case LoadPath::BufferToLDSViaVGPR:
+                case LoadPath::BufferToLDS:
+                case LoadPath::GlobalToLDSViaVGPR:
+                    return true;
+                default:
+                    break;
+                }
+                return false;
             }
 
             std::string toString(LoadPath mode)
@@ -65,6 +83,10 @@ namespace rocRoller
                     return "BufferToLDSViaVGPR";
                 case LoadPath::BufferToLDS:
                     return "BufferToLDS";
+                case LoadPath::GlobalToVGPR:
+                    return "GlobalToVGPR";
+                case LoadPath::GlobalToLDSViaVGPR:
+                    return "GlobalToLDSViaVGPR";
                 default:
                     break;
                 }
@@ -75,6 +97,7 @@ namespace rocRoller
             {
                 return stream << toString(mode);
             }
+
         } // namespace Solution
     } // namespace Parameters
 } // namespace rocRoller

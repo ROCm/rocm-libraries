@@ -133,6 +133,18 @@ namespace rocRoller
 
                 ExpressionPtr ret = lhs | rhs;
                 setComment(ret, expr.comment);
+
+                // Keep lowered expression type consistent with the original type
+                // Otherwise, a Raw32 expr may become a UInt32 when lowered
+                auto exprType = resultVariableType(expr);
+                auto retType  = resultVariableType(ret);
+                if(retType != exprType)
+                {
+                    AssertFatal(exprType.getElementSize() == retType.getElementSize(),
+                                "Expression type size mismatch after lowering BitfieldCombine");
+                    ret = reinterpret(exprType.dataType, ret);
+                }
+
                 return ret;
             }
 

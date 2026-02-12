@@ -4,13 +4,11 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_sdk/data_objects/batchnorm_inference_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class BatchnormInferenceAttributes : public Attributes<BatchnormInferenceAttributes>
 {
@@ -126,68 +124,37 @@ public:
         return setOutput(OutputNames::Y, std::move(value));
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto mean = get_mean();
         auto invVariance = get_inv_variance();
 
-        return hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(builder,
-                                                                            get_x()->get_uid(),
-                                                                            mean->get_uid(),
-                                                                            invVariance->get_uid(),
-                                                                            get_scale()->get_uid(),
-                                                                            get_bias()->get_uid(),
-                                                                            get_y()->get_uid());
+        return hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+            builder,
+            get_x()->get_uid(),
+            mean->get_uid(),
+            invVariance->get_uid(),
+            get_scale()->get_uid(),
+            get_bias()->get_uid(),
+            get_y()->get_uid());
     }
 
-private:
-    std::shared_ptr<TensorAttributes> getInput(InputNames name) const
+    static BatchnormInferenceAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
     {
-        auto it = inputs.find(name);
-        if(it != inputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
+        BatchnormInferenceAttributes attr;
 
-    std::shared_ptr<TensorAttributes> getOutput(OutputNames name) const
-    {
-        auto it = outputs.find(name);
-        if(it != outputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
+        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
+        attr.set_mean(tensorMap.at(fb->mean_tensor_uid()));
+        attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid()));
+        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
+        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
+        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
 
-    BatchnormInferenceAttributes& setInput(InputNames name,
-                                           const std::shared_ptr<TensorAttributes>& value)
-    {
-        inputs[name] = value;
-        return *this;
-    }
-    BatchnormInferenceAttributes& setInput(InputNames name,
-                                           std::shared_ptr<TensorAttributes>&& value)
-    {
-        inputs[name] = std::move(value);
-        return *this;
-    }
-
-    BatchnormInferenceAttributes& setOutput(OutputNames name,
-                                            const std::shared_ptr<TensorAttributes>& value)
-    {
-        outputs[name] = value;
-        return *this;
-    }
-    BatchnormInferenceAttributes& setOutput(OutputNames name,
-                                            std::shared_ptr<TensorAttributes>&& value)
-    {
-        outputs[name] = std::move(value);
-        return *this;
+        return attr;
     }
 };
 typedef BatchnormInferenceAttributes Batchnorm_inference_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

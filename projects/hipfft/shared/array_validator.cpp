@@ -197,10 +197,10 @@ bool valid_length_stride_3d(const std::vector<size_t>& l,
     {
         if(!valid_length_stride_1d_multi(idx, l, s, verbose))
         {
+            invalid = true;
 #ifdef _OPENMP
 #pragma omp cancel for
 #endif
-            invalid = true;
         }
     }
     if(invalid)
@@ -236,10 +236,10 @@ bool valid_length_stride_4d(const std::vector<size_t>& l,
     {
         if(!valid_length_stride_1d_multi(idx0, l, s, verbose))
         {
+            invalid = true;
 #ifdef _OPENMP
 #pragma omp cancel for
 #endif
-            invalid = true;
         }
     }
     if(invalid)
@@ -324,10 +324,10 @@ bool valid_length_stride_4d(const std::vector<size_t>& l,
 
         if(!valid_length_stride_multi_multi(l0, s0, l1, s1))
         {
+            invalid = true;
 #ifdef _OPENMP
 #pragma omp cancel for
 #endif
-            invalid = true;
         }
     }
     if(invalid)
@@ -455,10 +455,10 @@ bool valid_length_stride_generald(const std::vector<size_t> l,
 
             if(!valid_length_stride_multi_multi(l0, s0, l1, s1))
             {
+                invalid = true;
 #ifdef _OPENMP
 #pragma omp cancel for
 #endif
-                invalid = true;
             }
         }
         if(invalid)

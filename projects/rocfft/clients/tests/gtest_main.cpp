@@ -261,10 +261,14 @@ void precompile_test_kernels(const std::string& precompile_file)
 
                     params_forward.free();
 
-                    rocfft_params params_inverse;
-                    params_inverse.inverse_from_forward(params_forward);
-                    params_inverse.validate();
-                    params_inverse.setup_structs();
+                    // some adhoc tokens might be inverse already
+                    if(params_forward.is_forward())
+                    {
+                        rocfft_params params_inverse;
+                        params_inverse.inverse_from_forward(params_forward);
+                        params_inverse.validate();
+                        params_inverse.setup_structs();
+                    }
                 }
                 catch(std::exception& e)
                 {
@@ -417,8 +421,11 @@ int main(int argc, char* argv[])
         ->check(CLI::NonNegativeNumber);
     app.add_option("--mp_launch",
                    mp_launch,
-                   "Command line prefix to launch multi-process transforms, e.g. \"mpirun --np 4 "
-                   "/path/to/rocfft_mpi_worker\"")
+                   "Command line prefix to launch multi-process transforms, e.g. \n"
+                   "\"mpirun --np 4 /path/to/rocfft_mpi_worker\"\n"
+                   "NOTE: embedded quotes must be used for all command arguments that contain "
+                   "space character(s). For instance,\n"
+                   "\"mpirun --np 4 \\\"/path with spaces/to/rocfft_mpi_worker\\\"\"")
         ->default_val("")
         ->each([&](const std::string&) {
             if(mp_lib == fft_params::fft_mp_lib_none)
@@ -857,17 +864,21 @@ TEST(manual, bitwise_reproducibility) // MANUAL TESTS HERE
     {
         bitwise_repro(params);
     }
-    catch(std::bad_alloc&)
+    catch(const std::bad_alloc&)
     {
         GTEST_SKIP() << "host memory allocation failure";
     }
-    catch(ROCFFT_SKIP& e)
+    catch(const ROCFFT_SKIP& e)
     {
         GTEST_SKIP() << e.what();
     }
-    catch(ROCFFT_FAIL& e)
+    catch(const ROCFFT_FAIL& e)
     {
         GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
     SUCCEED();
 }

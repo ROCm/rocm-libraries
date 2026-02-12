@@ -10,6 +10,7 @@
 #include "HipdnnException.hpp"
 #include "ScopedDescriptor.hpp"
 #include "handle/Handle.hpp"
+#include "utilities/EngineOrdering.hpp"
 
 namespace hipdnn_backend
 {
@@ -31,9 +32,12 @@ void EngineHeuristicDescriptor::finalize()
     auto handle = _graph->getHandle();
     auto pluginResourceManager = handle->getPluginResourceManager();
 
-    // TODO - For now we are going to return the engine IDs we get from the plugin resource manager.
-    // In the future, we will need to implement a plugin system for engine heuristics that allows plugins to determine sort order of the returned engines.
     _engineIds = pluginResourceManager->getApplicableEngineIds(_graph.get());
+
+    // Sort engine IDs to prioritize MIOPEN_ENGINE and deprioritize MIOPEN_ENGINE_DETERMINISTIC
+    // In the future, we will need to implement a plugin system for engine heuristics that allows
+    // plugins to determine sort order of the returned engines.
+    utilities::sortEngineIds(_engineIds);
 
     HipdnnBackendDescriptorImpl<EngineHeuristicDescriptor>::finalize();
 }
@@ -285,6 +289,16 @@ std::shared_ptr<const GraphDescriptor> EngineHeuristicDescriptor::getGraph() con
 hipdnnBackendDescriptorType_t EngineHeuristicDescriptor::getStaticType()
 {
     return HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR;
+}
+
+std::string EngineHeuristicDescriptor::toString() const
+{
+    std::string str = "EngineHeuristicDescriptor: {heuristicMode=";
+    str += _heuristicModeSet ? std::to_string(_heuristicMode) : "unset";
+    str += _graph ? ", graph=" + fmt::format("{:p}", static_cast<const void*>(_graph.get()))
+                  : ", graph=null";
+    str += "}";
+    return str;
 }
 
 } // namespace hipdnn_backend

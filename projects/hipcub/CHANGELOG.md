@@ -2,6 +2,26 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-4.3.0 for ROCm 8.0
+
+### Added
+
+* Added `generate_resource_spec.cpp` to the test directory. It is now built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
+
+### Changed
+
+* Updated the documentation on how to run hipCUB tests on multiple GPUs in parallel.
+
+### Removed
+
+* Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code mentioned above.
+
+## hipCUB-4.2.0 for ROCm 7.2
+ 
+### Resolved issues
+ 
+* Fixed memory leak issues with some unit tests.
+
 ## hipCUB-4.1.0 for ROCm 7.1
 
 ### Added

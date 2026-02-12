@@ -3,21 +3,22 @@
 
 include(CMakePackageConfigHelpers)
 
+# Read data_sdk version for minimum requirement
+hipdnn_get_data_sdk_version(HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION)
+
 set(HIP_DNN_FRONTEND_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 add_subdirectory(tests)
 
 add_library(hipdnn_frontend INTERFACE)
 
-target_compile_definitions(hipdnn_frontend INTERFACE COMPONENT_NAME="hipdnn_frontend")
-
-target_link_libraries(hipdnn_frontend INTERFACE hipdnn_sdk hipdnn_backend)
+target_link_libraries(hipdnn_frontend INTERFACE hipdnn_data_sdk hipdnn_backend)
 
 set(HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/frontend")
 
-target_include_directories(hipdnn_frontend INTERFACE
-    $<BUILD_INTERFACE:${HIP_DNN_FRONTEND_INCLUDE_DIR}>
-    $<INSTALL_INTERFACE:${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}>
+target_include_directories(
+    hipdnn_frontend INTERFACE $<BUILD_INTERFACE:${HIP_DNN_FRONTEND_INCLUDE_DIR}>
+                              $<INSTALL_INTERFACE:${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}>
 )
 
 # Generate the config file from template
@@ -32,28 +33,25 @@ export(
     FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend/hipdnn_frontendTargets.cmake"
 )
 
-install( 
-    TARGETS hipdnn_frontend
-    EXPORT hipdnn_frontend_targets
-    COMPONENT Development
-)
+install(TARGETS hipdnn_frontend EXPORT hipdnn_frontend_targets COMPONENT Development)
 
+# cmake-lint: disable=E1122
 install(
     DIRECTORY ${HIP_DNN_FRONTEND_INCLUDE_DIR}/
     DESTINATION ${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}
     COMPONENT Development
-    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+    FILES_MATCHING
+    PATTERN "*.h"
+    PATTERN "*.hpp"
+)
+
+install(EXPORT hipdnn_frontend_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend
+        FILE hipdnn_frontendTargets.cmake COMPONENT Development
 )
 
 install(
-    EXPORT hipdnn_frontend_targets
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend
-    FILE hipdnn_frontendTargets.cmake
-    COMPONENT Development
-)
-
-install(
-    FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
+    FILES
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend
     COMPONENT Development
 )

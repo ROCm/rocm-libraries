@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,11 @@ TEST_ROUTINE(bsrsm2,
              arg.block_dim,
              arg.alpha,
              arg.alphai,
+             arg.diag_type,
+             arg.fill_mode,
+             arg.solve_policy,
              arg.transA,
              arg.transB,
              arg.dirA,
-             arg.baseA);
+             arg.baseA,
+             arg.graph_test);

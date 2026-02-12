@@ -153,8 +153,11 @@ namespace rocRoller
              *
              * @param size How many elements make up the User dimension.
              * @param offset Location of data within the scratch space
+             * @param argName Name of the argument for this scratch space
              */
-            User(Expression::ExpressionPtr size, Expression::ExpressionPtr offset);
+            User(Expression::ExpressionPtr size,
+                 Expression::ExpressionPtr offset,
+                 std::string const&        argName);
 
             std::string name() const override;
         };

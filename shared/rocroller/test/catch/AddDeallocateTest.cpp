@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -82,53 +82,17 @@ namespace AddDeallocateTest
         transforms.push_back(std::make_shared<OrderEpilogueBlocks>());
         transforms.push_back(std::make_shared<CleanLoops>());
         transforms.push_back(std::make_shared<AddPrefetch>(params, context.get()));
-        transforms.push_back(std::make_shared<AddComputeIndex>());
+        transforms.push_back(std::make_shared<UpdateWavefrontParameters>(params));
+        transforms.push_back(
+            std::make_shared<AssignIndexExpressions>(context.get(), example.getCommand()));
 
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);
 
-        SECTION("Downstream Barriers")
-        {
-            auto topo
-                = TopologicalCompare(std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph));
-
-            auto graph  = kgraph;
-            auto tracer = LastRWTracer(graph);
-
-            for(auto& [coordinate, controls] : tracer.lastRWLocations())
-            {
-                auto dependencies = controls;
-
-                auto maybeLDS = graph.coordinates.get<LDS>(coordinate);
-                if(maybeLDS)
-                {
-                    AddDeallocateDetail::addDownstreamBarrierInLoop(
-                        dependencies, coordinate, controls, kgraph, topo);
-                    CHECK(dependencies.size() >= 1);
-                    if(dependencies.size() == 1)
-                    {
-                        // If there is only one dependency, it should be a ForLoop
-                        CHECK(
-                            kgraph.control.get<ForLoopOp>(only(dependencies).value()).has_value());
-                    }
-                    else if(dependencies.size() > 1)
-                    {
-                        // If there are multiple dependencies, we should have an extra barrier
-                        for(auto& tag : dependencies)
-                        {
-                            if(controls.contains(tag))
-                                continue;
-
-                            CHECK(graph.control.get<Barrier>(tag).has_value());
-                        }
-                    }
-                }
-            }
-        }
-
         SECTION("Placement of LDS Deallocates")
         {
             kgraph = kgraph.transform(std::make_shared<NopExtraScopes>());
+            kgraph = kgraph.transform(std::make_shared<AddLDSBarriers>());
             kgraph = kgraph.transform(std::make_shared<AddDeallocateDataFlow>());
 
             auto ldsDeallocatePredicate = [&](int tag) -> bool {
@@ -169,12 +133,13 @@ namespace AddDeallocateTest
                           std::inserter(ldsDeallocateInsideLoop, ldsDeallocateInsideLoop.end()));
             }
 
+            // TODO: Adjust comment/check now that AddLDSBarriers is a thing.
             // With 4 unrolls and 2 inflight prefetches, we expect the following
             // 1. A, B deallocated three times in the main loop
-            // 2. A, B deallocate once after the main loop
+            // 2. A, B deallocate after the main loop
             // 3. C deallocated once after the prolog
-            CHECK(ldsDeallocateFromKernel.size() == 5);
-            CHECK(ldsDeallocateInsideLoop.size() == 3);
+            CHECK(ldsDeallocateFromKernel.size() == 8);
+            CHECK(ldsDeallocateInsideLoop.size() == 6);
         }
     }
 

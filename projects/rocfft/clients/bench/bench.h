@@ -175,7 +175,7 @@ void alloc_bench_bricks(const Tparams&                            params,
         {
             rocfft_scoped_device dev(b.device);
 
-            size_t brick_size_bytes = compute_ptrdiff(b.length(), b.stride, 0, 0) * elem_size;
+            size_t brick_size_bytes = compute_ptrdiff(b.length(), b.stride) * elem_size;
             output.emplace_back();
             if(output.back().alloc(brick_size_bytes) != hipSuccess)
                 throw std::runtime_error("hipMalloc failed");
@@ -207,9 +207,9 @@ void alloc_bench_bricks(const Tparams&                            params,
                 "in-place transform to different brick shapes only allowed for single bricks");
 
         // allocate the larger of the two bricks
-        auto isize_bytes = compute_ptrdiff(ibricks.front().length(), ibricks.front().stride, 0, 0)
+        auto isize_bytes = compute_ptrdiff(ibricks.front().length(), ibricks.front().stride)
                            * var_size<size_t>(params.precision, params.itype);
-        auto osize_bytes = compute_ptrdiff(obricks.front().length(), obricks.front().stride, 0, 0)
+        auto osize_bytes = compute_ptrdiff(obricks.front().length(), obricks.front().stride)
                            * var_size<size_t>(params.precision, params.otype);
 
         alloc_buffers(isize_bytes > osize_bytes ? ibricks : obricks,

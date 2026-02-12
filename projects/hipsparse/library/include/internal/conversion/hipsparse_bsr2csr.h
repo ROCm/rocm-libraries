@@ -112,9 +112,6 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrC, \p bsrValA,
 *          \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC or \p csrColIndC is nullptr,
 *          \p mb or \p nb is negative, or \p blockDim is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_bsr2csr.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

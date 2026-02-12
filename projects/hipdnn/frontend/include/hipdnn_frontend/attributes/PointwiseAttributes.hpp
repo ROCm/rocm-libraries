@@ -4,15 +4,13 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
+#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
-#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
 #include <memory>
 #include <optional>
 #include <unordered_map>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class PointwiseAttributes : public Attributes<PointwiseAttributes>
 {
@@ -129,50 +127,42 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_input_0(const std::shared_ptr<TensorAttributes>& input0)
     {
-        inputs[InputNames::IN_0] = input0;
-        return *this;
+        return setInput(InputNames::IN_0, input0);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_input_0(std::shared_ptr<TensorAttributes>&& input0)
     {
-        inputs[InputNames::IN_0] = std::move(input0);
-        return *this;
+        return setInput(InputNames::IN_0, std::move(input0));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_input_1(const std::shared_ptr<TensorAttributes>& input1)
     {
-        inputs[InputNames::IN_1] = input1;
-        return *this;
+        return setInput(InputNames::IN_1, input1);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_input_1(std::shared_ptr<TensorAttributes>&& input1)
     {
-        inputs[InputNames::IN_1] = std::move(input1);
-        return *this;
+        return setInput(InputNames::IN_1, std::move(input1));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_input_2(const std::shared_ptr<TensorAttributes>& input2)
     {
-        inputs[InputNames::IN_2] = input2;
-        return *this;
+        return setInput(InputNames::IN_2, input2);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_input_2(std::shared_ptr<TensorAttributes>&& input2)
     {
-        inputs[InputNames::IN_2] = std::move(input2);
-        return *this;
+        return setInput(InputNames::IN_2, std::move(input2));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_output_0(const std::shared_ptr<TensorAttributes>& output0)
     {
-        outputs[OutputNames::OUT_0] = output0;
-        return *this;
+        return setOutput(OutputNames::OUT_0, output0);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_output_0(std::shared_ptr<TensorAttributes>&& output0)
     {
-        outputs[OutputNames::OUT_0] = std::move(output0);
-        return *this;
+        return setOutput(OutputNames::OUT_0, std::move(output0));
     }
 
     enum class InputNames
@@ -203,7 +193,7 @@ public:
     std::optional<float> softplus_beta = std::nullopt;
     // NOLINTEND(readability-identifier-naming)
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::PointwiseAttributes>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::PointwiseAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto in0 = get_input_0();
@@ -211,7 +201,7 @@ public:
         auto in2 = get_input_2();
         auto ot0 = get_output_0();
 
-        return hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+        return hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
             builder,
             toSdkType(mode),
             relu_lower_clip,
@@ -227,26 +217,57 @@ public:
             softplus_beta);
     }
 
-private:
-    std::shared_ptr<TensorAttributes> getInput(InputNames name) const
+    static PointwiseAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::PointwiseAttributes* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
     {
-        auto it = inputs.find(name);
-        if(it != inputs.end())
+        PointwiseAttributes attr;
+
+        attr.set_mode(fromSdkType(fb->operation()));
+
+        if(fb->relu_lower_clip().has_value())
         {
-            return it->second;
+            attr.set_relu_lower_clip(fb->relu_lower_clip().value());
         }
-        return nullptr;
-    }
-    std::shared_ptr<TensorAttributes> getOutput(OutputNames name) const
-    {
-        auto it = outputs.find(name);
-        if(it != outputs.end())
+        if(fb->relu_upper_clip().has_value())
         {
-            return it->second;
+            attr.set_relu_upper_clip(fb->relu_upper_clip().value());
         }
-        return nullptr;
+        if(fb->relu_lower_clip_slope().has_value())
+        {
+            attr.set_relu_lower_clip_slope(fb->relu_lower_clip_slope().value());
+        }
+        if(fb->swish_beta().has_value())
+        {
+            attr.set_swish_beta(fb->swish_beta().value());
+        }
+        if(fb->elu_alpha().has_value())
+        {
+            attr.set_elu_alpha(fb->elu_alpha().value());
+        }
+        if(fb->softplus_beta().has_value())
+        {
+            attr.set_softplus_beta(fb->softplus_beta().value());
+        }
+        if(fb->axis_tensor_uid().has_value())
+        {
+            attr.set_axis(fb->axis_tensor_uid().value());
+        }
+
+        attr.set_input_0(tensorMap.at(fb->in_0_tensor_uid()));
+        if(fb->in_1_tensor_uid().has_value())
+        {
+            attr.set_input_1(tensorMap.at(fb->in_1_tensor_uid().value()));
+        }
+        if(fb->in_2_tensor_uid().has_value())
+        {
+            attr.set_input_2(tensorMap.at(fb->in_2_tensor_uid().value()));
+        }
+
+        attr.set_output_0(tensorMap.at(fb->out_0_tensor_uid()));
+
+        return attr;
     }
 };
 typedef PointwiseAttributes Pointwise_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

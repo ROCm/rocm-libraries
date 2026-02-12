@@ -290,13 +290,15 @@ hipError_t search_impl(void*          temporary_storage,
     using key_type    = typename std::iterator_traits<InputIterator2>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
 
-    using config = wrapped_search_config<Config, input_type>;
+    using selector = search_config_selector<input_type>;
 
     target_arch target_arch;
     ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+    gpu target_gpu;
+    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+    const target current_target(target_arch, target_gpu);
 
-    const search_config_params params = dispatch_target_arch<config, false>(target_arch);
-
+    const auto         params           = get_config<selector>(Config{}, current_target);
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
     const unsigned int items_per_block  = block_size * items_per_thread;
@@ -349,12 +351,12 @@ hipError_t search_impl(void*          temporary_storage,
                                                                      keys_size,
                                                                      compare_function);
                 };
-                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                                    search_shared_kernel,
-                                                                    num_blocks,
-                                                                    block_size,
-                                                                    0,
-                                                                    stream));
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, selector>(current_target,
+                                                                              search_shared_kernel,
+                                                                              num_blocks,
+                                                                              block_size,
+                                                                              0,
+                                                                              stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_kernel_shared", size, start);
             }
             else
@@ -370,12 +372,12 @@ hipError_t search_impl(void*          temporary_storage,
                         keys_size,
                         compare_function);
                 };
-                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                                    search_shared_kernel,
-                                                                    num_blocks,
-                                                                    block_size,
-                                                                    0,
-                                                                    stream));
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, selector>(current_target,
+                                                                              search_shared_kernel,
+                                                                              num_blocks,
+                                                                              block_size,
+                                                                              0,
+                                                                              stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_kernel_shared", size, start);
             }
         }
@@ -393,12 +395,12 @@ hipError_t search_impl(void*          temporary_storage,
                                                               keys_size,
                                                               compare_function);
                 };
-                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                                    search_kernel,
-                                                                    num_blocks,
-                                                                    block_size,
-                                                                    0,
-                                                                    stream));
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, selector>(current_target,
+                                                                              search_kernel,
+                                                                              num_blocks,
+                                                                              block_size,
+                                                                              0,
+                                                                              stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_kernel", size, start);
             }
             else
@@ -414,12 +416,12 @@ hipError_t search_impl(void*          temporary_storage,
                         keys_size,
                         compare_function);
                 };
-                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                                    search_kernel,
-                                                                    num_blocks,
-                                                                    block_size,
-                                                                    0,
-                                                                    stream));
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, selector>(current_target,
+                                                                              search_kernel,
+                                                                              num_blocks,
+                                                                              block_size,
+                                                                              0,
+                                                                              stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_kernel", size, start);
             }
         }

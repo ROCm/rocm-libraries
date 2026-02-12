@@ -26,6 +26,20 @@ enum class ErrorCode
     ATTRIBUTE_NOT_SET
 };
 
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline std::string to_string(ErrorCode code)
+{
+    static std::vector<std::string> s_errorCodes{
+        "OK", "INVALID_VALUE", "HIPDNN_BACKEND_ERROR", "ATTRIBUTE_NOT_SET"};
+
+    return s_errorCodes[static_cast<size_t>(code)];
+}
+
+inline std::ostream& operator<<(std::ostream& os, const ErrorCode& error)
+{
+    return os << to_string(error);
+}
+
 typedef ErrorCode error_code_t; // NOLINT(readability-identifier-naming)
 
 struct Error
@@ -81,42 +95,83 @@ struct Error
     }
 };
 
+inline std::ostream& operator<<(std::ostream& os, const Error& error)
+{
+    return os << "{" << error.code << ", " << error.get_message() << "}";
+}
+
 typedef Error error_object; // NOLINT(readability-identifier-naming)
 typedef Error error_t; // NOLINT(readability-identifier-naming)
 
 #define HIPDNN_RETURN_IF_NE(x, y, error_status, message) \
-    if(x != y)                                           \
+    do                                                   \
     {                                                    \
-        return {error_status, message};                  \
-    }
+        if(x != y)                                       \
+        {                                                \
+            return {error_status, message};              \
+        }                                                \
+    } while(0)
 
 #define HIPDNN_RETURN_IF_EQ(x, y, error_status, message) \
-    if(x == y)                                           \
+    do                                                   \
     {                                                    \
-        return {error_status, message};                  \
-    }
+        if(x == y)                                       \
+        {                                                \
+            return {error_status, message};              \
+        }                                                \
+    } while(0)
 
 #define HIPDNN_RETURN_IF_TRUE(x, error_status, message) \
-    if(x)                                               \
+    do                                                  \
     {                                                   \
-        return {error_status, message};                 \
-    }
+        if(x)                                           \
+        {                                               \
+            return {error_status, message};             \
+        }                                               \
+    } while(0)
 
 #define HIPDNN_RETURN_IF_FALSE(x, error_status, message) \
-    if(!(x))                                             \
+    do                                                   \
     {                                                    \
-        return {error_status, message};                  \
-    }
+        if(!(x))                                         \
+        {                                                \
+            return {error_status, message};              \
+        }                                                \
+    } while(0)
 
 #define HIPDNN_RETURN_IF_NULL(x, error_status, message) \
-    if(x == nullptr)                                    \
+    do                                                  \
     {                                                   \
-        return {error_status, message};                 \
-    }
+        if(x == nullptr)                                \
+        {                                               \
+            return {error_status, message};             \
+        }                                               \
+    } while(0)
 
 #define HIPDNN_RETURN_IF_LT(x, y, error_status, message) \
-    if(x < y)                                            \
+    do                                                   \
     {                                                    \
-        return {error_status, message};                  \
-    }
+        if(x < y)                                        \
+        {                                                \
+            return {error_status, message};              \
+        }                                                \
+    } while(0)
+
+#define HIPDNN_RETURN_IF_GE(x, y, error_status, message) \
+    do                                                   \
+    {                                                    \
+        if(x >= y)                                       \
+        {                                                \
+            return {error_status, message};              \
+        }                                                \
+    } while(0)
+
+#define HIPDNN_RETURN_IF_LE(x, y, error_status, message) \
+    do                                                   \
+    {                                                    \
+        if(x <= y)                                       \
+        {                                                \
+            return {error_status, message};              \
+        }                                                \
+    } while(0)
 }

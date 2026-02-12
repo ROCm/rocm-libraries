@@ -39,6 +39,13 @@
 #include <type_traits>
 #include <vector>
 
+enum class TestBlockDiscontinuityMethod
+{
+    HEADS           = 0,
+    TAILS           = 1,
+    HEADS_AND_TAILS = 2
+};
+
 template<class T>
 struct custom_flag_op1
 {
@@ -198,16 +205,14 @@ void flag_heads_and_tails_kernel(Type* device_input, FlagType* device_heads, Fla
     rocprim::block_store_direct_blocked(lid, device_tails + block_offset, tail_flags);
 }
 
-template<
-    class Type,
-    class FlagType,
-    class FlagOpType,
-    unsigned int Method,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
->
-auto test_block_discontinuity()
--> typename std::enable_if<Method == 0>::type
+template<class Type,
+         class FlagType,
+         class FlagOpType,
+         TestBlockDiscontinuityMethod Method,
+         unsigned int                 BlockSize,
+         unsigned int                 ItemsPerThread>
+auto test_block_discontinuity() ->
+    typename std::enable_if<Method == TestBlockDiscontinuityMethod::HEADS>::type
 {
     using type                               = Type;
     using flag_type = FlagType;
@@ -284,16 +289,14 @@ auto test_block_discontinuity()
     }
 }
 
-template<
-    class Type,
-    class FlagType,
-    class FlagOpType,
-    unsigned int Method,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
->
-auto test_block_discontinuity()
--> typename std::enable_if<Method == 1>::type
+template<class Type,
+         class FlagType,
+         class FlagOpType,
+         TestBlockDiscontinuityMethod Method,
+         unsigned int                 BlockSize,
+         unsigned int                 ItemsPerThread>
+auto test_block_discontinuity() ->
+    typename std::enable_if<Method == TestBlockDiscontinuityMethod::TAILS>::type
 {
     using type                               = Type;
     using flag_type = FlagType;
@@ -369,16 +372,14 @@ auto test_block_discontinuity()
     }
 }
 
-template<
-    class Type,
-    class FlagType,
-    class FlagOpType,
-    unsigned int Method,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
->
-auto test_block_discontinuity()
--> typename std::enable_if<Method == 2>::type
+template<class Type,
+         class FlagType,
+         class FlagOpType,
+         TestBlockDiscontinuityMethod Method,
+         unsigned int                 BlockSize,
+         unsigned int                 ItemsPerThread>
+auto test_block_discontinuity() ->
+    typename std::enable_if<Method == TestBlockDiscontinuityMethod::HEADS_AND_TAILS>::type
 {
     using type                               = Type;
     using flag_type = FlagType;
@@ -477,15 +478,13 @@ auto test_block_discontinuity()
 }
 
 // Static for-loop
-template <
-    unsigned int First,
-    unsigned int Last,
-    class Type,
-    class FlagType,
-    class FlagOpType,
-    unsigned int Method,
-    unsigned int BlockSize = 256U
->
+template<unsigned int First,
+         unsigned int Last,
+         class Type,
+         class FlagType,
+         class FlagOpType,
+         TestBlockDiscontinuityMethod Method,
+         unsigned int                 BlockSize = 256U>
 struct static_for
 {
     static void run()
@@ -502,14 +501,12 @@ struct static_for
     }
 };
 
-template <
-    unsigned int N,
-    class Type,
-    class FlagType,
-    class FlagOpType,
-    unsigned int Method,
-    unsigned int BlockSize
->
+template<unsigned int N,
+         class Type,
+         class FlagType,
+         class FlagOpType,
+         TestBlockDiscontinuityMethod Method,
+         unsigned int                 BlockSize>
 struct static_for<N, N, Type, FlagType, FlagOpType, Method, BlockSize>
 {
     static void run()

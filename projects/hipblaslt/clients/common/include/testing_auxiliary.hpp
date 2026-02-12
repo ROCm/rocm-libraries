@@ -1032,6 +1032,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     CHECK_HIP_ERROR(hipFree(d_scale_b));
     CHECK_HIP_ERROR(hipFree(d_scale_c));
     CHECK_HIP_ERROR(hipFree(d_scale_d));
+    CHECK_HIP_ERROR(hipFree(d_scale_e));
     CHECK_HIP_ERROR(hipFree(d_aux_buffer));
     CHECK_HIP_ERROR(hipFree(d_out_amax));
     CHECK_HIP_ERROR(hipFree(default_ptr));
@@ -1618,6 +1619,7 @@ void testing_aux_matmul_bad_ws_size(const Arguments& arg)
     CHECK_HIP_ERROR(hipFree(d_b));
     CHECK_HIP_ERROR(hipFree(d_c));
     CHECK_HIP_ERROR(hipFree(d_d));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB));
@@ -1791,7 +1793,8 @@ void testing_aux_auxiliary_func(const Arguments& arg)
                 == HIPBLASLT_EPILOGUE_GELU_AUX);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU_AUX_BIAS")
                 == HIPBLASLT_EPILOGUE_GELU_AUX_BIAS);
-    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SIGMOID") == HIPBLASLT_EPILOGUE_SIGMOID);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SIGMOID")
+                == HIPBLASLT_EPILOGUE_SIGMOID);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU") == HIPBLASLT_EPILOGUE_DGELU);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU_BGRAD")
                 == HIPBLASLT_EPILOGUE_DGELU_BGRAD);
@@ -3220,10 +3223,6 @@ void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
                                         scaleAlphaVec,
                                         matmul_descr->scaleAType,
                                         matmul_descr->scaleBType,
-                                        1, // scaleABlockRowSize
-                                        1, // scaleABlockColSize
-                                        1, // scaleBBlockRowSize
-                                        1, // scaleBBlockColSize
                                         arg.bias_type,
                                         arg.aux_type,
                                         matmul_descr->epilogue,

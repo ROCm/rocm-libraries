@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 
-#include <dataTypeInfo.hpp>
+#include <mxDataGenerator/dataTypeInfo.hpp>
 
 #include <gtest/gtest.h>
 

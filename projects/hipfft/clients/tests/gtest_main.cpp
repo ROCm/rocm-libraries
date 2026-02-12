@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,7 @@
 #include "../../shared/sys_mem.h"
 #include "../../shared/work_queue.h"
 #include "../hipfft_params.h"
+#include "../hipfftw_helper.h"
 #include "hipfft/hipfft.h"
 #include "hipfft_accuracy_test.h"
 
@@ -63,8 +64,10 @@ double complex_planar_prob_factor;
 double callback_prob_factor;
 // Constraints for the hipfftw tests
 size_t      max_length_for_hipfftw_test;
+size_t      max_nbatch_for_hipfftw_test;
 size_t      max_io_gb_for_hipfftw_test;
 size_t      max_num_arg_validation_tests_per_hipfftw_plan_type;
+size_t      max_elementary_stride_for_hipfftw_test;
 std::string hipfftw_token_for_functional_test;
 
 // Transform parameters for manual test:
@@ -158,12 +161,18 @@ void init_gtest_flags()
 void precompile_test_kernels(const std::string& precompile_file)
 {
     std::cout << "precompiling test kernels...\n";
-    WorkQueue<std::string> tokenQueue;
 
     init_gtest_flags();
 
-    std::vector<std::string> tokens;
-    auto                     ut = testing::UnitTest::GetInstance();
+    enum class lib_under_test
+    {
+        HIPFFT,
+        HIPFFTW
+    };
+
+    std::map<lib_under_test, std::vector<std::string>> tokens;
+
+    auto ut = testing::UnitTest::GetInstance();
     for(int ts_index = 0; ts_index < ut->total_test_suite_count(); ++ts_index)
     {
         const auto ts = ut->GetTestSuite(ts_index);
@@ -194,66 +203,97 @@ void precompile_test_kernels(const std::string& precompile_file)
                     continue;
                 name.replace(idx, end - idx, "1");
 
-                tokens.emplace_back(std::move(name));
+                if(name.find("hipfftw") != std::string::npos)
+                    tokens[lib_under_test::HIPFFTW].emplace_back(std::move(name));
+                else
+                    tokens[lib_under_test::HIPFFT].emplace_back(std::move(name));
             }
         }
     }
 
     std::random_device dev;
     std::mt19937       dist(dev());
-    std::shuffle(tokens.begin(), tokens.end(), dist);
-    auto precompile_begin = std::chrono::steady_clock::now();
-    std::cout << "precompiling kernels for " << tokens.size() << " tokens...\n";
-
-    for(auto&& t : tokens)
-        tokenQueue.push(std::move(t));
-
-    EnvironmentSetTemp       env_compile_only{"ROCFFT_INTERNAL_COMPILE_ONLY", "1"};
-    const size_t             NUM_THREADS = rocfft_concurrency();
-    std::vector<std::thread> threads;
-    for(size_t i = 0; i < NUM_THREADS; ++i)
+    auto               precompile_begin = std::chrono::steady_clock::now();
+    std::cout << "precompiling kernels for "
+              << std::accumulate(tokens.begin(),
+                                 tokens.end(),
+                                 static_cast<size_t>(0),
+                                 [](size_t acc, const decltype(tokens)::value_type& tok) {
+                                     return acc + tok.second.size();
+                                 })
+              << " tokens...\n";
+    EnvironmentSetTemp env_compile_only{"ROCFFT_INTERNAL_COMPILE_ONLY", "1"};
+    const size_t       NUM_THREADS = rocfft_concurrency();
+    for(auto& pair : tokens)
     {
-        threads.emplace_back([&tokenQueue]() {
-            for(;;)
-            {
-                std::string token{tokenQueue.pop()};
-                if(token.empty())
-                    break;
+        const auto             lib       = pair.first;
+        auto&                  lib_token = pair.second;
+        WorkQueue<std::string> tokenQueue;
+        std::shuffle(lib_token.begin(), lib_token.end(), dist);
+        for(auto&& t : lib_token)
+            tokenQueue.push(std::move(t));
 
-                try
+        std::vector<std::thread> threads;
+        for(size_t i = 0; i < NUM_THREADS; ++i)
+        {
+            threads.emplace_back([&tokenQueue, lib]() {
+                for(;;)
                 {
-                    hipfft_params params;
-                    params.from_token(token);
-                    params.validate();
-                    params.create_plan();
-                    if(params.is_forward())
+                    std::string token{tokenQueue.pop()};
+                    if(token.empty())
+                        break;
+
+                    try
                     {
-                        hipfft_params inverse_params;
-                        inverse_params.inverse_from_forward(params);
-                        inverse_params.validate();
-                        inverse_params.create_plan();
+                        switch(lib)
+                        {
+                        case(lib_under_test::HIPFFT):
+                        {
+                            hipfft_params params;
+                            params.from_token(token);
+                            params.validate();
+                            params.create_plan();
+                            if(params.is_forward())
+                            {
+                                hipfft_params inverse_params;
+                                inverse_params.inverse_from_forward(params);
+                                inverse_params.validate();
+                                inverse_params.create_plan();
+                            }
+                        }
+                        break;
+                        case(lib_under_test::HIPFFTW):
+                        {
+                            create_hipfftw_plan_from_token_using_temp_io(token, verbose);
+                        }
+                        break;
+                        default:
+                            throw std::runtime_error(
+                                "unexpected lib encountered in precompile_test_kernels");
+                            break;
+                        }
+                    }
+                    catch(fft_params::work_buffer_alloc_failure&)
+                    {
+                        continue;
+                    }
+                    catch(std::exception& e)
+                    {
+                        // failed to create a plan, abort
+                        //
+                        // we could continue on, but the test should just
+                        // fail later anyway in the same way.  so report
+                        // which token failed early and get out
+                        throw std::runtime_error(token + " plan creation failure: " + e.what());
                     }
                 }
-                catch(fft_params::work_buffer_alloc_failure&)
-                {
-                    continue;
-                }
-                catch(std::exception& e)
-                {
-                    // failed to create a plan, abort
-                    //
-                    // we could continue on, but the test should just
-                    // fail later anyway in the same way.  so report
-                    // which token failed early and get out
-                    throw std::runtime_error(token + " plan creation failure: " + e.what());
-                }
-            }
-        });
-        // insert empty tokens to tell threads to stop
-        tokenQueue.push({});
+            });
+            // insert empty tokens to tell threads to stop
+            tokenQueue.push({});
+        }
+        for(auto& t : threads)
+            t.join();
     }
-    for(auto& t : threads)
-        t.join();
 
     auto                                      precompile_end = std::chrono::steady_clock::now();
     std::chrono::duration<double, std::milli> precompile_ms  = precompile_end - precompile_begin;
@@ -265,7 +305,7 @@ int main(int argc, char* argv[])
 {
     CLI::App app{
         "\n"
-        "hipFFT Runtime Test command line options\n"
+        "hipFFT/hipFFTW Runtime Test command line options\n"
         "NB: input parameters are row-major.\n"
         "\n"
         "FFTW accuracy test cases are named using these identifiers:\n"
@@ -318,6 +358,11 @@ int main(int argc, char* argv[])
                    "Maximum length to be considered in hipfftw tests")
         ->default_val(8192)
         ->check(CLI::PositiveNumber);
+    app.add_option("--max_nbatch_for_hipfftw_test",
+                   max_nbatch_for_hipfftw_test,
+                   "Maximum batch size to be considered in hipfftw tests")
+        ->default_val(8192)
+        ->check(CLI::PositiveNumber);
     app.add_option("--max_io_gb_for_hipfftw_test",
                    max_io_gb_for_hipfftw_test,
                    "Maximum size of I/O to be considered in hipfftw tests in GiB")
@@ -329,6 +374,12 @@ int main(int argc, char* argv[])
            max_num_arg_validation_tests_per_hipfftw_plan_type,
            "Maximum number of argument-validation tests per kind of hipfftw plan creation function")
         ->default_val(256)
+        ->check(CLI::PositiveNumber);
+    app.add_option("--max_elementary_stride_for_hipfftw_test",
+                   max_elementary_stride_for_hipfftw_test,
+                   "Maximum (elementary) stride to consider in hipfftw tests for non-packed I/O "
+                   "data layouts")
+        ->default_val(8)
         ->check(CLI::PositiveNumber);
     app.add_option("--hipfftw_token",
                    hipfftw_token_for_functional_test,
@@ -344,8 +395,11 @@ int main(int argc, char* argv[])
         ->check(CLI::NonNegativeNumber);
     app.add_option("--mp_launch",
                    mp_launch,
-                   "Command line prefix to launch multi-process transforms, e.g. \"mpirun --np 4 "
-                   "/path/to/hipfft_mpi_worker\"")
+                   "Command line prefix to launch multi-process transforms, e.g. \n"
+                   "\"mpirun --np 4 /path/to/hipfft_mpi_worker\"\n"
+                   "NOTE: embedded quotes must be used for all command arguments that contain "
+                   "space character(s). For instance,\n"
+                   "\"mpirun --np 4 \\\"/path with spaces/to/hipfft_mpi_worker\\\"\"")
         ->default_val("")
         ->each([&](const std::string&) {
             if(mp_lib == fft_params::fft_mp_lib_none)

@@ -90,6 +90,7 @@ namespace rocRoller
         struct Conditional;
 
         struct Convert;
+        struct Reinterpret;
 
         struct Concatenate;
 
@@ -147,6 +148,7 @@ namespace rocRoller
             ToScalar,
             BitFieldExtract,
             Convert,
+            Reinterpret,
 
             // --- Ternary Operations ---
             AddShiftL,

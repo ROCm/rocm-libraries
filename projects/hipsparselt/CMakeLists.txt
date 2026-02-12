@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.25.2)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-project(hipsparselt VERSION 0.2.6 LANGUAGES CXX)
+project(hipsparselt VERSION 0.2.7 LANGUAGES CXX)
 
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
@@ -182,7 +182,8 @@ endif()
 # --- Packaging and installation ---
 
 if(HIPSPARSELT_ENABLE_CLIENT)
-    include(ROCmClientPackages)
+    include(rocm_client_prerequisites)
+    rocm_set_client_package_prerequisites()
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
 endif()

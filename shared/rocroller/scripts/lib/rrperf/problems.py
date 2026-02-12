@@ -187,6 +187,10 @@ class GEMMProblem:
     scaleValue_A: float = 1.0
     scaleValue_B: float = 1.0
 
+    initMode_A: str = "Bounded"
+    initMode_B: str = "Bounded"
+    initMode_C: str = "Bounded"
+
     workgroupMappingDim: int = -1
     workgroupMappingValue: int = -1
 
@@ -212,13 +216,13 @@ class GEMMSolution:
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
-    unroll_x: int = 0
-    unroll_y: int = 0
-
     load_A: str = "BufferToLDSViaVGPR"
     load_B: str = "BufferToLDSViaVGPR"
-    storeLDS_D: bool = True
+    store: str = "VGPRToGlobalMemoryViaLDSWithBuffer"
     betaInFma: bool = True
+
+    padLDS_A: tuple[int, int] = (0, 0)
+    padLDS_B: tuple[int, int] = (0, 0)
 
     scheduler: str = "Priority"
     schedulerCost: str = "LinearWeighted"
@@ -228,19 +232,20 @@ class GEMMSolution:
     prefetchLDSFactor: int = 0
     prefetchMixMemOps: bool = False
 
-    loadLDSScale_A: bool = False
-    loadLDSScale_B: bool = False
+    loadScale_A: str = "BufferToVGPR"
+    loadScale_B: str = "BufferToVGPR"
+
     swizzleScale: bool = False
     swizzleTileSize: MKNLTuple = MKNLTuple(0, 0, 0, 0)
     prefetchScale: bool = False
+    pretileScale: bool = False
 
-    streamK: bool = False
+    streamK: str = "None"
     numWGs: int = 0
-    streamKTwoTile: bool = False
-    streamKTwoTileDPFirst: bool = False
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
     matchMemoryAccess: bool = True
+    tailLoops: bool = True
 
     version: str = ""
 
@@ -405,16 +410,14 @@ class GEMMResult(GEMM, RRPerfResult):
             "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
             "Load_A": TF(self.load_A),
             "Load_B": TF(self.load_B),
-            "Store_D": TF(self.storeLDS_D),
+            "Store_D": self.store,
             "PF": TF(self.prefetch)
             + "/"
             + str(self.prefetchInFlight)
             + "/"
             + str(self.prefetchLDSFactor),
             "SCH": self.scheduler[0],
-            "SK": TF(self.streamK) + "/" + str(self.numWGs),
-            "2TSK": TF(self.streamKTwoTile),
-            "DPFirst": TF(self.streamKTwoTileDPFirst),
+            "SK": self.streamK + "/" + str(self.numWGs),
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
             ),
@@ -591,6 +594,34 @@ def cast_missing_parameters(result):
 
         result["workgroupMappingDim"] = wgmDim
         result["workgroupMappingValue"] = wgmValue
+
+    # Remove old/deprecated
+    for attr in ["unroll_x", "unroll_y"]:
+        if attr in result:
+            del result[attr]
+
+    if "storeLDS_D" in result:
+        storeLDS_D = result["storeLDS_D"]
+        del result["storeLDS_D"]
+        result["store"] = (
+            "VGPRToGlobalMemoryViaLDSWithBuffer"
+            if storeLDS_D
+            else "VGPRToGlobalMemoryWithBuffer"
+        )
+    # Convert old streamK bool fields to new streamK string enum
+    if "streamKTwoTile" in result or "streamKTwoTileDPFirst" in result:
+        old_streamK = result.get("streamK", False)
+        old_twoTile = result.pop("streamKTwoTile", False)
+        old_dpFirst = result.pop("streamKTwoTileDPFirst", False)
+
+        if old_twoTile:
+            result["streamK"] = "TwoTile"
+        elif old_dpFirst:
+            result["streamK"] = "TwoTileDPFirst"
+        elif old_streamK:
+            result["streamK"] = "Standard"
+        else:
+            result["streamK"] = "None"
 
 
 def load_results(path: pathlib.Path):

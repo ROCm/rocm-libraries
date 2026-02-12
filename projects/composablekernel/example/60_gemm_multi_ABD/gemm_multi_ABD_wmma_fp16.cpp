@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <iostream>
 #include <numeric>
@@ -17,6 +17,10 @@
 #include "ck/library/utility/literals.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_gemm.hpp"
 #include "ck/library/utility/check_err.hpp"
+
+using ::ck::DeviceMem;
+using ::ck::HostTensorDescriptor;
+using ::ck::Tensor;
 
 template <ck::index_t... Is>
 using S = ck::Sequence<Is...>;
@@ -137,11 +141,11 @@ using DeviceOpInstance = ck::tensor_operation::device::DeviceGemmMultipleABD_Wmm
     8,
     8,
     0,
-    S<4, 64, 1>,
+    S<4, 16, 1>,
     S<1, 0, 2>,
     S<1, 0, 2>,
     1,
-    1,
+    8,
     8,
     0,
     1,
@@ -228,6 +232,29 @@ int main(int argc, char* argv[])
                 return HostTensorDescriptor({row, col}, {1_uz, stride}, Bypass{});
             }
         };
+
+    auto f_get_default_stride =
+        [](std::size_t row, std::size_t col, ck::index_t stride, auto layout) {
+            if(stride == -1 || stride == 0)
+            {
+                // give a chance if stride is -1, return a default packed stride
+                if constexpr(std::is_same_v<decltype(layout), ck::tensor_layout::gemm::RowMajor>)
+                {
+                    return static_cast<std::size_t>(col);
+                }
+                else
+                {
+                    return static_cast<std::size_t>(row);
+                }
+            }
+            else
+                return static_cast<std::size_t>(stride);
+        };
+
+    StrideA = f_get_default_stride(M, K, StrideA, ALayout{});
+    StrideB = f_get_default_stride(K, N, StrideB, BLayout{});
+    StrideD = f_get_default_stride(M, N, StrideD, DLayout{});
+    StrideE = f_get_default_stride(M, N, StrideE, ELayout{});
 
     Tensor<ADataType> a0_m_k(f_host_tensor_descriptor(M, K, StrideA, ALayout{}));
     Tensor<ADataType> a1_m_k(f_host_tensor_descriptor(M, K, StrideA, ALayout{}));

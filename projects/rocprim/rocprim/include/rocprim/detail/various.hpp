@@ -583,6 +583,103 @@ public:
     }
 };
 
+// For each element 'i' in index sequence, do 'f(init + i * inc)'.
+template<typename F, auto init, auto inc, std::size_t... Is>
+constexpr void constexpr_for_impl(F&& f, std::index_sequence<Is...> /* sequence */)
+{
+    // Implement constexpr for via std::index_sequence because it compiles faster
+    // than recursive types.
+    (f(std::integral_constant<decltype(init), init + Is * inc>{}), ...);
+}
+
+/// Implements statically unrolled loop:
+/// `for (auto i = init; i < cond; i += inc) f(i);`
+template<auto init, auto cond, auto inc, class F>
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+constexpr void constexpr_for_lt(F&& f)
+{
+    if constexpr(init < cond)
+    {
+        static_assert(inc > 0);
+        constexpr auto N = (cond - init + inc - 1) / inc;
+        constexpr_for_impl<F, init, inc>(std::forward<F>(f), std::make_index_sequence<N>{});
+    }
+}
+
+/// Implements statically unrolled loop:
+/// `for (auto i = init; i <= cond; i += inc) f(i);`
+template<auto init, auto cond, auto inc, class F>
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+constexpr void constexpr_for_lte(F&& f)
+{
+    if constexpr(init <= cond)
+    {
+        static_assert(inc > 0);
+        constexpr auto N = (cond - init + inc) / inc;
+        constexpr_for_impl<F, init, inc>(std::forward<F>(f), std::make_index_sequence<N>{});
+    }
+}
+
+/// Implements statically unrolled loop:
+/// `for (auto i = init; i > cond; i += inc) f(i);`
+template<auto init, auto cond, auto inc, class F>
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+constexpr void constexpr_for_gt(F&& f)
+{
+    if constexpr(init > cond)
+    {
+        static_assert(inc < 0);
+        constexpr auto N = (cond - init + inc + 1) / inc;
+        constexpr_for_impl<F, init, inc>(std::forward<F>(f), std::make_index_sequence<N>{});
+    }
+}
+
+/// Implements statically unrolled loop:
+/// `for (auto i = init; i >= cond; i += inc) f(i);`
+template<auto init, auto cond, auto inc, class F>
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+constexpr void constexpr_for_gte(F&& f)
+{
+    if constexpr(init >= cond)
+    {
+        static_assert(inc < 0);
+        constexpr auto N = (cond - init + inc) / inc;
+        constexpr_for_impl<F, init, inc>(std::forward<F>(f), std::make_index_sequence<N>{});
+    }
+}
+
+template<class T, unsigned int ItemsPerThread, class WordType = int>
+struct __align__(sizeof(WordType)) thread_items_pack
+{
+private:
+    WordType data[ceiling_div(sizeof(T) * ItemsPerThread, sizeof(WordType))];
+
+public:
+    ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
+    static auto create(T(&thread_items)[ItemsPerThread])
+    {
+        thread_items_pack ret;
+        __builtin_memcpy(&ret, &thread_items, sizeof(T) * ItemsPerThread);
+        return ret; // Move constructor is called here
+    }
+
+    ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
+    T* unpack_to_decayed()
+    {
+        return reinterpret_cast<T*>(&data);
+    }
+
+    ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
+    T operator[](int index)
+    {
+        T ret;
+        __builtin_memcpy(reinterpret_cast<void*>(&ret),
+                         reinterpret_cast<char*>(data) + (index * sizeof(T)),
+                         sizeof(T));
+        return ret;
+    }
+};
+
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
 

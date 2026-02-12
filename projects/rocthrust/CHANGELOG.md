@@ -3,6 +3,22 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust x.y.z for ROCm x.y
+
+### Added
+
+* If you are using rocThrust on the host-side only, you can now build using g++ or non-HIP-aware clang++. To configure rocThrust in this-way, set the new CMake option `ROCTHRUST_DEVICE_SYSTEM` to `CPP` (other options include `HIP`, `CUDA`, `OpenMP`, and `TBB`), and set `CXX` to g++ or clang++. Then install rocThrust via `make install`. When you compile your application, don't forget to include the rocThrust include directory (`-I /opt/rocm/include`), since this won't happen automatically like it does when building with hipcc. Note that currently, rocThrust tests and benchmarks cannot be built when configuring rocThrust for host-side-only use.
+
+* Added `generate_resource_spec.cpp` to the test directory and built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
+
+### Changed
+
+* Updated the documentation on how to run rocThrust tests on multiple GPUs in parallel.
+
+### Removed
+
+* Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code above.
+
 ## rocThrust 4.2.0 for ROCm 7.2
 
 ### Added

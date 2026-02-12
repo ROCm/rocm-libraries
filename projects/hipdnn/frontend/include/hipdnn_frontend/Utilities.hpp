@@ -2,72 +2,47 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
-#include "Error.hpp"
 #include "attributes/TensorAttributes.hpp"
-#include "node/Node.hpp"
-#include <algorithm>
 #include <hipdnn_backend.h>
-#include <hipdnn_sdk/logging/CallbackTypes.h>
-#include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/logging/LoggingUtils.hpp>
-#include <hipdnn_sdk/test_utilities/LoggingUtils.hpp>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <numeric>
-#include <ranges>
 #include <vector>
+
+#include <hipdnn_frontend/detail/BackendWrapper.hpp>
 
 namespace hipdnn_frontend
 {
+
+// When an error occurs, get the backend error string and append it to the error_message.
+#define HIPDNN_RETURN_ON_BACKEND_FAILURE(backend_status, error_message)                           \
+    do                                                                                            \
+    {                                                                                             \
+        if((backend_status) != HIPDNN_STATUS_SUCCESS)                                             \
+        {                                                                                         \
+            std::array<char, 1024> backend_err_msg{};                                             \
+            hipdnn_frontend::detail::hipdnnBackend()->getLastErrorString(backend_err_msg.data(),  \
+                                                                         backend_err_msg.size()); \
+            std::string full_error_msg                                                            \
+                = std::string(error_message) + " Backend error: " + backend_err_msg.data();       \
+            return Error(ErrorCode::HIPDNN_BACKEND_ERROR, full_error_msg);                        \
+        }                                                                                         \
+    } while(0)
+
 namespace graph
 {
-// Find common shape from inputs.
-// Takes the max in each dim, and if any dim is not 1, or equal, then it's incompatible.
-// For example:
-// input_shapes = {{1, 2}, {1, 2}, {1, 2, 5}} -> common_shape = {1, 2, 5}
-// input_shapes = {{1, 2, 3}, {1, 2, 4}, {1, 2}} -> error
-inline Error findCommonShape(const std::vector<std::vector<int64_t>>& inputShapes,
-                             std::vector<int64_t>& commonShape)
-{
-    if(inputShapes.empty())
-    {
-        return {ErrorCode::INVALID_VALUE, "Input shapes cannot be empty"};
-    }
-
-    size_t dims
-        = std::max_element(inputShapes.begin(),
-                           inputShapes.end(),
-                           [](const std::vector<int64_t>& a, const std::vector<int64_t>& b) {
-                               return a.size() < b.size();
-                           })
-              ->size();
-
-    commonShape.resize(dims, 1);
-
-    for(auto& current : inputShapes)
-    {
-        for(size_t j = current.size(); j-- > 0;)
-        {
-            if(commonShape[j] != current[j] && commonShape[j] != 1 && current[j] != 1)
-            {
-                return {ErrorCode::INVALID_VALUE, "Incompatible shapes"};
-            }
-
-            commonShape[j] = std::max(commonShape[j], current[j]);
-        }
-    }
-
-    return {};
-}
 
 // Utility function to create Tensor_attributes from a Tensor
 template <class T,
-          class HostAlloc = hipdnn_sdk::utilities::HostAllocator<T>,
-          class DeviceAlloc = hipdnn_sdk::utilities::DeviceAllocator<T>>
-inline TensorAttributes
-    makeTensorAttributes(const std::string& name,
-                         DataType dataType,
-                         const hipdnn_sdk::utilities::Tensor<T, HostAlloc, DeviceAlloc>& tensor)
+          class HostAlloc = hipdnn_data_sdk::utilities::HostAllocator<T>,
+          class DeviceAlloc = hipdnn_data_sdk::utilities::DeviceAllocator<T>>
+inline TensorAttributes makeTensorAttributes(
+    const std::string& name,
+    DataType dataType,
+    const hipdnn_data_sdk::utilities::Tensor<T, HostAlloc, DeviceAlloc>& tensor)
 {
     return TensorAttributes()
         .set_name(name)
@@ -85,16 +60,27 @@ inline TensorAttributes makeTensorAttributes(const std::string& name,
         strides);
 }
 
-inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
+inline TensorAttributes makeTensorAttributes(const std::string& name,
+                                             const std::vector<int64_t>& dims,
+                                             const std::vector<int64_t>& strides)
+{
+    return TensorAttributes().set_name(name).set_dim(dims).set_stride(strides);
+}
+
+inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     createTensorFromAttribute(const TensorAttributes& attribute)
 {
-    return hipdnn_sdk::utilities::createTensor(
+    return hipdnn_data_sdk::utilities::createTensor(
         toSdkType(attribute.get_data_type()), attribute.get_dim(), attribute.get_stride());
 }
 
-}
+} // namespace graph
 
-inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCallback_ext)
+inline constexpr const char* K_COMPONENT_NAME = "hipdnn_frontend";
+
+// HIPDNN_HIDDEN ensures each shared object has its own copy of the static variable
+HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
+                                                       = hipdnnLoggingCallback_ext)
 {
     if(fn == nullptr)
     {
@@ -102,51 +88,59 @@ inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCall
     }
 
     static bool s_loggingInitialized = false;
-    static bool s_loggingEnabled = hipdnn_sdk::logging::isLoggingEnabled();
 
-    if(s_loggingInitialized || !s_loggingEnabled)
+    if(s_loggingInitialized)
     {
         return 0;
     }
 
-#ifdef COMPONENT_NAME
-    hipdnn::logging::initializeCallbackLogging(COMPONENT_NAME, fn);
-#else
-    return -1;
-#endif
+    // Initialize log level from environment variable
+    hipdnn_data_sdk::logging::initializeLogLevel();
+
+    // Register the callback so log messages get routed to the backend
+    hipdnn_data_sdk::logging::registerLoggingCallback(fn);
 
     s_loggingInitialized = true;
-    HIPDNN_LOG_INFO("Frontend logging initialized via callback.");
+
+    // Use this logging macro directly to avoid re-entrant logging call.
+    HIPDNN_SDK_LOG_INFO_WITH_COMPONENT(K_COMPONENT_NAME, "Frontend logging initialized");
 
     return 0;
 }
 
-#define HIPDNN_FE_LOG_INFO(...)                       \
-    do                                                \
-    {                                                 \
-        hipdnn_frontend::initializeFrontendLogging(); \
-        HIPDNN_LOG_INFO(__VA_ARGS__);                 \
+// ============================================================================
+// Frontend Logging Macros (HIPDNN_FE_LOG_*)
+// ============================================================================
+// These macros auto-initialize logging on first use, then log with "hipdnn_frontend"
+// as the component name.
+// Usage: HIPDNN_FE_LOG_INFO("Message " << value);
+
+#define HIPDNN_FE_LOG_INFO(msg)                                                     \
+    do                                                                              \
+    {                                                                               \
+        hipdnn_frontend::initializeFrontendLogging();                               \
+        HIPDNN_SDK_LOG_INFO_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
-#define HIPDNN_FE_LOG_WARN(...)                       \
-    do                                                \
-    {                                                 \
-        hipdnn_frontend::initializeFrontendLogging(); \
-        HIPDNN_LOG_WARN(__VA_ARGS__);                 \
+#define HIPDNN_FE_LOG_WARN(msg)                                                     \
+    do                                                                              \
+    {                                                                               \
+        hipdnn_frontend::initializeFrontendLogging();                               \
+        HIPDNN_SDK_LOG_WARN_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
-#define HIPDNN_FE_LOG_ERROR(...)                      \
-    do                                                \
-    {                                                 \
-        hipdnn_frontend::initializeFrontendLogging(); \
-        HIPDNN_LOG_ERROR(__VA_ARGS__);                \
+#define HIPDNN_FE_LOG_ERROR(msg)                                                     \
+    do                                                                               \
+    {                                                                                \
+        hipdnn_frontend::initializeFrontendLogging();                                \
+        HIPDNN_SDK_LOG_ERROR_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
-#define HIPDNN_FE_LOG_FATAL(...)                      \
-    do                                                \
-    {                                                 \
-        hipdnn_frontend::initializeFrontendLogging(); \
-        HIPDNN_LOG_FATAL(__VA_ARGS__);                \
+#define HIPDNN_FE_LOG_FATAL(msg)                                                     \
+    do                                                                               \
+    {                                                                                \
+        hipdnn_frontend::initializeFrontendLogging();                                \
+        HIPDNN_SDK_LOG_FATAL_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
 }

@@ -33,27 +33,31 @@
 #include <miopen/miopen.h>
 #include <miopen/object.hpp>
 #include <miopen/solver_id.hpp>
-#include <miopen/names.hpp>
 #include <miopen/invoke_params.hpp>
 #include <miopen/invoker.hpp>
 #include <miopen/conv/tensors.hpp>
 
 #include <nlohmann/json_fwd.hpp>
 
-#include <boost/any.hpp>
-
+#include <random>
 #include <string>
 #include <tuple>
-#include <vector>
 #include <unordered_map>
-#include <random>
+#include <vector>
 
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP16_ALT_IMPL)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP8_ROUNDING_MODE)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP8_ROUNDING_SEED)
 
+// disable TF32 by default temporarily until we fully complete this feature.
+// TODO:(LYM) change back
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_TF32_OVERRIDE, 0);
+MIOPEN_DECLARE_ENV_VAR_BOOL(NVIDIA_TF32_OVERRIDE, 0);
+
 namespace miopen {
+
+MIOPEN_INTERNALS_EXPORT bool EnvEnableTF32();
 
 namespace conv {
 struct ProblemDescription;
@@ -131,6 +135,17 @@ struct MIOPEN_INTERNALS_EXPORT ConvolutionAttribute
             return tmp_val == 1;
         }
     } deterministic;
+
+    class MathType
+    {
+        // temporary set default to pedantic until we fully complete this feature.
+        // TODO:(LYM) change back
+        miopenMathType_t value = miopenMathPedantic;
+        friend struct ConvolutionAttribute;
+
+    public:
+        inline int Get() const { return value; }
+    } math_type;
 
     /// Tri-state attribute values:
     /// * -1: Default (attribute-specific).
@@ -350,6 +365,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvolutionDescriptor : miopenConvolutionDescript
                                     Data_t dw,
                                     Data_t workSpace,
                                     std::size_t workSpaceSize) const;
+    miopenMathType_t GetMathType() const;
 
     std::size_t spatialDim;
     miopenConvolutionMode_t mode;
@@ -372,6 +388,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvolutionDescriptor : miopenConvolutionDescript
 
     std::size_t GetSolutionCountFallback(const ExecutionContext& ctx,
                                          const conv::ProblemDescription& problem) const;
+
+    bool EnableTF32() const;
 
     friend void to_json(nlohmann::json& json, const ConvolutionDescriptor& conv);
     friend void from_json(const nlohmann::json& json, ConvolutionDescriptor& conv);

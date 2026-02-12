@@ -39,21 +39,6 @@
 #include <mpi.h>
 #endif
 
-template <typename T,
-          typename... Args,
-          std::enable_if_t<std::is_integral_v<T> && (std::is_same_v<T, Args> && ...), bool> = true>
-static void set_with_random_nonnegative_values(const std::string& token, T& val, Args&... args)
-{
-    // using a hash of the token as random seed to avoid
-    // dependencies on externally-defined variables
-    std::hash<std::string>           hasher;
-    std::ranlux24_base               gen(hasher(token));
-    std::uniform_int_distribution<T> dis(static_cast<T>(0), std::numeric_limits<T>::max());
-    val = dis(gen);
-    ((args = dis(gen)), ...);
-    return;
-}
-
 inline fft_status fft_status_from_hipfftparams(const hipfftResult_t val)
 {
     switch(val)
@@ -149,20 +134,8 @@ public:
 
     int direction;
 
-    std::vector<int> int_length;
-    std::vector<int> int_inembed;
-    std::vector<int> int_onembed;
-
+    std::vector<int>           int_length;
     std::vector<long long int> ll_length;
-    std::vector<long long int> ll_inembed;
-    std::vector<long long int> ll_onembed;
-
-    template <typename T>
-    struct many_api_layout_args
-    {
-        T *input_embed, *output_embed;
-        T  input_stride, output_stride, input_distance, output_distance;
-    };
 
     struct hipLibXtDesc_deleter
     {
@@ -353,38 +326,24 @@ public:
             throw std::runtime_error("Invalid transform type");
         }
 
-        int_length.resize(dim());
-        int_inembed.resize(dim());
-        int_onembed.resize(dim());
+        int_length.assign(length.begin(), length.end());
+        ll_length.assign(length.begin(), length.end());
 
-        ll_length.resize(dim());
-        ll_inembed.resize(dim());
-        ll_onembed.resize(dim());
-        switch(dim())
+        try
         {
-        case 3:
-            ll_inembed[2] = istride[1] / istride[2];
-            ll_onembed[2] = ostride[1] / ostride[2];
-            [[fallthrough]];
-        case 2:
-            ll_inembed[1] = istride[0] / istride[1];
-            ll_onembed[1] = ostride[0] / ostride[1];
-            [[fallthrough]];
-        case 1:
-            ll_inembed[0] = istride[dim() - 1];
-            ll_onembed[0] = ostride[dim() - 1];
-            break;
-        default:
-            throw std::runtime_error("Invalid dimension");
+            (void)get_advanced_layout_args<int>();
+            (void)get_advanced_layout_args<long long int>();
+        }
+        catch(const ionembed_exception& e)
+        {
+            // hipFFT can't do strides that aren't {i,o}nembed-compatible
+            return fft_status_invalid_strides;
+        }
+        catch(...)
+        {
+            return fft_status_failure;
         }
 
-        for(size_t i = 0; i < dim(); ++i)
-        {
-            ll_length[i]   = length[i];
-            int_length[i]  = length[i];
-            int_inembed[i] = ll_inembed[i];
-            int_onembed[i] = ll_onembed[i];
-        }
         // reset auto_allocated_worksizes
         auto_allocated_worksizes.resize(get_num_used_gpus());
         std::for_each(auto_allocated_worksizes.begin(),
@@ -1081,32 +1040,34 @@ private:
         }
         case CREATE_MAKE_PLAN_MANY:
         {
-            auto layout_args = make_valid_layout_args_for_plan_many<int>();
+            auto layout_args = get_advanced_layout_args<int>();
             if(plan == INVALID_PLAN_HANDLE)
-                ret = hipfftEstimateMany(dim(),
-                                         int_length.data(),
-                                         layout_args.input_embed,
-                                         layout_args.input_stride,
-                                         layout_args.input_distance,
-                                         layout_args.output_embed,
-                                         layout_args.output_stride,
-                                         layout_args.output_distance,
-                                         *hipfft_transform_type,
-                                         nbatch,
-                                         worksize_estimate.data());
+                ret = hipfftEstimateMany(
+                    dim(),
+                    int_length.data(),
+                    const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+                    layout_args.istride_arg,
+                    layout_args.idist_arg,
+                    const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+                    layout_args.ostride_arg,
+                    layout_args.odist_arg,
+                    *hipfft_transform_type,
+                    nbatch,
+                    worksize_estimate.data());
             else
-                ret = hipfftGetSizeMany(plan,
-                                        dim(),
-                                        int_length.data(),
-                                        layout_args.input_embed,
-                                        layout_args.input_stride,
-                                        layout_args.input_distance,
-                                        layout_args.output_embed,
-                                        layout_args.output_stride,
-                                        layout_args.output_distance,
-                                        *hipfft_transform_type,
-                                        nbatch,
-                                        worksize_estimate.data());
+                ret = hipfftGetSizeMany(
+                    plan,
+                    dim(),
+                    int_length.data(),
+                    const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+                    layout_args.istride_arg,
+                    layout_args.idist_arg,
+                    const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+                    layout_args.ostride_arg,
+                    layout_args.odist_arg,
+                    *hipfft_transform_type,
+                    nbatch,
+                    worksize_estimate.data());
             break;
         }
         case CREATE_MAKE_PLAN_MANY64:
@@ -1121,19 +1082,21 @@ private:
             }
             else
             {
-                auto layout_args = make_valid_layout_args_for_plan_many<long long>();
-                ret              = hipfftGetSizeMany64(plan,
-                                          dim(),
-                                          ll_length.data(),
-                                          layout_args.input_embed,
-                                          layout_args.input_stride,
-                                          layout_args.input_distance,
-                                          layout_args.output_embed,
-                                          layout_args.output_stride,
-                                          layout_args.output_distance,
-                                          *hipfft_transform_type,
-                                          nbatch,
-                                          worksize_estimate.data());
+                auto layout_args = get_advanced_layout_args<long long int>();
+                ret              = hipfftGetSizeMany64(
+                    plan,
+                    dim(),
+                    ll_length.data(),
+                    const_cast<long long int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+                    layout_args.istride_arg,
+                    layout_args.idist_arg,
+                    const_cast<long long int*>(
+                        layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+                    layout_args.ostride_arg,
+                    layout_args.odist_arg,
+                    *hipfft_transform_type,
+                    nbatch,
+                    worksize_estimate.data());
             }
             break;
         }
@@ -1150,21 +1113,23 @@ private:
             else
             {
                 auto executionType = get_xt_api_execution_type();
-                auto layout_args   = make_valid_layout_args_for_plan_many<long long>();
-                ret                = hipfftXtGetSizeMany(plan,
-                                          dim(),
-                                          ll_length.data(),
-                                          layout_args.input_embed,
-                                          layout_args.input_stride,
-                                          layout_args.input_distance,
-                                          inputType,
-                                          layout_args.output_embed,
-                                          layout_args.output_stride,
-                                          layout_args.output_distance,
-                                          outputType,
-                                          nbatch,
-                                          worksize_estimate.data(),
-                                          executionType);
+                auto layout_args   = get_advanced_layout_args<long long int>();
+                ret                = hipfftXtGetSizeMany(
+                    plan,
+                    dim(),
+                    ll_length.data(),
+                    const_cast<long long int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+                    layout_args.istride_arg,
+                    layout_args.idist_arg,
+                    inputType,
+                    const_cast<long long int*>(
+                        layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+                    layout_args.ostride_arg,
+                    layout_args.odist_arg,
+                    outputType,
+                    nbatch,
+                    worksize_estimate.data(),
+                    executionType);
             }
             break;
         }
@@ -1269,52 +1234,6 @@ private:
         return false;
     }
 
-    template <
-        typename T,
-        std::enable_if_t<std::is_same_v<T, int> || std::is_same_v<T, long long int>, bool> = true>
-    many_api_layout_args<T> make_valid_layout_args_for_plan_many()
-    {
-        many_api_layout_args<T> ret;
-        if constexpr(std::is_same_v<T, int>)
-        {
-            ret.input_embed  = int_inembed.data();
-            ret.output_embed = int_onembed.data();
-        }
-        else
-        {
-            ret.input_embed  = ll_inembed.data();
-            ret.output_embed = ll_onembed.data();
-        }
-        ret.input_stride    = static_cast<T>(istride.back());
-        ret.output_stride   = static_cast<T>(ostride.back());
-        ret.input_distance  = static_cast<T>(idist);
-        ret.output_distance = static_cast<T>(odist);
-        if(is_using_default_layout())
-        {
-            // If using a default layout, users can
-            // (A) either set explicitly inembed, onembed, strides, and distances (like above);
-            // (B) or use nullptr as arguments for inembed and onembed. Strides and
-            //     distances are supposed to be ignored in that case.
-            // --> choose randomly between either valid usage when a default layout is
-            //     used, so that all possible valid use case scenarios are considered.
-            const std::string test_token = token();
-            int               randomizer;
-            set_with_random_nonnegative_values(test_token, randomizer);
-            if(randomizer % 2 == 0)
-            {
-                ret.input_embed  = nullptr;
-                ret.output_embed = nullptr;
-                // FIXME: negative values are not truly ignored for now.
-                set_with_random_nonnegative_values(test_token,
-                                                   ret.input_stride,
-                                                   ret.output_stride,
-                                                   ret.input_distance,
-                                                   ret.output_distance);
-            }
-        }
-        return ret;
-    }
-
     // Not all plan options work with all creation types.  Return a
     // suitable plan creation type for the current FFT parameters.
     int get_create_type()
@@ -1379,18 +1298,19 @@ private:
     }
     hipfftResult_t create_plan_many()
     {
-        auto layout_args = make_valid_layout_args_for_plan_many<int>();
-        auto ret         = hipfftPlanMany(&plan,
-                                  dim(),
-                                  int_length.data(),
-                                  layout_args.input_embed,
-                                  layout_args.input_stride,
-                                  layout_args.input_distance,
-                                  layout_args.output_embed,
-                                  layout_args.output_stride,
-                                  layout_args.output_distance,
-                                  *hipfft_transform_type,
-                                  nbatch);
+        auto layout_args = get_advanced_layout_args<int>();
+        auto ret
+            = hipfftPlanMany(&plan,
+                             dim(),
+                             int_length.data(),
+                             const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+                             layout_args.istride_arg,
+                             layout_args.idist_arg,
+                             const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+                             layout_args.ostride_arg,
+                             layout_args.odist_arg,
+                             *hipfft_transform_type,
+                             nbatch);
         return ret;
     }
 
@@ -1542,19 +1462,22 @@ private:
         size_t*             worksize_ptr = is_preventing_auto_allocation_at_generation()
                                                ? tmp_worksize.data()
                                                : auto_allocated_worksizes.data();
-        auto                layout_args  = make_valid_layout_args_for_plan_many<int>();
-        return hipfftMakePlanMany(plan,
-                                  dim(),
-                                  int_length.data(),
-                                  layout_args.input_embed,
-                                  layout_args.input_stride,
-                                  layout_args.input_distance,
-                                  layout_args.output_embed,
-                                  layout_args.output_stride,
-                                  layout_args.output_distance,
-                                  *hipfft_transform_type,
-                                  nbatch,
-                                  worksize_ptr);
+
+        auto layout_args = get_advanced_layout_args<int>();
+
+        return hipfftMakePlanMany(
+            plan,
+            dim(),
+            int_length.data(),
+            const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+            layout_args.istride_arg,
+            layout_args.idist_arg,
+            const_cast<int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+            layout_args.ostride_arg,
+            layout_args.odist_arg,
+            *hipfft_transform_type,
+            nbatch,
+            worksize_ptr);
     }
 
     hipfftResult_t create_make_plan_many64()
@@ -1568,19 +1491,20 @@ private:
         size_t*             worksize_ptr = is_preventing_auto_allocation_at_generation()
                                                ? tmp_worksize.data()
                                                : auto_allocated_worksizes.data();
-        auto                layout_args  = make_valid_layout_args_for_plan_many<long long int>();
-        return hipfftMakePlanMany64(plan,
-                                    dim(),
-                                    ll_length.data(),
-                                    layout_args.input_embed,
-                                    layout_args.input_stride,
-                                    layout_args.input_distance,
-                                    layout_args.output_embed,
-                                    layout_args.output_stride,
-                                    layout_args.output_distance,
-                                    *hipfft_transform_type,
-                                    nbatch,
-                                    worksize_ptr);
+        auto                layout_args  = get_advanced_layout_args<long long int>();
+        return hipfftMakePlanMany64(
+            plan,
+            dim(),
+            ll_length.data(),
+            const_cast<long long int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+            layout_args.istride_arg,
+            layout_args.idist_arg,
+            const_cast<long long int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+            layout_args.ostride_arg,
+            layout_args.odist_arg,
+            *hipfft_transform_type,
+            nbatch,
+            worksize_ptr);
     }
 
     hipDataType get_xt_api_execution_type() const
@@ -1618,21 +1542,22 @@ private:
                                                 ? tmp_worksize.data()
                                                 : auto_allocated_worksizes.data();
         auto                executionType = get_xt_api_execution_type();
-        auto                layout_args   = make_valid_layout_args_for_plan_many<long long int>();
-        return hipfftXtMakePlanMany(plan,
-                                    dim(),
-                                    ll_length.data(),
-                                    layout_args.input_embed,
-                                    layout_args.input_stride,
-                                    layout_args.input_distance,
-                                    inputType,
-                                    layout_args.output_embed,
-                                    layout_args.output_stride,
-                                    layout_args.output_distance,
-                                    outputType,
-                                    nbatch,
-                                    worksize_ptr,
-                                    executionType);
+        auto                layout_args   = get_advanced_layout_args<long long int>();
+        return hipfftXtMakePlanMany(
+            plan,
+            dim(),
+            ll_length.data(),
+            const_cast<long long int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_in)),
+            layout_args.istride_arg,
+            layout_args.idist_arg,
+            inputType,
+            const_cast<long long int*>(layout_args.io_nembed.get_nembed(fft_io::fft_io_out)),
+            layout_args.ostride_arg,
+            layout_args.odist_arg,
+            outputType,
+            nbatch,
+            worksize_ptr,
+            executionType);
     }
     static constexpr size_t absurd_init_worksize_estimate  = std::numeric_limits<size_t>::max();
     bool                    final_attempt_at_plan_creation = false;
@@ -1640,7 +1565,71 @@ private:
     size_t get_num_used_gpus() const
     {
         return multiGPU > 1 ? multiGPU : 1;
+    }
+
+    template <
+        typename T,
+        std::enable_if_t<std::is_same_v<T, int> || std::is_same_v<T, long long int>, bool> = true>
+    struct advanced_layout_args
+    {
+        hipfft_ionembed_t<T> io_nembed;
+        T                    istride_arg, ostride_arg, idist_arg, odist_arg;
     };
+
+    template <typename T>
+    advanced_layout_args<T> get_advanced_layout_args()
+    {
+        // Allow nullptr to be used for inembed and onembed ~50% of the time it can be
+        // used to ensure testing thereof.
+        // (using a hash of the token as "random" variable to avoid dependencies on
+        // externally-defined variables and repeatability)
+        std::hash<std::string> hasher;
+        // NOTES:
+        // - hipFFT requires (inembed == nullptr) == (onembed == nullptr);
+        // - {i,o}stride are ignored if (inembed == nullptr) && (onembed == nullptr).
+        //   (That is accounted for by the constructor of hipfft_ionembed_t<T> objects)
+        // - {i,o}dist are ignored if (inembed == nullptr) && (onembed == nullptr).
+        //   (That is NOT accounted for by the constructor of hipfft_ionembed_t<T> objects
+        //    which is unaware of intended distances)
+        auto       tmp = token();
+        const bool use_nullptr_for_default_nembed
+            = idist
+                  == default_distance(transform_type, placement, fft_io::fft_io_in, length, nbatch)
+              && odist
+                     == default_distance(
+                         transform_type, placement, fft_io::fft_io_out, length, nbatch)
+              && hasher(tmp) % 2 == 1;
+
+        advanced_layout_args<T> ret;
+        ret.io_nembed = hipfft_ionembed_t<T>(istride,
+                                             ostride,
+                                             length,
+                                             transform_type,
+                                             placement,
+                                             use_nullptr_for_default_nembed,
+                                             use_nullptr_for_default_nembed);
+        if(!ret.io_nembed.get_nembed(fft_io::fft_io_in)
+           && !ret.io_nembed.get_nembed(fft_io::fft_io_out))
+        {
+            // istride, ostride, idist, and odist arguments are supposed to be *ignored*
+            // by hipFFT if inembed and onembed arguments are both null.
+            // --> use completely arbitrary (positive) values to test that behavior
+            std::uniform_int_distribution<T> positive_int_distr(1, std::numeric_limits<T>::max());
+            std::mt19937                     prng(hasher(tmp));
+            ret.istride_arg = positive_int_distr(prng);
+            ret.ostride_arg = positive_int_distr(prng);
+            ret.idist_arg   = positive_int_distr(prng);
+            ret.odist_arg   = positive_int_distr(prng);
+        }
+        else
+        {
+            ret.istride_arg = ret.io_nembed.get_elementary_stride(fft_io::fft_io_in);
+            ret.ostride_arg = ret.io_nembed.get_elementary_stride(fft_io::fft_io_out);
+            ret.idist_arg   = idist;
+            ret.odist_arg   = odist;
+        }
+        return ret;
+    }
 };
 
 #endif

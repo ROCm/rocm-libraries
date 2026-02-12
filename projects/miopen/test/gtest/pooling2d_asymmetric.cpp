@@ -91,7 +91,7 @@ void Run2dDriver(miopenDataType_t prec)
         testing::internal::CaptureStderr();
         test_drive<pooling2d_driver>(ptrs.size(), ptrs.data());
         auto capture = testing::internal::GetCapturedStderr();
-        std::cout << capture;
+        std::cerr << capture;
     }
 };
 

@@ -465,7 +465,8 @@ struct RocblasltContractionProblem
         None = 0,
         Scalar,
         Vector,
-        Block
+        Block_32_UE8M0,
+        Block_32_UE8M0_32_8_EXT,
     };
 
     hipblasOperation_t trans_a;
@@ -535,10 +536,6 @@ struct RocblasltContractionProblem
     ScalingFormat scaleAType;
     ScalingFormat scaleBType;
 
-    size_t             scaleABlockRowSize;
-    size_t             scaleABlockColSize;
-    size_t             scaleBBlockRowSize;
-    size_t             scaleBBlockColSize;
     hipDataType        bias_type;
     hipDataType        aux_type;
     rocblaslt_epilogue epilogue;
@@ -601,10 +598,6 @@ struct RocblasltContractionProblem
                                 const void*            scaleAlphaVec,
                                 ScalingFormat          scaleAType,
                                 ScalingFormat          scaleBType,
-                                size_t                 scaleABlockRowSize,
-                                size_t                 scaleABlockColSize,
-                                size_t                 scaleBBlockRowSize,
-                                size_t                 scaleBBlockColSize,
                                 hipDataType            bias_type,
                                 hipDataType            aux_type,
                                 rocblaslt_epilogue     epilogue,

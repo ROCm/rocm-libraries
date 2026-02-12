@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -312,6 +312,7 @@ namespace rocRoller
 
             MAKE_EDGE_VISITOR(CoordinateGraph::Alias);
             MAKE_EDGE_VISITOR(CoordinateGraph::Buffer);
+            MAKE_EDGE_VISITOR(CoordinateGraph::BaseAddress);
             MAKE_EDGE_VISITOR(CoordinateGraph::Offset);
             MAKE_EDGE_VISITOR(CoordinateGraph::Stride);
             MAKE_EDGE_VISITOR(CoordinateGraph::View);
@@ -331,7 +332,6 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(ControlGraph::Assign);
             MAKE_OPERATION_VISITOR(ControlGraph::Barrier);
             MAKE_OPERATION_VISITOR(ControlGraph::Block);
-            MAKE_OPERATION_VISITOR(ControlGraph::ComputeIndex);
             MAKE_OPERATION_VISITOR(ControlGraph::ConditionalOp);
             MAKE_OPERATION_VISITOR(ControlGraph::Deallocate);
             MAKE_OPERATION_VISITOR(ControlGraph::DoWhileOp);

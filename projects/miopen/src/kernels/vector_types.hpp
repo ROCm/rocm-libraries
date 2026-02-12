@@ -1,33 +1,13 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifndef VECTOR_TYPES_HPP
 #define VECTOR_TYPES_HPP
 
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#include "bfloat16_dev.hpp"
+#include "miopen_type_traits.hpp"
+
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #endif
@@ -40,77 +20,161 @@ struct mapped_vector_type
     static_assert(false, "there is no specialization for this T & N combination.");
 };
 
-// Note: we should make sure there is no exception
-template <typename T>
-struct mapped_vector_type<T, 1>
+template <typename Vec>
+struct mapped_vector_info;
+
+#define DEFINE_VECTOR_MAPPING(ScalarType, N)                                  \
+    template <>                                                               \
+    struct mapped_vector_type<ScalarType, N>                                  \
+    {                                                                         \
+        using type = ScalarType __attribute__((ext_vector_type(N)));          \
+    };                                                                        \
+    template <>                                                               \
+    struct mapped_vector_info<ScalarType __attribute__((ext_vector_type(N)))> \
+    {                                                                         \
+        using UnderlyingType         = ScalarType;                            \
+        static constexpr size_t size = N;                                     \
+    };
+
+#define DEFINE_SCALAR_MAPPING(ScalarType)          \
+    template <>                                    \
+    struct mapped_vector_type<ScalarType, 1>       \
+    {                                              \
+        using type = ScalarType;                   \
+    };                                             \
+    template <>                                    \
+    struct mapped_vector_info<ScalarType>          \
+    {                                              \
+        using UnderlyingType         = ScalarType; \
+        static constexpr size_t size = 1;          \
+    };
+
+DEFINE_SCALAR_MAPPING(double)
+DEFINE_SCALAR_MAPPING(float)
+DEFINE_SCALAR_MAPPING(_Float16)
+DEFINE_SCALAR_MAPPING(ushort)
+DEFINE_SCALAR_MAPPING(int)
+DEFINE_SCALAR_MAPPING(unsigned int)
+
+DEFINE_VECTOR_MAPPING(float, 2)
+DEFINE_VECTOR_MAPPING(float, 4)
+
+DEFINE_VECTOR_MAPPING(_Float16, 2)
+DEFINE_VECTOR_MAPPING(_Float16, 4)
+DEFINE_VECTOR_MAPPING(_Float16, 8)
+
+DEFINE_VECTOR_MAPPING(ushort, 2)
+DEFINE_VECTOR_MAPPING(ushort, 4)
+DEFINE_VECTOR_MAPPING(ushort, 8)
+
+DEFINE_VECTOR_MAPPING(int, 2)
+DEFINE_VECTOR_MAPPING(int, 4)
+
+DEFINE_VECTOR_MAPPING(unsigned int, 2)
+DEFINE_VECTOR_MAPPING(unsigned int, 4)
+
+// The following overloads with __half are needed due to a regression
+// in the current implementation of the RNNHiddenStateUpdate kernel
+// Moreover, __half is defined as a struct, thus the attribute
+// ext_vector_type, which is used here extensively, will fail
+
+template <>
+struct mapped_vector_type<__half, 1>
 {
-    using type = T;
+    using type = _Float16;
 };
 
-// float
 template <>
-struct mapped_vector_type<float, 4>
+struct mapped_vector_info<__half>
 {
-    using type = ::float4;
+    using UnderlyingType         = _Float16;
+    static constexpr size_t size = 1;
 };
 
 template <>
-struct mapped_vector_type<float, 2>
-{
-    using type = ::float2;
-};
-
-// half
-
-template <>
-struct mapped_vector_type<_Float16, 8>
-{
-    using type = _Float16 __attribute__((ext_vector_type(8)));
-};
-
-template <>
-struct mapped_vector_type<_Float16, 4>
-{
-    using type = _Float16 __attribute__((ext_vector_type(4)));
-};
-
-template <>
-struct mapped_vector_type<_Float16, 2>
+struct mapped_vector_type<__half, 2>
 {
     using type = _Float16 __attribute__((ext_vector_type(2)));
 };
 
-// ushort
 template <>
-struct mapped_vector_type<ushort, 8>
+struct mapped_vector_type<__half, 4>
 {
-    using type = ushort __attribute__((ext_vector_type(8)));
+    using type = _Float16 __attribute__((ext_vector_type(4)));
 };
 
-template <>
-struct mapped_vector_type<ushort, 4>
+namespace detail {
+
+template <typename OutType, typename InType>
+__forceinline__ __device__ __host__ OutType scalarcast(InType in)
 {
-    using type = ushort4;
+    if constexpr(std::is_same<OutType, InType>::value)
+    {
+        return in;
+    }
+    else if constexpr(std::is_same<OutType, ushort>::value && std::is_same<InType, float>::value)
+    {
+        return float_to_bfloat16(in);
+    }
+    else if constexpr(std::is_same<InType, ushort>::value && std::is_same<OutType, float>::value)
+    {
+        return bfloat16_to_float(in);
+    }
+    else
+    {
+        return static_cast<OutType>(in);
+    }
+}
+
+template <typename MappedVectorType, typename T>
+__forceinline__ __device__ __host__ MappedVectorType broadcast(const T val)
+{
+    using VectorInfo = mapped_vector_info<MappedVectorType>;
+    MappedVectorType retval;
+    auto* retvalPtr = reinterpret_cast<typename VectorInfo::UnderlyingType*>(&retval);
+    for(auto i = 0; i < VectorInfo::size; ++i)
+    {
+        retvalPtr[i] = detail::scalarcast<typename VectorInfo::UnderlyingType>(val);
+    }
+    return retval;
 };
 
-template <>
-struct mapped_vector_type<ushort, 2>
-{
-    using type = ushort2;
-};
+} // namespace detail
 
-// int
-template <>
-struct mapped_vector_type<int, 4>
+template <typename OutType, typename InType>
+__forceinline__ __device__ __host__ OutType cast(InType input)
 {
-    using type = int4;
-};
+    using InTypeInfo  = mapped_vector_info<InType>;
+    using OutTypeInfo = mapped_vector_info<OutType>;
 
-template <>
-struct mapped_vector_type<int, 2>
-{
-    using type = int2;
-};
+    constexpr auto inSize  = InTypeInfo::size;
+    constexpr auto outSize = OutTypeInfo::size;
+
+    if constexpr(inSize == outSize && outSize == 4)
+    {
+        return OutType{detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.x),
+                       detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.y),
+                       detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.z),
+                       detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.w)};
+    }
+    else if constexpr(inSize == outSize && outSize == 2)
+    {
+        return OutType{detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.x),
+                       detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.y)};
+    }
+    else if constexpr(inSize == outSize && outSize == 1)
+    {
+        return detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input);
+    }
+    else if constexpr(inSize == 1 && outSize > 1)
+    {
+        return detail::broadcast<OutType>(input);
+    }
+    else
+    {
+        static_assert(false, "Unsupported type cast.");
+    }
+}
 
 } // namespace miopen
 

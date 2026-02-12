@@ -1,0 +1,55 @@
+name: pre-commit
+
+on:
+  pull_request:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0 # 0 fetches all commit history for --from-ref/--to-ref to function
+
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+
+      - name: Detect project changes
+        id: changes
+        env:
+          # Add project names here (one per line) to enable conditional dependency installation
+          PROJECTS_WITH_OPTIONAL_DEPS: >-
+            hipdnn
+        run: |
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD)
+
+          # Check each project for changes
+          for project in $PROJECTS_WITH_OPTIONAL_DEPS; do
+            if echo "$CHANGED_FILES" | grep -qE "^(projects|shared)/$project/"; then
+              echo "${project}_changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "${project}_changed=false" >> $GITHUB_OUTPUT
+            fi
+          done
+
+      # To install optional deps for a project:
+      # 1. Add project name to PROJECTS_WITH_OPTIONAL_DEPS above
+      # 2. Like the example below, add an install step conditional on:
+      #    - steps.changes.outputs.<project-name>_changed == 'true'
+
+      - name: Install hipDNN dependencies
+        if: steps.changes.outputs.hipdnn_changed == 'true'
+        run: |
+          wget -q https://github.com/google/flatbuffers/releases/download/v25.9.23/Linux.flatc.binary.g++-13.zip
+          unzip -q Linux.flatc.binary.g++-13.zip
+          sudo mv flatc /usr/local/bin/
+          sudo chmod +x /usr/local/bin/flatc
+          rm Linux.flatc.binary.g++-13.zip
+
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+        with:
+          # Only check changed files in the PR
+          extra_args: --from-ref origin/${{ github.event.pull_request.base.ref }} --to-ref HEAD

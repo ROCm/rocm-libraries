@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -73,12 +73,12 @@ namespace rocRoller
         /**
          * Gets expressions which can be used to compute magic division of denominator.
          *
-         * Returns [magicMultiple, magicShift, magicSign]
+         * Returns [magicMultiple, magicShift, magicSign, magicShiftMSB]
          *
          * If denominator is unsigned, magicSign will be nullptr.
          */
-        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr>
-            getMagicMultipleShiftAndSign(ExpressionPtr denominator, ContextPtr context);
+        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr, ExpressionPtr>
+            getMagicDivisionParams(ExpressionPtr denominator, ContextPtr context);
 
         /**
          * @brief Attempt to replace multiplication operations found within an expression with faster operations.
@@ -98,6 +98,11 @@ namespace rocRoller
          * Splits BitfieldCombine expressions that target more than 32 bits into a Concatenate of 32 bit sub-expressions.
          */
         ExpressionPtr splitBitfieldCombine(ExpressionPtr expr);
+
+        /**
+         * Splits uint64_t literal operands in a Concatenate expression into two Raw32 operands.
+         */
+        Concatenate splitConcatenate(Concatenate const& expr);
 
         /**
          * @brief Simplify expressions

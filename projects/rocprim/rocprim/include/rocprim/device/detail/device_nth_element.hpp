@@ -542,13 +542,14 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
 }
 
 template<class Config,
+         class Selector,
          unsigned int NumPartitions,
          class KeysIterator,
          class BinaryFunction,
          class WrappedBlockId>
 ROCPRIM_INLINE
 hipError_t
-    nth_element_keys_impl(detail::target_arch                                      target_arch,
+    nth_element_keys_impl(target                                                   current_target,
                           KeysIterator                                             keys,
                           typename std::iterator_traits<KeysIterator>::value_type* keys_buffer,
                           typename std::iterator_traits<KeysIterator>::value_type* tree,
@@ -620,12 +621,12 @@ hipError_t
                                                               size,
                                                               compare_function);
         };
-        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config>(target_arch,
-                                                            find_splitters_kernel,
-                                                            1,
-                                                            num_splitters,
-                                                            0,
-                                                            stream));
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      find_splitters_kernel,
+                                                                      1,
+                                                                      num_splitters,
+                                                                      0,
+                                                                      stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("find_splitters_kernel", size, start);
 
         start_timer();
@@ -638,12 +639,12 @@ hipError_t
                                                                   equality_buckets,
                                                                   compare_function);
         };
-        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config>(target_arch,
-                                                            count_bucket_sizes_kernel,
-                                                            num_blocks,
-                                                            num_threads_per_block,
-                                                            0,
-                                                            stream));
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      count_bucket_sizes_kernel,
+                                                                      num_blocks,
+                                                                      num_threads_per_block,
+                                                                      0,
+                                                                      stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("count_bucket_sizes_kernel", size, start);
 
         start_timer();
@@ -654,12 +655,13 @@ hipError_t
                                                                        equality_buckets,
                                                                        rank);
         };
-        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config>(target_arch,
-                                                            find_nth_element_bucket_kernel,
-                                                            1,
-                                                            num_buckets,
-                                                            0,
-                                                            stream));
+        ROCPRIM_RETURN_ON_ERROR(
+            execute_launch_plan<Config, Selector>(current_target,
+                                                  find_nth_element_bucket_kernel,
+                                                  1,
+                                                  num_buckets,
+                                                  0,
+                                                  stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("find_nth_element_bucket_kernel", size, start);
 
         start_timer();
@@ -675,12 +677,12 @@ hipError_t
                                                                             compare_function,
                                                                             ordered_bid);
         };
-        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config>(target_arch,
-                                                            copy_buckets_kernel,
-                                                            num_blocks,
-                                                            num_threads_per_block,
-                                                            0,
-                                                            stream));
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      copy_buckets_kernel,
+                                                                      num_blocks,
+                                                                      num_threads_per_block,
+                                                                      0,
+                                                                      stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("copy_buckets_kernel", size, start);
 
         // Copy the results in keys_buffer back to the keys
@@ -720,12 +722,12 @@ hipError_t
     auto block_sort_kernel = [=](auto arch_config)
     { block_sort_kernel_impl<decltype(arch_config)>(keys, size, compare_function); };
 
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config>(target_arch,
-                                                        block_sort_kernel,
-                                                        1,
-                                                        stop_recursion_size,
-                                                        0,
-                                                        stream));
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                  block_sort_kernel,
+                                                                  1,
+                                                                  stop_recursion_size,
+                                                                  0,
+                                                                  stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("kernel_block_sort", size, start);
     return hipSuccess;
 }

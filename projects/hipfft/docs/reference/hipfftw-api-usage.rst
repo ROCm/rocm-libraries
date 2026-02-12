@@ -26,6 +26,14 @@ Similarly to FFTW_, hipFFTW uses the following specific types.
 
 .. doxygentypedef:: fftwf_plan
 
+.. doxygentypedef:: fftw_iodim
+
+.. doxygentypedef:: fftwf_iodim
+
+.. doxygentypedef:: fftw_iodim64
+
+.. doxygentypedef:: fftwf_iodim64
+
 Constant values
 ===============
 
@@ -134,10 +142,12 @@ by ``fftw_plan_dft`` (or ``fftwf_plan_dft``) could be created by ``fftw_plan_man
 For all plan creation functions, the requested plan is said to be configured for in-place operations if identical
 input and output buffers are used when the plan is created. The plan is configured for out-of-place operations otherwise.
 
+.. _hipfftw-unsupported-configurations:
+
 .. note::
   - hipFFTW does not support split complex formats, real-to-real transforms, nor distributed transforms;
   - hipFFTW does not support transforms of more than 3 dimensions, that is, ``rank > 3`` is not supported;
-  - hipFFTW does not support transforms of more than 1 batch dimension, that is, ``batch_rank > 1`` is not supported.
+  - hipFFTW does not support transforms of more than 1 batch dimension, that is, ``howmany_rank > 1`` is not supported.
 
 .. _hipfftw-basic-plan-creation:
 
@@ -187,14 +197,103 @@ The following functions can be used for creating basic hipFFTW plans.
 Advanced plans
 --------------
 
-.. TBD
+Advanced plans support batched transforms and some non-default data layouts. The following
+additional arguments parameterize the input data layout for a :math:`d`-dimensional transform (:math:`d > 0`)
+of lengths ``n[0] x n[1] x ... x n[d-1]``:
+
+- ``istride`` is the elementary stride, that is, the stride along the last dimension;
+- ``idist`` is the distance between consecutive data sequences in the batch;
+- ``inembed`` is an array of :math:`d` integer values representing the dimensions of a :math:`d`-dimensional array embedding the input data.
+
+``ostride``, ``odist``, and ``onembed`` parameterize the output data layout of the transform
+similarly.
+
+Setting ``inembed`` to ``NULL`` is equivalent to a using ``inembed[i] = n[i]`` for all :math:`0 \leq i < d-1`
+and
+
+- ``inembed[d-1] = n[d-1]`` for complex transforms or out-of-place real forward transforms;
+- ``inembed[d-1] = n[d-1]/2 + 1`` for backward real transforms;
+- ``inembed[d-1] = 2 * (n[d-1]/2 + 1)`` for in-place forward real transforms.
+
+The same behavior holds for setting ``onembed`` to ``NULL``, subsituting "forward" for "backward"
+in the description above (and vice versa).
+
+If set explicitly, all the ``inembed`` and ``onembed`` values must be larger than or equal to their
+default values.
+
+.. note::
+  Using ``NULL`` for ``inembed`` and for ``onembed`` as well as ``istride = 1`` and ``ostride = 1``
+  results in the same data layout as for :ref:`basic plan<hipfftw-basic-plan-creation>` in case of
+  unbatched transforms (``howmany = 1``).
+
+Concretely, considering a batched, three-dimensional transform, the data element of logical
+index :math:`\left(j_0, j_1, j_2\right)` in the :math:`k`-th batch is
+``in[idist * k + istride * (j_2 + inembed[2] * (j_1 + inembed[1] * j_0))]``
+on input and ``out[odist * k + ostride * (j_2 + onembed[2] * (j_1 + onembed[1] * j_0))]`` on output.
+
+The following functions can be used for creating advanced hipFFTW plans.
+
+.. doxygenfunction:: fftw_plan_many_dft
+.. doxygenfunction:: fftwf_plan_many_dft
+.. doxygenfunction:: fftw_plan_many_dft_r2c
+.. doxygenfunction:: fftwf_plan_many_dft_r2c
+.. doxygenfunction:: fftw_plan_many_dft_c2r
+.. doxygenfunction:: fftwf_plan_many_dft_c2r
+
 
 .. _hipfftw-general-plan-creation:
 
 Arbitrary plans
 ---------------
 
-.. TBD
+Arbitrary plans support batched transforms with arbitrary data layouts.
+
+Considering a :math:`d`-dimensional transform (:math:`d > 0`) of lengths ``n[0] x n[1] x ... x n[d-1]``
+batched ``m[0] x m[1] x ... x m[q-1]`` times (:math:`q > 0`), arbitrary input and output data layouts
+can be set via the ``dims`` and ``howmany_dims`` arguments of the plan creation functions below. Their
+``rank`` and ``howmany_rank`` arguments capture the (strictly positive) values of :math:`d` and
+:math:`q`, respectively.
+
+Specifically, ``dims`` must be an array of :math:`d` ``fftw_iodim`` (or ``fftw_iodim64``) values such
+that, for all :math:`0 \leq i < d`,
+
+- ``dims[i].n`` is equal to ``n[i]`` (must be strictly positive);
+- ``dims[i].is`` is the input stride along the ``i``-th data dimension;
+- ``dims[i].os`` is the output stride along the ``i``-th data dimension.
+
+Similarly, ``howmany_dims`` must be an array of :math:`q` ``fftw_iodim`` (or ``fftw_iodim64``) values
+such that, for all :math:`0 \leq j < q`,
+
+- ``howmany_dims[j].n`` is equal to ``m[j]`` (must be strictly positive);
+- ``howmany_dims[j].is`` is the input distance along the ``j``-th batch dimension;
+- ``howmany_dims[j].os`` is the output distance along the ``j``-th batch dimension.
+
+The following functions can be used for creating arbitrary hipFFTW plans.
+
+.. doxygenfunction:: fftw_plan_guru_dft
+.. doxygenfunction:: fftwf_plan_guru_dft
+.. doxygenfunction:: fftw_plan_guru_dft_r2c
+.. doxygenfunction:: fftwf_plan_guru_dft_r2c
+.. doxygenfunction:: fftw_plan_guru_dft_c2r
+.. doxygenfunction:: fftwf_plan_guru_dft_c2r
+.. doxygenfunction:: fftw_plan_guru64_dft
+.. doxygenfunction:: fftwf_plan_guru64_dft
+.. doxygenfunction:: fftw_plan_guru64_dft_r2c
+.. doxygenfunction:: fftwf_plan_guru64_dft_r2c
+.. doxygenfunction:: fftw_plan_guru64_dft_c2r
+.. doxygenfunction:: fftwf_plan_guru64_dft_c2r
+
+.. _hipfftw-data-layout-requirements:
+
+Data layout requirements for hipFFTW plans
+------------------------------------------
+For complex in-place transforms, hipFFTW requires all strides and distances to be equal in input and output data layouts.
+For real in-place transforms, hipFFTW requires:
+
+- unit elementary strides along the :math:`\left(d-1\right)`-th dimension for :math:`d`-dimensional transforms;
+- all other input (resp. output) strides and distances to be twice the corresponding output (resp. input) strides and distances for forward (resp. backward) transforms.
+
+Negative strides and distances are *not* supported by hipFFTW.
 
 .. _hipfftw-execution:
 

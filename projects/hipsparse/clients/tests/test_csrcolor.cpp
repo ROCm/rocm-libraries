@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,39 +21,9 @@
  *
  * ************************************************************************ */
 
+#include "test.hpp"
 #include "testing_csrcolor.hpp"
 
-#include <hipsparse.h>
-
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
-
-TEST(csrcolor_bad_arg, csrcolor_bad_arg_float)
-{
-    testing_csrcolor_bad_arg<float>();
-}
-
-TEST(csrcolor, csrcolor_float)
-{
-    hipsparseStatus_t status = testing_csrcolor<float>();
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
-
-TEST(csrcolor, csrcolor_double)
-{
-    hipsparseStatus_t status = testing_csrcolor<double>();
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
-
-TEST(csrcolor, csrcolor_hipComplex)
-{
-    hipsparseStatus_t status = testing_csrcolor<hipComplex>();
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
-
-TEST(csrcolor, csrcolor_hipDoubleComplex)
-{
-    hipsparseStatus_t status = testing_csrcolor<hipDoubleComplex>();
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
-
+TEST_ROUTINE(csrcolor, reorder, arg.M, arg.N, arg.baseA);
 #endif

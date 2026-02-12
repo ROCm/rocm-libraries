@@ -335,11 +335,11 @@ namespace rocRoller
         {
             return dt == DataType::Half || dt == DataType::Halfx2 || dt == DataType::BFloat16
                    || dt == DataType::BFloat16x2 || dt == DataType::FP8 || dt == DataType::BF8
-                   || dt == DataType::FP8x4 || dt == DataType::BF8x4 || dt == DataType::Float
-                   || dt == DataType::FP6x16 || dt == DataType::BF6x16 || dt == DataType::FP4x8
-                   || dt == DataType::Double || dt == DataType::Int32 || dt == DataType::Int64
-                   || dt == DataType::UInt32 || dt == DataType::UInt64 || dt == DataType::Bool
-                   || dt == DataType::Bool32 || dt == DataType::Bool64;
+                   || dt == DataType::E8M0x4 || dt == DataType::FP8x4 || dt == DataType::BF8x4
+                   || dt == DataType::Float || dt == DataType::FP6x16 || dt == DataType::BF6x16
+                   || dt == DataType::FP4x8 || dt == DataType::Double || dt == DataType::Int32
+                   || dt == DataType::Int64 || dt == DataType::UInt32 || dt == DataType::UInt64
+                   || dt == DataType::Bool || dt == DataType::Bool32 || dt == DataType::Bool64;
         }
 
         inline ExpressionPtr convert(DataType dt, ExpressionPtr a)
@@ -369,6 +369,26 @@ namespace rocRoller
         inline ExpressionPtr convert(ExpressionPtr a)
         {
             return convert(DATATYPE, a);
+        }
+
+        inline ExpressionPtr reinterpret(DataType dt, ExpressionPtr a)
+        {
+            auto argType = resultVariableType(a);
+            auto srcSize = DataTypeInfo::Get(argType.dataType).elementBytes;
+            auto dstSize = DataTypeInfo::Get(dt).elementBytes;
+
+            AssertFatal(srcSize == dstSize,
+                        "Reinterpret requires same size types: source type ",
+                        toString(argType.dataType),
+                        " (",
+                        srcSize,
+                        " bytes) != destination type ",
+                        toString(dt),
+                        " (",
+                        dstSize,
+                        " bytes)");
+
+            return std::make_shared<Expression>(Reinterpret{{.arg{a}}, dt});
         }
 
         template <CCommandArgumentValue T>
@@ -490,6 +510,8 @@ namespace rocRoller
         EXPRESSION_INFO(BitFieldExtract);
 
         EXPRESSION_INFO(Convert);
+
+        EXPRESSION_INFO(Reinterpret);
 
         EXPRESSION_INFO(Concatenate);
 
@@ -706,6 +728,5 @@ namespace rocRoller
                 return std::make_tuple(exp.lhs, exp.r1hs, exp.r2hs);
             }
         }
-
     }
 }

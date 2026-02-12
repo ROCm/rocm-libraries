@@ -3,7 +3,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -397,6 +397,70 @@ inline bool is_act_enabled(rocblaslt_epilogue value_)
         return false;
     }
 };
+
+inline bool isBlockScaling(RocblasltContractionProblem::ScalingFormat s)
+{
+    switch(s)
+    {
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline size_t blockSize(RocblasltContractionProblem::ScalingFormat s)
+{
+    switch(s)
+    {
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        return 32;
+    default:
+        return 1;
+    }
+}
+
+inline std::vector<size_t> preSwizzleSizeForScale(RocblasltContractionProblem::ScalingFormat s)
+{
+    // Returns preSwizzleTile for scale format
+    // When preSwizzleTile is set:
+    // - MI instruction is forced to 16x16x128
+    // - swizzleScale must be enabled
+    switch(s)
+    {
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        // MI instruction is forced to 16x16x128, so the third element is 4 (i.e., 128/scaleBlockSize)
+        return {32, 8, 4};
+    default:
+        return {};
+    }
+}
+
+inline std::vector<size_t> preTileSizeForScaleA(RocblasltContractionProblem::ScalingFormat s)
+{
+    // Returns preTile for scale A: {tileM, tileK}
+    switch(s)
+    {
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        return {32, 8};
+    default:
+        return {};
+    }
+}
+
+inline std::vector<size_t> preTileSizeForScaleB(RocblasltContractionProblem::ScalingFormat s)
+{
+    // Returns preTile for scale B: {tileK, tileN}
+    switch(s)
+    {
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        return {8, 32};
+    default:
+        return {};
+    }
+}
 
 template <typename T>
 struct floating_traits

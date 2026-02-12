@@ -8,7 +8,7 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace ::testing;
 
-namespace hipdnn_frontend
+namespace
 {
 
 // Mock node class for testing INode::visit()
@@ -29,7 +29,7 @@ public:
     }
 };
 
-} // namespace hipdnn_frontend
+}
 
 TEST(TestINode, VisitGraphSingleNode)
 {

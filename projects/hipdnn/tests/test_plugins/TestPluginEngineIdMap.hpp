@@ -1,3 +1,6 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #pragma once
 
 #include <cstdint>
@@ -26,3 +29,6 @@ HIPDNN_MAP_TO_ID(NoApplicableEnginesBPlugin, -5);
 HIPDNN_MAP_TO_ID(ExecuteFailsPlugin, -6);
 HIPDNN_MAP_TO_ID(DuplicateIdAPlugin, -7);
 HIPDNN_MAP_TO_ID(DuplicateIdBPlugin, -7);
+HIPDNN_MAP_TO_ID(KnobsPlugin, -8);
+HIPDNN_MAP_TO_ID(KnobsPluginEngineB, -9);
+HIPDNN_MAP_TO_ID(KnobConstraintValidationPlugin, -10);

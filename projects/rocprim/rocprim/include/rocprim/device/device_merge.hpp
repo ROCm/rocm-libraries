@@ -42,32 +42,27 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename Config, typename Key, typename Value>
-inline size_t get_merge_vsmem_size_per_block(detail::target_arch arch)
+template<class Config, class Selector, class Key, class Value>
+inline size_t get_merge_vsmem_size_per_block(detail::target t)
 {
-    std::optional<size_t> vsmem_per_block;
-    for_each_arch(
-        [&](auto arch_tag)
-        {
-            constexpr target_arch Arch = decltype(arch_tag)::value;
-            if(Arch != arch || vsmem_per_block)
-                return;
-            using ArchConfig           = typename Config::template architecture_config<Arch>;
-            using merge_kernel_impl_t  = merge_kernel_impl_<ArchConfig, Key, Value>;
-            using merge_vsmem_helper_t = detail::vsmem_helper_impl<merge_kernel_impl_t>;
+    using targets = typename Selector::targets;
 
-            vsmem_per_block = merge_vsmem_helper_t::vsmem_per_block;
+    size_t vsmem_per_block = 0;
+
+    targets::for_each(
+        [&](auto candidate)
+        {
+            if(target{candidate} == most_common_config<targets>(t))
+            {
+                using ArchConfig           = target_config<Config, Selector, decltype(candidate)>;
+                using merge_kernel_impl_t  = merge_kernel_impl_<ArchConfig, Key, Value>;
+                using merge_vsmem_helper_t = detail::vsmem_helper_impl<merge_kernel_impl_t>;
+
+                vsmem_per_block = merge_vsmem_helper_t::vsmem_per_block;
+            }
         });
 
-    if(!vsmem_per_block)
-    {
-        using ArchConfig = typename Config::template architecture_config<target_arch::unknown>;
-        using merge_kernel_impl_t  = merge_kernel_impl_<ArchConfig, Key, Value>;
-        using merge_vsmem_helper_t = detail::vsmem_helper_impl<merge_kernel_impl_t>;
-
-        vsmem_per_block = merge_vsmem_helper_t::vsmem_per_block;
-    }
-    return vsmem_per_block.value();
+    return vsmem_per_block;
 }
 
 template<class Config,
@@ -96,16 +91,16 @@ inline hipError_t merge_impl(void*                temporary_storage,
     using key_type   = typename std::iterator_traits<KeysInputIterator1>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator1>::value_type;
 
-    using config = wrapped_merge_config<Config, key_type, value_type>;
+    using selector = merge_config_selector<key_type, value_type>;
 
     detail::target_arch target_arch;
-    hipError_t          result = detail::host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const merge_config_params params = detail::dispatch_target_arch<config, false>(target_arch);
+    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+    detail::gpu target_gpu;
+    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
+    const target current_target(target_arch, target_gpu);
+
+    const auto         params           = get_config<selector>(Config{}, current_target);
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int half_block       = block_size / 2;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -115,7 +110,7 @@ inline hipError_t merge_impl(void*                temporary_storage,
         = ((input1_size + input2_size) + items_per_block - 1) / items_per_block;
 
     size_t virtual_shared_memory_size
-        = get_merge_vsmem_size_per_block<config, key_type, value_type>(target_arch)
+        = get_merge_vsmem_size_per_block<Config, selector, key_type, value_type>(current_target)
           * number_of_blocks;
 
     unsigned int* index = nullptr;
@@ -172,12 +167,12 @@ inline hipError_t merge_impl(void*                temporary_storage,
                                               compare_function);
     };
 
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                        partition_kernel,
-                                                        partition_blocks,
-                                                        half_block,
-                                                        0,
-                                                        stream));
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, selector>(current_target,
+                                                                  partition_kernel,
+                                                                  partition_blocks,
+                                                                  half_block,
+                                                                  0,
+                                                                  stream));
 
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", input1_size, start);
 
@@ -212,12 +207,12 @@ inline hipError_t merge_impl(void*                temporary_storage,
                                     storage);
     };
 
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                        merge_kernel,
-                                                        dim3(number_of_blocks),
-                                                        dim3(block_size),
-                                                        0,
-                                                        stream));
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, selector>(current_target,
+                                                                  merge_kernel,
+                                                                  dim3(number_of_blocks),
+                                                                  dim3(block_size),
+                                                                  0,
+                                                                  stream));
 
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("merge_kernel", input1_size, start);
 

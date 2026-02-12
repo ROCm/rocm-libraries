@@ -30,7 +30,7 @@
 
 int main()
 {
-    // For size N >= 8192, temporary buffer is required to allocated
+    // For size N >= 8192, temporary buffer is required to be allocated
     const size_t N = 64 * 2048;
 
     std::vector<float2> cx(N);

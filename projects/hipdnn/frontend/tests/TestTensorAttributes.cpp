@@ -3,8 +3,9 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -114,220 +115,81 @@ TEST(TestTensorAttributes, PackAttributes)
 
     auto bufferPointer = builder.GetBufferPointer();
     auto tensorAttributesFlatbuffer
-        = flatbuffers::GetRoot<hipdnn_sdk::data_objects::TensorAttributes>(bufferPointer);
-    auto unpacked = std::unique_ptr<hipdnn_sdk::data_objects::TensorAttributesT>(
+        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(bufferPointer);
+    auto unpacked = std::unique_ptr<hipdnn_data_sdk::data_objects::TensorAttributesT>(
         tensorAttributesFlatbuffer->UnPack());
 
     EXPECT_EQ(unpacked->uid, 1);
     EXPECT_EQ(unpacked->name, "PackedTensor");
-    EXPECT_EQ(unpacked->data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(unpacked->data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
     EXPECT_EQ(unpacked->strides, std::vector<int64_t>({1, 2, 3}));
     EXPECT_EQ(unpacked->dims, std::vector<int64_t>({4, 5, 6}));
     EXPECT_TRUE(unpacked->virtual_);
 }
 
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveValidCase)
+TEST(TestTensorAttributes, ValidateSucceedsOnValueTensor)
 {
-    TensorAttributes tensor;
-    tensor.set_dim({4, 5, 6});
-    tensor.set_stride({30, 6, 1});
-    EXPECT_TRUE(tensor.validate_dims_and_strides_set_and_positive());
+    TensorAttributes tensor(1.f);
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
 }
 
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveEmptyDims)
+TEST(TestTensorAttributes, ValidateSucceedsOnVirtualTensor)
 {
     TensorAttributes tensor;
-    // No dimensions set
-    EXPECT_FALSE(tensor.validate_dims_and_strides_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveZeroDimension)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({4, 0, 6}); // Zero in middle dimension
-    tensor.set_stride({0, 6, 1});
-    EXPECT_FALSE(tensor.validate_dims_and_strides_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveNegativeDimension)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({4, -5, 6}); // Negative dimension
-    tensor.set_stride({30, 6, 1});
-    EXPECT_FALSE(tensor.validate_dims_and_strides_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveZeroStride)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({4, 5, 6});
-    tensor.set_stride({30, 0, 1}); // Zero stride
-    EXPECT_FALSE(tensor.validate_dims_and_strides_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveNegativeStride)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({4, 5, 6});
-    tensor.set_stride({30, -6, 1}); // Negative stride
-    EXPECT_FALSE(tensor.validate_dims_and_strides_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveStrideSizeMismatch)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({4, 5, 6});
-    tensor.set_stride({30, 6}); // Only 2 strides for 3 dimensions
-    EXPECT_FALSE(tensor.validate_dims_and_strides_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveMoreStridesThanDims)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({4, 5});
-    tensor.set_stride({20, 5, 1}); // 3 strides for 2 dimensions
-    EXPECT_FALSE(tensor.validate_dims_and_strides_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveAllZeroDims)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({0, 0, 0});
-    tensor.set_stride({0, 0, 0});
-    EXPECT_FALSE(tensor.validate_dims_and_strides_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveAllNegativeDims)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({-1, -2, -3});
-    tensor.set_stride({6, 3, 1});
-    EXPECT_FALSE(tensor.validate_dims_and_strides_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveMixedInvalidValues)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({4, 0, -6}); // Mix of valid, zero, and negative
-    tensor.set_stride({0, -6, 1}); // Mix of zero, negative, and valid
-    EXPECT_FALSE(tensor.validate_dims_and_strides_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveSingleDimension)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({10});
+    tensor.set_dim({1});
     tensor.set_stride({1});
-    EXPECT_TRUE(tensor.validate_dims_and_strides_set_and_positive());
+    tensor.set_is_virtual(true);
+    tensor.set_data_type(DataType::FLOAT);
+
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
 }
 
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveSingleZeroDimension)
+TEST(TestTensorAttributes, ValidateFailsOnVirtualValueTensor)
 {
-    TensorAttributes tensor;
-    tensor.set_dim({0});
+    TensorAttributes tensor(1.f);
+    tensor.set_dim({1});
     tensor.set_stride({1});
-    EXPECT_FALSE(tensor.validate_dims_and_strides_set_and_positive());
+    tensor.set_is_virtual(true);
+
+    EXPECT_EQ(tensor.validate(),
+              Error(ErrorCode::INVALID_VALUE, "Tensor  cannot be virtual and pass by value"));
 }
 
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveLargeDimensions)
+TEST(TestTensorAttributes, ValidateFailsOnDifferentDimAndStrideSize)
 {
     TensorAttributes tensor;
-    tensor.set_dim({1024, 2048, 4096});
-    tensor.set_stride({8388608, 4096, 1});
-    EXPECT_TRUE(tensor.validate_dims_and_strides_set_and_positive());
+    tensor.set_dim({1});
+    tensor.set_stride({1, 2});
+    tensor.set_data_type(DataType::FLOAT);
+
+    EXPECT_EQ(tensor.validate(),
+              Error(ErrorCode::INVALID_VALUE, "Tensor  dims and strides have different sizes"));
 }
 
-TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositive5DValidCase)
+TEST(TestTensorAttributes, ValidateFailsOnEmptyDims)
 {
     TensorAttributes tensor;
-    tensor.set_dim({2, 3, 4, 5, 6});
-    tensor.set_stride({360, 120, 30, 6, 1});
-    EXPECT_TRUE(tensor.validate_dims_and_strides_set_and_positive());
+    tensor.set_data_type(DataType::FLOAT);
+
+    EXPECT_EQ(tensor.validate(),
+              Error(ErrorCode::ATTRIBUTE_NOT_SET, "Tensor  dims must be non-empty"));
 }
 
-TEST(TestTensorAttributes, ValidateDimsSetAndPositiveValidCase)
+TEST(TestTensorAttributes, ValidateFailsOnNonPositiveDimension)
 {
-    TensorAttributes tensor;
-    tensor.set_dim({4, 5, 6});
-    EXPECT_TRUE(tensor.validate_dims_set_and_positive());
-}
+    std::vector<std::vector<int64_t>> testDims = {{0, 1}, {1, 0, 1}, {-1, 1, 1}, {1, 1, 1, -1}};
 
-TEST(TestTensorAttributes, ValidateDimsSetAndPositiveEmptyDims)
-{
-    TensorAttributes tensor;
-    // No dimensions set
-    EXPECT_FALSE(tensor.validate_dims_set_and_positive());
-}
+    for(const auto& dim : testDims)
+    {
+        TensorAttributes tensor;
+        tensor.set_dim(dim);
+        tensor.set_stride(dim);
+        tensor.set_data_type(DataType::FLOAT);
 
-TEST(TestTensorAttributes, ValidateDimsSetAndPositiveZeroDimension)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({4, 0, 6}); // Zero in middle dimension
-    EXPECT_FALSE(tensor.validate_dims_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsSetAndPositiveNegativeDimension)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({4, -5, 6}); // Negative dimension
-    EXPECT_FALSE(tensor.validate_dims_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsSetAndPositiveAllZeroDims)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({0, 0, 0});
-    EXPECT_FALSE(tensor.validate_dims_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsSetAndPositiveAllNegativeDims)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({-1, -2, -3});
-    EXPECT_FALSE(tensor.validate_dims_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsSetAndPositiveMixedInvalidValues)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({4, 0, -6}); // Mix of valid, zero, and negative
-    EXPECT_FALSE(tensor.validate_dims_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsSetAndPositiveSingleDimension)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({10});
-    EXPECT_TRUE(tensor.validate_dims_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsSetAndPositiveSingleZeroDimension)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({0});
-    EXPECT_FALSE(tensor.validate_dims_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsSetAndPositiveLargeDimensions)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({1024, 2048, 4096});
-    EXPECT_TRUE(tensor.validate_dims_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsSetAndPositive5DValidCase)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({2, 3, 4, 5, 6});
-    EXPECT_TRUE(tensor.validate_dims_set_and_positive());
-}
-
-TEST(TestTensorAttributes, ValidateDimsSetAndPositiveWithStridesIgnored)
-{
-    TensorAttributes tensor;
-    tensor.set_dim({4, 5, 6});
-    tensor.set_stride({0, -1, 2}); // Invalid strides should be ignored
-    EXPECT_TRUE(tensor.validate_dims_set_and_positive());
+        EXPECT_EQ(tensor.validate(),
+                  Error(ErrorCode::INVALID_VALUE, "Tensor  must have only positive dimensions"))
+            << "Dims: " << hipdnn_data_sdk::utilities::vecToString(dim);
+    }
 }
 
 TEST(TestTensorAttributes, ValidateDataType)
@@ -343,7 +205,10 @@ TEST(TestTensorAttributes, ValidateDataType)
            {DataType::BFLOAT16, ErrorCode::OK},
            {DataType::DOUBLE, ErrorCode::OK},
            {DataType::UINT8, ErrorCode::OK},
-           {DataType::INT32, ErrorCode::OK}};
+           {DataType::INT32, ErrorCode::OK},
+           {DataType::INT8, ErrorCode::OK},
+           {DataType::FP8_E4M3, ErrorCode::OK},
+           {DataType::FP8_E5M2, ErrorCode::OK}};
 
     for(auto [dataType, errorCode] : expectedResults)
     {

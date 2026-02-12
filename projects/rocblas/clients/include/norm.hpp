@@ -127,8 +127,8 @@ double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, VEC
         for(int64_t j = 0; j < M; j++)
         {
             size_t idx       = j + i * (size_t)lda;
-            hCPU_double[idx] = hCPU[idx];
-            hGPU_double[idx] = hGPU[idx];
+            hCPU_double[idx] = float(hCPU[idx]);
+            hGPU_double[idx] = float(hGPU[idx]);
         }
     }
 
