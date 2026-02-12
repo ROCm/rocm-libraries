@@ -410,14 +410,13 @@ class TestCustomScheduleBF16:
 
     @pytest.mark.parametrize(
         # fmt: off
-       "transA, transB, lds_tr_inst,  tr_lds, mt0, mt1", [
+    "transA, transB, lds_tr_inst,  tr_lds, mt0, mt1", [
         ( True,  False,        False,       1, 224, 128),  # TN
         ( False,  True,        True,        0, 224, 128),  # NT
         ( False,  False,       True,        1, 224, 128),  # NN
         ( False,  True,        True,        0, 128, 224),  # NT
-       ]
-    )
-     def test_schedule_224x128x64_128x224x64_16bit(self, transA, transB, lds_tr_inst, tr_lds, mt0, mt1):
+    ])
+    def test_schedule_224x128x64_128x224x64_16bit(self, transA, transB, lds_tr_inst, tr_lds, mt0, mt1):
         """
         Tests the 224x128x64 16-bit schedules (TN/NT/NN).
         Tests the 128x224x64 16-bit schedule  (NT).
