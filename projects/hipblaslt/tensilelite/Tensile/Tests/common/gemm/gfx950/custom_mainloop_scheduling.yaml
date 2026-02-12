@@ -517,7 +517,7 @@ BenchmarkProblems:
           - Range: [[240], [256], [1], [64, 64, 256]]
           - Range: [[240], [256], [1], [1, 17, 256]]  
           - Exact: [3840, 4096, 1, 8192]
-        - BiasTypeArgs: ['b']
+        - BiasTypeArgs: ['b']          
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -1455,7 +1455,7 @@ BenchmarkProblems:
       - PrefetchGlobalRead: [2]
       - SourceSwap: [1]
       - TransposeLDS: [1]
-      - UseCustomMainLoopSchedule: [true]
+      - UseCustomMainLoopSchedule: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
       - ProblemSizes:
