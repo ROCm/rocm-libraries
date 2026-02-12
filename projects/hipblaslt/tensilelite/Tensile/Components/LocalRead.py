@@ -160,24 +160,27 @@ class LocalReadMFMA(LocalRead):
 
     # Vreg Value layout (assuming MIInputPerThread = 8)
     # (1) local read dst
+    #       T: index transpose case (lrvwTile>1 and not transposeCode)
+    #       X: lrvwTile == 1 or not UseDirect32XEmulation
+    #       interleave T reg case, (2)
     #  local read + lrvwTile == 2
-    #   valOffset  0 -  1 (+16): X reg,  0 -  1 (+16)
-    #   valOffset  2 -  3 (+16): X reg,  8 -  9 (+16)
-    #   valOffset  4 -  5 (+16): X reg,  2 -  3 (+16)
-    #   valOffset  6 -  7 (+16): X reg, 10 - 11 (+16)
-    #   valOffset  8 -  9 (+16): X reg,  4 -  5 (+16)
-    #   valOffset 10 - 11 (+16): X reg, 12 - 13 (+16)
-    #   valOffset 12 - 13 (+16): X reg,  6 -  7 (+16)
-    #   valOffset 14 - 15 (+16): X reg, 14 - 15 (+16)
+    #   valOffset  0 -  1 (+16): X/T reg,  0 -  1 (+16)
+    #   valOffset  2 -  3 (+16): X/T reg,  8 -  9 (+16)
+    #   valOffset  4 -  5 (+16): X/T reg,  2 -  3 (+16)
+    #   valOffset  6 -  7 (+16): X/T reg, 10 - 11 (+16)
+    #   valOffset  8 -  9 (+16): X/T reg,  4 -  5 (+16)
+    #   valOffset 10 - 11 (+16): X/T reg, 12 - 13 (+16)
+    #   valOffset 12 - 13 (+16): X/T reg,  6 -  7 (+16)
+    #   valOffset 14 - 15 (+16): X/T reg, 14 - 15 (+16)
     #  local read + lrvwTile == 4
-    #   valOffset  0 -  3: X reg,  0 -  3
-    #   valOffset  4 -  7: X reg,  8 - 11
-    #   valOffset  8 - 11: X reg, 16 - 19
-    #   valOffset 12 - 15: X reg, 24 - 27
-    #   valOffset 16 - 19: X reg,  4 -  7
-    #   valOffset 20 - 23: X reg, 12 - 15
-    #   valOffset 24 - 27: X reg, 20 - 23
-    #   valOffset 28 - 31: X reg, 28 - 31
+    #   valOffset  0 -  3: X/T reg,  0 -  3
+    #   valOffset  4 -  7: X/T reg,  8 - 11
+    #   valOffset  8 - 11: X/T reg, 16 - 19
+    #   valOffset 12 - 15: X/T reg, 24 - 27
+    #   valOffset 16 - 19: X/T reg,  4 -  7
+    #   valOffset 20 - 23: X/T reg, 12 - 15
+    #   valOffset 24 - 27: X/T reg, 20 - 23
+    #   valOffset 28 - 31: X/T reg, 28 - 31
     # (2) interleave T reg (src of high value cvt, local read dest)
     #     For local read dst, apply this logic on top of above (1)
     #   valOffset  0 -  3: T reg,  0 -  3
@@ -216,12 +219,18 @@ class LocalReadMFMA(LocalRead):
             retIdx = retIdxUpper + retIdxLower
         return retIdx, XTchar
 
-    def getTransposeXorTIndex(self, writer, kernel, idx, tc, lrvwTile, dst, localRead=False):
+    def getTransposeXorTIndex(self, writer, kernel, idx, tc, lrvwTile, dst, isNext, localRead=False):
         assert(kernel["MIInputPerThread"] == 8)
-        assert(lrvwTile <= 4)
-        TF32EmuUseTransposeCode = writer.states.a.TF32EmuUseTransposeCode if tc == "A" else writer.states.b.TF32EmuUseTransposeCode
-        TF32EmuInterleaveTreg = writer.states.a.TF32EmuInterleaveTreg if tc == "A" else writer.states.b.TF32EmuInterleaveTreg
-        useDirect32XEmulation = writer.states.a.useDirect32XEmulation if tc == "A" else writer.states.b.useDirect32XEmulation
+        assert(lrvwTile <= 4, "lrvwTile is %d"%lrvwTile)
+        abmatrixinfo = writer.states.a if tc == 'A' else writer.states.b
+        if isNext:
+            useTransposeCode = abmatrixinfo.useTransposeCodeNext
+            useDirect32XEmulation = abmatrixinfo.useDirect32XEmulationNext
+        else:
+            useTransposeCode = abmatrixinfo.useTransposeCodeThis
+            useDirect32XEmulation = abmatrixinfo.useDirect32XEmulationThis
+        TF32EmuInterleaveTreg = abmatrixinfo.TF32EmuInterleaveTreg
+        swapBlockSizeSub = abmatrixinfo.swapBlockSizeSub
         blockH = kernel["MIInputPerThread"]
         blockW = lrvwTile
         blockSize = blockH * blockW
@@ -239,7 +248,12 @@ class LocalReadMFMA(LocalRead):
                 idx = dsReadConvTable[tableIdx] + blockIdx * blockSize
             if TF32EmuInterleaveTreg:
                 idx, XTchar = self.TXInterleaveLayoutIdx(idx)
-            return idx, XTchar
+            elif writer.states.doFullPackCodePrefetch:
+                # full pack code prefetch case, dst of local read is always T reg
+                # use T as destination
+                XTchar = "T"
+                # always use same swapBlockSizeSub(=0)
+                idx = idx % swapBlockSizeSub
             return idx, XTchar
         if not dst:
             # src case
@@ -251,22 +265,18 @@ class LocalReadMFMA(LocalRead):
                 # T reg interleave layout (common for both lrvwTile==1 and >1)
                 # Conversion for src only. No conversion in dst case.
                 idx, XTchar = self.TXInterleaveLayoutIdx(idx)
-            elif lrvwTile > 1:
-                # wider local read + not Temp case
-                if TF32EmuUseTransposeCode:
-                    XTchar = "T" # use T reg for wider local read + transpose code
-                else:
+            elif writer.states.doFullPackCodePrefetch:
+                # full pack code prefetch case, dst of local read is always T reg
+                XTchar = "T" # use T reg for wider local read + transpose code
+                # always use same swapBlockSizeSub(=0)
+                idx = idx % swapBlockSizeSub
+                if lrvwTile > 1 and not useTransposeCode:
                     # do index transpose for src only
                     idx = self.getTransposeIndex(kernel, idx, lrvwTile)
         else:
             # dst case
-            # interleave Treg case, dst is "X"
-            # not interleave Treg case, dst is "T" (transpose case)
-            if (not TF32EmuInterleaveTreg) and useDirect32XEmulation:
-                XTchar = "T"
-                #if (not useDirect32XEmulation):
-                #    # Temp Treg case reg 0-7 only
-                #    idx = idx % 8
+            # always "X"
+            pass
         return idx, XTchar
 
     # transpose vgprs for lrvwTile > 1
@@ -304,7 +314,7 @@ class LocalReadMFMA(LocalRead):
         # do transpose for lrvwTile x lrvwTile (=2x2 or 4x4)
         # 8 comes from kernel["MIInputPerThread"]
         assert(kernel["MIInputPerThread"] == 8)
-        assert(lrvwTile <= 4)
+        assert(lrvwTile <= 4, "lrvwTile is %d"%lrvwTile)
         # index conversion table for MIInputPerThread==8
         convArray2 = [0,  8,  2, 10,  4, 12,  6, 14,  1,  9,  3, 11,  5, 13,  7, 15]
         convArray4 = [0,  8, 16, 24,  4, 12, 20, 28,  1,  9, 17, 25,  5, 13, 21, 29,  2, 10, 18, 26,  6, 14, 22, 30,  3, 11, 19, 27,  7, 15, 23, 31]
@@ -322,9 +332,33 @@ class LocalReadMFMA(LocalRead):
             swappedIdx = idx
         return swappedIdx
 
+    # if prefetch is for NextLoop or not
+    def getIsNext(self, writer, kernel, tc, bufferIdx):
+        numIterPerCoalescedRead = writer.states.numIterPerCoalescedReadA if tc == "A" else writer.states.numIterPerCoalescedReadB
+        isNext = bufferIdx < writer.states.numItersPLR * numIterPerCoalescedRead
+        # subIter case
+        if kernel["ForceUnrollSubIter"]:
+            isNext = writer.states.SubTileIdx == 0
+        return isNext
+
+    # Get vgpr string for Emu from mfmaIter
+    def getVgprStrForEmuMfma(self, writer, kernel, tc, bufferIdx, iui, valOffset, lrvwTile, u, dst=False, localRead=False):
+        # subIter case
+        if kernel["ForceUnrollSubIter"]:
+            # isNext means using prefetch local read for next iter
+            # MFMA case, isNext means smaller vreg index
+            if tc == "A":
+                isNext = (u & 1) == 0
+            else:
+                isNext = u < 2
+        else:
+            isNext = self.getIsNext(writer, kernel, tc, bufferIdx)
+        v0Idx, v0XTchar = self.getTransposeXorTIndex(writer, kernel, valOffset, tc, lrvwTile, dst, isNext, localRead=localRead)
+        return "Valu%s_%s%u_I%u+%u"%(tc, v0XTchar, bufferIdx, iui, v0Idx)
     # Get vgpr string for Emu
     def getVgprStrForEmu(self, writer, kernel, tc, bufferIdx, iui, valOffset, lrvwTile, dst=False, localRead=False):
-        v0Idx, v0XTchar = self.getTransposeXorTIndex(writer, kernel, valOffset, tc, lrvwTile, dst, localRead=localRead)
+        isNext = self.getIsNext(writer, kernel, tc, bufferIdx)
+        v0Idx, v0XTchar = self.getTransposeXorTIndex(writer, kernel, valOffset, tc, lrvwTile, dst, isNext, localRead=localRead)
         return "Valu%s_%s%u_I%u+%u"%(tc, v0XTchar, bufferIdx, iui, v0Idx)
     # Get vgpr for Emu
     def getVgprForEmu(self, writer, kernel, tc, bufferIdx, iui, valOffset, lrvwTile, vgprLen=1, dst=False, localRead=False):
@@ -365,17 +399,9 @@ class LocalReadMFMA(LocalRead):
             done.append(idx)
             done.append(newIdx)
 
-    # 8 registers were read in fp32. Write to 2 of 4 registers with high bits
-    # Input: vgprValuA/B_X/T_ i ... i + 7 -> FP32
-    # Output: vgprValuA/B_X_ i .. i + 3 -> BF16 High bits
-    def pack4HiBits(self, kernel, tct, index, bufferIdx, baseValuiIdx, iui, writer, module, lrvwTile, tmpvgpr, commentForSchedule1):
-        useDirect32XEmulation = writer.states.a.useDirect32XEmulation if tct =="A" else writer.states.b.useDirect32XEmulation
+    def initTmpVregForPack(self, kernel, writer, tct, index, bufferIdx, baseValuiIdx, iui, module, lrvwTile, tmpvgpr, useDirect32XEmulation):
         valOffset = baseValuiIdx + index
-        dstValOffset = baseValuiIdx + index // 2
-        v0, v1, v2, v3 = self.get4VgprForEmu(writer, kernel, tct, bufferIdx, valOffset, iui, lrvwTile, dst=False)
         src0, src1 = self.get2VgprForEmu(writer, kernel, tct, bufferIdx, valOffset, iui, lrvwTile, vgprLen=2, dst=False)
-        dst0, dst1 = self.get2VgprForEmu(writer, kernel, tct, bufferIdx, dstValOffset, iui, lrvwTile, dst=True)
-
         if index % 8 == 0: # First half of registers use tmp registers
             if (not useDirect32XEmulation):
                 # First half of the registers will be overwritten. Store FP32 values in tmp
@@ -394,8 +420,26 @@ class LocalReadMFMA(LocalRead):
                 module.add(VMovB64(dst=vgpr(val1, 2), src=src0))
                 module.add(VMovB64(dst=vgpr(val2, 2), src=src1))
 
+    # 8 registers were read in fp32. Write to 2 of 4 registers with high bits
+    # Input: vgprValuA/B_X/T_ i ... i + 7 -> FP32
+    # Output: vgprValuA/B_X_ i .. i + 3 -> BF16 High bits
+    def pack4HiBits(self, kernel, writer, tct, index, bufferIdx, baseValuiIdx, iui, module, lrvwTile, commentForSchedule1, useDirect32XEmulation):
+        valOffset = baseValuiIdx + index
+        dstValOffset = baseValuiIdx + index // 2
+        v0, v1, v2, v3 = self.get4VgprForEmu(writer, kernel, tct, bufferIdx, valOffset, iui, lrvwTile, dst=False)
+        dst0, dst1 = self.get2VgprForEmu(writer, kernel, tct, bufferIdx, dstValOffset, iui, lrvwTile, dst=True)
         module.add(VCvtPkF32toBF16(dst=dst0, src0=v0, src1=v1))
-        commentStr = ""
+        commentStr = commentForSchedule1
+        # do not put comment for scheduling in the following cases
+        # - UseMFMAF32XEmulation
+        #   Delay the comment to the 2nd mfma
+        # - index % 8 == 0
+        #   we need to put schedule comment at index % 8 == 4
+        # - not useDirect32XEmulation
+        #   tmp vreg case, tmp vreg can be same between A and B
+        #   put schedule comment only at final pack
+        if kernel["UseMFMAF32XEmulation"] or (index % 8 == 0) or (not useDirect32XEmulation):
+            commentStr = ""
         module.add(VCvtPkF32toBF16(dst=dst1, src0=v2, src1=v3, comment=commentStr))
 
 
@@ -473,10 +517,14 @@ class LocalReadMFMA(LocalRead):
         pack     = Module("pack%s_I%s"%(tc,iui))
         packPre = Module("pack%s_I%s Pre"%(tc,iui))
 
-        needTransposeCode = writer.states.a.TF32EmuUseTransposeCode if tc == "A" else writer.states.b.TF32EmuUseTransposeCode
-        interleaveTreg = writer.states.a.TF32EmuInterleaveTreg if tc == "A" else writer.states.b.TF32EmuInterleaveTreg
-        useDirect32XEmulation = writer.states.a.useDirect32XEmulation if tc =="A" else writer.states.b.useDirect32XEmulation
-        indexTranpose = lrvwTile > 1 and (not needTransposeCode)
+        isNext = self.getIsNext(writer, kernel, tc, bufferIdx)
+        if isNext:
+            useTransposeCode = writer.states.a.useTransposeCodeNext if tc == "A" else writer.states.b.useTransposeCodeNext
+            useDirect32XEmulation = writer.states.a.useDirect32XEmulationNext if tc == "A" else writer.states.b.useDirect32XEmulationNext
+        else:
+            useTransposeCode = writer.states.a.useTransposeCodeThis if tc == "A" else writer.states.b.useTransposeCodeThis
+            useDirect32XEmulation = writer.states.a.useDirect32XEmulationThis if tc == "A" else writer.states.b.useDirect32XEmulationThis
+        indexTranpose = lrvwTile > 1 and (not useTransposeCode)
 
         # split Metadata when localread width > mi input
         numSplitMetadata = max(ceil((blockWidth * 4) // tP["bpeDS"]) - 1, 0) if tP["isM"] else 0
@@ -547,6 +595,8 @@ class LocalReadMFMA(LocalRead):
                 # divided by numSubTiles for non TailLoop case
                 # TailLoop case, code is not devided by numSubTiles
                 swapBlockSizeSub //= numSubTiles
+            # save the value for index transpose
+            abmatrixinfo.swapBlockSizeSub = swapBlockSizeSub
             for vIdx in range(0, numVectorsPerTile):
                 for eIdx in range(0, numReadsPerVector):
                     valuiIdx = int(valufIdx)
@@ -581,16 +631,31 @@ class LocalReadMFMA(LocalRead):
                                 # Val+6: bf16 low  (4,5)
                                 # Val+7: bf16 low  (6,7)
 
-                                if (valuiIdx % swapBlockSizeSub) == 0 and needTransposeCode:
-                                    # generate Tranpose code (with v_swap) for wider local read + needTransposeCode
-                                    self.transposeLRVregs(kernel, packCodePreT, tc, bufferIdx, iui, writer, lrvwTile, swapBlockSizeSub, subTileIdx)
-                                # For every 8 read vgprs of fp32, pack high bits of bf16 into first 4 vgprs
-                                commentForSchedule1 = "__TF32_1_" + tc + "_%d"%(baseValuiIdx//8)
-                                if valuiIdx % 8 == 0:
-                                    self.pack4HiBits(kernel, tc, 0, bufferIdx, baseValuiIdx, iui, writer, packCodeT, lrvwTile, tmpvgprFP32, commentForSchedule1)
-                                    self.pack4HiBits(kernel, tc, 4, bufferIdx, baseValuiIdx, iui, writer, packCodeT, lrvwTile, tmpvgprFP32, commentForSchedule1)
+                                if (valuiIdx % swapBlockSizeSub) == 0:
+                                    allPack4HiDOne = False
+                                    if useTransposeCode:
+                                        # generate Tranpose code (with v_swap) for wider local read + useTransposeCode
+                                        self.transposeLRVregs(kernel, packCodePreT, tc, bufferIdx, iui, writer, lrvwTile, swapBlockSizeSub, subTileIdx)
+                                    elif writer.states.doFullPackCodePrefetch:
+                                        # index transpose + doFullPackCodePrefetch case, finish all first conversion (high value) at once
+                                        allPack4HiDOne = True
+                                        for idx in range(0, swapBlockSizeSub, 8):
+                                            newBaseValuiIdx = baseValuiIdx + idx
+                                            commentForSchedule1 = "__TF32_1_" + tc + "_%d"%(newBaseValuiIdx//8)
+                                            self.pack4HiBits(kernel, writer, tc, 0, bufferIdx, newBaseValuiIdx, iui, packCodeT, lrvwTile, commentForSchedule1, useDirect32XEmulation)
+                                            self.pack4HiBits(kernel, writer, tc, 4, bufferIdx, newBaseValuiIdx, iui, packCodeT, lrvwTile, commentForSchedule1, useDirect32XEmulation)
 
-                                if (valuiIdx % 8) == 4 and indexTranpose:
+                                # For every 8 read vgprs of fp32, pack high bits of bf16 into first 4 vgprs
+                                if valuiIdx % 8 == 0 :
+                                    commentForSchedule1 = "__TF32_1_" + tc + "_%d"%(baseValuiIdx//8)
+                                    # allocate tmp vgpr first
+                                    self.initTmpVregForPack(kernel, writer, tc, 0, bufferIdx, baseValuiIdx, iui, packCodeT, lrvwTile, tmpvgprFP32, useDirect32XEmulation)
+                                    if not allPack4HiDOne:
+                                        self.pack4HiBits(kernel, writer, tc, 0, bufferIdx, baseValuiIdx, iui, packCodeT, lrvwTile, commentForSchedule1, useDirect32XEmulation)
+                                        self.pack4HiBits(kernel, writer, tc, 4, bufferIdx, baseValuiIdx, iui, packCodeT, lrvwTile, commentForSchedule1, useDirect32XEmulation)
+
+                                do8PackAtOnce = indexTranpose and not allPack4HiDOne
+                                if (valuiIdx % 8) == 4 and do8PackAtOnce:
                                     # index transpose  case
                                     # we need to keep both original values and transpose values
                                     # do "Compute low bits" for 0-3 and 4-7 + final pack here
@@ -638,7 +703,7 @@ class LocalReadMFMA(LocalRead):
                                     commentStr = "__TF32_2_" + tc + "_%d pack final end"%(baseValuiIdx//8)
                                     packCodeT.add(VCvtPkF32toBF16(dst=v7t, src0=v7t, src1=vgpr(tmp), comment=commentStr))
                                     writer.vgprPool.checkIn(tmp)
-                                elif valuiIdx % 4 == 0 and (not indexTranpose):
+                                elif valuiIdx % 4 == 0 and (not do8PackAtOnce):
                                     tmp = writer.vgprPool.checkOut(1, "x32f tmp mod 4")
 
                                     if (valuiIdx % 8) == 0 and not useDirect32XEmulation:
@@ -693,7 +758,7 @@ class LocalReadMFMA(LocalRead):
                                             packCodeT.add(VSubF32(dst=v3t, src0=v3t, src1=vgpr(tmp), comment="end"))
                                     writer.vgprPool.checkIn(tmp)
                                     # on last iteration, store lower bits in last 4 registers
-                                    if valuiIdx % 8 == 4 and (not indexTranpose):
+                                    if valuiIdx % 8 == 4 and (not do8PackAtOnce):
                                         if not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
                                             if useDirect32XEmulation:
                                                 v0, v1, v2, v3 = self.get4VgprForEmu(writer, kernel, tc, bufferIdx, baseValuiIdx, iui, lrvwTile)
@@ -706,7 +771,7 @@ class LocalReadMFMA(LocalRead):
                                                 v3 = vgpr(tmpvgprFP32[tmpIdx + 1] + 1)
                                             v4, v5, v6, v7 = self.get4VgprForEmu(writer, kernel, tc, bufferIdx, baseValuiIdx + 4, iui, lrvwTile)
                                             # dst regs
-                                            # v4 and v4d should be different in needTransposeCode=False case
+                                            # v4 and v4d should be different in useTransposeCode=False case
                                             v4d, v5d, v6d, v7d = self.get4VgprForEmu(writer, kernel, tc, bufferIdx, baseValuiIdx + 4, iui, lrvwTile, dst=True)
                                             # remove s_nop by scheduling mfma4x4 right after first 4 cvt for high
                                             # we will have mfma hi * hi + 4 final cvt A between mfma4x4 B and final conv B
@@ -717,7 +782,8 @@ class LocalReadMFMA(LocalRead):
                                             nopSrc = 0
                                             if kernel["UseCustomMainLoopSchedule"]:
                                                 nopSrc = 4
-                                            if kernel["UseMFMAF32XEmulation"] and nopSrc:
+                                            # insert nop here for CMS only
+                                            if kernel["UseCustomMainLoopSchedule"] and kernel["UseMFMAF32XEmulation"] and nopSrc:
                                                 # 5 wait states needed before the following CVT instructions
                                                 packCodeT.add(SNop(waitState = nopSrc))
                                             packCodeT.add(VCvtPkF32toBF16(dst=v7d, src0=v6, src1=v7, comment="pack final begin"))

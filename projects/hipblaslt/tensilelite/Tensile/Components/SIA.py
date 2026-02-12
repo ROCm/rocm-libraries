@@ -263,7 +263,10 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
     # final index definition
     writer.states.numMfmaForNextLoopLR = min(writer.states.numMfmaForNextLoopLR,numMfmaPerIter-1)
     writer.states.syncPlrMfmaIndex = numMfmaPerIter*(kernel["LoopIters"]-writer.states.numItersPLR+1) - writer.states.numMfmaForNextLoopLR - 1 if writer.states.numItersPLR else 0
-    if writer.states.doPackPreSchedulingNextLoop:
+    if writer.states.doFullPackCodePrefetch and kernel["ForceUnrollSubIter"]:
+        # move syncPlrMfmaIndex one iteration ahead for doFullPackCodePrefetch and subIter
+        writer.states.syncPlrMfmaIndex = max(0, writer.states.syncPlrMfmaIndex - numMfmaPerIter)
+    elif writer.states.doPackPreSchedulingNextLoop:
         # doPackPreSchedulingNextLoop only case (not doFullPackCodePrefetch), move syncPlrMfmaIndex to the top of 
         writer.states.syncPlrMfmaIndex = numMfmaPerIter*(kernel["LoopIters"]-writer.states.numItersPLR)
 

@@ -434,6 +434,7 @@ class Solution(collections.abc.Mapping):
     if state["UseF32XEmulation"]:
       state["UseF32XEmulation"] = True
       state["UseDirect32XEmulation"] = True
+      state["UseDirect32XEmulationInterleaveTreg"] = False # True: enable conventional T reg allocation
       # select conversion logic for X3
       # (1) UseMFMAF32XEmulation = True
       # (2) UseDot2F32XEmulation = True (set (1) to False)
@@ -1440,7 +1441,8 @@ class Solution(collections.abc.Mapping):
       ):
         state["ForceUnrollSubIter"] = True
         state["numSubTiles"] = 2
-        state["PrefetchLocalRead"] = 0 if state["ClusterLocalRead"] == 0 else state["PrefetchLocalRead"]
+        #state["PrefetchLocalRead"] = 0 if state["ClusterLocalRead"] == 0 else state["PrefetchLocalRead"]
+        state["ClusterLocalRead"] = 1
         # disable TailloopInNll
         state["TailloopInNll"] = False
       else:
@@ -1610,25 +1612,32 @@ class Solution(collections.abc.Mapping):
       hasCMS,_ = hasCustomSchedule(state)
       state["UseCustomMainLoopSchedule"] = 1 if hasCMS else 0
 
-    # usePLRPack check
-    # adjust setting only for non CMS (keep original setting for CMS)
-    if backup_UsePLRPack and state["UseCustomMainLoopSchedule"] == 0:
-      state["UsePLRPack"] = True
-      # MatrixInstruction only
-      if not state["EnableMatrixInstruction"]:
-        state["UsePLRPack"] = False
-      # F32X emulation only
-      if not state["UseF32XEmulation"]:
-        state["UsePLRPack"] = False
-      # SIA3 only
-      if state["ScheduleIterAlg"] != 3:
-        state["UsePLRPack"] = False
-      # enable UsePLRPack for SubIter only
-      #if not state["ForceUnrollSubIter"]:
-      #  state["UsePLRPack"] = 0
-      # DirectToLds (both A and B) only
-      if state["DirectToLds"] != 1:
-        state["UsePLRPack"] = False
+    # additional setting for non CMS
+    if state["UseCustomMainLoopSchedule"] == 0:
+      if state["UseMFMAF32XEmulation"]:
+        state["MfmaInitCVgprs"] = True
+      # usePLRPack check
+      # adjust setting only for non CMS (keep original setting for CMS)
+      if backup_UsePLRPack:
+        state["UsePLRPack"] = True
+        # MatrixInstruction only
+        if not state["EnableMatrixInstruction"]:
+          state["UsePLRPack"] = False
+        # F32X emulation only
+        if not state["UseF32XEmulation"]:
+          state["UsePLRPack"] = False
+        # SIA3 only
+        if state["ScheduleIterAlg"] != 3:
+          state["UsePLRPack"] = False
+        # enable UsePLRPack for SubIter only
+        if not state["ForceUnrollSubIter"]:
+          state["UsePLRPack"] = 0
+        # DirectToLds (both A and B) only
+        if state["DirectToLds"] != 1:
+          state["UsePLRPack"] = False
+        # PGR and PLR should be non 0
+        if state["PrefetchGlobalRead"] == 0 or state["PrefetchLocalRead"] == 0:
+          state["UsePLRPack"] = False
 
     # disable SwapGlobalReadOrder if grmode(normal/DTL/DTV) is different between A and B
     # GRA and GRB need to be equivalent to swap the order

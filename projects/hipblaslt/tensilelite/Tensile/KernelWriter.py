@@ -38,7 +38,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64
 from rocisa.register import RegisterPool
-from rocisa.enum import RegisterType
+from rocisa.enum import RegisterType, DataTypeEnum
 
 from .KernelWriterModules import *
 from .Component import Component, LraTileProperties
@@ -103,9 +103,11 @@ class ABMatrixInfo(MatrixInfo):
   startVgprLocalWriteSwapAddr: int= -1
   numSgprGlobalReadIncs: int     = -1
   numPackCvt: int                = 0
-  TF32EmuUseTransposeCode: bool  = False
+  useTransposeCodeThis: bool     = False
+  useTransposeCodeNext: bool     = False
   TF32EmuInterleaveTreg: bool    = False
-  useDirect32XEmulation: bool    = False
+  useDirect32XEmulationThis: bool = False
+  useDirect32XEmulationNext: bool = False
   numVgprEmu: int                = -1
   startVgprCvt: int              = -1
 
@@ -606,19 +608,30 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # Interleave A, B pack code based on scheduling order
   # A0,B0,A1,A2,,,B1,B2,.
   ##############################################################################
-  def _interleavePackAB(self, kernel, packAItems, packBItems, dstPackItems, nopInsert=False, prefetch=False, searchStrings=["__TF32_1", "__TF32_2"]):
+  def isMFMAIn(self,items):
+    for inst in items:
+      if isinstance(inst, MFMAInstruction):
+        return True
+    return False
+
+  def _interleavePackAB(self, kernel, packAItems, packBItems, dstPackItems, prefetch=False, searchStrings=["__TF32_1", "__TF32_2"]):
     while packAItems or packBItems:
-      numA, finalA = self._packItemsConditional(0, packAItems, dstPackItems, searchStrings)
-      numB, finalB = self._packItemsConditional(0, packBItems, dstPackItems, searchStrings)
-      # nop insert option for MFMA4x4 (for prefetch/tail loop)
-      # We do not need nop insertion for prefech and not doFullPackCodePrefetch
-      if nopInsert and kernel["UseMFMAF32XEmulation"] and (not (prefetch and not self.states.doFullPackCodePrefetch)):
-        waitState = 0
-        # if only 1 side is remaining and not final case (mfma is generated in non final part). Add s_nop 4
-        # else, add s_nop 0
-        if (numA > 0 and numB == 0 and (not finalA)) or (numA == 0 and numB > 0 and (not finalB)):
+      tmpPackItems = []
+      numA, finalA = self._packItemsConditional(0, packAItems, tmpPackItems, searchStrings)
+      numB, finalB = self._packItemsConditional(0, packBItems, tmpPackItems, searchStrings)
+      mfma = self.isMFMAIn(tmpPackItems)
+      dstPackItems += tmpPackItems
+      # nop insert for MFMA4x4 (for prefetch/tail loop)
+      # MFMA case only: if only 1 side is remaining and not final case (mfma is generated in non final part). Add s_nop 4
+      waitState = -1
+      if prefetch and mfma:
+        # prefetch + mfma included case, insert nop
+        if (numA > 0 and numB == 0) or (numA == 0 and numB > 0):
           waitState = 4
-        dstPackItems.append(SNop(waitState=waitState, comment="nop for MFMA4x4"))
+        else:
+          waitState = 0
+      if waitState >= 0:
+        dstPackItems.append(SNop(waitState=waitState, comment="nop for x32f emulation"))
 
   ##############################################################################
   # Schedule work into the each unroll loop iteration
@@ -656,6 +669,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     localWriteCodeCounts = self.codes.perIterLocalWrite[iteration][0]
     localWriteCode       = self.codes.perIterLocalWrite[iteration][1]
     isBarrier            = kernel["LoopIters"] - self.states.numItersPLR
+    if self.states.doFullPackCodePrefetch and kernel["ForceUnrollSubIter"]:
+      # hack for doFullPackCodePrefetch and SubIter
+      # move isBarrier 1 iter ahead (calculate isBarrier based on syncPlrMfmaIndex)
+      isBarrier = self.states.syncPlrMfmaIndex // self.states.numMfmaPerIter
     hasLocalRead = countLocalRead(localReadCode)
     scheduleIterAlg = self.states.scheduleIterAlg
     if (NLLlast and tailloopInNll):
@@ -1063,10 +1080,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if scheduleTF32Emu:
           instPerPackA = 0
           instPerPackB = 0
-          # Gather A, B conversion code based on scheduling order
-          self._interleavePackAB(kernel, packAItems, packBItems, packItems, nopInsert=False, searchStrings=["__TF32_1", "__TF32_2"])
           # Gather A, B Pre conversion code based on scheduling order
-          self._interleavePackAB(kernel, packPreAItems, packPreBItems, packPreItems, nopInsert=True, prefetch=True, searchStrings=["__TF32_1", "__TF32_2"])
+          self._interleavePackAB(kernel, packPreAItems, packPreBItems, packPreItems, prefetch=True, searchStrings=["__TF32_1", "__TF32_2"])
+          # Gather A, B conversion code based on scheduling order
+          self._interleavePackAB(kernel, packAItems, packBItems, packItems, searchStrings=["__TF32_1", "__TF32_2"])
 
         else:
           while packAItems:
@@ -1128,6 +1145,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       doPackPreSchedule = numPackPre > 0
       if doPackPreSchedule:
         startPrePackIndex = min(self.states.numMfmaForNextLoopLR + 1, numMfmaPerIter - 1)
+        if self.states.doFullPackCodePrefetch and kernel["ForceUnrollSubIter"] and iteration >= isBarrier:
+          # full pack code + subIter prefetch case
+          # ItemsThisLoop case: start after local read
+          # ItemsNextLoop case: local read is moved 1 iter ahead. Start pack scheduling from i = 0
+          startPrePackIndex = 0
         numMfmaForPrePack = numMfmaPerIter - startPrePackIndex
         numPackPreInstPerMfma = numPackPre // numMfmaForPrePack
         numPackPreInstMod = numPackPre % numMfmaForPrePack
@@ -1523,7 +1545,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               waitDsRead = SWaitCnt(dscnt=numDsInsts, comment="Wait for dependent lr")
               iterCode.add(waitDsRead)
         else:
-          if kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"]):
+          if (kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"])) and not kernel["UseF32XEmulation"]:
             if iteration == 0 and i == kernel["MIWaveTileA"]:
               # add 1 more waitcnt before using ds read data
               waitCode2 = deepcopy(waitCode)
@@ -1567,16 +1589,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
               # last inst to schedule
               # we would not like to put mfma at the end
               if mfmaCount == 1:
-                # if mfmaCount is 1, put it back and schedule at the next mfmaIndex
-                mfmaAdjust = 1
-                # add back
-                packPreItems.insert(0, inst)
-              elif mfmaCount == 2:
-                # if mfmaCount is 1, pop 1 more instruction
+                # if mfmaCount is 1, put 3 more instructions
                 # mfma will not be the last inst. No check if the next one exists or not
                 iterCode.add(inst)
                 inst = packPreItems.pop(0)
-                mfmaAdjust = -1
+                iterCode.add(inst)
+                inst = packPreItems.pop(0)
+                iterCode.add(inst)
+                inst = packPreItems.pop(0)
+                mfmaAdjust = -3
+                count += 3
+              elif mfmaCount == 2:
+                # if mfmaCount is 2, put 2 more instructions
+                # mfma will not be the last inst. No check if the next one exists or not
+                iterCode.add(inst)
+                inst = packPreItems.pop(0)
+                iterCode.add(inst)
+                inst = packPreItems.pop(0)
+                mfmaAdjust = -2
+                count += 2
             count += 1
             iterCode.add(inst)
 
@@ -2406,6 +2437,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       plrIdxDTV = (u+pflr) % kernel["LoopIters"]
       packPreIdx = (u+pflr) % self.states.numPackBuffer # pack store and pack pre read
       packIdx = u % self.states.numPackBuffer # pack read
+      # hack: full pack prefetch case, move local read for next loop 1 iter ahead (no change for CMS)
+      uNext = u
+      if kernel["ForceUnrollSubIter"] and self.states.doFullPackCodePrefetch and u >= self.states.numVgprBuffer and not kernel["UseCustomMainLoopSchedule"]:
+        if u == kernel["LoopIters"] - 2:
+          uNext = kernel["LoopIters"] - 1
+          self.states.SubTileIdx = 0 # hack: force to idx0 for next loop
+        elif u == kernel["LoopIters"] - 1:
+          uNext = kernel["LoopIters"] - 2
+      packStoreIdx = (uNext+pflr) % self.states.numPackBuffer
 
       localReads = Module()
 
@@ -2446,20 +2486,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
         doReadB = 1 if u == 0 else 0
         doReadM = 1 if u == 0 else 0
       # reads for next loop
-      doNext = u > localWriteEndIter
+      doNext = uNext > localWriteEndIter
       doReadA = doReadA or (hasLiveLdsData and doNext)
       doReadB = doReadB or (hasLiveLdsData and doNext)
       doReadM = doReadM or (hasLiveLdsData and doNext)
       doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
       for iui in range(0,kernel["InnerUnroll"]):
         # use full prefetch only for next loop
-        usePLRPack = self.states.doFullPackCodePrefetch and doNext
+        usePLRPackA = self.states.doFullPackCodePrefetch and (doNext or not self.states.a.useTransposeCodeThis or kernel["ForceUnrollSubIter"])
+        usePLRPackB = self.states.doFullPackCodePrefetch and (doNext or not self.states.b.useTransposeCodeThis or kernel["ForceUnrollSubIter"])
         doReadA = doReadA and iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"]
         doReadB = doReadB and iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]
         doReadM = doReadM and iui*self.states.numReadsIterCoalescedMetadata < kernel["InnerUnroll"]
         if (doReadA or doReadB or doReadM) and (kernel["ForceUnrollSubIter"] or self.states.doPackPreSchedulingNextLoop):
-          pack[packPreIdx] = Module()
-          packPre[packPreIdx] = Module()
+          pack[packStoreIdx] = Module()
+          packPre[packStoreIdx] = Module()
         if doReadA:
           localReads.addComment1("local read a")
           bufferIdx = plrIdx*self.states.numIterPerCoalescedReadA
@@ -2472,15 +2513,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # packPre code
           if doNext or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
-            packPre[packPreIdx].add(packPreA)
+            packPre[packStoreIdx].add(packPreA)
           else:
             # otherwise, put pack pre to pack
-            pack[packPreIdx].add(packPreA)
+            pack[packStoreIdx].add(packPreA)
           # pack code
-          if usePLRPack:
-            packPre[packPreIdx].add(packCodeA)
+          if usePLRPackA:
+            packPre[packStoreIdx].add(packCodeA)
           else:
-            pack[packPreIdx].add(packCodeA)
+            pack[packStoreIdx].add(packCodeA)
         if doReadM:
           localReads.addComment1("local read metadata")
           localReadCodeM, packCodeM, packPreM = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMetadata, iui*self.states.numReadsIterCoalescedMetadata, 0, tPM)
@@ -2501,15 +2542,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # packPre code
           if doNext or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
-            packPre[packPreIdx].add(packPreB)
+            packPre[packStoreIdx].add(packPreB)
           else:
             # otherwise, put pack pre to pack
-            pack[packPreIdx].add(packPreB)
+            pack[packStoreIdx].add(packPreB)
           # pack code
-          if usePLRPack:
-            packPre[packPreIdx].add(packCodeB)
+          if usePLRPackB:
+            packPre[packStoreIdx].add(packCodeB)
           else:
-            pack[packPreIdx].add(packCodeB)
+            pack[packStoreIdx].add(packCodeB)
         if (not isResetLroIter or iui != kernel["InnerUnroll"]-1):
           if doReadA:
             localReads.addComment1("local read increment a")
@@ -2904,6 +2945,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       plrIdxDTV = (u+pflr) % kernel["LoopIters"]
       packPreIdx = (u+pflr) % self.states.numPackBuffer
       packIdx = u % self.states.numPackBuffer
+      # hack: full pack prefetch case, move local read for next loop 1 iter ahead (no change for CMS)
+      uNext = u
+      if kernel["ForceUnrollSubIter"] and self.states.doFullPackCodePrefetch and u >= self.states.numVgprBuffer and not kernel["UseCustomMainLoopSchedule"]:
+        if u == kernel["LoopIters"] - 2:
+          uNext = kernel["LoopIters"] - 1
+          self.states.SubTileIdx = 0 # hack: force to idx0 for next loop
+        elif u == kernel["LoopIters"] - 1:
+          uNext = kernel["LoopIters"] - 2
+      packStoreIdx = (uNext+pflr) % self.states.numPackBuffer
 
       # vregSetIdx for DTV
       # use oppsite side of GR buffer
@@ -2944,20 +2994,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
         doReadM = 1 if u == 0 else 0
 
       # reads for next loop
-      doNext = u > localWriteEndIter
+      doNext = uNext > localWriteEndIter
       doReadA = doReadA or (hasLiveLdsData and doNext)
       doReadB = doReadB or (hasLiveLdsData and doNext)
       doReadM = doReadM or (hasLiveLdsData and doNext)
       doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
       for iui in range(0,kernel["InnerUnroll"]):
         # use full prefetch only for next loop
-        usePLRPack = self.states.doFullPackCodePrefetch and doNext
+        usePLRPackA = self.states.doFullPackCodePrefetch and (doNext or not self.states.a.useTransposeCodeThis or kernel["ForceUnrollSubIter"])
+        usePLRPackB = self.states.doFullPackCodePrefetch and (doNext or not self.states.b.useTransposeCodeThis or kernel["ForceUnrollSubIter"])
         doReadA = doReadA and iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"]
         doReadB = doReadB and iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]
         doReadM = doReadM and iui*self.states.numReadsIterCoalescedMetadata < kernel["InnerUnroll"]
         if (doReadA or doReadB or doReadM) and (kernel["ForceUnrollSubIter"] or self.states.doPackPreSchedulingNextLoop):
-          pack[packPreIdx] = Module()
-          packPre[packPreIdx] = Module()
+          pack[packStoreIdx] = Module()
+          packPre[packStoreIdx] = Module()
         if doReadA:
           localReads.addComment1("local read a")
           bufferIdx = plrIdx*self.states.numIterPerCoalescedReadA
@@ -2968,18 +3019,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
           localReads.add(localReadCodeA)
           localReadsA.add(localReadCodeA)
           # packPre code
-          if doNext or self.states.doPackPreSchedulingThisLoop and (not doNext):
+          if doNext or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
-            packPre[packPreIdx].add(packPreA)
+            packPre[packStoreIdx].add(packPreA)
           else:
             # otherwise, put pack pre to pack
-            pack[packPreIdx].add(packPreA)
+            pack[packStoreIdx].add(packPreA)
           # pack code
-          if usePLRPack:
+          if usePLRPackA:
             # put pack code to packPre
-            packPre[packPreIdx].add(packCodeA)
+            packPre[packStoreIdx].add(packCodeA)
           else:
-            pack[packPreIdx].add(packCodeA)
+            pack[packStoreIdx].add(packCodeA)
           if kernel["UseCustomMainLoopSchedule"]:
             LRCodeAAllIters[uIdx].add(localReadCodeA)
             PackCodeAAllIters[uIdx].add(packPreA)
@@ -3004,16 +3055,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # packPre code
           if doNext or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
-            packPre[packPreIdx].add(packPreB)
+            packPre[packStoreIdx].add(packPreB)
           else:
             # otherwise, put pack pre to pack
-            pack[packPreIdx].add(packPreB)
+            pack[packStoreIdx].add(packPreB)
           # pack code
-          if usePLRPack:
+          if usePLRPackB:
             # put pack code to packPre
-            packPre[packPreIdx].add(packCodeB)
+            packPre[packStoreIdx].add(packCodeB)
           else:
-            pack[packPreIdx].add(packCodeB)
+            pack[packStoreIdx].add(packCodeB)
           if kernel["UseCustomMainLoopSchedule"]:
             LRCodeBAllIters[uIdx].add(localReadCodeB)
             PackCodeBAllIters[uIdx].add(packPreB)
@@ -3036,9 +3087,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["DirectToVgprA"] or kernel["DirectToVgprB"]:
           module.add(self.getWaitcntCodeForDirectToVgpr(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, u))
         # put barrier at localWriteEndIter+1
-        if (u == localWriteEndIter+1 and not self.states.doFullPackCodePrefetch) or \
+        isBarrier = localWriteEndIter+1 if not self.states.doFullPackCodePrefetch else (u == self.states.syncPlrMfmaIndex // self.states.numMfmaPerIter)
+        if (u == isBarrier) or \
            (self.states.doFullPackCodePrefetch and (u == self.states.syncPlrMfmaIndex // self.states.numMfmaPerIter)) or \
-           (u == (localWriteEndIter+1)%kernel["LoopIters"] and kernel["ScheduleIterAlg"] == 2):
+           (u == isBarrier%kernel["LoopIters"] and kernel["ScheduleIterAlg"] == 2):
           if (kernel["DirectToLdsA"] or kernel["DirectToLdsB"]) and not self.states.scheduleGROverBarrier:
             vlcntVal = kernel["PrefetchGlobalRead"] - 1 if kernel["PrefetchGlobalRead"] >= 2 else 0
             waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, \
@@ -3246,8 +3298,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     pack = [ Module() for i in range (self.states.numPackBuffer ) ]
     packPre = [ Module() for i in range (self.states.numPackBuffer ) ]
     self.preLoopLocalWriteCode = None
-    # do prefetch and scheduling for full pack code (enable for CMS case)
-    self.states.doFullPackCodePrefetch = kernel["UsePLRPack"] and kernel["UseCustomMainLoopSchedule"]
 
     if kernel["PrefetchGlobalRead"]:
       if self.states.doShadowInit:
@@ -3335,11 +3385,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       self.states.subTileIdx = 0
 
-      if kernel["ForceUnrollSubIter"]:
-        kernel["LoopIters"] = kernel["numSubTiles"] * kernel["numSubTiles"]
-        self.states.numMfmaPerIter = self.states.numMfmaPerIter//kernel["LoopIters"]
-        self.states.numItersPLR = 1
-
       # Init for 3LDSBlk. LRAddr related initialization
       if self.states.IncLdsBufSwitch:
         # init Sreg only. Call A only because Sreg is common for A and B
@@ -3352,15 +3397,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "0prefetch wait for local write"))
         module.add(self._syncThreads(kernel))
 
-        # prefetch pack/prePack scheduling for non CMS only
-        if not kernel["UseCustomMainLoopSchedule"] and (self.states.lrvwTileA > 1 or self.states.lrvwTileB > 1):
-          # do prefetch and scheduling for full pack code
-          self.states.doFullPackCodePrefetch = kernel["UsePLRPack"]
-          # do packPre scheduling for This loop only not CLR or SubIter
-          self.states.doPackPreSchedulingThisLoop = (not kernel["ClusterLocalRead"])
-          self.states.doPackPreSchedulingNextLoop = True
-
-        usePLRPack = self.states.doFullPackCodePrefetch
+        usePLRPack = self.states.doFullPackCodePrefetch or kernel["UseCustomMainLoopSchedule"]
         # in some cases need an extra copy of the LDS read with appropriate double buffer offsets
         for plrIdx in range(0, self.states.numItersPLR):
           packPre[plrIdx] = Module()
@@ -3376,7 +3413,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 module.addComment1("local read prefetch a")
                 localReadCodeA, packCodeA, packPreA = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadA, iui*self.states.numReadsIterCoalescedA, espi, tensorParametersA)
                 module.add(localReadCodeA)
-                packPrePrefetchA.add(packPreA)
+                if self.states.doPackPreSchedulingNextLoop or kernel["UseCustomMainLoopSchedule"]:
+                  packPrePrefetchA.add(packPreA)
+                else:
+                  pack[plrIdx].add(packPreA)
                 if usePLRPack:
                   # usePLRPack case, generate all pack code at prefetch phase
                   # CMS only needs 1st PLRPack code insertion in preLoop, but localReadDo returns only 1st PLRPack code.
@@ -3396,7 +3436,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 module.addComment1("local read prefetch b")
                 localReadCodeB, packCodeB, packPreB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadB, iui*self.states.numReadsIterCoalescedB, espi, tensorParametersB)
                 module.add(localReadCodeB)
-                packPrePrefetchB.add(packPreB)
+                if self.states.doPackPreSchedulingNextLoop or kernel["UseCustomMainLoopSchedule"]:
+                  packPrePrefetchB.add(packPreB)
+                else:
+                  pack[plrIdx].add(packPreB)
                 if usePLRPack:
                   # usePLRPack case, generate all pack code at prefetch phase
                   # CMS only needs 1st PLRPack code insertion in preLoop, but localReadDo returns only 1st PLRPack code.
@@ -3416,7 +3459,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 module.add(self.localReadInc(kernel, iui, tensorParametersB))
           # Gather A, B conversion code based on scheduling order
           packPrePrefetchItems = []
-          self._interleavePackAB(kernel, packPrePrefetchA.flatitems(), packPrePrefetchB.flatitems(), packPrePrefetchItems, nopInsert=True, prefetch=True)
+          self._interleavePackAB(kernel, packPrePrefetchA.flatitems(), packPrePrefetchB.flatitems(), packPrePrefetchItems, prefetch=True)
           if len(packPrePrefetchItems) > 0:
             module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA and LRB to complete (for pre Pack code)"))
 
@@ -3616,14 +3659,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment2("Tail Loop")
 
       # F32XEmu case, need to disable index transpose and generate transpose code for wider local read
-      # Also, need to enable TF32EmuInterleaveTreg to have separate buffer for T0,T1,...
+      # Disable doFullPackCodePrefetchas.
+      # Not TF32EmuInterleaveTreg case, disable useDirect32XEmulationNext
       if kernel["UseF32XEmulation"]:
-        if self.states.lrvwTileA > 1 and self.states.a.useDirect32XEmulation:
-          self.states.a.TF32EmuUseTransposeCode = True
-          self.states.a.TF32EmuInterleaveTreg = True
-        if self.states.lrvwTileB > 1 and self.states.b.useDirect32XEmulation:
-          self.states.b.TF32EmuUseTransposeCode = True
-          self.states.b.TF32EmuInterleaveTreg = True
+        self.states.doFullPackCodePrefetch = False
+        if not self.states.a.TF32EmuInterleaveTreg:
+          self.states.a.useDirect32XEmulationThis = False
+          self.states.a.useDirect32XEmulationNext = False
+        if self.states.lrvwTileA > 1:
+          self.states.a.useTransposeCodeThis = True
+          self.states.a.useTransposeCodeNext = True
+        if not self.states.b.TF32EmuInterleaveTreg:
+          self.states.b.useDirect32XEmulationThis = False
+          self.states.b.useDirect32XEmulationNext = False
+        if self.states.lrvwTileB > 1:
+          self.states.b.useTransposeCodeThis = True
+          self.states.b.useTransposeCodeNext = True
 
       # need to unroll tail loop for the following cases
       mEnd = 1
@@ -3937,16 +3988,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(localReadCodeB)
             if not kernel["UseF32XEmulation"]:
               pack[0].add(packCodeB)
-          # Gather A, B conversion code based on scheduling order
-          if len(packPreA.flatitems()) or len(packPreB.flatitems()):
-            # pack Pre
-            packPreABItems = []
-            self._interleavePackAB(kernel, packPreA.flatitems(), packPreB.flatitems(), packPreABItems, nopInsert=True)
-            pack[0].addItems(packPreABItems)
           if kernel["UseF32XEmulation"]:
+            # Gather A, B conversion code based on scheduling order
+            if len(packPreA.flatitems()) or len(packPreB.flatitems()):
+              # pack Pre
+              packPreABItems = []
+              self._interleavePackAB(kernel, packPreA.flatitems(), packPreB.flatitems(), packPreABItems, prefetch=True)
+              pack[0].addItems(packPreABItems)
             # pack
             packABItems = []
-            self._interleavePackAB(kernel, packCodeA.flatitems(), packCodeB.flatitems(), packABItems, nopInsert=True)
+            # use interleave only for mfma (cvt_sub/dot2 causes tmp vgpr overlapping)
+            if kernel["UseMFMAF32XEmulation"]:
+              self._interleavePackAB(kernel, packCodeA.flatitems(), packCodeB.flatitems(), packABItems, prefetch=True)
+            else:
+              # cvt_sub/dot2 case, add A and B separately (call _interleavePackAB twice for A and B separately)
+              emptyModule = Module()
+              self._interleavePackAB(kernel, packCodeA.flatitems(), emptyModule.flatitems(), packABItems, prefetch=True)
+              self._interleavePackAB(kernel, emptyModule.flatitems(), packCodeB.flatitems(), packABItems, prefetch=True)
             shiftK.addItems(packABItems)
 
           # adjustment for DirectToLds case
@@ -4351,6 +4409,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.numMfmaPerIter = kernel["MIWaveTile"][0] * kernel["MIWaveTile"][1] * kernel["InnerUnroll"]
       if kernel["ProblemType"]["DataType"].isComplex(): self.states.numMfmaPerIter *= 4
       elif kernel["UseF32XEmulation"]: self.states.numMfmaPerIter *= 3
+
+    if kernel["ForceUnrollSubIter"]:
+      kernel["LoopIters"] = kernel["numSubTiles"] * kernel["numSubTiles"]
+      self.states.numMfmaPerIter = self.states.numMfmaPerIter//kernel["LoopIters"]
+      self.states.numItersPLR = 1
 
     # set number of LDS Block
     self.states.numLDSBlk = kernel["NumLdsBlk"]
@@ -5340,57 +5403,85 @@ class KernelWriter(metaclass=abc.ABCMeta):
     #         Wider local read case, we need TransposeCode=True
     #   False: Does not use interleave layout
     #         ider local read + index transpose case, this needs to be False
-    self.states.a.useDirect32XEmulation = kernel["UseDirect32XEmulation"]
-    self.states.b.useDirect32XEmulation = kernel["UseDirect32XEmulation"]
-    self.states.a.TF32EmuUseTransposeCode = False
-    self.states.b.TF32EmuUseTransposeCode = False
-    self.states.a.TF32EmuInterleaveTreg = False
-    self.states.b.TF32EmuInterleaveTreg = False
+    self.states.a.useDirect32XEmulationThis = self.states.a.useDirect32XEmulationNext = kernel["UseDirect32XEmulation"]
+    self.states.b.useDirect32XEmulationThis = self.states.b.useDirect32XEmulationNext = kernel["UseDirect32XEmulation"]
+    # do prefetch and scheduling for full pack code
+    # this sceduling opt is for non CMS. No need to enable it for CMS
+    self.states.doFullPackCodePrefetch = kernel["UsePLRPack"] and not kernel["UseCustomMainLoopSchedule"]
+    # prefetch pack/prePack scheduling for non CMS only
+    # We do not enable any ppack scheduling optimizations for PLR=0
+    if (not kernel["UseCustomMainLoopSchedule"]) and self.states.numItersPLR:
+      # enabhe prepack scheduling for this loop only for DTLA + B
+      if kernel["DirectToLds"] == 1:
+        # do packPre scheduling for This loop only not CLR or SubIter
+        self.states.doPackPreSchedulingThisLoop = (not kernel["ClusterLocalRead"]) or kernel["ForceUnrollSubIter"]
+      self.states.doPackPreSchedulingNextLoop = True
 
     def initTF32Emu(sAorB: ABMatrixInfo, lrvwTile):
+      # for UseF32XEmulation only
+      if not kernel["UseF32XEmulation"]:
+        return 0
       # number of Vreg for interleaveTreg. Half of ValuA or B. Need same block number as Valu
       numVForInterleave = sAorB.numVgprValu // 2
+      numVForIndexTranspose = sAorB.numVgprValuPerBlock
+      if kernel["ForceUnrollSubIter"]:
+        # SubIter case, we devide local read into half at each prefetch
+        numVForIndexTranspose //= 2
+      # full prefetch pack case, we need to allocate full ValuA/B buffers
+      if self.states.doFullPackCodePrefetch:
+        if kernel["UseDirect32XEmulationInterleaveTreg"]:
+          # use conventional Treg allocatin (interleaved Treg and Xreg)
+          numV = numVForInterleave
+          # enable TF32EmuInterleaveTreg
+          sAorB.TF32EmuInterleaveTreg = True
+        else:
+          # allocate single full buffer as dest of local read
+          numV = numVForIndexTranspose
+        sAorB.useDirect32XEmulationThis = True
+        sAorB.useDirect32XEmulationNext = True
+        if kernel["UseMFMAF32XEmulation"]:
+          # use transpose code for MFMA
+          sAorB.useTransposeCodeThis = True
+          sAorB.useTransposeCodeNext = True
+        return numV
       # reg layout setting
-      if sAorB.useDirect32XEmulation:
+      # At init stage, seting is same for this and next
+      if sAorB.useDirect32XEmulationThis:
         # enable TF32EmuInterleaveTreg
         sAorB.TF32EmuInterleaveTreg = True
         numV = numVForInterleave
         if lrvwTile > 1:
           # useDirect32XEmulation case
-          # Use wider local read + transpose (with transpose code or without tranpose code (means vreg index tranpose))
-          if kernel["UseDot2F32XEmulation"] or kernel["UseMFMAF32XEmulation"]:
-            # use Transpose code(instead of vreg index tranpose) for dot2 or MFMA (dst needs to be same as src)
-            sAorB.TF32EmuUseTransposeCode = True
-          else:
-            # use vreg index tranpose
-            sAorB.TF32EmuUseTransposeCode = False
-            # disable TF32EmuInterleaveTreg
-            sAorB.TF32EmuInterleaveTreg = False
-            # We need to allocate numVgprValuPerBlock (only T0 needed. Use same reg for T1,..)
-            # However, we need to use interleave Treg at TailLoop
-            # Use larger number
-            numV = max(sAorB.numVgprValuPerBlock, numVForInterleave)
+          # Use wider local read + transpose code
+          sAorB.useTransposeCodeThis = True
+          sAorB.useTransposeCodeNext = True
       else:
-         # no useDirect32XEmulation case, use temp T reg version
+         # no useDirect32XEmulation case, use temp reg version
          numV = adjustNumVForTF32Emu(sAorB, lrvwTile)
       return numV
 
     def adjustNumVForTF32Emu(sAorB: ABMatrixInfo, lrvwTile):
+      # for UseF32XEmulation only
+      if not kernel["UseF32XEmulation"]:
+        return 0
+      # no T reg for both This and Next Loop
       if lrvwTile > 1:
         # use tranpose code for wider local read
-        sAorB.TF32EmuUseTransposeCode = True
-      # allocate temp vgpr as T reg
-      # need half of MIInputPerThread
-      # numV = kernel["MIInputPerThread"] // 2 # so far, only 4 = 8 // 2 works
+        sAorB.useTransposeCodeThis = True
+        sAorB.useTransposeCodeNext = True
       numV = 0
       # disable TF32EmuInterleaveTreg
       sAorB.TF32EmuInterleaveTreg = False
-      sAorB.useDirect32XEmulation = False
+      sAorB.useDirect32XEmulationThis = False
+      sAorB.useDirect32XEmulationNext = False
       return numV
 
     def checkVregOverflowTF32Emu(vgprIdx, numV):
-      # Do not allow adjustment for CMS
-      if kernel["UseCustomMainLoopSchedule"]:
+      # for UseF32XEmulation only
+      if not kernel["UseF32XEmulation"]:
+        return False
+      # Do not allow adjustment for CMS or doFullPackCodePrefetch
+      if kernel["UseCustomMainLoopSchedule"] or self.states.doFullPackCodePrefetch:
         return False
       # We need to consider 2 more vreg (Serial tmp)
       # Looks like we need more tmp vreg at tailloop
@@ -5413,16 +5504,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numVgprsEmuB = adjustNumVForTF32Emu(self.states.b, self.states.lrvwTileB)
     #   then, check A
     needAdjustment = checkVregOverflowTF32Emu(vgprIdx, numVgprsEmuA + numVgprsEmuB)
-    if needAdjustment and self.states.lrvwTileA == 1:
+    if needAdjustment and self.states.lrvwTileA == 1 and not self.states.doFullPackCodePrefetch:
       numVgprsEmuA = adjustNumVForTF32Emu(self.states.a, self.states.lrvwTileA)
     # step 2 Adjustment for lrvwTileA/B>1
     #   start from B
     needAdjustment = checkVregOverflowTF32Emu(vgprIdx, numVgprsEmuA + numVgprsEmuB)
-    if needAdjustment and self.states.lrvwTileB > 1:
+    if needAdjustment and self.states.lrvwTileB > 1 and not self.states.doFullPackCodePrefetch:
       numVgprsEmuB = adjustNumVForTF32Emu(self.states.b, self.states.lrvwTileB)
     #   then, checkA
     needAdjustment = checkVregOverflowTF32Emu(vgprIdx, numVgprsEmuA + numVgprsEmuB)
-    if needAdjustment and self.states.lrvwTileA > 1:
+    if needAdjustment and self.states.lrvwTileA > 1 and not self.states.doFullPackCodePrefetch:
       numVgprsEmuA = adjustNumVForTF32Emu(self.states.a, self.states.lrvwTileA)
     # final adjustment
     # disable UseMFMAF32XEmulation and save 2 vregs
@@ -5786,6 +5877,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numReadsPerUnrollA = ceil(tensorParametersA["bpe"] * kernel["MIInputPerThreadA"] / int(tensorParametersA["localReadInstruction"].blockWidth * 4))
       else:
         self.states.numReadsPerUnrollA = kernel["MIInputPerThreadA"]
+      if kernel["ForceUnrollSubIter"]:
+        self.states.numReadsPerUnrollA //= kernel["numSubTiles"]
       numA = kernel["InnerUnroll"]*(kernel["MIWaveTile"][0] * self.states.numReadsPerUnrollA) // tensorParametersA["localReadInstruction"].numOffsets
       if self.states.lrvwTileA > 1:
         numA = numA // kernel["VectorWidthA"]
@@ -5797,11 +5890,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.states.numReadsPerUnrollMetadata = kernel["MIInputPerThreadMetadata"]
         tileM = kernel["MIWaveTile"][1] if kernel["ProblemType"]["Sparse"] == 2 else kernel["MIWaveTile"][0]
         numM = kernel["InnerUnroll"]*(tileM * self.states.numReadsPerUnrollMetadata) // tensorParametersM["localReadInstruction"].numOffsets
+      if kernel["ForceUnrollSubIter"]:
+        self.states.numReadsPerUnrollMetadata //= kernel["numSubTiles"]
 
       if kernel["UnrollMajorLDSB"] or kernel["enableLDSTrB"]:
         self.states.numReadsPerUnrollB = ceil(tensorParametersB["bpe"] * kernel["MIInputPerThreadB"] / int(tensorParametersB["localReadInstruction"].blockWidth * 4))
       else:
         self.states.numReadsPerUnrollB = kernel["MIInputPerThreadB"]
+      if kernel["ForceUnrollSubIter"]:
+        self.states.numReadsPerUnrollB //= kernel["numSubTiles"]
       numB = kernel["InnerUnroll"]*(kernel["MIWaveTile"][1] * self.states.numReadsPerUnrollB) // tensorParametersB["localReadInstruction"].numOffsets
       if self.states.lrvwTileB > 1:
         numB = numB // kernel["VectorWidthB"]
@@ -5838,13 +5935,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if kernel["EnableMatrixInstruction"]:
       from rocisa.instruction import getMFMAIssueLatency, getSMFMAIssueLatency
-      self.states.miLatency, miIssueLatency = getSMFMAIssueLatency(kernel["ProblemType"]["DataType"].toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"]) if kernel["ProblemType"]["Sparse"] else \
-                                              getMFMAIssueLatency(kernel["ProblemType"]["DataType"].toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
+      datatype = kernel["ProblemType"]["DataType"]
+      if kernel["UseF32XEmulation"]:
+        datatype = DataType(DataTypeEnum.BFloat16)
+      self.states.miLatency, miIssueLatency = getSMFMAIssueLatency(datatype.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"]) if kernel["ProblemType"]["Sparse"] else \
+                                              getMFMAIssueLatency(datatype.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
       # TODO: Avoid the logic which does not make sense.
       # For gfx950, we can't issue any VALU or DS instruction in next 4 cycles.
       # Changed the value based on this and also to mitigate some instruction scheduling issues.
       # Invalidate this adjustment if ExtraMiLatencyLeft is >= 0
-      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and kernel["ProblemType"]["DataType"].numBytes() == 2 and kernel["ExtraMiLatencyLeft"]== -1:
+      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and datatype.numBytes() == 2 and kernel["ExtraMiLatencyLeft"]== -1:
         self.states.miLatency = kernel["MatrixInstM"] // 2
         miIssueLatency = 2
 
