@@ -335,7 +335,7 @@ protected:
         auto&& handle                  = get_handle();
         bn_infer_test_data.output.data = handle.Read<YDataType>(
             bn_infer_test_data.out_dev, bn_infer_test_data.output.data.size());
-        test::ComputeCPUBNInference(bn_infer_test_data);
+        test::ComputeCPUBNInference<YDataType, AccDataType>(bn_infer_test_data);
         activationHostInfer(bn_infer_test_data.activ_mode,
                             0.0,
                             bn_infer_test_data.activ_beta,
@@ -505,7 +505,7 @@ protected:
         bn_bwd_test_data.dBias.data = handle.Read<DscaleDbiasDataType>(
             bn_bwd_test_data.dBias_dev, bn_bwd_test_data.dBias.data.size());
 
-        test::ComputeCPUBNBwd(bn_bwd_test_data);
+        test::ComputeCPUBNBwd<DxDataType, AccDataType>(bn_bwd_test_data);
 
         test::CompareTensor<DxDataType, AccDataType>(
             bn_bwd_test_data.output, bn_bwd_test_data.out_ref, bwd_tol);
@@ -715,7 +715,7 @@ protected:
                                              bn_fwd_train_test_data.runVariance_ref.data.size());
         }
 
-        test::ComputeCPUBNFwdTrain(bn_fwd_train_test_data);
+        test::ComputeCPUBNFwdTrain<YDataType, AccDataType>(bn_fwd_train_test_data);
         activationHostInfer(bn_fwd_train_test_data.activ_mode,
                             0.0,
                             bn_fwd_train_test_data.activ_beta,
