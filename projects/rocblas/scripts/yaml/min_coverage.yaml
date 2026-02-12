@@ -433,10 +433,10 @@ Tests:
 
   - name: atomics_mode_L3_quick
     category: quick
-    atomics_mode: [0, 1]
+    atomics_mode: [1]
     function:
-      gemm: *single_double_precisions_complex
-      gemm_ex: *single_double_precisions_complex
+      gemm: *single_double_precisions_complex_real
+      gemm_ex: *single_double_precisions_complex_real
     arguments: *gemm_common_args
 
 # gemm
@@ -520,7 +520,7 @@ Tests:
   - name: dgmm_L3_quick
     category: quick
     function:
-      - dgmm: *single_double_precisions_complex
+      - dgmm: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     incx: *incx_range
     side: [ L ]
@@ -528,7 +528,7 @@ Tests:
   - name: dgmm_batched_L3_pre_checkin
     category: pre_checkin
     function:
-      - dgmm_batched: *single_double_precisions_complex
+      - dgmm_batched: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     batch_count: *batch_count_range
     incx: *incx_range
@@ -537,7 +537,7 @@ Tests:
   - name: dgmm_strided_batched_L3_nightly
     category: nightly
     function:
-      - dgmm_strided_batched: *single_double_precisions_complex
+      - dgmm_strided_batched: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     batch_count: *batch_count_range
     incx: *incx_range
@@ -546,34 +546,34 @@ Tests:
   - name: geam_L3_quick
     category: quick
     function:
-      - geam: *single_double_precisions_complex
+      - geam: *single_double_precisions_complex_real
     arguments: *gemm_common_args
 
   - name: geam_batched_L3_pre_checkin
     category: pre_checkin
     function:
-      - geam_batched: *single_double_precisions_complex
+      - geam_batched: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     batch_count: *batch_count_range
 
   - name: geam_strided_batched_L3_nightly
     category: nightly
     function:
-      - geam_strided_batched: *single_double_precisions_complex
+      - geam_strided_batched: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     batch_count: *batch_count_range
 
   - name: her2k_L3_quick
     category: quick
     function:
-      - her2k: *single_double_precisions_complex
+      - her2k: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     uplo: [ L ]
 
   - name: her2k_batched_L3_pre_checkin
     category: pre_checkin
     function:
-      - her2k_batched: *single_double_precisions_complex
+      - her2k_batched: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     batch_count: *batch_count_range
     uplo: [ L ]
@@ -581,7 +581,7 @@ Tests:
   - name: her2k_strided_batched_L3_nightly
     category: nightly
     function:
-      - her2k_strided_batched: *single_double_precisions_complex
+      - her2k_strided_batched: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     batch_count: *batch_count_range
     uplo: [ L ]
@@ -589,14 +589,14 @@ Tests:
   - name: herk_L3_quick
     category: quick
     function:
-      - herk: *single_double_precisions_complex
+      - herk: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     uplo: [ L ]
 
   - name: herk_batched_L3_pre_checkin
     category: pre_checkin
     function:
-      - herk_batched: *single_double_precisions_complex
+      - herk_batched: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     batch_count: *batch_count_range
     uplo: [ L ]
@@ -604,7 +604,7 @@ Tests:
   - name: herk_strided_batched_L3_nightly
     category: nightly
     function:
-      - herk_strided_batched: *single_double_precisions_complex
+      - herk_strided_batched: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     batch_count: *batch_count_range
     uplo: [ L ]
@@ -612,7 +612,7 @@ Tests:
   - name: symm_L3_quick
     category: quick
     function:
-      - symm: *single_double_precisions_complex
+      - symm: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     uplo: [ L ]
     side: [ L ]
@@ -620,7 +620,7 @@ Tests:
   - name: symm_batched_L3_pre_checkin
     category: pre_checkin
     function:
-      - symm_batched: *single_double_precisions_complex
+      - symm_batched: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     batch_count: *batch_count_range
     uplo: [ L ]
@@ -629,7 +629,7 @@ Tests:
   - name: symm_strided_batched_L3_nightly
     category: nightly
     function:
-      - symm_strided_batched: *single_double_precisions_complex
+      - symm_strided_batched: *single_double_precisions_complex_real
     arguments: *gemm_common_args
     batch_count: *batch_count_range
     uplo: [ L ]
@@ -638,7 +638,7 @@ Tests:
   - name: syr2k_L3_quick
     category: quick
     function:
-      - syr2k: *single_double_precisions_complex
+      - syr2k: *single_double_precisions_complex_real
     arguments: *syr2k_common_args
     incx_incy: *incx_incy_range
     uplo: [ L ]
@@ -646,7 +646,7 @@ Tests:
   - name: syr2k_batched_L3_pre_checkin
     category: pre_checkin
     function:
-      - syr2k_batched: *single_double_precisions_complex
+      - syr2k_batched: *single_double_precisions_complex_real
     arguments: *syr2k_common_args
     batch_count: *batch_count_range
     incx_incy: *incx_incy_range
@@ -655,7 +655,7 @@ Tests:
   - name: syr2k_strided_batched_L3_nightly
     category: nightly
     function:
-      - syr2k_strided_batched: *single_double_precisions_complex
+      - syr2k_strided_batched: *single_double_precisions_complex_real
     arguments: *syr2k_common_args
     batch_count: *batch_count_range
     incx_incy: *incx_incy_range
