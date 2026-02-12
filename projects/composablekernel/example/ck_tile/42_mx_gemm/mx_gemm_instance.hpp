@@ -105,7 +105,7 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args,
         Kernel{},
         Kernel::GridSize(kargs),
         Kernel::BlockSize(),
-        Kernel::GetSmemSize(),
+        0,
         kargs);
 
     return ck_tile::launch_kernel(s, kernel);
