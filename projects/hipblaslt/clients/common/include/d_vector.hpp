@@ -32,14 +32,7 @@
 #include "hipblaslt_test.hpp"
 #include "singletons.hpp"
 #include <cinttypes>
-#include <cstdio>
 #include <hipblaslt/hipblaslt.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/sysinfo.h>
-#endif
 
 #define MEM_MAX_GUARD_PAD 8192
 #define MAX_DTYPE_SIZE sizeof(double)
@@ -141,19 +134,7 @@ public:
         : hip_memory(size, capacity, false)
     {
         char* d = nullptr;
-
-        // size_t tmp = (size_t)340 * 1024 * 1024 * 1024 - get_available_host_memory();
-        // size_t available_host_memory = (tmp < (size_t)32 * 1024 * 1024 * 1024) ? ((size_t)32 * 1024 * 1024 * 1024 - tmp) : 0;
-        // available_host_memory = available_host_memory * 0.8;
-        // Keep 20% of the available host memory for room of emergency
-        size_t available_host_memory = get_available_host_memory() * 0.8;
-        // Ensure sufficient host memory, otherwise hipHostMalloc may OOM and hip api won't return error code
-        if(available_host_memory < m_size)
-        {
-            d      = nullptr;
-            m_size = m_capacity = 0;
-        }
-        else if(hipHostMalloc(&d, capacity) != hipSuccess)
+        if(hipHostMalloc(&d, capacity) != hipSuccess)
         {
             hipblaslt_cerr << "Error allocating (" << (m_size >> 30) << " GB) host memory"
                            << std::endl;
@@ -170,39 +151,6 @@ public:
     const char* get() const
     {
         return m_d.get();
-    }
-
-    inline size_t get_available_host_memory()
-    {
-#ifdef __linux__
-        struct sysinfo info;
-        if(sysinfo(&info) == 0)
-        {
-            // In the linux system, the host memory(pinned memory)'s capacity is the same as the free memory
-            return info.freeram;
-        }
-        else
-        {
-            stderr << "Error getting available host memory" << std::endl;
-            return 0;
-        }
-#elif _WIN32
-        MEMORYSTATUSEX memStatus = {};
-        memStatus.dwLength = sizeof(memStatus);
-        if(GlobalMemoryStatusEx(&memStatus))
-        {
-            // Use available physical memory with a safety margin to avoid OOM
-            // Dividing by 2 provides a conservative estimate for hipHostMalloc
-            // during heavy testing scenarios
-            return memStatus.ullAvailPhys / 2;
-        }
-        else
-        {
-            stderr << "Error getting available host memory" << std::endl;
-            return 0;
-        }
-#endif
-        return 0;
     }
 
 private:
@@ -265,7 +213,6 @@ private:
             auto e = M(bytes, alloc_capacity, use_HMM);
             if(e.get())
                 return e;
-            stderr << "Clearing memory pool and retrying" << std::endl;
             hipblaslt_cerr << "Clearing memory pool and retrying" << std::endl;
             // allocation failed, so clear the pool and try again (without the 20%)
             pool.clear();
