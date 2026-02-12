@@ -228,9 +228,9 @@ namespace rocRollerTest
 
                         auto context = TestContext::ForTestDevice({}, name);
 
-                        if(not context->targetArchitecture().target().isCDNA35GPU())
+                        if(not context->targetArchitecture().target().isCDNA4GPU())
                         {
-                            SKIP("LDS Bank Model only implemented for CDNA 3.5 GPUs");
+                            SKIP("LDS Bank Model only implemented for CDNA 4 GPUs");
                         }
 
                         LDSBankConflictTestKernel kernel(
