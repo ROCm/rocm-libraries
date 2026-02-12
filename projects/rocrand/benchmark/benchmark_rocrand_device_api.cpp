@@ -193,7 +193,6 @@ void generate_kernel(rocrand_state_mtgp32* states, T* data, const size_t size, G
     unsigned int         index    = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int         stride   = gridDim.x * blockDim.x;
 
-
     __shared__
     rocrand_state_mtgp32 state;
     rocrand_mtgp32_block_copy(&states[state_id], &state);
@@ -568,7 +567,7 @@ struct runner<rocrand_state_sobol64>
     }
 
     /**
-    * @note blocks and threads arguments are ignored. This runner uses the 
+    * @note blocks and threads arguments are ignored. This runner uses the
     * grid_config and block_config determined during construction to ensure
     * valid indexing into the dimension-arranged state array.
     */
