@@ -459,6 +459,7 @@ rocblaslt_status
         msg << params->toString() << std::endl;
         msg << e.what() << std::endl;
         log_info(__func__, msg.str());
+        std::cout<<msg.str()<<std::endl;
         return rocblaslt_status_not_implemented;
     }
 
