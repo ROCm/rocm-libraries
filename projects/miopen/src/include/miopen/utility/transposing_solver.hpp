@@ -207,9 +207,9 @@ public:
         assert(handle);
     }
 
-    SegmentedGpuBuffer(SegmentedGpuBuffer&)  = delete;
-    SegmentedGpuBuffer(SegmentedGpuBuffer&&) = delete;
-    SegmentedGpuBuffer& operator=(SegmentedGpuBuffer&) = delete;
+    SegmentedGpuBuffer(SegmentedGpuBuffer&)             = delete;
+    SegmentedGpuBuffer(SegmentedGpuBuffer&&)            = delete;
+    SegmentedGpuBuffer& operator=(SegmentedGpuBuffer&)  = delete;
     SegmentedGpuBuffer& operator=(SegmentedGpuBuffer&&) = delete;
 
     miopen::shared<Data_t> operator()(std::size_t size)
@@ -376,9 +376,9 @@ public:
             transpose(*handle);
     }
 
-    ProblemTensorTransposeGroup(ProblemTensorTransposeGroup&)  = delete;
-    ProblemTensorTransposeGroup(ProblemTensorTransposeGroup&&) = delete;
-    ProblemTensorTransposeGroup& operator=(ProblemTensorTransposeGroup&) = delete;
+    ProblemTensorTransposeGroup(ProblemTensorTransposeGroup&)             = delete;
+    ProblemTensorTransposeGroup(ProblemTensorTransposeGroup&&)            = delete;
+    ProblemTensorTransposeGroup& operator=(ProblemTensorTransposeGroup&)  = delete;
     ProblemTensorTransposeGroup& operator=(ProblemTensorTransposeGroup&&) = delete;
 
     ~ProblemTensorTransposeGroup()

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
-#include <spdlog/spdlog.h>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_test_sdk/utilities/LoggingUtils.hpp>
@@ -11,10 +10,11 @@ int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
 
-    hipdnn::logging::initializeCallbackLogging(COMPONENT_NAME,
-                                               hipdnn_test_sdk::utilities::testLoggingCallback);
+    // Register callback to output logs during tests.
+    // Log level is automatically initialized from HIPDNN_LOG_LEVEL env var on first use.
+    hipdnn_data_sdk::logging::registerLoggingCallback(
+        hipdnn_test_sdk::utilities::testLoggingCallback);
 
     auto result = RUN_ALL_TESTS();
-    spdlog::shutdown();
     return result;
 }

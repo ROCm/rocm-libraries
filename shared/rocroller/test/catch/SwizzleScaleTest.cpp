@@ -52,7 +52,6 @@ namespace SwizzleScaleTest
         example.setTileSize(128, 128, 128);
         example.setMFMA(16, 16, 128, 1);
         example.setUseLDS(true, true, false);
-        example.setUnroll(2, 2);
         example.setScaling(
             ScaleMode::Separate, ScaleMode::None, DataType::E8M0, DataType::None, 32);
 
