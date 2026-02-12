@@ -43,8 +43,6 @@ workgroup_size_y: 2
 workgroupMappingDim: 0
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDS
 load_B: BufferToLDS
 store: VGPRToGlobalMemoryWithBuffer
@@ -55,7 +53,6 @@ prefetchMixMemOps: true
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeightedSimple
-matchMemoryAccess: true
 types:
   type_A: fp4
   type_B: fp4
