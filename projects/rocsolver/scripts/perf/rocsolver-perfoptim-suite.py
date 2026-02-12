@@ -78,7 +78,7 @@ def call_rocsolver_bench(bench_executable, *args):
             process.returncode)
 
 
-def execute_benchmarks(output_file, suite, precision, case, bench_executable):
+def execute_benchmarks(output_file, suite, precision, case, bench_executable, local):
     """
     EXECUTE_BENCHMARKS collects the arguments for the benchmark client, calls
     the client, gets the resulting time, and writes everything to output file
@@ -87,17 +87,23 @@ def execute_benchmarks(output_file, suite, precision, case, bench_executable):
     benchmark_generator = SUITES[suite]
     sizenormal, sizebatch = get_size_configurations(case)
 
-    for row, n, bench_args in benchmark_generator(suite=suite, precision=precision,
+    for roww, n, bench_args in benchmark_generator(suite=suite, precision=precision,
                                                     sizenormal=sizenormal, sizebatch=sizebatch):
         # Run benchmark
         out, err, exitcode = call_rocsolver_bench(bench_executable, bench_args)
         if exitcode != 0:
             sys.exit("rocsolver-bench call failure: {}".format(err))
-
         time = float(out)
-        row['gpu_time_us'] = time
-        row['log_n'] = math.log10(n)
-        row['log_gpu_time_us'] = math.log10(time)
+
+        # write results
+        if local:
+            row = {'n': roww['n']}
+            row['gpu_time_us'] = time
+        else:
+            row = roww
+            row['gpu_time_us'] = time
+            row['log_n'] = math.log10(n)
+            row['log_gpu_time_us'] = math.log10(time)
 
         if not init:
             results = csv.DictWriter(output_file, fieldnames=row.keys(),
@@ -118,6 +124,9 @@ if __name__ == '__main__':
     parser.add_argument('-v','--verbose',
             action='store_true',
             help='display more information about operations being performed')
+    parser.add_argument('-l','--local',
+            action='store_true',
+            help='prints to screen only size and time as results')
     parser.add_argument('--exe',
             default='../../build/release/clients/staging/rocsolver-bench',
             help='the benchmark executable to run')
@@ -137,8 +146,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     setup_vprint(args)
 
-    if args.output_path is not None:
+    if args.output_path is not None and not args.local:
         with open(args.output_path, 'w', buffering=1, encoding='utf-8') as output_file:
-            execute_benchmarks(output_file, args.suite, args.precision, args.case, args.exe)
+            execute_benchmarks(output_file, args.suite, args.precision, args.case, args.exe, args.local)
     else:
-        execute_benchmarks(sys.stdout, args.suite, args.precision, args.case, args.exe)
+        execute_benchmarks(sys.stdout, args.suite, args.precision, args.case, args.exe, args.local)
