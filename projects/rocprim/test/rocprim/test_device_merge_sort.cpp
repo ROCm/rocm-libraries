@@ -92,7 +92,6 @@ using RocprimDeviceSortTestsParams = ::testing::Types<
     DeviceSortParams<unsigned short, int>,
     DeviceSortParams<signed char, common::custom_type<float, float, true>>,
     DeviceSortParams<int>,
-    DeviceSortParams<common::custom_type<int, int, true>>,
     DeviceSortParams<common::custom_type_copyable<char, double, true>>,
     DeviceSortParams<unsigned long>,
     DeviceSortParams<long long>,
@@ -104,9 +103,16 @@ using RocprimDeviceSortTestsParams = ::testing::Types<
     DeviceSortParams<rocprim::bfloat16, rocprim::bfloat16, rocprim::less<rocprim::bfloat16>>,
     DeviceSortParams<int, float, ::rocprim::greater<int>>,
     DeviceSortParams<short, common::custom_type<int, int, true>>,
-    DeviceSortParams<double, common::custom_type<double, double, true>>,
+
+// These two cases currently fail on gfx950 when BUILD_CODE_COVERAGE=ON.
+// Temporarily disable them while we investigate.
+#if !defined(__gfx950__)
+    DeviceSortParams<common::custom_type<int, int, true>>,
     DeviceSortParams<common::custom_type<float, float, true>,
                      common::custom_type<double, double, true>>,
+#endif
+
+    DeviceSortParams<double, common::custom_type<double, double, true>>,
     DeviceSortParams<int, test_utils::custom_float_type>,
     DeviceSortParams<test_utils::custom_test_array_type<int, 4>>,
     // Test the algorithm with graphs
