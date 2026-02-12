@@ -164,4 +164,6 @@ INSTANTIATE_TEST_SUITE_P(Full, GPU_WidePooling2d_FP32, testing::Values(GetTestCa
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_WidePooling2d_FP16, testing::Values(GetTestCases("--half")));
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_WidePooling2d_BFP16, testing::Values(GetTestCases("--bfloat16")));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_WidePooling2d_BFP16,
+                         testing::Values(GetTestCases("--bfloat16")));
