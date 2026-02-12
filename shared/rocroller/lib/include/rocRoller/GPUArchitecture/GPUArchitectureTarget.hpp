@@ -117,7 +117,7 @@ namespace rocRoller
             return gfx == GPUArchitectureGFX::GFX942;
         }
 
-        constexpr bool isCDNA35GPU() const
+        constexpr bool isCDNA4GPU() const
         {
             return gfx == GPUArchitectureGFX::GFX950;
         }
@@ -149,7 +149,7 @@ namespace rocRoller
 
         constexpr bool isCDNAGPU() const
         {
-            return isCDNA1GPU() || isCDNA2GPU() || isCDNA3GPU() || isCDNA35GPU();
+            return isCDNA1GPU() || isCDNA2GPU() || isCDNA3GPU() || isCDNA4GPU();
         }
 
         constexpr bool isGFX9GPU() const

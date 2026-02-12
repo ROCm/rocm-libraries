@@ -194,7 +194,6 @@ namespace rocRoller
 
                 std::string scheduler;
                 std::string schedulerCost;
-                bool        matchMemoryAccess;
 
                 bool tailLoops = true;
 
