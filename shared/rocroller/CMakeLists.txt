@@ -25,6 +25,7 @@ list(
     ${rocmcmakebuildtools_SOURCE_DIR}/share/rocmcmakebuildtools/cmake
 )
 include(ROCMInstallTargets)
+include(ROCMSetupVersion)
 
 option(ROCROLLER_ENABLE_CLIENT "Build the rocRoller client." ON)
 option(ROCROLLER_ENABLE_YAML_CPP "Enable yaml-cpp backend." ON)
@@ -234,6 +235,9 @@ target_include_directories(rocroller
 
 
 target_compile_features(rocroller PUBLIC cxx_std_20)
+
+# Git hash
+rocm_get_git_commit_tag(ROCROLLER_GIT_HASH)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/source/Utilities/Version.cpp.in"

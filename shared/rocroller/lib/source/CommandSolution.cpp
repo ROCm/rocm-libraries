@@ -52,8 +52,6 @@ namespace rocRoller
         msg << ShowValue(transposeMemoryAccess);
         msg << ShowValue(packMultipleElementsInto1VGPR);
 
-        msg << ShowValue(unrollX);
-        msg << ShowValue(unrollY);
         msg << ShowValue(unrollK);
         msg << ShowValue(fuseLoops);
         msg << ShowValue(tailLoops);

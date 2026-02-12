@@ -29,10 +29,10 @@
 // Always include the SDK logging infrastructure
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 
-#include <mutex>
+#include <shared_mutex>
 #include <string>
 
-namespace hipdnn::logging
+namespace hipdnn_plugin_sdk::logging
 {
 
 /// Default component name for plugins if not initialized
@@ -54,27 +54,27 @@ HIPDNN_HIDDEN inline std::string& getStoredComponentName()
     return s_componentName;
 }
 
-HIPDNN_HIDDEN inline std::mutex& getComponentNameMutex()
+HIPDNN_HIDDEN inline std::shared_mutex& getComponentNameMutex()
 {
-    static std::mutex s_mutex;
+    static std::shared_mutex s_mutex;
     return s_mutex;
 }
 
 inline void setComponentName(const std::string& name)
 {
-    std::lock_guard<std::mutex> lock(getComponentNameMutex());
+    std::unique_lock<std::shared_mutex> lock(getComponentNameMutex());
     getStoredComponentName() = name;
 }
 
 inline std::string getComponentName()
 {
-    std::lock_guard<std::mutex> lock(getComponentNameMutex());
+    std::shared_lock<std::shared_mutex> lock(getComponentNameMutex());
     return getStoredComponentName();
 }
 
 } // namespace detail
 
-} // namespace hipdnn::logging
+} // namespace hipdnn_plugin_sdk::logging
 
 #ifdef HIPDNN_PLUGIN_USE_SPDLOG
 // ============================================================================
@@ -96,18 +96,18 @@ inline std::string getComponentName()
 // retrieving component name (which requires mutex lock + string allocation).
 // Note: spdlog's should_log checks the logger's level, but we can short-circuit
 // earlier by checking the SDK log level.
-#define _HIPDNN_SPDLOG_ACTION(spdlog_level, hipdnn_severity, ...)               \
-    do                                                                          \
-    {                                                                           \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(hipdnn_severity))      \
-        {                                                                       \
-            auto componentName = ::hipdnn::logging::detail::getComponentName(); \
-            auto logger = spdlog::get(componentName);                           \
-            if(logger && logger->should_log(spdlog_level))                      \
-            {                                                                   \
-                logger->log(spdlog_level, __VA_ARGS__);                         \
-            }                                                                   \
-        }                                                                       \
+#define _HIPDNN_SPDLOG_ACTION(spdlog_level, hipdnn_severity, ...)                          \
+    do                                                                                     \
+    {                                                                                      \
+        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(hipdnn_severity))                 \
+        {                                                                                  \
+            auto componentName = ::hipdnn_plugin_sdk::logging::detail::getComponentName(); \
+            auto logger = spdlog::get(componentName);                                      \
+            if(logger && logger->should_log(spdlog_level))                                 \
+            {                                                                              \
+                logger->log(spdlog_level, __VA_ARGS__);                                    \
+            }                                                                              \
+        }                                                                                  \
     } while(0)
 
 #define HIPDNN_PLUGIN_LOG_TRACE(...) \
@@ -121,7 +121,7 @@ inline std::string getComponentName()
 #define HIPDNN_PLUGIN_LOG_FATAL(...) \
     _HIPDNN_SPDLOG_ACTION(spdlog::level::level_enum::critical, HIPDNN_SEV_FATAL, __VA_ARGS__)
 
-namespace hipdnn::logging
+namespace hipdnn_plugin_sdk::logging
 {
 
 /**
@@ -163,7 +163,7 @@ HIPDNN_HIDDEN inline void initializeCallbackLogging(const std::string& component
     }
 }
 
-} // namespace hipdnn::logging
+} // namespace hipdnn_plugin_sdk::logging
 
 #else
 // ============================================================================
@@ -175,57 +175,57 @@ HIPDNN_HIDDEN inline void initializeCallbackLogging(const std::string& component
 // NOTE: Log level is checked BEFORE retrieving component name because
 // getComponentName() requires a mutex lock and string copy.
 
-#define HIPDNN_PLUGIN_LOG_TRACE(msg)                                           \
-    do                                                                         \
-    {                                                                          \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO))     \
-        {                                                                      \
-            auto _hipdnn_comp = ::hipdnn::logging::detail::getComponentName(); \
-            HIPDNN_SDK_LOG_INFO_WITH_COMPONENT(_hipdnn_comp.c_str(), msg);     \
-        }                                                                      \
+#define HIPDNN_PLUGIN_LOG_TRACE(msg)                                                      \
+    do                                                                                    \
+    {                                                                                     \
+        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO))                \
+        {                                                                                 \
+            auto _hipdnn_comp = ::hipdnn_plugin_sdk::logging::detail::getComponentName(); \
+            HIPDNN_SDK_LOG_INFO_WITH_COMPONENT(_hipdnn_comp.c_str(), msg);                \
+        }                                                                                 \
     } while(0)
 
-#define HIPDNN_PLUGIN_LOG_INFO(msg)                                            \
-    do                                                                         \
-    {                                                                          \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO))     \
-        {                                                                      \
-            auto _hipdnn_comp = ::hipdnn::logging::detail::getComponentName(); \
-            HIPDNN_SDK_LOG_INFO_WITH_COMPONENT(_hipdnn_comp.c_str(), msg);     \
-        }                                                                      \
+#define HIPDNN_PLUGIN_LOG_INFO(msg)                                                       \
+    do                                                                                    \
+    {                                                                                     \
+        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO))                \
+        {                                                                                 \
+            auto _hipdnn_comp = ::hipdnn_plugin_sdk::logging::detail::getComponentName(); \
+            HIPDNN_SDK_LOG_INFO_WITH_COMPONENT(_hipdnn_comp.c_str(), msg);                \
+        }                                                                                 \
     } while(0)
 
-#define HIPDNN_PLUGIN_LOG_WARN(msg)                                            \
-    do                                                                         \
-    {                                                                          \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN))     \
-        {                                                                      \
-            auto _hipdnn_comp = ::hipdnn::logging::detail::getComponentName(); \
-            HIPDNN_SDK_LOG_WARN_WITH_COMPONENT(_hipdnn_comp.c_str(), msg);     \
-        }                                                                      \
+#define HIPDNN_PLUGIN_LOG_WARN(msg)                                                       \
+    do                                                                                    \
+    {                                                                                     \
+        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN))                \
+        {                                                                                 \
+            auto _hipdnn_comp = ::hipdnn_plugin_sdk::logging::detail::getComponentName(); \
+            HIPDNN_SDK_LOG_WARN_WITH_COMPONENT(_hipdnn_comp.c_str(), msg);                \
+        }                                                                                 \
     } while(0)
 
-#define HIPDNN_PLUGIN_LOG_ERROR(msg)                                           \
-    do                                                                         \
-    {                                                                          \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_ERROR))    \
-        {                                                                      \
-            auto _hipdnn_comp = ::hipdnn::logging::detail::getComponentName(); \
-            HIPDNN_SDK_LOG_ERROR_WITH_COMPONENT(_hipdnn_comp.c_str(), msg);    \
-        }                                                                      \
+#define HIPDNN_PLUGIN_LOG_ERROR(msg)                                                      \
+    do                                                                                    \
+    {                                                                                     \
+        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_ERROR))               \
+        {                                                                                 \
+            auto _hipdnn_comp = ::hipdnn_plugin_sdk::logging::detail::getComponentName(); \
+            HIPDNN_SDK_LOG_ERROR_WITH_COMPONENT(_hipdnn_comp.c_str(), msg);               \
+        }                                                                                 \
     } while(0)
 
-#define HIPDNN_PLUGIN_LOG_FATAL(msg)                                           \
-    do                                                                         \
-    {                                                                          \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_FATAL))    \
-        {                                                                      \
-            auto _hipdnn_comp = ::hipdnn::logging::detail::getComponentName(); \
-            HIPDNN_SDK_LOG_FATAL_WITH_COMPONENT(_hipdnn_comp.c_str(), msg);    \
-        }                                                                      \
+#define HIPDNN_PLUGIN_LOG_FATAL(msg)                                                      \
+    do                                                                                    \
+    {                                                                                     \
+        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_FATAL))               \
+        {                                                                                 \
+            auto _hipdnn_comp = ::hipdnn_plugin_sdk::logging::detail::getComponentName(); \
+            HIPDNN_SDK_LOG_FATAL_WITH_COMPONENT(_hipdnn_comp.c_str(), msg);               \
+        }                                                                                 \
     } while(0)
 
-namespace hipdnn::logging
+namespace hipdnn_plugin_sdk::logging
 {
 
 /**
@@ -244,6 +244,6 @@ inline void initializeCallbackLogging(const std::string& componentName,
     hipdnn_data_sdk::logging::registerLoggingCallback(callbackFunction);
 }
 
-} // namespace hipdnn::logging
+} // namespace hipdnn_plugin_sdk::logging
 
 #endif // HIPDNN_PLUGIN_USE_SPDLOG

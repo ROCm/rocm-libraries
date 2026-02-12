@@ -177,7 +177,7 @@
     SolutionNameMin: Cijk_Alik_Bjlk_HHS_BH_Bias_GG_HAH_SAV_MT64x64x32_MI32x32x8x1_SN_MIWT1_1
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0

@@ -212,7 +212,7 @@
     SolutionNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_BiasSrcB_SAV_MT32x32x32_MI16x16x1_SN_GRVWB2_GSU1_MIWT1_1_WG32_8_1_WGM8
     SourceSwap: 1
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -397,7 +397,7 @@
     SolutionNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_BiasSrcB_SAV_MT32x32x64_MI16x16x1_SN_GRVWB2_GSU1_MIWT1_1_WG32_8_1_WGM8
     SourceSwap: 1
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -582,7 +582,7 @@
     SolutionNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_BiasSrcB_SAV_MT16x64x64_MI16x16x1_SN_GRVWB1_GSU1_MIWT1_1_WG16_16_1_WGM8
     SourceSwap: 1
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -767,7 +767,7 @@
     SolutionNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_BiasSrcB_SAV_MT16x64x64_MI16x16x1_SN_GRVWB4_GSU1_MIWT1_1_WG16_16_1_WGM8
     SourceSwap: 1
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -951,10 +951,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 4
-    SolutionNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_BiasSrcB_SAV_UserArgs_MT256x128x32_MI32x32x1_SN_GRVWA8_GRVWB8_GSU2_LBSPPA0_LBSPPB0_MIWT4_2_SU0_SUM0_SUS0_VWB2_WGM1
+    SolutionNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_BiasSrcB_SAV_UserArgs_MT256x128x32_MI32x32x1_SN_GRVWA8_GRVWB8_GSU2_LBSPPA0_LBSPPB0_MIWT4_2_SU0_SUM1_SUS0_VWB2_WGM1
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -1139,10 +1139,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 5
-    SolutionNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_BiasSrcB_SAV_UserArgs_MT256x128x32_MI32x32x1_SN_GRVWA4_GRVWB8_GSU4_LBSPPA0_LBSPPB0_MIWT4_2_SU0_SUM0_SUS0_VWB2_WGM1
+    SolutionNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_BiasSrcB_SAV_UserArgs_MT256x128x32_MI32x32x1_SN_GRVWA4_GRVWB8_GSU4_LBSPPA0_LBSPPB0_MIWT4_2_SU0_SUM1_SUS0_VWB2_WGM1
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
