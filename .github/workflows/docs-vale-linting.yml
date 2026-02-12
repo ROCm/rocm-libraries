@@ -17,4 +17,17 @@ on:
 jobs:
   docs-vale-linting:
     name: 'docs-vale-linting'
-    uses: ROCm/rocm-docs-core/.github/workflows/linting.yml@vale_check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+      - run: npm install -g mdx2vast
+
+      - name: install_docutils_for_vale_linting
+        run: pip install docutils
+
+      - uses: errata-ai/vale-action@v2.1.1
+        with:
+          fail_on_error: true
+          vale_flags: "--minAlertLevel=error"
