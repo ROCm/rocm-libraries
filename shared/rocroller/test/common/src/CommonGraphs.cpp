@@ -380,10 +380,8 @@ namespace rocRollerTest::Graphs
         m_problem.unrollK = std::max(2, prefetchInFlight);
     }
 
-    void GEMM::setUnroll(unsigned int unrollX, unsigned int unrollY, unsigned int unrollK)
+    void GEMM::setUnroll(unsigned int unrollK)
     {
-        m_problem.unrollX = unrollX;
-        m_problem.unrollY = unrollY;
         m_problem.unrollK = unrollK;
     }
 
@@ -618,8 +616,6 @@ namespace rocRollerTest::Graphs
         params->fuseLoops                     = m_problem.fuseLoops;
         params->tailLoops                     = m_problem.tailLoops;
         params->allowAmbiguousMemoryNodes     = m_problem.allowAmbiguousMemoryNodes;
-        params->unrollX                       = m_problem.unrollX;
-        params->unrollY                       = m_problem.unrollY;
         params->unrollK                       = m_problem.unrollK;
         params->packMultipleElementsInto1VGPR = m_problem.packMultipleElementsInto1VGPR;
         params->prefetch                      = m_problem.prefetch;
