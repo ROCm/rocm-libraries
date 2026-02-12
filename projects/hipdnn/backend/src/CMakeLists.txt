@@ -3,6 +3,7 @@
 
 include(CMakePackageConfigHelpers)
 
+find_package(fmt ${HIPDNN_FMTLIB_VERSION} REQUIRED)
 find_package(hip REQUIRED)
 
 set(HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR "${PROJECT_BINARY_DIR}/backend/include/")
@@ -39,7 +40,7 @@ target_include_directories(
 )
 
 target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk)
+target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk fmt::fmt)
 target_link_libraries(hipdnn_backend_private PRIVATE ${CMAKE_DL_LIBS})
 target_compile_definitions(hipdnn_backend_private PRIVATE HIPDNN_BACKEND_COMPILATION)
 

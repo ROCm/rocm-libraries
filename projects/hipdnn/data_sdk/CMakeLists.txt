@@ -13,7 +13,7 @@ hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
 hipdnn_add_dependency(spdlog VERSION ${HIPDNN_SPDLOG_VERSION})
 hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 
-find_package(fmt ${HIPDNN_FMTLIB_VERSION} QUIET)
+find_package(fmt ${HIPDNN_FMTLIB_VERSION} REQUIRED)
 find_package(hip REQUIRED)
 
 # For dependencies we are going to check if they weren't imported, and then install it along with
