@@ -18,7 +18,8 @@ namespace miopen_plugin
 ConvFwdParams::ConvFwdParams(
     const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& attributes,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
+        tensorMap,
+    bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
     , _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
@@ -35,7 +36,8 @@ ConvFwdParams::ConvFwdParams(
         = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
     const auto groupCount = hipdnn_data_sdk::utilities::calculateGroupCount(inputDims, weightDims);
 
-    _conv = MiopenConvDescriptor(_spatialDimCount, attributes, static_cast<int>(groupCount));
+    _conv = MiopenConvDescriptor(
+        _spatialDimCount, attributes, static_cast<int>(groupCount), deterministicEnabled);
 
     _tensorsValid = (!attrX.virtual_() && !attrW.virtual_() && !attrY.virtual_());
 }

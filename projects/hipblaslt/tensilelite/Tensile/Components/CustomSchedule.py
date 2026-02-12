@@ -138,6 +138,23 @@ def count_items(input_list: list[int], sv: Optional[int] = None, ev: Optional[in
             count += 1
     return count
 
+def switch_A_B_schedule(optSchedule):
+    # Swap A and B entries in the schedule
+    # Only replace A/B if it's the last or second-last character
+    swappedSchedule = dict()
+    for key, value in optSchedule.items():
+        # Check if A or B is in the last or second-last position
+        if len(key) >= 1 and key[-1] in ('A', 'B'):
+            # Last character is A or B
+            new_key = key[:-1] + ('B' if key[-1] == 'A' else 'A')
+        elif len(key) >= 2 and key[-2] in ('A', 'B'):
+            # Second-last character is A or B
+            new_key = key[:-2] + ('B' if key[-2] == 'A' else 'A') + key[-1]
+        else:
+            # No A or B in last or second-last position, keep unchanged
+            new_key = key
+        swappedSchedule[new_key] = value
+    return swappedSchedule
 
 class ScheduleInfo:
     def __init__(
@@ -171,6 +188,21 @@ class ScheduleInfo:
 
     def isValidationDisabled(self):
         return self._skipValidation
+
+    def pretty_print(self):
+        klen = max(len(k) for k in self.optSchedule.keys())
+        for k,v in self.optSchedule.items():
+            print(f"{k:>{klen}}: {v}")
+        
+        if snops := self.optSchedule.get('SNOP', []):
+            print("---- SNOP code ----")
+            for idx, code in zip(snops[0], self.snopCode):
+                print(f"{idx:>2}: {str(code).strip()}")
+        
+        if syncs := self.optSchedule.get('SYNC', []):
+            print("---- SYNC code ----")
+            for idx, code in zip(syncs[0], self.syncCode):
+                print(f"{idx:>2}: {str(code).strip()}")
 
 def removeComments(module):
     retModule = Module()
@@ -281,7 +313,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         case_str = "NN"
     else:
         case_str = "Unknown"
-    assert status is True, f"Custom mainloop schedule validation failed for kernel {kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']} {case_str}: {message}"
+    assert status is True, f"CMS validation failed for kernel {kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']} {case_str}: {message}"
 
     InstStreams = {key: [stream, idMap[key]] for key, stream in opt1.optSchedule.items()}
 
@@ -313,12 +345,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             else:
                 return ret
 
-        needIfMacro = False
-        ToSched = dict()
-        for k, stream in InstStreams.items():
-            ToSched[k] = scheduleInst(stream[0], stream[1])
-            if len(ToSched[k]) > 1:
-                needIfMacro = True
+        ToSched = {k: scheduleInst(stream[0], stream[1]) for k, stream in InstStreams.items()}
 
         def nllvmcntHandling(inst, shift0, shift1):
             if isinstance(inst, SWaitCnt) and (inst.vlcnt != -1 or (inst.dscnt != -1 and opt1.nllZeroDscnt)):
@@ -344,69 +371,50 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             else:
                 macro.add(inst)
 
-        def scheduleInst1(instList, macroGuard=""):
-            if len(instList) == 1:
-                if instList[0] != None:
-                    for inst in instList[0].flatitems():
-                        if isinstance(inst, SWaitCnt):
-                            nllvmcntHandling(inst, opt1.nglshift, opt1.nllshift)
-                        else:
-                            if macroGuard != "":
-                                macro.add(ValueIf(macroGuard))
-                            macro.add(inst)
-                            if macroGuard != "":
-                                macro.add(ValueEndif(comment="EndIf %s"%(macroGuard)))
+        def get_macro_guard(key):
+            """Determine the macro guard for a given instruction key."""
+            if key in ['GRIncA', 'GRIncB']:
+                return "\\useGRInc == 1"
+            elif key in ['GRA', 'GRB', 'LWSA', 'LWSB']:
+                return "\\useGR == 1"
+            elif key in ['LRA%u' % lastIter, 'LRB%u' % lastIter, 'LRSA', 'LRSB']:
+                return "\\usePLR == 1"
+            elif key in ['LCC']:
+                return "\\useLoop == 1"
+            return ""
 
-        for k,ts in ToSched.items():
-            if k in ['GRIncA', 'GRIncB']: # check for global read inc
-                scheduleInst1(ts, "\\useGRInc == 1")
-            elif k in ['GRA', 'GRB', 'LWSA', 'LWSB']: # check for global reads
-                scheduleInst1(ts, "\\useGR == 1")
-            elif k in ['LRA%u'%lastIter, 'LRB%u'%lastIter, 'LRSA', 'LRSB']: # check for next prefetch
-                scheduleInst1(ts, "\\usePLR == 1")
-            elif k in ['LCC']: # check for next prefetch
-                scheduleInst1(ts, "\\useLoop == 1")
-            else:
-                scheduleInst1(ts)
-
-        if needIfMacro:
-            for codepath in range(numCodePath):
-                if codepath == 0:
-                    macro.add(ValueIf("\\ID == %u"%codepath))
-                else:
-                    macro.add(ValueElseIf("\\ID == %u\n"%codepath))
-
-                def scheduleInst2(instList, macroGuard=""):
-                    if len(instList) == numCodePath:
-                        if instList[codepath] != None:
-                            for inst in instList[codepath].flatitems():
-                                if isinstance(inst, SWaitCnt):
-                                    nllvmcntHandling(inst, opt1.nglshift, opt1.nllshift)
-                                else:
-                                    if macroGuard != "":
-                                        macro.add(ValueIf(macroGuard))
-                                    macro.add(inst)
-                                    if macroGuard != "":
-                                        macro.add(ValueEndif(comment="EndIf %s"%(macroGuard)))
-
-                for k,ts in ToSched.items():
-                    if k in ['GRIncA', 'GRIncB']: # check for global read inc
-                        scheduleInst2(ts, "\\useGRInc == 1\n")
-                    elif k in ['GRA', 'GRB', 'LWSA', 'LWSB']: # check for global reads
-                        scheduleInst2(ts, "\\useGR == 1\n")
-                    elif k in ['LRA%u'%lastIter, 'LRB%u'%lastIter, 'LRSA', 'LRSB']: # check for next prefetch
-                        scheduleInst2(ts, "\\usePLR == 1\n")
-                    elif k in ['LCC']: # check for next prefetch
-                        scheduleInst2(ts, "\\useLoop == 1\n")
+        def emit_instructions(instModule, macroGuard: str):
+            """Emit instructions from a module with optional macro guard."""
+            if instModule is not None:
+                for inst in instModule.flatitems():
+                    if isinstance(inst, SWaitCnt):
+                        nllvmcntHandling(inst, opt1.nglshift, opt1.nllshift)
                     else:
-                        scheduleInst2(ts)
+                        if macroGuard:
+                            macro.add(ValueIf(macroGuard))
+                        macro.add(inst)
+                        if macroGuard:
+                            macro.add(ValueEndif(comment="EndIf %s" % macroGuard))
 
-                if codepath == numCodePath - 1:
-                    macro.add(ValueEndif(comment="EndIf \\ID checks"))
+        for k, ts in ToSched.items():
+            macroGuard = get_macro_guard(k)
 
+            if len(ts) == 1:
+                emit_instructions(ts[0], macroGuard)
+            elif len(ts) == numCodePath:
+                # Multi codepath - emit inside ID conditionals
+                for codepath in range(numCodePath):
+                    if codepath == 0:
+                        macro.add(ValueIf("\\ID == %u" % codepath))
+                    else:
+                        macro.add(ValueElseIf("\\ID == %u" % codepath))
+                    emit_instructions(ts[codepath], macroGuard)
+                macro.add(ValueEndif(comment="EndIf \\ID checks"))
+            else:
+                raise ValueError(f"Invalid number of instructions for {k}: {len(ts)}")
+ 
     module.add(macro)
     return module, numCodePath
-
 
 
 def hasCustomSchedule(kernel):
@@ -613,10 +621,57 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
             'LWSB'   : [[42]],  # swap after last gr b
             'LCC'   : [[47, 47]],
         }
+    elif isNN(kernel) and useLDSTr and TLDS == 1:
 
+        nglshift = nllshift = 11
+
+        syncTable = [
+            -1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for LRB1 in prev iteration"),
+            
+            7, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for prior 5 LRA0"),
+            20, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRA0 is launched"),
+            20, SBarrier(comment=""),
+            
+            21, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="All LRB0 launched"),
+            21, SBarrier(comment=""),
+
+            36, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="All GRA launched"),
+            36, SBarrier(comment=""),
+
+            43, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="All GRB launched"),
+            43, SBarrier(comment=""),
+        ]
+        
+        syncCode = syncTable[1::2]
+        optSchedule = {
+            'SYNC'   : [syncTable[::2]],
+            
+            'GRIncA' : [[1,1,1, 2,2,2, 3,3,3]],
+            'GRIncB' : [[4,4,4, 5,5,5, 6,6,6]],
+            
+            'LRA0'   : [[1, 3,3, 5,5,   7,7, 9,9, 11,11, 13,13, 15,15, 17],
+                        [2, 4,4, 6,6,   8,8, 10,10, 12,12, 14,14, 16,16, 18]],
+            'LRB0'   : [[13, 15, 17],
+                        [14, 16, 18]],
+
+            'GRA'    : [[21,21, 23,23, 25,25, 27,27, 29,29, 31,31, 33,33, 35,35],
+                        [20,20, 22,22, 24,24, 26,26, 28,28, 30,30, 32,32, 34,34]],
+            'GRB'    : [[37,37, 39,39, 41,41],
+                        [38,38, 40,40, 42,42]],
+
+            'LRSA'   : [[30]],
+            'LRSB'   : [[31]],
+
+            'LWSA'   : [[36]],
+            'LWSB'   : [[43]],
+
+            'LRA1'   : [[36,36, 37,37, 38,38, 39,39, 40,40, 41,41, 42,42, 43,43]],
+            'LRB1'   : [[43, 44, 45]],
+
+            'LCC'    : [[47, 47]],
+        }
     else:
         return False, None
-
 
     numMfma = 48
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
@@ -630,8 +685,6 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
-
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -757,6 +810,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
+    kernel["MfmaInitCVgprs"] = True
     numMfma = 96
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
@@ -769,7 +823,6 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
     numMfma = 96
     optSchedule = dict()
     syncCode = []
@@ -897,6 +950,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
+    kernel["MfmaInitCVgprs"] = True
     return True, opt1
 
 @RegisterSchedule(
@@ -907,8 +961,6 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
-
     optSchedule = dict()
     syncCode = []
 
@@ -945,6 +997,7 @@ def _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS):
     numMfma = 64
     # B0A0, B0A1, B1A0, B1A1
     mfmaReorder = []
+    kernel["MfmaInitCVgprs"] = True
     if not kernel["ForceUnrollSubIter"]:
         mfmaReorder = [0,1,2,3, 8,9,10,11, 16,17,18,19, 24,25,26,27,
                        4,5,6,7, 12,13,14,15, 20,21,22,23, 28,29,30,31,
@@ -961,8 +1014,6 @@ def _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
-
     optSchedule = dict()
     syncCode = []
 
@@ -1096,9 +1147,9 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
+    kernel["MfmaInitCVgprs"] = True
     numMfma = 128
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidation()
     return True, opt1
 
 @RegisterSchedule(
@@ -1109,7 +1160,6 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
     numMfma = 80
     optSchedule = dict()
     syncCode = []
@@ -1228,7 +1278,7 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-
+    kernel["MfmaInitCVgprs"] = True
     return True, opt1
 
 @RegisterSchedule(
@@ -1239,7 +1289,6 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     numMfma = 80
     if isNN(kernel) and useLDSTr and TLDS==1:
@@ -1280,6 +1329,55 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment="")]
         nglshift = nllshift = 13
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    elif isTN(kernel) and (not useLDSTr) and TLDS==1:
+        syncTable = [
+            -1, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1 (partial) before starting main loop"),
+             4, SWaitCnt(dscnt=0+2, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1 (complete) for the remaining main loop"),
+            14, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete to start GRB"),
+            14, SBarrier(comment=""),
+            # Must be dscnt=0 here: validator requires proving all LRA0 are complete
+            # before the first GRA is issued (vmfma_index window [31,41)).
+            39, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 / ensure LRA0 complete before starting GRB/GRA"),
+            39, SBarrier(comment=""),
+            45, SWaitCnt(dscnt=-1, vlcnt=13+2, vscnt=-1, comment="Wait for GRB to complete before LRB1"),
+            45, SBarrier(comment=""),
+            69, SWaitCnt(dscnt=-1, vlcnt=13, vscnt=-1, comment="Wait for GRA to complete before LRA1"),
+            69, SBarrier(comment=""),
+        ]
+        optSchedule = {
+            'SYNC'   : [syncTable[::2]],
+            'GRIncA' : [[29,30,31,32,33,34,35,36,37]],
+            'GRIncB' : [[0,1,2,3,4,5,6,7,8]],
+
+            # Current iteration.
+            'LRB0'   : [[0,2,3,4,5],
+                        [1,3,4,5,6]],
+            'LRA0'   : [[13,15,18,21,24,26,28,30],
+                        [13,16,19,22,25,27,29,31]],
+
+            # GRB must not start before the SYNC at idx 15 (LRB0 completion).
+            'GRB'    : [[14,14, 17,17, 20,20, 23,23, 26,26],
+                        [15,15, 18,18, 21,21, 24,24, 27,27]],
+            # Buffer loads.
+            'GRA'    : [[40,40, 43,43, 46,46, 49,49, 59,59, 62,62, 65,65, 67,67],
+                        [41,41, 44,44, 47,47, 57,57, 60,60, 63,63, 66,66, 68,68]],
+            # Prefetch next iteration.
+            # Need 5 local reads for B (MIWaveTileB=5).
+            'LRB1'   : [[45,46,47,48,49],
+                        [46,47,48,49,50]],
+            # Need 8 local reads for A (MIWaveTileA=8) in each code path.
+            # Path1 LRA1 must be earlier than path0 (validator requirement).
+            'LRA1'   : [[69, 70, 71, 72, 73, 74, 75, 76],
+                        [70, 71, 72, 73, 74, 75, 76, 77]],
+            'LRSA'   : [[32]],
+            'LRSB'   : [[33]],
+            'LWSA'   : [[74]],
+            'LWSB'   : [[76]],
+            'LCC'    : [[77, 78]],
+        }
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 13
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNT(kernel) and useLDSTr and TLDS==0:
         nglshift = nllshift = 0
         kernel["SwapGlobalReadOrder"] = True
@@ -1311,6 +1409,7 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
+    kernel["MfmaInitCVgprs"] = True
     return True, opt1
 
 @RegisterSchedule(
@@ -1321,7 +1420,6 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[4, 1]
 )
 def _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0
@@ -1413,7 +1511,7 @@ def _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
-
+    kernel["MfmaInitCVgprs"] = True
     numMfma = 120  # Must match actual MFMA count for 256x240x64 tile
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
@@ -1426,7 +1524,6 @@ def _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[4, 1]
 )
 def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0
@@ -1533,6 +1630,7 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
+    kernel["MfmaInitCVgprs"] = True
     numMfma = 104
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
@@ -1545,39 +1643,147 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
-    if not (isTN(kernel) and TLDS):
-        return False, None
-    kernel["MfmaInitCVgprs"] = True
-    nglshift = nllshift = 11 # vmcnt shift for ngl and nll
-    optSchedule = {
-    'SYNC': [[-1, 6, 14, 14, 27,27, 47, 47]], 
-    'LRA0': [[0,1, 2,3,4,5,5]],
-    'GRIncA': [[0, 0, 1, 1, 2,2 , 3,3, 4]],
-    'LRB0': [[9, 11,13, 19]],
-    'GRIncB': [[ 6,6,7,7,8,8,9,9,10]],
-    'GRA': [[14, 14, 16,16,18,18,20,20,23,23, 26,26, 27, 27]], 
-    'LRSA': [[26]],
-    'LRSB': [[26]],
-    'GRB': [[33,34,36,38,38,42,42,46]],
-    'LWSA': [[54]],
-    'LWSB': [[54]],
-    'LRA1': [[30,35,44, 45, 46, 48,51]],
-    'LRB1': [[47,52,54,55]],
-    'LCC': [[55, 55]],
-    }
-
-    syncCode = [
-        SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all of LRA1 and the first instance of LRB1"),
-        SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for the second instance of LRB1"),
-        SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete so GRA could begin. Makes sure LRB1 is completed so no need for a barrier at 21"),
-        SBarrier(comment=""),
-        SWaitCnt(dscnt=0, vlcnt=10, vscnt=-1, comment="wait for all LR. All of previous GRB (4) and current GRA (6), total of 10 can be outstanding"),
-        SBarrier(comment=""),
-        SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Outstanding LR are all LRA so no need to wait. All of GR from previous iteration must be done."),
-        SBarrier(comment="")
-    ]
+    optSchedule = dict()
+    syncCode = []
     numMfma = 56
-    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    numCodePaths = 1
+
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isTN(kernel) and not useLDSTr and TLDS==1:
+        nglshift = nllshift = 11 # vmcnt shift for ngl and nll
+        optSchedule = {
+            'SYNC': [[-1, 6, 14, 14, 27,27, 47, 47]],
+            'LRA0': [[0,1, 2,3,4,5,5]],
+            'GRIncA': [[0, 0, 1, 1, 2,2 , 3,3, 4]],
+            'LRB0': [[9, 11,13, 19]],
+            'GRIncB': [[ 6,6,7,7,8,8,9,9,10]],
+            'GRA': [[14, 14, 16,16,18,18,20,20,23,23, 26,26, 27, 27]],
+            'LRSA': [[26]],
+            'LRSB': [[26]],
+            'GRB': [[33,34,36,38,38,42,42,46]],
+            'LWSA': [[54]],
+            'LWSB': [[54]],
+            'LRA1': [[30,35,44, 45, 46, 48,51]],
+            'LRB1': [[47,52,54,55]],
+            'LCC': [[55, 55]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all of LRA1 and the first instance of LRB1"),
+            SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for the second instance of LRB1"),
+            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete so GRA could begin. Makes sure LRB1 is completed so no need for a barrier at 21"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=10, vscnt=-1, comment="wait for all LR. All of previous GRB (4) and current GRA (6), total of 10 can be outstanding"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Outstanding LR are all LRA so no need to wait. All of GR from previous iteration must be done."),
+            SBarrier(comment="")
+        ]
+    elif isNN(kernel) and useLDSTr and TLDS==1:
+        optSchedule = {
+
+            'SYNC'   : [[-1,3, 16,16, 27, 35,35, 48,48]],
+            'GRIncA' : [[1,2,3,4,4,5,5,6,6]],
+            'GRIncB' : [[7,7,8,8,9,9,10,11,11]],
+
+            'LRA0'   : [[0,1,1,2,2,3,4,5,6,7,8,9,10,11]],
+            'LRB0'   : [[17,18,19,20]],   ## After LRA0, we can mix LRB0 and GRA
+
+            ## GRA should start after LRA0 is done.
+            'GRA'    : [[15,16, 19,19, 22,22, 25,25, 28,28, 31,31, 34,34]],
+            ## GRB should start after LRB0 is done.
+            'GRB'    : [[42,42, 45,45, 48,48, 51,51]],
+
+            #After previous GRA is done.
+            'LRA1'   : [[35,36,37,38,39,40,41,42,43,44,45,46,47,48]],
+            #After previous GRB is done.
+            'LRB1'   : [[49,50, 52,53]],
+
+            'LRSA'   : [[24]], # after LRA0 and before LRA1
+            'LRSB'   : [[24]], # after LRB0 and before LRB2
+            'LWSA'   : [[53]], # For A
+            'LWSB'   : [[54]],
+
+            'LCC'    : [[54, 55]],
+        }
+        # note: syncCode needs to be
+        syncCode = [SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for necessary prior LRA1/LRB1 before starting main loop"),
+                    SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 for the remaining main loop"),
+                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete to start GRA"),
+                    SBarrier(comment=""),
+                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),
+                    SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Wait for previous GRA to complete to start LRA1"),
+                    SBarrier(comment=""),
+                    SWaitCnt(dscnt=-1, vlcnt=9, vscnt=-1, comment="Wait for previous GRB to complete to start LRB1"),
+                    SBarrier(comment=""),
+                   ]
+        nglshift = nllshift = 11 # vmcnt shift for ngl and nll
+    elif isNT(kernel) and useLDSTr and TLDS == 0:
+        # Global read scheduling:
+        # Each GR has two instructions (addr update + buffer_load), so we list them explicitly as
+        # two adjacent MFMA indices per GR.
+        kernel["SwapGlobalReadOrder"] = True
+        numCodePaths = 2
+
+        syncTable = [
+            # Loop start:
+            # - LRB1 waits previous-iter GRB
+            # - LRA1 waits previous-iter GRA
+            -1, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 before starting main loop"),
+
+            # After early MFMAs (keep prior-iter LR fully fenced)
+            3,  SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 for the remaining main loop"),
+
+            # GRB must wait for LRB0 (interleave LRA0 + GRB safely)
+            15, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete to start GRB"),
+            15, SBarrier(comment=""),
+
+            # GRA must wait for LRA0; LRB1 can be interleaved with GRA after this fence
+            27, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0/GRB to complete to start GRA/LRB1"),
+            27, SBarrier(comment=""),
+
+            # Mid-loop global-read safety fence (GR-to-LDS)
+            30, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Mid-loop fence (wait for outstanding GR-to-LDS)"),
+            30, SBarrier(comment=""),
+
+            # Ensure all GR-to-LDS are complete before LRA1 (next-iter A LDS reads)
+            43, SWaitCnt(dscnt=-1, vlcnt=11-2, vscnt=-1, comment="Wait for all GR-to-LDS to complete before LRA1"),
+            43, SBarrier(comment=""),
+        ]
+
+        optSchedule = {
+            'SYNC'   : [syncTable[::2]],
+            # Swap A/B increments
+            'GRIncB' : [[0, 0, 1, 1, 2, 2, 4, 4, 5]],
+            'GRIncA' : [[5, 6, 6, 7, 7, 8, 8, 9, 9]],
+
+            'LRB0'   : [[0, 1, 2, 3, 4, 5, 6, 7],
+                        [1, 2, 3, 4, 5, 6, 7, 8]],
+            'LRA0'   : [[9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
+                        [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]],
+
+            'GRA'    : [[14,15, 17,18, 20,21, 23,24],
+                        [15,16, 18,19, 21,22, 24,25]],
+            'GRB'    : [[28,29, 31,32, 34,35, 37,38, 40,41, 43,44, 46,47],
+                        [29,30, 32,33, 35,36, 38,39, 41,42, 44,45, 45,46]],
+
+            'LRB1'   : [[30, 31, 32, 33, 34, 35, 36, 37],
+                        [31, 32, 33, 34, 35, 36, 37, 38]],
+            'LRA1'   : [[43, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55]],
+
+            'LRSA'   : [[24]],
+            'LRSB'   : [[25]],
+            'LWSA'   : [[48]],
+            'LWSB'   : [[49]],
+            'LCC'    : [[53, 54]],
+        }
+
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 11
+    else:
+        return False, None
+
+    kernel["MfmaInitCVgprs"] = True
+    opt1 = ScheduleInfo(numCodePaths, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
 @RegisterSchedule(
@@ -1587,8 +1793,7 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     matrix_inst=[16, 16, 32, 1],
     mfma_wave_group=[2, 2]
 )
-def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
+def _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     optSchedule = dict()
     syncCode = []
@@ -1630,8 +1835,40 @@ def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
             SBarrier(comment=""),
         ]
         nglshift = nllshift = 15
+    elif isNT(kernel) and useLDSTr and TLDS == 0:
+        optSchedule = {
+            'SYNC'   : [[-1, 21, 21, 51, 51, 79, 79]],
+            'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
+            'GRIncB' : [[9,10,11,12,13,14,15,16,17]],
+
+            'LRA0'   : [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]],
+            'LRB0'   : [[14, 17, 20, 23, 26, 29, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50]],
+
+            'GRA'    : [[22,22, 26,26, 30,30, 34,34, 38,38, 42,42, 46,46]],
+            'GRB'    : [[52,53, 56,57, 60,61, 64,65, 68,69, 71,72, 74,75, 77,78]],
+
+            'LRA1'   : [[79,80, 81,82, 83,84, 85,86, 87,88, 89,90, 91,92]],
+            'LRB1'   : [[93,94, 95,96, 97,98, 99,100, 101,102, 103,104, 105,106, 107,108]],
+            'LRSA'   : [[54]],
+            'LRSB'   : [[54]],
+            'LWSA'   : [[91]],
+            'LWSB'   : [[91]],
+            'LCC'    : [[111, 111]]
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment=""),
+        ]
+        nglshift = nllshift = 15
     else:
         return False, None
+
+    kernel["MfmaInitCVgprs"] = True
     numMfma = 112
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
@@ -1644,8 +1881,6 @@ def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
-    kernel["SwapGlobalReadOrder"] = False
     numMfma = 120
     nllZeroDscnt = False
     syncs = SyncSchedule()
@@ -1757,6 +1992,9 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         'LRB1':   [lrb1],
         'LCC':    [[numMfma-2, numMfma-1]],
     }
+
+    kernel["MfmaInitCVgprs"] = True
+    kernel["SwapGlobalReadOrder"] = False
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift, nllZeroDscnt)
@@ -1770,8 +2008,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     matrix_inst=[16, 16, 32, 1],
     mfma_wave_group=[2, 2]
 )
-def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
+def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     optSchedule = dict()
     syncCode = []
@@ -1816,8 +2053,48 @@ def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
             SBarrier(comment=""),
         ]
         nglshift = nllshift = 15
+    elif isNT(kernel) and useLDSTr and TLDS == 0:
+        optSchedule = {
+            'SYNC': [[-1,6,
+                       21,21,55,55,60,60]],
+            'GRIncA': [[0,1,2,3,4,5,6,7,8]],
+            'LRA0': [[0,0,2,2,4,4,6,6,8,8,10,10,12,12,14,14],
+                     [1,1,3,3,5,5,7,7,9,9,11,11,13,13,15,15]],
+            
+            'GRIncB': [[9,10,11,12,13,14,15,16,17]],
+            
+            'GRA': [[21,22, 25,26, 30,31, 35,36, 40,41, 45,46, 50,51, 53,54]],
+            'LRB0': [[21,22, 25,26, 30,31, 35,36, 40,41, 45,46, 50,51]],
+
+            'GRB': [[61,61, 63,63, 65,65, 79,79, 85,85, 95,95, 100,100],
+                    [62,62, 64,64, 66,66, 80,80, 91,91, 96,96, 101,101]],
+            'LWSA': [[93],[99]],
+            'LWSB': [[91],[87]],
+            'LRA1': [[61,61, 63,63, 65,65, 79,79, 85,85, 93,93, 100,100, 104,104],
+                    [62,62, 64,64, 66,66, 80,80, 91,91, 96,96, 101,101, 106,106]],
+            'LRB1': [[91,91,95,95,98,98,100,100,110,110,110,111,111,111],
+                     [87,87,94,94,99,99,101,101,103,103,105,105,107,107]],
+
+            'LRSA': [[54]],
+            'LRSB': [[54]],
+            'LCC': [[110,111]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior local read"),
+            SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for prior local read"),
+            SWaitCnt(dscnt=0, vlcnt=7, vscnt=-1, comment="wait for previous set of global reads and Local Reads"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=-1, vlcnt=8, vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment="")
+        ]
+        nglshift = nllshift = 15
     else:
         return False, None
+
+    kernel["MfmaInitCVgprs"] = True
     numMfma = 112
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
@@ -1830,7 +2107,6 @@ def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -1915,6 +2191,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
+    kernel["MfmaInitCVgprs"] = True
     numMfma = 120
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
@@ -1927,7 +2204,6 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[1, 4]
 )
 def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
     syncCode = []
     if isTN(kernel) and TLDS==1:
@@ -2034,6 +2310,8 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
+
+    kernel["MfmaInitCVgprs"] = True
     return True, opt1
 
 @RegisterSchedule(
@@ -2044,8 +2322,6 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[1, 4]
 )
 def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
-    kernel["SwapGlobalReadOrder"] = False
     numMfma = 104
     syncs = SyncSchedule()
 
@@ -2155,6 +2431,9 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
     }
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
+
+    kernel["MfmaInitCVgprs"] = True
+    kernel["SwapGlobalReadOrder"] = False
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
@@ -2166,8 +2445,6 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
-
     optSchedule = dict()
     syncCode = []
 
@@ -2258,6 +2535,8 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 11 # vmcnt shift for ngl and nll
     else:
         return False, None
+
+    kernel["MfmaInitCVgprs"] = True
     numMfma = 56
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
@@ -2270,7 +2549,6 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -2282,18 +2560,17 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
         kernel["UseMFMAF32XEmulation"] = False
         kernel["UseDot2F32XEmulation"] = False
         syncTable = [
-            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Begininng of a iteration. Wait for prior local read.") ,
-            5,  SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Before PackA0. Wait for first two LRA0. Skip 2*LRA0 + 1*LRB0.") ,
-            17, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Before GRA and PackB0. Wait for all prior LRA0 for GRA and the first 2*LRB0 for PackB0. Skip 4*LRB0.") ,
+            5,  SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Before PackA0. Wait for all LRA0. Skip 1*LRB0.") ,
+            17, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Before PackB0. Wait for all prior LRB0 for PackB0.") ,
             17, SBarrier(comment="GRA") ,
             32, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Before GRB. Wait for all prior LRB0.") ,
             32, SBarrier(comment="GRB") ,
             35, SWaitCnt(dscnt=-1, vlcnt=6, vscnt=-1, comment="Before LRB3. Wait for GRB from previous iter. Skip 4*GRA + 2*GRB") ,
             35, SBarrier(comment="LRB") ,
-            44, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Before PackB3. Wait for first two LRB3. Skip 4*LRA0.") ,
+            44, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Before PackB3. Wait for all prior LRB3.") ,
             53, SWaitCnt(dscnt=0, vlcnt=10, vscnt=-1, comment="Before LRA3. Wait for GRA from previous iter. Skip 4*GRA + 6*GRB") ,
             53, SBarrier(comment="LRA") ,
-            63, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Before PackA3. Wait for first two LRA3. Skip 2*LRA3.") ,
+            63, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Before PackA3. Wait for all prior LRA3.") ,
         ]
         optSchedule = {
             'SYNC'  : [syncTable[::2]],
@@ -2325,9 +2602,9 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
     else:
         return False, None
     
+    kernel["MfmaInitCVgprs"] = True
     numMfma = 72
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidation()
     return True, opt1
 
 @RegisterSchedule(
@@ -2339,7 +2616,6 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
 )
 def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     numMfma = 144
-    kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
     syncCode = []
     mfmaReorder = []
@@ -2454,7 +2730,6 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
 
         syncCode = syncTable[1::2]
         optSchedule = {
-
             'SYNC': [syncTable[::2]],
 
             'GRIncA': [grIncA],
@@ -2475,7 +2750,6 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
             'LRB3': [lrb3],
             'PackB3' : [packB3],
             'PackA3' : [packA3],
-
         }
 
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
@@ -2573,14 +2847,12 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
         grB[0] += create_range(min_val = startLRA3+1,num = 4,step = 2, repeat = 2)
         grB[1] += create_range(min_val = startLRA3,num = 4,step = 2, repeat = 2)
         waitLRA3 = max(lra3[0])+4  
-    
         # LRB3 + PACKA3 & PACKB3
         startLRB3 = (3*numMfma)//4 - 4 # Starts 4 indexes before 3/4 MFMAs to accommodate LRB3 latency
         lrb3 = create_range(min_val = startLRB3,num=numLrReadB - 2,step=1,repeat=1)
         grA = [create_range(min_val = min(lrb3)+1, num = 8, step = 1,repeat = 1),
                create_range(min_val = min(lrb3)+3, num = 8, step = 1,repeat = 1)]
         lrb3 += create_range(min_val = max(lrb3)+3,num=2,step=1,repeat=1)
-        
         waitLRB3 = max(lrb3) + 6 
 
         # Grouping segment of 4x4x4_16B MFMAs together for PackB3 & PackA3 (reduce MFMA type switching cost)
@@ -2661,6 +2933,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
+    kernel["MfmaInitCVgprs"] = True
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder=mfmaReorder)
     return True, opt1
 
@@ -2672,8 +2945,6 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
-    # print('kernel', kernel)
-    kernel["MfmaInitCVgprs"] = True
     numMfma = 144
     optSchedule = dict()
     syncCode = []
@@ -2763,9 +3034,187 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+
+    elif isNN(kernel) and TLDS==1:
+        kernel["UsePLRPack"] = True
+        kernel["UseMFMAF32XEmulation"] = True
+        
+        numLrReadA = 32 
+        numLrReadB = 6
+
+        # mfma Reordering
+        mfmaReorder = [i for i in range(0,numMfma//4)] + [i for i in range(numMfma//2,3*numMfma//4)]+[i for i in range(numMfma//4,numMfma//2)]+[i for i in range(3*numMfma//4,numMfma)]
+
+        # Interleave LBR0 and GRINCB
+        lrb0 = create_range(min_val = 0, num = 6, step = 1, repeat = 1)
+        grIncB = create_range(min_val = 0, num = 6, step = 1, repeat = 1)
+        grIncB += create_range(min_val = max(lrb0)+1, num = 1, step = 1, repeat = 3)
+        
+        # Interleave GRINCA and PACKB0
+        grIncA = create_range(min_val = max(grIncB)+1, num = 2, step = 1, repeat = 3)
+        waitLRB0 = max(grIncA)
+        grIncA += create_range(min_val = max(grIncA)+2, num = 3, step = 1, repeat = 1)
+
+        startPACKB0 = waitLRB0
+        packBOffset = [ 
+                   0, 0, 1, 1, 
+                   6, 6,
+                   7, 7, 8, 8,
+
+                   2, 2, 3, 3, 
+                   6, 6,
+                   9, 9, 10, 10,
+
+                   4, 4, 5, 5, 
+                   6, 6,
+                   11, 11, 12, 12,
+                   ]
+
+        packB0 = [x + startPACKB0 for x in packBOffset]
+        packB0Done = max(packB0)
+
+        # Sanity check
+        assert packB0Done < numMfma//4, f"packB0Done {packB0Done} >= numMfma//4 {numMfma//4}"
+
+        # GRB (1st block) interleaved with LRA0
+        grB = [create_range(min_val = packB0Done+2,num = 3,step = 4, repeat = 2),
+               create_range(min_val = packB0Done+1,num = 3,step = 4, repeat = 2)]
+       
+        # LRA0 
+        lra0 = [create_range(min_val = max(packB0)+1, num = numLrReadA // 2, step = 2, repeat = 2),
+                create_range(min_val = max(packB0)+2, num = numLrReadA // 2, step = 2, repeat = 2)]
+       
+        # PackA0
+        waitLRA0 = max(lra0[1])+1
+        startPACKA0 = waitLRA0
+
+        packAOffset = [ 
+            0, 0, 1, 1, 
+            8, 8,
+            9, 9, 10, 10,
+
+            2, 2, 3, 3, 
+            8, 8,
+            11, 11, 12, 12,
+
+            4, 4, 5, 5, 
+            8, 8,
+            13, 13, 14, 14,
+
+            6, 6, 7, 7, 
+            8, 8,
+            15, 15, 16, 16,
+            ]
+        packA0 = [x + startPACKA0 for x in packAOffset]
+
+        halfMFMA = numMfma//2
+        assert max(packA0) < halfMFMA, f"max(packA0) {max(packA0)} >= halfMFMA {halfMFMA}"
+
+        # LRA3 interleaved with GRB (2nd half)
+        startLRA3 = halfMFMA
+        lra3 = [create_range(min_val = startLRA3+1, num = numLrReadA // 2, step = 2, repeat = 2),
+                create_range(min_val = startLRA3, num = numLrReadA // 2, step = 2, repeat = 2)]
+
+        # M0 update before barrier to prevent bad interleaving between the 2 codepaths
+        grB[0] += [startLRA3-2,startLRA3]
+        grB[1] += [startLRA3-2,startLRA3+1]
+
+        grB[0] += create_range(min_val = startLRA3+2,num = 2,step = 2, repeat = 2)
+        grB[1] += create_range(min_val = startLRA3+3,num = 2,step = 2, repeat = 2)
+        
+        # LRB3 + PACKA3 & PACKB3
+        startLRB3 = (3*numMfma)//4 - 4 # Starts 4 indexes before 3/4 MFMAs to accommodate LRB3 latency
+        lrb3 = create_range(min_val = startLRB3,num=numLrReadB - 2,step=1,repeat=1)
+        
+        grA = [create_range(min_val = max(lra3[0])+1, num = 8, step = 1,repeat = 1),
+               create_range(min_val = max(lra3[1])+1, num = 8, step = 1,repeat = 1)]
+        lrb3 += create_range(min_val = max(lrb3)+3,num=2,step=1,repeat=1)
+        
+        waitLRB3 = max(lrb3) + 9 
+
+        # Grouping segment of 4x4x4_16B MFMAs together for PackB3 & PackA3 (reduce MFMA type switching cost)
+        packB3 = [x + waitLRB3 for x in packBOffset]
+        start_4x4x4 = packB3[4] # 5th index is start of 4x4x4_16B MFMA for PackB3
+        waitLRA3 = max(lrb3)+1
+        packA3 = [ 
+                   *create_range(min_val = waitLRA3, num = 2, step = 1, repeat = 2),
+                   start_4x4x4, start_4x4x4,
+                   *create_range(min_val = max(packB3)+1, num = 2, step = 1, repeat = 2),
+
+                   *create_range(min_val = waitLRA3+2, num = 2, step = 1, repeat = 2),
+                   start_4x4x4, start_4x4x4,
+                   *create_range(min_val = max(packB3)+3, num = 2, step = 1, repeat = 2),
+
+                   *create_range(min_val = waitLRA3+4, num = 2, step = 1, repeat = 2),
+                   start_4x4x4, start_4x4x4,
+                   *create_range(min_val = max(packB3)+5, num = 2, step = 1, repeat = 2),
+
+                   *create_range(min_val = waitLRA3+6, num = 2, step = 1, repeat = 2),
+                   start_4x4x4, start_4x4x4,
+                   *create_range(min_val = max(packB3)+7, num = 2, step = 1, repeat = 2),
+                   ]
+
+        # GRA 2nd half
+        grA[0] += create_range(min_val = max(packB3)+1, num = 4, step = 1,repeat = 2)
+        grA[1] += create_range(min_val = max(packB3)+1, num = 4, step = 1,repeat = 2)
+
+        syncTable = [                                      
+                    waitLRB0, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for 1/6 LRB0 to complete"),
+                    waitLRB0+1, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 2/6 LRB0 to complete"),
+                    waitLRB0+2, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 3/6 LRB0 to complete"),
+                    waitLRB0+3, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 4/6 LRB0 to complete"),
+                    waitLRB0+4, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 5/6 LRB0 to complete"),
+                    waitLRB0+5, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 6/6 LRB0 to complete"),
+                    waitLRB0+5, SBarrier(comment="Barrier before GRB"), 
+
+                    # incremental wait on LRA0
+                    waitLRA0, SWaitCnt(dscnt=min(15,numLrReadA-4), vlcnt=-1, vscnt=-1, comment="Wait for 4 LRA0 to complete"),
+                    waitLRA0+4, SWaitCnt(dscnt=numLrReadA-20, vlcnt=-1, vscnt=-1, comment="Wait for 20 LRA0 to complete"),
+                    waitLRA0+5, SWaitCnt(dscnt=numLrReadA-24, vlcnt=-1, vscnt=-1, comment="Wait for 24 LRA0 to complete"),
+                    waitLRA0+6, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+
+                    startLRA3-1,SWaitCnt(dscnt=-1, vlcnt=3, vscnt=-1, comment="Wait for previous GRA&B"),
+                    startLRA3-1,SBarrier(comment="Sync before GRA, LRA3 & LRB3"),
+
+                    # incremental wait on LRA3 & LRB3
+                    waitLRA3, SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="Wait for 17/32 LRA3 to complete"),         
+                    waitLRA3+4, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for LRA3 to complete"),                    
+                    waitLRA3+7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3 to complete"),                    
+
+                    ]
+
+        syncCode = syncTable[1::2]
+        optSchedule = {
+
+            'SYNC': [syncTable[::2]],
+
+            'GRIncA': [grIncA],
+            'GRIncB': [grIncB],
+            'LRA0': [*lra0],
+            'LRB0': [lrb0],
+            'LRSA': [[packA0[4]]],#Use slot between MFMA 16x16x32 & 4x4x4 for LRSA
+            'LRSB': [[packA0[4]]],
+            'PackA0' : [packA0],
+            'PackB0' : [packB0],
+            'GRA': [*grA],
+            'GRB': [*grB],              
+            'LWSA': [[numMfma-2]],
+            'LWSB': [[numMfma-2]],
+            'LCC': [[numMfma-1, numMfma-1]],
+            'LRA3': [*lra3],
+            'LRB3': [lrb3],
+            'PackB3' : [packB3],
+            'PackA3' : [packA3],
+
+        }
+
+        nglshift = nllshift = 14
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder=mfmaReorder)
+    
     else:
         return False, None
 
+    kernel["MfmaInitCVgprs"] = True
     return True, opt1
 
 @RegisterSchedule(
@@ -2777,7 +3226,6 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
 )
 def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     numMfma = 192
-    kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0
@@ -2904,8 +3352,8 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
+    kernel["MfmaInitCVgprs"] = True
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidation() # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
     return True, opt1
 
 @RegisterSchedule(
@@ -2916,7 +3364,6 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -2992,8 +3439,231 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     else:
         return False, None
 
+    kernel["MfmaInitCVgprs"] = True
     numMfma = 72
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 128, 32, 2, 0, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
+    n_mfma = 4 * 4 * 3    # 128 MT0 / 2 WT0 / 16 mfma dim  * 128/2/16 * 3 bf16 MFMAs per tf32 mfma
+
+    optSchedule = dict()
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    syncs = SyncSchedule()
+    syncCode = []   
+    snops: list[tuple[int, SNop]] = []
+    snopCode = []
+
+    if isTN(kernel) and not useLDSTr and TLDS==1:
+        kernel["UseMFMAF32XEmulation"] = True
+
+        lra0 = [0,0,1,1]
+        syncs.add( 3, dscnt=2, comment="Wait for the first 2 LRA0 to complete before pack")
+        syncs.add( 5, dscnt=0, comment="Wait for the rest    LRA0 to complete before pack")
+        pack_a0 = [3,3,4,4, 7,7, 8,8,9,9, 5,5,6,6, 7,7, 10,10,11,11]
+        pack_b0 = [12,12,13,13, 16,16, 17,17,18,18,  14,14,15,15, 16,16,  19,19,20,20]
+
+        lrb0 = [6,6,7,7]
+        syncs.add(11, dscnt=0, comment="Wait for LRB0 to complete before pack",
+                  barrier=True, barrier_comment="Wait for all waves to finish LRs before GRs")
+        grinca = [0,1,2, 2,2,2, 2,4,5]
+        grincb = [6,8,9, 10,11,12, 13,14,15]
+        lrsa = [13]
+        lrsb = [14]
+        lwsa = [45]
+        lwsb = [45]
+        
+        gra = [15,17, 18,19, 20,21, 25,26]
+        grb = [27,28, 31,33, 36,37, 39,40]
+        num_gr = (len(gra[1::2]) + len(grb[1::2]))
+        
+        gr_wait = 23
+        v = count_items(gra[1::2]+grb[1::2], ev=gr_wait)
+        syncs.add(gr_wait, vlcnt=v, barrier=True, comment = "Wait for previous GRA&B")
+
+        lrb3 = [24,24,25,25]
+        syncs.add( 28, dscnt=2, comment="Wait for the first 2 LRB3 to complete")
+        syncs.add( 30, dscnt=0, comment="Wait for the rest    LRB3 to complete")
+        pack_b3 = [28,28,29,29, 32,32,  33,33,34,34,  30,30,31,31, 32,32,  35,35,36,36]
+        
+        lra3 = [36,36,37,37]
+        syncs.add(39, dscnt=2, comment="Wait for the first 2 LRA3 to complete")
+        syncs.add(41, dscnt=0, comment="Wait for the rest    LRA3 to complete")
+        pack_a3 = [39,39,40,40, 43,43, 44,44,45,45, 41,41,42,42, 43,43, 46,46,47,47]
+
+    else:
+        return False, None
+
+    optSchedule = {
+        'SYNC':   [syncs.get_indicies()],
+        'GRIncA': [grinca],
+        'GRIncB': [grincb],
+        'LRA0':   [lra0],
+        'LRB0':   [lrb0],
+        'PackA0': [pack_a0],
+        'PackB0': [pack_b0],
+        'GRA':    [gra],
+        'GRB':    [grb],
+        'LRSA':   [lrsa],
+        'LRSB':   [lrsb],
+        'LWSA':   [lwsa],
+        'LWSB':   [lwsb],
+        'LRA3':   [lra3],
+        'LRB3':   [lrb3],
+        'PackB3': [pack_b3],
+        'PackA3': [pack_a3],
+        'LCC':    [[n_mfma-2, n_mfma-1]],
+    }
+
+    syncCode = syncs.get_code()
+    nglshift = nllshift = num_gr
+    if snops:
+        optSchedule['SNOP'] = [ [s[0] for s in snops] ]
+        snopCode = [s[1] for s in snops]
+ 
+    kernel["MfmaInitCVgprs"] = True
+    kernel["UsePLRPack"] = True
+    opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
+    return True, opt1
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 128, 32, 2, 1, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[32, 32, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
+    n_mfma = 128//2//32 * 128//2//32 * 3 * 2    # 128 MT0 / 2 WT0 / 32 mfma dim  * 128/2/32 * 3 bf16 MFMAs per tf32 mfma * 2 PLR=1
+
+    optSchedule = dict()
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    syncs = SyncSchedule()
+    syncCode = []   
+    gr_inc_step = 0
+
+    if isTN(kernel) and not useLDSTr and TLDS==1:
+        lra0   = [0,1,2,3]
+        lrb0   = [       4,5,6,7]
+        #                wait then read
+        syncs.add(       4, dscnt=2, comment="wait for the first 2 LRAs before packing")
+        syncs.add(         5, dscnt=1, comment="wait for the rest of LRAs before packing them")
+        pack_a0 = [      4,4,4,4, 6,6, 7,7,7,7,
+                           5,5,5,5, 6,6, 8,8,8,8]
+        # because of GR starting at 10, we need barrier at 9, will use that for sync too.
+        syncs.add(                               9, dscnt=0, comment="wait for LRBs before the packing them",
+                                                 barrier=True, barrier_comment="make sure all LRs are done before starting GR")
+        pack_b0= [                               9,9,9,9, 10,10, 11,11,11,11,
+                                                 9,9,9,9, 10,10, 11,11,11,11]
+
+        grinca = [0,0,0,1,1,1,2,2,2]
+        grincb = [3,3,3,6,6,6,6,6,6]
+        lrsa   = [10]
+        lrsb   = [10]    
+        
+        gra    = [                                 10,10,11,11] # one index for two instructions
+        grb    = [                                              13,13,14,14] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+        syncs.add(                                             12, vlcnt=8, barrier=True, comment="wait for the previous GRAs")
+
+        lra1   = [                                             12,12,13,14] # twice on 12 since we are waiting for GRA anyway at 12
+        lrb1   = [                                                        15,16,16,17]
+        #                                                                 wait then read
+        syncs.add(                                                        15, dscnt=2, vlcnt=8, comment="wait for the first 2 LRAs before packing. Also wait for GRBs",
+                                                                              barrier=True, barrier_comment="make sure GRBs are done before starting LRBs"  )
+        syncs.add(                                                            17, dscnt=3, comment="wait for the rest of LRAs before packing them")
+        pack_a1 = [                                                          16,16,16,16, 20,20, 21,21,21,21,
+                                                                              17,17,17,17, 20,20, 21,21,21,21]
+        syncs.add(                                                              18, dscnt=2, comment="wait for 2 LRBs before the packing them")
+        syncs.add(                                                               19, dscnt=0, comment="wait for the rest of LRBs before the packing them")
+        pack_b1= [                                                              18,18,18,18, 20,20, 22,22,22,22,
+                                                                                 19,19,19,19, 20,20, 22,22,23,23]
+        lwsa   = [                                                                          20] # use delay before mfma4x4x4
+        lwsb   = [                                                                          20]
+        
+    elif isNN(kernel) and TLDS==1:
+        lra0   = [0,0,0,0,
+                   1,1,1,1,
+                    2,2,2,2,
+                     3,3,3,3]
+        lrb0   = [          4,5,6,7]
+        #                wait then read
+        syncs.add(          4, dscnt=8, comment="wait for the first 2x4 LRAs before packing")
+        syncs.add(            5, dscnt=1, comment="wait for the rest of LRAs")
+        pack_a0 = [         4,4,4,4, 6,6, 7,7,7,7,
+                              5,5,6,6, 6,6, 8,8,8,8]
+        # because of GR starting at 10, we need barrier at 9, will use that for sync too.
+        syncs.add(                               9, dscnt=0, comment="wait for LRBs before the packing them",
+                                                 barrier=True, barrier_comment="make sure all LRs are done before starting GR")
+        pack_b0= [                               9,9,9,9, 10,10, 11,11,11,11,
+                                                 9,9,9,9, 10,10, 11,11,11,11]
+
+        grinca = [0,0,0,1,1,1,2,2,2]
+        grincb = [4,4,4,6,6,6,6,6,6]
+        lrsa   = [10]
+        lrsb   = [10]   
+        
+        gra    = [                                 10,10,11,11] # one index for two instructions
+        grb    = [                                              13,14,  15,16] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+        syncs.add(                                             12, vlcnt=8, barrier=True, comment="wait for the previous GRAs")
+
+        lra1   = [                                             12,12,12,12,
+                                                                13,13,13,13,
+                                                                 14,14,14,14,
+                                                                  15,15,15,15]
+        lrb1   = [                                                           16,16,17,17]
+        #                                                                    wait then read
+        syncs.add(                                                           16, dscnt=12, vlcnt=7, comment="wait for the first LRA before packing and also wait for GRBs",
+                                                                                 barrier=True, barrier_comment="make sure GRBs are done before starting LRBs"  )
+        syncs.add(                                                              17, dscnt=2, comment="wait for the rest of LRAs")
+        pack_a1 =[                                                             16,16,17,17, 20,20, 21,21,21,21,
+                                                                                17,17,17,17, 20,20, 21,21,21,21]
+        syncs.add(                                                               18, dscnt=3, comment="wait for the first LRB before the packing them")
+        syncs.add(                                                                19, dscnt=1, comment="wait for the 2nd and 3rd LRB")
+        syncs.add(                                                                      20, dscnt=0, comment="wait for the 4th LRB")
+        pack_b1= [                                                               18,18,19,19, 20,20, 22,22,22,22,
+                                                                                  19,19,20,20, 20,20, 22,22,23,23]
+        lwsa   = [                                                                           20] # use delay before mfma4x4x4
+        lwsb   = [                                                                           20]    
+    else:
+        return False, None  
+    
+    optSchedule = {
+        'SYNC':   [syncs.get_indicies()],
+        'GRIncA': [grinca],
+        'GRIncB': [grincb],
+        'LRA0':   [lra0],
+        'LRB0':   [lrb0],
+        'GRA':    [duplicate_list_items(gra, 2, gr_inc_step)],
+        'GRB':    [duplicate_list_items(grb, 2, gr_inc_step)],
+        'LRSA':   [lrsa],
+        'LRSB':   [lrsb],
+        'LWSA':   [lwsa],
+        'LWSB':   [lwsb],
+        'PackA0': [pack_a0],
+        'PackB0': [pack_b0],
+        'LRA1':   [lra1],
+        'LRB1':   [lrb1],
+        'PackB1': [pack_b1],
+        'PackA1': [pack_a1],
+        'LCC':    [[n_mfma-1, n_mfma-1]],
+    }
+
+    syncCode = syncs.get_code()
+    nglshift = nllshift = num_gr
+
+    kernel["MfmaInitCVgprs"] = True
+    kernel["UsePLRPack"] = True
+    kernel["UseMFMAF32XEmulation"] = True
+    opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
 @RegisterSchedule(
@@ -3004,8 +3674,6 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
-
     n_mfma = 96
     optSchedule = dict()
     nglshift = nllshift = 0
@@ -3085,6 +3753,9 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
 
+    kernel["MfmaInitCVgprs"] = True
+    kernel["UseMFMAF32XEmulation"] = True
+    kernel["UsePLRPack"] = True
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
@@ -3098,9 +3769,9 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
 )
 def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
     numMfma = 96
-    kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
     syncCode = []
+    mfmaReorder = []
     nglshift = nllshift = 0
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UsePLRPack"] = True
@@ -3114,17 +3785,15 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
         waitLRA0 = max(grIncA)+2
         startPACKA0 = waitLRA0
 
-        packAOffset = [ 
-            0, 0, 1, 1, 
+        packAOffset = [
+            0, 0, 1, 1,
             4, 4,
             5, 5, 6, 6,
 
-            2, 2, 3, 3, 
+            2, 2, 3, 3,
             4, 4,
             7, 7, 8, 8,
-            ]   
-
-       
+        ]
         packA0 = [x + startPACKA0 for x in packAOffset]
         packA0Done = max(packA0)
 
@@ -3143,24 +3812,23 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
         waitLRB0 = max(lrb0)+2
         startPACKB0 = waitLRB0
 
-        packBOffset = [ 
-            0, 0, 1, 1, 
+        packBOffset = [
+            0, 0, 1, 1,
             8, 8,
             9, 9, 10, 10,
 
-            2, 2, 3, 3, 
+            2, 2, 3, 3,
             8, 8,
             11, 11, 12, 12,
 
-            4, 4, 5, 5, 
+            4, 4, 5, 5,
             8, 8,
             13, 13, 14, 14,
 
-            6, 6, 7, 7, 
+            6, 6, 7, 7,
             8, 8,
             15, 15, 16, 16,
-            ]   
-        
+        ]
         packB0 = [x + startPACKB0 for x in packBOffset]
 
         halfMFMA = numMfma//2
@@ -3176,31 +3844,29 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
         lrb3[0]+= create_range(min_val = max(lrb3[0])+5, num = 1, step = 2, repeat = 2)
         lrb3[1]+= create_range(min_val = max(lrb3[1])+5, num = 1, step = 2, repeat = 2)
 
-
         grB = [create_range(min_val = startLRB3+1,num = 4,step = 2, repeat = 2),
                create_range(min_val = startLRB3,num = 4,step = 2, repeat = 2)]
-        
-        
+
         waitLRB3 = max(lrb3[1])+2 
 
         # Use different PackBOffset to shift last 5 CVTs iterations after GRB/LRA3
-        packB3Offset = [ 
-            0, 0, 1, 1, 
+        packB3Offset = [
+            0, 0, 1, 1,
             8, 8,
             9, 9, 10, 10,
 
-            2, 2, 3, 3, 
+            2, 2, 3, 3,
             8, 8,
             11, 11, 19, 19,
 
-            4, 4, 5, 5, 
+            4, 4, 5, 5,
             8, 8,
             20, 20, 21, 21,
 
-            6, 6, 7, 7, 
+            6, 6, 7, 7,
             8, 8,
             22, 22, 23, 23,
-            ]   
+        ]   
 
         # PackB3
         packB3 = [x + waitLRB3 for x in packB3Offset]
@@ -3212,48 +3878,47 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
 
         lra3 = [create_range(min_val = startLRA3+1,num=4,step=2,repeat=1),
                 create_range(min_val = startLRA3,num=4,step=2,repeat=1)]
-        
+
         waitLRA3 = max(lra3[0]) + 6 
         packA3 = [x + waitLRA3 for x in packAOffset]
 
-        syncTable = [     -1, SBarrier(comment="Sync codepath"),
-                    waitLRA0, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 1st LRA0 to complete"),
-                    waitLRA0+1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 2nd LRA0 to complete"),
-                    waitLRA0+2, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 3rd LRA0 to complete"),
-                    waitLRA0+3, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRA0 to complete"),
-                    min(grIncB), SBarrier(comment="Barrier before GRA"),
+        syncTable = [
+            -1, SBarrier(comment="Sync codepath"),
+            waitLRA0, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 1st LRA0 to complete"),
+            waitLRA0+1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 2nd LRA0 to complete"),
+            waitLRA0+2, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 3rd LRA0 to complete"),
+            waitLRA0+3, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRA0 to complete"),
+            min(grIncB), SBarrier(comment="Barrier before GRA"),
 
-                    waitLRB0, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="Wait for 1/8 LRB0 to complete"),
-                    waitLRB0+1, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for 2/8 LRB0 to complete"),
-                    waitLRB0+2, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for 3/8 LRB0 to complete"),
-                    waitLRB0+3, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 4/8 LRB0 to complete"),
-                    waitLRB0+4, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 5/8 LRB0 to complete"),
-                    waitLRB0+5, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 6/8 LRB0 to complete"),
-                    waitLRB0+6, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 7/8 LRB0 to complete"),
-                    waitLRB0+7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 8/8 LRB0 to complete"),
+            waitLRB0, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="Wait for 1/8 LRB0 to complete"),
+            waitLRB0+1, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for 2/8 LRB0 to complete"),
+            waitLRB0+2, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for 3/8 LRB0 to complete"),
+            waitLRB0+3, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 4/8 LRB0 to complete"),
+            waitLRB0+4, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 5/8 LRB0 to complete"),
+            waitLRB0+5, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 6/8 LRB0 to complete"),
+            waitLRB0+6, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 7/8 LRB0 to complete"),
+            waitLRB0+7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 8/8 LRB0 to complete"),
 
-                    startLRB3-1,SWaitCnt(dscnt=-1, vlcnt=4, vscnt=-1, comment="Wait for previous GRA&B"),
-                    startLRB3-1,SBarrier(comment="Barrier before GRB and before LRBA3/LBRB3"),
+            startLRB3-1, SWaitCnt(dscnt=-1, vlcnt=4, vscnt=-1, comment="Wait for previous GRA&B"),
+            startLRB3-1, SBarrier(comment="Barrier before GRB and before LRBA3/LBRB3"),
 
-                    waitLRB3,SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="Wait for 1/8 LRB3 to complete"),
-                    waitLRB3+1,SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for 2/8 LRB3 to complete"),
-                    waitLRB3+2,SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for 3/8 LRB3 to complete"),
-                    waitLRB3+3,SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 4/8 LRB3 to complete"),
-                    waitLRB3+4,SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 5/8 LRB3 to complete"),
-                    waitLRB3+5,SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 6/8 LRB3 to complete"),
-                    waitLRB3+6,SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 7/8 LRB3 to complete"),
-                    waitLRB3+7,SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 8/8 LRB3 to complete"),
+            waitLRB3, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="Wait for 1/8 LRB3 to complete"),
+            waitLRB3+1, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for 2/8 LRB3 to complete"),
+            waitLRB3+2, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for 3/8 LRB3 to complete"),
+            waitLRB3+3, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 4/8 LRB3 to complete"),
+            waitLRB3+4, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 5/8 LRB3 to complete"),
+            waitLRB3+5, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 6/8 LRB3 to complete"),
+            waitLRB3+6, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 7/8 LRB3 to complete"),
+            waitLRB3+7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 8/8 LRB3 to complete"),
 
-                    waitLRA3, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 1/4 LRA3 to complete"),                    
-                    waitLRA3+1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 2/4 LRA3 to complete"),                    
-                    waitLRA3+2, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 3/4 LRA3 to complete"),                    
-                    waitLRA3+3, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 4/4 LRA3 to complete"),                    
-                    ]
+            waitLRA3, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 1/4 LRA3 to complete"),                    
+            waitLRA3+1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 2/4 LRA3 to complete"),                    
+            waitLRA3+2, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 3/4 LRA3 to complete"),                    
+            waitLRA3+3, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 4/4 LRA3 to complete"),                    
+        ]
 
         syncCode = syncTable[1::2]
-        
         optSchedule = {
-
             'SYNC': [syncTable[::2]],
 
             'GRIncA': [grIncA],
@@ -3274,13 +3939,640 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
             'LRB3': [*lrb3],
             'PackB3' : [packB3],
             'PackA3' : [packA3],
-
         }
-        print(optSchedule)
+        nglshift = nllshift = 12 # vmcnt shift for ngl and nll
+    elif isNN(kernel) and TLDS==1:
+        return False, None
+        # kernel["UsePLRPack"] = True
+        # kernel["UseMFMAF32XEmulation"] = True
+        # kernel["UseDot2F32XEmulation"] = False
+
+        # numLrReadA = 16
+        # numLrReadB = 8
+        # # mfma Reordering
+        # mfmaReorder = [i for i in range(0, numMfma//4)] + [i for i in range(numMfma//2, 3*numMfma//4)] + [i for i in range(numMfma//4, numMfma//2)] + [i for i in range(3*numMfma//4, numMfma)]
+
+        # # LBR0
+        # lrb0 = create_range(min_val = 0, num = numLrReadB//2, step = 1, repeat = 2)
+        # grIncB = create_range(min_val = 0, num = 3, step = 1, repeat = 3)
+        # grIncA = create_range(min_val = max(grIncB)+1, num = 3, step = 1, repeat = 3)
+        # waitLRB0 = max(lrb0)
+        # # PackB0 using mfma4x4x4_16b
+        # startPACKB0 = waitLRB0 + 4
+        # packBOffset = [ 
+        #     0, 0, 1, 1, 
+        #     8, 8,
+        #     9, 9, 10, 10,
+
+        #     2, 2, 3, 3, 
+        #     8, 8,
+        #     11, 11, 12, 12,
+
+        #     4, 4, 5, 5, 
+        #     8, 8,
+        #     13, 13, 14, 14,
+
+        #     6, 6, 7, 7, 
+        #     8, 8,
+        #     15, 15, 16, 16,
+        # ]
+        # packB0 = [x + startPACKB0 for x in packBOffset]
+        # packB0Done = max(packB0)
+        # assert packB0Done < numMfma//4
+
+        # # LRA0 
+        # lra0 = create_range(min_val = waitLRB0+4, num = numLrReadA, step = 1, repeat = 1)
+        # grA = create_range(min_val = packB0Done+6, num = 8, step = 2, repeat = 1)
+        # waitLRA0 = max(lra0)
+        # startPACKA0 = waitLRA0 + 2
+        # packAOffset = [
+        #     0, 0, 1, 1,
+        #     4, 4,
+        #     5, 5, 6, 6,
+
+        #     2, 2, 3, 3,
+        #     4, 4,
+        #     7, 7, 8, 8,
+        # ]
+        # packA0 = [x + startPACKA0 for x in packAOffset]
+        # halfMFMA = numMfma//2
+        # assert max(packA0) < halfMFMA
+
+        # # LRA3
+        # startLRA3 = halfMFMA
+        # lra3 = create_range(min_val = startLRA3, num = numLrReadA, step = 1, repeat = 1)
+        # grB = create_range(min_val = startLRA3+1, num = 4, step = 2, repeat = 2)
+        # grB += create_range(min_val = max(lra3)+1, num = 4, step = 2, repeat = 2)
+        # waitLRA3 = max(lra3)
+        # startPACKA3 = waitLRA3 + 4
+
+        # # LRB3
+        # startLRB3 = (3*numMfma)//4 - 4 # Starts 4 indexes before 3/4 MFMAs to accommodate LRB3 latency
+        # lrb3 = create_range(min_val = startLRB3, num = numLrReadB//2, step = 1, repeat = 2)
+        # waitLRB3 = max(lrb3)
+        # startPACKB3 = waitLRB3 + 4
+
+        # # Grouping segment of 4x4x4_16B MFMAs together for PackB3 & PackA3 (reduce MFMA type switching cost)
+        # packB3 = [x + startPACKB3 for x in packBOffset]
+        # start_4x4x4 = packB3[4] # 5th index is start of 4x4x4_16B MFMA for PackB3
+        # packA3 = [
+        #     *create_range(min_val = startPACKA3, num = 2, step = 1, repeat = 2),
+        #     start_4x4x4, start_4x4x4,
+        #     *create_range(min_val = max(packB3)+1, num = 2, step = 1, repeat = 2),
+
+        #     *create_range(min_val = startPACKA3+2, num = 2, step = 1, repeat = 2),
+        #     start_4x4x4, start_4x4x4,
+        #     *create_range(min_val = max(packB3)+3, num = 2, step = 1, repeat = 2),
+        # ]
+
+        # syncTable = [
+        #     waitLRB0, SWaitCnt(dscnt=min(15,numLrReadA-4), vlcnt=-1, vscnt=-1, comment="Wait for 4 LRA0 to complete"),
+        #     waitLRB0+4, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+        #     waitLRB0+4, SBarrier(comment=""),
+
+        #     waitLRA0, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 4/8 LRB0 to complete"),
+        #     waitLRA0+4, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 to complete"),
+        #     waitLRA0+4, SBarrier(comment=""),
+
+        #     startLRA3-1, SWaitCnt(dscnt=-1, vlcnt=6, vscnt=-1, comment="Wait for previous GRA&GRB"),
+        #     startLRA3-1, SBarrier(comment=""),
+
+        #     waitLRA3, SWaitCnt(dscnt=(numLrReadB-1), vlcnt=-1, vscnt=-1, comment="Wait for 1st LRB3 to complete"),
+        #     waitLRA3+4, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRB3 to complete"),
+
+        #     startLRB3-1, SWaitCnt(dscnt=-1, vlcnt=6, vscnt=-1, comment="Wait for previous GRA&GRB"),
+        #     startLRB3-1, SBarrier(comment=""),
+
+        #     waitLRB3, SWaitCnt(dscnt=min(15,numLrReadA-4), vlcnt=-1, vscnt=-1, comment="Wait for 4 LRA3 to complete"),
+        #     waitLRB3+4, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3 to complete"),
+        # ]
+
+        # optSchedule = {
+        #     'SYNC': [syncTable[::2]],
+        #     'GRIncA': [grIncA],
+        #     'GRIncB': [grIncB],
+        #     'LRA0': [lra0],
+        #     'LRB0': [lrb0],
+        #     'PackA0' : [packA0],
+        #     'PackB0' : [packB0],
+        #     'GRA': [grA],
+        #     'GRB': [grB],
+        #     'LRSA': [[max(lra0)+1]],
+        #     'LRSB': [[max(lra0)+1]],
+        #     'LWSA': [[max(lrb3)+1]],
+        #     'LWSB': [[max(lrb3)+1]],
+        #     'LCC': [[numMfma-1, numMfma-1]],
+        #     'LRA3': [lra3],
+        #     'LRB3': [lrb3],
+        #     'PackA3' : [packA3],
+        #     'PackB3' : [packB3],
+        # }
+        # syncCode = syncTable[1::2]
+        # nglshift = nllshift = 12
+    else:
+        return False, None
+
+    kernel["MfmaInitCVgprs"] = True
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder=mfmaReorder)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 160, 64, 2, 1, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS):
+    n_mfma = 120
+    optSchedule = dict()
+    nglshift = nllshift = 0
+
+    syncs = SyncSchedule()
+    syncCode = []
+    gr_inc_step = 0
+
+    if isTN(kernel) and not useLDSTr and TLDS==1:
+        kernel["UseMFMAF32XEmulation"] = True
+        kernel["UsePLRPack"] = True
+
+        grinca = [0,0,1,1,2,2,3,3,4]
+        grincb = [4,5,5,6,6,7,7,8,8]
+        lrsa   = [58]
+        lrsb   = [59]
+        lwsa   = [118]
+        lwsb   = [118]
+
+        pack_a = [0,0,1,1, 8,8, 9,9,10,10,
+                  2,2,3,3, 8,8, 11,11,12,12,
+                  4,4,5,5, 8,8, 13,13,14,14,
+                  6,6,7,7, 8,8, 15,15,16,16
+                  ]
+        pack_b = [0,0,1,1, 10,10, 11,11,12,12,
+                  2,2,3,3, 10,10, 13,13,14,14,
+                  4,4,5,5, 10,10, 15,15,16,16,
+                  6,6,7,7, 10,10, 17,17,18,18,
+                  8,8,9,9, 10,10, 19,19,20,20
+                  ]
+        lra0   = [0,1,2,3,4,5,6,7]
+        syncs.add(                 12, dscnt=4, barrier=True, comment="wait for LRA0 before pack to complete + barrier for GRA")
+        pack_a0 = [                i+13 for i in pack_a]  ## last element = 13 + 16 = 29
+
+        lrb0   = [               8,9,10,11, 13,14,15,16, 18,19]
+        syncs.add(                                               24, dscnt=0, comment="wait for LRB0 before pack to complete")
+        pack_b0 = [                                                  i+30 for i in pack_b]  ## last element = 30 + 20 = 50
+
+        gra    = [                                    17,22,27,32, 42,47,52,57] # one index for two instructions
+        grb    = [                                                               67,71,75,79, 89,93,97,101, 112,116] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+
+        syncs.add(                                                            59, vlcnt=8, barrier=True, comment="wait for previous set of global reads + barrier for GRB")
+
+        lra1   = [60,61,62,63,64,65,66,67]
+        syncs.add(                          72, dscnt=4, comment="wait for LRA1 before pack to complete")
+        pack_a1 = [                         i+73 for i in pack_a]  ## last element = 73 + 16 = 89
+
+        lrb1   = [                        68,69,70,71, 73,74,75,76, 78,79]
+        syncs.add(                                                            85, dscnt=0, comment="wait for LRB1 before pack to complete")
+        pack_b1 = [                                                           i+90 for i in pack_b]  ## last element = 90 + 20 = 110
+
+        optSchedule = {
+            'SYNC':   [syncs.get_indicies()],
+            'GRIncA': [grinca],
+            'GRIncB': [grincb],
+            'LRA0':   [lra0],
+            'LRB0':   [lrb0],
+            'PackA0': [pack_a0],
+            'PackB0': [pack_b0],
+            'GRA':    [duplicate_list_items(gra, 2, gr_inc_step),
+                       duplicate_list_items([x+1 for x in gra], 2, gr_inc_step)],
+            'GRB':    [duplicate_list_items(grb, 2, gr_inc_step),
+                       duplicate_list_items([x+1 for x in grb], 2, gr_inc_step)],
+            'LRSA':   [lrsa],
+            'LRSB':   [lrsb],
+            'LWSA':   [lwsa],
+            'LWSB':   [lwsb],
+            'LRA1':   [lra1],
+            'LRB1':   [lrb1],
+            'PackB1': [pack_b1],
+            'PackA1': [pack_a1],
+            'LCC':    [[n_mfma-2, n_mfma-1]],
+        }
+
+        syncCode = syncs.get_code()
+        nglshift = nllshift = num_gr
+    else:
+        return False, None
+
+    kernel["MfmaInitCVgprs"] = True
+    opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(256, 128, 32, 2, 0, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_256x128x32_TF32(kernel, useLDSTr, TLDS):
+    numMfma = 96
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+
+    if isTN(kernel) and useLDSTr and TLDS==1:
+        kernel["UsePLRPack"] = True
+        numPackInstr = 24 
+        numPackIndices = numPackInstr // 2 # Assign 2 pack instructions per mfma index
+
+        # LRA0 + PACKA0 - done before 1/4 MFMAs - index 24
+        lrA0 = [0,0, 1,1, 2,2, 3,3]
+        waitLRA0 = max(lrA0) + 2
+        startPACKA0 = waitLRA0
+        packA0 = create_range(startPACKA0, (len(lrA0)//2)*numPackIndices, numMfma//4-1)
+
+         # LBR0 + PACKB0 - done before 2/4 MFMAs - index 48
+        lrB0 = [7,7, 15,15]
+        waitLRB0 = max(lrB0) + 2
+        startPACKB0 = max(waitLRB0,max(packA0)) # Starts after waitLRB0 and packA0
+        packB0 = create_range(startPACKB0, (len(lrB0)//2)*numPackIndices, numMfma//2-1)
+
+        # LRB3 + PACKB3 - start after 2/4 MFMAs - index 48
+        halfMFMA = numMfma//2
+        startLRB3 = halfMFMA
+        lrB3 = create_range(startLRB3, 1, numMfma-1)
+        lrB3 += create_range(max(lrB3)+6, 1, numMfma-1)
+        waitLRB3 = startLRB3 + 4
+        packB3 = create_range(waitLRB3, (len(lrB3)//2)*numPackIndices, numMfma-1)
+
+        # LRA3 + PACKA3 - start after 3/4 MFMAs - index 72
+        startLRA3 = (3*numMfma)//4
+        lrA3 = create_range(startLRA3, 4, numMfma-1)
+        waitLRA3 = startLRA3 + 4
+        packA3 = create_range(waitLRA3, (len(lrA3)//2)*numPackIndices, numMfma-1)
+
+        syncTable = [
+            waitLRA0, SWaitCnt(dscnt=inflight(lrA0, waitLRA0)-2, vlcnt=-1, vscnt=-1, comment="wait for 1st 2 LRA0 to complete"),
+            waitLRA0+numPackIndices, SWaitCnt(dscnt=inflight(lrA0, waitLRA0+numPackIndices), vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete"),
+
+            waitLRB0, SWaitCnt(dscnt=inflight(lrB0, waitLRB0)-2, vlcnt=-1, vscnt=-1, comment="wait for 1st 2 LRB0 to complete"),
+            waitLRB0+numPackIndices, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0 to complete"),
+            waitLRB0+numPackIndices, SBarrier(comment="Barrier before GRA&GRB"),
+
+            startLRB3-1, SWaitCnt(dscnt=-1, vlcnt=6, vscnt=-1, comment="Wait for prev GRA&GRB"),
+            startLRB3-1, SBarrier(comment=""),
+
+            waitLRB3,SWaitCnt(dscnt=inflight(lrB3, waitLRB3)-2, vlcnt=-1, vscnt=-1, comment="Wait for 1st 2 LRB3 to complete"),
+            waitLRB3+numPackIndices,SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRB3 to complete"),
+
+            startLRA3, SWaitCnt(dscnt=-1, vlcnt=6, vscnt=-1, comment="Wait for prev GRA&GRB"),
+            startLRA3, SBarrier(comment=""),
+
+            waitLRA3, SWaitCnt(dscnt=inflight(lrA3,waitLRA3)-2, vlcnt=-1, vscnt=-1, comment="Wait for 1st 2 LRA3 to complete"),
+            waitLRA3+numPackIndices, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRA3 to complete")
+        ]
+
+        optSchedule = {
+            'SYNC'   : [syncTable[::2]],
+            'GRIncA' : [[0,0,0, 1,1,1, 2,2,2]],
+            'GRIncB' : [[3,3,3, 4,4,4, 5,5,5]],
+
+            'LRA0'   : [lrA0],
+            'PackA0' : [packA0],
+            'LRB0'   : [lrB0],
+            'PackB0' : [packB0],
+
+            'GRA': [[48, 48, 50, 50, 52, 52, 54, 54, 66, 66, 68, 68, 70, 70, 72, 72]],
+            'GRB': [[30, 32, 34, 36, 40, 42, 44, 46]],
+
+            'LRA3'   : [lrA3],
+            'PackA3' : [packA3],
+            'LRB3'   : [lrB3],
+            'PackB3' : [packB3],
+
+            'LRSA': [[22]],
+            'LRSB': [[22]],
+            'LWSA': [[70]],
+            'LWSB': [[70]],
+            'LCC': [[95, 95]],
+        }
+        syncCode = syncTable[1::2]
         nglshift = nllshift = 12 # vmcnt shift for ngl and nll
     else:
         return False, None
 
+    kernel["MfmaInitCVgprs"] = True
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidation() # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
     return True, opt1
+
+@RegisterSchedule(
+    tile_config=TileConfig(64, 128, 64, 2, 1, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_64x128x64_TF32(kernel, useLDSTr, TLDS):
+    n_mfma = 48
+    optSchedule = dict()
+    nglshift = nllshift = 0
+
+    syncs = SyncSchedule()
+    syncCode = []
+    gr_inc_step = 0
+
+    if isTN(kernel) and not useLDSTr and TLDS==1:
+        kernel["UseMFMAF32XEmulation"] = True
+        kernel["UsePLRPack"] = True
+
+        grinca = [0,0,1,1,2,2,3,3,4]
+        grincb = [4,5,5,6,6,7,7,8,8]
+        lrsa   = [23]
+        lrsb   = [23]
+        lwsa   = [47]
+        lwsb   = [47]
+
+        pack_a_offset = [0,0,0,0, 2,2, 3,3,3,3,
+                         1,1,1,1, 2,2, 4,4,4,4
+                        ]
+        pack_b_offset = [0,0,0,0, 4,4, 5,5,5,5,
+                         1,1,1,1, 4,4, 6,6,6,6,
+                         2,2,2,2, 4,4, 7,7,7,7,
+                         3,3,3,3, 4,4, 8,8,8,8
+                        ]
+        lra0   = [0,1,2,3]
+        syncs.add(                8, dscnt=5, comment="wait for necessary LRA0 before pack to start")
+        syncs.add(                10, dscnt=4, barrier=True, comment="wait for remaining LRA0 before pack to complete + barrier for GRA")
+        pack_a0 = [                i+9 for i in pack_a_offset]  ## last index = 9 + 4 = 13
+
+        lrb0   = [        4,5, 7, 9,10,11,12,13]
+        syncs.add(                           14, dscnt=4, comment="wait for necessary LRB0 before pack to start")
+        syncs.add(                           16, dscnt=0, comment="wait for remaining LRB0 before pack to complete")
+        pack_b0 = [                          i+14 for i in pack_b_offset]  ## last index = 14 + 8 = 22
+
+        gra    = [                 10,13,17,21] # one index for two instructions
+        grb    = [                            24,28,32,35,38,41,43,45] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+
+        syncs.add(                            24, vlcnt=4, barrier=True, comment="wait for previous set of global reads + barrier for GRB")
+
+        lra1   = [24,25,26,27]
+        syncs.add(                       32, dscnt=5, comment="wait for necessary LRA1 before pack to start")
+        syncs.add(                       34, dscnt=4, comment="wait for remaining LRA1 before pack to complete")
+        pack_a1 = [                         i+33 for i in pack_a_offset]  ## last index = 33 + 4 = 37
+
+        lrb1   = [           28,29, 31,32, 34,35,36,37]
+        syncs.add(                                     38, dscnt=4, comment="wait for necessary LRB1 before pack to start")
+        syncs.add(                                     40, dscnt=0, comment="wait for remaining LRB1 before pack to complete")
+        pack_b1 = [                                    i+38 for i in pack_b_offset]  ## last index = 38 + 8 = 46
+
+        optSchedule = {
+            'SYNC':   [syncs.get_indicies()],
+            'GRIncA': [grinca],
+            'GRIncB': [grincb],
+            'LRA0':   [lra0],
+            'LRB0':   [lrb0],
+            'PackA0': [pack_a0],
+            'PackB0': [pack_b0],
+            'GRA':    [duplicate_list_items(gra, 2, gr_inc_step)],
+            'GRB':    [duplicate_list_items(grb, 2, gr_inc_step)],
+            'LRSA':   [lrsa],
+            'LRSB':   [lrsb],
+            'LWSA':   [lwsa],
+            'LWSB':   [lwsb],
+            'LRA1':   [lra1],
+            'LRB1':   [lrb1],
+            'PackB1': [pack_b1],
+            'PackA1': [pack_a1],
+            'LCC':    [[n_mfma-1, n_mfma-1]],
+        }
+
+        syncCode = syncs.get_code()
+        nglshift = nllshift = num_gr
+    else:
+        return False, None
+
+    kernel["MfmaInitCVgprs"] = True
+    opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 64, 64, 2, 1, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x64x64_TF32(kernel, useLDSTr, TLDS):
+    valid, opt = _get_schedule_64x128x64_TF32(kernel, useLDSTr, TLDS)
+    if not valid:
+        return False, None
+
+    optSchedule = switch_A_B_schedule(opt.optSchedule)
+    return True, ScheduleInfo(opt.numCodePaths, opt.numMfma, optSchedule, opt.syncCode, opt.nglshift, opt.nllshift)
+
+@RegisterSchedule(
+    tile_config=TileConfig(160, 128, 64, 2, 1, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
+    n_mfma = 120
+    optSchedule = dict()
+    nglshift = nllshift = 0
+
+    syncs = SyncSchedule()
+    syncCode = []
+
+    if isNN(kernel) and useLDSTr and TLDS==1:
+        kernel["UseMFMAF32XEmulation"] = True
+        kernel["UsePLRPack"] = True
+        syncs.add(11, dscnt=8, comment="wait for LRB0 before pack to complete")
+        syncs.add(16, dscnt=8, barrier=True, comment="wait for LRB0 before pack to complete", barrier_comment="barrier for GRA")
+        syncs.add(33, dscnt=0, comment="wait for LRA0 before pack to complete")
+        syncs.add(59, vlcnt=8, barrier=True, comment="wait for previous set of global reads", barrier_comment="barrier for GRB")
+        syncs.add(73, dscnt=8, comment="wait for LRB1 before pack to complete")
+        syncs.add(78, dscnt=8, comment="wait for LRB1 before pack to complete")
+        syncs.add(94, dscnt=0, comment="wait for LRA1 before pack to complete")
+
+        optSchedule = {
+            'SYNC': [syncs.get_indicies()],
+
+            'GRIncB': [[0, 1, 2, 3, 4, 6, 7, 8, 9]],
+            'LRB0'  : [[0,2,
+                        4,5, 
+                        6,7, 
+                        9,11],
+                                [0,1,
+                                 3,5, 
+                                 6,8,
+                                 10,12]],
+
+            'GRIncA': [[10, 11, 12, 13, 14, 15, 15, 16, 16]],
+
+            'PackB0': [[13,13,14,14, 21,21, 22,22,23,23, 
+                        15,15,16,16, 21,21, 24,24,25,25, 
+                        17,17,18,18, 21,21, 26,26,27,27, 
+                        19,19,20,20, 21,21, 28,28,29,29]],
+
+            'LRA0'  : [[0, 0, 2, 2, 4, 4, 5, 5,
+                        7, 7, 8, 8, 10,10,12,12,
+                        13,13,13,13,14,14,14,14,
+                        16,16,16,16,18,18,18,18,
+                        20,20,20,20,22,24,26,28],
+                                                [0, 0, 1, 1, 3, 3, 5, 5,
+                                                 7, 7, 9, 9, 11,11,12,12, 
+                                                 13,13,13,13,15,15,15,15,
+                                                 17,17,17,17,19,19,19,19,
+                                                 21,21,21,21,23,23,23,23]],
+
+            'PackA0': [[30,30,31,31, 40,40, 41,41,42,42, 
+                        32,32,33,33, 40,40, 43,43,44,44, 
+                        34,34,35,35, 40,40, 45,45,46,46, 
+                        36,36,37,37, 40,40, 47,47,48,48,
+                        38,38,39,39, 40,40, 49,49,50,50]],
+
+            'GRA'   : [[60, 60, 62, 62, 64, 64, 66, 66, 68, 68,  
+                        81, 81, 83, 83, 85, 85, 87, 87, 90, 90]],
+
+            'GRB'   : [[17, 17, 22, 22, 27, 27, 32, 32, 42, 42, 47, 47, 52, 52, 57, 57]],
+
+            'LRSA'  : [[58]], 'LRSB'  : [[59]],'LWSA'  : [[118]], 'LWSB'  : [[118]],
+
+            'LRB1'  : [[59,61,
+                        63,65,
+                        67,69,
+                        71,73],
+                                    [60,62,
+                                     64,66,
+                                     68,70,
+                                     72,74]],
+
+            'PackB1': [[73,73,74,74, 81,81, 82,82,83,83, 
+                        75,75,76,76, 81,81, 84,84,85,85, 
+                        77,77,78,78, 81,81, 86,86,87,87, 
+                        79,79,80,80, 81,81, 88,88,89,89]],
+
+            'LRA1'  : [[59,59,61,61, 63,63,65,65,
+                        67,67,69,69, 71,71,73,73,
+                        74,74,74,74, 75,75,75,75,
+                        77,77,77,77, 79,79,79,79,
+                        81,81,81,81, 83,83,83,83],
+                                                    [60,60,62,62, 64,64,65,65,
+                                                     66,66,68,68, 70,70,72,72,
+                                                     74,74,74,74, 76,76,76,76,
+                                                     78,78,78,78, 80,80,80,80,
+                                                     81,81,81,81, 82,82,82,82]],
+
+            'PackA1': [[90,90,91,91,            100,100, 101,101,102,102, 
+                        92,92,93,93,            100,100, 103,103,104,104, 
+                        94,94,95,95,            100,100, 105,105,106,106, 
+                        96,96,97,97,            100,100, 107,107,108,108, 
+                        98,98,99,99,            100,100, 109,109,110,110]],
+
+            'LCC': [[118, 119]]
+        }
+
+        syncCode = syncs.get_code()
+        nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
+
+        opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
+
+    elif isTN(kernel) and not useLDSTr and TLDS==1:
+        valid, opt = _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS)
+        if not valid:
+            return False, None
+        optSchedule = switch_A_B_schedule(opt.optSchedule)
+        opt1 = ScheduleInfo(opt.numCodePaths, opt.numMfma, optSchedule, opt.syncCode, opt.nglshift, opt.nllshift)
+
+    else:
+        return False, None
+
+    kernel["MfmaInitCVgprs"] = True
+    return True, opt1
+
+        
+@RegisterSchedule(
+    tile_config=TileConfig(128, 256, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x256x64_16bit(kernel, useLDSTr, TLDS):
+    numMfma = 64
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0
+    if isNN(kernel) and useLDSTr and TLDS == 1:
+        lra0 = [create_range(min_val = 1, num = 4, step = 2, repeat = 2),
+                create_range(min_val = 0, num = 4, step = 2, repeat = 2)]
+
+        GRIncA = [create_range(min_val = 2, num = 3, step = 2, repeat = 3),
+                  create_range(min_val = 1, num = 3, step = 2, repeat = 3)]
+
+        waitLRA0 = max(lra0[1])+5
+        gra = create_range(min_val = waitLRA0+1, num = 4, step = 2, repeat = 2)
+        lrb0 = create_range(min_val = max(gra)+1, num = 8, step = 1, repeat = 1)
+        GRIncB = create_range(min_val = max(gra)+1, num = 9, step = 1, repeat = 1)
+
+        assert max(lrb0) < numMfma // 2, "lrb0 max {} numMfma/2 {}".format(max(lrb0), numMfma//2)
+
+        startGRB = max(lrb0) + 5
+
+        assert startGRB < numMfma // 2, "startGRB {} numMfma/2 {}".format(startGRB, numMfma//2)
+        grb = create_range(min_val = startGRB, num = 4, step = 2, repeat = 2)
+        startLRA1 = max(grb) + 3
+
+        lra1 = create_range(min_val = startLRA1, num = 8, step = 1, repeat = 1)
+        startLRB1 = max(lra1) + 1
+        grb += create_range(min_val = startLRB1, num = 4, step = 2, repeat = 2)
+        lrb1 = create_range(min_val = startLRB1+1, num = 4, step = 2, repeat = 1)
+        lrb1 += create_range(min_val = max(lrb1)+2, num = 4, step = 1, repeat = 1)
+        syncTable = [
+            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 & LRB0"),
+            waitLRA0,  SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0"),
+            waitLRA0, SBarrier(comment=""),
+
+            startGRB-1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0"),
+            startGRB-1, SBarrier(comment=""),
+            startLRA1-1, SWaitCnt(dscnt=-1, vlcnt=16, vscnt=-1, comment="wait for previous GRA & GRB"),
+            startLRA1-1, SBarrier(comment=""),
+
+            startLRB1-1, SWaitCnt(dscnt=-1, vlcnt=8, vscnt=-1, comment="wait for previous GRA & GRB"),
+            startLRB1-1, SBarrier(comment="")
+        ]
+
+        optSchedule = {
+            'GRA': [gra],
+            'GRB': [grb],
+            'GRIncA': [*GRIncA],
+            'GRIncB': [GRIncB],
+            'LCC': [[numMfma-2,numMfma-2]],
+            'LRA0': [*lra0],
+            'LRA1': [lra1],
+            'LRB0': [lrb0],
+            'LRB1': [lrb1],
+            'LRSA': [[startGRB-1]],
+            'LRSB': [[startGRB-1]],
+            'LWSA': [[numMfma-3]],
+            'LWSB': [[numMfma-3]],
+            'SYNC': [syncTable[::2]],
+        }
+
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 12 
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    else:
+        # No matching variant found
+        return False, None
+
+    kernel["MfmaInitCVgprs"] = True
+    return True, opt1
+

@@ -226,11 +226,11 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 0
-    SolutionNameMin: Cijk_Alik_Bljk_I8I8S_BH_HAS_Bias_HAS_SAV_UserArgs_MT32x32x32_MI32x32x1_SN_GSU2_GSUC0_GSUWGMRR0_K1_MIWT1_1_SU0_SUM0_SUS32_VWA1_VWB1_WG32_2_1_WGM18_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_I8I8S_BH_HAS_Bias_HAS_SAV_UserArgs_MT32x32x32_MI32x32x1_SN_GSU2_GSUC0_GSUWGMRR0_K1_MIWT1_1_SU0_SUM1_SUS32_VWA1_VWB1_WG32_2_1_WGM18_WGMXCC1_WGMXCCGn1
     SourceSwap: false
     Sparse: 0
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 32
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0

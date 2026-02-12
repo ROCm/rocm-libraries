@@ -564,8 +564,6 @@ namespace rocRoller
                         params->setDimensionInfo(*m_tagLoadScaleB, macTileBScale);
                     }
 
-                    params->unrollX       = solutionParams.unrollX;
-                    params->unrollY       = solutionParams.unrollY;
                     params->swizzleScale  = solutionParams.swizzleScale;
                     params->prefetchScale = solutionParams.prefetchScale;
 
