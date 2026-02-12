@@ -247,8 +247,8 @@ bool MiopenConvPlanBuilder::isApplicable(
     {
         HIPDNN_PLUGIN_LOG_INFO(
             "Convolution plan builder is applicable only for single node graphs. Graph "
-            "has {} nodes",
-            opGraph.nodeCount());
+            "has "
+            << opGraph.nodeCount() << " nodes");
         return false;
     }
 
@@ -334,15 +334,15 @@ void MiopenConvPlanBuilder::buildPlan(
     switch(nodeWrapper.attributesType())
     {
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
-        HIPDNN_PLUGIN_LOG_INFO("Building convolution fwd plan for node: {}", nodeName);
+        HIPDNN_PLUGIN_LOG_INFO("Building convolution fwd plan for node: " << nodeName);
         buildPlanFwd(handle, opGraph, executionContext, _deterministic);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
-        HIPDNN_PLUGIN_LOG_INFO("Building convolution bwd plan for node: {}", nodeName);
+        HIPDNN_PLUGIN_LOG_INFO("Building convolution bwd plan for node: " << nodeName);
         buildPlanBwd(handle, opGraph, executionContext, _deterministic);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
-        HIPDNN_PLUGIN_LOG_INFO("Building convolution wrw plan for node: {}", nodeName);
+        HIPDNN_PLUGIN_LOG_INFO("Building convolution wrw plan for node: " << nodeName);
         buildPlanWrw(handle, opGraph, executionContext, _deterministic);
         break;
     default:
