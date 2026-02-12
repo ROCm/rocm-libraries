@@ -1469,7 +1469,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         else if(arg.scaleA == hipblaslt_scaling_format::Vector)
             size_scaleAVec[i] = M[i];
         else if(isBlockScaling(arg.scaleA))
-            size_scaleAVec[i] = (M[i] * K[i]) / blockSize(arg.scaleA);
+            size_scaleAVec[i] = scaleBufferSize(A_row[i], A_col[i], arg.scaleA);
         else
             size_scaleAVec[i] = 0;
         if(arg.scaleB == hipblaslt_scaling_format::Scalar)
@@ -1477,7 +1477,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         else if(arg.scaleB == hipblaslt_scaling_format::Vector)
             size_scaleBVec[i] = N[i];
         else if(isBlockScaling(arg.scaleB))
-            size_scaleBVec[i] = (K[i] * N[i]) / blockSize(arg.scaleB);
+            size_scaleBVec[i] = scaleBufferSize(B_row[i], B_col[i], arg.scaleB);
         else
             size_scaleBVec[i] = 0;
         if(arg.bias_vector)
