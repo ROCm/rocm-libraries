@@ -10,7 +10,6 @@ SPDX-License-Identifier: MIT
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
-#include <functional>
 #include <hipdnn_backend.h>
 
 int main(int argc, char** argv)
