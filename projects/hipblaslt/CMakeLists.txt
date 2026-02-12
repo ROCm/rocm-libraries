@@ -520,6 +520,8 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
             sample_hipblaslt_gemm_ext_bgradb
             sample_hipblaslt_gemm_dgelu_bgrad
             sample_hipblaslt_gemm_dgelu_bgrad_ext
+            sample_hipblaslt_gemm_drelu_bgrad
+            sample_hipblaslt_gemm_drelu_bgrad_ext
             sample_hipblaslt_gemm_is_tuned_ext
             sample_hipblaslt_gemm_tuning_wgm_ext
             sample_hipblaslt_gemm_with_scale_a_b
