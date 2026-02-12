@@ -607,7 +607,7 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
     Further, each loop iteration only contains MIWaveTileA * MIWaveTileB MFMAs, instead of 2 * MIWaveTileA * MIWaveTileB MFMAs.
 
     Default is column-major ordering of MFMAs:
-    A v \ B ->
+    A  B ->
     | 0 4  8 12 |
     | 1 5  9 13 |
     | 2 6 10 14 |
