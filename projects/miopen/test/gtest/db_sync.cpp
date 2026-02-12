@@ -1030,10 +1030,16 @@ struct CPU_DBSync_NONE : testing::TestWithParam<std::pair<std::string, size_t>>
 
 TEST_P(CPU_DBSync_NONE, StaticFDBSync)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip database sync tests when AddressSanitizer is enabled as the database
+    // file naming may not match the expected xnack configuration.
+    GTEST_SKIP();
+#else
     std::string arch;
     size_t num_cu;
     std::tie(arch, num_cu) = GetParam();
     StaticFDBSync(arch, num_cu);
+#endif
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
