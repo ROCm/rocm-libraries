@@ -179,7 +179,7 @@ namespace GEMMTests
         gemm.macN             = 256;
         gemm.loadPathA        = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB        = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD        = true;
+        gemm.storePath        = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
         gemm.prefetchInFlight = 1;
         auto maxLDS = m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize);
         auto bytesPerElement = sizeof(float);
@@ -217,7 +217,7 @@ namespace GEMMTests
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
-        gemm.storeLDSD     = false;
+        gemm.storePath     = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.loopOverTiles = true;
         basicGEMM<float>(gemm);
     }
@@ -442,7 +442,7 @@ namespace GEMMTests
         gemm.macK      = 128;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.transA    = "T";
         gemm.transB    = "N";
 
@@ -471,7 +471,7 @@ namespace GEMMTests
         gemm.macK      = 128;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.transA    = "T";
         gemm.transB    = "N";
 
@@ -500,7 +500,7 @@ namespace GEMMTests
         gemm.macK      = 128;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.transA    = "T";
         gemm.transB    = "N";
 
@@ -537,7 +537,7 @@ namespace GEMMTests
 
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = true;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
 
         basicGEMM<Half>(gemm);
     }
@@ -562,7 +562,7 @@ namespace GEMMTests
 
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = true;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
 
         basicGEMM<Half>(gemm);
     }
@@ -587,7 +587,7 @@ namespace GEMMTests
 
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = true;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
 
         gemm.splitStoreTileIntoWaveBlocks = true;
         basicGEMM<Half>(gemm);
@@ -620,7 +620,7 @@ namespace GEMMTests
 
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = true;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
 
         basicGEMM<Half>(gemm);
     }

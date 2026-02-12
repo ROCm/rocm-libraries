@@ -340,7 +340,7 @@ namespace GPUArchitectureGenerator
                      std::back_inserter(retval),
                      [](rocRoller::GPUArchitectureTarget const& x) -> bool {
                          return x.isCDNA1GPU() || x.isCDNA2GPU() || x.isCDNA3GPU()
-                                || x.isCDNA35GPU();
+                                || x.isCDNA4GPU();
                      });
         return retval;
     }
@@ -398,7 +398,7 @@ namespace GPUArchitectureGenerator
             rocRoller::SupportedArchitectures.begin(),
             rocRoller::SupportedArchitectures.end(),
             std::back_inserter(retval),
-            [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.isCDNA35GPU(); });
+            [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.isCDNA4GPU(); });
         return retval;
     }
 
@@ -418,7 +418,7 @@ namespace GPUArchitectureGenerator
 
             {rocRoller::GPUCapability::PackedWorkitemIDs,
              [](rocRoller::GPUArchitectureTarget x) -> bool {
-                 return x.isCDNA2GPU() || x.isCDNA3GPU() || x.isCDNA35GPU() || x.isRDNA4GPU();
+                 return x.isCDNA2GPU() || x.isCDNA3GPU() || x.isCDNA4GPU() || x.isRDNA4GPU();
              }},
             {rocRoller::GPUCapability::WorkgroupIdxViaTTMP,
              [](rocRoller::GPUArchitectureTarget x) -> bool { return x.isGFX12GPU(); }},

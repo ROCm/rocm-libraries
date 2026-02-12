@@ -147,7 +147,7 @@ namespace GEMMTests
         gemm.workgroupSizeY = 1;
         gemm.loadPathA      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD      = false;
+        gemm.storePath      = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.m              = 2 * gemm.macM;
         gemm.n              = 2 * gemm.macN;
         gemm.k              = 2 * gemm.macK;
