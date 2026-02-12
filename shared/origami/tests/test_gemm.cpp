@@ -810,6 +810,81 @@ TEST_CASE("GEMM: estimate_l2_hit and estimate_mall_hit unit test", "[gemm]") {
   }
 }
 
+TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
+  const size_t N_CU = 256;
+  const size_t num_xcd = 8;
+
+  SECTION("grid_b=64, grid_k=1, wgmxcc=1 — round-robin strided across batches") {
+    // Grid: 2×2×1×64, wgm=1, wgmxcc=1 (no wgmxcc)
+    // stride=8, mnk=4, each strided tile lands in a different batch
+    auto u = origami::count_unique_tiles({1, 2, 2, 64}, {0, 1, 1}, N_CU, num_xcd, 0, 0);
+    CHECK(u.k == 1);
+    CHECK(u.m == 1);
+    CHECK(u.n == 1);
+    CHECK(u.b == 32);
+  }
+
+  SECTION("grid_b=64, grid_k=1, wgmxcc=8 — contiguous block spans all mn per batch") {
+    // Grid: 2×2×1×64, wgm=1, wgmxcc=8
+    // Each XCD gets 32 contiguous tiles -> 4 mn × 8 batches
+    auto u = origami::count_unique_tiles({1, 2, 2, 64}, {0, 8, 1}, N_CU, num_xcd, 0, 0);
+    CHECK(u.k == 1);
+    CHECK(u.m == 2);
+    CHECK(u.n == 2);
+    CHECK(u.b == 8);
+  }
+
+  SECTION("grid_k=64, grid_b=1, wgmxcc=1 — round-robin strided across k-splits") {
+    // Grid: 2×2×64×1, wgm=1, wgmxcc=1
+    // stride=8 cycles through k: unique_k = 64/gcd(8,64) = 8
+    auto u = origami::count_unique_tiles({64, 2, 2, 1}, {0, 1, 1}, N_CU, num_xcd, 0, 0);
+    CHECK(u.k == 8);
+    CHECK(u.m == 2);
+    CHECK(u.n == 2);
+    CHECK(u.b == 1);
+  }
+
+  SECTION("grid_k=64, grid_b=1, wgmxcc=8 — contiguous block within one mn tile") {
+    // Grid: 2×2×64×1, wgm=1, wgmxcc=8
+    // Each XCD gets 32 contiguous tiles -> 32 k-splits in mn_id=0
+    auto u = origami::count_unique_tiles({64, 2, 2, 1}, {0, 8, 1}, N_CU, num_xcd, 0, 0);
+    CHECK(u.k == 32);
+    CHECK(u.m == 1);
+    CHECK(u.n == 1);
+    CHECK(u.b == 1);
+  }
+
+  SECTION("16×16 grid, wgmxcc=8, wgm=4 — contiguous block in first WGM slab") {
+    // Grid: 16×16×1×1, wgm=4, wgmxcc=8
+    // 32 contiguous tiles → 8 m-rows × 4 n-columns (one slab)
+    auto u = origami::count_unique_tiles({1, 16, 16, 1}, {0, 8, 4}, N_CU, num_xcd, 0, 0);
+    CHECK(u.k == 1);
+    CHECK(u.m == 8);
+    CHECK(u.n == 4);
+    CHECK(u.b == 1);
+  }
+
+  SECTION("8×8 grid with k=4, wgmxcc=8, wgm=2 — mixed k and mn") {
+    // Grid: 8×8×4×1, wgm=2, wgmxcc=8
+    // 32 contiguous tiles → 4 k-splits × 4 m-rows × 2 n-columns
+    auto u = origami::count_unique_tiles({4, 8, 8, 1}, {0, 8, 2}, N_CU, num_xcd, 0, 0);
+    CHECK(u.k == 4);
+    CHECK(u.m == 4);
+    CHECK(u.n == 2);
+    CHECK(u.b == 1);
+  }
+
+  SECTION("All XCDs report the same unique counts") {
+    // With wgmxcc=8, all XCDs should see the same tile structure
+    for (size_t xcd = 0; xcd < num_xcd; ++xcd) {
+      auto u = origami::count_unique_tiles({1, 16, 16, 1}, {0, 8, 4}, N_CU, num_xcd, xcd, 0);
+      CHECK(u.k == 1);
+      CHECK(u.m == 8);
+      CHECK(u.n == 4);
+      CHECK(u.b == 1);
+    }
+  }
+}
 
 TEST_CASE("Heuristics: Default parameters", "[heuristics]") {
   origami::heuristic_params_t defaults;

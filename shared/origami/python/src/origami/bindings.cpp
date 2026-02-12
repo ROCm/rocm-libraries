@@ -99,6 +99,16 @@ NB_MODULE(origami, m) {
       .def("nk", &origami::dim3_t::nk)
       .def("mnk", &origami::dim3_t::mnk);
 
+  nanobind::class_<origami::dim4_t>(m, "dim4_t")
+      .def(nanobind::init<std::size_t, std::size_t, std::size_t, std::size_t>())
+      .def_rw("k", &origami::dim4_t::k)
+      .def_rw("m", &origami::dim4_t::m)
+      .def_rw("n", &origami::dim4_t::n)
+      .def_rw("b", &origami::dim4_t::b)
+      .def("mn", &origami::dim4_t::mn)
+      .def("mnk", &origami::dim4_t::mnk)
+      .def("total", &origami::dim4_t::total);
+
   // Tensile-specific parameters (used when prediction_mode == simulation)
   nanobind::class_<origami::tensile_params_t>(m, "tensile_params_t")
       .def(nanobind::init<>())
@@ -185,10 +195,7 @@ NB_MODULE(origami, m) {
       .def_rw("tile_elements", &origami::context_t::tile_elements)
       .def_rw("output_tile_bytes", &origami::context_t::output_tile_bytes)
       .def_rw("wgm", &origami::context_t::wgm)
-      .def_rw("mall_tile_m", &origami::context_t::mall_tile_m)
-      .def_rw("mall_tile_n", &origami::context_t::mall_tile_n)
-      .def_rw("l2_tile_m", &origami::context_t::l2_tile_m)
-      .def_rw("l2_tile_n", &origami::context_t::l2_tile_n);
+;
 
   nanobind::class_<origami::problem_t>(m, "problem_t")
       .def(nanobind::init<>())
@@ -321,6 +328,18 @@ NB_MODULE(origami, m) {
   m.def("compute_l2_tiles",
         &origami::compute_l2_tiles,
         "Compute L2 tile dimensions");
+  m.def("wgm_to_grid",
+        &origami::wgm_to_grid,
+        "Map a linear WG ID to 4D tile coordinates (k, m, n, b)");
+  m.def("count_unique_tiles",
+        &origami::count_unique_tiles,
+        "Count unique tiles for a specific XCD during a specific timestep");
+  m.def("count_unique_tiles_timestep",
+        &origami::count_unique_tiles_timestep,
+        "Count unique tiles for an entire timestep (all XCDs combined)");
+  m.def("estimate_cache_hit_rates",
+        &origami::estimate_cache_hit_rates,
+        "Estimate MALL and L2 hit rates using two-timestep analytical model");
   m.def("compute_number_matrix_instructions",
         &origami::compute_number_matrix_instructions,
         "Compute the number of matrix instructions required");
@@ -384,6 +403,14 @@ NB_MODULE(origami, m) {
           return origami::estimate_mall_hit(problem, hardware, config, context);
         },
         "Estimate MALL hit rate (auto-creates context)");
+  m.def("estimate_cache_hit_rates",
+        [](const origami::problem_t& problem,
+           const origami::hardware_t& hardware,
+           const origami::config_t& config) {
+          origami::context_t context(problem, hardware, config);
+          return origami::estimate_cache_hit_rates(problem, hardware, config, context);
+        },
+        "Estimate MALL and L2 hit rates using two-timestep analytical model (auto-creates context)");
   m.def("compute_memory_latency",
         [](const origami::problem_t& problem,
            const origami::hardware_t& hardware,

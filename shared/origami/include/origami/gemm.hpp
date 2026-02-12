@@ -40,12 +40,6 @@ struct context_t {
   /// Workgroup mapping parameters.
   workgroup_mapping_t wgm{0, 8, 1};
 
-  /// Cache tile dimensions (spatial model).
-  size_t mall_tile_m = 0;
-  size_t mall_tile_n = 0;
-  size_t l2_tile_m   = 0;
-  size_t l2_tile_n   = 0;
-
   /// Default constructor.
   context_t() = default;
 
@@ -77,6 +71,16 @@ double calculate_work_utilization(const problem_t& problem, const config_t& conf
  * @return double ratio of the useful problem volume to the total scheduled volume.
  */
 double calculate_output_utilization(const problem_t& problem, const config_t& config, size_t vector_elems);
+
+/**
+ * @brief This function rounds the number of elements up to the smallest value whose total size 
+ * (given the element bit-width) is an exact multiple of a 128-byte memory transaction.
+ *
+ * @param elements Macro tile dimension
+ * @param element_size_bits size in bits
+ * @return size_t
+ */
+ size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
 
 /**
  * @brief Computes the launch parameters for the kernel.
@@ -156,13 +160,47 @@ std::pair<size_t, size_t> compute_l2_tiles(const problem_t& problem,
                                            size_t wgm_value);
 
 /**
- * @brief This function rounds the number of elements up to the smallest value whose total size (given the element bit-width) is an exact multiple of a 128-byte memory transaction.
+ * @brief Map a linear workgroup ID to 4D tile coordinates (k, m, n, b) using WGM slab ordering.
  *
- * @param elements Macro tile dimension
- * @param element_size_bits size in bits
- * @return size_t
+ * Dispatch order: k (innermost) -> mn (WGM slab ordering) -> b (outermost).
+ * Within the mn space, slabs of width min(wgm, grid.n) are laid out N-first, then M.
+ *
+ * @param grid Grid dimensions (k, m, n, b).
+ * @param wgm_mapping Workgroup mapping parameters (wgmxcc, wgm).
+ * @param id Linear workgroup ID.
+ * @return dim4_t 4D tile coordinate.
  */
-size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
+dim4_t wgm_to_grid(const dim4_t& grid, const workgroup_mapping_t& wgm_mapping, size_t id);
+
+/**
+ * @brief Count unique tiles for a specific XCD during a specific timestep.
+ *
+ * With wgmxcc, XCD x in timestep ts sees cus_per_xcd consecutive tiles
+ * in raw dispatch order. Without wgmxcc, falls back to even division.
+ *
+ * @param grid Grid dimensions (k, m, n, b).
+ * @param wgm_mapping Workgroup mapping parameters (wgmxcc, wgm).
+ * @param N_CU Total number of CUs.
+ * @param num_xcd Number of XCDs.
+ * @param xcd_id XCD index (0-based).
+ * @param timestep_id Timestep index (0-based).
+ * @return dim4_t Unique tile counts in each dimension.
+ */
+dim4_t count_unique_tiles(const dim4_t& grid, const workgroup_mapping_t& wgm_mapping,
+                          size_t N_CU, size_t num_xcd,
+                          size_t xcd_id, size_t timestep_id);
+
+/**
+ * @brief Count unique tiles for an entire timestep (all XCDs combined).
+ *
+ * @param grid Grid dimensions (k, m, n, b).
+ * @param wgm_mapping Workgroup mapping parameters (wgmxcc, wgm).
+ * @param N_CU Total number of CUs.
+ * @param timestep_id Timestep index (0-based).
+ * @return dim4_t Unique tile counts in each dimension.
+ */
+dim4_t count_unique_tiles_timestep(const dim4_t& grid, const workgroup_mapping_t& wgm_mapping,
+                                   size_t N_CU, size_t timestep_id);
 
 /**
  * @brief Compute the number of matrix instructions required to compute a single MT_MXMT_NXMT_K
@@ -259,6 +297,23 @@ double estimate_mall_hit(const problem_t& problem,
                          const hardware_t& hardware,
                          const config_t& config,
                          const context_t& context);
+
+/**
+ * @brief Estimate MALL and L2 hit rates using a two-timestep analytical model.
+ *
+ * Computes unique tiles counts for the first two timesteps using WGM, 
+ * then estimates temporal reuse from T0->T1 overlap. Extrapolates to all timesteps.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param context Execution context with derived parameters.
+ * @return std::pair<double, double> (mall_hit_rate, l2_hit_rate).
+ */
+std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
+                                                   const hardware_t& hardware,
+                                                   const config_t& config,
+                                                   const context_t& context);
 
 /**
  * @brief L2 hit rate from a global (problem-wide) perspective using the refactored API.
