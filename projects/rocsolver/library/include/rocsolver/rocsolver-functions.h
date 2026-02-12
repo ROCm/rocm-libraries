@@ -4930,7 +4930,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetf2_npvt_batched_64(rocblas_handle 
 
     \note
     Although this routine can offer better performance, Gaussian elimination without pivoting is not backward stable.
-    If numerical accuracy is compromised, use the legacy-LAPACK-like API \ref rocsolver_sgetf2_strided_batched "GETF2_STRIDED_BATCHED" routines instead.
+    If numerical accuracy is compromised, use \ref rocsolver_sgetf2_strided_batched "GETF2_STRIDED_BATCHED" routines instead.
 
     @param[in]
     handle      rocblas_handle.
@@ -5055,8 +5055,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetf2_npvt_strided_batched_64(rocblas
     triangular (upper trapezoidal if ``m`` < ``n``).
 
     \note
-    Although this routine can offer better performance, Gaussian elimination without pivoting is not backward stable.
-    If numerical accuracy is compromised, use the legacy-LAPACK-like API \ref rocsolver_sgetrf "GETRF" routines instead.
+    Although this routine can offer better performance than GETRF, Gaussian elimination without pivoting is not backward stable.
+    If numerical accuracy is compromised, use \ref rocsolver_sgetrf "GETRF" routines instead.
 
     @param[in]
     handle      rocblas_handle.
@@ -5159,7 +5159,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrf_npvt_64(rocblas_handle handle,
 
     \note
     Although this routine can offer better performance, Gaussian elimination without pivoting is not backward stable.
-    If numerical accuracy is compromised, use the legacy-LAPACK-like API \ref rocsolver_sgetrf_batched "GETRF_BATCHED" routines instead.
+    If numerical accuracy is compromised, use \ref rocsolver_sgetrf_batched "GETRF_BATCHED" routines instead.
 
     @param[in]
     handle      rocblas_handle.
@@ -5274,7 +5274,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrf_npvt_batched_64(rocblas_handle 
 
     \note
     Although this routine can offer better performance, Gaussian elimination without pivoting is not backward stable.
-    If numerical accuracy is compromised, use the legacy-LAPACK-like API \ref rocsolver_sgetrf_strided_batched "GETRF_STRIDED_BATCHED" routines instead.
+    If numerical accuracy is compromised, use \ref rocsolver_sgetrf_strided_batched "GETRF_STRIDED_BATCHED" routines instead.
 
     @param[in]
     handle      rocblas_handle.
