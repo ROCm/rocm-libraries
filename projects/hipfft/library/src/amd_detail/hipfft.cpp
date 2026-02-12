@@ -469,8 +469,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     // NOTE: hipFFT ignores distance arguments if default layouts are used!
     const bool ignore_user_distances = !plan->ionembed.get_nembed(fft_io::fft_io_in)
                                        && !plan->ionembed.get_nembed(fft_io::fft_io_out);
-    std::vector<size_t> i_strides, o_strides;
-    size_t              inDist = 0, outDist = 0;
+
     for(auto dft_type : iotype.transform_types())
     {
         for(auto placement : {rocfft_placement_inplace, rocfft_placement_notinplace})
@@ -479,12 +478,12 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                 = placement == rocfft_placement_inplace
                       ? (iotype.is_forward(dft_type) ? ip_forward_desc : ip_inverse_desc)
                       : (iotype.is_forward(dft_type) ? op_forward_desc : op_inverse_desc);
-            i_strides = plan->ionembed.as_generalized_strides(
+            auto i_strides = plan->ionembed.as_generalized_strides(
                 fft_io::fft_io_in,
                 fft_transform_type_from_rocfft_transform_type(dft_type),
                 fft_result_placement_from_rocfft_result_placement(placement),
                 rm_lengths_vec);
-            o_strides = plan->ionembed.as_generalized_strides(
+            auto o_strides = plan->ionembed.as_generalized_strides(
                 fft_io::fft_io_out,
                 fft_transform_type_from_rocfft_transform_type(dft_type),
                 fft_result_placement_from_rocfft_result_placement(placement),
@@ -492,7 +491,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
             // rm -> cm:
             std::reverse(i_strides.begin(), i_strides.end());
             std::reverse(o_strides.begin(), o_strides.end());
-            inDist  = !ignore_user_distances
+            const auto inDist  = !ignore_user_distances
                           ? user_idist
                           : default_distance(
                              fft_transform_type_from_rocfft_transform_type(dft_type),
@@ -500,7 +499,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                              fft_io::fft_io_in,
                              rm_lengths_vec,
                              number_of_transforms);
-            outDist = !ignore_user_distances
+            const auto outDist = !ignore_user_distances
                           ? user_odist
                           : default_distance(
                               fft_transform_type_from_rocfft_transform_type(dft_type),
@@ -523,19 +522,43 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                                                         outDist));
         }
     }
-    // FIXME: inconsistent initialization below for inverse real in-place
-    // with implicitly default data layouts (e.g., nullptr for inembed and onembed)
-    // [members used in hipfftXtMemcpy thereafter]
-    plan->inStrides  = i_strides;
-    plan->outStrides = o_strides;
-    plan->iDist      = inDist;
-    plan->oDist      = outDist;
-
-    // problem dimensions and strides are known, set up the bricks
-    // for single-proc multi-GPU
+    
     if(plan->singleProcMultiDevice)
+    {
+        // Host buffer setup for hipfftXtMemcpy:
+        // Only in-place is allowed for real/complex transforms.
+        // Complex/complex transforms can be in-place or not, but complex/complex data formats are
+        // quite general.
+        auto dft_kind = fft_transform_type_complex_forward;
+        if(iotype.is_real_to_complex())
+            dft_kind = fft_transform_type_real_forward;
+        if(iotype.is_complex_to_real())
+            dft_kind = fft_transform_type_real_inverse;
+        
+        plan->inStrides = default_strides(dft_kind,
+                                          fft_placement_inplace,
+                                          fft_io_in,
+                                          rm_lengths_vec);
+        plan->iDist = default_distance(dft_kind,
+                                       fft_placement_inplace,
+                                       fft_io_in,
+                                       rm_lengths_vec,
+                                       plan->batch);
+        plan->outStrides = default_strides(dft_kind,
+                                           fft_placement_inplace,
+                                           fft_io_out,
+                                           rm_lengths_vec);
+        plan->oDist = default_distance(dft_kind,
+                                       fft_placement_inplace,
+                                       fft_io_out,
+                                       rm_lengths_vec,
+                                       plan->batch);
+        // FIXME: row-major vs column-major for strides?
+        
+        // Problem dimensions and strides are known, set up the bricks for single-proc multi-GPU
         set_io_bricks(
             plan->inLength, plan->outLength, plan->batch, plan->inBricks, plan->outBricks);
+    }    
 
     // create fields for the bricks
     if(!plan->inBricks.empty())
@@ -1886,6 +1909,7 @@ try
         case HIPFFT_XT_FORMAT_INPUT: 
         case HIPFFT_XT_FORMAT_INPLACE:
             return plan->inBricks;
+            // FIXME: are inbricks always HIPFFT_XT_FORMAT_INPUT?  What about inverse transforms?
         case HIPFFT_XT_FORMAT_OUTPUT:
         case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
             return plan->outBricks;
