@@ -262,11 +262,18 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                 params.back().workgroupMapping = false;
             }
 
-            // Enable StreamK when number of output tiles < number of CUs and not f6 data type
-            size_t numTilesM = prob.m / wgt.m;
-            size_t numTilesN = prob.n / wgt.n;
-            size_t numTiles  = numTilesM * numTilesN * prob.batch_count;
-            auto   isF6      = (kernelType.typeA == rocRoller::DataType::FP6
+            // Enable StreamK when:
+            // 1. Number of output tiles < number of CUs
+            // 2. There are enough K iterations per tile (itersPerTile >= 16) to
+            //    amortize StreamK overhead. Threshold is derived from origami's
+            //    MinItersPerCU (8) applied to the smallest useful split factor (2).
+            // 3. Data type is not f6 (unsupported) or large f8 (register pressure).
+            // 4. Not the 256x256x256 FP4 pre-swizzled tile.
+            size_t numTilesM    = prob.m / wgt.m;
+            size_t numTilesN    = prob.n / wgt.n;
+            size_t numTiles     = numTilesM * numTilesN * prob.batch_count;
+            size_t itersPerTile = prob.k / wgt.k;
+            auto   isF6         = (kernelType.typeA == rocRoller::DataType::FP6
                          || kernelType.typeA == rocRoller::DataType::BF6
                          || kernelType.typeB == rocRoller::DataType::FP6
                          || kernelType.typeB == rocRoller::DataType::BF6);
@@ -275,7 +282,8 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                 || kernelType.typeB == rocRoller::DataType::FP8
                 || kernelType.typeB == rocRoller::DataType::BF8)
                && wgt.m + wgt.n > 256);
-            if(numTiles < analytical_hardware.N_CU && !isF6 && !isLargeF8 && !is256Tile)
+            if(numTiles < analytical_hardware.N_CU && itersPerTile >= 16
+               && !isF6 && !isLargeF8 && !is256Tile)
             {
                 params.back().streamK = true;
             }
