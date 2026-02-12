@@ -17520,6 +17520,8 @@ class KernelWriterAssembly(KernelWriter):
   def initTDMDescriptor(self, kernel: Mapping, tP: Mapping) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
+    tlu: int = tP["tlu"]
+    unrolledMajor = not tlu
     ti: int = tP["idx"]
     tileChar: str = tP["tileChar"]
     mod = Module(f"Init TDM Descriptor {tc}")
@@ -17529,7 +17531,7 @@ class KernelWriterAssembly(KernelWriter):
       return f"tdm{tc}Group{idx}"
 
     def strideRefName() -> str:
-      return f"Stride{tc}{tileChar}"
+      return self.strideRef(tc, ti) if unrolledMajor else self.strideRef(tc, 3)
 
     def sizeRefName(idx: int) -> str:
       idxChar= INDEX_CHARS[idx]
@@ -17538,7 +17540,7 @@ class KernelWriterAssembly(KernelWriter):
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
     mt: int = kernel[f"MacroTile{ti}"]
     du: int = kernel["DepthU"]
-    sizeTile0, sizeTile1 = du, mt
+    sizeTile0, sizeTile1 = (du, mt) if unrolledMajor else (mt, du)
     bpe: float  = tP["bpeGR"]
     #TODO: temp hack
     numWaves: int = prod(kernel["MIWaveGroup"])
@@ -17552,7 +17554,6 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.setDataType(dtype, descSgprName(1)))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
 
-    #TODO: currently TN only
     with self.allocTmpSgpr(1) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
@@ -17569,8 +17570,9 @@ class KernelWriterAssembly(KernelWriter):
     sizeShifter = 1 if dtype.isFloat4() else 0
     mod.add(comp.setIterationEnabled(descSgprName(1), False))
     mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
-    mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self, sizeShifter))
-    mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), self))
+    dim0Idx, dim1Idx = (3, ti) if unrolledMajor else (ti, 3)
+    mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(dim0Idx), self, sizeShifter))
+    mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(dim1Idx), self))
     mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
     mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves // dim1Divisor, self))
     mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
@@ -17585,6 +17587,8 @@ class KernelWriterAssembly(KernelWriter):
   def initTDMDescriptorWaveSeparatedImpl(self, kernel, tP) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
+    tlu: int = tP["tlu"]
+    unrolledMajor = not tlu
     ti: int = tP["idx"]
     tileChar: str = tP["tileChar"]
     mod = Module(f"Init TDM Descriptor {tc}")
@@ -17593,8 +17597,8 @@ class KernelWriterAssembly(KernelWriter):
       assert idx < 2
       return f"tdm{tc}Group{idx}"
 
-    def strideRefName() -> str:
-      return f"Stride{tc}{tileChar}"
+    def strideRefName() -> str | RegisterContainer:
+      return self.strideRef(tc, ti) if unrolledMajor else self.strideRef(tc, 3)
 
     def sizeRefName(idx: int) -> str:
       idxChar= INDEX_CHARS[idx]
@@ -17606,7 +17610,7 @@ class KernelWriterAssembly(KernelWriter):
     isMX: bool = tc.startswith("MX")
     duScale = kernel["ProblemType"][f"MXBlock{tc[-1]}"] if isMX else 1
     du //= duScale
-    sizeTile0, sizeTile1 = du, mt
+    sizeTile0, sizeTile1 = (du, mt) if unrolledMajor else (mt, du)
     bpe: float = tP["bpeGR"]
     #TODO: temp hack
     numWaves: int = prod(kernel["MIWaveGroup"])
@@ -17625,7 +17629,6 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.setDataType(dtype, descSgprName(1)))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
 
-    #TODO: currently TN only
     with self.allocTmpSgpr(1) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
@@ -17645,12 +17648,14 @@ class KernelWriterAssembly(KernelWriter):
 
     mod.add(comp.setIterationEnabled(descSgprName(1), False))
     mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
+
     if ("MXS" in tc):
       mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(ti), self, ceil(log2(mxUnit)), True))
       mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(3), self, ceil(log2(duScale*mxUnit)), True))
     else:
-      mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self, sizeShifter))
-      mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), self))
+      dim0Idx, dim1Idx = (3, ti) if unrolledMajor else (ti, 3)
+      mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(dim0Idx), self, sizeShifter, False))
+      mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(dim1Idx), self, 0, False))
 
     if tc.startswith("MX"):
       #reset to 0 since scale of sizeTile0 and stride for MX is not required

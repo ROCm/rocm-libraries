@@ -28,10 +28,12 @@ class TensorDataMoverLoad(TensorDataMover):
         #TODO here we assume TN
         mod = Module()
         tc: str = tp["tensorChar"]
+        tlu: int = tp["tlu"]
         tIdx: int = 0 if tp["isA"] else 1
         bpe: float = tp["bpeGR"]
         assert bpe > 0, "bpe must > 0"
-        sgprStrideName: str = f"Stride{tc}{writer.states.indexChars[tp['idx']]}"
+        tileStride: str | RegisterContainer = writer.strideRef(tc, tIdx)
+        tdmSeparateStride: str | RegisterContainer = writer.strideRef(tc, 3) if tlu else writer.strideRef(tc, tIdx)
         sgprWorkgroupName: str = f"WorkGroup{tIdx}"
         vgprThreadIdName: str = "Serial"
         #TODO: temp hack
@@ -46,13 +48,13 @@ class TensorDataMoverLoad(TensorDataMover):
             tmpSgprIdx = tmpSgprRes.idx
             waveOffsetSgprIdx = tmpSgprRes.idx + 2
             mod.add(SMovB64(sgpr(tmpSgprIdx, 2), 0))
-            mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprStrideName), round(mt * bpe), f"stride * MT({mt}) * bpe({bpe})"))
+            mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"stride * MT({mt}) * bpe({bpe})"))
             mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), "*= wgId)"))
             #add wave offset
             mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr(vgprThreadIdName), "first tId"))
             mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), f"wId=fTid // {wavelen}"))
             mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * bpe // tdmSplit), "woffset = wId * mt // numWaves * bpe // tdmSplit"))
-            mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(sgprStrideName), f"woffset *= stride"))
+            mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= stride"))
             mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
             mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
             mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
@@ -67,8 +69,10 @@ class TensorDataMoverLoad(TensorDataMover):
         tc: str = tp["tensorChar"]
         tIdx: int = tp["idx"]
         bpe: float = tp["bpeGR"]
+        tlu: int = tp["tlu"]
         assert bpe > 0, "bpe must > 0"
-        sgprStrideName: str = f"Stride{tc}{writer.states.indexChars[tp['idx']]}"
+        tileStride: str | RegisterContainer = writer.strideRef(tc, tIdx)
+        tdmSeparateStride: str | RegisterContainer = writer.strideRef(tc, 3) if tlu else writer.strideRef(tc, tIdx)
         sgprWorkgroupName: str = f"WorkGroup{tIdx}"
         vgprThreadIdName: str = "Serial"
         #TODO: temp hack
@@ -76,6 +80,8 @@ class TensorDataMoverLoad(TensorDataMover):
         assert numWaves > 1
         wavelen: int = kernel["WavefrontSize"]
         mt: int = kernel["MacroTile0"] if tc.endswith("A") else kernel["MacroTile1"]
+        du: int = kernel["DepthU"]
+        tile1Size: int = du if tlu else mt
         tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc)) else 1
         if ("MXS" in tc):
             subTc = tc[3]
@@ -92,18 +98,17 @@ class TensorDataMoverLoad(TensorDataMover):
             if ("MXS" in tc):
                 mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), round(mxUnit * mt * bpe), f"wgId * mxUnit({mxUnit}) * MT({mt}) * bpe({bpe})"))
             else:
-                mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprStrideName), round(mt * bpe), f"stride * MT({mt}) * bpe({bpe})"))
+                mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"tileStride * MT({mt}) * bpe({bpe})"))
                 mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), "*= wgId)"))
             #add wave offset
             mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr(vgprThreadIdName), "first tId"))
             mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen*numComp)), sgpr(waveOffsetSgprIdx), f"wCompId = fTid // wavelen({wavelen}) // numComp({numComp})"))
-            # mod.add(SAndB32(sgpr(waveOffsetSgprIdx), numComp - 1, sgpr(waveOffsetSgprIdx), f"wCompId = wId % numComp({numComp})"))
             if ("MXS" in tc):
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), mxUnit, f"woffset = wCompId * mxUnit{mxUnit} * Size{INDEX_CHARS[tIdx]}"))
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr("Size%s"%INDEX_CHARS[tIdx]), f"woffset = wCompId * mxUnit{mxUnit} * Size{INDEX_CHARS[tIdx]}"))
             else:
-                mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * bpe // tdmSplit), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe}) // tdmSplit({tdmSplit})"))
-                mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(sgprStrideName), f"woffset *= stride"))
+                mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(tile1Size // numComp * bpe // tdmSplit), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe}) // tdmSplit({tdmSplit})"))
+                mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= tdmSeparateStride"))
             mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
             if dstGroup0 is not None:
                 mod.add(SAddU32(sgpr(f"{dstGroup0}+2"), sgpr(f"{dstGroup0}+2"), sgpr(tmpSgprIdx), "+= tileOffset(lo)"))
@@ -286,13 +291,18 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(SOrB32(sgpr(f"{group1}+4"), sgpr(f"{group1}+4"), hex((tile1 >> constShifter) & 0xFFFF), f"set tile1 to {tile1 >> constShifter}"))
         return mod
 
-    def setTensorStride0(self, group1: int | str, sgprStride0: int | str, constShifter: int=0, isMXS: bool=False) -> Module:
+    def setTensorStride0(self, group1: int | str, sgprStride0: int | str | RegisterContainer, constShifter: int=0, isMXS: bool=False) -> Module:
         mod = Module()
         if isMXS:
-                mod.add(SLShiftLeftB32(sgpr(f"{group1}+5"), hex(constShifter), sgpr(sgprStride0)))
-        else:
-            if constShifter:
+            mod.add(SLShiftLeftB32(sgpr(f"{group1}+5"), hex(constShifter), sgpr(sgprStride0)))
+        elif constShifter:
+            if isinstance(sgprStride0, RegisterContainer):
+                mod.add(SLShiftRightB32(sgpr(f"{group1}+5"), hex(constShifter), sgprStride0))
+            else:
                 mod.add(SLShiftRightB32(sgpr(f"{group1}+5"), hex(constShifter), sgpr(sgprStride0)))
+        else:
+            if isinstance(sgprStride0, RegisterContainer):
+                mod.add(SMovB32(sgpr(f"{group1}+5"), sgprStride0))
             else:
                 mod.add(SMovB32(sgpr(f"{group1}+5"), sgpr(sgprStride0)))
         #TODO: support 48-bit stride
