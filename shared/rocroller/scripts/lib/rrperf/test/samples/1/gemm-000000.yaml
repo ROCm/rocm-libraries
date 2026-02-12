@@ -53,7 +53,6 @@ prefetchMixMemOps: true
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeightedSimple
-matchMemoryAccess: true
 types:
   type_A: fp4
   type_B: fp4
