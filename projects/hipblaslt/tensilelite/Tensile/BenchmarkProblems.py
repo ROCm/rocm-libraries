@@ -360,12 +360,12 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                          buildTmpPath: Path, benchmarkProblemsPath: Path,
                          debugConfig: DebugConfig, deviceId: int,
                          gfxName: str, isaInfoMap: Dict[str, IsaInfo], probSolMap: dict,
-                         compileOnly: bool = False,
+                         buildOnly: bool = False,
     ):
     """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config
 
     Args:
-        compileOnly: If True, generate and compile kernels but skip benchmarking.
+        buildOnly: If True, generate and build kernels but skip benchmarking.
     """
     benchmarkTestFails = 0
 
@@ -525,8 +525,8 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             benchmarkStep.activationArgs, solutions, cacheValid)
 
         # run benchmarking client
-        if compileOnly:
-            print1("# Compile-only mode: skipping benchmark.")
+        if buildOnly:
+            print1("# Build-only mode: skipping benchmark.")
         elif not os.path.exists(resultsFileName) or globalParameters["ForceRedoBenchmarkProblems"]:
             libraryLogicPath = None
             forBenchmark = True
@@ -561,12 +561,12 @@ def main(
     gfxName: str,
     isaInfoMap: Dict[str, IsaInfo],
     probSolMap: dict,
-    compileOnly: bool = False,
+    buildOnly: bool = False,
 ):
     """Entry point for the "BenchmarkProblems" section of a Tensile config yaml
 
     Args:
-        compileOnly: If True, generate and compile kernels but skip benchmarking.
+        buildOnly: If True, generate and build kernels but skip benchmarking.
     """
     getClientExecutablePath()
 
@@ -620,12 +620,12 @@ def main(
                             gfxName,
                             isaInfoMap,
                             probSolMap,
-                            compileOnly,
+                            buildOnly,
                         )
                 totalTestFails += benchmarkErrors
 
-                if compileOnly:
-                    print1("# Compile-only mode: skipping result collection.")
+                if buildOnly:
+                    print1("# Build-only mode: skipping result collection.")
                 else:
                     print("clientExit={} {} for {}" \
                             .format(totalTestFails, "(ERROR)" if totalTestFails else "(PASS)", \

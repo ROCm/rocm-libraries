@@ -85,7 +85,7 @@ def executeStepsInConfig(
         debugConfig: DebugConfig,
         deviceId: int,
         probSolDict: dict,
-        compileOnly: bool = False,
+        buildOnly: bool = False,
    ):
     """Conducts the steps in the provided ``config`` according to the Tensile workflow.
 
@@ -103,7 +103,7 @@ def executeStepsInConfig(
         asmToolchain (AssemblyToolchain): The toolchain for making assembly kernels.
         srcToolchain (SourceToolchain): The toolchain for making source kernels.
         cCompiler (str): The C compiler to use.
-        compileOnly (bool): If True, generate and compile kernels but skip benchmarking.
+        buildOnly (bool): If True, generate and build kernels but skip benchmarking.
     """
 
     buildTmpPath = outputPath / "build_tmp"
@@ -129,15 +129,15 @@ def executeStepsInConfig(
             gfxName,
             isaInfoMap,
             probSolDict,
-            compileOnly,
+            buildOnly,
         )
         if timingEnabled:
             elapsed = (time.time_ns() - startTime) / 1_000_000
             _timing_logger.info(f"TIMING:python_benchmark_problems:{elapsed:.3f}")
         print1("")
 
-    if compileOnly:
-        print1("# Compile-only mode: skipping LibraryLogic and LibraryClient.")
+    if buildOnly:
+        print1("# Build-only mode: skipping LibraryLogic and LibraryClient.")
         return
 
     ##############################################################################
@@ -501,7 +501,7 @@ def Tensile(userArgs):
             "and optional second file is size list")
     argParser.add_argument("--use-cache", dest="useCache", action="store_true",
             help="Ignore cache; redo parameter forking and solution generation")
-    argParser.add_argument("--compile-only", dest="compileOnly", action="store_true",
+    argParser.add_argument("--build-only", dest="buildOnly", action="store_true",
             help="Generate and compile kernels but skip benchmarking. "
                  "Use with --use-cache on target machine to run benchmarks.")
     argParser.add_argument("--restore-from-log", type=str, dest="RestoreLog",
@@ -512,7 +512,7 @@ def Tensile(userArgs):
     configPaths = args.ConfigFile
     altFormat = args.AlternateFormat
     useCache = args.useCache
-    compileOnly = args.compileOnly
+    buildOnly = args.buildOnly
     outputPath = Path(ensurePath(os.path.abspath(args.OutputPath)))
     print1(f"#  OutputPath: {str(outputPath)}")
 
@@ -643,7 +643,7 @@ def Tensile(userArgs):
     if "MaxFileName" in globalParameters or "MaxFileName" in config:
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
-    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, compileOnly)
+    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly)
 
 def TensileConfigPath(*args):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "Configs", *args)
