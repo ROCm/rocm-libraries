@@ -2150,6 +2150,46 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
         }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 16
+    elif isTN(kernel) and TLDS==1:
+        kernel["SwapGlobalReadOrder"] = True
+        # Note: A/B Global read orders are swapped
+        # i.e. GRA contains GR for B
+        optSchedule = {
+            'SYNC'  : [[-1, 4, 16, 16, 50, 50, 54, 55, 84, 85]],
+            'GRIncA': [[0,  1,  2,  3,  4,  5,  6,  7,  8]],
+            'GRIncB': [[9, 10, 11, 12, 13, 14, 16, 16, 16]],
+            'LRB0'  : [[0, 2, 4, 6, 8, 10],
+                       [1, 3, 5, 7, 9, 11]],
+            'LRA0'  : [[12, 14, 24, 26, 28, 30, 32, 34, 36, 38],
+                       [13, 15, 25, 27, 29, 31, 33, 35, 37, 39]],
+            'GRA'   : [[16, 16, 18, 18, 20, 20, 22, 22, 46, 46, 48, 48],
+                       [17, 17, 19, 19, 21, 21, 23, 23, 47, 47, 49, 49]],
+            'GRB'   : [[50, 50, 52, 52, 74, 75, 78, 78, 80, 80, 82, 82, 106, 106, 108, 108, 110, 110, 112, 112],
+                       [51, 51, 53, 53, 76, 77, 79, 79, 81, 81, 83, 83, 107, 107, 109, 109, 111, 111, 113, 113]],
+            'LRB1'  : [[56, 58, 60, 62, 64, 66],
+                       [57, 59, 61, 63, 65, 67]],
+            'LRA1'  : [[86, 88, 90, 92, 94, 96, 98, 100, 102, 104],
+                       [87, 89, 91, 93, 95, 97, 99, 101, 103, 105]],
+            'LRSA'  : [[44]],
+            'LRSB'  : [[45]],
+            'LWSA'  : [[115]],
+            'LWSB'  : [[117]],
+            'LCC'   : [[119, 119]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for prior local read. Relax a bit to dscnt=4 to reduce latency") ,
+            SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for all prior local read requested as the input for MFMA") ,
+            SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for prior LRB0 before GRA (GR for MatrixB). Skip LRA0*2") ,
+            SBarrier(comment="") ,
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA0 before GRB (GR for MatrixA)") ,
+            SBarrier(comment="") ,
+            SWaitCnt(dscnt=-1, vlcnt=18, vscnt=-1, comment="Wait for GRA (GR for MatrixB) from previous iteration before LRB1. Skip GRB*10 from last iter and GRA*6 + GRB*2 from this iter.") ,
+            SBarrier(comment="") ,
+            SWaitCnt(dscnt=-1, vlcnt=12, vscnt=-1, comment="Wait for GRB (GR for MatrixA) from previous iteration before LRA1. Skip GRA*6 + GRB*6 from this iter.") ,
+            SBarrier(comment="") ,
+        ]
+        nglshift = nllshift = 16
     elif isNT(kernel) and useLDSTr and TLDS == 0:
         kernel["SwapGlobalReadOrder"] = True
         # Note: A/B Global read orders are swapped
