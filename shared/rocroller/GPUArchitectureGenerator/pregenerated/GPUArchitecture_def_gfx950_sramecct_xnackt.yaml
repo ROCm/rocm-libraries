@@ -1,5 +1,5 @@
 Architectures:
-  gfx950:sramecc+xnack+:
+  gfx950:sramecc+:xnack+:
     Capabilities:
       ArchAccUnifiedRegs: 0
       CMPXWritesSGPR: 0
@@ -8,19 +8,66 @@ Architectures:
       DefaultScaleBlockSize: 32
       DefaultWavefrontSize: 64
       HasAccCD: 0
+      HasAccumOffset: 0
+      HasAddLshl: 0
+      HasAtomicAdd: 0
       HasBlockScaling32: 0
+      HasCodeObjectV4: 0
+      HasCodeObjectV5: 0
+      HasDSReadTransposeB16: 0
+      HasDSReadTransposeB4: 0
+      HasDSReadTransposeB6: 0
+      HasDSReadTransposeB8: 0
+      HasDirectToLds: 0
       HasE8M0Scale: 0
+      HasExpcnt: 0
+      HasExplicitVectorCO: 0
+      HasExplicitVectorRevCO: 0
+      HasGlobalOffset: 0
+      HasLshlOr: 0
+      HasMFMA: 0
+      HasMFMA_16x16x32_bf16: 0
+      HasMFMA_16x16x32_f16: 0
+      HasMFMA_32x32x16_bf16: 0
+      HasMFMA_32x32x16_f16: 0
+      HasMFMA_bf16_16x16x16_1k: 0
+      HasMFMA_bf16_32x32x4_1k: 0
+      HasMFMA_f64: 0
+      HasMFMA_f8f6f4: 0
+      HasMFMA_fp8: 0
+      HasMFMA_scale_f8f6f4: 0
       HasPRNG: 0
+      HasPermLanes16: 0
+      HasPermLanes32: 0
+      HasSMulHi: 0
       HasWave64: 0
+      HasWiderDirectToLds: 0
       HasXCC: 0
       HasXnack: 0
       MaxExpcnt: 7
       MaxLdsSize: 163840
-      MaxLgkmcnt: 0
-      MaxVmcnt: 0
+      MaxLgkmcnt: 15
+      MaxVmcnt: 63
       PackedWorkitemIDs: 0
+      SupportedISA: 0
       SupportedSource: 0
       Waitcnt0Disabled: 0
+      ds_read_b64_tr_b16: 0
+      ds_read_b64_tr_b4: 0
+      ds_read_b64_tr_b8: 0
+      ds_read_b96_tr_b6: 0
+      s_barrier: 0
+      v_add3_u32: 0
+      v_dot2_f32_f16: 0
+      v_dot2c_f32_f16: 0
+      v_dot4c_i32_i8: 0
+      v_fma_f16: 0
+      v_fma_f32: 0
+      v_fma_mix_f32: 0
+      v_fmac_f32: 0
+      v_mac_f16: 0
+      v_mov_b64: 0
+      v_pk_fma_f16: 0
     ISAVersion:
       ArchString: gfx950
       Sramecc: true
