@@ -30,6 +30,10 @@
 
 #include <cstddef>
 
+#ifndef ENABLE_ROCPROFSDK
+#define ENABLE_ROCPROFSDK 0
+#endif
+
 namespace TensileLite
 {
     namespace Client
@@ -194,6 +198,20 @@ namespace TensileLite
                 for(auto iter = m_reporters.begin(); iter != m_reporters.end(); iter++)
                     (*iter)->validateWarmups(inputs, startEvents, stopEvents);
             }
+
+#if ENABLE_ROCPROFSDK
+            virtual void preProfiler() override
+            {
+                for(auto iter = m_reporters.begin(); iter != m_reporters.end(); iter++)
+                    (*iter)->preProfiler();
+            }
+
+            virtual void postProfiler() override
+            {
+                for(auto iter = m_reporters.rbegin(); iter != m_reporters.rend(); iter++)
+                    (*iter)->postProfiler();
+            }
+#endif
 
             virtual size_t numSyncs() override
             {

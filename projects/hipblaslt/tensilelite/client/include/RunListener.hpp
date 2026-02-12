@@ -34,6 +34,10 @@
 
 #include <cstddef>
 
+#ifndef ENABLE_ROCPROFSDK
+#define ENABLE_ROCPROFSDK 0
+#endif
+
 namespace TensileLite
 {
     namespace Client
@@ -86,6 +90,17 @@ namespace TensileLite
             /// Loop condition.  Return true if we need another run for this solution.
             /// Note that it's not guaranteed that each listener gets this call.
             virtual bool needMoreRunsInSolution() const = 0;
+
+#if ENABLE_ROCPROFSDK
+            /***********
+   * Profiler
+   ***********/
+            /// Called at the beginning of each profiler run
+	    virtual void preProfiler() {};
+
+            /// Called at end of each profiler run
+	    virtual void postProfiler() {};
+#endif
 
             /***********************************************************************
    * Kernel invocation run - Innermost loop.

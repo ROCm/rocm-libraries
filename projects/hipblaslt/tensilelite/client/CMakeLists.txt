@@ -45,6 +45,19 @@ foreach(target tensilelite-client cpu-gemm-driver)
     endif()
 endforeach()
 
+option(ENABLE_ROCPROFSDK "Enable in-process ROCprofiler-SDK counters" OFF)
+if (ENABLE_ROCPROFSDK)
+  add_compile_definitions(ENABLE_ROCPROFSDK=1)
+  find_package(rocprofiler-sdk)
+
+  if (rocprofiler-sdk_FOUND)
+    target_link_libraries(tensilelite-client PRIVATE rocprofiler-sdk)
+  else()
+    message(FATAL_ERROR "ROCprofiler-SDK not found.")
+  endif()
+else()
+  add_compile_definitions(ENABLE_ROCPROFSDK=0)
+endif()
+
 add_subdirectory(include)
 add_subdirectory(src)
-

@@ -34,6 +34,10 @@
 
 #include <cstddef>
 
+#ifndef ENABLE_ROCPROFSDK
+#define ENABLE_ROCPROFSDK 0
+#endif
+
 namespace TensileLite
 {
     namespace Client
@@ -154,6 +158,20 @@ namespace TensileLite
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
                 (*iter)->validateWarmups(inputs, startEvents, stopEvents);
         }
+
+#if ENABLE_ROCPROFSDK
+        void MetaRunListener::preProfiler()
+        {
+            for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
+                (*iter)->preProfiler();
+        }
+
+        void MetaRunListener::postProfiler()
+        {
+            for(auto iter = m_listeners.rbegin(); iter != m_listeners.rend(); iter++)
+                (*iter)->postProfiler();
+        }
+#endif
 
         size_t MetaRunListener::numSyncs()
         {

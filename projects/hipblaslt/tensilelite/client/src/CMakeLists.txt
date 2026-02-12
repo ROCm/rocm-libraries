@@ -25,3 +25,12 @@ set(COMMON_CLIENT_SOURCES
 target_sources(tensilelite-client PRIVATE ${COMMON_CLIENT_SOURCES})
 target_sources(cpu-gemm-driver PRIVATE ${COMMON_CLIENT_SOURCES})
 
+if (ENABLE_ROCPROFSDK)
+
+target_sources(tensilelite-client
+    PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/Profiler.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/RocProfiler.cpp"
+)
+
+endif()
