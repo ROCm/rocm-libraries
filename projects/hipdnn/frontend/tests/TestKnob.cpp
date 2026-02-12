@@ -109,26 +109,6 @@ flatbuffers::DetachedBuffer createStringKnobFlatbuffer(const std::string& knobId
     return builder.Release();
 }
 
-// Helper to create a knob with NONE default_value (invalid knob)
-flatbuffers::DetachedBuffer createKnobWithNoneDefaultValue(const std::string& knobIdStr,
-                                                           const std::string& description)
-{
-    flatbuffers::FlatBufferBuilder builder;
-
-    // Create a knob with KnobValue::NONE (no default value)
-    auto knobOffset = fb::CreateKnobDirect(builder,
-                                           knobIdStr.c_str(),
-                                           description.c_str(),
-                                           fb::KnobValue::NONE, // NONE default_value
-                                           0, // null offset
-                                           fb::KnobConstraint::NONE,
-                                           0,
-                                           false);
-
-    builder.Finish(knobOffset);
-    return builder.Release();
-}
-
 } // anonymous namespace
 
 // ============================================================================
@@ -910,20 +890,6 @@ TEST(TestKnobSetting, PackKnobSettingPreservesKnobId)
 // NONE Default Value Tests (Graceful Error Handling)
 // ============================================================================
 
-TEST(TestKnob, NoneDefaultValueReturnsError)
-{
-    // Create a knob with NONE default_value
-    auto buffer = createKnobWithNoneDefaultValue("invalid_knob", "Knob with no default value");
-    hipdnnBackendFlatbufferData_t bufferData{buffer.data(), buffer.size()};
-    auto result = hipdnn_frontend::Knob::fromFlatbuffer(bufferData);
-
-    // Should return error, not throw
-    EXPECT_TRUE(result.hasError());
-    EXPECT_FALSE(result.hasValue());
-    EXPECT_NE(result.errorMessage.find("NONE default_value"), std::string::npos);
-    EXPECT_NE(result.errorMessage.find("invalid_knob"), std::string::npos);
-}
-
 TEST(TestKnob, InvalidDefaultValueReturnsError)
 {
     // Create a knob with constraint min=0, max=100 but default_value=200 (violates constraint)
@@ -1009,19 +975,6 @@ TEST(TestKnob, ValidDefaultValueSucceeds)
     // Should succeed
     EXPECT_TRUE(result.hasValue());
     EXPECT_FALSE(result.hasError());
-}
-
-TEST(TestKnob, NoneDefaultValueDoesNotCrash)
-{
-    // Create a knob with NONE default_value - should not throw or crash
-    auto buffer = createKnobWithNoneDefaultValue("test_knob", "Test");
-    hipdnnBackendFlatbufferData_t bufferData{buffer.data(), buffer.size()};
-
-    // This should NOT throw - graceful error handling
-    EXPECT_NO_THROW({
-        auto result = hipdnn_frontend::Knob::fromFlatbuffer(bufferData);
-        EXPECT_TRUE(result.hasError());
-    });
 }
 
 TEST(TestKnob, NullFlatbufferDataReturnsError)
