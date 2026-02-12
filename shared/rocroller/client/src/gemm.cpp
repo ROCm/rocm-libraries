@@ -1255,11 +1255,8 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--prefetchLDSFactor", &SolutionParameters::prefetchLDSFactor),
         std::make_pair("--prefetchMixMemOps", &SolutionParameters::prefetchMixMemOps),
         std::make_pair("--betaInFMA", &SolutionParameters::betaInFma),
-        std::make_pair("--unroll_x", &SolutionParameters::unrollX),
-        std::make_pair("--unroll_y", &SolutionParameters::unrollY),
         std::make_pair("--scheduler", &SolutionParameters::scheduler),
         std::make_pair("--schedulerCost", &SolutionParameters::schedulerCost),
-        std::make_pair("--matchMemoryAccess", &SolutionParameters::matchMemoryAccess),
         std::make_pair("--tailLoops", &SolutionParameters::tailLoops),
         std::make_pair("--streamK", &SolutionParameters::streamK));
 
@@ -1466,11 +1463,8 @@ namespace rocRoller::Client::GEMMClient::CLI
         // Other
 
         update(SN(&SP::betaInFma), solution.betaInFma);
-        update(SN(&SP::unrollX), solution.unrollX);
-        update(SN(&SP::unrollY), solution.unrollY);
         update(SN(&SP::scheduler), solution.scheduler);
         update(SN(&SP::schedulerCost), solution.schedulerCost);
-        update(SN(&SP::matchMemoryAccess), solution.matchMemoryAccess);
     }
 }
 
@@ -1533,11 +1527,7 @@ int main(int argc, const char* argv[])
 
         .betaInFma = true,
 
-        .unrollX = 0,
-        .unrollY = 0,
-
-        .scheduler         = "Priority",
-        .matchMemoryAccess = true,
+        .scheduler = "Priority",
 
         .tailLoops = true,
 
@@ -1735,8 +1725,6 @@ int main(int argc, const char* argv[])
     app.add_flag(SN(&SP::workgroupRemapXCC), "Use an XCC-aware workgroup remapping.");
     app.add_option(SN(&SP::workgroupRemapXCCValue),
                    "Force an XCC-aware workgroup remapping value. (Optional)");
-    app.add_option(SN(&SP::unrollX), "Unroll size in X.");
-    app.add_option(SN(&SP::unrollY), "Unroll size in Y.");
 
     app.add_option(
         SN(&SP::loadPathA),
@@ -1755,9 +1743,6 @@ int main(int argc, const char* argv[])
     app.add_flag(SN(&SP::betaInFma), "Use beta in FMA instruction instead of alpha.");
     app.add_option(SN(&SP::scheduler), "Which scheduler to use.");
     app.add_option(SN(&SP::schedulerCost), "Which scheduler cost function to use.");
-
-    app.add_flag(SN(&SP::matchMemoryAccess),
-                 "Match memory access to transpose.  Currently decreases performance.");
     auto descriptionPadLDSA = fmt::format("Byte padding for A LDS buffer.  Passed as a pair: "
                                           "contiguous-bytes,padding-bytes, eg {}=1024,8",
                                           SN(&SP::padLDSA));
