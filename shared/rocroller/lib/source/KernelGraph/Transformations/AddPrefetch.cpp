@@ -576,7 +576,6 @@ namespace rocRoller
             //
             // Prefetch before ForLoop
             //
-            auto preBarrier = graph.control.addElement(Barrier());
             auto preNOP     = graph.control.addElement(NOP());
             graph.control.addElement(Sequence(), {preNOP}, {forLoop});
 
@@ -605,8 +604,6 @@ namespace rocRoller
                 auto storeChain = duplicateChain(graph, {load.ldsChain});
                 preChain.push_back(storeChain);
 
-                auto ldsTileTag = graph.mapper.get<LDS>(storeChain);
-                graph.mapper.connect<LDS>(preBarrier, ldsTileTag, storeLDScounter);
                 storeLDScounter++;
 
                 auto op = std::get<Operation>(graph.control.getElement(load.globalOperation));
@@ -629,7 +626,6 @@ namespace rocRoller
             {
                 graph.control.addElement(Sequence(), {preChain[i - 1]}, {preChain[i]});
             }
-            graph.control.addElement(Sequence(), {preChain.back()}, {preBarrier});
 
             auto addLDSPrefetchChains = [&](int u, int pre, int post, bool duplicate) -> int {
                 std::vector<int> prefetchChain;
@@ -722,8 +718,9 @@ namespace rocRoller
             };
 
             if(!m_prefetchFromLDSChains[forLoop].empty())
-                addLDSPrefetchChains(0, preBarrier, preNOP, true);
-            graph.control.addElement(Sequence(), {preBarrier}, {preNOP});
+                addLDSPrefetchChains(0, preChain.back(), preNOP, true);
+            else
+                graph.control.addElement(Sequence(), {preChain.back()}, {preNOP});
 
             //
             // ForLoop body
