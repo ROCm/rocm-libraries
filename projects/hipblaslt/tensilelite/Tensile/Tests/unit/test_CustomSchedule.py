@@ -73,6 +73,13 @@ def create_base_kernel():
     return kernel
 
 class TestCustomScheduleBF16:
+    @staticmethod
+    def get_num_mfma(kernel):
+        numMfma = (kernel["MIWaveTileA"] * kernel["MIWaveTileB"] *
+                   kernel["DepthU"] / kernel["MatrixInstruction"][2]   # two sub-iterations due to DepthU=64
+        )
+        return numMfma
+
     def test_no_custom_schedule(self):
         """Test that a kernel that doesn't match any condition returns False."""
         kernel = create_base_kernel()
