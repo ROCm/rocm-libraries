@@ -91,8 +91,8 @@ public:
             auto varianceValue = static_cast<ComputeDataType>(variance.getHostValue(0, cidx));
 
             // Compute inv_variance = 1 / sqrt(variance + epsilon)
-            auto invVarianceValue
-                = static_cast<ComputeDataType>(1.0) / sqrtInternal(varianceValue + epsilonCompute);
+            auto invVarianceValue = static_cast<ComputeDataType>(1.0)
+                                    / hipdnn_data_sdk::types::sqrt(varianceValue + epsilonCompute);
 
             //There is some extra casting in here to deal with double -> float implicit casts.
             auto inVal = static_cast<ComputeDataType>(x.getHostValue(indices));
@@ -171,7 +171,7 @@ public:
             ComputeDataType channelVariance = (varianceAccum / nhw) - (channelMean * channelMean);
 
             auto invVar = static_cast<ComputeDataType>(1.0)
-                          / sqrtInternal(channelVariance + epsilonCompute);
+                          / hipdnn_data_sdk::types::sqrt(channelVariance + epsilonCompute);
 
             // Apply normalization with scale and bias
             hipdnn_data_sdk::utilities::iterateAlongDimensions(
@@ -320,7 +320,8 @@ public:
                 ComputeDataType calculatedVariance
                     = (varianceAccum / nhwF) - (channelMean * channelMean);
 
-                ComputeDataType denominator = sqrtInternal(calculatedVariance + epsilonCompute);
+                ComputeDataType denominator
+                    = hipdnn_data_sdk::types::sqrt(calculatedVariance + epsilonCompute);
                 channelInvVariance = static_cast<ComputeDataType>(1.0) / denominator;
             }
             else
@@ -428,26 +429,6 @@ private:
             elementsPerChannel *= dims.at(i);
         }
         return elementsPerChannel;
-    }
-
-    static double sqrtInternal(double value)
-    {
-        return hipdnn_data_sdk::types::sqrt(value);
-    }
-
-    static float sqrtInternal(float value)
-    {
-        return hipdnn_data_sdk::types::sqrt(value);
-    }
-
-    static hipdnn_data_sdk::types::bfloat16 sqrtInternal(hipdnn_data_sdk::types::bfloat16 value)
-    {
-        return hipdnn_data_sdk::types::sqrt(value);
-    }
-
-    static hipdnn_data_sdk::types::half sqrtInternal(hipdnn_data_sdk::types::half value)
-    {
-        return hipdnn_data_sdk::types::sqrt(value);
     }
 };
 

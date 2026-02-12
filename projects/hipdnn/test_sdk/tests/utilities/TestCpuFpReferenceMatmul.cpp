@@ -22,11 +22,7 @@ using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::flatbuffer_utilities;
 using namespace hipdnn_sdk_test_utils;
-
-using hipdnn_data_sdk::types::bfloat16;
-using hipdnn_data_sdk::types::fp8_e4m3;
-using hipdnn_data_sdk::types::fp8_e5m2;
-using hipdnn_data_sdk::types::half;
+using namespace hipdnn_data_sdk::types;
 
 namespace
 {

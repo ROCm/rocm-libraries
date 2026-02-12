@@ -14,8 +14,6 @@
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::helpers;
-using hipdnn_data_sdk::types::bfloat16;
-using hipdnn_data_sdk::types::half;
 using namespace hipdnn_data_sdk::types;
 
 TEST(TestCpuFpReferenceMiopenRmsValidation, NegativeToleranceThrows)

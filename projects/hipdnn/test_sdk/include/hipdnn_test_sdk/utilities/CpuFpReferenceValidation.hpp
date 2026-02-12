@@ -108,7 +108,7 @@ public:
             T refValue = refView.getHostValue(indices);
             T implValue = implView.getHostValue(indices);
 
-            T absDiff = static_cast<T>(std::abs(implValue - refValue));
+            T absDiff = static_cast<T>(hipdnn_data_sdk::types::abs(implValue - refValue));
 
             // Integer values must be equal
             if(absDiff > 0)
