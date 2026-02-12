@@ -25,9 +25,6 @@ target_link_libraries(
     hipblaslt_plugin_integration_tests PUBLIC GTest::gtest hip::host hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
 )
 
-# Enable spdlog support for fmt-style logging
-hipdnn_enable_spdlog(hipblaslt_plugin_integration_tests)
-
 # Ensure that the hipblaslt_plugin is built before the hipblaslt_plugin_integration_tests, as the
 # integration tests depend on the hipBLASLt Provider Plugin
 add_dependencies(hipblaslt_plugin_integration_tests hipblaslt_plugin)

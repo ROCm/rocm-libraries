@@ -4,7 +4,6 @@ SPDX-License-Identifier: MIT
 */
 
 #include <gtest/gtest.h>
-#include <spdlog/spdlog.h>
 
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
@@ -19,7 +18,5 @@ int main(int argc, char** argv)
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
 
-    auto result = RUN_ALL_TESTS();
-    spdlog::shutdown();
-    return result;
+    return RUN_ALL_TESTS();
 }

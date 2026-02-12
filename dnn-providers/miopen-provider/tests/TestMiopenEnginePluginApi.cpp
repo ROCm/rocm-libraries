@@ -33,20 +33,22 @@ TEST(TestMiopenEnginePluginApi, GetAllEngineIdsNull)
 
 TEST(TestMiopenEnginePluginApi, GetAllEngineIdsValid)
 {
-    std::array<int64_t, 1> engineIds = {0};
+    std::array<int64_t, 2> engineIds = {0, 0};
     uint32_t numEngines = 0;
 
-    //get max 1 engine
-    auto status = hipdnnEnginePluginGetAllEngineIdsImpl(engineIds.data(), 1, &numEngines);
+    // Get all engines (now expecting 2: MIOPEN_ENGINE and MIOPEN_ENGINE_DETERMINISTIC)
+    auto status = hipdnnEnginePluginGetAllEngineIdsImpl(engineIds.data(), 2, &numEngines);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_EQ(numEngines, 1u);
+    EXPECT_EQ(numEngines, 2u);
     EXPECT_EQ(engineIds[0], hipdnn_data_sdk::utilities::engineNameToId("MIOPEN_ENGINE"));
+    EXPECT_EQ(engineIds[1],
+              hipdnn_data_sdk::utilities::engineNameToId("MIOPEN_ENGINE_DETERMINISTIC"));
 
     status = hipdnnEnginePluginGetAllEngineIdsImpl(nullptr, 0, &numEngines);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_EQ(numEngines, 1u);
+    EXPECT_EQ(numEngines, 2u);
 }
 
 TEST(TestMiopenEnginePluginApi, CreateNullHandle)

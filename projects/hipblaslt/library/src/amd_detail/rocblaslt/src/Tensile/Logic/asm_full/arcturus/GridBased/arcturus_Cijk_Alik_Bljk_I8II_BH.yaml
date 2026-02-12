@@ -215,7 +215,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_I8II_BH_MT64x64x64_MI32x32x8x1_SN_1LDSB0_EPS0_GRVWA8_LPA8_LPB4_MIWT1_1_SVW1_TLDS1_VWA1_WG64_4_1
     SourceSwap: 1
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0

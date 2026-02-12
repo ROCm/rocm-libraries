@@ -200,7 +200,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_F8NSS_BH_BiasSB_BiasSrcB_SAB_SAV_MT16x16x64_MI16x16x32x1_SN_1LDSB1_EPS0_MIWT1_1_PGR2_SS1_SVW1_WG16_4_1
     SourceSwap: true
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0

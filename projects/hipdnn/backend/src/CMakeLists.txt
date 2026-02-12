@@ -27,6 +27,7 @@ add_library(
     plugin/EnginePluginResourceManager.cpp
     plugin/PluginCore.cpp
     plugin/SharedLibrary.cpp
+    utilities/EngineOrdering.cpp
     LastErrorManager.cpp
     $<$<BOOL:${WIN32}>:PlatformUtils.windows.cpp>
     $<$<BOOL:${UNIX}>:PlatformUtils.linux.cpp>
