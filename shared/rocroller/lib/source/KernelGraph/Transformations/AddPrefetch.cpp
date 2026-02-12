@@ -798,7 +798,6 @@ namespace rocRoller
 
                 auto globalPrefetchU = (u + numInFlight) % numUnroll;
                 auto ldsPrefetchU    = (u + 1) % numUnroll;
-                auto barrier         = graph.control.addElement(NOP());
 
                 auto nop = separateMemOps ? graph.control.addElement(NOP()) : -1;
 
@@ -863,54 +862,6 @@ namespace rocRoller
                                   globalStores[i].user);
                 }
 
-                // overlap the direct2lds and load lds when they do not access the same LDS allocation
-                if(prefetchDirect2LDS && !separateMemOps)
-                {
-                    auto singleIncomingSequence = only(
-                        graph.control.getInputNodeIndices<Sequence>(globalLoads[0].globalChain));
-                    auto singleIncomingBody
-                        = only(graph.control.getInputNodeIndices<Body>(globalLoads[0].globalChain));
-                    AssertFatal(singleIncomingSequence || singleIncomingBody);
-
-                    if(singleIncomingSequence)
-                    {
-                        graph.control.addElement(Sequence(), {*singleIncomingSequence}, {barrier});
-                        logger->debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
-                                      "ordering {} to barrier {}",
-                                      *singleIncomingSequence,
-                                      barrier);
-                    }
-                    if(singleIncomingBody)
-                    {
-                        graph.control.addElement(Body(), {*singleIncomingBody}, {barrier});
-                        logger->debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
-                                      "operation {} containes barrier {} in body",
-                                      *singleIncomingBody,
-                                      barrier);
-                    }
-
-                    auto successor = segmentBoundaries[u + 1];
-
-                    Log::debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
-                               "ordering {} to {}",
-                               globalLoads[globalLoads.size() - 1].globalChain,
-                               successor);
-                    graph.control.addElement(
-                        Sequence(), {globalLoads[globalLoads.size() - 1].globalChain}, {successor});
-
-                    Log::debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
-                               "ordering {} to {}",
-                               globalStores[globalStores.size() - 1].ldsChain,
-                               successor);
-                    graph.control.addElement(
-                        Sequence(), {globalStores[globalStores.size() - 1].ldsChain}, {successor});
-                }
-                else
-                {
-                    graph.control.addElement(
-                        Sequence(), {globalStores[globalStores.size() - 1].ldsChain}, {barrier});
-                }
-
                 logger->debug("  prefetch: in-loop: ordering {} to {}",
                               globalLoads[globalLoads.size() - 1].globalChain,
                               globalStores[0].ldsChain);
@@ -922,12 +873,17 @@ namespace rocRoller
                 int firstPrefetchFromLDS = -1;
                 if(m_prefetchFromLDSChains[forLoop].contains(ldsPrefetchU))
                 {
-                    firstPrefetchFromLDS = addLDSPrefetchChains(
-                        ldsPrefetchU, barrier, segmentBoundaries[u + 1], false);
+                    firstPrefetchFromLDS
+                        = addLDSPrefetchChains(ldsPrefetchU,
+                                               globalStores[globalStores.size() - 1].ldsChain,
+                                               segmentBoundaries[u + 1],
+                                               false);
                 }
                 else
                 {
-                    graph.control.addElement(Sequence(), {barrier}, {segmentBoundaries[u + 1]});
+                    graph.control.addElement(Sequence(),
+                                             {globalStores[globalStores.size() - 1].ldsChain},
+                                             {segmentBoundaries[u + 1]});
                 }
 
                 // To ensure proper memory ordering, the last
