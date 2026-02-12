@@ -375,14 +375,17 @@ CK_TILE_HOST_DEVICE bf16x8_t bf8x8_to_bf16x8_scale(const bf8x8_t& src, const flo
         bf16_t bhalf_arr[2];
     } output;
 
+    constexpr index_t USE_BOTTOM = 0;
+    constexpr index_t USE_TOP    = 1;
+
     input.i8val[0]   = src[0];
     input.i8val[1]   = src[1];
     input.i8val[2]   = src[2];
     input.i8val[3]   = src[3];
-    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.i16val, scale, 0);
+    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.i16val, scale, USE_BOTTOM);
     y[0]             = output.bhalf_arr[0];
     y[1]             = output.bhalf_arr[1];
-    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.i16val, scale, 1);
+    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.i16val, scale, USE_TOP);
     y[2]             = output.bhalf_arr[0];
     y[3]             = output.bhalf_arr[1];
 
@@ -390,10 +393,10 @@ CK_TILE_HOST_DEVICE bf16x8_t bf8x8_to_bf16x8_scale(const bf8x8_t& src, const flo
     input.i8val[1]   = src[5];
     input.i8val[2]   = src[6];
     input.i8val[3]   = src[7];
-    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.i16val, scale, 0);
+    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.i16val, scale, USE_BOTTOM);
     y[4]             = output.bhalf_arr[0];
     y[5]             = output.bhalf_arr[1];
-    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.i16val, scale, 1);
+    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.i16val, scale, USE_TOP);
     y[6]             = output.bhalf_arr[0];
     y[7]             = output.bhalf_arr[1];
 #else
@@ -413,11 +416,17 @@ CK_TILE_HOST_DEVICE bf16x8_t fp4x4_to_bf16x8_scale(const pk_fp4x4_t& src, const 
         uint32_t u32;
         pk_fp4x4_t pf4;
     } cvt;
+
+    constexpr index_t USE_BYTE_0 = 0;
+    constexpr index_t USE_BYTE_1 = 1;
+    constexpr index_t USE_BYTE_2 = 2;
+    constexpr index_t USE_BYTE_3 = 3;
+
     cvt.pf4     = src;
-    bf16x2_t y0 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(cvt.u32, scale, 0);
-    bf16x2_t y1 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(cvt.u32, scale, 1);
-    bf16x2_t y2 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(cvt.u32, scale, 2);
-    bf16x2_t y3 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(cvt.u32, scale, 3);
+    bf16x2_t y0 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(cvt.u32, scale, USE_BYTE_0);
+    bf16x2_t y1 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(cvt.u32, scale, USE_BYTE_1);
+    bf16x2_t y2 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(cvt.u32, scale, USE_BYTE_2);
+    bf16x2_t y3 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(cvt.u32, scale, USE_BYTE_3);
 
     y[0] = y0[0];
     y[1] = y0[1];
