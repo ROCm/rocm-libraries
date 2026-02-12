@@ -66,8 +66,6 @@ struct GEMMProblem
     std::string transB = "T";
 
     // Unroll Sizes
-    unsigned int unrollX = 0;
-    unsigned int unrollY = 0;
     unsigned int unrollK = 0;
 
     SolutionParams::StorePath storePath{

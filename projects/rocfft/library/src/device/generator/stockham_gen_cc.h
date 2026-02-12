@@ -378,7 +378,7 @@ struct StockhamKernelCC : public StockhamKernel
                                                   Expression{Parens(in_bound || pred)}),
                                         width,
                                         height,
-                                        ThreadGuardMode::GURAD_BY_FUNC_ARG,
+                                        ThreadGuardMode::GUARD_BY_FUNC_ARG,
                                         true);
 
             tmp_stmts += add_work(
@@ -462,7 +462,7 @@ struct StockhamKernelCC : public StockhamKernel
                                                   Expression{Parens(in_bound || pred)}),
                                         width,
                                         height,
-                                        ThreadGuardMode::GURAD_BY_FUNC_ARG);
+                                        ThreadGuardMode::GUARD_BY_FUNC_ARG);
 
             tmp_stmts += add_work(
                 std::bind(

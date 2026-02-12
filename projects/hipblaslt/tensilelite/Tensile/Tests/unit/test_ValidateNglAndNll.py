@@ -102,7 +102,7 @@ class TestValidateNll(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
         self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         "Loop NLL: LRB0 at index 0 is not valid. Needed before index 6 (of next iteration), but only guaranteed at index 7.")
+                                         "Loop NLL: LRB0 @ idx=0 issued too late, must be guaranteed before MFMA @ idx=6 (of next iteration) but only guaranteed @ idx=7.")
 
     def test_lr0_swait_depends_on_lr1_realistic(self, useZeroDscnt: bool=False):
         """
@@ -146,7 +146,7 @@ class TestValidateNll(CMSValidationTestBase):
         }
         # We need to set nglshift and nllshift for the vlcnt adjustments
         num_gr = 2  # 2 GRs total (1 GRA + 1 GRB, but we only count the actual reads not the increments)
-        expected_error_message = None if useZeroDscnt else "Loop NLL: LRB0 at index 3 is not valid. Needed before index 28 (of next iteration), but only guaranteed at index 31."
+        expected_error_message = None if useZeroDscnt else "Loop NLL: LRB0 @ idx=3 issued too late, must be guaranteed before MFMA @ idx=28 (of next iteration) but only guaranteed @ idx=31."
         self.validate(optSchedule, syncTable[1::2], 1, num_gr, num_gr, 0, expected_error_message, nllZeroDscnt=useZeroDscnt)
 
     def test_lr0_swait_depends_on_lr1_realistic_zero_dscnt(self):

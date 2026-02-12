@@ -258,7 +258,7 @@
     SourceSwap: 1
     SplitGlobalRead: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StoreCInUnroll: false
     StoreCInUnrollExact: false

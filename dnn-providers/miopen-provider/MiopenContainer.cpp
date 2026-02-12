@@ -38,14 +38,24 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
     using namespace hipdnn_data_sdk::utilities;
 
     static const std::vector<EngineDefinition> s_engineDefinitions = {
-        // MIOPEN_ENGINE
+        // MIOPEN_ENGINE (non-deterministic, default)
         {MIOPEN_ENGINE_ID,
          []() -> std::unique_ptr<IEngine> {
              auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_ID);
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>());
-             engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>());
-             engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(false));
+             engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(false));
+             return engine;
+         }},
+
+        // MIOPEN_ENGINE_DETERMINISTIC (convolution-only)
+        {MIOPEN_ENGINE_DETERMINISTIC_ID,
+         []() -> std::unique_ptr<IEngine> {
+             auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_DETERMINISTIC_ID);
+             // Only include conv plan builders - batchnorm doesn't support deterministic mode
+             engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(true));
+             engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(true));
              return engine;
          }}
 
