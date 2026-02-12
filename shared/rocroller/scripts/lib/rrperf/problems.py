@@ -216,9 +216,6 @@ class GEMMSolution:
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
-    unroll_x: int = 0
-    unroll_y: int = 0
-
     load_A: str = "BufferToLDSViaVGPR"
     load_B: str = "BufferToLDSViaVGPR"
     store: str = "VGPRToGlobalMemoryViaLDSWithBuffer"
@@ -247,7 +244,6 @@ class GEMMSolution:
     numWGs: int = 0
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
-    matchMemoryAccess: bool = True
     tailLoops: bool = True
 
     version: str = ""
@@ -598,6 +594,11 @@ def cast_missing_parameters(result):
         result["workgroupMappingDim"] = wgmDim
         result["workgroupMappingValue"] = wgmValue
 
+    # Remove old/deprecated
+    for attr in ["unroll_x", "unroll_y"]:
+        if attr in result:
+            del result[attr]
+
     if "storeLDS_D" in result:
         storeLDS_D = result["storeLDS_D"]
         del result["storeLDS_D"]
@@ -606,6 +607,7 @@ def cast_missing_parameters(result):
             if storeLDS_D
             else "VGPRToGlobalMemoryWithBuffer"
         )
+
     # Convert old streamK bool fields to new streamK string enum
     if "streamKTwoTile" in result or "streamKTwoTileDPFirst" in result:
         old_streamK = result.get("streamK", False)
@@ -620,6 +622,9 @@ def cast_missing_parameters(result):
             result["streamK"] = "Standard"
         else:
             result["streamK"] = "None"
+
+    if "matchMemoryAccess" in result:
+        del result["matchMemoryAccess"]
 
 
 def load_results(path: pathlib.Path):
