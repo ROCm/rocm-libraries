@@ -69,7 +69,6 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
         // clang-format on
     }
 
-
     // clang-format off
     cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {1, 1, 32, 32}}, {datatype, miopenTensorNCHW, {1, 1, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}}});
     cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {1, 1, 32, 32}}, {datatype, miopenTensorNCHW, {1, 1, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
@@ -184,7 +183,6 @@ const auto& GetTestParams()
     }();
     return params;
 }
-
 
 // Subbatch chunking test case (3D convolution triggering 2-chunk processing)
 // MAX_GRID_SIZE = 16M, batch_chunk_size = 16M/k
