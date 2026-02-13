@@ -315,8 +315,8 @@ TEST_F(GPUArchitectureTest, ToLLVMString)
     {
         GPUArchitectureTarget target
             = {GPUArchitectureGFX::GFX908, {.sramecc = true, .xnack = true}};
-        EXPECT_EQ(target.features.toString(), "sramecc+xnack+");
-        EXPECT_EQ(toString(target.features), "sramecc+xnack+");
+        EXPECT_EQ(target.features.toString(), "sramecc+:xnack+");
+        EXPECT_EQ(toString(target.features), "sramecc+:xnack+");
         EXPECT_EQ(target.features.toLLVMString(), "+xnack,+sramecc");
     }
 }
