@@ -356,9 +356,8 @@ public:
                     ss << ",";
                 ss << "\"" << kv.first << "\":";
                 if(kv.second)
-                    ss << "{"
-                       << "\"min_mhz\":" << kv.second->first << ",\"max_mhz\":" << kv.second->second
-                       << "}";
+                    ss << "{" << "\"min_mhz\":" << kv.second->first
+                       << ",\"max_mhz\":" << kv.second->second << "}";
                 else
                     ss << "null";
                 first = false;
@@ -1908,9 +1907,8 @@ inline void print_dry_header(std::string_view algo_name,
     size_t      status_col_width = status_header.size();
 
     std::cout << std::setw(status_col_width) << std::left << status_header << "  "
-              << std::setw(spec_col_width) << std::left << "Specialization"
-              << "  "
-              << "Index/" << specialization_count << "\n";
+              << std::setw(spec_col_width) << std::left << "Specialization" << "  " << "Index/"
+              << specialization_count << "\n";
 
     size_t underline_width = status_col_width + 2 + spec_col_width + 2 + family_col_width;
 
@@ -1940,12 +1938,11 @@ inline void print_header(std::string_view          algo_name,
     size_t status_col_width = std::max(status_header.size(), noisy_status.size());
 
     std::cout << std::setw(status_col_width) << std::left << status_header << "  "
-              << std::setw(noise_col_width) << std::left << "Noise"
-              << "  " << std::setw(gpu_temp_col_width) << std::left << "GPU °C"
-              << "  " << std::setw(bytes_per_sec_col_width) << std::left << "Bytes/sec"
-              << "  " << std::setw(spec_col_width) << std::left << "Specialization"
-              << "  "
-              << "Index/" << specialization_count << "\n";
+              << std::setw(noise_col_width) << std::left << "Noise" << "  "
+              << std::setw(gpu_temp_col_width) << std::left << "GPU °C" << "  "
+              << std::setw(bytes_per_sec_col_width) << std::left << "Bytes/sec" << "  "
+              << std::setw(spec_col_width) << std::left << "Specialization" << "  " << "Index/"
+              << specialization_count << "\n";
 
     size_t underline_width = status_col_width + 2 + noise_col_width + 2 + gpu_temp_col_width + 2
                              + bytes_per_sec_col_width + 2 + spec_col_width + 2 + family_col_width;
