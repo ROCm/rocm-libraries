@@ -5709,7 +5709,7 @@ void cpu_getrs_npvt<float>(rocblas_operation trans,
     for(rocblas_int i = 0; i < n; i++)
     {
         ipiv[i] = i + 1;
-    };
+    }
 
     char transC = rocblas2char_operation(trans);
     sgetrs_(&transC, &n, &nrhs, A, &lda, ipiv.data(), B, &ldb, &info);
@@ -5730,7 +5730,7 @@ void cpu_getrs_npvt<double>(rocblas_operation trans,
     for(rocblas_int i = 0; i < n; i++)
     {
         ipiv[i] = i + 1;
-    };
+    }
 
     char transC = rocblas2char_operation(trans);
     dgetrs_(&transC, &n, &nrhs, A, &lda, ipiv.data(), B, &ldb, &info);
@@ -5751,7 +5751,7 @@ void cpu_getrs_npvt<rocblas_float_complex>(rocblas_operation trans,
     for(rocblas_int i = 0; i < n; i++)
     {
         ipiv[i] = i + 1;
-    };
+    }
 
     char transC = rocblas2char_operation(trans);
     cgetrs_(&transC, &n, &nrhs, A, &lda, ipiv.data(), B, &ldb, &info);
@@ -5772,7 +5772,7 @@ void cpu_getrs_npvt<rocblas_double_complex>(rocblas_operation trans,
     for(rocblas_int i = 0; i < n; i++)
     {
         ipiv[i] = i + 1;
-    };
+    }
 
     char transC = rocblas2char_operation(trans);
     zgetrs_(&transC, &n, &nrhs, A, &lda, ipiv.data(), B, &ldb, &info);
