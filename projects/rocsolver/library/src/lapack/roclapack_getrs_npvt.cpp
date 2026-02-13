@@ -59,7 +59,6 @@ rocblas_status rocsolver_getrs_npvt_impl(rocblas_handle handle,
     I incb = 1;
     rocblas_stride strideA = 0;
     rocblas_stride strideB = 0;
-    rocblas_stride strideP = 0;
     I batch_count = 1;
 
     // memory workspace sizes:
@@ -89,7 +88,7 @@ rocblas_status rocsolver_getrs_npvt_impl(rocblas_handle handle,
     // execution
     return rocsolver_getrs_npvt_template<false, false, T>(
         handle, trans, n, nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB,
-        batch_count, work1, work2, work3, work4, optim_mem, true);
+        batch_count, work1, work2, work3, work4, optim_mem);
 }
 
 ROCSOLVER_END_NAMESPACE

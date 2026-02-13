@@ -39,18 +39,6 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-#ifndef ROCBLAS_CHECK_RESTORE_MODE
-#define ROCBLAS_CHECK_RESTORE_MODE(fcn, old_mode)       \
-    {                                                   \
-        rocblas_status const istat = (fcn);             \
-        if(istat != rocblas_status_success)             \
-        {                                               \
-            rocblas_set_pointer_mode(handle, old_mode); \
-            return (istat);                             \
-        }                                               \
-    }
-#endif
-
 template <typename T, typename I>
 rocblas_status rocsolver_getrs_npvt_argCheck(rocblas_handle handle,
                                              const rocblas_operation trans,
@@ -126,8 +114,6 @@ rocblas_status rocsolver_getrs_npvt_template(rocblas_handle handle,
                                              const I inca,
                                              const I lda,
                                              const rocblas_stride strideA,
-                                             // const I* ipiv,
-                                             // const rocblas_stride strideP,
                                              U B,
                                              const rocblas_stride shiftB,
                                              const I incb,
@@ -156,37 +142,41 @@ rocblas_status rocsolver_getrs_npvt_template(rocblas_handle handle,
     rocblas_get_pointer_mode(handle, &old_mode);
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
 
+    auto rocblas_check_restore_mode = [=](rocblas_status const istat) {
+        if(istat != rocblas_status_success)
+        {
+            rocblas_set_pointer_mode(handle, old_mode);
+            return (istat);
+        }
+    };
+
     if(trans == rocblas_operation_none)
     {
         // solve L*X = B, overwriting B with X
-        ROCBLAS_CHECK_RESTORE_MODE(rocsolver_trsm_lower<BATCHED, STRIDED, T>(
-                                       handle, rocblas_side_left, trans, rocblas_diagonal_unit, n,
-                                       nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb,
-                                       strideB, batch_count, optim_mem, work1, work2, work3, work4),
-                                   old_mode);
+        rocblas_check_restore_mode(rocsolver_trsm_lower<BATCHED, STRIDED, T>(
+            handle, rocblas_side_left, trans, rocblas_diagonal_unit, n, nrhs, A, shiftA, inca, lda,
+            strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2, work3,
+            work4));
 
         // solve U*X = B, overwriting B with X
-        ROCBLAS_CHECK_RESTORE_MODE(rocsolver_trsm_upper<BATCHED, STRIDED, T>(
-                                       handle, rocblas_side_left, trans, rocblas_diagonal_non_unit,
-                                       n, nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb,
-                                       strideB, batch_count, optim_mem, work1, work2, work3, work4),
-                                   old_mode);
+        rocblas_check_restore_mode(rocsolver_trsm_upper<BATCHED, STRIDED, T>(
+            handle, rocblas_side_left, trans, rocblas_diagonal_non_unit, n, nrhs, A, shiftA, inca,
+            lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2,
+            work3, work4));
     }
     else
     {
         // solve U'*X = B or U**H *X = B, overwriting B with X
-        ROCBLAS_CHECK_RESTORE_MODE(rocsolver_trsm_upper<BATCHED, STRIDED, T>(
-                                       handle, rocblas_side_left, trans, rocblas_diagonal_non_unit,
-                                       n, nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb,
-                                       strideB, batch_count, optim_mem, work1, work2, work3, work4),
-                                   old_mode);
+        rocblas_check_restore_mode(rocsolver_trsm_upper<BATCHED, STRIDED, T>(
+            handle, rocblas_side_left, trans, rocblas_diagonal_non_unit, n, nrhs, A, shiftA, inca,
+            lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2,
+            work3, work4));
 
         // solve L'*X = B, or L**H *X = B overwriting B with X
-        ROCBLAS_CHECK_RESTORE_MODE(rocsolver_trsm_lower<BATCHED, STRIDED, T>(
-                                       handle, rocblas_side_left, trans, rocblas_diagonal_unit, n,
-                                       nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb,
-                                       strideB, batch_count, optim_mem, work1, work2, work3, work4),
-                                   old_mode);
+        rocblas_check_restore_mode(rocsolver_trsm_lower<BATCHED, STRIDED, T>(
+            handle, rocblas_side_left, trans, rocblas_diagonal_unit, n, nrhs, A, shiftA, inca, lda,
+            strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2, work3,
+            work4));
     }
 
     rocblas_set_pointer_mode(handle, old_mode);
