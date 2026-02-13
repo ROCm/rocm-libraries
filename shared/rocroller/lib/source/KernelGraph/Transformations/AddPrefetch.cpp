@@ -279,6 +279,10 @@ namespace rocRoller
 
             bool isLoadForExchange(int loadTag, KernelGraph const& graph)
             {
+                if(not(graph.control.get<LoadTiled>(loadTag)
+                       or graph.control.get<LoadLDSTile>(loadTag)))
+                    return false;
+
                 auto isExchangePredicate = [&](int operation) -> bool {
                     auto maybeExchange = graph.control.get<Exchange>(operation);
                     return maybeExchange.has_value();
@@ -355,7 +359,6 @@ namespace rocRoller
 
             std::map<int, std::map<int, std::vector<int>>> m_deferredToOrder;
 
-            std::map<int, int> m_exchangeLoadMap;
 
             CommandParametersPtr m_params;
             ContextPtr           m_context;
@@ -430,7 +433,7 @@ namespace rocRoller
                        || *nary == NaryArgument::LHS_SCALE || *nary == NaryArgument::RHS_SCALE;
             };
 
-            std::map<int, int> loadMap = m_exchangeLoadMap;
+            std::map<int, int> loadMap{};
             for(auto loadTag : graph.control.findNodes(starts, isLoadPredicate))
             {
                 auto tileTag     = graph.mapper.get<MacroTile>(loadTag);
@@ -455,7 +458,6 @@ namespace rocRoller
                                toString(conn.connection));
 
                     graph.control.addElement(Sequence(), {loadMap[coord]}, {exchangeTag});
-                    m_exchangeLoadMap[coord] = loadMap[coord];
                 }
                 m_prefetchUnrollBodyStarts[forLoop][u].erase(exchangeTag);
             }
@@ -497,16 +499,6 @@ namespace rocRoller
                     graph.control.addElement(Sequence(), {loadMap[conn.coordinate]}, {multiplyTag});
                 }
                 m_prefetchUnrollBodyStarts[forLoop][u].erase(multiplyTag);
-            }
-
-            auto loads
-                = filter(graph.control.isElemType<LoadTiled>(),
-                         graph.control.depthFirstVisit(m_prefetchUnrollBodyStarts[forLoop][u],
-                                                       Graph::Direction::Downstream))
-                      .to<std::vector>();
-            for(auto x : loads)
-            {
-                m_deferredToOrder[forLoop][u].push_back(getTopSetCoordinate(graph, x));
             }
         }
 
@@ -927,6 +919,18 @@ namespace rocRoller
 
                 orderLoadsBeforeMultiplies(graph, forLoop, u);
 
+                auto loads
+                    = filter(graph.control.isElemType<LoadTiled>(),
+                             graph.control.depthFirstVisit(m_prefetchUnrollBodyStarts[forLoop][u],
+                                                           Graph::Direction::Downstream))
+                          .to<std::vector>();
+                toOrder.clear();
+                std::transform(std::begin(loads),
+                               std::end(loads),
+                               std::back_inserter(toOrder),
+                               [&graph](int tag) { return getTopSetCoordinate(graph, tag); });
+                orderMemoryNodes(graph, loads, false);
+
                 // Connect the segment to the proceeding segment boundary
                 if(separateMemOps)
                 {
@@ -938,11 +942,6 @@ namespace rocRoller
                     for(auto tag : m_prefetchUnrollBodyEnds[forLoop][u])
                         graph.control.addElement(Sequence(), {tag}, {segmentBoundaries[u + 1]});
                 }
-            }
-
-            for(uint u = 0; u < numUnroll; ++u)
-            {
-                orderMemoryNodes(graph, m_deferredToOrder[forLoop][u], false);
             }
 
             //
