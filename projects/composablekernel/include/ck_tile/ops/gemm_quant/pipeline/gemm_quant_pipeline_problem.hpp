@@ -83,10 +83,6 @@ struct GemmQuantPipelineProblemBase
     static constexpr auto HasHotLoop = HasHotLoop_;
     static constexpr auto TailNum    = TailNum_;
 
-    // Limitations
-    static_assert(!(BCastPolicy_ == CastPolicy::BeforeLDSWrite &&
-                    !std::is_same_v<BLayout, BQLayout>));
-
     // gfx950 supports load with transpose for 4bit types, so we can transpose
     // pk_fp4_t from LDS in registers. But without this instruction,
     // the transpose is done in register between Vmem read and LDS write and

@@ -78,6 +78,7 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
     CK_TILE_HOST_DEVICE static constexpr auto MakeBQDramTileDistribution()
     {
         using BQLayout = remove_cvref_t<typename Problem::BQLayout>;
+        using BLayout  = remove_cvref_t<typename Problem::BLayout>;
         // If we apply scale before writing to LDS, we need a tile distribution for
         // BQuant consistent with global memory reading of matrix B, while
         // if we apply scale after reading from LDS, we need a tile distribution for
@@ -128,48 +129,90 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
             constexpr index_t LargestVec = (KPerBlock * NPerBlock) / (num_warps * warp_size);
             constexpr index_t b_vec      = VecLoadSize > LargestVec ? LargestVec : VecLoadSize;
 
+            constexpr index_t KScale = KPerBlock / Problem::BQuantGroupSize::kK;
+
             if constexpr(std::is_same_v<BQLayout, tensor_layout::gemm::ColumnMajor>)
             {
-                constexpr index_t KScale =
-                    KPerBlock / Problem::BQuantGroupSize::kK; // k_scale num  //2
-                constexpr index_t K0 = KPerBlock / b_vec;     // # of threads in K dim for B Matrix
-                constexpr index_t K1 = K0 / KScale;
-                constexpr index_t K3 = KScale;
-                constexpr index_t K2 = 1;
 
-                constexpr index_t N0 = num_warps / NumWaveGroups;
-                constexpr index_t N1 = warp_size / K0;
-                constexpr index_t N2 = NPerBlock / (N0 * N1);
+                if constexpr(std::is_same_v<BQLayout, BLayout>)
+                {
 
-                return make_static_tile_distribution(
-                    tile_distribution_encoding<sequence<K1>,
-                                               tuple<sequence<N0, N1, N2>, sequence<K3, K2>>,
-                                               tuple<sequence<1>, sequence<1, 2, 0>>,
-                                               tuple<sequence<0>, sequence<1, 0, 0>>,
-                                               sequence<1, 2>,
-                                               sequence<2, 1>>{});
+                    constexpr index_t K0 = KPerBlock / b_vec;
+                    constexpr index_t K1 = K0 / KScale;
+                    constexpr index_t K3 = KScale;
+                    constexpr index_t K2 = 1;
+
+                    constexpr index_t N0 = num_warps / NumWaveGroups;
+                    constexpr index_t N1 = warp_size / K0;
+                    constexpr index_t N2 = NPerBlock / (N0 * N1);
+
+                    return make_static_tile_distribution(
+                        tile_distribution_encoding<sequence<K1>,
+                                                   tuple<sequence<N0, N1, N2>, sequence<K3, K2>>,
+                                                   tuple<sequence<1>, sequence<1, 2, 0>>,
+                                                   tuple<sequence<0>, sequence<1, 0, 0>>,
+                                                   sequence<1, 2>,
+                                                   sequence<2, 1>>{});
+                }
+                else
+                {
+                    constexpr index_t N1                = NPerBlock / b_vec;
+                    constexpr index_t N2                = b_vec;
+                    constexpr index_t KRepeatInWave     = warp_size / N1;
+                    constexpr index_t KRepeatAcrossWave = num_warps / KScale;
+                    constexpr index_t K2                = num_warps / KRepeatAcrossWave;
+                    return make_static_tile_distribution(
+                        tile_distribution_encoding<sequence<KRepeatAcrossWave, KRepeatInWave>,
+                                                   tuple<sequence<1, N1, N2>, sequence<K2, 1, 1>>,
+                                                   tuple<sequence<1, 2, 0>, sequence<0, 1, 2>>,
+                                                   tuple<sequence<0, 0, 0>, sequence<1, 1, 1>>,
+                                                   sequence<1, 2>,
+                                                   sequence<2, 2>>{});
+                }
             }
             else
             {
-                constexpr index_t NScale = NPerBlock / Problem::BQuantGroupSize::kN;
-                constexpr index_t NLanes = NScale / b_vec;
-                constexpr index_t NVec   = b_vec;
+                if constexpr(std::is_same_v<BQLayout, BLayout>)
+                {
+                    constexpr index_t NScale = NPerBlock / Problem::BQuantGroupSize::kN;
+                    constexpr index_t NLanes = NScale / b_vec;
+                    constexpr index_t NVec   = b_vec;
 
-                constexpr index_t KLanes            = warp_size / NLanes;
-                constexpr index_t KVec              = KPerBlock / KLanes / num_warps;
-                constexpr index_t KScale            = KPerBlock / Problem::BQuantGroupSize::kK;
-                constexpr index_t KRepeat           = KPerBlock / KScale / KVec;
-                constexpr index_t KRepeatInWave     = KRepeat > KLanes ? KLanes : 1;
-                constexpr index_t KRepeatAcrossWave = KRepeat > KLanes ? KRepeat / KLanes : 1;
+                    constexpr index_t KLanes  = warp_size / NLanes;
+                    constexpr index_t KVec    = KPerBlock / KLanes / num_warps;
+                    constexpr index_t KRepeat = KPerBlock / KScale / KVec;
 
-                // TODO: fix second sequence
-                return make_static_tile_distribution(
-                    tile_distribution_encoding<sequence<KRepeatAcrossWave, KRepeatInWave>,
-                                               tuple<sequence<1, 1, 1>, sequence<NLanes, NVec>>,
-                                               tuple<sequence<1, 0>, sequence<1, 0, 2>>,
-                                               tuple<sequence<0, 0>, sequence<1, 1, 0>>,
-                                               sequence<1, 2>,
-                                               sequence<2, 1>>{});
+                    constexpr index_t KRepeatInWave     = KRepeat > KLanes ? KLanes : 1;
+                    constexpr index_t KRepeatAcrossWave = KRepeat > KLanes ? KRepeat / KLanes : 1;
+
+                    return make_static_tile_distribution(
+                        tile_distribution_encoding<sequence<KRepeatAcrossWave, KRepeatInWave>,
+                                                   tuple<sequence<1, 1, 1>, sequence<NLanes, NVec>>,
+                                                   tuple<sequence<1, 0>, sequence<1, 0, 2>>,
+                                                   tuple<sequence<0, 0>, sequence<1, 1, 0>>,
+                                                   sequence<1, 2>,
+                                                   sequence<2, 1>>{});
+                }
+                else
+                {
+                    constexpr index_t KRepeatInWave = Problem::BQuantGroupSize::kK / b_vec;
+                    constexpr index_t K1            = KScale;
+
+                    constexpr index_t N0 = num_warps / NumWaveGroups;
+                    constexpr index_t N1 = warp_size / (KRepeatInWave * K1);
+
+                    // Number of contiguous elements in N dimension when reading B matrix
+                    // becomes the vector size of BQ
+                    constexpr index_t N2 = NPerBlock / (BlockSize / (KPerBlock / b_vec));
+
+                    return make_static_tile_distribution(
+                        tile_distribution_encoding<sequence<1, 1, KRepeatInWave>,
+                                                   tuple<sequence<1, K1, 1>, sequence<N0, N1, N2>>,
+                                                   tuple<sequence<1, 0, 2>, sequence<2, 0, 1, 0>>,
+                                                   tuple<sequence<0, 0, 0>, sequence<1, 1, 1, 2>>,
+                                                   sequence<1, 2>,
+                                                   sequence<2, 2>>{});
+                }
             }
         }
     }

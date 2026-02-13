@@ -59,9 +59,11 @@ using BQuant1D64Types = ::testing::Types<
     // RRR BQ: R
     std::tuple<   RowMajor,    RowMajor, RowMajor,    RowMajor, BF16,   BF16,  E8M0, BF16, BQuantGrouped,   GemmConfigMx,  GroupSize64>,
 
-    // std::tuple<   RowMajor,    RowMajor, RowMajor, ColumnMajor, BF16, BF16,   E8M0,  BF16, BQuantGrouped, GemmConfigMx, GroupSize64>, // not supported with CastBeforeLDSWrite
     std::tuple<   RowMajor,    RowMajor, RowMajor, ColumnMajor, BF16, PkFP4,  E8M0,  BF16, BQuantGrouped, GemmConfigMxFP4, GroupSize64>,
-    std::tuple<ColumnMajor,    RowMajor, RowMajor, ColumnMajor, BF16, PkFP4,  E8M0,  BF16, BQuantGrouped, GemmConfigMxFP4, GroupSize64>
+    std::tuple<ColumnMajor,    RowMajor, RowMajor, ColumnMajor, BF16, PkFP4,  E8M0,  BF16, BQuantGrouped, GemmConfigMxFP4, GroupSize64>,
+
+    std::tuple<   RowMajor, ColumnMajor, RowMajor,    RowMajor, BF16, BF16,   E8M0,  BF16, BQuantGrouped, GemmConfigMx, GroupSize64>,
+    std::tuple<   RowMajor,    RowMajor, RowMajor, ColumnMajor, BF16, BF16,   E8M0,  BF16, BQuantGrouped, GemmConfigMx, GroupSize64>
 >;
 // clang-format on
 

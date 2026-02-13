@@ -359,14 +359,27 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
                         ? BQuantGroupSize::kK
                         : BQuantGroupSize::kN;
 
+                // The input indices are with respect to B block tile. If B and Bq have different
+                // layouts, the indices must be swapped
+                auto make_bq_index = [](auto idx0, auto idx1) {
+                    if constexpr(std::is_same_v<BLayout, BQLayout>)
+                    {
+                        return make_tuple(
+                            tile_distributed_index<idx0.impl_.at(0) / BQuantGroupSizeIdx0>{},
+                            tile_distributed_index<idx1.impl_.at(0) / BQuantGroupSizeIdx1>{});
+                    }
+                    else
+                    {
+                        return make_tuple(
+                            tile_distributed_index<idx1.impl_.at(0) / BQuantGroupSizeIdx0>{},
+                            tile_distributed_index<idx0.impl_.at(0) / BQuantGroupSizeIdx1>{});
+                    }
+                };
+
                 sweep_tile_span(b_block[number<0>{}], [&](auto idx0) {
                     sweep_tile_span(b_block[number<1>{}], [&](auto idx1) {
-                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                        constexpr auto idx0_s =
-                            tile_distributed_index<idx0.impl_.at(0) / BQuantGroupSizeIdx0>{};
-                        constexpr auto idx1_s =
-                            tile_distributed_index<idx1.impl_.at(0) / BQuantGroupSizeIdx1>{};
-                        constexpr auto i_j_idx_scale = make_tuple(idx0_s, idx1_s);
+                        constexpr auto i_j_idx       = make_tuple(idx0, idx1);
+                        constexpr auto i_j_idx_scale = make_bq_index(idx0, idx1);
                         float scale                  = float(scale_tile[i_j_idx_scale]);
                         if constexpr(std::is_same_v<BDataType, ck_tile::pk_fp4_t>)
                         {
