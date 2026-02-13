@@ -566,7 +566,7 @@ double compute_memory_latency(const problem_t& problem,
                               size_t num_active_cus,
                               size_t splitting_factor) {
   
-  bool debug = runtime_options().get().debug_enabled;
+  bool debug = runtime_options::get().debug_enabled;
 
   // Extract parameters from structured types
   const auto a_bytes = data_type_to_bytes(problem.a_dtype);
@@ -717,7 +717,7 @@ double compute_tile_latency(const problem_t& problem,
                             size_t num_active_cus,
                             size_t splitting_factor) {
   
-  bool debug = runtime_options().get().debug_enabled;
+  bool debug = runtime_options::get().debug_enabled;
 
   // Extract parameters from structured types
   const size_t K = problem.size.k;
@@ -903,7 +903,7 @@ double compute_total_latency(const problem_t& problem,
                              const config_t& config,
                              size_t max_cus) {
   assert(config.is_valid());
-  bool debug = runtime_options().get().debug_enabled;
+  bool debug = runtime_options::get().debug_enabled;
 
   // Extract parameters from structured types
   size_t M     = problem.size.m;
