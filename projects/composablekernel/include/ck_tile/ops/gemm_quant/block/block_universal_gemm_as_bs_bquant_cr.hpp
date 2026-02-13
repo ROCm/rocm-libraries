@@ -127,6 +127,8 @@ struct BQuantBlockUniversalGemmAsBsCr
     using CDataType       = remove_cvref_t<typename Traits::CDataType>;
 
     // BDataType gets converted from PkInt4 during loading
+    // This is only needed when BCastPolicy is CastBeforeLDSWrite. This is always the case
+    // for pk_int4_t but not for pk_fp4_t
     using OverrideBDataType = std::conditional_t<
         (std::is_same_v<BDataType, pk_int4_t> || std::is_same_v<BDataType, pk_fp4_t>) &&
             std::is_same_v<typename Traits::BLayout, tensor_layout::gemm::RowMajor>,

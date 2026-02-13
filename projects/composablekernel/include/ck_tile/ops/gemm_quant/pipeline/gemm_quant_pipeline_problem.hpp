@@ -88,9 +88,9 @@ struct GemmQuantPipelineProblemBase
                     !std::is_same_v<BLayout, BQLayout>));
 
     // gfx950 supports load with transpose for 4bit types, so we can transpose
-    // pk_fp4_t from LDS in registers. But transpose without this instruction,
+    // pk_fp4_t from LDS in registers. But without this instruction,
     // the transpose is done in register between Vmem read and LDS write and
-    // the implementation does not support pk_fp4_t
+    // the implementation does not support 4 bit types
 #ifdef __gfx950__
     static constexpr auto BCastPolicy = BCastPolicy_;
 #else
