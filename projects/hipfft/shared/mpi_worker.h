@@ -20,6 +20,7 @@
 * THE SOFTWARE.
 *******************************************************************************/
 
+#include "fft_enums.h"
 #include "fft_params.h"
 
 #include "CLI11.hpp"
@@ -974,8 +975,8 @@ int mpi_worker_main(const char*                                               de
         // each node, GPUs are indexed 0,1,...,N
 
         // distribute input and output among the available number of ranks and GPUs per rank
-        params.distribute_input(ngpus, input_grid, mp_size);
-        params.distribute_output(ngpus, output_grid, mp_size);
+        params.distribute_field<fft_io::fft_io_in>(ngpus, input_grid, mp_size);
+        params.distribute_field<fft_io::fft_io_out>(ngpus, output_grid, mp_size);
 
         params.validate();
         token = params.token();
