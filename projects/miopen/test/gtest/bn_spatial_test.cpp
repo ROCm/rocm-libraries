@@ -128,7 +128,7 @@ struct verify_forward_train_bn_spatial
                         mean_accum_arr[row] += input(bidx, cidx, row, column);
                     }
                 } // for (column)
-            }     // for (row)
+            } // for (row)
             for(std::size_t i = 0; i < height; i++)
                 mean_accum += mean_accum_arr[i];
 #else  // MIO_HEIRARCH_SEL
@@ -165,10 +165,10 @@ struct verify_forward_train_bn_spatial
                         out(bidx, cidx, row, column) = elemStd =
                             (input(bidx, cidx, row, column) - mean_accum); // (x_i - mean)
                         variance_accum += (elemStd * elemStd);             // sum{ (x_i - mean)^2 }
-                    }                                                      // end for (column)
-                }                                                          // end for (row)
-            }                                                              // end for(n)
-#else                                                                      // MIO_HEIRARCH_SEL
+                    } // end for (column)
+                } // end for (row)
+            } // end for(n)
+#else  // MIO_HEIRARCH_SEL
             for(std::size_t row = 0; row < height; row++){ //via rows
                 for(std::size_t column = 0; column < width; column++){// via columns
                     for(std::size_t bidx = 0; bidx < n_batch; bidx++){ //via mini_batch
@@ -178,7 +178,7 @@ struct verify_forward_train_bn_spatial
                 }// for (column)
             }// for (row)
             for(std::size_t i = 0; i<height; i++) variance_accum += variance_accum_arr[i];
-#endif                                                                     // MIO_HEIRARCH_SEL
+#endif // MIO_HEIRARCH_SEL
 
             variance_accum /= nhw; // (1/N)*sum{ (x_i - mean)^2 }
             // #3 add epsilon for numeric stability, sqr_root, and invert
@@ -198,8 +198,8 @@ struct verify_forward_train_bn_spatial
                             scale(0, cidx, 0, 0) * (invVar * out(bidx, cidx, row, column)) +
                             shift(0, cidx, 0, 0);
                     } // for (column)
-                }     // for (row)
-            }         // end for(n_batchs)
+                } // for (row)
+            } // end for(n_batchs)
 
             saveMean(0, cidx, 0, 0)   = mean_accum;
             saveInvVar(0, cidx, 0, 0) = invVar;
@@ -385,8 +385,8 @@ struct verify_forward_infer_bn_spatial_recalc
                         // iterating through the stack of images in the mini_batch
                         mean_accum += input(bidx, cidx, row, column);
                     } // end for (n)
-                }     // end for (column)
-            }         // end for (row)
+                } // end for (column)
+            } // end for (row)
             mean_accum /= nhw;
 
             elemStd        = 0.;
@@ -403,9 +403,9 @@ struct verify_forward_infer_bn_spatial_recalc
                         out(bidx, cidx, row, column) = elemStd =
                             (input(bidx, cidx, row, column) - mean_accum); // (x_i - mean)
                         variance_accum += (elemStd * elemStd);             // sum{ (x_i - mean)^2 }
-                    }                                                      // end for(n)
-                }                                                          // end for (column)
-            }                                                              // end for (row)
+                    } // end for(n)
+                } // end for (column)
+            } // end for (row)
             variance_accum /= nhw; // (1/N)*sum{ (x_i - mean)^2 }
 
             // #3 add epsilon for numeric stability, sqr_root, and invert
@@ -426,8 +426,8 @@ struct verify_forward_infer_bn_spatial_recalc
                         out(bidx, cidx, row, column) =
                             scale(0, cidx, 0, 0) * inhat + shift(0, cidx, 0, 0);
                     } // end for(n_batchs)
-                }     // for (column)
-            }         // for (row)
+                } // for (column)
+            } // for (row)
         });
 
 #ifdef MIO_BN_TIME_EVERYTHING
@@ -678,7 +678,7 @@ struct verify_backward_bn_spatial_recalc
                         mean_accum_arr[row] += x_input(bidx, cidx, row, column);
                     }
                 } // for (column)
-            }     // for (row)
+            } // for (row)
             for(std::size_t i = 0; i < height; i++)
                 mean += mean_accum_arr[i];
 #else  // MIO_HEIRARCH_SEL
@@ -711,10 +711,10 @@ struct verify_backward_bn_spatial_recalc
                         // per (x-dims) channel load a block of data into LDS
                         elemStd = x_input(bidx, cidx, row, column) - mean; // (x_i - mean)
                         variance += elemStd * elemStd;                     // sum{ (x_i - mean)^2 }
-                    }                                                      // end for(n)
-                }                                                          // for (column)
-            }                                                              // for (row)
-#else                                                                      // MIO_HEIRARCH_SEL
+                    } // end for(n)
+                } // for (column)
+            } // for (row)
+#else                        // MIO_HEIRARCH_SEL
             for(std::size_t row = 0; row < height; row++){ //via rows
                 for(std::size_t column = 0; column < width; column++){// via columns
                     for(std::size_t bidx = 0; bidx < n_batch; bidx++){ //via mini_batch
@@ -724,7 +724,7 @@ struct verify_backward_bn_spatial_recalc
                 }// for (column)
             }// for (row)
             for(std::size_t i = 0; i<height; i++) variance += variance_accum_arr[i];
-#endif                                                                     // MIO_HEIRARCH_SEL
+#endif                       // MIO_HEIRARCH_SEL
             variance /= nhw; // (1/(N*H*W))*sum{ (x_i - mean)^2 }
             invVar = 1. / double(sqrt(variance + epsilon));
 
@@ -745,8 +745,8 @@ struct verify_backward_bn_spatial_recalc
                         dshift(0, cidx, 0, 0) += dyelem;
                         dscale(0, cidx, 0, 0) += xhat[xhat_index] * dyelem;
                     } // end for(n_batch)
-                }     // for (column)
-            }         // for (row)
+                } // for (column)
+            } // for (row)
 #else
             for(std::size_t row = 0; row < height; row++){ //via rows
                 for(std::size_t column = 0; column < width; column++){// via columns
@@ -783,9 +783,9 @@ struct verify_backward_bn_spatial_recalc
                         double tmp3                     = (scale(0, cidx, 0, 0) * invVar) / nhw;
                         dx_out(bidx, cidx, row, column) = tmp3 * (tmp2 + tmp1);
                     } // end for(n_batchs)
-                }     // for (column)
-            }         // for (row)
-        });           // for (channel)
+                } // for (column)
+            } // for (row)
+        }); // for (channel)
 
 #ifdef MIO_BN_TIME_EVERYTHING
         auto t_end = std::chrono::high_resolution_clock::now();
@@ -952,9 +952,9 @@ struct verify_backward_bn_spatial_use_saved
                         dshift(0, cidx, 0, 0) += dyelem;
                         dscale(0, cidx, 0, 0) += xhat[xhat_index] * dyelem;
                     } // end for(n_batch)
-                }     // for (column)
-            }         // for (row)
-#else                 // MIO_HEIRARCH_SEL
+                } // for (column)
+            } // for (row)
+#else  // MIO_HEIRARCH_SEL
             for(std::size_t row = 0; row < height; row++){ //via rows
                 for(std::size_t column = 0; column < width; column++){// via columns
                     for(std::size_t bidx = 0; bidx < n_batch; bidx++){ //via mini_batch
@@ -974,7 +974,7 @@ struct verify_backward_bn_spatial_use_saved
                 dshift(0,cidx,0,0) += dshift_accum_arr[i];
                 dscale(0,cidx,0,0) += dscale_accum_arr[i];
             }
-#endif                // MIO_HEIRARCH_SEL
+#endif // MIO_HEIRARCH_SEL
 
             for(std::size_t row = 0; row < height; row++)
             { // via rows
@@ -990,9 +990,9 @@ struct verify_backward_bn_spatial_use_saved
                         double tmp3                     = (scale(0, cidx, 0, 0) * invVar) / nhw;
                         dx_out(bidx, cidx, row, column) = tmp3 * (tmp2 + tmp1);
                     } // end for(n_batchs)
-                }     // for (column)
-            }         // for (row)
-        });           // for (channel)
+                } // for (column)
+            } // for (row)
+        }); // for (channel)
 #ifdef MIO_BN_TIME_EVERYTHING
         auto t_end = std::chrono::high_resolution_clock::now();
 
