@@ -571,8 +571,8 @@ namespace rocRoller
             constexpr static inline int             Complexity = 1;
 
             DataType outputDataType = DataType::None;
-            int      offset         = 0;
-            int      width          = 0;
+            uint32_t      offset         = 0;
+            uint32_t      width          = 0;
         };
 
         struct Nary
@@ -694,8 +694,8 @@ namespace rocRoller
 
         ExpressionPtr reinterpret(DataType dt, ExpressionPtr a);
 
-        ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width);
-        ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width);
+        ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint32_t offset, uint32_t width);
+        ExpressionPtr bfe(ExpressionPtr a, uint32_t offset, uint32_t width);
 
         ExpressionPtr bfc(ExpressionPtr       src,
                           ExpressionPtr       dst,

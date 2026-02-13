@@ -375,6 +375,9 @@ namespace ExpressionTest
         )";
 
         CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+
+        auto bfe1 = Expression::BitFieldExtract{{.arg{a}}, DataType::UInt8, 300u, 8u};
+        CHECK(bfe1.offset == 300u);
     }
 
     TEST_CASE("Expression comments", "[expression][comments][codegen]")
