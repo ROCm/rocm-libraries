@@ -34,21 +34,6 @@ struct has_b_tile_access_pattern<T, std::void_t<decltype(T::BTileAccessPattern)>
 template <typename Derived>
 struct UniversalGemmBasePolicy
 {
-    template <typename T>
-    using has_bcastpolicy_type = decltype(T::BCastPolicy);
-
-    template <typename Problem>
-    static constexpr bool IsBCastPolicyBeforeLDSWrite_v = [] {
-        if constexpr(is_detected<has_bcastpolicy_type, Problem>{})
-        {
-            return Problem::BCastPolicy == CastPolicy::BeforeLDSWrite;
-        }
-        else
-        {
-            return false;
-        }
-    }();
-
 #if defined(__gfx950__)
     // The combination of pk_int4_t and transposed loading causes numerical errors.
     // Therefore do not use transposed loading in this case.
@@ -94,6 +79,21 @@ struct UniversalGemmBasePolicy
     template <typename Problem>
     static constexpr bool is_b_load_tr = false;
 #endif
+
+    template <typename T>
+    using has_bcastpolicy_type = decltype(T::BCastPolicy);
+
+    template <typename Problem>
+    static constexpr bool IsBCastPolicyBeforeLDSWrite_v = [] {
+        if constexpr(is_detected<has_bcastpolicy_type, Problem>{})
+        {
+            return Problem::BCastPolicy == CastPolicy::BeforeLDSWrite;
+        }
+        else
+        {
+            return false;
+        }
+    }();
 
     static constexpr auto I0 = number<0>{};
     static constexpr auto I1 = number<1>{};
