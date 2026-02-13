@@ -11,6 +11,7 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -136,6 +137,18 @@ protected:
                 {attr->get_uid(),
                  hipdnn_test_sdk::utilities::createAllCloseValidator(
                      toSdkType(attr->get_data_type()), absoluteTolerance, relativeTolerance)});
+            _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
+        });
+    }
+
+    void registerRmsValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
+                              float rmsThreshold)
+    {
+        // Since the graph can infer properties + Ids, we defer validator registration until right before validation in verifyGraph
+        _deferredValidators.emplace_back([=]() {
+            _tensorIdToValidatorMap.insert({attr->get_uid(),
+                                            hipdnn_test_sdk::utilities::createRmsValidator(
+                                                toSdkType(attr->get_data_type()), rmsThreshold)});
             _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
         });
     }
