@@ -61,6 +61,7 @@ namespace TensileLite
         Sigmoid,
         Tanh,
         DGelu,
+        DRelu,
         Geluscaling,
         Silu,
         Swish,
