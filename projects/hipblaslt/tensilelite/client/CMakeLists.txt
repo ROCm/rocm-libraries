@@ -15,14 +15,8 @@ target_link_libraries(tensilelite-client
 )
 
 if(TENSILELITE_ENABLE_ROCROLLER)
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        if(HIPBLASLT_ENABLE_THEROCK)
-            find_package(mxDataGenerator REQUIRED)
-        else()
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator"
-                           "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
-        endif()
-    endif()
+    # Note: mxDataGenerator is added by clients/CMakeLists.txt, so we just link to it here
+    # If building standalone without clients, user must manually add mx DataGenerator
     target_compile_definitions(tensilelite-client PRIVATE HIPBLASLT_USE_ROCROLLER)
     target_link_libraries(tensilelite-client PRIVATE roc::mxDataGenerator)
     target_compile_features(tensilelite-client PRIVATE cxx_std_20)
