@@ -142,6 +142,9 @@ rocblas_status rocsolver_getrs_npvt_template(rocblas_handle handle,
     rocblas_get_pointer_mode(handle, &old_mode);
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
 
+    // ------------------------------------------------
+    // note: restore pointer mode in case of early exit
+    // ------------------------------------------------
     auto rocblas_check_restore_mode = [=](rocblas_status const istat) {
         if(istat != rocblas_status_success)
         {
