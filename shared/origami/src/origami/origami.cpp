@@ -303,6 +303,18 @@ staggerU_t select_staggerU(const problem_t& problem,
                            const config_t& config,
                            size_t skGrid,
                            int32_t wgm) {
+  // In a typical GEMM, CUs on the same XCD compete to access K-slices in L2.
+  // StaggerU offsets the starting K-position per workgroup to distribute L2 traffic.
+  //
+  // Mapping direction: contention = sharers × data_size (macro tile).
+  // A is shared along N (L2Tile_N sharers within XCD), data size ∝ MT_M.
+  // B is shared along M (L2Tile_M sharers within XCD), data size ∝ MT_N.
+  // SUM0 (stagger along M) distributes B reads; SUM1 (stagger along N) distributes A reads.
+  // Pick the mapping that targets the higher contention.
+  //
+  // L2 capacity: stagger expands the L2 working set (multiple K-slices active).
+  //   If the expanded working set exceeds L2 capacity -> disable stagger.
+
   // Extract parameters from structured types
   size_t M     = problem.size.m;
   size_t N     = problem.size.n;
@@ -335,24 +347,6 @@ staggerU_t select_staggerU(const problem_t& problem,
       skGrid > numMTs ? math::safe_ceil_div(skGrid, numCUs) : math::safe_ceil_div(numMTs, numCUs);
   auto split_factor = math::safe_ceil_div(skGrid, numMTs);
 
-  // In a typical GEMM, CUs compete to access the first K-slice.
-  // There are two tiers of memory contention:
-  // 1. MALL: XCDs compete to access the first K-slice in MALL (MALL -> L2).
-  //    - Important when CUs within each XCD are underutilized
-  //    - Distributes work across XCDs to utilize all compute resources
-  // 2. L2: CUs on the same XCD compete to access K-slices in L2 (L2 -> L1).
-  //    - Critical when CUs within each XCD are saturated
-  //    - Each XCD has only 16 L2 slices, creating local contention
-  //
-  // StaggerU Strategy based on workgroup distribution:
-  // - If numWGsPerL2Tile < numXCD / 2: Sparse distribution -> use Mall stagger (inter-XCD)
-  // - Otherwise: Dense distribution -> use L2 stagger (intra-XCD)
-  //
-  // When using L2 stagger: Stagger TWO L2 tiles instead of one
-  // - This spreads K-slice access across more offsets
-  //
-  // The L2 tile size is determined by WGM, which partitions the output matrix across XCDs.
-
   // Early Exit: Non-temporal accesses bypass L2 cache, so staggerU (which reduces L2 contention)
   // provides no benefit.
   if (nta > 3 || ntb > 3)
@@ -370,11 +364,6 @@ staggerU_t select_staggerU(const problem_t& problem,
 
   // Find WGM
   size_t abs_wgm = std::abs(wgm);
-
-  // Find Mall Tile (the tile that is accessed by all CUs in one time step)
-  size_t numWGsPerMallTile = numMT_M * numMT_N;
-  size_t MallTile_N        = numMT_N;
-  size_t MallTile_M        = numMT_M;
 
   // Find L2 Tile (the tile that is accessed by CUs on one XCD in one time step)
   size_t L2Tile_M = 0;
@@ -399,54 +388,60 @@ staggerU_t select_staggerU(const problem_t& problem,
     return staggerU_t{0, 0, 0};
   }
 
-  // Early Exit: if the whole data doesn't fit in L2, then we have to fetch data from MALL
-  // In this case, we better wait for data to be accessible in L2 rather than issuing another
-  // MALL read. Therefore, staggerU only helps when ALL K-slices can remain resident in L2.
-  // There is a 5% buffer to account for other overheads.
-  // if ((MT_M * L2Tile_M * data_type_to_bytes(problem.a_dtype) +
-  //      MT_N * L2Tile_N * data_type_to_bytes(problem.b_dtype)) *
-  //         K >
-  //     0.95 * hardware.L2_capacity)
-  //   return staggerU_t{0, 0, 0};  
-
-  // Find StaggerU for L2
-  size_t L2_staggerUMapping = 0;
-  size_t L2_staggerU        = 0;
-  // Stagger along the direction with more XCDs — that's where contention is highest
-  size_t numXCDs_M = math::safe_ceil_div(numMT_M, L2Tile_M);
-  size_t numXCDs_N = math::safe_ceil_div(numMT_N, L2Tile_N);
-  if (numXCDs_M >= numXCDs_N) {
-      L2_staggerUMapping = 0;  // SUM0: stagger along M
-      L2_staggerU        = std::min(2 * L2Tile_M, numMT_M);
-  } else {
-      L2_staggerUMapping = 1;  // SUM1: stagger along N
-      L2_staggerU        = std::min(2 * L2Tile_N, numMT_N);
-  }
-
-  // Find StaggerU for Mall
-  size_t Mall_staggerUMapping = 0;
-  size_t Mall_staggerU        = 0;
-  if (MallTile_M >= MallTile_N) {
-    Mall_staggerUMapping = 0;
-    Mall_staggerU        = MallTile_M;
-  } else {
-    Mall_staggerUMapping = 1;
-    Mall_staggerU        = MallTile_N;
-  }
-
-  // Decision: Check workgroup distribution across XCDs
-  // If we have very few workgroups per XCD (less than half the number of XCDs),
-  // it indicates sparse work distribution -> use Mall stagger
-  // Otherwise, use L2 stagger
+  // Stagger along the dimension with higher tiles
   size_t out_staggerUMapping     = 0;
   size_t out_staggerU            = 0;
   size_t out_staggerUStrideShift = 0;
-  if (numWGsPerL2Tile < numCUsPerXCD / 8) {
-    out_staggerUMapping = Mall_staggerUMapping;
-    out_staggerU        = Mall_staggerU;
+  if (L2Tile_M > L2Tile_N) {
+    out_staggerUMapping = 0;  // SUM0: stagger along M
+    out_staggerU        = std::min(L2Tile_M, numMT_M);
   } else {
-    out_staggerUMapping = L2_staggerUMapping;
-    out_staggerU        = L2_staggerU;
+    out_staggerUMapping = 1;  // SUM1: stagger along N
+    out_staggerU        = std::min(L2Tile_N, numMT_N);
+  }
+
+  // L2 capacity check: base stagger must fit in L2.
+  size_t bpe_a = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
+  size_t bpe_b = static_cast<size_t>(data_type_to_bytes(problem.b_dtype));
+  size_t per_slice = MT_K * (L2Tile_M * MT_M * bpe_a + L2Tile_N * MT_N * bpe_b);
+  // 95% is a conservative limit mostly to handle not-nice L2 tiles (wrapping around).
+  if (out_staggerU * per_slice > 0.95 * hardware.L2_capacity)
+    return staggerU_t{0, 0, 0};
+
+  // MALL coverage optimization. Per-XCD L2 working set is unchanged by direction/doubling
+  // choices, so no further L2 capacity checks needed.
+  // Step 1: Check if switching direction with the same value gives better GEMM coverage.
+  // Compare what fraction of each dimension the base value covers.
+  // Prefer the direction where more of the dimension is covered.
+  size_t base = out_staggerU;
+  {
+    size_t cov_M = std::min(base, numMT_M);
+    size_t cov_N = std::min(base, numMT_N);
+    // Compare fractions: cov_M/numMT_M vs cov_N/numMT_N
+    if (cov_N * numMT_M > cov_M * numMT_N && numMT_N >= base) {
+      out_staggerUMapping = 1;  // N has better relative coverage and fits
+    } else if (cov_M * numMT_N > cov_N * numMT_M && numMT_M >= base) {
+      out_staggerUMapping = 0;  // M has better relative coverage and fits
+    }
+    // If equal fractions, keep original direction from L2 contention
+  }
+
+  // Step 2: Try doubling. StaggerU cannot exceed numMT in the chosen direction.
+  // If both directions fit, pick the one with best XCD coverage.
+  {
+    // XCD coverage = number of distinct XCDs spanned by the stagger pattern.
+    size_t numXCDs_M = math::safe_ceil_div(numMT_M, L2Tile_M);
+    size_t numXCDs_N = math::safe_ceil_div(numMT_N, L2Tile_N);
+    size_t doubled = 2 * base;
+    bool can_M = (doubled <= numMT_M);
+    bool can_N = (doubled <= numMT_N);
+    if (can_M && can_N) {
+      size_t xcd_M = std::min(math::safe_ceil_div(doubled, L2Tile_M), numXCDs_M);
+      size_t xcd_N = std::min(math::safe_ceil_div(doubled, L2Tile_N), numXCDs_N);
+      out_staggerUMapping = (xcd_N >= xcd_M) ? 1 : 0;
+      out_staggerU = doubled;
+    }
+    // If neither fits, keep the base value and direction from step 1.
   }
 
   // If the stagger size is <= 2, there is nothing to stagger
@@ -464,8 +459,7 @@ staggerU_t select_staggerU(const problem_t& problem,
   // Each stagger step spans: DepthU * bpe * 2^shift bytes.
   // We need: DepthU * bpe * 2^shift >= L2_CACHE_LINE_BYTES
   constexpr size_t L2_CACHE_LINE_BYTES = 128;
-  double min_bpe = std::min(data_type_to_bytes(problem.a_dtype),
-                              data_type_to_bytes(problem.b_dtype));
+  double min_bpe = std::min(bpe_a, bpe_b);
   size_t bytes_per_k_iter = static_cast<size_t>(MT_K * min_bpe);
   size_t min_shift = 0;
   while ((bytes_per_k_iter << min_shift) < L2_CACHE_LINE_BYTES && min_shift < 5)
