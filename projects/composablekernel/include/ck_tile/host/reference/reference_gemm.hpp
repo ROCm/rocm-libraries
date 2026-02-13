@@ -411,33 +411,32 @@ CK_TILE_HOST void reference_mx_gemm_bquant(const HostTensor<ADataType>& a_m_k,
         ComputeType v_a;
         ComputeType v_b;
 
-        for(std::size_t k = 0; k < K; k++)
-        {
-            const auto b_scale = type_convert<float>(q(k / QuantGroupSize::kK, n));
-            v_a                = ck_tile::type_convert<ComputeType>(a_element_op(a_m_k(m, k)));
+        auto load_b = [&](std::size_t k) -> AccDataType {
             if constexpr(std::is_same_v<BDataType, pk_fp4_t>)
             {
                 const auto b_pack = type_convert<pk_fp4_t>(b_element_op(b_k_n(k, n)));
-
-                const auto pack_dim =
-                    std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor> ? n : k;
-
-                if(pack_dim % 2 == 0)
+                if constexpr(std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>)
                 {
-                    const auto b_f4_lo = type_convert<pk_fp4_t>(b_pack.unpack(number<0>{}));
-                    v_b                = type_convert<ComputeType>(b_f4_lo);
+                    return (n & 1) ? type_convert<ComputeType>(b_pack.unpack(number<1>{}))
+                                   : type_convert<ComputeType>(b_pack.unpack(number<0>{}));
                 }
                 else
                 {
-                    const auto b_f4_hi = type_convert<pk_fp4_t>(b_pack.unpack(number<1>{}));
-                    v_b                = type_convert<ComputeType>(b_f4_hi);
+                    return (k & 1) ? type_convert<ComputeType>(b_pack.unpack(number<1>{}))
+                                   : type_convert<ComputeType>(b_pack.unpack(number<0>{}));
                 }
             }
             else
             {
-                v_b = ck_tile::type_convert<ComputeType>(b_element_op(b_k_n(k, n)));
+                return ck_tile::type_convert<ComputeType>(b_element_op(b_k_n(k, n)));
             }
-            v_b *= b_scale;
+        };
+
+        for(std::size_t k = 0; k < K; k++)
+        {
+            const auto b_scale = type_convert<float>(q(k / QuantGroupSize::kK, n));
+            v_a                = ck_tile::type_convert<ComputeType>(a_element_op(a_m_k(m, k)));
+            v_b                = load_b(k) * b_scale;
             v_acc += v_a * v_b;
         }
         c_m_n(m, n) = ck_tile::type_convert<CDataType>(acc_element_op(v_acc));
