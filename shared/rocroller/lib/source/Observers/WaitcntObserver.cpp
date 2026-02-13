@@ -209,7 +209,7 @@ namespace rocRoller
 
                 if(context->kernelOptions()->assertWaitCntState)
                 {
-                    // assertLabelConsistency();
+                    assertLabelConsistency();
                 }
             }
 

@@ -311,6 +311,32 @@ namespace rocRoller
                 }
                 return false;
             }
+
+            bool IsDirectLoadToVGPR(KernelGraph const& k, int loadTag)
+            {
+                const auto maybeLoad = k.control.get<LoadTiled>(loadTag);
+                if(!maybeLoad)
+                    return false;
+
+                auto macroTileTag = k.mapper.get<MacroTile>(loadTag);
+
+                const auto maybeMacroTile = k.coordinates.get<MacroTile>(macroTileTag);
+                if(!maybeMacroTile)
+                    return false;
+                const auto macroTile = maybeMacroTile.value();
+
+                const auto top = getTopSetCoordinate(k, loadTag);
+
+                auto isStoreLDSTilePredicate = k.control.isElemType<StoreLDSTile>();
+                auto storeLDSTileNodes
+                    = k.control.findNodes(top, isStoreLDSTilePredicate, GD::Downstream);
+                const auto isLoadInLDSPathViaVGPR = std::any_of(
+                    storeLDSTileNodes.begin(), storeLDSTileNodes.end(), [&](int storeTag) {
+                        return macroTileTag == k.mapper.get<MacroTile>(storeTag);
+                    });
+
+                return !isLoadInLDSPathViaVGPR;
+            }
         }
 
         namespace CF = rocRoller::KernelGraph::ControlGraph;
@@ -359,6 +385,18 @@ namespace rocRoller
 
             std::map<int, std::map<int, std::vector<int>>> m_deferredToOrder;
 
+            struct LoadTiledInfoComparator
+            {
+                bool operator()(const LoadTiledInfo& a, const LoadTiledInfo& b) const
+                {
+                    return a.top < b.top;
+                }
+            };
+
+            // Global Memory To VGPR loads not part of a to LDS path nor loads for exchange operations
+            // ForLoop -> Unroll value -> list of {topSetCoordinate, loadTag}
+            std::map<int, std::map<int, std::set<LoadTiledInfo, LoadTiledInfoComparator>>>
+                m_directLoads;
 
             CommandParametersPtr m_params;
             ContextPtr           m_context;
@@ -399,12 +437,7 @@ namespace rocRoller
         }
 
         /**
-        * @brief Order loads before Multiplies; and record direct
-        * load operations within the segment that need to be ordered.
-        *
-        * We can't order direct loads just yet, as the graph might be
-        * in an invalid state when orderLoadsBeforeMultiplies is
-        * called.
+        * @brief Order loads before Multiplies
         */
         void AddPrefetchVisitor::orderLoadsBeforeMultiplies(KernelGraph& graph, int forLoop, int u)
         {
@@ -553,7 +586,22 @@ namespace rocRoller
                 sortBy(loadsByUnroll[u], argumentOrder, [](const auto& info) { return info.user; });
             }
 
-            AssertFatal(loadsByUnroll.size() == numUnroll);
+            AssertFatal(loadsByUnroll.size() == numUnroll,
+                        ShowValue(loadsByUnroll.size()),
+                        ShowValue(numUnroll));
+
+            std::map<int, std::vector<LoadTiledInfo>> directLoadsByUnroll;
+            for(int u = 0; u < numUnroll; u++)
+            {
+                for(auto load : m_directLoads[forLoop][u])
+                    directLoadsByUnroll[u].push_back(load);
+                // TODO: Order by argument type?
+            }
+
+            const auto numDirectLoads = directLoadsByUnroll.size();
+            AssertFatal(numDirectLoads == 0 or numDirectLoads == numUnroll,
+                        ShowValue(numDirectLoads),
+                        ShowValue(numUnroll));
 
             //
             // Add Scope above the ForLoop
@@ -578,6 +626,21 @@ namespace rocRoller
             // Loads first
             for(int u = 0; u < numInFlight; ++u)
             {
+                // Direct loads before global prefetch loads in pre-loop
+                if(directLoadsByUnroll.contains(u))
+                {
+                    for(auto& load : directLoadsByUnroll[u])
+                    {
+                        logger->debug("  prefetch: pre-loop direct load: unroll {} load {} "
+                                      "of user {} with top {}.",
+                                      u,
+                                      load.tag,
+                                      load.user,
+                                      load.top);
+                        auto loadChain = duplicateChain(graph, {load.top});
+                        preChain.push_back(loadChain);
+                    }
+                }
                 for(auto load : loadsByUnroll[u])
                 {
                     logger->debug(
@@ -746,6 +809,35 @@ namespace rocRoller
                 }
             }
 
+            // Update SetCoordinates for direct loads operations
+            for(uint u = 0; u < numUnroll; ++u)
+            {
+                auto prefetchGlobalU = (u + numInFlight) % numUnroll;
+                for(auto load : m_directLoads[forLoop][prefetchGlobalU])
+                {
+                    // for each SetCoordinate in chain
+                    for(auto setCoordTag : graph.control.findNodes(
+                            load.top, graph.control.isElemType<SetCoordinate>(), GD::Downstream))
+                    {
+                        auto setCoordOp = graph.control.getNode<SetCoordinate>(setCoordTag);
+                        auto setCoordUnrollCoord = graph.mapper.get<Unroll>(setCoordTag);
+
+                        if(setCoordUnrollCoord == unrollCoord)
+                        {
+                            auto prefetchCoordExpr = literal(u + numInFlight);
+
+                            logger->debug(
+                                "  prefetch: in-loop: set coordinate: load {} user {} expr {}",
+                                u,
+                                load.user,
+                                toString(prefetchCoordExpr));
+
+                            graph.control.setElement(setCoordTag, SetCoordinate(prefetchCoordExpr));
+                        }
+                    }
+                }
+            }
+
             // Build Unroll segment boundaries
             std::vector<int> segmentBoundaries = {forLoop};
             for(uint u = 0; u < numUnroll; ++u)
@@ -793,23 +885,60 @@ namespace rocRoller
 
                 auto nop = separateMemOps ? graph.control.addElement(NOP()) : -1;
 
+                auto previousBoundaryStart = separateMemOps ? nop : segmentBoundaries[u];
+
+                // Order direct loads before global prefetch loads within this segment
+                // and chain them sequentially
+                if(directLoadsByUnroll.contains(globalPrefetchU))
+                {
+                    auto        directLoadPrefetchU = (u + numInFlight) % numUnroll;
+                    const auto& directLoads         = directLoadsByUnroll[directLoadPrefetchU];
+
+                    const auto firstLoadTopSetCoord = directLoads[0].top;
+
+                    if(separateMemOps)
+                    {
+                        graph.control.addElement(
+                            Sequence(), {previousBoundaryStart}, {firstLoadTopSetCoord});
+                    }
+                    else if(u == 0)
+                    {
+                        graph.control.addElement(
+                            Body(), {previousBoundaryStart}, {firstLoadTopSetCoord});
+                    }
+                    else
+                    {
+                        graph.control.addElement(
+                            Sequence(), {previousBoundaryStart}, {firstLoadTopSetCoord});
+                    }
+
+                    for(size_t i = 1; i < directLoads.size(); ++i)
+                    {
+                        graph.control.addElement(
+                            Sequence(), {directLoads[i - 1].top}, {directLoads[i].top});
+                    }
+
+                    previousBoundaryStart = directLoads[directLoads.size() - 1].top;
+                }
+
                 // Issue global loads
                 auto globalLoads = loadsByUnroll[globalPrefetchU];
                 logger->debug("  prefetch: in-loop: issue global loads {}",
                               globalLoads[0].globalChain);
                 if(separateMemOps)
                 {
-                    graph.control.addElement(Sequence(), {nop}, {globalLoads[0].globalChain});
+                    graph.control.addElement(
+                        Sequence(), {previousBoundaryStart}, {globalLoads[0].globalChain});
                 }
                 else if(u == 0)
                 {
                     graph.control.addElement(
-                        Body(), {segmentBoundaries[u]}, {globalLoads[0].globalChain});
+                        Body(), {previousBoundaryStart}, {globalLoads[0].globalChain});
                 }
                 else
                 {
                     graph.control.addElement(
-                        Sequence(), {segmentBoundaries[u]}, {globalLoads[0].globalChain});
+                        Sequence(), {previousBoundaryStart}, {globalLoads[0].globalChain});
                 }
 
                 logger->debug("  prefetch: in-loop: global load {} user {}",
@@ -1101,46 +1230,61 @@ namespace rocRoller
                     // If there isn't an info entry yet, then there
                     // isn't a matching StoreLDSTile operation.  In
                     // this case, LDS isn't being used for this User
-                    // coordinate; don't try pre-fetching it.
+                    // coordinate; don't try pre-fetching it unless
+                    // it is a direct load (Global Memory -> VGPR).
                     auto user = k.mapper.get<User>(loadTag);
                     if(!m_info[forLoop][operationUnroll[loadTag]].contains(user))
                     {
-                        auto ok = m_params->prefetchScale && isLoadForExchange(loadTag, k);
+                        const auto isDirectLoad   = IsDirectLoadToVGPR(k, loadTag);
+                        const auto isExchangeLoad = isLoadForExchange(loadTag, k);
+                        auto       ok = m_params->prefetchScale && (isExchangeLoad || isDirectLoad);
                         if(m_params->prefetchMixMemOps && !ok)
                         {
                             Throw<FatalError>(
-                                "AddPrefetch: A direct load (not through LDS) was detected, "
+                                "AddPrefetch: An unexpected direct load (not through LDS) was "
+                                "detected, "
                                 "and memory-operation mixing is enabled.  The AddPrefetch pass "
-                                "can not continue.  To remedy this: ensure that all loads have LDS "
-                                "enabled OR disable memory operation mixing (prefetchMixMemOps).");
-
-                            // The problem is (as currently implemented)...
-                            //
-                            // We add LoadTile operations above the
-                            // ForLoop to prefetch the first set of
-                            // tiles.  These are in-flight across the
-                            // top of the loop boundary.
-                            //
-                            // Now consider the last segment.  If
-                            // memory operations are allowed to be
-                            // mixed AND a direct load appears before
-                            // a multiply, then this direct load will
-                            // force the mixed-in prefetch loads that
-                            // are in-flight to complete.
-                            //
-                            // Then, at the bottom of the loop nothing
-                            // will be in-flight.
-                            //
-                            // This is inconsistent with the top of
-                            // the loop.
-                            //
-                            // This can be remedied with some
-                            // modifications to this pass: by making
-                            // sure memory operations are done in the
-                            // right order.
+                                "can not continue.");
                         }
-                        Log::debug("AddPrefetch::stage: Skipping global non-LDS load operation {}",
-                                   loadTag);
+
+                        if(isDirectLoad && not(isExchangeLoad))
+                        {
+                            if(!operationUnroll.contains(loadTag))
+                                continue;
+
+                            auto top = getTopSetCoordinate(k, loadTag);
+
+                            if(alreadySeen.contains(top))
+                                continue;
+
+                            auto unrollU = operationUnroll[loadTag];
+
+                            Log::debug("AddPrefetch::stage: Direct load operation {} "
+                                       "top {} unroll {}.",
+                                       loadTag,
+                                       top,
+                                       unrollU);
+
+                            m_directLoads[forLoop][unrollU].insert(
+                                {.user = user, .tag = loadTag, .top = top});
+
+                            for(auto edge : k.control.getNeighbours(top, GD::Upstream))
+                                m_prefetchDelete[forLoop].insert(edge);
+                            for(auto edge : k.control.getNeighbours(top, GD::Downstream))
+                            {
+                                if(!isBodyPredicate(edge))
+                                    m_prefetchDelete[forLoop].insert(edge);
+                            }
+
+                            alreadySeen.insert(top);
+                        }
+                        else
+                        {
+                            Log::debug(
+                                "AddPrefetch::stage: Skipping global non-LDS load operation {}",
+                                loadTag);
+                        }
+
                         continue;
                     }
 
