@@ -85,8 +85,10 @@ function(hipdnn_add_dependency_includes TARGET_NAME HEADER_LIB_TARGET_NAME)
 
     get_target_property(_dep_includes ${HEADER_LIB_TARGET_NAME} INTERFACE_INCLUDE_DIRECTORIES)
     if(_dep_includes)
-        message(VERBOSE "${TARGET_NAME} adding includes from ${HEADER_LIB_TARGET_NAME}: ${_dep_includes}")
-        target_include_directories(${TARGET_NAME} SYSTEM ${_visibility} ${_dep_includes})
+        foreach(_include IN LISTS _dep_includes)
+            message(VERBOSE "${TARGET_NAME} adding include from ${HEADER_LIB_TARGET_NAME}: ${_include}")
+            target_include_directories(${TARGET_NAME} SYSTEM ${_visibility} $<BUILD_INTERFACE:${_include}>)
+        endforeach()
     endif()
 
     if(ARG_COMPILE_DEFINITIONS)
