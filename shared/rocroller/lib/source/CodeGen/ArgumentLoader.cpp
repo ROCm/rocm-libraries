@@ -94,7 +94,7 @@ namespace rocRoller
             m_preloadedBlock.reset();
         }
 
-        if(anyManuallyLoadedArguments())
+        if(anyManuallyLoadedArguments() && m_manuallyLoadedBlock)
         {
             Log::debug("Splitting out manually loaded args:");
             co_yield splitOutArgs(m_manuallyLoadedBlock, m_manuallyLoadedOffset);

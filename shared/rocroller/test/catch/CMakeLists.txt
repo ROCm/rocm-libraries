@@ -35,6 +35,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/AddStreamKTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AliasDataFlowTagsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AnnotateInstructionsTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentLoaderGPUTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentTracerTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticUtilityTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AssignIndexExpressionsTest.cpp"
