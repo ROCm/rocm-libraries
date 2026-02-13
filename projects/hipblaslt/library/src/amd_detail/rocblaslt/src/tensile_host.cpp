@@ -63,9 +63,11 @@
 #include <atomic>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -96,22 +98,21 @@ namespace
     //
     // This is intended as a lightweight alternative while a more robust solution is built out.
     //
-    // To add your own assembly kernel, you need to create a RegistryEntry along the
-    // lines of entrySimpleGemmPoC() below, and add it to the registry returned by getRegistry().
+    // To add your own assembly kernel, you can either:
+    // 1) Create a RegistryEntry (e.g. entrySimpleGemmPoC()) and add it to getRegistry(), or
+    // 2) For Wave mxfp4 kernels: place assembly files named wave_gemm_mxfp4_{m}_{n}_{k}.s
+    //    under HIPBLASLT_EXTERNAL_ASSEMBLY_DIR; they are discovered recursively and
+    //    registered automatically (signature: a, a_scale, b, b_scale, c).
     //
-    // Then, tell hipblaslt to enable external assembly, and where the assembly files are,
-    // via environment variables:
+    // Enable external assembly and set the assembly directory:
     //
-    // export HIPBLASLT_ENABLE_EXTERNAL_ASSEMBLY=1
-    // export HIPBLASLT_EXTERNAL_ASSEMBLY_DIR=/path/to/your/asm/files/
+    //   export HIPBLASLT_ENABLE_EXTERNAL_ASSEMBLY=1
+    //   export HIPBLASLT_EXTERNAL_ASSEMBLY_DIR=/path/to/your/asm/files/
     //
-    // You should then be able to your assembly kernel through hipblaslt-bench, verifying it
-    // is wired up correctly and seeing its performance.
+    // Example (SimpleGemm PoC):
     //
-    // To run entrySimpleGemmPoC are:
-    //
-    // ninja hipblaslt-bench && \
-    //  hipblaslt-bench -m 128 -n 64 -k 256 -r f32_r --verify --alpha 1 --beta 1
+    //   ninja hipblaslt-bench && \
+    //     hipblaslt-bench -m 128 -n 64 -k 256 -r f32_r --verify --alpha 1 --beta 1
     class ExternalAssemblyDriver
     {
     public:
@@ -168,7 +169,6 @@ namespace
             }();
             return enabled;
         }
-
         /// Returns the path to the .s source file.
         static std::string getAsmPath(const std::string& filename)
         {
@@ -239,9 +239,8 @@ namespace
             std::string compiler = "/opt/rocm/llvm/bin/clang";
 
             std::ostringstream cmd;
-            cmd << compiler << " -x assembler"
-                << " -target amdgcn-amd-amdhsa"
-                << " -mcpu=" << arch << " -o " << coPath << " " << asmPath << " 2>&1";
+            cmd << compiler << " -x assembler" << " -target amdgcn-amd-amdhsa" << " -mcpu=" << arch
+                << " -o " << coPath << " " << asmPath << " 2>&1";
 
             std::cout << "[ExternalAssemblyDriver] Compiling: " << cmd.str() << std::endl;
 
@@ -348,6 +347,7 @@ namespace
         // Rule 1: Simple GEMM PoC
         static RegistryEntry entrySimpleGemmPoC()
         {
+            std::cout << "entrySimpleGemmPoC" << std::endl;
             return {"SimpleGemm_PoC",
                     // Selector: what GEMM geometries should this kernel be used for?
                     [](rocblaslt_handle, const RocblasltContractionProblem& p) -> bool {
@@ -394,11 +394,38 @@ namespace
                      }}};
         }
 
+        /// Rule 2: Wave mxfp4 external assembly
+        /// Returns registry entries for all Wave mxfp4 assembly files under
+        /// HIPBLASLT_EXTERNAL_ASSEMBLY_DIR. Returns empty if the env var is unset or
+        /// the directory does not exist.
+        static std::vector<RegistryEntry> getWaveMxfp4RegistryEntries()
+        {
+            const char* env = std::getenv("HIPBLASLT_EXTERNAL_ASSEMBLY_DIR");
+            if(!env || *env == '\0')
+                return {};
+            std::string dir(env);
+            if(dir.back() != '/')
+                dir += '/';
+            std::error_code ec;
+            if(!std::filesystem::is_directory(dir, ec) || ec)
+                return {};
+            std::vector<WaveMxfp4SolutionInfo> solutions = scanDirectoryForWaveMxfp4Assembly(dir);
+            std::vector<RegistryEntry>         entries;
+            entries.reserve(solutions.size());
+            for(const auto& sol : solutions)
+                entries.push_back(makeWaveMxfp4RegistryEntry(sol));
+            return entries;
+        }
+
         static const std::vector<RegistryEntry>& getRegistry()
         {
-            static std::vector<RegistryEntry> registry = {
-                entrySimpleGemmPoC(),
-            };
+            static std::vector<RegistryEntry> registry = []() {
+                std::vector<RegistryEntry> r           = {entrySimpleGemmPoC()};
+                std::vector<RegistryEntry> waveEntries = getWaveMxfp4RegistryEntries();
+                for(auto& e : waveEntries)
+                    r.push_back(std::move(e));
+                return r;
+            }();
             return registry;
         }
 
@@ -448,6 +475,120 @@ namespace
             modules.push_back(module);
             funcMap[key] = func;
             return func;
+        }
+
+        // -------------------------------------------------------------------------
+        // Wave mxfp4 external assembly: scan directory and build registry entries
+        // from filenames of the form wave_gemm_mxfp4_{m}_{n}_{k}.s
+        // -------------------------------------------------------------------------
+
+        /// Solution info parsed from a Wave mxfp4 assembly filename.
+        struct WaveMxfp4SolutionInfo
+        {
+            std::string asmPath; // Full path to the .s file
+            std::string name; // Registry name, e.g. "WaveMxfp4_128_64_256"
+            int         m{0};
+            int         n{0};
+            int         k{0};
+        };
+
+        /// Returns true if the kernel expects (a, a_scale, b, b_scale, c) with i8 inputs and f32 output.
+        static bool isWaveMxfp4Problem(const RocblasltContractionProblem& p)
+        {
+            return p.a_type == HIP_R_8I && p.b_type == HIP_R_8I && p.d_type == HIP_R_32F
+                   && p.scaleA != nullptr && p.scaleB != nullptr && !p.strided_batch
+                   && !p.grouped_gemm && p.batch_count == 1;
+        }
+
+        /// Parses a basename like "wave_gemm_mxfp4_128_64_256.s" into m, n, k.
+        /// Returns nullopt if the filename does not match.
+        static std::optional<WaveMxfp4SolutionInfo> parseWaveMxfp4Filename(const std::string& path)
+        {
+            std::string basename = std::filesystem::path(path).filename().string();
+            // Match wave_gemm_mxfp4_<m>_<n>_<k>.s (case-insensitive extension)
+            std::regex  re(R"(wave_gemm_mxfp4_(\d+)_(\d+)_(\d+)\.s)", std::regex::icase);
+            std::smatch match;
+            if(!std::regex_match(basename, match, re) || match.size() != 4)
+                return std::nullopt;
+
+            WaveMxfp4SolutionInfo info;
+            info.asmPath = path;
+            info.m       = std::stoi(match[1].str());
+            info.n       = std::stoi(match[2].str());
+            info.k       = std::stoi(match[3].str());
+            info.name = "WaveMxfp4_" + match[1].str() + "_" + match[2].str() + "_" + match[3].str();
+            return info;
+        }
+
+        /// Recursively collects all Wave mxfp4 assembly files under \p dir.
+        static std::vector<WaveMxfp4SolutionInfo>
+            scanDirectoryForWaveMxfp4Assembly(const std::string& dir)
+        {
+            std::vector<WaveMxfp4SolutionInfo> result;
+            std::error_code                    ec;
+            for(auto it = std::filesystem::recursive_directory_iterator(dir, ec);
+                it != std::filesystem::recursive_directory_iterator();
+                ++it)
+            {
+                if(ec)
+                    break;
+                if(!it->is_regular_file(ec))
+                    continue;
+                std::string path = it->path().string();
+                if(path.size() < 4)
+                    continue;
+                std::string ext = path.substr(path.size() - 2);
+                if(ext != ".s" && ext != ".S")
+                    continue;
+                auto info = parseWaveMxfp4Filename(path);
+                if(info)
+                    result.push_back(*info);
+            }
+            return result;
+        }
+
+        /// Default kernel function name for Wave mxfp4 kernels (matches common Wave def gemm(...)).
+        static const char* waveMxfp4KernelFunctionName()
+        {
+            return "gemm";
+        }
+
+        /// Builds a single registry entry for one Wave mxfp4 assembly file.
+        static RegistryEntry makeWaveMxfp4RegistryEntry(const WaveMxfp4SolutionInfo& info)
+        {
+            const int m = info.m, n = info.n, k = info.k;
+            return {
+                info.name,
+                // Selector: same dimensions and Wave mxfp4 types (i8 A/B, scaleA/scaleB, f32 D).
+                [m, n, k](rocblaslt_handle, const RocblasltContractionProblem& p) -> bool {
+                    if(!isWaveMxfp4Problem(p))
+                        return false;
+                    return static_cast<int>(p.m) == m && static_cast<int>(p.n) == n
+                           && static_cast<int>(p.k) == k;
+                },
+                // KernelInfo: (a, a_scale, b, b_scale, c) per Wave mxfp4 kernel signature.
+                {info.asmPath,
+                 waveMxfp4KernelFunctionName(),
+                 [](const RocblasltContractionProblem& p) -> std::vector<uint8_t> {
+                     struct WaveMxfp4Args
+                     {
+                         const void* a;
+                         const void* a_scale;
+                         const void* b;
+                         const void* b_scale;
+                         void*       c;
+                     };
+                     WaveMxfp4Args  args = {p.A, p.scaleA, p.B, p.scaleB, p.D};
+                     const uint8_t* raw  = reinterpret_cast<const uint8_t*>(&args);
+                     return std::vector<uint8_t>(raw, raw + sizeof(WaveMxfp4Args));
+                 },
+                 [](const RocblasltContractionProblem& p) -> GridConfig {
+                     const int blockSize = 256;
+                     int       threads   = static_cast<int>(p.m * p.n);
+                     int       blocks    = (threads + blockSize - 1) / blockSize;
+                     return {{blocks, 1, 1}, {blockSize, 1, 1}};
+                 }},
+            };
         }
     };
 
@@ -2908,6 +3049,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                        const RocblasltContractionProblem& prob,
                                        std::shared_ptr<void>              gemmData)
 {
+    std::cout << "runContractionProblem" << std::endl;
 
     rocblaslt_status status = rocblaslt_status_internal_error;
 
@@ -2915,6 +3057,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     {
         if(ExternalAssemblyDriver::isEnabled())
         {
+            std::cout << "Finding kernel through external assembly driver" << std::endl;
             const auto* kernel = ExternalAssemblyDriver::findKernel(handle, prob);
             if(kernel)
             {
