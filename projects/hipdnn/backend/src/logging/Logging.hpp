@@ -12,7 +12,6 @@
 // Backend-specific logging macros
 // These are separate from HIPDNN_LOG_* used by frontend/plugins to avoid conflicts
 #ifdef HIPDNN_BACKEND_COMPILATION
-#include <fmt/format.h>
 #include <hipdnn_data_sdk/logging/LogLevel.hpp>
 
 #define HIPDNN_BACKEND_LOG_INFO(...)                                                            \
