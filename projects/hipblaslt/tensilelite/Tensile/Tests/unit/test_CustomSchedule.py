@@ -177,44 +177,29 @@ class TestCustomScheduleBF16:
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 
-    def test_schedule_96x256x64_16bit_TN(self):
-        """Tests the 96x256x64 16-bit TN schedule."""
+    @pytest.mark.parametrize(
+        # fmt: off
+        "transA, transB, lds_tr_inst,  tr_lds", [
+        # TN case supports both LDSTrInst=True and LDSTrInst=False
+        (  True,  False,       False,       1),
+        (  True,  False,        True,       1),
+        ( False,   True,        True,       0)
+        # fmt: on
+        ])
+    def test_schedule_96x256x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
+        """Tests the 96x256x64 16-bit schedules."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
         kernel["ProblemType"].update({
             "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": True, "TransposeB": False
+            "TransposeA": transA, "TransposeB": transB
         })
         kernel.update({
             "MacroTile0": 96, "MacroTile1": 256, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
-            "TransposeLDS": 1, "MIWaveTileA": 3, "MIWaveTileB": 8,
-        })
-
-        has_schedule, schedule_info = hasCustomSchedule(kernel)
-        assert has_schedule
-        assert isinstance(schedule_info, ScheduleInfo)
-        assert schedule_info.numCodePaths == 2
-        assert schedule_info.numMfma == 48
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
-        assert valid, message
-
-    def test_schedule_96x256x64_16bit_NT(self):
-        """Tests the 96x256x64 16-bit NT schedule."""
-        kernel = create_base_kernel()
-        dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": False, "TransposeB": True
-        })
-        kernel.update({
-            "MacroTile0": 96, "MacroTile1": 256, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
-            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
-            "LDSTrInst": True, "TransposeLDS": 0,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds,
             "MIWaveTileA": 3, "MIWaveTileB": 8,
         })
 
