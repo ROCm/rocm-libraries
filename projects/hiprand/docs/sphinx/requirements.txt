@@ -18,7 +18,7 @@ breathe==4.35.0
     # via rocm-docs-core
 certifi==2024.7.4
     # via requests
-cffi==1.17.0
+cffi==2.0.0
     # via
     #   cryptography
     #   pynacl
@@ -26,7 +26,7 @@ charset-normalizer==3.3.2
     # via requests
 click==8.1.7
     # via sphinx-external-toc
-cryptography==43.0.0
+cryptography==46.0.5
     # via pyjwt
 deprecated==1.2.14
     # via pygithub
@@ -137,8 +137,9 @@ sphinxcontrib-serializinghtml==2.0.0
     # via sphinx
 tomli==2.0.1
     # via sphinx
-typing-extensions==4.12.2
+typing-extensions==4.15.0
     # via
+    #   cryptography
     #   pydata-sphinx-theme
     #   pygithub
 urllib3==2.2.2
