@@ -1564,11 +1564,8 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[320], [192], [1], [64, 64, 256]]
-          - Range: [[320], [192], [1], [1, 1, 64]]
+          - Range: [[320], [192], [1], [1, 17, 64]]
           - Range: [[320], [192], [1], [32, 64, 256]]
-          - Range: [[10240], [6144], [1], [64, 64, 256]]
-          - Exact: [5120, 3072, 1, 8192]
         - BiasTypeArgs: ['b']
     - # BenchmarkProblemSizeGroup - 128x192x64 TN (CMS)
       InitialSolutionParameters:
