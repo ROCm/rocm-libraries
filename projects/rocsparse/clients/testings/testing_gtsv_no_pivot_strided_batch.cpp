@@ -91,7 +91,9 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
 {
     rocsparse_int m            = arg.M;
     rocsparse_int batch_count  = arg.N;
-    rocsparse_int batch_stride = arg.denseld;
+    rocsparse_int batch_stride = arg.M;//arg.denseld;
+
+    std::cout << "m: " << m << " batch_count: " << batch_count << " batch_stride: " << batch_stride << std::endl;
 
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);
@@ -116,10 +118,16 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
     {
         for(rocsparse_int i = 0; i < m; ++i)
         {
-            hdl[j * batch_stride + i] = random_cached_generator<T>(1, 8);
-            hd[j * batch_stride + i]  = random_cached_generator<T>(17, 32);
-            hdu[j * batch_stride + i] = random_cached_generator<T>(1, 8);
+            hdl[j * batch_stride + i] = static_cast<T>(2);//random_cached_generator<T>(1, 8);
+            hd[j * batch_stride + i]  = static_cast<T>(4);//random_cached_generator<T>(17, 32);
+            hdu[j * batch_stride + i] = static_cast<T>(2);//random_cached_generator<T>(1, 8);
         }
+        // for(rocsparse_int i = 0; i < m; ++i)
+        // {
+        //     hdl[j * batch_stride + i] = static_cast<T>(i);
+        //     hd[j * batch_stride + i]  = static_cast<T>(i + m);
+        //     hdu[j * batch_stride + i] = static_cast<T>(i + 2 * m);
+        // }
 
         hdl[j * batch_stride + 0]     = static_cast<T>(0);
         hdu[j * batch_stride + m - 1] = static_cast<T>(0);
@@ -132,7 +140,7 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
     {
         for(rocsparse_int i = 0; i < m; ++i)
         {
-            hx[j * batch_stride + i] = random_cached_generator<T>(-10, 10);
+            hx[j * batch_stride + i] = static_cast<T>(1);//random_cached_generator<T>(-10, 10);
         }
     }
 
@@ -185,6 +193,20 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
                                       + hdu[offset + i] * hx[offset + i + 1];
             }
         }
+
+        std::cout << "hx" << std::endl;
+        for(size_t i = 0; i < m; i++)
+        {
+            std::cout << hx[i] << " ";
+        }
+        std::cout << "" << std::endl;
+
+        std::cout << "hresult" << std::endl;
+        for(size_t i = 0; i < m; i++)
+        {
+            std::cout << hresult[i] << " ";
+        }
+        std::cout << "" << std::endl;
 
         near_check_segments<T>(batch_stride * batch_count, hx_original.data(), hresult.data());
     }

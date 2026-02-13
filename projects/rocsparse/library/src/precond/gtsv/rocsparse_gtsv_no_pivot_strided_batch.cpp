@@ -27,6 +27,8 @@
 
 #include "gtsv_nopivot_strided_batch_device.h"
 
+#include <vector>
+
 #define LAUNCH_GTSV_NOPIVOT_STRIDED_BATCH_PCR_POW2_STAGE1(T, block_size, stride, iter) \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                \
         (rocsparse::gtsv_nopivot_strided_batch_pcr_pow2_stage1_kernel<block_size>),    \
@@ -240,7 +242,145 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        rocsparse_host_assert(m <= 512, "This function is designed for m <= 512.");
+        //rocsparse_host_assert(m <= 512, "This function is designed for m <= 512.");
+
+
+        if(m == 1024)
+        {
+            std::cout << "A" << std::endl;
+            constexpr int M = 1024;
+            constexpr int WF_SIZE = 32;
+            constexpr int BLOCKSIZE = 256;
+            std::vector<T> htemp_a(M);
+            std::vector<T> htemp_b(M);
+            std::vector<T> htemp_c(M);
+            std::vector<T> htemp_x(M);
+            std::vector<T> htemp_cprime(M);
+            std::vector<T> htemp_xprime(M);
+            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_a.data(), dl, sizeof(T) * M, hipMemcpyDeviceToHost));
+            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_b.data(), d, sizeof(T) * M, hipMemcpyDeviceToHost));
+            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_c.data(), du, sizeof(T) * M, hipMemcpyDeviceToHost));
+            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_x.data(), x, sizeof(T) * M, hipMemcpyDeviceToHost));
+            std::cout << "Before htemp_a" << std::endl;
+            for(int i = 0; i < M; i++)
+            {
+                std::cout << htemp_a[i] << " ";
+            }
+            std::cout << "" << std::endl;
+
+            std::cout << "Before htemp_b" << std::endl;
+            for(int i = 0; i < M; i++)
+            {
+                std::cout << htemp_b[i] << " ";
+            }
+            std::cout << "" << std::endl;
+
+            std::cout << "Before htemp_c" << std::endl;
+            for(int i = 0; i < M; i++)
+            {
+                std::cout << htemp_c[i] << " ";
+            }
+            std::cout << "" << std::endl;
+
+            std::cout << "Before htemp_x" << std::endl;
+            for(int i = 0; i < M; i++)
+            {
+                std::cout << htemp_x[i] << " ";
+            }
+            std::cout << "" << std::endl;
+            
+            T* dtemp_a = nullptr;
+            T* dtemp_b = nullptr;
+            T* dtemp_c = nullptr;
+            T* dtemp_x = nullptr;
+            T* dtemp_cprime = nullptr;
+            T* dtemp_xprime = nullptr;
+            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_a, sizeof(T) * M));
+            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_b, sizeof(T) * M));
+            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_c, sizeof(T) * M));
+            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_x, sizeof(T) * M));
+            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_cprime, sizeof(T) * M));
+            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_xprime, sizeof(T) * M));
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::gtsv_nopivot_strided_batch_pcr_wavefront_kernel<BLOCKSIZE, WF_SIZE, M>),
+                dim3((batch_count - 1) / (BLOCKSIZE / WF_SIZE) + 1),
+                dim3(BLOCKSIZE),
+                0,
+                handle->stream,
+                m,
+                batch_count,
+                batch_stride,
+                dl,
+                d,
+                du,
+                x,
+                dtemp_a,
+                dtemp_b,
+                dtemp_c,
+                dtemp_x,
+                dtemp_cprime,
+                dtemp_xprime);
+
+            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_a.data(), dtemp_a, sizeof(T) * M, hipMemcpyDeviceToHost));
+            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_b.data(), dtemp_b, sizeof(T) * M, hipMemcpyDeviceToHost));
+            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_c.data(), dtemp_c, sizeof(T) * M, hipMemcpyDeviceToHost));
+            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_x.data(), dtemp_x, sizeof(T) * M, hipMemcpyDeviceToHost));
+            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_cprime.data(), dtemp_cprime, sizeof(T) * M, hipMemcpyDeviceToHost));
+            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_xprime.data(), dtemp_xprime, sizeof(T) * M, hipMemcpyDeviceToHost));
+
+            std::cout << "After htemp_a" << std::endl;
+            for(int i = 0; i < M; i++)
+            {
+                std::cout << htemp_a[i] << " ";
+            }
+            std::cout << "" << std::endl;
+
+            std::cout << "After htemp_b" << std::endl;
+            for(int i = 0; i < M; i++)
+            {
+                std::cout << htemp_b[i] << " ";
+            }
+            std::cout << "" << std::endl;
+
+            std::cout << "After htemp_c" << std::endl;
+            for(int i = 0; i < M; i++)
+            {
+                std::cout << htemp_c[i] << " ";
+            }
+            std::cout << "" << std::endl;
+
+            std::cout << "After htemp_x" << std::endl;
+            for(int i = 0; i < M; i++)
+            {
+                std::cout << htemp_x[i] << " ";
+            }
+            std::cout << "" << std::endl;
+
+            std::cout << "After htemp_cprime" << std::endl;
+            for(int i = 0; i < M; i++)
+            {
+                std::cout << htemp_cprime[i] << " ";
+            }
+            std::cout << "" << std::endl;
+
+            std::cout << "After htemp_xprime" << std::endl;
+            for(int i = 0; i < M; i++)
+            {
+                std::cout << htemp_xprime[i] << " ";
+            }
+            std::cout << "" << std::endl;
+
+            RETURN_IF_HIP_ERROR(hipFree(dtemp_a));
+            RETURN_IF_HIP_ERROR(hipFree(dtemp_b));
+            RETURN_IF_HIP_ERROR(hipFree(dtemp_c));
+            RETURN_IF_HIP_ERROR(hipFree(dtemp_x));
+            RETURN_IF_HIP_ERROR(hipFree(dtemp_cprime));
+            RETURN_IF_HIP_ERROR(hipFree(dtemp_xprime));
+            return rocsparse_status_success;
+        }
+
+
+
 
         // Run special algorithm if m is power of 2
         if((m & (m - 1)) == 0)
@@ -460,7 +600,8 @@ rocsparse_status rocsparse::gtsv_no_pivot_strided_batch_template(rocsparse_handl
     }
 
     // If m is small we can solve the systems entirely in shared memory
-    if(m <= 512)
+    // if(m <= 512)
+    if(m <= 1024)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::gtsv_no_pivot_strided_batch_small_template(
             handle, m, dl, d, du, x, batch_count, batch_stride, temp_buffer));

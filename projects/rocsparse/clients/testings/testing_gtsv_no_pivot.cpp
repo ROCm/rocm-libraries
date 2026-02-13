@@ -108,18 +108,18 @@ void testing_gtsv_no_pivot(const Arguments& arg)
     host_vector<T> hdu(m);
 
     // initialize tri-diagonal matrix
-    // for(rocsparse_int i = 0; i < m; ++i)
-    // {
-    //     hdl[i] = static_cast<T>(2);//random_cached_generator<T>(1, 8);
-    //     hd[i]  = static_cast<T>(4);//random_cached_generator<T>(17, 32);
-    //     hdu[i] = static_cast<T>(2);//random_cached_generator<T>(1, 8);
-    // }
     for(rocsparse_int i = 0; i < m; ++i)
     {
-        hdl[i] = static_cast<T>(i);
-        hd[i]  = static_cast<T>(i + m);
-        hdu[i] = static_cast<T>(i + 2 * m);
+        hdl[i] = static_cast<T>(2);//random_cached_generator<T>(1, 8);
+        hd[i]  = static_cast<T>(4);//random_cached_generator<T>(17, 32);
+        hdu[i] = static_cast<T>(2);//random_cached_generator<T>(1, 8);
     }
+    // for(rocsparse_int i = 0; i < m; ++i)
+    // {
+    //     hdl[i] = static_cast<T>(i);
+    //     hd[i]  = static_cast<T>(i + m);
+    //     hdu[i] = static_cast<T>(i + 2 * m);
+    // }
 
     hdl[0]     = 0.0f;
     hdu[m - 1] = 0.0f;

@@ -1665,7 +1665,7 @@ namespace rocsparse
             x[i] = B[ldb * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * i + lid];
         }
 
-        for(int it = 0; it < 1; it++)
+        for(int it = 0; it < iter; it++)
         {
             for(int i = 0; i < M / WF_SIZE; i++)
             {
@@ -1711,10 +1711,10 @@ namespace rocsparse
                 c[i] = c_new;
                 x[i] = x_new;
 
-                temp_a[lid] = a_left;
-                temp_b[lid] = b_left;
-                temp_c[lid] = c_left;
-                temp_B[lid] = x_left;
+                // temp_a[lid] = a_left;
+                // temp_b[lid] = b_left;
+                // temp_c[lid] = c_left;
+                // temp_B[lid] = x_left;
             }
 
             stride <<= 1; //stride *= 2;
@@ -1763,12 +1763,18 @@ namespace rocsparse
         const int wid = tid / WF_SIZE;
 
         int iter   = static_cast<int>(rocsparse::log2(M / 2));
+        int iter2  = static_cast<int>(rocsparse::log2(WF_SIZE));
         int stride = 1;
 
         T a[M / WF_SIZE];
         T b[M / WF_SIZE];
         T c[M / WF_SIZE];
         T x[M / WF_SIZE];
+
+        T a2[M / WF_SIZE];
+        T b2[M / WF_SIZE];
+        T c2[M / WF_SIZE];
+        T x2[M / WF_SIZE];
 
         for(int i = 0; i < M / WF_SIZE; i++)
         {
@@ -1778,22 +1784,22 @@ namespace rocsparse
             x[i] = B[ldb * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * i + lid];
         }
 
-        for(int it = 0; it < 2; it++)
+        for(int it = 0; it < iter2; it++)
         {
             for(int i = 0; i < M / WF_SIZE; i++)
             {
                 const int right = lid + stride;
                 const int left = lid - stride;
 
-                T a_left_patch = (i > 0) ? shfl(a[i - 1], WF_SIZE - stride, WF_SIZE) : static_cast<T>(0);
-                T b_left_patch = (i > 0) ? shfl(b[i - 1], WF_SIZE - stride, WF_SIZE) : static_cast<T>(0);
-                T c_left_patch = (i > 0) ? shfl(c[i - 1], WF_SIZE - stride, WF_SIZE) : static_cast<T>(0);
-                T x_left_patch = (i > 0) ? shfl(x[i - 1], WF_SIZE - stride, WF_SIZE) : static_cast<T>(0);
+                const T a_left_patch = (i > 0) ? shfl(a[i - 1], WF_SIZE + left, WF_SIZE) : static_cast<T>(0);
+                const T b_left_patch = (i > 0) ? shfl(b[i - 1], WF_SIZE + left, WF_SIZE) : static_cast<T>(0);
+                const T c_left_patch = (i > 0) ? shfl(c[i - 1], WF_SIZE + left, WF_SIZE) : static_cast<T>(0);
+                const T x_left_patch = (i > 0) ? shfl(x[i - 1], WF_SIZE + left, WF_SIZE) : static_cast<T>(0);
 
-                T a_right_patch = (i < (M / WF_SIZE - 1)) ? shfl(a[i + 1], stride - 1, WF_SIZE) : static_cast<T>(0);
-                T b_right_patch = (i < (M / WF_SIZE - 1)) ? shfl(b[i + 1], stride - 1, WF_SIZE) : static_cast<T>(0);
-                T c_right_patch = (i < (M / WF_SIZE - 1)) ? shfl(c[i + 1], stride - 1, WF_SIZE) : static_cast<T>(0);
-                T x_right_patch = (i < (M / WF_SIZE - 1)) ? shfl(x[i + 1], stride - 1, WF_SIZE) : static_cast<T>(0);
+                const T a_right_patch = (i < (M / WF_SIZE - 1)) ? shfl(a[i + 1], right - WF_SIZE, WF_SIZE) : static_cast<T>(0);
+                const T b_right_patch = (i < (M / WF_SIZE - 1)) ? shfl(b[i + 1], right - WF_SIZE, WF_SIZE) : static_cast<T>(0);
+                const T c_right_patch = (i < (M / WF_SIZE - 1)) ? shfl(c[i + 1], right - WF_SIZE, WF_SIZE) : static_cast<T>(0);
+                const T x_right_patch = (i < (M / WF_SIZE - 1)) ? shfl(x[i + 1], right - WF_SIZE, WF_SIZE) : static_cast<T>(0);
 
                 T a_left = shfl_up(a[i], stride, WF_SIZE);
                 T b_left = shfl_up(b[i], stride, WF_SIZE);
@@ -1801,14 +1807,6 @@ namespace rocsparse
                 T x_left = shfl_up(x[i], stride, WF_SIZE);
 
                 if(left < 0)
-                {
-                    a_left = static_cast<T>(0);
-                    b_left = static_cast<T>(0);
-                    c_left = static_cast<T>(0);
-                    x_left = static_cast<T>(0);
-                }
-
-                if(i > 0 && lid == 0)
                 {
                     a_left = a_left_patch;
                     b_left = b_left_patch;
@@ -1823,41 +1821,98 @@ namespace rocsparse
 
                 if(right > (WF_SIZE - 1))
                 {
-                    a_right = static_cast<T>(0);
-                    b_right = static_cast<T>(0);
-                    c_right = static_cast<T>(0);
-                    x_right = static_cast<T>(0);
-                }
-
-                if(i < (M / WF_SIZE - 1) && lid == (WF_SIZE - 1))
-                {
                     a_right = a_right_patch;
                     b_right = b_right_patch;
                     c_right = c_right_patch;
                     x_right = x_right_patch;
                 }
 
-                // const T k1 = (left >= 0) ? a[i] / b_left : static_cast<T>(0);
-                // const T k2 = (right <= WF_SIZE - 1) ? c[i] / b_right : static_cast<T>(0);
+                const T k1 = (b_left != static_cast<T>(0)) ? a[i] / b_left : static_cast<T>(0);
+                const T k2 = (b_right != static_cast<T>(0)) ? c[i] / b_right : static_cast<T>(0);
 
-                // const T a_new = -a_left * k1;
-                // const T b_new = b[i] - c_left * k1 - a_right * k2;
-                // const T c_new = -c_right * k2;
-                // const T x_new = x[i] - x_left * k1 - x_right * k2;
+                const T a_new = -a_left * k1;
+                const T b_new = b[i] - c_left * k1 - a_right * k2;
+                const T c_new = -c_right * k2;
+                const T x_new = x[i] - x_left * k1 - x_right * k2;
 
-                // a[i] = a_new;
-                // b[i] = b_new;
-                // c[i] = c_new;
-                // x[i] = x_new;
+                a2[i] = a_new;
+                b2[i] = b_new;
+                c2[i] = c_new;
+                x2[i] = x_new;
 
-                temp_a[WF_SIZE * i + lid] = a_left;
-                temp_b[WF_SIZE * i + lid] = b_left;
-                temp_c[WF_SIZE * i + lid] = c_left;
-                temp_B[WF_SIZE * i + lid] = x_left;
+                // temp_a[WF_SIZE * i + lid] = a_right;
+                // temp_b[WF_SIZE * i + lid] = b_right;
+                // temp_c[WF_SIZE * i + lid] = c_right;
+                // temp_B[WF_SIZE * i + lid] = x_right;
+            }
+
+            for(int i = 0; i < M / WF_SIZE; i++)
+            {
+                a[i] = a2[i];
+                b[i] = b2[i];
+                c[i] = c2[i];
+                x[i] = x2[i];
             }
 
             stride <<= 1; //stride *= 2;
         }
+
+        // stride now equals M / 2
+        // assert(stride == M / 2);
+        assert(stride == 2 * WF_SIZE);
+
+        // for(int i = 0; i < M / WF_SIZE; i++)
+        // {
+        //     temp_a[WF_SIZE * i + lid] = iter2;
+        //     temp_b[WF_SIZE * i + lid] = stride;
+        // }
+
+        // if(lid == 1)
+        // {
+        //     for(int i = 0; i < WF_SIZE; i++)
+        //     {
+        //         temp_b[i] = a[i];
+        //     }
+        // }
+
+        // Finish with thomas algorithm
+        T c_prime[M / WF_SIZE];
+        T x_prime[M / WF_SIZE];
+
+        // Forward sweep
+        c_prime[0] = c[0] / b[0];
+        for(int i = 1; i < M / WF_SIZE - 1; i++)
+        {
+            T num       = c[i];
+            T denom     = b[i] - a[i] * c_prime[i - 1];
+            c_prime[i] = num / denom;
+        }
+
+        x_prime[0] = x[0] / b[0];
+        for(int i = 1; i < M / WF_SIZE; i++)
+        {
+            T num      = x[i] - a[i] * x_prime[i - 1];
+            T denom    = b[i] - a[i] * c_prime[i - 1];
+            x_prime[i] = num / denom;
+        }
+
+        // Backward sweep
+        x[M / WF_SIZE - 1] = x_prime[M / WF_SIZE - 1];
+        for(int i = M / WF_SIZE - 2; i >= 0; i--)
+        {
+            x[i] = x_prime[i] - c_prime[i] * x[i + 1];
+        }
+
+        // Write results to output
+        B[ldb * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * (M / WF_SIZE - 1) + lid] = x[M / WF_SIZE - 1];
+        for(int i = M / WF_SIZE - 2; i >= 0; i--)
+        {
+            B[ldb * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * i + lid] = x[i];
+        }
+
+
+
+
 
         // for(int i = 0; i < M / WF_SIZE; i++)
         // {
@@ -1866,14 +1921,13 @@ namespace rocsparse
         //     // aj bj
         //     // 
         //     // det = bi * bj - aj * ci
-        //     T aj = shfl_down(a[i], stride, WF_SIZE);
-        //     T bj = shfl_down(b[i], stride, WF_SIZE);
-        //     T xj = shfl_down(x[i], stride, WF_SIZE);
+        //     const T aj = shfl_down(a[i], stride, WF_SIZE);
+        //     const T bj = shfl_down(b[i], stride, WF_SIZE);
+        //     const T xj = shfl_down(x[i], stride, WF_SIZE);
 
-        //     if(lid < WF_SIZE / 2) // same as lid < stride
+        //     if(lid < WF_SIZE / 2)
         //     {
-        //         T   det = b[i] * bj - aj * c[i];
-        //         det     = static_cast<T>(1) / det;
+        //         const T   det = static_cast<T>(1) / (b[i] * bj - aj * c[i]);
 
         //         B[ldb * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * i + lid] = (bj * x[i] - c[i] * xj) * det;
         //         B[ldb * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * i + lid + stride] = (xj * b[i] - x[i] * aj) * det;
