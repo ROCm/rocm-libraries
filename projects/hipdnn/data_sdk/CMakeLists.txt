@@ -10,10 +10,8 @@ set(HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/dat
 set(HIP_DNN_DATA_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
-hipdnn_add_dependency(spdlog VERSION ${HIPDNN_SPDLOG_VERSION})
 hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 
-find_package(fmt ${HIPDNN_FMTLIB_VERSION} QUIET)
 find_package(hip REQUIRED)
 
 # For dependencies we are going to check if they weren't imported, and then install it along with
@@ -84,12 +82,6 @@ if(TARGET FlatBuffers)
         INCLUDE_SUBDIR flatbuffers
     )
 endif()
-
-# Process spdlog dependency
-_hipdnn_data_sdk_process_dependency(
-    spdlog_header_only spdlog::spdlog_header_only INCLUDE_DIR ${HIP_DNN_SPDLOG_INCLUDE_DIR}
-    INCLUDE_SUBDIR spdlog
-)
 
 # Process nlohmann_json dependency
 _hipdnn_data_sdk_process_dependency(

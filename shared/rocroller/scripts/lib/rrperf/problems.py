@@ -244,7 +244,6 @@ class GEMMSolution:
     numWGs: int = 0
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
-    matchMemoryAccess: bool = True
     tailLoops: bool = True
 
     version: str = ""
@@ -608,6 +607,7 @@ def cast_missing_parameters(result):
             if storeLDS_D
             else "VGPRToGlobalMemoryWithBuffer"
         )
+
     # Convert old streamK bool fields to new streamK string enum
     if "streamKTwoTile" in result or "streamKTwoTileDPFirst" in result:
         old_streamK = result.get("streamK", False)
@@ -622,6 +622,9 @@ def cast_missing_parameters(result):
             result["streamK"] = "Standard"
         else:
             result["streamK"] = "None"
+
+    if "matchMemoryAccess" in result:
+        del result["matchMemoryAccess"]
 
 
 def load_results(path: pathlib.Path):
