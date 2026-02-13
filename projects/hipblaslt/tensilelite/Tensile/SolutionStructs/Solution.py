@@ -1477,7 +1477,8 @@ class Solution(collections.abc.Mapping):
         # return
         # Many existing kernels are rejected with this condition.
         # So far, continue with VectorWidthA //=state["numSubTiles"]
-        state["VectorWidthA"] //= state["numSubTiles"]
+        while state["MIWaveTile"][0] % (state["VectorWidthA"] * state["numSubTiles"]) != 0:
+          state["VectorWidthA"] //= state["numSubTiles"]
         if state["SourceSwap"] and state["StoreVectorWidth"] > state["VectorWidthA"]:
           # need to adjust StoreVectorWidth in SourceSwap case
           state["StoreVectorWidth"] //= state["numSubTiles"]
@@ -1504,7 +1505,8 @@ class Solution(collections.abc.Mapping):
         # return
         # Many existing kernels are rejected with this condition.
         # So far, continue with VectorWidthB //=state["numSubTiles"]
-        state["VectorWidthB"] //= state["numSubTiles"]
+        while state["MIWaveTile"][1] % (state["VectorWidthB"] * state["numSubTiles"]) != 0:
+          state["VectorWidthB"] //= state["numSubTiles"]
 
     if state["ProblemType"]["Sparse"]:
       if not state["DirectToVgprSparseMetadata"]:
