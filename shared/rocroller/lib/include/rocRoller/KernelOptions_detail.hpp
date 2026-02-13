@@ -39,8 +39,20 @@ namespace rocRoller
         bool alwaysWaitBeforeBranch      = false;
         bool alwaysWaitZeroBeforeBarrier = false;
 
-        bool preloadKernelArguments = true;
+        /**
+         * Maximum limit on the number of kernel arguments we will allow to be preloaded into
+         * SGPRs by the GPU at the beginning of the kernel. If it is set to -1, this is
+         * unlimited and we will use the maximum defined by the architecture.
+         */
         int  systemPreloadedKernelArguments = -1;
+
+        /**
+         * If enabled, kernel arguments that are not preloaded by the system will be lazily
+         * loaded as they are needed in the kernel. Note that this does not currently work well
+         * for complex kernels as we cannot efficiently overlap kernel argument loading with
+         * other memory traffic.
+         */
+        bool lazyLoadKernelArguments = false;
 
         unsigned int maxACCVGPRs      = 256;
         unsigned int maxSGPRs         = 102;

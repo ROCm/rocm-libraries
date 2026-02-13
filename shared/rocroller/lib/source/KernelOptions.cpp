@@ -152,7 +152,7 @@ namespace rocRoller
         ShowOption(alwaysWaitAfterStore);
         ShowOption(alwaysWaitBeforeBranch);
         ShowOption(alwaysWaitZeroBeforeBarrier);
-        ShowOption(preloadKernelArguments);
+        ShowOption(lazyLoadKernelArguments);
         ShowOption(systemPreloadedKernelArguments);
         ShowOption(maxACCVGPRs);
         ShowOption(maxSGPRs);

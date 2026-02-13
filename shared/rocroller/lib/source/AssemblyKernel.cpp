@@ -117,7 +117,6 @@ namespace rocRoller
             m_workitemIndex[2]->setName("Workitem Index Z");
             co_yield m_workitemIndex[2]->allocate();
         }
-
     }
 
     Generator<Instruction> AssemblyKernel::preamble()
@@ -155,7 +154,7 @@ namespace rocRoller
 
         co_yield Instruction::Comment(ctx->kernelOptions()->toString());
 
-        if(ctx->kernelOptions()->preloadKernelArguments)
+        if(!ctx->kernelOptions()->lazyLoadKernelArguments)
             co_yield ctx->argLoader()->loadAllArguments();
 
         co_yield ctx->argLoader()->splitOutArgumentRegisters();
@@ -209,10 +208,16 @@ namespace rocRoller
 
             // No more need for packed value.
             m_packedWorkitemIndex.reset();
-            if(ctx->kernelOptions()->preloadKernelArguments)
-                m_argumentPointer.reset();
-            else
+
+            if(ctx->kernelOptions()->lazyLoadKernelArguments)
+            {
                 m_argumentPointer->setReadOnly();
+            }
+            else
+            {
+                // We're done loading kernel arguments so we don't need the pointer anymore.
+                m_argumentPointer.reset();
+            }
         }
 
         for(auto& reg : m_workgroupIndex)

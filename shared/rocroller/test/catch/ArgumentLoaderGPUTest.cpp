@@ -162,7 +162,7 @@ namespace ArgumentLoaderGPUTest
                         << ", lazyLoad=" << lazyLoad)
         {
 
-            auto context = TestContext::ForTestDevice({{.preloadKernelArguments = !lazyLoad}},
+            auto context = TestContext::ForTestDevice({{.lazyLoadKernelArguments = lazyLoad}},
                                                       numScalarArgs,
                                                       numPreloadedArgs,
                                                       numWorkgroupRegs,
