@@ -891,6 +891,42 @@ BenchmarkProblems:
           - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
           - Range: [[613], [612], [1], [1, 1, 64]]
         - BiasTypeArgs: ['b']
+    - # BenchmarkProblemSizeGroup - 192x128x64 TN (CMS)
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,32, 1,  1, 6, 4,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ActivationFuncCall: [0]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - LDSTrInst: [0]
+        - TransposeLDS: [1]
+        - StreamK: [3]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[192], [128], [1], [1, 17, 64]]
+          - Range: [[192], [128], [1], [32, 64, 256]]
+        - BiasTypeArgs: ['b']
     - # BenchmarkProblemSizeGroup - 256x160x64 TN (match cms-tn.yaml)
       InitialSolutionParameters:
       BenchmarkCommonParameters:
