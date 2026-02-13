@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <miopen/ck_builder/shared.hpp>
+#include <miopen/ck_builder/instance_data/common.hpp>
 
 namespace miopen {
 namespace conv {
@@ -16,18 +16,7 @@ struct DlAlgorithm
     using ConvSpecial = ckb::ConvSpecialization;
     using GemmSpecial = ckb::GemmSpecialization;
 
-    struct ThreadBlock
-    {
-        std::size_t block_size;
-        struct TileSize
-        {
-            std::size_t m;
-            std::size_t n;
-            std::size_t k;
-        } tile_size;
-    } thread_block;
-
-    static_assert(ckb::ThreadBlockDescriptor<ThreadBlock>);
+    ThreadBlock thread_block;
 
     // DL-specific thread configuration
     struct ThreadConfig
@@ -85,40 +74,12 @@ struct DlAlgorithm
     ConvSpecial fwd_specialization;
     GemmSpecial gemm_specialization;
 
-    // Elementwise operations applied during convolution
-    // - input_op: Applied to input tensor (A) before GEMM
-    // - weight_op: Applied to weight tensor (B) before GEMM
-    // - output_op: Applied to output tensor (CDE) after GEMM (epilogue)
-    struct ElementwiseOps
-    {
-        ckb::ElementwiseOperation input_op;
-        ckb::ElementwiseOperation weight_op;
-        ckb::ElementwiseOperation output_op;
-    } elementwise_ops;
+    ElementwiseOps elementwise_ops;
 };
 
 static_assert(ckb::factory::FwdDlAlgorithm<DlAlgorithm>);
 
-struct TensorDescriptor
-{
-    struct Config
-    {
-        ckb::TensorLayout layout;
-        ckb::DataType data_type;
-        ckb::DataType compute_type;
-    } config;
-};
-
-struct DlSignature
-{
-    std::size_t spatial_dim;
-    ckb::ConvDirection direction;
-    TensorDescriptor input;
-    TensorDescriptor weight;
-    TensorDescriptor output;
-    ckb::DataType data_type;
-    ckb::DataType accumulation_data_type;
-};
+using DlSignature = ConvSignature;
 
 // Struct to hold both signature and algorithm
 struct DlInstance
