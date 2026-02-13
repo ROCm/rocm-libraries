@@ -1692,6 +1692,16 @@ namespace TensileLite
 
         void DataInitialization::initializeCPUInputs(ContractionProblemGemm const& problem)
         {
+#ifdef HIPBLASLT_USE_ROCROLLER
+            // Use MX data generator for FP4 matrices with MX format
+            if((problem.a().dataType() == rocisa::DataType::Float4 && problem.mxBlockA() > 0)
+               || (problem.b().dataType() == rocisa::DataType::Float4 && problem.mxBlockB() > 0))
+            {
+                initializeMXDataForFP4(problem);
+                return; // Skip standard initialization for MX FP4 matrices
+            }
+#endif
+
             auto& tensors = problem.tensors();
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
@@ -1755,6 +1765,81 @@ namespace TensileLite
                 }
             }
         }
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+        void DataInitialization::initializeMXDataForFP4(ContractionProblemGemm const& problem)
+        {
+            // Empty vectors for preSwizzle and preTile (not used in TensilteLite)
+            std::vector<size_t> emptySwizzle;
+            std::vector<size_t> emptyTile;
+
+            // Generate MX data for matrix A if it uses FP4 with MX blocks
+            if(problem.mxBlockA() > 0 && problem.a().dataType() == rocisa::DataType::Float4)
+            {
+                // Get matrix A dimensions from tensor descriptor
+                auto const& tensorA = problem.a();
+                auto        rows    = tensorA.sizes()[0]; // Number of rows
+                auto        cols    = tensorA.sizes()[1]; // Number of columns
+                auto        stride  = tensorA.strides()[1]; // Leading dimension
+
+                // Get the pristine data pointer for matrix A
+                auto& pristineA
+                    = m_vdata[ContractionProblemGemm::TENSOR::A].pristine[rocisa::DataType::Float4];
+                auto& pristineMXScaleA
+                    = m_vdata[ContractionProblemGemm::TENSOR::MXSA].pristine[rocisa::DataType::UInt8];
+
+                // Call mxDataGenerator directly
+                auto refA = generateMXInput(HIP_R_4F_E2M1_EXT,
+                                           pristineA.cpuInput.valid.get(),
+                                           pristineMXScaleA.cpuInput.valid.get(),
+                                           rows,
+                                           cols,
+                                           stride,
+                                           problem.transA(),
+                                           emptySwizzle,
+                                           emptyTile,
+                                           problem.mxBlockA(), // scaleBlockRowSize
+                                           1,                  // scaleBlockColSize
+                                           true,               // isMatrixA
+                                           "Bounded",
+                                           -1.0f,
+                                           1.0f);
+            }
+
+            // Generate MX data for matrix B if it uses FP4 with MX blocks
+            if(problem.mxBlockB() > 0 && problem.b().dataType() == rocisa::DataType::Float4)
+            {
+                // Get matrix B dimensions from tensor descriptor
+                auto const& tensorB = problem.b();
+                auto        rows    = tensorB.sizes()[0]; // Number of rows
+                auto        cols    = tensorB.sizes()[1]; // Number of columns
+                auto        stride  = tensorB.strides()[1]; // Leading dimension
+
+                // Get the pristine data pointer for matrix B
+                auto& pristineB
+                    = m_vdata[ContractionProblemGemm::TENSOR::B].pristine[rocisa::DataType::Float4];
+                auto& pristineMXScaleB
+                    = m_vdata[ContractionProblemGemm::TENSOR::MXSB].pristine[rocisa::DataType::UInt8];
+
+                // Call mxDataGenerator directly
+                auto refB = generateMXInput(HIP_R_4F_E2M1_EXT,
+                                           pristineB.cpuInput.valid.get(),
+                                           pristineMXScaleB.cpuInput.valid.get(),
+                                           rows,
+                                           cols,
+                                           stride,
+                                           problem.transB(),
+                                           emptySwizzle,
+                                           emptyTile,
+                                           problem.mxBlockB(),
+                                           1,
+                                           false, // isMatrixA = false for matrix B
+                                           "Bounded",
+                                           -1.0f,
+                                           1.0f);
+            }
+        }
+#endif
 
         void DataInitialization::initializeConstantInputs(ContractionProblemGemm const& problem)
         {

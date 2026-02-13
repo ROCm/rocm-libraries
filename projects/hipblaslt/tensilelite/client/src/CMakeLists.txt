@@ -22,3 +22,14 @@ target_sources(tensilelite-client
     "${CMAKE_CURRENT_SOURCE_DIR}/SolutionIterator.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/LibraryUpdateReporter.cpp"
 )
+
+if(TENSILELITE_ENABLE_ROCROLLER)
+    target_sources(tensilelite-client
+        PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../clients/common/src/mxDataGen.cpp"
+    )
+    target_include_directories(tensilelite-client
+        PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../clients/common/include"
+    )
+endif()

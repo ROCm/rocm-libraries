@@ -56,6 +56,7 @@ if(TENSILELITE_ENABLE_HOST)
     add_subdirectory(include)
 
     if(TENSILELITE_ENABLE_CLIENT)
+        option(TENSILELITE_ENABLE_ROCROLLER "Enable MX data generator for FP4 testing" ON)
         add_subdirectory(client)
     endif()
 
