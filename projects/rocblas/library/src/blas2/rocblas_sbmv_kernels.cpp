@@ -243,7 +243,12 @@ rocblas_status rocblas_internal_sbmv_launcher(rocblas_handle handle,
     int batches = handle->getBatchGridDim((int)batch_count);
 
     static constexpr int sbmv_DIM_X = 64;
+    // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    static constexpr int sbmv_DIM_Y = 4;
+#else
     static constexpr int sbmv_DIM_Y = 16;
+#endif
     rocblas_int          blocks     = (n - 1) / (sbmv_DIM_X) + 1;
     dim3                 grid(blocks, 1, batches);
     dim3                 threads(sbmv_DIM_X, sbmv_DIM_Y);

@@ -215,7 +215,12 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
                || ((is_double || is_complex_float) && m > dcdgmm_gfx942_m_lower_threshold)))
         {
             static constexpr int DGMM_DIM_X = 32;
+            // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+            static constexpr int DGMM_DIM_Y = 8;
+#else
             static constexpr int DGMM_DIM_Y = 32;
+#endif
 
             rocblas_int blocksX = (m - 1) / (DGMM_DIM_X * 2) + 1;
             rocblas_int blocksY = (n - 1) / DGMM_DIM_Y + 1;
@@ -248,7 +253,12 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
                || ((is_double || is_complex_float) && m > dcdgmm_gfx942_m_lower_threshold)))
         {
             static constexpr int DGMM_DIM_X = 32;
+            // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+            static constexpr int DGMM_DIM_Y = 8;
+#else
             static constexpr int DGMM_DIM_Y = 32;
+#endif
 
             rocblas_int blocksX = (m - 1) / (DGMM_DIM_X * 2) + 1;
             rocblas_int blocksY = (n - 1) / DGMM_DIM_Y + 1;

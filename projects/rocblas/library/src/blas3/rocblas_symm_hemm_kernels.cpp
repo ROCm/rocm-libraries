@@ -305,7 +305,12 @@ rocblas_status rocblas_symm_hemm_dispatch(rocblas_handle handle,
         return rocblas_status_success;
 
     static constexpr int symm_SCALE_DIM_X = 128;
+    // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    static constexpr int symm_SCALE_DIM_Y = 2;
+#else
     static constexpr int symm_SCALE_DIM_Y = 8;
+#endif
     rocblas_int          gx               = (m - 1) / (symm_SCALE_DIM_X) + 1;
     rocblas_int          gy = std::min(c_YZ_grid_launch_limit, (n - 1) / (symm_SCALE_DIM_Y) + 1);
 
@@ -314,7 +319,12 @@ rocblas_status rocblas_symm_hemm_dispatch(rocblas_handle handle,
     dim3 symm_scale_grid(gx, gy, batches);
     dim3 symm_scale_threads(symm_SCALE_DIM_X, symm_SCALE_DIM_Y);
 
+    // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    static constexpr int symm_DIM_XY = 16;
+#else
     static constexpr int symm_DIM_XY = 32;
+#endif
     rocblas_int          bx          = (m - 1) / (symm_DIM_XY) + 1;
     rocblas_int          by = std::min(c_YZ_grid_launch_limit, (n - 1) / (symm_DIM_XY) + 1);
     dim3                 symm_grid(bx, by, batches);

@@ -425,7 +425,12 @@ rocblas_status rocblas_internal_ger_launcher(rocblas_handle handle,
     {
         //The following rocblas_ger_double_buffered_kernel is only valid for the multiples of DIM_X
         static constexpr int DIM_X               = is_float ? 128 : 64;
+        // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+        static constexpr int DIM_Y               = is_float ? 2 : 4;
+#else
         static constexpr int DIM_Y               = is_float ? 8 : 16;
+#endif
         static constexpr int elements_per_thread = DIM_X / (2 * DIM_Y);
 
         const int block_x = m / DIM_X;
@@ -483,7 +488,12 @@ rocblas_status rocblas_internal_ger_launcher(rocblas_handle handle,
         }
         else
         {
+            // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+            static constexpr int DIM_X = 256;
+#else
             static constexpr int DIM_X = 1024;
+#endif
             dim3                 ger_grid(n, 1, batches);
             dim3                 ger_threads(DIM_X);
 
@@ -500,7 +510,12 @@ rocblas_status rocblas_internal_ger_launcher(rocblas_handle handle,
     else
     {
         static constexpr int DIM_X   = 32;
+        // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+        static constexpr int DIM_Y   = 8;
+#else
         static constexpr int DIM_Y   = 32;
+#endif
         static constexpr int WIN     = 2; // work item number of elements to process
         rocblas_int          blocksX = (m - 1) / DIM_X + 1;
         rocblas_int          blocksY = (n - 1) / (DIM_Y * WIN) + 1; // WIN columns/work item
