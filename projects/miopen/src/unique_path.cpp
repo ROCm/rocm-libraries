@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <cstring>
 #include <array>
-#include <bit>
 #include <random>
 
 #include <miopen/unique_path.hpp>
@@ -13,15 +12,15 @@ namespace {
 
 using DataBlock = std::array<uint64_t, 2>;
 
-static void generate_random_data_block(DataBlock& buf)
+void generate_random_data_block(DataBlock& buf)
 {
     std::random_device rd;
     std::mt19937_64 gen(rd());
     std::uniform_int_distribution<std::remove_reference_t<decltype(buf[0])>> distrib(0);
 
-    for(size_t i = 0; i < buf.size(); ++i)
+    for(auto& x : buf)
     {
-        buf[i] = distrib(gen);
+        x = distrib(gen);
     }
 }
 
@@ -56,7 +55,7 @@ fs::path unique_path(fs::path const& model)
                 nibbles_used = 0;
             }
 
-            unsigned int c = std::bit_cast<const uint8_t*>(ran.data())[nibbles_used / 2u];
+            unsigned int c = reinterpret_cast<const uint8_t*>(ran.data())[nibbles_used / 2u];
             c >>= 4u * (nibbles_used++ & 1u); // if odd, shift right 1 nibble
             sch = hex[c & 0xf];               // convert to hex digit and replace
         }
