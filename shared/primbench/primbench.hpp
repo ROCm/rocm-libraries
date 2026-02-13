@@ -35,6 +35,7 @@
 #include <random>
 #include <regex>
 #include <thread>
+#include <type_traits>
 #include <unordered_set>
 #include <variant>
 
@@ -355,8 +356,9 @@ public:
                     ss << ",";
                 ss << "\"" << kv.first << "\":";
                 if(kv.second)
-                    ss << "{" << "\"min_mhz\":" << kv.second->first
-                       << ",\"max_mhz\":" << kv.second->second << "}";
+                    ss << "{"
+                       << "\"min_mhz\":" << kv.second->first << ",\"max_mhz\":" << kv.second->second
+                       << "}";
                 else
                     ss << "null";
                 first = false;
@@ -1906,8 +1908,9 @@ inline void print_dry_header(std::string_view algo_name,
     size_t      status_col_width = status_header.size();
 
     std::cout << std::setw(status_col_width) << std::left << status_header << "  "
-              << std::setw(spec_col_width) << std::left << "Specialization" << "  " << "Index/"
-              << specialization_count << "\n";
+              << std::setw(spec_col_width) << std::left << "Specialization"
+              << "  "
+              << "Index/" << specialization_count << "\n";
 
     size_t underline_width = status_col_width + 2 + spec_col_width + 2 + family_col_width;
 
@@ -1937,11 +1940,12 @@ inline void print_header(std::string_view          algo_name,
     size_t status_col_width = std::max(status_header.size(), noisy_status.size());
 
     std::cout << std::setw(status_col_width) << std::left << status_header << "  "
-              << std::setw(noise_col_width) << std::left << "Noise" << "  "
-              << std::setw(gpu_temp_col_width) << std::left << "GPU °C" << "  "
-              << std::setw(bytes_per_sec_col_width) << std::left << "Bytes/sec" << "  "
-              << std::setw(spec_col_width) << std::left << "Specialization" << "  " << "Index/"
-              << specialization_count << "\n";
+              << std::setw(noise_col_width) << std::left << "Noise"
+              << "  " << std::setw(gpu_temp_col_width) << std::left << "GPU °C"
+              << "  " << std::setw(bytes_per_sec_col_width) << std::left << "Bytes/sec"
+              << "  " << std::setw(spec_col_width) << std::left << "Specialization"
+              << "  "
+              << "Index/" << specialization_count << "\n";
 
     size_t underline_width = status_col_width + 2 + noise_col_width + 2 + gpu_temp_col_width + 2
                              + bytes_per_sec_col_width + 2 + spec_col_width + 2 + family_col_width;
@@ -2434,6 +2438,157 @@ private:
     map_type m_map = {};
 }; // struct json
 
+struct device_storage
+{
+    device_storage(size_t size) : m_size(size), m_device_ptr(nullptr)
+    {
+        if(size > 0)
+        {
+            PRIMBENCH_HIP_CHECK(hipMalloc(&m_device_ptr, size))
+        }
+    }
+
+    ~device_storage()
+    {
+        if(m_device_ptr != nullptr)
+        {
+            PRIMBENCH_HIP_CHECK(hipFree(m_device_ptr));
+        }
+    }
+
+    size_t get_size() const
+    {
+        return m_size;
+    }
+
+    template<typename T = void>
+    T* get_ptr() const
+    {
+        return static_cast<T*>(m_device_ptr);
+    };
+
+    // This type is not copy assignable.
+    device_storage& operator=(const device_storage&) = delete;
+    // This type is not copy constructible.
+    device_storage(const device_storage&) = delete;
+
+private:
+    const size_t m_size;
+    void*        m_device_ptr;
+}; // struct device_storage
+
+/**
+ * \brief Cache thrashing utility to ensure the cache contains irrelevant data.
+ */
+struct cache_thrasher
+{
+public:
+    /**
+     * \brief Initializes the cache thrasher by allocating the required memory on device.
+     *
+     * Currently, the actual largest GPU cache size cannot be queried via HIP, so this
+     * conservative size is used instead. Future support via HSA could make this runtime-
+     * queryable.
+     */
+    cache_thrasher(size_t cache_size = PRIMBENCH_GPU_CACHE_SIZE) : m_device_storage(cache_size) {}
+
+    /**
+     * \brief Clears the cache by thrashing memory on device.
+     *
+     * Zeros a buffer of size `m_cache_size` to evict cached data. Should be called before
+     * each kernel launch.
+     */
+    void clear_cache(hipStream_t stream = hipStreamDefault)
+    {
+        PRIMBENCH_HIP_CHECK(
+            hipMemsetAsync(m_device_storage.get_ptr(), 0, m_device_storage.get_size(), stream));
+    }
+
+    // This type is not copy assignable.
+    cache_thrasher& operator=(const cache_thrasher&) = delete;
+    // This type is not copy constructible.
+    cache_thrasher(const cache_thrasher&) = delete;
+
+private:
+    const device_storage m_device_storage;
+}; // struct cache_thrasher
+
+struct gpu_warmer
+{
+    static constexpr int threads_per_block = 256;
+    static constexpr int num_items         = 1 << 20; // 1 million items.
+
+    gpu_warmer(settings& settings, amdsmi& amdsmi)
+        : m_settings(settings), m_amdsmi(amdsmi), m_device_storage(num_items * sizeof(float))
+    {}
+
+    static __global__
+    void warmup_kernel(float* data, int n)
+    {
+        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+        if(idx < n)
+        {
+            float x = 0.5f + idx * 0.0001f;
+
+            for(int i = 0; i < 10000; ++i)
+            {
+                x += sinf(x) * cosf(x);
+                x *= 1.0000001f;
+                x = sqrtf(x + 1.0f);
+                x = logf(x + 1.0f);
+            }
+
+            data[idx] = x;
+        }
+    }
+
+    void warm_up(hipStream_t stream = hipStreamDefault) const
+    {
+        auto ceil_div = [](int a, int b) -> int { return (a + b - 1) / b; };
+
+        auto start = std::chrono::steady_clock::now();
+
+        const auto& s = m_settings;
+
+        while(true)
+        {
+            uint16_t gpu_temp = m_amdsmi.get_temp();
+            if(gpu_temp >= s.min_gpu_temp)
+                break;
+
+            progress::print_warming(gpu_temp, s.min_gpu_temp);
+
+            dim3 threads(threads_per_block);
+            dim3 blocks(ceil_div(num_items, threads.x));
+
+            warmup_kernel<<<blocks, threads, 0, stream>>>(m_device_storage.get_ptr<float>(),
+                                                          num_items);
+
+            PRIMBENCH_HIP_CHECK(hipStreamSynchronize(stream));
+
+            auto duration = std::chrono::steady_clock::now() - start;
+            if(duration >= std::chrono::duration<double>(s.max_warming_secs))
+            {
+                std::cerr << "\nError: Failed to warm up after " << s.max_warming_secs
+                          << " seconds\n";
+                exit(EXIT_FAILURE);
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+
+    // This type is not copy assignable.
+    gpu_warmer& operator=(const gpu_warmer&) = delete;
+    // This type is not copy constructible.
+    gpu_warmer(const gpu_warmer&) = delete;
+
+private:
+    const settings&      m_settings;
+    const amdsmi&        m_amdsmi;
+    const device_storage m_device_storage;
+}; // struct gpu_warmer
+
 /**
  * \brief Manages benchmark execution, GPU warm-up/cool-down, timing, and logging.
  *
@@ -2456,7 +2611,9 @@ public:
           const settings&  settings,
           flags::FlagTag   flags,
           size_t           spec_col_width,
-          size_t           family_col_width)
+          size_t           family_col_width,
+          cache_thrasher&  cache,
+          gpu_warmer&      warmer)
         : stream(stream)
         , bytes(settings.bytes)
         , seed(settings.seed)
@@ -2470,6 +2627,8 @@ public:
         , m_flags(flags)
         , m_spec_col_width(spec_col_width)
         , m_family_col_width(family_col_width)
+        , m_cache(cache)
+        , m_warmer(warmer)
     {}
 
     /**
@@ -2716,67 +2875,7 @@ private:
      */
     void warm_up() const
     {
-        constexpr int threads_per_block = 256;
-        constexpr int num_items         = 1 << 20; // 1 million items.
-
-        static float* d_data = nullptr;
-        if(!d_data)
-            PRIMBENCH_HIP_CHECK(hipMalloc(&d_data, num_items * sizeof(float)));
-
-        auto ceil_div = [](int a, int b) -> int { return (a + b - 1) / b; };
-
-        auto start = std::chrono::steady_clock::now();
-
-        const auto& s = m_settings;
-
-        while(true)
-        {
-            uint16_t gpu_temp = m_amdsmi.get_temp();
-            if(gpu_temp >= s.min_gpu_temp)
-                break;
-
-            progress::print_warming(gpu_temp, s.min_gpu_temp);
-
-            dim3 threads(threads_per_block);
-            dim3 blocks(ceil_div(num_items, threads.x));
-
-            warmup_kernel<<<blocks, threads, 0, stream>>>(d_data, num_items);
-
-            PRIMBENCH_HIP_CHECK(hipStreamSynchronize(stream));
-
-            auto duration = std::chrono::steady_clock::now() - start;
-            if(duration >= std::chrono::duration<double>(s.max_warming_secs))
-            {
-                std::cerr << "\nError: Failed to warm up after " << s.max_warming_secs
-                          << " seconds\n";
-                exit(EXIT_FAILURE);
-            }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-    }
-
-    /**
-     * \brief GPU warm-up kernel used to raise temperature.
-     */
-    static __global__
-    void warmup_kernel(float* data, int n)
-    {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
-        if(idx < n)
-        {
-            float x = 0.5f + idx * 0.0001f;
-
-            for(int i = 0; i < 10000; ++i)
-            {
-                x += sinf(x) * cosf(x);
-                x *= 1.0000001f;
-                x = sqrtf(x + 1.0f);
-                x = logf(x + 1.0f);
-            }
-
-            data[idx] = x;
-        }
+        m_warmer.warm_up(stream);
     }
 
     /**
@@ -2942,19 +3041,11 @@ private:
     }
 
     /**
-     * \brief Clears GPU caches by zeroing a buffer.
-     *
-     * Zeros a buffer of size `PRIMBENCH_GPU_CACHE_SIZE` to evict cached data before
-     * each kernel launch. Currently, the actual largest GPU cache size
-     * cannot be queried via HIP, so this conservative size is used instead.
-     * Future support via HSA could make this runtime-queryable.
+     * \brief Clears GPU caches.
      */
     void clear_gpu_cache(hipStream_t stream) const
     {
-        static void* buf = nullptr;
-        if(!buf)
-            PRIMBENCH_HIP_CHECK(hipMalloc(&buf, PRIMBENCH_GPU_CACHE_SIZE));
-        PRIMBENCH_HIP_CHECK(hipMemsetAsync(buf, 0, PRIMBENCH_GPU_CACHE_SIZE, stream));
+        m_cache.clear_cache(stream);
     }
 
     /**
@@ -3004,6 +3095,9 @@ private:
 
     size_t m_spec_col_width;
     size_t m_family_col_width;
+
+    cache_thrasher& m_cache;
+    gpu_warmer&     m_warmer;
 
     std::function<void()> m_run_before_every_iteration_lambda = nullptr;
     std::vector<double>   m_times;
@@ -3875,7 +3969,9 @@ private:
                      m_settings,
                      m_flags,
                      m_spec_col_width,
-                     m_family_col_width);
+                     m_family_col_width,
+                     m_cache,
+                     m_warmer);
     }
 
     /**
@@ -3961,6 +4057,9 @@ private:
     size_t m_spec_col_width; /**< Column width for specialization names */
     size_t m_family_col_width; /**< Column width for family index */
 
+    detail::cache_thrasher m_cache = detail::cache_thrasher(); /**< Cache clearing utility */
+    detail::gpu_warmer     m_warmer
+        = detail::gpu_warmer(m_settings, get_amdsmi()); /**< GPU warm-up utility */
 }; // class executor
 
 } // namespace primbench
