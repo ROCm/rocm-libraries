@@ -83,11 +83,17 @@ additional_options = {
     "hipdnn": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
             "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
             "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         ],
-        "projects_to_test": ["hipdnn", "miopen_plugin"],
+        "projects_to_test": [
+            "hipdnn",
+            "hipdnn_install",
+            "hipdnn-samples",
+            "miopen_plugin",
+        ],
         "project_to_add": "miopen",
     },
     "miopen-provider": {
