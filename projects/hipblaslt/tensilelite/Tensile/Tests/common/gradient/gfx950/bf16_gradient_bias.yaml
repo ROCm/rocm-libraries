@@ -81,7 +81,7 @@ BenchmarkProblems:
           # - Exact: []
         - BiasTypeArgs: ['s']
         - ActivationArgs:
-          - [Enum: Dgelu]
+          - [Enum: Dgelu, Drelu]
 
   ########################################
   # TN - standard (BiasSrc A)
@@ -149,7 +149,7 @@ BenchmarkProblems:
           # - Exact: []
         - BiasTypeArgs: ['s']
         - ActivationArgs:
-          - [Enum: Dgelu]
+          - [Enum: Dgelu, Drelu]
 
   ########################################
   # NN - standard (BiasSrc A)
@@ -220,7 +220,7 @@ BenchmarkProblems:
           # - Exact: []
         - BiasTypeArgs: ['s']
         - ActivationArgs:
-          - [Enum: Dgelu]
+          - [Enum: Dgelu, Drelu]
 
   ########################################
   # TT - standard (BiasSrc A)
@@ -289,7 +289,7 @@ BenchmarkProblems:
           - Exact: [512, 256, 1,1023]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
-          - [Enum: Dgelu]
+          - [Enum: Dgelu, Drelu]
 
   ########################################
   # TN - standard (BiasSrc B)
@@ -361,7 +361,7 @@ BenchmarkProblems:
           # - Exact: []
         - BiasTypeArgs: ['s']
         - ActivationArgs:
-          - [Enum: Dgelu]
+          - [Enum: Dgelu, Drelu]
 
   ########################################
   # NT - standard (BiasSrc B)
@@ -430,4 +430,4 @@ BenchmarkProblems:
           # - Exact: []
         - BiasTypeArgs: ['s']
         - ActivationArgs:
-          - [Enum: Dgelu]
+          - [Enum: Dgelu, Drelu]
