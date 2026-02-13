@@ -26,7 +26,7 @@
 
 #define MAX_HIP_DESCRIPTOR_GPUS 64
 
-/*! @struct hipXtDesc_t
+/*!
  * @brief Struct for single-process multi-GPU transform
  *
  * This struct holds pointers to device memory, including the device
@@ -55,10 +55,10 @@ typedef enum hiplibFormat_t
     HIPLIB_FORMAT_UNDEFINED = 0x1
 } hiplibFormat;
 
-/*! @struct hipLibXtDesc_t
+/*!
  * @brief Struct for single-process multi-GPU transform
  *
- * This struct holds \ref hipXtDesc_t structures that define blocks
+ * This struct holds \ref hipXtDesc structures that define blocks
  * of memory for use in a transform.
  *
  * @warning Experimental
