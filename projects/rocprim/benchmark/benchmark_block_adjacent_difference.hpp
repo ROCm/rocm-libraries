@@ -45,19 +45,25 @@
 #include <vector>
 
 template<typename Subalgo,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         bool         WithTile,
+         typename T,
+         unsigned int                                 BlockSize,
+         unsigned int                                 ItemsPerThread,
+         bool                                         WithTile,
+         rocprim::block_adjacent_difference_algorithm Algorithm,
          typename... Args>
 __global__ __launch_bounds__(BlockSize)
 void kernel(Args... args)
 {
-    Subalgo::template run<BlockSize, ItemsPerThread, WithTile>(args...);
+    Subalgo::template run<T, BlockSize, ItemsPerThread, WithTile, Algorithm>(args...);
 }
 
 struct subtract_left
 {
-    template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
+    template<typename T,
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm>
     __device__
     static void run(const T* d_input, T* d_output, unsigned int trials)
     {
@@ -67,7 +73,7 @@ struct subtract_left
         T input[ItemsPerThread];
         rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
+        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize, 1, 1, Algorithm>;
         __shared__
         typename adjacent_diff_t::storage_type storage;
 
@@ -97,7 +103,11 @@ struct subtract_left
 
 struct subtract_left_partial
 {
-    template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
+    template<typename T,
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm>
     __device__
     static void
         run(const T* d_input, const unsigned int* tile_sizes, T* d_output, unsigned int trials)
@@ -108,7 +118,7 @@ struct subtract_left_partial
         T input[ItemsPerThread];
         rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
+        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize, 1, 1, Algorithm>;
         __shared__
         typename adjacent_diff_t::storage_type storage;
 
@@ -154,7 +164,11 @@ struct subtract_left_partial
 
 struct subtract_right
 {
-    template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
+    template<typename T,
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm>
     __device__
     static void run(const T* d_input, T* d_output, unsigned int trials)
     {
@@ -164,7 +178,7 @@ struct subtract_right
         T input[ItemsPerThread];
         rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
+        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize, 1, 1, Algorithm>;
         __shared__
         typename adjacent_diff_t::storage_type storage;
 
@@ -198,7 +212,11 @@ struct subtract_right
 
 struct subtract_right_partial
 {
-    template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
+    template<typename T,
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm>
     __device__
     static void
         run(const T* d_input, const unsigned int* tile_sizes, T* d_output, unsigned int trials)
@@ -209,7 +227,7 @@ struct subtract_right_partial
         T input[ItemsPerThread];
         rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
+        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize, 1, 1, Algorithm>;
         __shared__
         typename adjacent_diff_t::storage_type storage;
 
@@ -239,6 +257,20 @@ struct subtract_right_partial
     }
 };
 
+template<rocprim::block_adjacent_difference_algorithm Algorithm>
+std::string get_algorithm_name()
+{
+    switch(Algorithm)
+    {
+        case rocprim::block_adjacent_difference_algorithm::adjacent_difference_crosslane:
+            return "crosslane";
+        case rocprim::block_adjacent_difference_algorithm::adjacent_difference_shared_mem:
+            return "shared_mem";
+            // Not using `default: ...` because it kills effectiveness of -Wswitch
+    }
+    return "unknown_algorithm";
+}
+
 template<typename Subalgo>
 std::string get_subalgo_name()
 {
@@ -256,11 +288,12 @@ std::string get_subalgo_name()
 
 template<typename Subalgo,
          typename T,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         bool         WithTile,
-         unsigned int Trials = 100,
-         typename Config     = rocprim::default_config>
+         unsigned int                                 BlockSize,
+         unsigned int                                 ItemsPerThread,
+         bool                                         WithTile,
+         rocprim::block_adjacent_difference_algorithm Algorithm,
+         unsigned int                                 Trials = 100,
+         typename Config                                     = rocprim::default_config>
 struct block_adjacent_difference_benchmark : public primbench::benchmark_interface
 {
     primbench::json meta() const override
@@ -274,7 +307,8 @@ struct block_adjacent_difference_benchmark : public primbench::benchmark_interfa
                  primbench::json{}
                      .add("bs", BlockSize)
                      .add("ipt", ItemsPerThread)
-                     .add("with_tile", WithTile));
+                     .add("with_tile", WithTile)
+                     .add("method", get_algorithm_name<Algorithm>()));
     }
 
     void run(primbench::state& state) override
@@ -316,7 +350,7 @@ struct block_adjacent_difference_benchmark : public primbench::benchmark_interfa
             state.run(
                 [&]
                 {
-                    kernel<Subalgo, BlockSize, ItemsPerThread, WithTile>
+                    kernel<Subalgo, T, BlockSize, ItemsPerThread, WithTile, Algorithm>
                         <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input.get(),
                                                                            d_tile_sizes.get(),
                                                                            d_output.get(),
@@ -336,7 +370,7 @@ struct block_adjacent_difference_benchmark : public primbench::benchmark_interfa
             state.run(
                 [&]
                 {
-                    kernel<Subalgo, BlockSize, ItemsPerThread, WithTile>
+                    kernel<Subalgo, T, BlockSize, ItemsPerThread, WithTile, Algorithm>
                         <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input.get(),
                                                                            d_output.get(),
                                                                            Trials);

@@ -43,23 +43,26 @@
 
 template<typename Subalgo,
          typename T,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         bool         WithTile,
-         unsigned int Trials>
+         unsigned int                                 BlockSize,
+         unsigned int                                 ItemsPerThread,
+         bool                                         WithTile,
+         rocprim::block_adjacent_difference_algorithm Algorithm,
+         unsigned int                                 Trials>
 __global__ __launch_bounds__(BlockSize)
 void kernel(const T* d_input, T* d_output)
 {
-    Subalgo::template run<T, BlockSize, ItemsPerThread, WithTile, Trials>(d_input, d_output);
+    Subalgo::template run<T, BlockSize, ItemsPerThread, WithTile, Algorithm, Trials>(d_input,
+                                                                                     d_output);
 }
 
 struct flag_heads
 {
     template<typename T,
-             unsigned int BlockSize,
-             unsigned int ItemsPerThread,
-             bool         WithTile,
-             unsigned int Trials>
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm,
+             unsigned int                                 Trials>
     __device__
     static void run(const T* d_input, T* d_output)
     {
@@ -72,8 +75,8 @@ struct flag_heads
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)
         {
-            rocprim::block_discontinuity<T, BlockSize> bdiscontinuity;
-            bool                                       head_flags[ItemsPerThread];
+            rocprim::block_discontinuity<T, BlockSize, 1, 1, Algorithm> bdiscontinuity;
+            bool                                                        head_flags[ItemsPerThread];
             if(WithTile)
             {
                 bdiscontinuity.flag_heads(head_flags, T(123), input, rocprim::equal_to<T>());
@@ -97,10 +100,11 @@ struct flag_heads
 struct flag_tails
 {
     template<typename T,
-             unsigned int BlockSize,
-             unsigned int ItemsPerThread,
-             bool         WithTile,
-             unsigned int Trials>
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm,
+             unsigned int                                 Trials>
     __device__
     static void run(const T* d_input, T* d_output)
     {
@@ -113,8 +117,8 @@ struct flag_tails
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)
         {
-            rocprim::block_discontinuity<T, BlockSize> bdiscontinuity;
-            bool                                       tail_flags[ItemsPerThread];
+            rocprim::block_discontinuity<T, BlockSize, 1, 1, Algorithm> bdiscontinuity;
+            bool                                                        tail_flags[ItemsPerThread];
             if(WithTile)
             {
                 bdiscontinuity.flag_tails(tail_flags, T(123), input, rocprim::equal_to<T>());
@@ -138,10 +142,11 @@ struct flag_tails
 struct flag_heads_and_tails
 {
     template<typename T,
-             unsigned int BlockSize,
-             unsigned int ItemsPerThread,
-             bool         WithTile,
-             unsigned int Trials>
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm,
+             unsigned int                                 Trials>
     __device__
     static void run(const T* d_input, T* d_output)
     {
@@ -154,9 +159,9 @@ struct flag_heads_and_tails
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)
         {
-            rocprim::block_discontinuity<T, BlockSize> bdiscontinuity;
-            bool                                       head_flags[ItemsPerThread];
-            bool                                       tail_flags[ItemsPerThread];
+            rocprim::block_discontinuity<T, BlockSize, 1, 1, Algorithm> bdiscontinuity;
+            bool                                                        head_flags[ItemsPerThread];
+            bool                                                        tail_flags[ItemsPerThread];
             if(WithTile)
             {
                 bdiscontinuity.flag_heads_and_tails(head_flags,
@@ -186,6 +191,20 @@ struct flag_heads_and_tails
     }
 };
 
+template<rocprim::block_adjacent_difference_algorithm Algorithm>
+std::string get_algorithm_name()
+{
+    switch(Algorithm)
+    {
+        case rocprim::block_adjacent_difference_algorithm::adjacent_difference_crosslane:
+            return "crosslane";
+        case rocprim::block_adjacent_difference_algorithm::adjacent_difference_shared_mem:
+            return "shared_mem";
+            // Not using `default: ...` because it kills effectiveness of -Wswitch
+    }
+    return "unknown_algorithm";
+}
+
 template<typename Subalgo>
 std::string get_subalgo_name()
 {
@@ -201,11 +220,12 @@ std::string get_subalgo_name()
 
 template<typename Subalgo,
          typename T,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         bool         WithTile,
-         unsigned int Trials = 100,
-         typename Config     = rocprim::default_config>
+         unsigned int                                 BlockSize,
+         unsigned int                                 ItemsPerThread,
+         bool                                         WithTile,
+         rocprim::block_adjacent_difference_algorithm Algorithm,
+         unsigned int                                 Trials = 100,
+         typename Config                                     = rocprim::default_config>
 struct block_discontinuity_benchmark : public primbench::benchmark_interface
 {
     primbench::json meta() const override
@@ -219,7 +239,8 @@ struct block_discontinuity_benchmark : public primbench::benchmark_interface
                  primbench::json{}
                      .add("bs", BlockSize)
                      .add("ipt", ItemsPerThread)
-                     .add("with_tile", WithTile));
+                     .add("with_tile", WithTile)
+                     .add("method", get_algorithm_name<Algorithm>()));
     }
 
     void run(primbench::state& state) override
@@ -247,7 +268,7 @@ struct block_discontinuity_benchmark : public primbench::benchmark_interface
         state.run(
             [&]
             {
-                kernel<Subalgo, T, BlockSize, ItemsPerThread, WithTile, Trials>
+                kernel<Subalgo, T, BlockSize, ItemsPerThread, WithTile, Algorithm, Trials>
                     <<<dim3(items / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,
                                                                                     d_output);
             });

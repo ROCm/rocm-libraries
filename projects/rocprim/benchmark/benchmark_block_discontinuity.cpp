@@ -24,15 +24,24 @@
 
 #include "primbench.hpp"
 
-#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE) \
-    executor.queue<block_discontinuity_benchmark<Benchmark, T, BS, IPT, WITH_TILE>>();
+constexpr auto crosslane
+    = rocprim::block_adjacent_difference_algorithm::adjacent_difference_crosslane;
+constexpr auto shared_mem
+    = rocprim::block_adjacent_difference_algorithm::adjacent_difference_shared_mem;
 
-#define BENCHMARK_TYPE(type, block, bool)             \
-    CREATE_BENCHMARK(type, block, 1, bool, Algorithm) \
-    CREATE_BENCHMARK(type, block, 2, bool, Algorithm) \
-    CREATE_BENCHMARK(type, block, 3, bool, Algorithm) \
-    CREATE_BENCHMARK(type, block, 4, bool, Algorithm) \
-    CREATE_BENCHMARK(type, block, 8, bool, Algorithm)
+#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, ALGO) \
+    executor.queue<block_discontinuity_benchmark<Benchmark, T, BS, IPT, WITH_TILE, ALGO>>();
+
+#define CREATE_BENCHMARK_KINDS(T, BS, IPT, WITH_TILE)  \
+    CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, crosslane) \
+    CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, shared_mem)
+
+#define BENCHMARK_TYPE(T, BS, WITH_TILE)        \
+    CREATE_BENCHMARK_KINDS(T, BS, 1, WITH_TILE) \
+    CREATE_BENCHMARK_KINDS(T, BS, 2, WITH_TILE) \
+    CREATE_BENCHMARK_KINDS(T, BS, 3, WITH_TILE) \
+    CREATE_BENCHMARK_KINDS(T, BS, 4, WITH_TILE) \
+    CREATE_BENCHMARK_KINDS(T, BS, 8, WITH_TILE)
 
 template<typename Benchmark>
 void add_benchmarks(primbench::executor& executor)

@@ -24,16 +24,25 @@
 
 #include "primbench.hpp"
 
-#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE) \
-    executor.queue<block_adjacent_difference_benchmark<Benchmark, T, BS, IPT, WITH_TILE>>();
+constexpr auto crosslane
+    = rocprim::block_adjacent_difference_algorithm::adjacent_difference_crosslane;
+constexpr auto shared_mem
+    = rocprim::block_adjacent_difference_algorithm::adjacent_difference_shared_mem;
 
-#define BENCHMARK_TYPE(type, block, with_tile)              \
-    CREATE_BENCHMARK(type, block, 1, with_tile, Algorithm)  \
-    CREATE_BENCHMARK(type, block, 3, with_tile, Algorithm)  \
-    CREATE_BENCHMARK(type, block, 4, with_tile, Algorithm)  \
-    CREATE_BENCHMARK(type, block, 8, with_tile, Algorithm)  \
-    CREATE_BENCHMARK(type, block, 16, with_tile, Algorithm) \
-    CREATE_BENCHMARK(type, block, 32, with_tile, Algorithm)
+#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, ALGO) \
+    executor.queue<block_adjacent_difference_benchmark<Benchmark, T, BS, IPT, WITH_TILE, ALGO>>();
+
+#define CREATE_BENCHMARK_KINDS(T, BS, IPT, WITH_TILE)  \
+    CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, crosslane) \
+    CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, shared_mem)
+
+#define BENCHMARK_TYPE(T, BS, WITH_TILE)         \
+    CREATE_BENCHMARK_KINDS(T, BS, 1, WITH_TILE)  \
+    CREATE_BENCHMARK_KINDS(T, BS, 3, WITH_TILE)  \
+    CREATE_BENCHMARK_KINDS(T, BS, 4, WITH_TILE)  \
+    CREATE_BENCHMARK_KINDS(T, BS, 8, WITH_TILE)  \
+    CREATE_BENCHMARK_KINDS(T, BS, 16, WITH_TILE) \
+    CREATE_BENCHMARK_KINDS(T, BS, 32, WITH_TILE)
 
 template<typename Benchmark>
 void add_benchmarks(primbench::executor& executor)
@@ -47,7 +56,7 @@ void add_benchmarks(primbench::executor& executor)
     BENCHMARK_TYPE(rocprim::int128_t, 256, false)
     BENCHMARK_TYPE(rocprim::uint128_t, 256, false)
 
-    if(Benchmark::enable_with_tile)
+    if(!std::is_same<Benchmark, subtract_right_partial>::value)
     {
         BENCHMARK_TYPE(int32_t, 256, true)
         BENCHMARK_TYPE(float, 256, true)
