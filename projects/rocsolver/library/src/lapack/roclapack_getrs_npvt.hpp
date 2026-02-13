@@ -142,44 +142,61 @@ rocblas_status rocsolver_getrs_npvt_template(rocblas_handle handle,
     rocblas_get_pointer_mode(handle, &old_mode);
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
 
-    // ------------------------------------------------
-    // note: restore pointer mode in case of early exit
-    // ------------------------------------------------
-    auto rocblas_check_restore_mode = [=](rocblas_status const istat) {
-        if(istat != rocblas_status_success)
-        {
-            rocblas_set_pointer_mode(handle, old_mode);
-            return (istat);
-        }
-    };
-
     if(trans == rocblas_operation_none)
     {
         // solve L*X = B, overwriting B with X
-        rocblas_check_restore_mode(rocsolver_trsm_lower<BATCHED, STRIDED, T>(
-            handle, rocblas_side_left, trans, rocblas_diagonal_unit, n, nrhs, A, shiftA, inca, lda,
-            strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2, work3,
-            work4));
+        {
+            rocblas_status const istat = (rocsolver_trsm_lower<BATCHED, STRIDED, T>(
+                handle, rocblas_side_left, trans, rocblas_diagonal_unit, n, nrhs, A, shiftA, inca,
+                lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2,
+                work3, work4));
+            if(istat != rocblas_status_success)
+            {
+                rocblas_set_pointer_mode(handle, old_mode);
+                return (istat);
+            }
+        }
 
         // solve U*X = B, overwriting B with X
-        rocblas_check_restore_mode(rocsolver_trsm_upper<BATCHED, STRIDED, T>(
-            handle, rocblas_side_left, trans, rocblas_diagonal_non_unit, n, nrhs, A, shiftA, inca,
-            lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2,
-            work3, work4));
+        {
+            rocblas_status const istat = (rocsolver_trsm_upper<BATCHED, STRIDED, T>(
+                handle, rocblas_side_left, trans, rocblas_diagonal_non_unit, n, nrhs, A, shiftA,
+                inca, lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1,
+                work2, work3, work4));
+            if(istat != rocblas_status_success)
+            {
+                rocblas_set_pointer_mode(handle, old_mode);
+                return (istat);
+            }
+        }
     }
     else
     {
         // solve U'*X = B or U**H *X = B, overwriting B with X
-        rocblas_check_restore_mode(rocsolver_trsm_upper<BATCHED, STRIDED, T>(
-            handle, rocblas_side_left, trans, rocblas_diagonal_non_unit, n, nrhs, A, shiftA, inca,
-            lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2,
-            work3, work4));
+        {
+            rocblas_status const istat = (rocsolver_trsm_upper<BATCHED, STRIDED, T>(
+                handle, rocblas_side_left, trans, rocblas_diagonal_non_unit, n, nrhs, A, shiftA,
+                inca, lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1,
+                work2, work3, work4));
+            if(istat != rocblas_status_success)
+            {
+                rocblas_set_pointer_mode(handle, old_mode);
+                return (istat);
+            }
+        }
 
         // solve L'*X = B, or L**H *X = B overwriting B with X
-        rocblas_check_restore_mode(rocsolver_trsm_lower<BATCHED, STRIDED, T>(
-            handle, rocblas_side_left, trans, rocblas_diagonal_unit, n, nrhs, A, shiftA, inca, lda,
-            strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2, work3,
-            work4));
+        {
+            rocblas_status const istat = (rocsolver_trsm_lower<BATCHED, STRIDED, T>(
+                handle, rocblas_side_left, trans, rocblas_diagonal_unit, n, nrhs, A, shiftA, inca,
+                lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2,
+                work3, work4));
+            if(istat != rocblas_status_success)
+            {
+                rocblas_set_pointer_mode(handle, old_mode);
+                return (istat);
+            }
+        }
     }
 
     rocblas_set_pointer_mode(handle, old_mode);
