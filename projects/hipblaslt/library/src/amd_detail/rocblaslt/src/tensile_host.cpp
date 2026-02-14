@@ -100,9 +100,9 @@ namespace
     //
     // To add your own assembly kernel, you can either:
     // 1) Create a RegistryEntry (e.g. entrySimpleGemmPoC()) and add it to getRegistry(), or
-    // 2) For Wave mxfp4 kernels: place assembly files named wave_gemm_mxfp4_{m}_{n}_{k}.s
-    //    under HIPBLASLT_EXTERNAL_ASSEMBLY_DIR; they are discovered recursively and
-    //    registered automatically (signature: a, a_scale, b, b_scale, c).
+    // 2) For Wave kernels: place assembly files named wave_gemm_{dtype}_{m}_{n}_{k}.s
+    //    (dtype = mxfp4 or fp16) under HIPBLASLT_EXTERNAL_ASSEMBLY_DIR; they are
+    //    discovered recursively. mxfp4: (a, a_scale, b, b_scale, c); fp16: (A, B, D).
     //
     // Enable external assembly and set the assembly directory:
     //
@@ -123,8 +123,8 @@ namespace
 
         struct GridConfig
         {
-            Dim3 blocks;
-            Dim3 blockSize;
+            Dim3 blocks; // gridDimX, gridDimY, gridDimZ
+            Dim3 blockSize; // blockDimX, blockDimY, blockDimZ
             int  getWavesPerWorkgroup() const
             {
                 // Assuming wavefront size of 64
@@ -394,34 +394,11 @@ namespace
                      }}};
         }
 
-        /// Rule 2: Wave mxfp4 external assembly
-        /// Returns registry entries for all Wave mxfp4 assembly files under
-        /// HIPBLASLT_EXTERNAL_ASSEMBLY_DIR. Returns empty if the env var is unset or
-        /// the directory does not exist.
-        static std::vector<RegistryEntry> getWaveMxfp4RegistryEntries()
-        {
-            const char* env = std::getenv("HIPBLASLT_EXTERNAL_ASSEMBLY_DIR");
-            if(!env || *env == '\0')
-                return {};
-            std::string dir(env);
-            if(dir.back() != '/')
-                dir += '/';
-            std::error_code ec;
-            if(!std::filesystem::is_directory(dir, ec) || ec)
-                return {};
-            std::vector<WaveMxfp4SolutionInfo> solutions = scanDirectoryForWaveMxfp4Assembly(dir);
-            std::vector<RegistryEntry>         entries;
-            entries.reserve(solutions.size());
-            for(const auto& sol : solutions)
-                entries.push_back(makeWaveMxfp4RegistryEntry(sol));
-            return entries;
-        }
-
         static const std::vector<RegistryEntry>& getRegistry()
         {
             static std::vector<RegistryEntry> registry = []() {
                 std::vector<RegistryEntry> r           = {entrySimpleGemmPoC()};
-                std::vector<RegistryEntry> waveEntries = getWaveMxfp4RegistryEntries();
+                std::vector<RegistryEntry> waveEntries = getWaveRegistryEntries();
                 for(auto& e : waveEntries)
                     r.push_back(std::move(e));
                 return r;
@@ -478,54 +455,61 @@ namespace
         }
 
         // -------------------------------------------------------------------------
-        // Wave mxfp4 external assembly: scan directory and build registry entries
-        // from filenames of the form wave_gemm_mxfp4_{m}_{n}_{k}.s
+        // Wave external assembly: scan directory and build registry entries
+        // from filenames of the form wave_gemm_{dtype}_{m}_{n}_{k}.s (e.g. mxfp4, fp16)
         // -------------------------------------------------------------------------
 
-        /// Solution info parsed from a Wave mxfp4 assembly filename.
-        struct WaveMxfp4SolutionInfo
+        enum class WaveDtype
+        {
+            Mxfp4,
+            Fp16,
+        };
+
+        /// Centralized solution info parsed from a Wave assembly filename.
+        struct WaveSolutionInfo
         {
             std::string asmPath; // Full path to the .s file
             std::string name; // Registry name, e.g. "WaveMxfp4_128_64_256"
             int         m{0};
             int         n{0};
             int         k{0};
+            WaveDtype   dtype{WaveDtype::Mxfp4};
         };
 
-        /// Returns true if the kernel expects (a, a_scale, b, b_scale, c) with i8 inputs and f32 output.
-        static bool isWaveMxfp4Problem(const RocblasltContractionProblem& p)
-        {
-            return p.a_type == HIP_R_8I && p.b_type == HIP_R_8I && p.d_type == HIP_R_32F
-                   && p.scaleA != nullptr && p.scaleB != nullptr && !p.strided_batch
-                   && !p.grouped_gemm && p.batch_count == 1;
-        }
-
-        /// Parses a basename like "wave_gemm_mxfp4_128_64_256.s" into m, n, k.
-        /// Returns nullopt if the filename does not match.
-        static std::optional<WaveMxfp4SolutionInfo> parseWaveMxfp4Filename(const std::string& path)
+        /// Parses a basename like "wave_gemm_mxfp4_128_64_256.s" or "wave_gemm_fp16_128_64_256.s".
+        /// Returns nullopt if the filename does not match a known Wave dtype pattern.
+        static std::optional<WaveSolutionInfo> parseWaveFilename(const std::string& path)
         {
             std::string basename = std::filesystem::path(path).filename().string();
-            // Match wave_gemm_mxfp4_<m>_<n>_<k>.s (case-insensitive extension)
-            std::regex  re(R"(wave_gemm_mxfp4_(\d+)_(\d+)_(\d+)\.s)", std::regex::icase);
+            // Match wave_gemm_<dtype>_<m>_<n>_<k>.s (case-insensitive extension)
+            std::regex  re(R"(wave_gemm_(mxfp4|fp16)_(\d+)_(\d+)_(\d+)\.s)", std::regex::icase);
             std::smatch match;
-            if(!std::regex_match(basename, match, re) || match.size() != 4)
+            if(!std::regex_match(basename, match, re) || match.size() != 5)
                 return std::nullopt;
 
-            WaveMxfp4SolutionInfo info;
-            info.asmPath = path;
-            info.m       = std::stoi(match[1].str());
-            info.n       = std::stoi(match[2].str());
-            info.k       = std::stoi(match[3].str());
-            info.name = "WaveMxfp4_" + match[1].str() + "_" + match[2].str() + "_" + match[3].str();
+            WaveSolutionInfo info;
+            info.asmPath         = path;
+            info.m               = std::stoi(match[2].str());
+            info.n               = std::stoi(match[3].str());
+            info.k               = std::stoi(match[4].str());
+            std::string dtypeStr = match[1].str();
+            if(dtypeStr == "mxfp4")
+                info.dtype = WaveDtype::Mxfp4;
+            else if(dtypeStr == "fp16")
+                info.dtype = WaveDtype::Fp16;
+            else
+                return std::nullopt;
+            const std::string dims = match[2].str() + "_" + match[3].str() + "_" + match[4].str();
+            info.name
+                = (info.dtype == WaveDtype::Mxfp4) ? ("WaveMxfp4_" + dims) : ("WaveFp16_" + dims);
             return info;
         }
 
-        /// Recursively collects all Wave mxfp4 assembly files under \p dir.
-        static std::vector<WaveMxfp4SolutionInfo>
-            scanDirectoryForWaveMxfp4Assembly(const std::string& dir)
+        /// Recursively collects all Wave assembly files under \p dir (any supported dtype).
+        static std::vector<WaveSolutionInfo> scanDirectoryForWaveAssembly(const std::string& dir)
         {
-            std::vector<WaveMxfp4SolutionInfo> result;
-            std::error_code                    ec;
+            std::vector<WaveSolutionInfo> result;
+            std::error_code               ec;
             for(auto it = std::filesystem::recursive_directory_iterator(dir, ec);
                 it != std::filesystem::recursive_directory_iterator();
                 ++it)
@@ -540,35 +524,47 @@ namespace
                 std::string ext = path.substr(path.size() - 2);
                 if(ext != ".s" && ext != ".S")
                     continue;
-                auto info = parseWaveMxfp4Filename(path);
+                auto info = parseWaveFilename(path);
                 if(info)
                     result.push_back(*info);
             }
             return result;
         }
 
-        /// Default kernel function name for Wave mxfp4 kernels (matches common Wave def gemm(...)).
-        static const char* waveMxfp4KernelFunctionName()
+        static const char* waveKernelFunctionName()
         {
             return "gemm";
         }
 
+        /// Returns true if the problem matches Wave mxfp4 kernel (a, a_scale, b, b_scale, c).
+        static bool isWaveMxfp4Problem(const RocblasltContractionProblem& p)
+        {
+            return p.a_type == HIP_R_8I && p.b_type == HIP_R_8I && p.d_type == HIP_R_32F
+                   && p.scaleA != nullptr && p.scaleB != nullptr && !p.strided_batch
+                   && !p.grouped_gemm && p.batch_count == 1;
+        }
+
+        /// Returns true if the problem matches Wave fp16 kernel (A, B, D); output D is fp32.
+        static bool isWaveFp16Problem(const RocblasltContractionProblem& p)
+        {
+            return p.a_type == HIP_R_16F && p.b_type == HIP_R_16F && p.d_type == HIP_R_32F
+                   && p.batch_count == 1;
+        }
+
         /// Builds a single registry entry for one Wave mxfp4 assembly file.
-        static RegistryEntry makeWaveMxfp4RegistryEntry(const WaveMxfp4SolutionInfo& info)
+        static RegistryEntry makeWaveMxfp4RegistryEntry(const WaveSolutionInfo& info)
         {
             const int m = info.m, n = info.n, k = info.k;
             return {
                 info.name,
-                // Selector: same dimensions and Wave mxfp4 types (i8 A/B, scaleA/scaleB, f32 D).
                 [m, n, k](rocblaslt_handle, const RocblasltContractionProblem& p) -> bool {
                     if(!isWaveMxfp4Problem(p))
                         return false;
                     return static_cast<int>(p.m) == m && static_cast<int>(p.n) == n
                            && static_cast<int>(p.k) == k;
                 },
-                // KernelInfo: (a, a_scale, b, b_scale, c) per Wave mxfp4 kernel signature.
                 {info.asmPath,
-                 waveMxfp4KernelFunctionName(),
+                 waveKernelFunctionName(),
                  [](const RocblasltContractionProblem& p) -> std::vector<uint8_t> {
                      struct WaveMxfp4Args
                      {
@@ -589,6 +585,78 @@ namespace
                      return {{blocks, 1, 1}, {blockSize, 1, 1}};
                  }},
             };
+        }
+
+        /// Builds a single registry entry for one Wave fp16 assembly file (A, B, D).
+        static RegistryEntry makeWaveFp16RegistryEntry(const WaveSolutionInfo& info)
+        {
+            const int m = info.m, n = info.n, k = info.k;
+            return {
+                info.name,
+                [m, n, k](rocblaslt_handle, const RocblasltContractionProblem& p) -> bool {
+                    if(!isWaveFp16Problem(p))
+                        return false;
+                    return static_cast<int>(p.m) == m && static_cast<int>(p.n) == n
+                           && static_cast<int>(p.k) == k;
+                },
+                {info.asmPath,
+                 waveKernelFunctionName(),
+                 [](const RocblasltContractionProblem& p) -> std::vector<uint8_t> {
+                     struct WaveFp16Args
+                     {
+                         const void* A;
+                         const void* B;
+                         void*       D;
+                     };
+                     WaveFp16Args   args = {p.A, p.B, p.D};
+                     const uint8_t* raw  = reinterpret_cast<const uint8_t*>(&args);
+                     return std::vector<uint8_t>(raw, raw + sizeof(WaveFp16Args));
+                 },
+                 [](const RocblasltContractionProblem& p) -> GridConfig {
+                     const int blockSizeM = 128;
+                     const int blockSizeN = 256;
+
+                     int blocksM = (p.m + blockSizeM - 1) / blockSizeM;
+                     int blocksN = (p.n + blockSizeN - 1) / blockSizeN;
+
+                     return {{blocksM, blocksN, 1}, {256, 2, 1}};
+                 }},
+            };
+        }
+
+        /// Dispatches to the dtype-specific makeWave*RegistryEntry.
+        static RegistryEntry makeWaveRegistryEntry(const WaveSolutionInfo& info)
+        {
+            switch(info.dtype)
+            {
+            case WaveDtype::Mxfp4:
+                return makeWaveMxfp4RegistryEntry(info);
+            case WaveDtype::Fp16:
+                return makeWaveFp16RegistryEntry(info);
+            default:
+                throw std::runtime_error("[ExternalAssemblyDriver] Unknown Wave dtype");
+            }
+        }
+
+        /// Returns registry entries for all Wave assembly files under
+        /// HIPBLASLT_EXTERNAL_ASSEMBLY_DIR (all supported dtypes).
+        static std::vector<RegistryEntry> getWaveRegistryEntries()
+        {
+            const char* env = std::getenv("HIPBLASLT_EXTERNAL_ASSEMBLY_DIR");
+            if(!env || *env == '\0')
+                return {};
+            std::string dir(env);
+            if(dir.back() != '/')
+                dir += '/';
+            std::error_code ec;
+            if(!std::filesystem::is_directory(dir, ec) || ec)
+                return {};
+            std::vector<WaveSolutionInfo> solutions = scanDirectoryForWaveAssembly(dir);
+            std::vector<RegistryEntry>    entries;
+            entries.reserve(solutions.size());
+            for(const auto& sol : solutions)
+                entries.push_back(makeWaveRegistryEntry(sol));
+            return entries;
         }
     };
 
@@ -3049,8 +3117,6 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                        const RocblasltContractionProblem& prob,
                                        std::shared_ptr<void>              gemmData)
 {
-    std::cout << "runContractionProblem" << std::endl;
-
     rocblaslt_status status = rocblaslt_status_internal_error;
 
     try
