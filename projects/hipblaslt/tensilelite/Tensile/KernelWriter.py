@@ -5486,21 +5486,27 @@ class KernelWriter(metaclass=abc.ABCMeta):
     #         Wider local read case, we need TransposeCode=True
     #   False: Does not use interleave layout
     #         ider local read + index transpose case, this needs to be False
-    self.states.a.useDirect32XEmulationThis = self.states.a.useDirect32XEmulationNext = kernel["UseDirect32XEmulation"]
-    self.states.b.useDirect32XEmulationThis = self.states.b.useDirect32XEmulationNext = kernel["UseDirect32XEmulation"]
-    # do prefetch and scheduling for full pack code
-    # this sceduling opt is for non CMS. No need to enable it for CMS
-    self.states.doFullPackCodePrefetch = kernel["UsePLRPack"] and not kernel["UseCustomMainLoopSchedule"]
-    # prefetch pack/prePack scheduling for non CMS only
-    # We do not enable any ppack scheduling optimizations for PLR=0
-    if (not kernel["UseCustomMainLoopSchedule"]) and self.states.numItersPLR:
-      # enabhe prepack scheduling for this loop only for DTLA + B
-      if kernel["DirectToLds"] == 1:
-        # do packPre scheduling for This loop only not CLR or SubIter
-        self.states.doPackPreSchedulingThisLoop = (not kernel["ClusterLocalRead"]) or kernel["ForceUnrollSubIter"]
-      self.states.doPackPreSchedulingNextLoop = True
-
-    def initTF32Emu(sAorB: ABMatrixInfo, lrvwTile):
+    def initTF32Emu():
+      # for UseF32XEmulation only
+      if not kernel["UseF32XEmulation"]:
+        return 0, 0
+      self.states.a.useDirect32XEmulationThis = self.states.a.useDirect32XEmulationNext = kernel["UseDirect32XEmulation"]
+      self.states.b.useDirect32XEmulationThis = self.states.b.useDirect32XEmulationNext = kernel["UseDirect32XEmulation"]
+      # do prefetch and scheduling for full pack code
+      # this sceduling opt is for non CMS. No need to enable it for CMS
+      self.states.doFullPackCodePrefetch = kernel["UsePLRPack"] and not kernel["UseCustomMainLoopSchedule"]
+      # prefetch pack/prePack scheduling for non CMS only
+      # We do not enable any ppack scheduling optimizations for PLR=0
+      if (not kernel["UseCustomMainLoopSchedule"]) and self.states.numItersPLR:
+        # enabhe prepack scheduling for this loop only for DTLA + B
+        if kernel["DirectToLds"] == 1:
+          # do packPre scheduling for This loop only not CLR or SubIter
+          self.states.doPackPreSchedulingThisLoop = (not kernel["ClusterLocalRead"]) or kernel["ForceUnrollSubIter"]
+        self.states.doPackPreSchedulingNextLoop = True
+      numVgprsEmuA = initTF32EmuAB(self.states.a, self.states.lrvwTileA)
+      numVgprsEmuB = initTF32EmuAB(self.states.b, self.states.lrvwTileB)
+      return numVgprsEmuA, numVgprsEmuB
+    def initTF32EmuAB(sAorB: ABMatrixInfo, lrvwTile):
       # for UseF32XEmulation only
       if not kernel["UseF32XEmulation"]:
         return 0
@@ -5577,8 +5583,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return vgprIdx + bufferVregNum + numV > self.states.regCaps["MaxVgpr"]
 
     # initial TF32Emu setting
-    numVgprsEmuA = initTF32Emu(self.states.a, self.states.lrvwTileA)
-    numVgprsEmuB = initTF32Emu(self.states.b, self.states.lrvwTileB)
+    numVgprsEmuA, numVgprsEmuB = initTF32Emu()
     # numVreg adjustment
     # step 1 Adjustment for lrvwTileA/B==1
     #   start from B
