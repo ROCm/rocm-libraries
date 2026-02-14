@@ -15,6 +15,7 @@
 #include <utility>
 #include <variant>
 #include <iostream>
+#include <functional>
 
 struct FmhaBwdFp32
 {
@@ -562,14 +563,14 @@ float fmha_bwd_(const ck_tile::stream_config& s, fmha_bwd_args a)
 }
 
 template <int Version = 2>
-float fmha_bwd(fmha_bwd_traits, fmha_bwd_args, const ck_tile::stream_config&);
+float fmha_bwd(const fmha_bwd_traits&, fmha_bwd_args, const ck_tile::stream_config&);
 
 struct fmha_bwd_launcher
 {
     std::function<float(fmha_bwd_args, const ck_tile::stream_config&)> run{};
     ck_tile::index_t dq_acc_splits{0};
 
-    fmha_bwd_launcher(fmha_bwd_traits);
+    fmha_bwd_launcher(const fmha_bwd_traits&);
 
     template <typename... Args>
     float operator()(Args&&... args) const

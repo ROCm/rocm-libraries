@@ -242,7 +242,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
     const ck_tile::index_t shape_seqlen_k =
         (mode == mode_enum::batch ? seqlen_ks[0] : seqstart_k_host.back());
 
-    auto fmha_traits = fmha_bwd_traits{
+    const fmha_bwd_traits fmha_traits{
         shape_seqlen_q,
         shape_seqlen_k,
         batch,

@@ -187,7 +187,7 @@ std::string fmha_bwd_dq_dk_dv_get_name_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>()
 
 FMHA_BWD_API_FILENAME = "fmha_bwd_api.cpp"
 FMHA_BWD_API = """
-fmha_bwd_launcher::fmha_bwd_launcher(fmha_bwd_traits t){{
+fmha_bwd_launcher::fmha_bwd_launcher(const fmha_bwd_traits& t){{
     [[maybe_unused]] const std::string device_name = ck_tile::get_device_name();
 {F_launcher}
     run = [](fmha_bwd_args, const ck_tile::stream_config&) {{ return -1.0f; }};
@@ -197,7 +197,7 @@ fmha_bwd_launcher::fmha_bwd_launcher(fmha_bwd_traits t){{
 
 // Prefer to use launcher. Leave fmha_bwd here for backward compatibility.
 template <>
-float fmha_bwd<2>(fmha_bwd_traits t, fmha_bwd_args a, const ck_tile::stream_config& s){{
+float fmha_bwd<2>(const fmha_bwd_traits& t, fmha_bwd_args a, const ck_tile::stream_config& s){{
     [[maybe_unused]] const std::string device_name = ck_tile::get_device_name();
     float r = -1;
 {F_dispatch}
