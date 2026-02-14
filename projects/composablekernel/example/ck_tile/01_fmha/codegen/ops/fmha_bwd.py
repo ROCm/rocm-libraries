@@ -942,7 +942,7 @@ class FmhaBwdApiPool:
     def hdim_cond(hdim: int) -> str:
         return f"t.hdim_q <= {hdim} && t.hdim_v <= {hdim}"
 
-    def _api_per_arch(self, varient) -> str:
+    def _api_per_arch(self, variant) -> str:
         per_arch = ""
         for i_arch, (arch, pool_by_arch) in enumerate(self.dq_dk_dv_pool.items()):
             per_dtypes = ""
@@ -952,7 +952,7 @@ class FmhaBwdApiPool:
                     traits = sorted(pool_by_hdim, key=self.max_seq_q_sort_key)
                     inners = self._api_inners(traits)
                     per_hdim_case += FMHA_BWD_API_COND_STATEMENT(
-                        if_i=i_hdim, F_cond=self.hdim_cond(hdim), F_body=inners[varient]
+                        if_i=i_hdim, F_cond=self.hdim_cond(hdim), F_body=inners[variant]
                     )
                 per_dtypes += FMHA_BWD_API_COND_STATEMENT(
                     if_i=i_dtype, F_cond=self.dtype_cond(dtype), F_body=per_hdim_case
