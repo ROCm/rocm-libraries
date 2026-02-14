@@ -1727,7 +1727,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
           if not schedulePackConsiderMetadata:
               insertABcount = 0
-              final = False
+              isLastNop = False
               if kernel["UseF32XEmulation"]:
                 if instPerPackA > 0 or instPerPackB == 0 and packItems:
                   tmp = []
@@ -1742,6 +1742,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                       instPerPackA -= num
                   firstDone = True
                   for n in tmp:
+                    isLastNop = isinstance(n, SNop)
                     iterCode.add(n)
               else:
                 # we put 2 pack in each mfma
@@ -1768,6 +1769,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                       instPerPackB -= num
                   firstDone = True
                   for n in tmp:
+                    isLastNop = isinstance(n, SNop)
                     iterCode.add(n)
               else:
                 for j in range(instPerPackB):
@@ -1784,7 +1786,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   iterCode.add(SNop(waitState=1, comment="VALU packing writes to be consumed by matrix instruction"))
                   curPackIdx += 1
                   break
-              if kernel["UseF32XEmulation"]:
+              if kernel["UseF32XEmulation"] and not isLastNop:
                 # HACK add dummy waits btween swap and mfmas. TODO: improve pack scheduling to avoid this
                 numDummy = 0 if kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16 else 1
                 # nop insertion for MFMA is done in _interleavePackAB
