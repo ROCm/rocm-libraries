@@ -704,7 +704,6 @@ class LocalReadMFMA(LocalRead):
                                     packCodeT.add(VCvtPkF32toBF16(dst=v7t, src0=v7t, src1=vgpr(tmp), comment=commentStr))
                                     writer.vgprPool.checkIn(tmp)
                                 elif valuiIdx % 4 == 0 and (not do8PackAtOnce):
-                                    tmp = writer.vgprPool.checkOut(1, "x32f tmp mod 4")
 
                                     if (valuiIdx % 8) == 0 and not useDirect32XEmulation:
                                         # get 4 tmp vgprs
@@ -725,7 +724,6 @@ class LocalReadMFMA(LocalRead):
                                     if kernel["UseMFMAF32XEmulation"]:
                                         vHiBase = str(vHi0.regName)
                                         idMat = vgpr(writer.states.startVgprIdentityMatrix,2)
-                                        tmpDelay = writer.vgprPool.checkOut(1)
                                         # We use a single MFMA 4x4x4_16b to perform 4 `vT - vHi` operations. 
                                         # - A is set to negative identity matrix
                                         # - no need for DPP as B has the same layout as C & D
@@ -736,13 +734,13 @@ class LocalReadMFMA(LocalRead):
                                             commentStr = commentForSchedule1 + ": " 
                                         packCodeT.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[4,4,4,16], mfma1k=False,acc=vgpr(vTBase,4), a=idMat, b=vgpr(vHiBase,2), acc2=vgpr(vTBase,4), 
                                         comment="Calculate low bits for TF32 emulation%s"%commentStr))
-                                        writer.vgprPool.checkIn(tmpDelay)
                                     else:
                                         # Compute low bits = fp32(highBF16(A/B)) - fp32(A/B)
                                         if kernel["UseDot2F32XEmulation"]:
                                             packCodeT.add(VDot2CF32BF16(dst=v0t, src0=hex(0x8000bf80), src1=vHi0))
                                             packCodeT.add(VDot2CF32BF16(dst=v1t, src0=hex(0xbf800000), src1=vHi0))
                                         else:
+                                            tmp = writer.vgprPool.checkOut(1, "x32f tmp mod 4")
                                             packCodeT.add(PVCvtBF16toFP32(dst=vgpr(tmp), src=vHi0, comment="begin"+str(valuiIdx)))
                                             packCodeT.add(VSubF32(dst=v0t, src0=v0t, src1=vgpr(tmp)))
                                             packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi0, vgprMask=None, vi=1))
@@ -756,7 +754,7 @@ class LocalReadMFMA(LocalRead):
                                             packCodeT.add(VSubF32(dst=v2t, src0=v2t, src1=vgpr(tmp)))
                                             packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi1, vgprMask=None, vi=1))
                                             packCodeT.add(VSubF32(dst=v3t, src0=v3t, src1=vgpr(tmp), comment="end"))
-                                    writer.vgprPool.checkIn(tmp)
+                                            writer.vgprPool.checkIn(tmp)
                                     # on last iteration, store lower bits in last 4 registers
                                     if valuiIdx % 8 == 4 and (not do8PackAtOnce):
                                         if not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
