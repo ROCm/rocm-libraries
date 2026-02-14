@@ -190,6 +190,8 @@ FMHA_BWD_API = """
 fmha_bwd_launcher::fmha_bwd_launcher(fmha_bwd_traits t){{
     [[maybe_unused]] const std::string device_name = ck_tile::get_device_name();
 {F_launcher}
+    run = [](fmha_bwd_args, const ck_tile::stream_config&) {{ return -1.0f; }};
+    dq_acc_splits = 1;
 }}
 
 
@@ -230,6 +232,7 @@ FMHA_BWD_API_INNER_DISPATCH_LAUNCHER = """
         return fmha_bwd_<dot_do_o_trait_, dq_dk_dv_trait_, std::conditional_t<{F_convert_dq_enabled}, convert_dq_trait_, void>, {F_arch.tag}>(s, a);
     }};
     dq_acc_splits = fmha_bwd_dq_dk_dv_dq_acc_splits_<dq_dk_dv_trait_, {F_arch.tag}>(t.max_seqlen_k);
+    return;
 }}
 """
 
