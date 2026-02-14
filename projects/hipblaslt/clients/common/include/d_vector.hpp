@@ -267,7 +267,7 @@ private:
             hipblaslt_cerr << "Clearing memory pool and retrying" << std::endl;
             // allocation failed, so clear the pool and try again (without the 20%)
             pool.clear();
-            hipblaslt_err << "After clean, the host memory is " << get_available_host_memory() << " bytes" << std::endl;
+            hipblaslt_cerr << "After clean, the host memory is " << get_available_host_memory() << " bytes" << std::endl;
 
             // reset the error code from previous hipMalloc failure and try again to allocate memory
             hipError_t err = hipPeekAtLastError();
