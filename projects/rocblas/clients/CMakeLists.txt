@@ -114,8 +114,12 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  # Look for openmp config in ROCm install to populate openmp_LIB_DIR and openmp_LIB_INSTALL_DIR
-  find_package(OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake")
+  # Look for openmp config in ROCm install to populate openmp_LIB_DIR and openmp_LIB_INSTALL_DIR.
+  # NO_DEFAULT_PATH prevents CMake from discovering system-installed OpenMP configs
+  # via PATH-derived prefixes (e.g. /opt/rocm), which can inject -isystem flags
+  # for the Clang resource directory, breaking HIP device compilation with GCC 15
+  # host headers on the amdgcn target.
+  find_package(OpenMP CONFIG NO_DEFAULT_PATH PATHS "${HIP_CLANG_ROOT}/lib/cmake")
 endif()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
