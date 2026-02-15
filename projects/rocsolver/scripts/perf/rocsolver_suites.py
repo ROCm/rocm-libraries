@@ -461,17 +461,6 @@ def xxtrd_suite(*, suite, precision, sizenormal, sizebatch):
         yield (row, s, f'-f {fn} -r {precision} -n {s} {COMMON_ARGS}')
 
 
-def xxtrd_suite(*, suite, precision, sizenormal, sizebatch):
-    """
-    XXTRD (SYTRD or HETRD) tests are run with the given precision and sizes
-    """
-    fn = 'sytrd' if precision == 's' or precision == 'd' else 'hetrd'
-    size = sizenormal
-    for s in size:
-        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'n': s}
-        yield (row, s, f'-f {fn} -r {precision} -n {s} {COMMON_ARGS}')
-
-
 def xxgtr_suite(*, suite, precision, sizenormal, sizebatch):
     """
     XXGTR (ORGTR or UNGTR) tests are run with the given precision and sizes.
@@ -498,7 +487,7 @@ def xxmtr_suite(*, suite, precision, sizenormal, sizebatch):
 
 def gebrd_suite(*, suite, precision, sizenormal, sizebatch):
     """
-    GEBRD tests are run with the given precision and sizes
+    GEBRD tests are run with the given precision and sizes (only square case)
     """
     fn = 'gebrd'
     size = sizenormal
@@ -509,7 +498,7 @@ def gebrd_suite(*, suite, precision, sizenormal, sizebatch):
 
 def xxgbr_suite(*, suite, precision, sizenormal, sizebatch):
     """
-    XXGBR (ORGBR or UNGBR) tests are run with the given precision and sizes. 
+    XXGBR (ORGBR or UNGBR) tests are run with the given precision and sizes (only square case). 
     Always row-wise to actually use orglq/unglq.
     """
     fn = 'orgbr' if precision == 's' or precision == 'd' else 'ungbr'
@@ -655,7 +644,7 @@ def xxevjBatch_suite(*, suite, precision, sizenormal, sizebatch):
 
 def gesvd_suite(*, suite, precision, sizenormal, sizebatch):
     """
-    GESVD tests are run, for the given precision and sizes, with vectors and without vectors.
+    GESVD tests are run, for the given precision and sizes, with vectors and without vectors (only square case).
     Tests are run wityh the hybrid approach as well. 
     """
     fn = 'gesvd'
@@ -673,7 +662,7 @@ def gesvd_suite(*, suite, precision, sizenormal, sizebatch):
 
 def gesdd_suite(*, suite, precision, sizenormal, sizebatch):
     """
-    GESDD tests are run, for the given precision and sizes, with vectors and without vectors
+    GESDD tests are run, for the given precision and sizes, with vectors and without vectors (only square case).
     """
     fn = 'gesdd'
     size = sizenormal
@@ -687,7 +676,7 @@ def gesdd_suite(*, suite, precision, sizenormal, sizebatch):
 
 def gesvdj_suite(*, suite, precision, sizenormal, sizebatch):
     """
-    GESVDJ tests are run, for the given precision and sizes, with vectors and without vectors
+    GESVDJ tests are run, for the given precision and sizes, with vectors and without vectors (only square case).
     """
     fn = 'gesvdj'
     size = sizenormal
@@ -701,7 +690,7 @@ def gesvdj_suite(*, suite, precision, sizenormal, sizebatch):
 
 def gesvdjBatch_suite(*, suite, precision, sizenormal, sizebatch):
     """
-    GESVDJBATCH tests are run, for the given precision and sizes, with vectors and without vectors
+    GESVDJBATCH tests are run, for the given precision and sizes, with vectors and without vectors (only square case).
     """
     fn = 'gesvdj_strided_batched'
     size = sizebatch
