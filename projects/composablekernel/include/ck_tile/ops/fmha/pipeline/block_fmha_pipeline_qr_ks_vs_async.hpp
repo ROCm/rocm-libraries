@@ -598,6 +598,9 @@ struct BlockFmhaPipelineQRKSVSAsync
                 s.get_tile_distribution()); // Pcompute{j}
 
             __builtin_amdgcn_sched_barrier(0x7F);
+            // Ensure gemm_0's LDS reads (K tile) complete before V store
+            // K and V may use the same LDS buffer (e.g., LdsSeq[k0_loops-1] == LdsSeq[k0_loops])
+            block_sync_lds();
             // store & prefetch next v, after the max reduction
             if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
             {
