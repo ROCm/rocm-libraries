@@ -624,11 +624,12 @@ __device__ void lasrt_increasing(const rocblas_int n, T* D, rocblas_int* stack)
     MAX_THDS should be 128, 256, 512, or 1024, and sval should
     be a shared array of size MAX_THDS.
 
-    NOTE: IAMAX finds element of maximum |Re(.)| + |Im(.)| (this is like the inf-norm)
-   IMAX1 finds element of maximum absolute value (this is like the 2-norm).
+    NOTE: Suppose we consider an element a vector of the form [Re(.), Im(.)],
+    IAMAX finds element of maximum |Re(.)| + |Im(.)| (this is like the inf-norm of an element)
+    IMAX1 finds element of maximum absolute value (this is like the 2-norm of an element).
 
-   The absolute value is sqrt( Re(.)^2 + Im(.)^2 ).
-   IAMAX and IMAX1 behave the same for real numbers.
+    The absolute value is sqrt( Re(.)^2 + Im(.)^2 ).
+    IAMAX and IMAX1 behave the same for real numbers.
 
    TODO: Test and update IAMAX and IMAX1 for NaN and Inf propagation **/
 template <int MAX_THDS, typename T, typename I, typename S>
@@ -3281,7 +3282,7 @@ void local_gemm(rocblas_handle handle,
  *
  * STATE MACHINE:
  * -------------
- * kase = 0: Converged (d_est contains the final estimate of ||A?1||1)
+ * kase = 0: Converged (d_est contains the final estimate of ||A^{-1}||_1)
  * kase = 1: Caller should solve A*x = x and call LACN2 again
  * kase = 2: Caller should solve A^H*x = x and call LACN2 again
  *
@@ -3295,7 +3296,7 @@ void local_gemm(rocblas_handle handle,
  * DESIGN NOTES:
  * ------------
  * - This is an INTERNAL template utility, not a public API
- * - LACN2 only computes the estimate; the caller computes rcond = 1/(||A|| * ||A?1||)
+ * - LACN2 only computes the norm estimate; the caller computes rcond = 1/(||A||_1 * ||A^{-1}||_1)
  * - Typically converges in 3-5 iterations
  * - LACN2 can only process one matrix at a time, batched routines should compute
  *   the condition number for one batch at a time in a loop
