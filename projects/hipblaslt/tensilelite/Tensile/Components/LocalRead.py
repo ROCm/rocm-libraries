@@ -420,6 +420,23 @@ class LocalReadMFMA(LocalRead):
                 module.add(VMovB64(dst=vgpr(val1, 2), src=src0))
                 module.add(VMovB64(dst=vgpr(val2, 2), src=src1))
 
+    def releaseTmpVregForPack(self, kernel, writer, tc, baseValuiIdx, tmpvgprFP32, useDirect32XEmulation):
+        if not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
+            if not useDirect32XEmulation:
+                while len(tmpvgprFP32):
+                    tmp = tmpvgprFP32.pop()
+                    writer.vgprPool.checkIn(tmp)
+                # if A, write tmp vgpr to writer state
+                if tc == "A":
+                    if baseValuiIdx not in writer.states.tmpvgpr:
+                        writer.states.tmpvgpr[baseValuiIdx] = []
+                    if tmp not in writer.states.tmpvgpr[baseValuiIdx]:
+                        writer.states.tmpvgpr[baseValuiIdx].append(tmp)
+                # if B, free tmp vgpr from writer state
+                elif tc == "B":
+                    if baseValuiIdx in writer.states.tmpvgpr:
+                        writer.states.tmpvgpr[baseValuiIdx] = []
+
     # 8 registers were read in fp32. Write to 2 of 4 registers with high bits
     # Input: vgprValuA/B_X/T_ i ... i + 7 -> FP32
     # Output: vgprValuA/B_X_ i .. i + 3 -> BF16 High bits
@@ -438,11 +455,97 @@ class LocalReadMFMA(LocalRead):
         # - not useDirect32XEmulation
         #   tmp vreg case, tmp vreg can be same between A and B
         #   put schedule comment only at final pack
-        if kernel["UseMFMAF32XEmulation"] or (index % 8 == 0) or (not useDirect32XEmulation):
-            commentStr = ""
+        #if kernel["UseMFMAF32XEmulation"] or (index % 8 == 0) or (not useDirect32XEmulation):
+        #    commentStr = ""
         module.add(VCvtPkF32toBF16(dst=dst1, src0=v2, src1=v3, comment=commentStr))
 
+    def pack4LowBitsStep1(self, kernel, writer, tc, valuiIdx, bufferIdx, iui, packCodeT, lrvwTile, tmpvgprFP32, commentForSchedule1, useDirect32XEmulation):
+        baseValuiIdx = valuiIdx - valuiIdx % 8
+        if (valuiIdx % 8) == 0 and not useDirect32XEmulation:
+            # get 4 tmp vgprs
+            tmpIdx = len(tmpvgprFP32) - 2
+            vTBase = tmpvgprFP32[tmpIdx + 0] # str(v0t.regName) does not work for tmp vreg. Put vgpr index directly here
+            v0t = vgpr(tmpvgprFP32[tmpIdx + 0])
+            v1t = vgpr(tmpvgprFP32[tmpIdx] + 1)
+            v2t = vgpr(tmpvgprFP32[tmpIdx + 1])
+            v3t = vgpr(tmpvgprFP32[tmpIdx + 1] + 1)
+        else:
+            v0t, v1t, v2t, v3t = self.get4VgprForEmu(writer, kernel, tc, bufferIdx, valuiIdx, iui, lrvwTile)
+            vTBase = str(v0t.regName)
+        srcVIdxHi = (valuiIdx-baseValuiIdx)//2 + baseValuiIdx
+        # vHi0, vHi1 is dst for Upper cvt
+        vHi0, vHi1 = self.get2VgprForEmu(writer, kernel, tc, bufferIdx, srcVIdxHi, iui, lrvwTile, dst=True)
+        # interleaveTreg case (means dst and src are same (dot2 or mfma))
+        if kernel["UseMFMAF32XEmulation"]:
+            vHiBase = str(vHi0.regName)
+            idMat = vgpr(writer.states.startVgprIdentityMatrix,2)
+            # We use a single MFMA 4x4x4_16b to perform 4 `vT - vHi` operations.
+            # - A is set to negative identity matrix
+            # - no need for DPP as B has the same layout as C & D
+            commentStr = ""
+            if commentForSchedule1 != "":
+                # add comment for scheduling (__TF32_1_)
+                # UseMFMAF32XEmulation case, put the mark at second mfma4x4. Skip here
+                commentStr = commentForSchedule1 + ": "
+            packCodeT.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[4,4,4,16], mfma1k=False,acc=vgpr(vTBase,4), a=idMat, b=vgpr(vHiBase,2), acc2=vgpr(vTBase,4),
+            comment="Calculate low bits for TF32 emulation%s"%commentStr))
+        else:
+            tmp = writer.vgprPool.checkOut(1, "x32f tmp mod 4")
+            # Compute low bits = fp32(highBF16(A/B)) - fp32(A/B)
+            if kernel["UseDot2F32XEmulation"]:
+                packCodeT.add(VDot2CF32BF16(dst=v0t, src0=hex(0x8000bf80), src1=vHi0))
+                packCodeT.add(VDot2CF32BF16(dst=v1t, src0=hex(0xbf800000), src1=vHi0))
+            else:
+                packCodeT.add(PVCvtBF16toFP32(dst=vgpr(tmp), src=vHi0, comment="begin"+str(valuiIdx)))
+                packCodeT.add(VSubF32(dst=v0t, src0=v0t, src1=vgpr(tmp)))
+                packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi0, vgprMask=None, vi=1))
+                packCodeT.add(VSubF32(dst=v1t, src0=v1t, src1=vgpr(tmp)))
+            if kernel["UseDot2F32XEmulation"] and (valuiIdx % 8) == 0:
+                packCodeT.add(VDot2CF32BF16(dst=v2t, src0=hex(0x8000bf80), src1=vHi1))
+                packCodeT.add(VDot2CF32BF16(dst=v3t, src0=hex(0xbf800000), src1=vHi1))
+            else:
+                # We use cvt+sub pair since dot2 requires adding 4 wait states.
+                packCodeT.add(PVCvtBF16toFP32(dst=vgpr(tmp), src=vHi1))
+                packCodeT.add(VSubF32(dst=v2t, src0=v2t, src1=vgpr(tmp)))
+                packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi1, vgprMask=None, vi=1))
+                packCodeT.add(VSubF32(dst=v3t, src0=v3t, src1=vgpr(tmp), comment="end"))
+            writer.vgprPool.checkIn(tmp)
 
+    def pack4LowBitsFinal(self, kernel, writer, tc, valuiIdx, bufferIdx, iui, packCodeT, lrvwTile, tmpvgprFP32, useDirect32XEmulation, noComment=False):
+        baseValuiIdx = valuiIdx - valuiIdx % 8
+        # on last iteration, store lower bits in last 4 registers
+        if not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
+            if useDirect32XEmulation:
+                v0, v1, v2, v3 = self.get4VgprForEmu(writer, kernel, tc, bufferIdx, baseValuiIdx, iui, lrvwTile)
+            else:
+                #v0, v1, v2, v3 = self.get4TmpVgprForEmu(writer, kernel, tc, bufferIdx, baseValuiIdx, iui)
+                tmpIdx = len(tmpvgprFP32) - 2
+                v0 = vgpr(tmpvgprFP32[tmpIdx + 0])
+                v1 = vgpr(tmpvgprFP32[tmpIdx + 0] + 1)
+                v2 = vgpr(tmpvgprFP32[tmpIdx + 1])
+                v3 = vgpr(tmpvgprFP32[tmpIdx + 1] + 1)
+            v4, v5, v6, v7 = self.get4VgprForEmu(writer, kernel, tc, bufferIdx, baseValuiIdx + 4, iui, lrvwTile)
+            # dst regs
+            # v4 and v4d should be different in useTransposeCode=False case
+            v4d, v5d, v6d, v7d = self.get4VgprForEmu(writer, kernel, tc, bufferIdx, baseValuiIdx + 4, iui, lrvwTile, dst=True)
+            # remove s_nop by scheduling mfma4x4 right after first 4 cvt for high
+            # we will have mfma hi * hi + 4 final cvt A between mfma4x4 B and final conv B
+            # (more instructions between mfma4x4 B and final conv A)
+            # however, we still need nop in tail loop case (A, B scheduling is not interleaved in tail loop) and CMS
+            # we still need s_nop in main loop, NGLL, NLL if number MIWaveTileA/B are different.
+            # s_nop insertion is handled in makeSubIterSchedule for main loop and NGLL/NLL
+            nopSrc = 0
+            if kernel["UseCustomMainLoopSchedule"]:
+                nopSrc = 4
+            # insert nop here for CMS only
+            if kernel["UseCustomMainLoopSchedule"] and kernel["UseMFMAF32XEmulation"] and nopSrc:
+                # 5 wait states needed before the following CVT instructions
+                packCodeT.add(SNop(waitState = nopSrc))
+            packCodeT.add(VCvtPkF32toBF16(dst=v7d, src0=v6, src1=v7, comment="pack final begin"))
+            packCodeT.add(VCvtPkF32toBF16(dst=v6d, src0=v4, src1=v5))
+            packCodeT.add(VCvtPkF32toBF16(dst=v5d, src0=v2, src1=v3))
+            commentStr = "" if noComment else "__TF32_2_" + tc + "_%d pack final end"%(baseValuiIdx//8)
+            packCodeT.add(VCvtPkF32toBF16(dst=v4d, src0=v0, src1=v1, comment=commentStr))
     """
     Local Read: Do It A/B
     iui = Inner Unroll Idx
@@ -632,29 +735,56 @@ class LocalReadMFMA(LocalRead):
                                 # Val+7: bf16 low  (6,7)
 
                                 if (valuiIdx % swapBlockSizeSub) == 0:
-                                    allPack4HiDOne = False
+                                    allPack4HiDone = False
+                                    allPack4LoDone = False
                                     if useTransposeCode:
                                         # generate Tranpose code (with v_swap) for wider local read + useTransposeCode
                                         self.transposeLRVregs(kernel, packCodePreT, tc, bufferIdx, iui, writer, lrvwTile, swapBlockSizeSub, subTileIdx)
-                                    elif writer.states.doFullPackCodePrefetch:
+                                    if writer.states.doFullPackCodePrefetch and useDirect32XEmulation:
                                         # index transpose + doFullPackCodePrefetch case, finish all first conversion (high value) at once
-                                        allPack4HiDOne = True
-                                        for idx in range(0, swapBlockSizeSub, 8):
-                                            newBaseValuiIdx = baseValuiIdx + idx
+                                        allPack4HiDone = True
+                                        for idx in range(0, swapBlockSizeSub, 4):
+                                            newBaseValuiIdx = baseValuiIdx + idx - (idx % 8)
+                                            newIdx = (idx % 8)
+                                            # add comment at last one only
                                             commentForSchedule1 = "__TF32_1_" + tc + "_%d"%(newBaseValuiIdx//8)
-                                            self.pack4HiBits(kernel, writer, tc, 0, bufferIdx, newBaseValuiIdx, iui, packCodeT, lrvwTile, commentForSchedule1, useDirect32XEmulation)
-                                            self.pack4HiBits(kernel, writer, tc, 4, bufferIdx, newBaseValuiIdx, iui, packCodeT, lrvwTile, commentForSchedule1, useDirect32XEmulation)
+                                            noComment = idx < swapBlockSizeSub - 4
+                                            commentForPack = "" if noComment else commentForSchedule1
+                                            self.pack4HiBits(kernel, writer, tc, newIdx, bufferIdx, newBaseValuiIdx, iui, packCodeT, lrvwTile, commentForPack, useDirect32XEmulation)
+                                        # do all low cvt
+                                        if useDirect32XEmulation:
+                                            allPack4LoDone = True
+                                            # allocate tmp vgpr first
+                                            self.initTmpVregForPack(kernel, writer, tc, 0, bufferIdx, baseValuiIdx, iui, packCodeT, lrvwTile, tmpvgprFP32, useDirect32XEmulation)
+                                            # low pack 1st stage
+                                            for idx in range(0, swapBlockSizeSub, 4):
+                                                # add comment at last one only
+                                                commentForSchedule1 = "__TF32_1_" + tc + "_%d"%(newBaseValuiIdx//8)
+                                                noComment = idx < swapBlockSizeSub - 4
+                                                commentForPack = "" if noComment else commentForSchedule1
+                                                self.pack4LowBitsStep1(kernel, writer, tc, baseValuiIdx + idx, bufferIdx, iui, packCodeT, lrvwTile, tmpvgprFP32, commentForPack, useDirect32XEmulation)
+                                            # low pack final
+                                            for idx in range(0, swapBlockSizeSub, 4):
+                                                # on last iteration, store lower bits in last 4 registers
+                                                if idx % 8 == 4:
+                                                    self.pack4LowBitsFinal(kernel, writer, tc, baseValuiIdx + idx, bufferIdx, iui, packCodeT, lrvwTile, tmpvgprFP32, useDirect32XEmulation, noComment=idx < swapBlockSizeSub - 4)
+                                            # release tmp regs
+                                            self.releaseTmpVregForPack(kernel, writer, tc, baseValuiIdx, tmpvgprFP32, useDirect32XEmulation)
 
                                 # For every 8 read vgprs of fp32, pack high bits of bf16 into first 4 vgprs
-                                if valuiIdx % 8 == 0 :
+                                if valuiIdx % 8 == 0 and not allPack4LoDone:
                                     commentForSchedule1 = "__TF32_1_" + tc + "_%d"%(baseValuiIdx//8)
                                     # allocate tmp vgpr first
                                     self.initTmpVregForPack(kernel, writer, tc, 0, bufferIdx, baseValuiIdx, iui, packCodeT, lrvwTile, tmpvgprFP32, useDirect32XEmulation)
-                                    if not allPack4HiDOne:
-                                        self.pack4HiBits(kernel, writer, tc, 0, bufferIdx, baseValuiIdx, iui, packCodeT, lrvwTile, commentForSchedule1, useDirect32XEmulation)
-                                        self.pack4HiBits(kernel, writer, tc, 4, bufferIdx, baseValuiIdx, iui, packCodeT, lrvwTile, commentForSchedule1, useDirect32XEmulation)
+                                    if not allPack4HiDone:
+                                        commentForPack = ""
+                                        self.pack4HiBits(kernel, writer, tc, 0, bufferIdx, baseValuiIdx, iui, packCodeT, lrvwTile, commentForPack, useDirect32XEmulation)
+                                        commentForPack = commentForSchedule1
+                                        if kernel["UseMFMAF32XEmulation"] or (not useDirect32XEmulation):
+                                            commentForPack = ""
+                                        self.pack4HiBits(kernel, writer, tc, 4, bufferIdx, baseValuiIdx, iui, packCodeT, lrvwTile, commentForPack, useDirect32XEmulation)
 
-                                do8PackAtOnce = indexTranpose and not allPack4HiDOne
+                                do8PackAtOnce = indexTranpose and not allPack4HiDone
                                 if (valuiIdx % 8) == 4 and do8PackAtOnce:
                                     # index transpose  case
                                     # we need to keep both original values and transpose values
@@ -703,108 +833,15 @@ class LocalReadMFMA(LocalRead):
                                     commentStr = "__TF32_2_" + tc + "_%d pack final end"%(baseValuiIdx//8)
                                     packCodeT.add(VCvtPkF32toBF16(dst=v7t, src0=v7t, src1=vgpr(tmp), comment=commentStr))
                                     writer.vgprPool.checkIn(tmp)
-                                elif valuiIdx % 4 == 0 and (not do8PackAtOnce):
-
-                                    if (valuiIdx % 8) == 0 and not useDirect32XEmulation:
-                                        # get 4 tmp vgprs
-                                        tmpIdx = len(tmpvgprFP32) - 2
-                                        vTBase = tmpvgprFP32[tmpIdx + 0] # str(v0t.regName) does not work for tmp vreg. Put vgpr index directly here
-                                        v0t = vgpr(tmpvgprFP32[tmpIdx + 0])
-                                        v1t = vgpr(tmpvgprFP32[tmpIdx] + 1)
-                                        v2t = vgpr(tmpvgprFP32[tmpIdx + 1])
-                                        v3t = vgpr(tmpvgprFP32[tmpIdx + 1] + 1)
-                                    else:
-                                        v0t, v1t, v2t, v3t = self.get4VgprForEmu(writer, kernel, tc, bufferIdx, valuiIdx, iui, lrvwTile)
-                                        vTBase = str(v0t.regName)
-                                    srcVIdxHi = (valuiIdx-baseValuiIdx)//2 + baseValuiIdx
-                                    # vHi0, vHi1 is dst for Upper cvt
-                                    vHi0, vHi1 = self.get2VgprForEmu(writer, kernel, tc, bufferIdx, srcVIdxHi, iui, lrvwTile, dst=True)
-
-                                    # interleaveTreg case (means dst and src are same (dot2 or mfma))
-                                    if kernel["UseMFMAF32XEmulation"]:
-                                        vHiBase = str(vHi0.regName)
-                                        idMat = vgpr(writer.states.startVgprIdentityMatrix,2)
-                                        # We use a single MFMA 4x4x4_16b to perform 4 `vT - vHi` operations. 
-                                        # - A is set to negative identity matrix
-                                        # - no need for DPP as B has the same layout as C & D
-                                        commentStr = ""
-                                        if valuiIdx % 8 == 4:
-                                            # add comment for scheduling (__TF32_1_)
-                                            # UseMFMAF32XEmulation case, put the mark at second mfma4x4. Skip here
-                                            commentStr = commentForSchedule1 + ": " 
-                                        packCodeT.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[4,4,4,16], mfma1k=False,acc=vgpr(vTBase,4), a=idMat, b=vgpr(vHiBase,2), acc2=vgpr(vTBase,4), 
-                                        comment="Calculate low bits for TF32 emulation%s"%commentStr))
-                                    else:
-                                        tmp = writer.vgprPool.checkOut(1, "x32f tmp mod 4")
-                                        # Compute low bits = fp32(highBF16(A/B)) - fp32(A/B)
-                                        if kernel["UseDot2F32XEmulation"]:
-                                            packCodeT.add(VDot2CF32BF16(dst=v0t, src0=hex(0x8000bf80), src1=vHi0))
-                                            packCodeT.add(VDot2CF32BF16(dst=v1t, src0=hex(0xbf800000), src1=vHi0))
-                                        else:
-                                            packCodeT.add(PVCvtBF16toFP32(dst=vgpr(tmp), src=vHi0, comment="begin"+str(valuiIdx)))
-                                            packCodeT.add(VSubF32(dst=v0t, src0=v0t, src1=vgpr(tmp)))
-                                            packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi0, vgprMask=None, vi=1))
-                                            packCodeT.add(VSubF32(dst=v1t, src0=v1t, src1=vgpr(tmp)))
-                                        if kernel["UseDot2F32XEmulation"] and (valuiIdx % 8) == 0:
-                                            packCodeT.add(VDot2CF32BF16(dst=v2t, src0=hex(0x8000bf80), src1=vHi1))
-                                            packCodeT.add(VDot2CF32BF16(dst=v3t, src0=hex(0xbf800000), src1=vHi1))
-                                        else:
-                                            # We use cvt+sub pair since dot2 requires adding 4 wait states.
-                                            packCodeT.add(PVCvtBF16toFP32(dst=vgpr(tmp), src=vHi1))
-                                            packCodeT.add(VSubF32(dst=v2t, src0=v2t, src1=vgpr(tmp)))
-                                            packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi1, vgprMask=None, vi=1))
-                                            packCodeT.add(VSubF32(dst=v3t, src0=v3t, src1=vgpr(tmp), comment="end"))
-                                        writer.vgprPool.checkIn(tmp)
+                                elif valuiIdx % 4 == 0 and (not do8PackAtOnce) and (not allPack4LoDone):
+                                    noComment = valuiIdx % 8 == 0
+                                    commentForPack = "" if noComment else commentForSchedule1
+                                    self.pack4LowBitsStep1(kernel, writer, tc, valuiIdx, bufferIdx, iui, packCodeT, lrvwTile, tmpvgprFP32, commentForPack, useDirect32XEmulation)
                                     # on last iteration, store lower bits in last 4 registers
-                                    if valuiIdx % 8 == 4 and (not do8PackAtOnce):
-                                        if not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
-                                            if useDirect32XEmulation:
-                                                v0, v1, v2, v3 = self.get4VgprForEmu(writer, kernel, tc, bufferIdx, baseValuiIdx, iui, lrvwTile)
-                                            else:
-                                                #v0, v1, v2, v3 = self.get4TmpVgprForEmu(writer, kernel, tc, bufferIdx, baseValuiIdx, iui)
-                                                tmpIdx = len(tmpvgprFP32) - 2
-                                                v0 = vgpr(tmpvgprFP32[tmpIdx + 0])
-                                                v1 = vgpr(tmpvgprFP32[tmpIdx + 0] + 1)
-                                                v2 = vgpr(tmpvgprFP32[tmpIdx + 1])
-                                                v3 = vgpr(tmpvgprFP32[tmpIdx + 1] + 1)
-                                            v4, v5, v6, v7 = self.get4VgprForEmu(writer, kernel, tc, bufferIdx, baseValuiIdx + 4, iui, lrvwTile)
-                                            # dst regs
-                                            # v4 and v4d should be different in useTransposeCode=False case
-                                            v4d, v5d, v6d, v7d = self.get4VgprForEmu(writer, kernel, tc, bufferIdx, baseValuiIdx + 4, iui, lrvwTile, dst=True)
-                                            # remove s_nop by scheduling mfma4x4 right after first 4 cvt for high
-                                            # we will have mfma hi * hi + 4 final cvt A between mfma4x4 B and final conv B
-                                            # (more instructions between mfma4x4 B and final conv A)
-                                            # however, we still need nop in tail loop case (A, B scheduling is not interleaved in tail loop) and CMS
-                                            # we still need s_nop in main loop, NGLL, NLL if number MIWaveTileA/B are different.
-                                            # s_nop insertion is handled in makeSubIterSchedule for main loop and NGLL/NLL
-                                            nopSrc = 0
-                                            if kernel["UseCustomMainLoopSchedule"]:
-                                                nopSrc = 4
-                                            # insert nop here for CMS only
-                                            if kernel["UseCustomMainLoopSchedule"] and kernel["UseMFMAF32XEmulation"] and nopSrc:
-                                                # 5 wait states needed before the following CVT instructions
-                                                packCodeT.add(SNop(waitState = nopSrc))
-                                            packCodeT.add(VCvtPkF32toBF16(dst=v7d, src0=v6, src1=v7, comment="pack final begin"))
-                                            packCodeT.add(VCvtPkF32toBF16(dst=v6d, src0=v4, src1=v5))
-                                            packCodeT.add(VCvtPkF32toBF16(dst=v5d, src0=v2, src1=v3))
-                                            commentStr = "__TF32_2_" + tc + "_%d pack final end"%(baseValuiIdx//8)
-                                            packCodeT.add(VCvtPkF32toBF16(dst=v4d, src0=v0, src1=v1, comment=commentStr))
-                                if valuiIdx % 8 == 4:
-                                    if not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
-                                        if not useDirect32XEmulation:
-                                            while len(tmpvgprFP32):
-                                                tmp = tmpvgprFP32.pop()
-                                                writer.vgprPool.checkIn(tmp)
-                                            # if A, write tmp vgpr to writer state
-                                            if tc == "A":
-                                                if baseValuiIdx not in writer.states.tmpvgpr:
-                                                    writer.states.tmpvgpr[baseValuiIdx] = []
-                                                if tmp not in writer.states.tmpvgpr[baseValuiIdx]:
-                                                    writer.states.tmpvgpr[baseValuiIdx].append(tmp)
-                                            # if B, free tmp vgpr from writer state
-                                            elif tc == "B":
-                                                if baseValuiIdx in writer.states.tmpvgpr:
-                                                    writer.states.tmpvgpr[baseValuiIdx] = []
+                                    if valuiIdx % 8 == 4:
+                                        self.pack4LowBitsFinal(kernel, writer, tc, valuiIdx, bufferIdx, iui, packCodeT, lrvwTile, tmpvgprFP32, useDirect32XEmulation)
+                                if valuiIdx % 8 == 4 and (not allPack4LoDone):
+                                    self.releaseTmpVregForPack(kernel, writer, tc, baseValuiIdx, tmpvgprFP32, useDirect32XEmulation)
 
                             if kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]):
                                 if tP["bpe"] == 2 and tP["bpeDS"] == 4:

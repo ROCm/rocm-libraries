@@ -1481,7 +1481,7 @@ class Solution(collections.abc.Mapping):
           state["VectorWidthA"] //= state["numSubTiles"]
         if state["SourceSwap"] and state["StoreVectorWidth"] > state["VectorWidthA"]:
           # need to adjust StoreVectorWidth in SourceSwap case
-          state["StoreVectorWidth"] //= state["numSubTiles"]
+          state["StoreVectorWidth"] = state["VectorWidthA"]
 
     if state["VectorWidthB"] == -1:
       if state["EnableMatrixInstruction"]:
