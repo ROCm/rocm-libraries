@@ -4,7 +4,6 @@ SPDX-License-Identifier: MIT
 */
 
 #include <gtest/gtest.h>
-#include <spdlog/spdlog.h>
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
@@ -13,14 +12,12 @@ SPDX-License-Identifier: MIT
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
-    hipdnn::logging::initializeCallbackLogging("hipblaslt_plugin_tests",
-                                               hipdnn_test_sdk::utilities::testLoggingCallback);
+    hipdnn_plugin_sdk::logging::initializeCallbackLogging(
+        "hipblaslt_plugin_tests", hipdnn_test_sdk::utilities::testLoggingCallback);
 
     // Register HipErrorHandler to check and clear HIP errors after each test
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
 
-    auto result = RUN_ALL_TESTS();
-    spdlog::shutdown();
-    return result;
+    return RUN_ALL_TESTS();
 }
