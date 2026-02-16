@@ -57,10 +57,10 @@ struct AutoPrepareForGpuReference
         miopen::debug::AlwaysEnableConvDirectNaive = true;
         miopen::debug::LoggingQuiet                = true;
     }
-    AutoPrepareForGpuReference(const AutoPrepareForGpuReference&) = delete;
-    AutoPrepareForGpuReference(AutoPrepareForGpuReference&&)      = delete;
+    AutoPrepareForGpuReference(const AutoPrepareForGpuReference&)            = delete;
+    AutoPrepareForGpuReference(AutoPrepareForGpuReference&&)                 = delete;
     AutoPrepareForGpuReference& operator=(const AutoPrepareForGpuReference&) = delete;
-    AutoPrepareForGpuReference& operator=(AutoPrepareForGpuReference&&) = delete;
+    AutoPrepareForGpuReference& operator=(AutoPrepareForGpuReference&&)      = delete;
     ~AutoPrepareForGpuReference()
     {
         miopen::debug::LoggingQuiet                = quiet_prev;

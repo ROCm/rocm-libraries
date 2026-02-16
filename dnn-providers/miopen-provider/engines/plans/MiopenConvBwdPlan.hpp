@@ -14,7 +14,7 @@
 #include "MiopenTensor.hpp"
 #include "PlanInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class ConvBwdParams
@@ -23,7 +23,8 @@ public:
     ConvBwdParams(
         const hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes& attributes,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-            tensorMap);
+            tensorMap,
+        bool deterministicEnabled = false);
 
     ConvBwdParams(const ConvBwdParams&) = delete;
     ConvBwdParams& operator=(const ConvBwdParams&) = delete;
@@ -75,4 +76,4 @@ private:
     bool _benchmarkingEnabled;
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

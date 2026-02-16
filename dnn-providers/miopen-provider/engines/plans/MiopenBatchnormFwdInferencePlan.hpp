@@ -11,7 +11,7 @@
 #include "PlanBuilderInterface.hpp" //temporary
 #include "PlanInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class BatchnormFwdInferenceParams

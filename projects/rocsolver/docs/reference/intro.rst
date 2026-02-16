@@ -26,6 +26,11 @@ LAPACK auxiliary functions
     :ref:`rocsolver_laswp <laswp>`, x, x, x, x
     :ref:`rocsolver_lauum <lauum>`, x, x, x, x
 
+.. csv-table:: Norms and condition number estimators
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`rocsolver_lange <lange>`, x, x, x, x
+
 .. csv-table:: Householder reflections
     :header: "Function", "single", "double", "single complex", "double complex"
 

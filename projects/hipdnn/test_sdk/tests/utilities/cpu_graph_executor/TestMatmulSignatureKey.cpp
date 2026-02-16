@@ -8,9 +8,10 @@
 #include "MatmulGraphUtils.hpp"
 #include "MatmulTensorBundles.hpp"
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/MatmulSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulSignatureKey.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_test_sdk::detail;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_sdk_test_utils;
@@ -80,8 +81,8 @@ TEST(TestMatmulSignatureKey, CreateFromNodeAndTensorMap)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
+                                                                         flatbufferGraph.size());
 
     MatmulSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap(), DataType::FLOAT);
 

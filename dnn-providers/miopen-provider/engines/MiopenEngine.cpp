@@ -6,12 +6,12 @@
 
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 MiopenEngine::MiopenEngine(int64_t id)
@@ -25,7 +25,7 @@ int64_t MiopenEngine::id() const
 }
 
 bool MiopenEngine::isApplicable(HipdnnEnginePluginHandle& handle,
-                                const hipdnn_plugin_sdk::IGraph& opGraph) const
+                                const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     // This is wrong if we ever have more than 1 plan builder thats applicable.
     // If this is the case, we should split plan builders accross multiple engines.
@@ -40,6 +40,7 @@ bool MiopenEngine::isApplicable(HipdnnEnginePluginHandle& handle,
 }
 
 void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                               hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -49,6 +50,28 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
 
     std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
     knobsVector.push_back(knob);
+
+    // Collect custom knobs from plan builders
+    for(const auto& planBuilder : _planBuilders)
+    {
+        auto customKnobs = planBuilder->getCustomKnobs(handle, opGraph);
+
+        if(customKnobs.empty())
+        {
+            continue;
+        }
+
+        for(const auto& knobT : customKnobs)
+        {
+            auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(builder, &knobT);
+            knobsVector.push_back(knobOffset);
+        }
+
+        // Only one plan builder should be applicable for a given graph and return custom knobs.
+        // Stop after finding the first one to avoid duplicates.
+        break;
+    }
+
     auto knobs = builder.CreateVector(knobsVector);
 
     auto engineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
@@ -60,8 +83,9 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
     handle.storeEngineDetailsDetachedBuffer(detailsOut.ptr, std::move(detachedBuffer));
 }
 
-size_t MiopenEngine::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                      const hipdnn_plugin_sdk::IGraph& opGraph) const
+size_t MiopenEngine::getWorkspaceSize(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     size_t workspaceSize = 0;
     for(const auto& planBuilder : _planBuilders)
@@ -76,8 +100,8 @@ size_t MiopenEngine::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
 
 void MiopenEngine::initializeExecutionContext(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph,
-    const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(engineConfig.isValid())
@@ -93,22 +117,22 @@ void MiopenEngine::initializeExecutionContext(
             }
             else
             {
-                HIPDNN_LOG_WARN(
-                    "Benchmarking knob setting value is not an integer. Type: {}",
-                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
+                HIPDNN_PLUGIN_LOG_WARN(
+                    "Benchmarking knob setting value is not an integer. Type: "
+                    << hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
             }
         }
     }
     else
     {
-        HIPDNN_LOG_WARN("Engine config is invalid");
+        HIPDNN_PLUGIN_LOG_WARN("Engine config is invalid");
     }
 
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            planBuilder->buildPlan(handle, opGraph, executionContext);
+            planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
             break;
         }
     }

@@ -116,10 +116,10 @@ namespace rocRoller
                                                        .fractionOfVGPRs    = 0,
                                                        .outOfRegisters     = 1000000000.0,
                                                        .zeroFreeBarriers   = true,
-                                                       .vmemCycles         = 63,
-                                                       .vmemQueueSize      = 1,
-                                                       .dsmemCycles        = 38,
-                                                       .dsmemQueueSize     = 1};
+                                                       .vmemCycles         = 64,
+                                                       .vmemQueueSize      = 3,
+                                                       .dsmemCycles        = 32,
+                                                       .dsmemQueueSize     = 3};
 
         constexpr Weights GFX950_WEIGHTS = {.nops               = 1001.4279088984798,
                                             .vmcnt              = 526.093932290615,
@@ -270,7 +270,7 @@ namespace rocRoller
 
                 if(fn == CostFunction::LinearWeightedSimple)
                 {
-                    if(!arch.isCDNA35GPU())
+                    if(!arch.isCDNA4GPU())
                         Log::warn("Architecture {} not tested for simplifed weights.",
                                   arch.toString());
 
@@ -283,7 +283,7 @@ namespace rocRoller
                     return GFX90A_WEIGHTS;
                 else if(arch.isCDNA3GPU())
                     return GFX942_WEIGHTS;
-                else if(arch.isCDNA35GPU())
+                else if(arch.isCDNA4GPU())
                     return GFX950_WEIGHTS;
                 else
                 {

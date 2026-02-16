@@ -277,10 +277,10 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     message( WARNING "Using ${BLAS_LIBRARY} as reference library, 64-bit tests may fail. Test suite should be run with --gtest_filter=-*stress*")
   endif()
 
-  # Find the package ROCmSMI
+  # Find the package AMD SMI
   if(NOT WIN32)
-    find_package(rocm_smi CONFIG REQUIRED)
-    list( APPEND COMMON_LINK_LIBS rocm_smi64 )
+    find_package(amd_smi CONFIG REQUIRED)
+    list( APPEND COMMON_LINK_LIBS amd_smi )
   endif()
 
   find_package( GTest REQUIRED )

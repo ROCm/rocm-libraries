@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -97,6 +97,7 @@ namespace rocRoller
             {
                 return stream << toString(mode);
             }
+
         } // namespace Solution
     } // namespace Parameters
 } // namespace rocRoller

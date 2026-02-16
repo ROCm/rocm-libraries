@@ -14,9 +14,10 @@
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
-using namespace miopen_legacy_plugin::test_utilities;
+using namespace miopen_plugin::test_utilities;
 using namespace test_conv_common;
 
 namespace
@@ -26,7 +27,7 @@ template <typename DataType>
 class ConvBackwardData : public IntegrationGraphVerificationHarness<DataType, ConvTestCase>
 {
 protected:
-    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
+    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         // Skipping until CK is working on Windows
         SKIP_IF_WINDOWS();
@@ -41,11 +42,11 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto dyAttr = graph::makeTensorAttributes(
+        auto dyAttr = makeTensorAttributes(
             "dy", testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
-        auto wAttr = graph::makeTensorAttributes(
+        auto wAttr = makeTensorAttributes(
             "w", testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
