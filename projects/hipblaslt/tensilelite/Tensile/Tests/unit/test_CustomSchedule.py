@@ -53,7 +53,7 @@ def create_base_kernel():
             "TransposeB": False,
         },
         "MacroTile0": 0, "MacroTile1": 0, "DepthU": 64,
-        "PrefetchGlobalRead": 0, "PrefetchLocalRead": 0, "DirectToLds": True,
+        "PrefetchGlobalRead": 0, "PrefetchLocalRead": 0, "DirectToLds": 1,  "DtlPlusLdsBuf": False,
         "GlobalReadVectorWidthA": 0, "GlobalReadVectorWidthB": 0,
         "LocalReadVectorWidth": 0,
         "WaveSeparateGlobalReadA": 0,
@@ -97,7 +97,7 @@ class TestCustomScheduleBF16:
         })
         kernel.update({
             "MacroTile0": 256, "MacroTile1": 256, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, 
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2], "TransposeLDS": 0 if NT else 1, "MIWaveTileA": 8, "MIWaveTileB": 8,
         })
