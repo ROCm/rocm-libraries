@@ -88,8 +88,33 @@ MatmulParams::MatmulParams(
 
     _matrixLayoutA = HipblasltMatrixLayout(tA);
     _matrixLayoutB = HipblasltMatrixLayout(tB);
-    _matrixLayoutC = HipblasltMatrixLayout(tC);
 
+    if(activAttr != nullptr)
+    {
+        _matrixLayoutC = HipblasltMatrixLayout(
+            hipblaslt_utils::findTensorAttributes(tensorMap, activAttr->out_0_tensor_uid()));
+    }
+    else if(biasAttr != nullptr)
+    {
+        _matrixLayoutC = HipblasltMatrixLayout(
+            hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid()));
+    }
+    else
+    {
+        _matrixLayoutC = HipblasltMatrixLayout(tC);
+    }
+
+    const auto& aDims = tA.dims();
+    const auto& bDims = tB.dims();
+    const auto& cDims = tC.dims();
+    if(aDims.size() != bDims.size() || aDims.size() != cDims.size())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported input matrix ranks: they should be the same");
+    }
+
+    hipDataType biasDataType = HIP_R_32F;
     if(biasAttr)
     {
         if(!biasAttr->in_1_tensor_uid().has_value())
@@ -113,6 +138,18 @@ MatmulParams::MatmulParams(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "MatmulParams: biasAttr tensor UIDs do not match c_tensor_uid");
         }
+
+        const auto tBias = hipblaslt_utils::findTensorAttributes(tensorMap, _biasUid.value());
+        const auto& biasDims = tBias.dims();
+
+        PLUGIN_THROW_IF_TRUE(
+            biasDims.empty() || biasDims.back() != cDims.back()
+                || std::accumulate(
+                       biasDims.cbegin(), biasDims.cend(), int64_t(1), std::multiplies<int64_t>())
+                       != biasDims.back(),
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Bias tensor dims must be equal to column dimension of output matrix");
+        biasDataType = hipblaslt_utils::tensorDataTypeToHipDataType(tBias.dataType());
     }
 
     // Row-major BLAS trick: to compute C = A * B with row-major data,
@@ -120,17 +157,7 @@ MatmulParams::MatmulParams(
     // So we swap the transpose operations: transA in desc = getTrans(B), transB in desc = getTrans(A)
     _matmulDesc
         = HipblasltMatmulDesc(getTrans(tB), getTrans(tA), getComputeDataType(tA, tB), HIP_R_32F);
-    setEpilogue(activAttr);
-
-    const auto& aDims = tA.dims();
-    const auto& bDims = tB.dims();
-    const auto& cDims = tC.dims();
-    if(aDims.size() != bDims.size() || aDims.size() != cDims.size())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Unsupported input matrix ranks: they should be the same");
-    }
+    setEpilogue(activAttr, biasDataType);
 
     if(aDims.size() > 2)
     {
@@ -186,7 +213,8 @@ void MatmulParams::setBatchInfo(
     }
 }
 
-void MatmulParams::setEpilogue(const hipdnn_data_sdk::data_objects::PointwiseAttributes* activAttr)
+void MatmulParams::setEpilogue(const hipdnn_data_sdk::data_objects::PointwiseAttributes* activAttr,
+                               hipDataType biasDataType)
 {
     auto epilogueParams
         = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(activAttr, _biasUid.has_value());
@@ -210,6 +238,24 @@ void MatmulParams::setEpilogue(const hipdnn_data_sdk::data_objects::PointwiseAtt
                                             HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
                                             &epilogueParams.act1,
                                             sizeof(epilogueParams.act1)));
+    }
+
+    if(_biasUid.has_value())
+    {
+        THROW_ON_HIPBLASLT_FAILURE(
+            hipblasLtMatmulDescSetAttribute(_matmulDesc.matmulDesc(),
+                                            HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE,
+                                            &biasDataType,
+                                            sizeof(biasDataType)));
+
+        // hipBLASLt requires initialized bias pointer in matmul descriptor for algorithm search.
+        // Since the pointer is unknown on this stage, we initialize it by dummy pointer to update it in execution stage.
+        void* dummyBiasPtr = reinterpret_cast<void*>(0x1);
+        THROW_ON_HIPBLASLT_FAILURE(
+            hipblasLtMatmulDescSetAttribute(_matmulDesc.matmulDesc(),
+                                            HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
+                                            &dummyBiasPtr,
+                                            sizeof(dummyBiasPtr)));
     }
 }
 
@@ -295,6 +341,17 @@ void MatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
         = hipblaslt_utils::findDeviceBuffer(_params.b().uid(), deviceBuffers, numDeviceBuffers);
     auto cBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.c().uid(), deviceBuffers, numDeviceBuffers);
+
+    if(_params.biasUid().has_value())
+    {
+        auto biasBuffer = hipblaslt_utils::findDeviceBuffer(
+            _params.biasUid().value(), deviceBuffers, numDeviceBuffers);
+        THROW_ON_HIPBLASLT_FAILURE(
+            hipblasLtMatmulDescSetAttribute(_params.desc().matmulDesc(),
+                                            HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
+                                            &biasBuffer.ptr,
+                                            sizeof(biasBuffer.ptr)));
+    }
     // A, B and C matrices are row-major. But hipBLASLt works with column-major matrices
     // To work with row-major matrices, we transpose them.
     // This is done by changing the order of A and B matrices in arguments:

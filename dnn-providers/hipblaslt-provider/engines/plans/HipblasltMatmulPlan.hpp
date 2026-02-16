@@ -54,7 +54,8 @@ private:
                       const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB,
                       const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tC);
 
-    void setEpilogue(const hipdnn_data_sdk::data_objects::PointwiseAttributes* activAttr);
+    void setEpilogue(const hipdnn_data_sdk::data_objects::PointwiseAttributes* activAttr,
+                     hipDataType biasDataType);
 
     HipblasltMatmulDesc _matmulDesc;
     HipblasltMatrixLayout _matrixLayoutA;
