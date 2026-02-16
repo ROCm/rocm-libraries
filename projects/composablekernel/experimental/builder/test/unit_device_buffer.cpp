@@ -48,7 +48,7 @@ TEST(DeviceBuffer, AutoFree)
     const auto size = 12345;
     std::byte* ptr  = nullptr;
 
-    // In this test we are explicitly testing a pointer that is out of scope, so 
+    // In this test we are explicitly testing a pointer that is out of scope, so
     // we have to disable the clang compiler's lifestime safety checks.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-permissive"
