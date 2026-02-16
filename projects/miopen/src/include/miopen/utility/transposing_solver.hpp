@@ -239,7 +239,16 @@ struct BatchedTransposeSolverImpl : TransposePseudoSolver
 
     bool IsApplicable(const TransposeProblem& problem) const override
     {
-        return BatchedTransposeSolution::IsApplicable(problem.input.GetType());
+        const auto& desc = problem.input;
+        const auto& lens = desc.GetLengths();
+
+        // Batched transpose only supports 4D tensors (NCHW <-> NHWC)
+        if(lens.size() != 4)
+            return false;
+
+        // Delegate to BatchedTransposeSolution's validation which checks data type and dimensions
+        return BatchedTransposeSolution::IsApplicable(
+            desc.GetType(), lens[0], lens[1], lens[2], lens[3]);
     }
 
     ConvSolution GetSolution(const ExecutionContext& ctx,
@@ -251,8 +260,8 @@ struct BatchedTransposeSolverImpl : TransposePseudoSolver
         // Extract NCHW dimensions (lengths are always stored in NCHW order)
         const uint32_t n = static_cast<uint32_t>(lens[0]);
         const uint32_t c = static_cast<uint32_t>(lens[1]);
-        const uint32_t h = lens.size() > 2 ? static_cast<uint32_t>(lens[2]) : 1;
-        const uint32_t w = lens.size() > 3 ? static_cast<uint32_t>(lens[3]) : 1;
+        const uint32_t h = static_cast<uint32_t>(lens[2]);
+        const uint32_t w = static_cast<uint32_t>(lens[3]);
 
         TransposeSolution transpose_sol(ctx, desc.GetType(), n, c, h, w);
 
@@ -463,6 +472,7 @@ public:
                                                     transposed_params);
             });
 
+        MIOPEN_LOG_I2("Executing the input transpose");
         for(const auto& transpose : inputs)
             transpose(*handle);
     }
@@ -474,6 +484,7 @@ public:
 
     ~ProblemTensorTransposeGroup()
     {
+        MIOPEN_LOG_I2("Executing the output transpose");
         for(const auto& transpose : outputs)
             transpose(*handle);
     }
@@ -582,7 +593,7 @@ struct TransposingSolver : Base
 
         if(!any_difference)
         {
-            MIOPEN_LOG_I("No layout difference detected, solver");
+            MIOPEN_LOG_I("No layout difference detected for solver, skipping transpose");
             return false;
         }
 
@@ -615,7 +626,6 @@ struct TransposingSolver : Base
                              const Problem& problem,
                              const typename Inner::PerformanceConfigType& config) const override
     {
-
         // Use Derived::Transpose to allow derived classes to override (CRTP pattern)
         auto transposed_problem = Derived::Transpose(problem);
         ConvSolution sln        = Inner{}.GetSolution(ctx, transposed_problem, config);
@@ -673,7 +683,9 @@ struct TransposingSolver : Base
                     transpose_solver = candidate;
             }
 
-            assert(transpose_solver != transpose_solvers.end());
+            if(transpose_solver == transpose_solvers.end())
+                MIOPEN_THROW("No applicable transpose solver found for layout transformation: " +
+                             specific_pair);
 
             auto transpose_sln = transpose_solver->second->GetSolution(ctx, transpose_problem);
 

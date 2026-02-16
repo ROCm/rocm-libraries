@@ -334,7 +334,7 @@ BatchedTransposeSolution::BatchedTransposeSolution(const ExecutionContext& ctx,
     : data_type(data_type_), batch(batch_), height(height_), width(width_)
 {
     if(!IsApplicable(data_type))
-        MIOPEN_THROW("These data type are not supported");
+        MIOPEN_THROW("This data type is not supported");
     num_cu                 = ctx.GetStream().GetMaxComputeUnits();
     std::size_t data_size  = miopen::GetTypeSize(data_type);
     kernel_param_heuristic = batched_transpose::HeuristicGet(ctx, data_size, batch, height, width);

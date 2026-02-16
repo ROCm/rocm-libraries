@@ -81,6 +81,36 @@ struct MIOPEN_INTERNALS_EXPORT BatchedTransposeSolution
                data_type == miopenInt8 || data_type == miopenBFloat16;
     }
 
+    /// Check if the given NCHW dimensions are supported by batched transpose
+    /// This validates both data type and dimension constraints for the batched transpose kernel
+    static bool IsApplicable(miopenDataType_t data_type, size_t n, size_t c, size_t h, size_t w)
+    {
+        // Check data type first
+        if(!IsApplicable(data_type))
+            return false;
+
+        // Check all dimensions fit in uint32_t (kernel parameter requirement)
+        if(n > std::numeric_limits<uint32_t>::max() || c > std::numeric_limits<uint32_t>::max() ||
+           h > std::numeric_limits<uint32_t>::max() || w > std::numeric_limits<uint32_t>::max())
+            return false;
+
+        // Check h*w doesn't overflow uint32_t (required for width/height parameter)
+        const size_t hw_product = h * w;
+        if(hw_product > std::numeric_limits<uint32_t>::max())
+            return false;
+
+        // Check n*c*(h*w) doesn't overflow uint32_t (required for dim_total calculation)
+        // dim_total = batch * dim_h * dim_w where batch=n, and dim_h*dim_w ≈ c*(h*w)/tile_size
+        // Conservative check: ensure batch * height * width fits in uint32_t
+        if(c != 0 && hw_product > std::numeric_limits<uint32_t>::max() / c)
+            return false;
+        const size_t c_hw = c * hw_product;
+        if(n != 0 && c_hw > std::numeric_limits<uint32_t>::max() / n)
+            return false;
+
+        return true;
+    }
+
     miopenDataType_t data_type;
     uint32_t batch;
     uint32_t height;
