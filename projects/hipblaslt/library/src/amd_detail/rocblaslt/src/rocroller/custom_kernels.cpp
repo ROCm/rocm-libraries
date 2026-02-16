@@ -171,17 +171,6 @@ void preloadCustomKernels(SolutionCache& cache)
                         params.workgroupTile,
                         getCoPath() / "f4gemm_bf16_per1x32Fp4_BpreShuffle_32x1024.co"));
 
-                // 64xN kernels
-                params.workgroupTile    = {64, 128, 256};
-                cache.addKernel(
-                    mxfp4Kernel,
-                    params,
-                    createCustomGemmKernel(
-                        "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x128E",
-                        mxfp4Kernel,
-                        params.workgroupTile,
-                        getCoPath() / "f4gemm_bf16_per1x32Fp4_BpreShuffle_64x128.co"));
-
                 params.workgroupTile    = {64, 256, 256};
                 cache.addKernel(
                     mxfp4Kernel,
