@@ -106,7 +106,7 @@ struct Extent : std::array<size_t, RANK>
     /// @param i The index to index the array with.
     ///
     /// @see std::array::operator[]
-    __device__ __host__ size_t& operator[](size_t i)
+    __device__ __host__ size_t& operator[](size_t i) [[clang::lifetimebound]]
     {
         if constexpr(RANK > 0)
         {
