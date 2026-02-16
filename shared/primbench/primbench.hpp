@@ -3570,9 +3570,9 @@ public:
              detail::flags::FlagTag flags    = flags::none,
              hipStream_t            stream   = hipStreamDefault)
         : m_settings(settings)
-        , m_own_stream(stream == hipStreamDefault)
         , m_flags(flags)
         , m_stream(stream)
+        , m_own_stream(stream == hipStreamDefault)
         , m_cli(argc, argv)
     {
         get_logger().save_program_start_time();
