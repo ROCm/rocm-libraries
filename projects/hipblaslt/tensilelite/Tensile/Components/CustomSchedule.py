@@ -565,7 +565,6 @@ class RegisterSchedule:
         # Return original function unchanged (so it can still be called directly)
         return func
 
-
 @RegisterSchedule(
     tile_config=TileConfig(256, 96, 64, 2, 1, True, 0, 0),
     dtype_predicate=is16bit,
@@ -1282,6 +1281,149 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
+    tile_config=TileConfig(96, 256, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_96x256x64_16bit(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+
+    numMfma = 48
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 11
+
+    if isTN(kernel) and TLDS==1:
+        kernel["SwapGlobalReadOrder"] = True
+
+        syncTable = [
+            7, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Finish all LRA1s and LRB1s"),
+
+            9, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRB0 done"),
+            9, SBarrier(comment=""),
+
+            23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRA0 done"),
+
+            35, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Wait for prev GRBs"),
+            35, SBarrier(comment=""),
+
+            43, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Wait for prev GRA"),
+            43, SBarrier(comment=""),
+
+            47, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Finish all LRB1 and 1/3 LRA1"),
+        ]
+
+        syncCode = syncTable[1::2]
+        optSchedule = {
+            'GRIncA' : [[0,0,0,    2,2,2, 3, 4,4],
+                        [-1,-1,-1, 1,1,1, 3, 3,3]],
+            'GRIncB' : [[4, 5,5,5, 6,6,6, 7,7],
+                        [4, 5,5,5, 6,6,6, 7,7]],
+
+            'LRB0'   : [[-1,-1,-1, 1,1,1, 3,3],
+                        [0,0,0,    2,2,2, 4,4]],
+            'LRSB'   : [[8], [9]],
+            
+            'SYNC'   : [syncTable[::2]],
+
+            # Actually loads GRB
+            'GRA'    : [[8,9,  11,11, 13,13, 15,15,  20,20, 22,22, 24,24, 26,26],
+                        [8,10, 12,12, 14,14, 16,16,  21,21, 23,23, 25,25, 27,27]],
+            'LWSB'   : [[32]],
+
+            'LRA0'   : [[17, 17, 17],
+                        [15, 15, 15]],
+            'LRSA'   : [[19]],
+            
+            # Actually loads GRA
+            'GRB'    : [[36,36, 38,38, 40,40],
+                        [37,37, 39,39, 41,41]],
+            'LWSA'   : [[45]],
+            
+            'LRB1'   : [[35,35, 37,37, 39,39, 41,41],
+                        [36,36, 38,38, 40,40, 42,42]],
+            'LRA1'   : [[43,44,46],
+                        [43,45,46]],
+            
+            'LCC'   : [[47, 47]],
+        }
+
+        # Reorder to basically create the 256x96 case
+        mfmaReorder = [
+             0,  3,  6,  9, 12, 15, 18, 21,
+             1,  4,  7, 10, 13, 16, 19, 22,
+             2,  5,  8, 11, 14, 17, 20, 23,
+              # Second half
+             24, 27, 30, 33, 36, 39, 42, 45,
+             25, 28, 31, 34, 37, 40, 43, 46,
+             26, 29, 32, 35, 38, 41, 44, 47
+        ]
+
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder=mfmaReorder)
+
+    elif isNT(kernel) and useLDSTr and TLDS == 0:
+        # A: MIWaveTileA=3 => 2*3 = 6 local/global reads
+        # B: MIWaveTileB=8 => 2*8 = 16 local/global reads
+        syncTable = [
+            -1, SWaitCnt(dscnt=12, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW for iteration == 0"),
+             5, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW for iteration == 0"),
+            12, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before GRA"),
+            12, SBarrier(comment="barrier after LRA0, before GRA"),
+            23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before GRB"),
+            23, SBarrier(comment="barrier after LRB0, before GRB"),
+
+            25, SWaitCnt(dscnt=-1, vlcnt=11+1, vscnt=-1, comment="wait for global reads before next-tile LR"),
+            25, SBarrier(comment="final barrier before LRA1/LRB1"),
+            36, SWaitCnt(dscnt=-1, vlcnt=11-2, vscnt=-1, comment="wait for global reads before next-tile LR"),
+            36, SBarrier(comment="final barrier before LRA1/LRB1"),
+        ]
+        optSchedule = {
+            'SYNC'   : [syncTable[::2]],
+
+            # Address increments
+            'GRIncA' : [[0, 0, 1, 1, 2, 2, 3, 3, 4]],
+            'GRIncB' : [[4, 5, 5, 6, 6, 7, 7, 8, 8]],
+
+            # Current-iteration local reads
+            'LRA0'   : [[0, 1, 2, 3, 4, 5],
+                        [1, 2, 3, 4, 4, 6]],
+            # Ensure LRB0 completes early enough for upcoming MFMA consumers.
+            'LRB0'   : [[6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
+                        [7, 8, 9, 10, 11, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]],
+
+            # Global reads (DirectToLds). Issue after LRA0 barrier, while finishing LRB0.
+            # Do not interleave GRA between GRIncB indices (SCC hazard).
+            'GRA'    : [[12, 12, 18, 18, 21, 21],
+                        [13, 13, 19, 19, 22, 22]],
+            # Start GRB after the LRB0 barrier. Use stride=2 starting at 24.
+            'GRB'    : [[24, 24, 26, 26, 28, 28, 30, 30, 32, 32, 34, 34, 38, 38, 40, 40],
+                        [24, 24, 27, 27, 29, 29, 31, 31, 33, 33, 35, 35, 37, 37, 39, 39]],
+
+            # Next-iteration local reads
+            'LRA1'   : [[25, 26, 27, 28, 29, 30],
+                        [26, 27, 28, 29, 30, 31]],
+            # Keep within the mfma window; repeated indices are allowed (multiple instructions scheduled at same mfma slot).
+            'LRB1'   : [[36, 37, 37, 38, 38, 39, 39, 40, 40, 41, 41, 42, 43, 45, 46, 47],
+                        [37, 38, 38, 39, 39, 40, 40, 41, 41, 42, 42, 43, 44, 46, 47, 47]],
+
+            # Epilogue-related
+            'LRSA'   : [[22]],
+            'LRSB'   : [[23]],
+            'LWSA'   : [[43]],
+            'LWSB'   : [[44]],
+            'LCC'    : [[45, 46]],
+        }
+
+        syncCode = syncTable[1::2]
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    else:
+        return False, None
+
+    return True, opt1
+
+@RegisterSchedule(
     tile_config=TileConfig(256, 160, 64, 2, 1, True, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
@@ -1633,6 +1775,79 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     numMfma = 104
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+@RegisterSchedule(
+    tile_config=TileConfig(192, 128, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_192x128x64_16bit(kernel, useLDSTr, TLDS):
+    """192x128x64 TN schedule (BF16/FP16)."""
+    kernel["MfmaInitCVgprs"] = True
+
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+
+    # 192 = 16 * MIWaveTileA(6) * MIWaveGroup0(2)
+    # 128 = 16 * MIWaveTileB(4) * MIWaveGroup1(2)
+    if isTN(kernel) and (not useLDSTr) and TLDS == 1:
+        numMfma = 2 * kernel["MIWaveTileA"] * kernel["MIWaveTileB"]
+        # Number of global reads per iter (A:6, B:4) = 10
+        nglshift = nllshift = 10
+
+        # Use syncTable format (idx, wait/barrier, idx, wait/barrier, ...)
+        syncTable = [
+            # Loop start: must guarantee prior-iteration LR1 completion for the next iteration's early MFMA use.
+            -1, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 before starting main loop"),
+            5,  SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 for the remaining main loop"),
+
+            14,  SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete to start GRA"),
+            14,  SBarrier(comment=""),
+
+            23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete to start GRB"),
+            23, SBarrier(comment=""),
+
+            # GR -> SWait(vmcnt=0) -> SBarrier -> LR1 ordering (global-read to LDS must be visible before LR1)
+            28, SWaitCnt(dscnt=-1, vlcnt=10+1, vscnt=-1, comment="Wait for all GRs to complete before starting LR1"),
+            28, SBarrier(comment=""),
+
+            44, SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="Wait for all GRs to complete before starting LRB1"),
+            44, SBarrier(comment=""),
+        ]
+
+        optSchedule = {
+            'SYNC'   : [syncTable[::2]],
+            'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
+            'GRIncB' : [[9,9,10,10,11,11,12,13,13]],
+
+            'LRA0'   : [[0,1,2,3,4,5]],
+            'LRB0'   : [[6,9,12,15]],
+
+            'GRA'    : [[14,14, 16,16, 18,18, 20,20, 22,22, 24,24],
+                        [15,15, 17,17, 19,19, 21,21, 23,23, 25,25]],
+            'GRB'    : [[26,26, 30,30, 37,37, 43,43]],
+
+            # Prefetch next iteration
+            'LRA1'   : [[28,30,32,34,36,38],
+                        [29,31,33,35,37,39]],
+            'LRB1'   : [[44,45,46,47]],
+
+            'LRSA'   : [[21]],
+            'LRSB'   : [[21]],
+            'LWSA'   : [[46]],
+            'LWSB'   : [[46]],
+            'LCC'    : [[47, 47]],
+        }
+
+        syncCode = syncTable[1::2]
+    else:
+        return False, None
+
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
 @RegisterSchedule(
@@ -2149,6 +2364,46 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
             'LCC': [[119, 119]],
         }
         syncCode = syncTable[1::2]
+        nglshift = nllshift = 16
+    elif isTN(kernel) and TLDS==1:
+        kernel["SwapGlobalReadOrder"] = True
+        # Note: A/B Global read orders are swapped
+        # i.e. GRA contains GR for B
+        optSchedule = {
+            'SYNC'  : [[-1, 4, 16, 16, 50, 50, 54, 55, 84, 85]],
+            'GRIncA': [[0,  1,  2,  3,  4,  5,  6,  7,  8]],
+            'GRIncB': [[9, 10, 11, 12, 13, 14, 16, 16, 16]],
+            'LRB0'  : [[0, 2, 4, 6, 8, 10],
+                       [1, 3, 5, 7, 9, 11]],
+            'LRA0'  : [[12, 14, 24, 26, 28, 30, 32, 34, 36, 38],
+                       [13, 15, 25, 27, 29, 31, 33, 35, 37, 39]],
+            'GRA'   : [[16, 16, 18, 18, 20, 20, 22, 22, 46, 46, 48, 48],
+                       [17, 17, 19, 19, 21, 21, 23, 23, 47, 47, 49, 49]],
+            'GRB'   : [[50, 50, 52, 52, 74, 75, 78, 78, 80, 80, 82, 82, 106, 106, 108, 108, 110, 110, 112, 112],
+                       [51, 51, 53, 53, 76, 77, 79, 79, 81, 81, 83, 83, 107, 107, 109, 109, 111, 111, 113, 113]],
+            'LRB1'  : [[56, 58, 60, 62, 64, 66],
+                       [57, 59, 61, 63, 65, 67]],
+            'LRA1'  : [[86, 88, 90, 92, 94, 96, 98, 100, 102, 104],
+                       [87, 89, 91, 93, 95, 97, 99, 101, 103, 105]],
+            'LRSA'  : [[44]],
+            'LRSB'  : [[45]],
+            'LWSA'  : [[115]],
+            'LWSB'  : [[117]],
+            'LCC'   : [[119, 119]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for prior local read. Relax a bit to dscnt=4 to reduce latency") ,
+            SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for all prior local read requested as the input for MFMA") ,
+            SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for prior LRB0 before GRA (GR for MatrixB). Skip LRA0*2") ,
+            SBarrier(comment="") ,
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA0 before GRB (GR for MatrixA)") ,
+            SBarrier(comment="") ,
+            SWaitCnt(dscnt=-1, vlcnt=18, vscnt=-1, comment="Wait for GRA (GR for MatrixB) from previous iteration before LRB1. Skip GRB*10 from last iter and GRA*6 + GRB*2 from this iter.") ,
+            SBarrier(comment="") ,
+            SWaitCnt(dscnt=-1, vlcnt=12, vscnt=-1, comment="Wait for GRB (GR for MatrixA) from previous iteration before LRA1. Skip GRA*6 + GRB*6 from this iter.") ,
+            SBarrier(comment="") ,
+        ]
         nglshift = nllshift = 16
     elif isNT(kernel) and useLDSTr and TLDS == 0:
         kernel["SwapGlobalReadOrder"] = True
