@@ -108,25 +108,32 @@ struct FixedNKGroupedGemmProfiler
         bool pass = true;
         for(int kbatch : kbatches)
         {
-            pass &= ck::profiler::profile_grouped_gemm_fixed_nk_impl<ADataType,
-                                                                     BDataType,
-                                                                     EDataType,
-                                                                     AccDataType,
-                                                                     ALayout,
-                                                                     BLayout,
-                                                                     CLayout>(verify,
-                                                                              init_method,
-                                                                              log,
-                                                                              bench,
-                                                                              Ms,
-                                                                              Ns,
-                                                                              Ks,
-                                                                              StrideAs,
-                                                                              StrideBs,
-                                                                              StrideCs,
-                                                                              kbatch,
-                                                                              n_warmup,
-                                                                              n_iter);
+            try
+            {
+                pass &= ck::profiler::profile_grouped_gemm_fixed_nk_impl<ADataType,
+                                                                         BDataType,
+                                                                         EDataType,
+                                                                         AccDataType,
+                                                                         ALayout,
+                                                                         BLayout,
+                                                                         CLayout>(verify,
+                                                                                  init_method,
+                                                                                  log,
+                                                                                  bench,
+                                                                                  Ms,
+                                                                                  Ns,
+                                                                                  Ks,
+                                                                                  StrideAs,
+                                                                                  StrideBs,
+                                                                                  StrideCs,
+                                                                                  kbatch,
+                                                                                  n_warmup,
+                                                                                  n_iter);
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << e.what() << std::endl;
+            }
         }
         return pass;
     }

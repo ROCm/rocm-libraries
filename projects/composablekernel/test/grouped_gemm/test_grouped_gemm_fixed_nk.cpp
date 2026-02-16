@@ -43,8 +43,8 @@ class TestGroupedGemm
 
 using KernelTypes = ::testing::Types<
 
-#if(defined(CK_USE_XDL) && (defined(__gfx9__) || defined(__gfx12__))) || \
-    (defined(CK_USE_WMMA) && defined(__gfx12__))
+#if CK_USE_OCP_FP8 || CK_USE_FNUZ_FP8 || defined(CK_USE_FP8_ON_UNSUPPORTED_ARCH) || \
+    defined(CK_USE_WMMA_FP8)
     ck::Tuple<Row, Row, Row, F16, F8, F16>,
     ck::Tuple<Row, Col, Row, F16, F8, F16>,
 #endif
