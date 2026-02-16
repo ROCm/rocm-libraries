@@ -59,7 +59,7 @@ namespace GEMMTests
         gemm.workgroupSizeY = 4;
 
         gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.fuseLoops = false;
 
         basicGEMM<Half>(gemm);
@@ -207,7 +207,7 @@ namespace GEMMTests
         gemm.workgroupSizeX = 4 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 1;
 
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         basicGEMM<Half>(gemm);
     }
@@ -232,7 +232,7 @@ namespace GEMMTests
         gemm.workgroupSizeX = 4 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 1;
 
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         basicGEMM<Half>(gemm);
     }
@@ -254,7 +254,7 @@ namespace GEMMTests
         gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 2;
 
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         basicGEMM<Half>(gemm);
 
@@ -288,7 +288,7 @@ namespace GEMMTests
         gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 2;
 
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         basicGEMM<Half>(gemm);
 
@@ -315,7 +315,7 @@ namespace GEMMTests
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         gemm.transB = "N";
 
@@ -346,7 +346,7 @@ namespace GEMMTests
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         gemm.transB = "N";
 

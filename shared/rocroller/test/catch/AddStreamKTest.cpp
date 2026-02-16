@@ -553,7 +553,7 @@ TEST_CASE("AddStreamK with unroll K", "[streamk][kernel-graph]")
     example.setMFMA(32, 32, 2, 1);
     example.setUseLDS(false, false, false);
     example.setPrefetch(false, 0, 0, false);
-    example.setUnroll(0, 0, unrollK);
+    example.setUnroll(unrollK);
     example.setStreamK(mode);
 
     auto numWGs     = example.getFlattenedWorkgroupSize();
