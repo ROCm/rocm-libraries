@@ -14,6 +14,7 @@ using RowMajor      = ck_tile::tensor_layout::gemm::RowMajor;
 using ColumnMajor   = ck_tile::tensor_layout::gemm::ColumnMajor;
 using FP8           = ck_tile::fp8_t;
 using BF8           = ck_tile::bf8_t;
+using FP16          = ck_tile::fp16_t;
 using BF16          = ck_tile::bf16_t;
 using Half          = ck_tile::half_t;
 using PkInt4        = ck_tile::pk_int4_t;
@@ -31,9 +32,37 @@ using BQuant1D128Types = ::testing::Types<
     std::tuple<RowMajor, ColumnMajor, RowMajor, ColumnMajor, FP8,  FP8,    float, Half, BQuantGrouped, GemmConfigBase, GroupSize>,
     std::tuple<RowMajor, ColumnMajor, RowMajor, ColumnMajor, FP8,  PkInt4, FP8,   Half, BQuantGrouped, GemmConfigBase, GroupSize>,
     std::tuple<RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF8,  PkInt4, BF8,   Half, BQuantGrouped, GemmConfigBase, GroupSize>,
-    std::tuple<RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16, PkFP4,  E8M0,  BF16, BQuantGrouped, GemmConfigMx,   GroupSize>,
-    std::tuple<RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16, BF8,    E8M0,  BF16, BQuantGrouped, GemmConfigMx,   GroupSize>,
-    std::tuple<RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16, BF16,   E8M0,  BF16, BQuantGrouped, GemmConfigMx,   GroupSize>
+
+    // Microscaling
+    // RCR BQ: C
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,  PkFP4, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,    BF8, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,   BF16, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, FP16,   FP16, E8M0, FP16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,    FP8, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, FP16,    FP8, E8M0, FP16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, FP16,    BF8, E8M0, FP16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor, ColumnMajor, FP16,  PkFP4, E8M0, FP16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    // RCR BQ: R
+    std::tuple<   RowMajor, ColumnMajor, RowMajor,    RowMajor, BF16,    BF8, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    // CRR BQ: C
+    std::tuple<ColumnMajor,    RowMajor, RowMajor, ColumnMajor, BF16,    BF8, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    // CRR BQ: R
+    std::tuple<ColumnMajor,    RowMajor, RowMajor,    RowMajor, BF16,   BF16, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    // CCR BQ: C
+    std::tuple<ColumnMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,   BF16, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    std::tuple<ColumnMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,    BF8, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    std::tuple<ColumnMajor, ColumnMajor, RowMajor, ColumnMajor, BF16,  PkFP4, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+
+    // RRR BQ: C
+    std::tuple<   RowMajor,    RowMajor, RowMajor, ColumnMajor, BF16,    BF8, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    // RRR BQ: R
+    std::tuple<   RowMajor,    RowMajor, RowMajor,    RowMajor, BF16,   BF16, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+
+    std::tuple<   RowMajor,    RowMajor, RowMajor, ColumnMajor, BF16,  PkFP4, E8M0, BF16, BQuantGrouped, GemmConfigMxFP4, GroupSize>,
+    std::tuple<ColumnMajor,    RowMajor, RowMajor, ColumnMajor, BF16,  PkFP4, E8M0, BF16, BQuantGrouped, GemmConfigMxFP4, GroupSize>,
+    std::tuple<   RowMajor, ColumnMajor, RowMajor,    RowMajor, BF16,   BF16, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>,
+    std::tuple<   RowMajor,    RowMajor, RowMajor, ColumnMajor, BF16,   BF16, E8M0, BF16, BQuantGrouped,    GemmConfigMx, GroupSize>
 >;
 // clang-format on
 
