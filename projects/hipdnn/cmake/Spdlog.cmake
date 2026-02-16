@@ -3,6 +3,10 @@
 
 # Shared spdlog/fmt configuration for hipDNN components (backend, plugins, etc.)
 # This module provides a unified function to enable spdlog support for any target.
+#
+# Note: hipDNN backend code does not use fmt directly. All logging and string
+# formatting uses std::ostringstream and stream operators. The fmt configuration
+# here is required because spdlog uses fmt internally for its logging functions.
 
 # Function to enable spdlog support for a target
 # This handles both system-installed spdlog and locally fetched spdlog,
@@ -13,7 +17,7 @@
 # This function:
 # - Finds spdlog if not already available
 # - Adds spdlog include directories (header-only, no linking to avoid compile option inheritance)
-# - Configures fmt (external or bundled)
+# - Configures fmt (external or bundled) for spdlog's internal use
 # - Adds required compile definitions (HIPDNN_PLUGIN_USE_SPDLOG, FMT_HEADER_ONLY, etc.)
 #
 # Note: We use hipdnn_add_dependency_includes() instead of target_link_libraries() to avoid

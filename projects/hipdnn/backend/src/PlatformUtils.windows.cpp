@@ -6,7 +6,7 @@
 #ifdef _WIN32
 
 #include "HipdnnException.hpp"
-#include <spdlog/fmt/fmt.h>
+#include <sstream>
 #include <winternl.h>
 
 namespace hipdnn_backend::platform_utilities
@@ -124,13 +124,11 @@ std::string getSystemInfo()
         architecture = "Unknown";
     }
 
-    return fmt::format("System Information: {{System Name: Windows, Node Name: {}, Release: {}.{}, "
-                       "Version: {}, Machine: {}}}",
-                       computerName.data(),
-                       versionInfo.dwMajorVersion,
-                       versionInfo.dwMinorVersion,
-                       versionInfo.dwBuildNumber,
-                       architecture);
+    std::ostringstream oss;
+    oss << "System Information: {System Name: Windows, Node Name: " << computerName.data()
+        << ", Release: " << versionInfo.dwMajorVersion << "." << versionInfo.dwMinorVersion
+        << ", Version: " << versionInfo.dwBuildNumber << ", Machine: " << architecture << "}";
+    return oss.str();
 }
 
 }

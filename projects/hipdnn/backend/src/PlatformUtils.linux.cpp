@@ -7,7 +7,7 @@
 
 #include "HipdnnException.hpp"
 #include <dlfcn.h>
-#include <spdlog/fmt/fmt.h>
+#include <sstream>
 #include <sys/utsname.h>
 
 namespace hipdnn_backend::platform_utilities
@@ -79,14 +79,11 @@ std::string getSystemInfo()
         return "Failed to retrieve system information using uname";
     }
 
-    return fmt::format(
-        "System Information: {{System Name: {}, Node Name: {}, Release: {}, Version: "
-        "{}, Machine: {}}}",
-        buffer.sysname,
-        buffer.nodename,
-        buffer.release,
-        buffer.version,
-        buffer.machine);
+    std::ostringstream oss;
+    oss << "System Information: {System Name: " << buffer.sysname
+        << ", Node Name: " << buffer.nodename << ", Release: " << buffer.release
+        << ", Version: " << buffer.version << ", Machine: " << buffer.machine << "}";
+    return oss.str();
 }
 
 }

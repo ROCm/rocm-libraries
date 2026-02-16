@@ -5,6 +5,7 @@
 #include "FlatbufferUtilities.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include "utilities/PointerToString.hpp"
 
 namespace hipdnn_backend
 {
@@ -174,8 +175,7 @@ std::string VariantDescriptor::toString() const
 {
     std::string str = "VariantDescriptor: {numDataPointers=" + std::to_string(_dataPointers.size());
     str += ", numUniqueIds=" + std::to_string(_uniqueIds.size());
-    str += _workspace != nullptr ? ", workspace=" + fmt::format("{:p}", _workspace)
-                                 : ", workspace=null";
+    str += _workspace != nullptr ? ", workspace=" + ptrToString(_workspace) : ", workspace=null";
     str += "}";
     return str;
 }

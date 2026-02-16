@@ -16,7 +16,7 @@
 #include "descriptors/VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
-#include <spdlog/fmt/ranges.h>
+#include <sstream>
 
 namespace hipdnn_backend
 {
@@ -149,15 +149,13 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
         }
         catch(const std::exception& e)
         {
-            HIPDNN_BACKEND_LOG_WARN("Failed to destroy handle for plugin '{}' during cleanup: {}",
-                                    plugin->name(),
-                                    e.what());
+            HIPDNN_BACKEND_LOG_WARN("Failed to destroy handle for plugin '"
+                                    << plugin->name() << "' during cleanup: " << e.what());
         }
         catch(...)
         {
-            HIPDNN_BACKEND_LOG_WARN(
-                "Failed to destroy handle for plugin '{}' during cleanup: unknown error",
-                plugin->name());
+            HIPDNN_BACKEND_LOG_WARN("Failed to destroy handle for plugin '"
+                                    << plugin->name() << "' during cleanup: unknown error");
         }
     };
 
@@ -173,25 +171,25 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
         }
         catch(const std::exception& e)
         {
-            HIPDNN_BACKEND_LOG_ERROR(
-                "Failed to create handle for plugin '{}': {}", plugin->name(), e.what());
+            HIPDNN_BACKEND_LOG_ERROR("Failed to create handle for plugin '" << plugin->name()
+                                                                            << "': " << e.what());
             continue;
         }
 
         if(handle == nullptr)
         {
-            HIPDNN_BACKEND_LOG_ERROR("Plugin '{}' returned null handle", plugin->name());
+            HIPDNN_BACKEND_LOG_ERROR("Plugin '" << plugin->name() << "' returned null handle");
             continue;
         }
 
         if(_handleToPlugin.find(handle) != _handleToPlugin.end())
         {
             safeDestroyHandle(plugin.get(), handle);
-            HIPDNN_BACKEND_LOG_ERROR(
-                "Plugin '{}' returned a handle that collides with another plugin. "
-                "This may indicate a symbol collision between plugins. "
-                "Ensure all plugins are built with -fvisibility=hidden.",
-                plugin->name());
+            HIPDNN_BACKEND_LOG_ERROR("Plugin '"
+                                     << plugin->name()
+                                     << "' returned a handle that collides with another plugin. "
+                                        "This may indicate a symbol collision between plugins. "
+                                        "Ensure all plugins are built with -fvisibility=hidden.");
             continue;
         }
 
@@ -204,8 +202,8 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
         }
         catch(const std::exception& e)
         {
-            HIPDNN_BACKEND_LOG_ERROR(
-                "Failed to get engine IDs for plugin '{}': {}", plugin->name(), e.what());
+            HIPDNN_BACKEND_LOG_ERROR("Failed to get engine IDs for plugin '" << plugin->name()
+                                                                             << "': " << e.what());
             safeDestroyHandle(plugin.get(), handle);
             _handleToPlugin.erase(handle);
             continue;
@@ -627,16 +625,21 @@ std::string EnginePluginResourceManager::toString() const
 
     auto loadedPlugins = _pm->getLoadedPluginFiles();
 
-    std::vector<std::string> pluginPathStrings;
-    pluginPathStrings.reserve(loadedPlugins.size());
+    std::ostringstream oss;
+    oss << "EnginePluginResourceManager: {loadedPlugins=" << loadedPlugins.size()
+        << ", loadedPluginPaths=[";
+    bool first = true;
     for(const auto& path : loadedPlugins)
     {
-        pluginPathStrings.push_back(path.string());
+        if(!first)
+        {
+            oss << ", ";
+        }
+        oss << path.string();
+        first = false;
     }
-
-    return fmt::format("EnginePluginResourceManager: {{loadedPlugins={}, loadedPluginPaths=[{}]}}",
-                       loadedPlugins.size(),
-                       fmt::join(pluginPathStrings, ", "));
+    oss << "]}";
+    return oss.str();
 }
 
 } // namespace plugin

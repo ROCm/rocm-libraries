@@ -5,6 +5,7 @@
 #include "HipdnnException.hpp"
 #include "handle/Handle.hpp"
 #include "logging/Logging.hpp"
+#include "utilities/PointerToString.hpp"
 
 namespace hipdnn_backend
 {
@@ -15,7 +16,7 @@ void HandleFactory::createHandle(hipdnnHandle_t* handle)
 
     *handle = new hipdnnHandle();
 
-    HIPDNN_BACKEND_LOG_INFO("Created handle: {:p}", static_cast<void*>(*handle));
+    HIPDNN_BACKEND_LOG_INFO("Created handle: " << ptrToString(*handle));
 }
 
 void HandleFactory::destroyHandle(hipdnnHandle_t handle)
@@ -24,7 +25,7 @@ void HandleFactory::destroyHandle(hipdnnHandle_t handle)
 
     delete handle;
 
-    HIPDNN_BACKEND_LOG_INFO("Destroyed handle: {:p}", static_cast<void*>(handle));
+    HIPDNN_BACKEND_LOG_INFO("Destroyed handle: " << ptrToString(handle));
 }
 
 } // namespace hipdnn_backend

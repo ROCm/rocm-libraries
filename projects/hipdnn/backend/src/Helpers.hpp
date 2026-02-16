@@ -5,8 +5,7 @@
 #include "HipdnnException.hpp"
 #include "HipdnnStatus.h"
 #include "LastErrorManager.hpp"
-
-#include <spdlog/fmt/fmt.h>
+#include "utilities/PointerToString.hpp"
 
 namespace hipdnn_backend
 {
@@ -26,11 +25,11 @@ std::string logPtr(T* ptr)
     }
     catch(const std::exception& e)
     {
-        return fmt::format("InvalidPtr[{:p}] ({})", static_cast<void*>(ptr), e.what());
+        return "InvalidPtr[" + ptrToString(ptr) + "] (" + e.what() + ")";
     }
     catch(...)
     {
-        return fmt::format("InvalidPtr[{:p}] (Unknown exception)", static_cast<void*>(ptr));
+        return "InvalidPtr[" + ptrToString(ptr) + "] (Unknown exception)";
     }
 }
 

@@ -9,6 +9,7 @@
 #include "HipdnnException.hpp"
 #include "handle/Handle.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
+#include "utilities/PointerToString.hpp"
 
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
@@ -307,8 +308,7 @@ std::string EngineDescriptor::toString() const
 {
     std::string str = "EngineDescriptor: {engineId=";
     str += _engineIdSet ? std::to_string(_engineId) : "unset";
-    str += _graph ? ", graph=" + fmt::format("{:p}", static_cast<const void*>(_graph.get()))
-                  : ", graph=null";
+    str += _graph ? ", graph=" + ptrToString(_graph.get()) : ", graph=null";
     str += "}";
     return str;
 }

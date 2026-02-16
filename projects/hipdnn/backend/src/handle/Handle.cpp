@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "Handle.hpp"
-#include <spdlog/fmt/fmt.h>
+#include "utilities/PointerToString.hpp"
 
 using namespace hipdnn_backend::plugin;
 
@@ -30,8 +30,7 @@ std::shared_ptr<EnginePluginResourceManager> hipdnnHandle::getPluginResourceMana
 std::string hipdnnHandle::toString() const
 {
     std::string str = "hipdnnHandle: {";
-    str += "stream="
-           + (_stream != nullptr ? fmt::format("{:p}", static_cast<void*>(_stream)) : "null");
+    str += "stream=" + hipdnn_backend::ptrToString(_stream);
     str += ", "
            + (_pluginResourceManager != nullptr ? _pluginResourceManager->toString()
                                                 : "pluginResourceManager=null");

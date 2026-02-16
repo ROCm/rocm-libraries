@@ -9,6 +9,7 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 #include "handle/Handle.hpp"
+#include "utilities/PointerToString.hpp"
 
 namespace hipdnn_backend
 {
@@ -246,8 +247,7 @@ hipdnnBackendDescriptorType_t ExecutionPlanDescriptor::getStaticType()
 std::string ExecutionPlanDescriptor::toString() const
 {
     std::string str = "ExecutionPlanDescriptor: {workspaceSize=" + std::to_string(_workspaceSize);
-    str += _engineConfig ? ", engineConfig="
-                               + fmt::format("{:p}", static_cast<const void*>(_engineConfig.get()))
+    str += _engineConfig ? ", engineConfig=" + ptrToString(_engineConfig.get())
                          : ", engineConfig=null";
     str += "}";
     return str;

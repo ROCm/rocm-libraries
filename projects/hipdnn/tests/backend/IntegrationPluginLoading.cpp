@@ -170,8 +170,9 @@ TEST_F(IntegrationPluginLoading, DuplicateEngineIds)
     hipdnnGetLastErrorString(buffer.data(), buffer.size());
 
     std::string expectedError
-        = fmt::format("Engine ID {} already exists",
-                      hipdnn_tests::plugin_constants::engineId<DuplicateIdBPlugin>());
+        = "Engine ID "
+          + std::to_string(hipdnn_tests::plugin_constants::engineId<DuplicateIdBPlugin>())
+          + " already exists";
 
     EXPECT_NE(std::string{buffer.data()}.find(expectedError), std::string::npos);
 

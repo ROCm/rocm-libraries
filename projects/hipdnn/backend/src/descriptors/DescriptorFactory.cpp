@@ -11,6 +11,7 @@
 #include "HipdnnException.hpp"
 #include "VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
+#include "utilities/PointerToString.hpp"
 
 namespace hipdnn_backend
 {
@@ -21,8 +22,8 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     THROW_IF_NULL(
         descriptor, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, "hipdnnBackendDescriptor_t* is null.");
 
-    HIPDNN_BACKEND_LOG_INFO("Creating descriptor of type: {}",
-                            hipdnnGetBackendDescriptorTypeName(descriptorType));
+    HIPDNN_BACKEND_LOG_INFO(
+        "Creating descriptor of type: " << hipdnnGetBackendDescriptorTypeName(descriptorType));
 
     std::shared_ptr<IBackendDescriptor> privateDesc;
     switch(descriptorType)
@@ -54,7 +55,7 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
 
     *descriptor = HipdnnBackendDescriptor::packDescriptor(privateDesc);
 
-    HIPDNN_BACKEND_LOG_INFO("Created descriptor: {:p}", static_cast<void*>(*descriptor));
+    HIPDNN_BACKEND_LOG_INFO("Created descriptor: " << ptrToString(*descriptor));
 }
 
 void DescriptorFactory::createGraphExt(hipdnnBackendDescriptor_t* descriptor,
@@ -71,7 +72,7 @@ void DescriptorFactory::createGraphExt(hipdnnBackendDescriptor_t* descriptor,
     graphDescriptor->deserializeGraph(serializedGraph, graphByteSize);
     *descriptor = HipdnnBackendDescriptor::packDescriptor(graphDescriptor);
 
-    HIPDNN_BACKEND_LOG_INFO("Created graph descriptor: {:p}", static_cast<void*>(*descriptor));
+    HIPDNN_BACKEND_LOG_INFO("Created graph descriptor: " << ptrToString(*descriptor));
 }
 
 void DescriptorFactory::destroy(hipdnnBackendDescriptor_t descriptor)
@@ -81,7 +82,7 @@ void DescriptorFactory::destroy(hipdnnBackendDescriptor_t descriptor)
 
     delete descriptor;
 
-    HIPDNN_BACKEND_LOG_INFO("Destroyed descriptor: {:p}", static_cast<void*>(descriptor));
+    HIPDNN_BACKEND_LOG_INFO("Destroyed descriptor: " << ptrToString(descriptor));
 }
 
 } // namespace hipdnn_backend

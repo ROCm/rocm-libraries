@@ -7,7 +7,7 @@
 #include "HipdnnException.hpp"
 #include "hipdnn_backend.h"
 #include <memory>
-#include <spdlog/fmt/fmt.h>
+#include <string>
 
 // NOLINTBEGIN(portability-template-virtual-member-function)
 
@@ -194,12 +194,3 @@ private:
     friend class hipdnn_backend::MockDescriptorUtility;
 };
 //NOLINTEND(readability-identifier-naming)
-
-template <>
-struct fmt::formatter<HipdnnBackendDescriptor> : fmt::formatter<std::string>
-{
-    auto format(const HipdnnBackendDescriptor& descriptor, format_context& ctx) const
-    {
-        return fmt::formatter<std::string>::format(descriptor.toString(), ctx);
-    }
-};

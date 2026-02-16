@@ -10,6 +10,7 @@
 #include "HipdnnException.hpp"
 #include "ScopedDescriptor.hpp"
 #include "handle/Handle.hpp"
+#include "utilities/PointerToString.hpp"
 
 namespace hipdnn_backend
 {
@@ -291,8 +292,7 @@ std::string EngineHeuristicDescriptor::toString() const
 {
     std::string str = "EngineHeuristicDescriptor: {heuristicMode=";
     str += _heuristicModeSet ? std::to_string(_heuristicMode) : "unset";
-    str += _graph ? ", graph=" + fmt::format("{:p}", static_cast<const void*>(_graph.get()))
-                  : ", graph=null";
+    str += _graph ? ", graph=" + ptrToString(_graph.get()) : ", graph=null";
     str += "}";
     return str;
 }

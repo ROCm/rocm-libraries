@@ -6,6 +6,7 @@
 #include "FlatbufferUtilities.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include "utilities/PointerToString.hpp"
 
 namespace hipdnn_backend
 {
@@ -124,7 +125,7 @@ hipdnnHandle_t GraphDescriptor::getHandle() const
 std::string GraphDescriptor::toString() const
 {
     std::string str = "GraphDescriptor: {handle=";
-    str += _handle != nullptr ? fmt::format("{:p}", static_cast<const void*>(_handle)) : "null";
+    str += ptrToString(_handle);
     str += ", serializedGraphSize="
            + std::to_string(_graphSerializedBuffer.size() > 0 ? _graphSerializedBuffer.size() : 0);
     str += "}";
