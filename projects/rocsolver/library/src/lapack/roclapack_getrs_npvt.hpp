@@ -37,6 +37,8 @@
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_run_specialized_kernels.hpp"
 
+#include "roclapack_getrs.hpp"
+
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <typename T, typename I>
@@ -126,81 +128,22 @@ rocblas_status rocsolver_getrs_npvt_template(rocblas_handle handle,
                                              void* work4,
                                              const bool optim_mem)
 {
-    ROCSOLVER_ENTER("getrs_npvt", "trans:", trans, "n:", n, "nrhs:", nrhs, "shiftA:", shiftA,
-                    "inca:", inca, "lda:", lda, "shiftB:", shiftB, "incb:", incb, "ldb:", ldb,
-                    "bc:", batch_count);
+    bool const pivot = false;
+    I* const ipiv = nullptr;
+    rocblas_stride const strideP = 0;
 
-    // quick return
-    if(n == 0 || nrhs == 0 || batch_count == 0)
-        return rocblas_status_success;
+    return (rocsolver_getrs_template<BATCHED, STRIDED, T, I, U>(handle, trans, n, nrhs,
 
-    hipStream_t stream;
-    rocblas_get_stream(handle, &stream);
+                                                                A, shiftA, inca, lda, strideA,
 
-    // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+                                                                ipiv, strideP,
 
-    if(trans == rocblas_operation_none)
-    {
-        // solve L*X = B, overwriting B with X
-        {
-            rocblas_status const istat = (rocsolver_trsm_lower<BATCHED, STRIDED, T>(
-                handle, rocblas_side_left, trans, rocblas_diagonal_unit, n, nrhs, A, shiftA, inca,
-                lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2,
-                work3, work4));
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
+                                                                B, shiftB, incb, ldb, strideB,
 
-        // solve U*X = B, overwriting B with X
-        {
-            rocblas_status const istat = (rocsolver_trsm_upper<BATCHED, STRIDED, T>(
-                handle, rocblas_side_left, trans, rocblas_diagonal_non_unit, n, nrhs, A, shiftA,
-                inca, lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1,
-                work2, work3, work4));
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
-    }
-    else
-    {
-        // solve U'*X = B or U**H *X = B, overwriting B with X
-        {
-            rocblas_status const istat = (rocsolver_trsm_upper<BATCHED, STRIDED, T>(
-                handle, rocblas_side_left, trans, rocblas_diagonal_non_unit, n, nrhs, A, shiftA,
-                inca, lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1,
-                work2, work3, work4));
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
+                                                                batch_count,
 
-        // solve L'*X = B, or L**H *X = B overwriting B with X
-        {
-            rocblas_status const istat = (rocsolver_trsm_lower<BATCHED, STRIDED, T>(
-                handle, rocblas_side_left, trans, rocblas_diagonal_unit, n, nrhs, A, shiftA, inca,
-                lda, strideA, B, shiftB, incb, ldb, strideB, batch_count, optim_mem, work1, work2,
-                work3, work4));
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
-    }
-
-    rocblas_set_pointer_mode(handle, old_mode);
-    return rocblas_status_success;
+                                                                work1, work2, work3, work4,
+                                                                optim_mem, pivot));
 }
 
 ROCSOLVER_END_NAMESPACE
