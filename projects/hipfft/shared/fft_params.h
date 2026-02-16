@@ -2305,150 +2305,195 @@ public:
         scale_factor = 1 / params_forward.scale_factor;
     }
 
-    // prepare for multi-GPU transform.  cpu_input has contiguous
-    // input on the host, ibuffer has device input, which can be
-    // discarded if it's turned into multi-GPU bricks.  pibuffer,
-    // pobuffer are the pointers that will be passed to the FFT
-    // library's "execute" API.
-    virtual void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
-                                   std::vector<gpubuf>&  ibuffer,
-                                   std::vector<void*>&   pibuffer,
-                                   std::vector<void*>&   pobuffer)
+    /**
+     * @brief initialize the I/O device buffers as required for multi-device
+     * transforms described by this object. Device buffers are determined (created
+     * and allocated, if needed), and input buffers are data-initialized using the
+     * provided host-residing (resp. device-residing) reference data for the
+     * `rocfft_params` (resp. `hipfft_params`) derived class.
+     *
+     * TODO: unify data-initialization logic across derived classes and make all arguments
+     * relevant in all cases (remove ignore ones).
+     * 
+     * @param[in] input_data_host vector of (at least) one host buffer containing the
+     * input-initialization data to be considered for data-initialization of the
+     * device input buffers (this is unused by `hipfft_params` objects). If used,
+     * the data layout of `input_data_host[0]` must be consistent with `cpu_params.istride`,
+     * `cpu_params.idist`, etc. wherein `cpu_params = this->make_params_for_reference_cpu()`.
+     * @param[in] input_data_gpu vector of (at least) one device buffer containing the
+     * input-initialization data to be considered for data-initialization of the
+     * device input buffers (this is unused by `rocfft_params` objects). If used,
+     * the data layout of `input_data_gpu[0]` must be consistent with `this->istride`,
+     * `this->idist`, etc.
+     * @param[out] mgpu_ibuffers vector of raw pointers to input device allocations as
+     * needed for the multi-device transform that this object describes. The content
+     * of these device allocations is initialized with the (transposed) content of
+     * `input_data_host` (resp. `input_data_gpu`) by `rocfft_params` (resp. `hipfft_params`)
+     * objects. Upon return, the data layout in these device allocations is
+     * - as described by the corresponding input brick's for `rocfft_params` objects;
+     * - as implicitly-defined for `hipfft_params` objects.
+     * @param[out] mgpu_obuffers vector of raw pointers to output device allocations as
+     * needed for the multi-device transform that this object describes.
+     */
+    virtual void multi_gpu_prepare(std::vector<hostbuf>& input_data_host,
+                                   std::vector<gpubuf>&  input_data_gpu,
+                                   std::vector<void*>&   mgpu_ibuffers,
+                                   std::vector<void*>&   mgpu_obuffers)
     {
     }
 
-    // finalize multi-GPU transform.  pobuffers are the pointers
-    // provided to the FFT library's "execute" API.  obuffer is the
-    // normal GPU buffer that is used for single-device FFTs.
-    // gpu_output is the host buffer where transform output needs to
-    // go for validation
-    // Field is distributed among ranks and then among the number
-    // of GPUs per rank (which defaults to 1).
-    virtual void multi_gpu_finalize(std::vector<hostbuf>& gpu_output,
-                                    std::vector<gpubuf>&  obuffer,
-                                    std::vector<void*>&   pobuffer)
+    /**
+     * @brief gather the results of a multi-device transform to a unique host-residing
+     * buffer for `rocfft_params` objects (resp. device-residing buffer for
+     * `hipfft_params` objects).
+     * 
+     * TODO: unify data-gathering logic across derived classes and make all arguments
+     * relevant in all cases (remove ignore ones).
+     * 
+     * @param[out] gathered_results_host vector of (at least) one host buffer (ignored by
+     * `hipfft_params` objects). If not ignored, `gathered_results_host[0]` contains the
+     * gathered output data of the multi-device transform upon return.
+     * @param[out] gathered_results_device vector of (at least) one device buffer (ignored
+     * by `rocfft_params` objects). If not ignored, `gathered_results_device[0]` contains
+     * the gathered output data of the multi-device transform upon return.
+     * @param[in] mgpu_obuffers vector of raw pointers to output device allocations
+     * considered by the (previously-executed) multi-device transform described by this
+     * object.
+     * 
+     * Note 1: whichever gathering buffer that is considered (`gathered_results_host[0]`
+     * or `gathered_results_device[0]`) must be large enough for containing the
+     * gathered results when passed to this function: this function does NOT resize it.
+     * Note 2: the data layout in the considered gathered results is defined
+     * by the calling object's output data layout parameter, i.e., defined by
+     * `this->ostride`, `this->odist`, `this->otype`, etc.
+     */
+    virtual void multi_gpu_finalize(std::vector<hostbuf>& gathered_results_host,
+                                    std::vector<gpubuf>&  gathered_results_device,
+                                    std::vector<void*>&   mgpu_obuffers)
     {
     }
 
-    // Create bricks in the specified field.  brick_grid has an
-    // integer per dimension (batch and FFT dimensions), with the
-    // number of bricks to split that dimension on.  Field length
-    // starts with batch dimension, followed by FFT dimensions
-    // slowest to fastest.
-    // num_ranks represents the number of ranks used in the parallel
-    // computer, which are assumed to have at least gpusperrank each
+    /**
+     * @brief create one input (resp. output) field with as many bricks
+     * as desired along every field dimension for the current object.
+     * The device assignment of the bricks is cycling though the total number
+     * of available devices (i.e., `gpusperrank * num_ranks`) starting from
+     * the `start_global_dev_idx` (global) device index.
+     * NOTE: The global device index `g` in `[0, gpusperrank * mp_ranks(`
+     * corresponds to device of local ID `g / mp_ranks` on process of rank
+     * `g % mp_ranks`. This prioritize distributing layout across all processes.
+     * 
+     * @tparam io enum flag specifying whether the input (`io == fft_io::fft_io_in`)
+     * or output (`io == fft_io::fft_io_in`) field is being considered.
+     * 
+     * @param[in] gpusperrank number of GPU devices available to each process
+     * @param[in] brick_count_along desired (strictly positive) numbers of
+     * bricks per dimension: `brick_count_along[i]` if the number of bricks
+     * desired along the `i`-th field dimension.
+     * @param[in] num_ranks number of processes used in the parallel computer
+     * (default value is 1)
+     * @param[in] start_global_dev_idx first (global) device ID to be considered
+     * in the cyclic assignment (default value is 0)
+     * 
+     * NOTES:
+     * - data layouts within bricks are set to be compact, i.e., contiguous for
+     * bricks in complex domain, padded in real domain for in-place operations
+     * (only if the fastest dimension is not divided itself, i.e., if
+     * brick_count_along.last() == 1)
+     * - if more bricks than available devices are requested, some bricks may be
+     * assigned to the same device.
+     */
+    template <fft_io io>
     void distribute_field(int                              gpusperrank,
-                          const std::vector<unsigned int>& brick_grid,
-                          std::vector<fft_field>&          fields,
-                          const std::vector<size_t>&       field_length,
-                          int                              num_ranks)
+                          const std::vector<unsigned int>& brick_count_along,
+                          int                              num_ranks            = 1,
+                          int                              start_global_dev_idx = 0)
     {
-        if(brick_grid.size() != field_length.size())
+        static_assert(io == fft_io::fft_io_in || io == fft_io::fft_io_out);
+
+        auto& iofields       = io == fft_io::fft_io_in ? ifields : ofields;
+        auto  iofield_length = io == fft_io::fft_io_in ? ilength() : olength();
+        iofield_length.insert(iofield_length.begin(), nbatch);
+        const auto field_size = iofield_length.size(); // --> field_size > 0
+        // arg validation
+        if(brick_count_along.size() != field_size)
             throw std::runtime_error(
-                "distribute field requires same number of dims for grid and field length");
+                "fft_params::distribute_field inconsistent size between desired number of bricks "
+                "per dimension and number of dimensions");
+        if(std::any_of(
+               brick_count_along.begin(),
+               brick_count_along.end(),
+               [](const auto& brick_count_along_dim) { return brick_count_along_dim == 0; }))
+            throw std::invalid_argument("brick_count_per_dim must not be 0.");
+        if(gpusperrank < 1 || num_ranks < 1)
+            throw std::invalid_argument(
+                "fft_params::distribute_field requires strictly positive number of processes and "
+                "number of available device(s) per process.");
 
-        // if nothing's actually split, don't bother making bricks
-        if(std::all_of(
-               brick_grid.begin(), brick_grid.end(), [](const unsigned int g) { return g == 1; }))
-            return;
+        const auto total_bricks = product(brick_count_along.begin(), brick_count_along.end());
 
-        size_t total_bricks = product(brick_grid.begin(), brick_grid.end());
-
-        auto& field = fields.emplace_back();
-
-        // Start with empty brick in field
-        field.bricks.reserve(total_bricks);
-        field.bricks.emplace_back();
-
-        // Go over the grid
-        for(size_t i = 0; i < brick_grid.size(); ++i)
+        struct length_division
         {
-            std::vector<fft_brick> cur_bricks;
-            cur_bricks.swap(field.bricks);
-            field.bricks.reserve(total_bricks);
+            size_t min_length;
+            size_t remainder;
+        };
+        std::vector<length_division> field_division_along(field_size);
+        for(auto field_dim = field_size; field_dim-- > 0;)
+        {
+            field_division_along[field_dim].min_length
+                = iofield_length[field_dim] / brick_count_along[field_dim];
+            field_division_along[field_dim].remainder
+                = iofield_length[field_dim] % brick_count_along[field_dim];
+        }
 
-            auto brick_count = brick_grid[i];
-            auto cur_length  = field_length[i];
-
-            // split current length, apply to all current bricks and
-            // append bricks to field
-            for(size_t ibrick = 0; ibrick < brick_count; ++ibrick)
+        // make ONE field with as many bricks as required along every field dimension
+        iofields.resize(1);
+        auto& iofield  = iofields[0];
+        auto& iobricks = iofield.bricks;
+        // Create the required number of bricks
+        iobricks.resize(total_bricks);
+        // define them
+        for(size_t b_idx = 0; b_idx < total_bricks; b_idx++)
+        {
+            auto&               iobrick = iobricks[b_idx];
+            std::vector<size_t> brick_dim_idx(field_size, 0);
+            iobrick.lower.resize(field_size);
+            iobrick.upper.resize(field_size);
+            iobrick.stride.resize(field_size);
+            auto tmp_idx = b_idx;
+            for(auto field_dim = field_size; field_dim-- > 0;
+                tmp_idx /= brick_count_along[field_dim])
             {
-                for(const auto& b : cur_bricks)
+                const auto brick_idx_along_dim = tmp_idx % brick_count_along[field_dim];
+                const auto brick_length_along_dim
+                    = field_division_along[field_dim].min_length
+                      + (brick_idx_along_dim < field_division_along[field_dim].remainder ? 1 : 0);
+                iobrick.lower[field_dim]
+                    = brick_idx_along_dim * field_division_along[field_dim].min_length
+                      + std::min(brick_idx_along_dim, field_division_along[field_dim].remainder);
+                iobrick.upper[field_dim] = iobrick.lower[field_dim] + brick_length_along_dim;
+                if(field_dim == field_size - 1)
+                    iobrick.stride[field_dim] = 1; // contiguous along fastest dimension
+                else
                 {
-                    auto& new_brick = field.bricks.emplace_back(b);
-                    new_brick.lower.push_back(cur_length / brick_count * ibrick);
-                    // last brick needs to include the whole split len
-                    if(ibrick == brick_count - 1)
+                    auto stride_multiplier
+                        = iobrick.upper[field_dim + 1] - iobrick.lower[field_dim + 1];
+                    if(field_dim == field_size - 2 && is_real()
+                       && placement == fft_placement_inplace
+                       && (is_forward() ^ (io == fft_io::fft_io_out)) /* <-- brick in real domain */
+                       && brick_count_along[field_size - 1] == 1)
                     {
-                        new_brick.upper.push_back(cur_length);
+                        // real in-place case with fastest dimension that is NOT divided
+                        // --> most likely use case is *with* padding
+                        stride_multiplier = 2 * (stride_multiplier / 2 + 1);
                     }
-                    else
-                    {
-                        new_brick.upper.push_back(std::min(
-                            cur_length, new_brick.lower.back() + cur_length / brick_count));
-                    }
+                    iobrick.stride[field_dim] = iobrick.stride[field_dim + 1] * stride_multiplier;
                 }
             }
+
+            iobrick.rank   = (start_global_dev_idx + b_idx) % num_ranks;
+            iobrick.device = ((start_global_dev_idx + b_idx) / num_ranks) % gpusperrank;
         }
-
-        // Give all bricks contiguous strides
-        int brickIdx = 0;
-        for(auto& b : field.bricks)
-        {
-            b.stride.resize(b.upper.size());
-
-            // Fill strides from fastest to slowest
-            size_t brick_dist = 1;
-            for(size_t distIdx = 0; distIdx < b.upper.size(); ++distIdx)
-            {
-                *(b.stride.rbegin() + distIdx) = brick_dist;
-                brick_dist *= *(b.upper.rbegin() + distIdx) - *(b.lower.rbegin() + distIdx);
-            }
-
-            // Split across ranks for a multi-process transform,
-            // otherwise split across bricks.  assume there's one
-            // rank/device per brick
-            if(mp_lib == fft_mp_lib_none)
-            {
-                b.device = brickIdx;
-            }
-            else
-            {
-                int rank = brickIdx / gpusperrank; // determine MPI rank
-                int gpu  = brickIdx % gpusperrank; // determine GPU within rank
-
-                b.rank   = rank;
-                b.device = gpu;
-            }
-            brickIdx++;
-        }
-    }
-
-    // Distribute problem input among specified grid of devices/processors.
-    // Grid specifies number of bricks per dimension, starting with batch
-    // and ending with fastest FFT dimension. For single-proc single-proc
-    // multi-gpu, gpusperrank represents the number of GPUs to use;
-    // while for multi-proc it represents the number of GPUs on each rank.
-    void distribute_input(int                              gpusperrank,
-                          const std::vector<unsigned int>& brick_grid,
-                          int                              num_ranks = 1)
-    {
-        auto len = length;
-        len.insert(len.begin(), nbatch);
-        distribute_field(gpusperrank, brick_grid, ifields, len, num_ranks);
-    }
-
-    // Distribute problem output among specified grid of devices/processors.
-    // Grid specifies number of bricks per dimension, starting with batch
-    // and ending with fastest FFT dimension.
-    void distribute_output(int                              gpusperrank,
-                           const std::vector<unsigned int>& brick_grid,
-                           int                              num_ranks = 1)
-    {
-        auto len = olength();
-        len.insert(len.begin(), nbatch);
-        distribute_field(gpusperrank, brick_grid, ofields, len, num_ranks);
     }
 
     // Apply load operations specified by this struct to the host-side
@@ -2604,6 +2649,36 @@ public:
             abort();
         }
 #endif
+    }
+
+    fft_params make_params_for_reference_cpu() const
+    {
+        fft_params ret;
+        ret.length         = length;
+        ret.precision      = precision;
+        ret.placement      = fft_placement_notinplace;
+        ret.transform_type = transform_type;
+        ret.nbatch         = nbatch;
+        ret.itype          = is_real() ? (is_forward() ? fft_array_type_real
+                                                       : fft_array_type_hermitian_interleaved)
+                                       : fft_array_type_complex_interleaved;
+        ret.otype          = is_real() ? (is_inverse() ? fft_array_type_real
+                                                       : fft_array_type_hermitian_interleaved)
+                                       : fft_array_type_complex_interleaved;
+        ret.istride
+            = default_strides(transform_type, fft_placement_notinplace, fft_io::fft_io_in, length);
+        ret.ostride
+            = default_strides(transform_type, fft_placement_notinplace, fft_io::fft_io_out, length);
+        ret.idist = default_distance(
+            transform_type, fft_placement_notinplace, fft_io::fft_io_in, length, nbatch);
+        ret.odist = default_distance(
+            transform_type, fft_placement_notinplace, fft_io::fft_io_out, length, nbatch);
+        ret.compute_isize();
+        ret.compute_osize();
+
+        // other ret's members should be irrelevant for cpu reference calculations
+        // (default values)
+        return ret;
     }
 };
 
