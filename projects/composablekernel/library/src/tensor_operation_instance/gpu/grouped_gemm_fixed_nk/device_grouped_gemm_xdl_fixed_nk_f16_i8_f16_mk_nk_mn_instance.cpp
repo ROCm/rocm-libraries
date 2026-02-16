@@ -31,7 +31,8 @@ using DsLayout = ck::Tuple<>;
 
 using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 
-// static constexpr auto GemmMNKPadding = ck::tensor_operation::device::GemmSpecialization::MNKPadding;
+// static constexpr auto GemmMNKPadding =
+// ck::tensor_operation::device::GemmSpecialization::MNKPadding;
 
 using device_grouped_gemm_xdl_fixed_nk_f16_i8_f16_mk_nk_mn_irregular_tile_instances = std::tuple<
     // clang-format off
