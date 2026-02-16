@@ -97,7 +97,7 @@ class TestCustomScheduleBF16:
         })
         kernel.update({
             "MacroTile0": 256, "MacroTile1": 256, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, 
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2], "TransposeLDS": 0 if NT else 1, "MIWaveTileA": 8, "MIWaveTileB": 8,
         })
