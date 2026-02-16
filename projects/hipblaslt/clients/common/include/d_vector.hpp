@@ -32,6 +32,8 @@
 #include "hipblaslt_test.hpp"
 #include "singletons.hpp"
 #include <cinttypes>
+
+#include <type_traits>
 #include <hipblaslt/hipblaslt.h>
 
 #ifdef _WIN32
@@ -147,14 +149,14 @@ public:
         // Keep 20% of the available host memory for room of emergency
         size_t available_host_memory = get_available_host_memory() * 0.8;
         // Ensure sufficient host memory, otherwise hipHostMalloc may OOM and hip api won't return error code
-        if(available_host_memory < m_size)
+        if(available_host_memory < capacity)
         {
             d      = nullptr;
             m_size = m_capacity = 0;
         }
         else if(hipHostMalloc(&d, capacity) != hipSuccess)
         {
-            hipblaslt_cerr << "Error allocating (" << (m_size >> 30) << " GB) host memory"
+            hipblaslt_cerr << "Error allocating (" << (capacity >> 30) << " GB) host memory"
                            << std::endl;
             d      = nullptr;
             m_size = m_capacity = 0;
@@ -267,7 +269,10 @@ private:
             hipblaslt_cerr << "Clearing memory pool and retrying" << std::endl;
             // allocation failed, so clear the pool and try again (without the 20%)
             pool.clear();
-            hipblaslt_cerr << "After clean, the host memory is " << get_available_host_memory() << " bytes" << std::endl;
+            if constexpr (std::is_same_v<M, h_memory>)
+            {
+                hipblaslt_cerr << "After clean, the host memory is " << e.get_available_host_memory() << " bytes" << std::endl;
+            }
 
             // reset the error code from previous hipMalloc failure and try again to allocate memory
             hipError_t err = hipPeekAtLastError();
