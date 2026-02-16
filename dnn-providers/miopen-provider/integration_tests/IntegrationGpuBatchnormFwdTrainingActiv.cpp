@@ -58,7 +58,7 @@ class BatchnormFwdTrainingActivation
           std::tuple<test_bn_common::BatchnormTestCase, test_activation_common::ActivTestCase>>
 {
 protected:
-    void runGraphTest(InputType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
+    void runGraphTest(InputType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         runGraphTestWithScenario(tolerance, BatchnormTrainingScenario::WITH_BATCH_STATS, layout);
     }
@@ -69,7 +69,7 @@ protected:
     {
         const auto& [bnTestCase, activTestCase] = this->GetParam();
 
-        HIPDNN_PLUGIN_LOG_INFO("Test is using {} for its random seed", bnTestCase.seed);
+        HIPDNN_PLUGIN_LOG_INFO("Test is using " << bnTestCase.seed << " for its random seed");
 
         hipdnn_frontend::graph::Graph graphObj;
         graphObj.set_name("BatchnormFwdTrainingActivTest");

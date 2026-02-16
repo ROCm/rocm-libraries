@@ -29,7 +29,7 @@ class BatchnormForwardInference
     : public IntegrationGraphVerificationHarness<DataType, BatchnormTestCase>
 {
 protected:
-    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
+    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         const BatchnormTestCase& testCase = this->GetParam();
 
