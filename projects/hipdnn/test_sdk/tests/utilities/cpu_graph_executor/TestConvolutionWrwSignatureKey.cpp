@@ -8,9 +8,10 @@
 #include "ConvolutionGraphUtils.hpp"
 #include "ConvolutionTensorBundles.hpp"
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionWrwSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionWrwSignatureKey.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_test_sdk::detail;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_sdk_test_utils;
@@ -93,8 +94,8 @@ TEST(TestConvolutionWrwSignatureKey, CreateFromNodeAndTensorMap)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
+                                                                         flatbufferGraph.size());
 
     ConvolutionWrwSignatureKey keyFromNode(
         graphWrap.getNode(0), graphWrap.getTensorMap(), DataType::FLOAT);

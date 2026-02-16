@@ -105,6 +105,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_spmv_coo.cpp
     test_spmv_coo_aos.cpp
     test_spmv_csr.cpp
+    test_spmv_csr_pytorch_compat.cpp
     test_spmv_sell.cpp
     test_spsm_coo.cpp
     test_spsm_csr.cpp
@@ -127,6 +128,7 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_sctr.yaml
     # Level 2    
     rocm/test_bsrmv.yaml
+    rocm/test_bsrxmv.yaml
     rocm/test_bsrsv2.yaml
     rocm/test_csrmv.yaml
     rocm/test_csrsv2.yaml

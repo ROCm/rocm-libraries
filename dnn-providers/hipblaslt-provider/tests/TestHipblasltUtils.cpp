@@ -28,3 +28,54 @@ TEST(TestHipblasltUtils, TensorDataTypeToHipblasltDataTypeThrowsOnUnsupported)
                      static_cast<hipdnn_data_sdk::data_objects::DataType>(-1)),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+TEST(TestHipblasltUtils, FindDeviceBufferReturnsCorrectBuffer)
+{
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers
+        = {{42, reinterpret_cast<void*>(0x1234)}, {99, reinterpret_cast<void*>(0x5678)}};
+
+    auto result = hipblaslt_utils::findDeviceBuffer(99, buffers.data(), 2);
+    EXPECT_EQ(result.uid, 99);
+    EXPECT_EQ(result.ptr, reinterpret_cast<void*>(0x5678));
+}
+
+TEST(TestHipblasltUtils, FindDeviceBufferThrowsIfNotFound)
+{
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{1, reinterpret_cast<void*>(0x1111)}};
+
+    EXPECT_THROW(
+        hipblaslt_utils::findDeviceBuffer(2, buffers.data(), static_cast<uint32_t>(buffers.size())),
+        hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestHipblasltUtils, FindTensorAttributesReturnsCorrectValue)
+{
+    flatbuffers::FlatBufferBuilder builder1;
+    auto attrOffset1 = hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder1, 1);
+    builder1.Finish(attrOffset1);
+
+    flatbuffers::FlatBufferBuilder builder2;
+    auto attrOffset2 = hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder2, 2);
+    builder2.Finish(attrOffset2);
+
+    auto attrPtr1 = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(
+        builder1.GetBufferPointer());
+    auto attrPtr2 = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(
+        builder2.GetBufferPointer());
+
+    auto attrMap
+        = std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>{
+            {1, attrPtr1}, {2, attrPtr2}};
+
+    EXPECT_EQ(hipblaslt_utils::findTensorAttributes(attrMap, 1).uid(), 1);
+    EXPECT_EQ(hipblaslt_utils::findTensorAttributes(attrMap, 2).uid(), 2);
+}
+
+TEST(TestHipblasltUtils, FindTensorAttributesThrowsIfNotFound)
+{
+    auto attrMap
+        = std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>{};
+
+    EXPECT_THROW(hipblaslt_utils::findTensorAttributes(attrMap, 1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}

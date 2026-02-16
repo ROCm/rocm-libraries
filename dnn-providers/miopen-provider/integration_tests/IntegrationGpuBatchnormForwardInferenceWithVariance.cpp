@@ -15,9 +15,10 @@
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
-using namespace miopen_legacy_plugin::test_utilities;
+using namespace miopen_plugin::test_utilities;
 using namespace test_bn_common;
 
 namespace
@@ -28,7 +29,7 @@ class BatchnormForwardInferenceWithVariance
     : public IntegrationGraphVerificationHarness<DataType, BatchnormTestCase>
 {
 protected:
-    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
+    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         const BatchnormTestCase& testCase = this->GetParam();
 
@@ -44,25 +45,25 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xAttr = graph::makeTensorAttributes(
+        auto xAttr = makeTensorAttributes(
             "X", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
-        auto meanAttr = graph::makeTensorAttributes(
+        auto meanAttr = makeTensorAttributes(
             "mean", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
-        auto varianceAttr = graph::makeTensorAttributes(
+        auto varianceAttr = makeTensorAttributes(
             "variance", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto varianceTensorAttr
             = std::make_shared<graph::TensorAttributes>(std::move(varianceAttr));
 
-        auto scaleAttr = graph::makeTensorAttributes(
+        auto scaleAttr = makeTensorAttributes(
             "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
-        auto biasAttr = graph::makeTensorAttributes(
+        auto biasAttr = makeTensorAttributes(
             "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 

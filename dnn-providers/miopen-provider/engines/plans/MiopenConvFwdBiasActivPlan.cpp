@@ -7,16 +7,7 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvFwdBiasActivPlan.hpp"
 
-// MIOpen's fusion API does not calculate the workspace size correctly
-#define WORKAROUND_LWPMIOPEN_1815 1
-
-#if WORKAROUND_LWPMIOPEN_1815
-#include <algorithm>
-#include <array>
-#include <numeric>
-#endif
-
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 ConvFwdBiasActivParams::ConvFwdBiasActivParams(
@@ -24,7 +15,8 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
+        tensorMap,
+    bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, convAttr.x_tensor_uid())))
     , _x(miopen_utils::createTensor(tensorMap, convAttr.x_tensor_uid()))
@@ -40,7 +32,8 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     const auto wDims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
     const auto groupCount = hipdnn_data_sdk::utilities::calculateGroupCount(xDims, wDims);
 
-    _conv = MiopenConvDescriptor(_spatialDimCount, convAttr, static_cast<int>(groupCount));
+    _conv = MiopenConvDescriptor(
+        _spatialDimCount, convAttr, static_cast<int>(groupCount), deterministicEnabled);
 
     if(biasAttr != nullptr)
     {
@@ -120,7 +113,9 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
     : _params(std::move(params))
     , _benchmarkingEnabled(benchmarkingEnabled)
 {
-    (void)_benchmarkingEnabled;
+    // Set tuning policy based on benchmarking flag - RAII ensures restoration
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+
     miopenFusionPlanDescriptor_t fusePlanDesc;
     THROW_ON_MIOPEN_FAILURE(miopenCreateFusionPlan(
         &fusePlanDesc, miopenVerticalFusion, _params.x().tensorDescriptor()));
@@ -129,7 +124,7 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
             auto status = miopenDestroyFusionPlan(desc);
             if(status != miopenStatusSuccess)
             {
-                HIPDNN_LOG_ERROR(
+                HIPDNN_PLUGIN_LOG_ERROR(
                     "miopenDestroyFusionPlan failed in ConvFwdBiasActivPlan destructor");
             }
         });
@@ -159,40 +154,16 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
         THROW_ON_MIOPEN_FAILURE(miopenCompileFusionPlan(handle.miopenHandle, fusePlanDesc));
     }
 
-    if(getWsSize)
+    if(!getWsSize)
     {
-#if WORKAROUND_LWPMIOPEN_1815
-        // MIOpen's fusion API does not calculate the workspace size correctly. To work around
-        // this issue, the workspace size is calculated as the sum of the sizes of the input,
-        // weight, and output tensors, each aligned to 256 bytes.
-        // Refer to ConvCKIgemmGrpFwdBiasActivFused::GetWorkspaceSize() in MIOpen's source code
-        // for more details.
-
-        size_t xSize;
-        THROW_ON_MIOPEN_FAILURE(miopenGetTensorNumBytes(_params.x().tensorDescriptor(), &xSize));
-        size_t wSize;
-        THROW_ON_MIOPEN_FAILURE(miopenGetTensorNumBytes(_params.w().tensorDescriptor(), &wSize));
-        size_t ySize;
-        THROW_ON_MIOPEN_FAILURE(miopenGetTensorNumBytes(_params.y().tensorDescriptor(), &ySize));
-
-        std::array<size_t, 3> sizes = {xSize, wSize, ySize};
-
-        // Align each size to 256 bytes
-        constexpr size_t ALIGNMENT_BOUNDARY = 256;
-        constexpr size_t ALIGNMENT = ALIGNMENT_BOUNDARY - 1;
-        auto alignToBoundary = [](size_t size) { return (size + ALIGNMENT) & ~ALIGNMENT; };
-        std::transform(sizes.begin(), sizes.end(), sizes.begin(), alignToBoundary);
-
-        // Calculate the total workspace size as the sum of aligned sizes
-        _workspaceSize = std::accumulate(sizes.begin(), sizes.end(), static_cast<size_t>(0));
-#else
-        THROW_ON_MIOPEN_FAILURE(miopenFusionPlanGetWorkSpaceSize(
-            handle.miopenHandle,
-            fusePlanDesc,
-            &_workspaceSize,
-            static_cast<miopenConvFwdAlgorithm_t>(-1))); // Algo is not used in MIOpen
-#endif
+        return;
     }
+
+    THROW_ON_MIOPEN_FAILURE(miopenFusionPlanGetWorkSpaceSize(
+        handle.miopenHandle,
+        fusePlanDesc,
+        &_workspaceSize,
+        static_cast<miopenConvFwdAlgorithm_t>(-1))); // Algo is not used in MIOpen
 }
 
 size_t ConvFwdBiasActivPlan::getWorkspaceSize(
@@ -213,7 +184,7 @@ void ConvFwdBiasActivPlan::execute(const HipdnnEnginePluginHandle& handle,
             auto status = miopenDestroyOperatorArgs(args);
             if(status != miopenStatusSuccess)
             {
-                HIPDNN_LOG_ERROR(
+                HIPDNN_PLUGIN_LOG_ERROR(
                     "miopenDestroyOperatorArgs failed in ConvFwdBiasActivPlan destructor");
             }
         });
@@ -277,4 +248,4 @@ void ConvFwdBiasActivPlan::execute(const HipdnnEnginePluginHandle& handle,
                                                        workspaceSize));
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

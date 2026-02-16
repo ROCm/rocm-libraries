@@ -4,9 +4,9 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
-using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_test_sdk::detail;
 using namespace hipdnn_data_sdk::data_objects;
 
 TEST(TestFlatbufferTensorAttributesUtils, UnpackTensorAttributes)

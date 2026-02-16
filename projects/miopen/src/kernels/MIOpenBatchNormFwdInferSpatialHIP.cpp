@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
 #endif
 #include "bnorm_spatial_activation_functions.hpp"
@@ -59,7 +59,10 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
     FLOAT value[MIO_BN_VEC_SIZE];
 
     // loop over the batches
-    for(unsigned int n = 0; n < batchSize; ++n)
+    // NOTE: We use zlocalsize = 1 and zgridsize = min(batchSize, maxGridSizeToFillTheGPU). So the
+    // idea here is to use the blocks in z-dimension to cover the batch dimension first, and then
+    // each block will loop over the remaining batches with stride of gridDim.z if necessary.
+    for(unsigned int n = blockIdx.z; n < batchSize; n += gridDim.z)
     {
         // load input value
         const unsigned int batchIndex =
@@ -104,13 +107,14 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 {
     unsigned int tidx = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
     unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
+    unsigned int tidz = blockIdx.z;
 
     // decide vector sizes based on problem layout
     constexpr unsigned int vecSizeX = MIO_LAYOUT_NHWC ? MIO_BN_VEC_SIZE : 1;
     constexpr unsigned int vecSizeY = MIO_LAYOUT_NHWC ? 1 : MIO_BN_VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw)
+    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw || tidz >= batchSize)
     {
         return;
     }
@@ -192,13 +196,14 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 {
     unsigned int tidx = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
     unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
+    unsigned int tidz = blockIdx.z;
 
     // decide vector sizes based on problem layout
     constexpr unsigned int vecSizeX = MIO_LAYOUT_NHWC ? MIO_BN_VEC_SIZE : 1;
     constexpr unsigned int vecSizeY = MIO_LAYOUT_NHWC ? 1 : MIO_BN_VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw)
+    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw || tidz >= batchSize)
     {
         return;
     }

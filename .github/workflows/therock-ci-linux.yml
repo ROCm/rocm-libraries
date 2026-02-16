@@ -5,7 +5,7 @@ on:
     inputs:
       cmake_options:
         type: string
-      project_to_test:
+      projects_to_test:
         type: string
       test_type:
         type: string
@@ -40,7 +40,7 @@ jobs:
 
       # We only want to build MIOpen HEAD against CK HEAD, not applicable for other projects
       - name: Checkout composable_kernel repository
-        if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') }}
+        if: ${{ contains(inputs.projects_to_test, 'miopen') || contains(inputs.projects_to_test, 'miopen_plugin') }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/composable_kernel"
@@ -51,7 +51,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: e39ed88b1d9c35181b7e68fd48feb73d8afb019e # 2026-01-21 commit
+          ref: 5028da50db14c24801a7695e754256016d5068db # 2026-02-10 commit
 
       - name: Install python deps
         run: |
@@ -145,9 +145,11 @@ jobs:
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
+    # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu'}}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
-      project_to_test: ${{ inputs.project_to_test }}
+      projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"

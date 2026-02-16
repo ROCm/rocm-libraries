@@ -30,8 +30,6 @@
 #include <miopen/logger.hpp>
 #include <miopen/filesystem.hpp>
 
-#include <boost/date_time/posix_time/posix_time_types.hpp>
-
 #include <algorithm>
 #include <cassert>
 #include <chrono>
