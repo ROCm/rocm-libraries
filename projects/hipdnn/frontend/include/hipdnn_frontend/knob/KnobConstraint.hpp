@@ -266,5 +266,4 @@ public:
         return "EmptyConstraint{}";
     }
 };
-
 } // namespace hipdnn_frontend
