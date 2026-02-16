@@ -27,15 +27,16 @@ void add_device_grouped_conv3d_bwd_weight_xdl_scale_ndhwgc_gkzyxc_ndhwgk_bf16_f3
     // 1. Default
     add_device_operation_instances(
         instances,
-        device_grouped_conv_bwd_weight_xdl_c_shuffle_bf16_scale_instances<3,
-                                                                          NDHWGC,
-                                                                          GKZYXC,
-                                                                          NDHWGK,
-                                                                          ConvBwdWeightDefault>{});
+        device_grouped_conv_bwd_weight_xdl_c_shuffle_bf16_f32_bf16_scale_instances<
+            3,
+            NDHWGC,
+            GKZYXC,
+            NDHWGK,
+            ConvBwdWeightDefault>{});
     // 2. Filter1x1Stride1Pad0
     add_device_operation_instances(
         instances,
-        device_grouped_conv_bwd_weight_xdl_c_shuffle_bf16_scale_instances<
+        device_grouped_conv_bwd_weight_xdl_c_shuffle_bf16_f32_bf16_scale_instances<
             3,
             NDHWGC,
             GKZYXC,
