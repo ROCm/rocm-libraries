@@ -25,10 +25,6 @@ template <typename T>
 constexpr static unsigned int load_factor = sizeof(load_t) / sizeof(T);
 
 template <typename T>
-constexpr static unsigned int VALUES_SIZE =
-    VECTORIZED ? U_BATCH_SIZE * load_factor<T> : U_BATCH_SIZE;
-
-template <typename T>
 using vec_t = array<T, load_factor<T>>;
 
 template <typename T,
@@ -36,17 +32,19 @@ template <typename T,
           unsigned int BOUND               = INNER_SIZE,
           unsigned int I_STRIDE            = STRIDE>
 __forceinline__ __device__ static vec_t<T>
-load(unsigned long i, const unsigned long i_offset, const T* __restrict__ src)
+load(unsigned int i, const unsigned int i_offset, const T* __restrict__ src)
 {
     if(I_STRIDE == 1 && i + load_factor<T> < BOUND)
     {
+        __builtin_amdgcn_sched_barrier(1);
         const load_t value = *reinterpret_cast<const load_t*>(&src[i + i_offset]);
         const auto values  = *reinterpret_cast<const vec_t<T>*>(&value);
         return values;
     }
     else
     {
-        vec_t<T> values = {{}};
+        __builtin_amdgcn_sched_barrier(1);
+        vec_t<T> values{{}};
 #pragma unroll
         for(int k = 0; k < load_factor<T>; ++k)
         {
@@ -65,7 +63,7 @@ load(unsigned long i, const unsigned long i_offset, const T* __restrict__ src)
 
 template <typename T, unsigned int BOUND = INNER_SIZE, unsigned int I_STRIDE = STRIDE>
 __forceinline__ __device__ static void
-store(unsigned long i, const unsigned long i_offset, T* __restrict__ dst, vec_t<T>& data)
+store(unsigned int i, const unsigned int i_offset, T* __restrict__ dst, vec_t<T>& data)
 {
     if(I_STRIDE == 1 && i + load_factor<T> < BOUND)
     {
@@ -215,7 +213,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
 #pragma unroll
                     for(int k = 0; k < load_factor<T>; ++k)
                     {
-                        tmp = max(CVT_FLOAT2ACCUM(xtmp.data[k]), tmp);
+                        tmp = max(CVT_FLOAT2ACCUM(xdata.data[k]), tmp);
                     }
                     xdata = xtmp;
                 }
@@ -335,10 +333,9 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                             CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
                     ydata.data[k] = CVT_ACCUM2FLOAT(value);
                 }
-                auto ytmpout = ydata;
-                xdata        = xtmp;
-                ydata        = ytmp;
-                store(i - LOCAL_SIZE * load_factor<T>, offset + Y_OFFSET, y, ytmpout);
+                store(i - LOCAL_SIZE * load_factor<T>, offset + Y_OFFSET, y, ydata);
+                xdata = xtmp;
+                ydata = ytmp;
             }
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
@@ -399,7 +396,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         const unsigned int s      = (NUM_BATCH * gid + batch) % STRIDE;
         const unsigned int offset = o * INNER_SIZE * STRIDE + s;
         FLOAT_ACCUM tmp           = -MAX_VAL_ACCUM;
-        FLOAT_ACCUM x_values[VALUES_SIZE<T>];
+        FLOAT_ACCUM x_values[U_BATCH_SIZE * load_factor<T>];
         for(FLOAT_ACCUM& x_value : x_values)
         {
             x_value = -MAX_VAL_ACCUM;
@@ -546,9 +543,8 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                     ydata.data[k] = CVT_ACCUM2FLOAT(x_values[index]);
                     ++index;
                 }
-                auto ytmpout = ydata;
-                ydata        = ytmp;
-                store(i - BATCH_SIZE * load_factor<T>, offset + Y_OFFSET, y, ytmpout);
+                store(i - BATCH_SIZE * load_factor<T>, offset + Y_OFFSET, y, ydata);
+                ydata = ytmp;
             }
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
@@ -663,10 +659,10 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
             for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
             {
                 auto dy_idx       = i * STRIDE + offset + DY_OFFSET;
-                auto y_idx        = i * STRIDE + offset + Y_OFFSET;
                 FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dy[dy_idx]);
                 if constexpr(!USE_SOFTMAX_LOG)
                 {
+                    auto y_idx = i * STRIDE + offset + Y_OFFSET;
                     value *= CVT_FLOAT2ACCUM(y[y_idx]);
                 }
                 channel_dot += value;
@@ -681,6 +677,7 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
             auto dydata    = load(i, offset + DY_OFFSET, dy);
             auto ydata     = load(i, offset + Y_OFFSET, y);
             auto dxdata    = load(i, offset + DX_OFFSET, dx);
+            i += LOCAL_SIZE * load_factor<T>;
             for(; i < INNER_SIZE; i += LOCAL_SIZE * load_factor<T>)
             {
                 auto dytmp = load(i, offset + DY_OFFSET, dy);
@@ -702,11 +699,10 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                             CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta);
                     dxdata.data[k] = CVT_ACCUM2FLOAT(value);
                 }
-                auto dxtmpout = dxdata;
-                dydata        = dytmp;
-                ydata         = ytmp;
-                dxdata        = dxtmp;
-                store(i - LOCAL_SIZE * load_factor<T>, offset + DX_OFFSET, dx, dxtmpout);
+                store(i - LOCAL_SIZE * load_factor<T>, offset + DX_OFFSET, dx, dxdata);
+                dydata = dytmp;
+                ydata  = ytmp;
+                dxdata = dxtmp;
             }
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
@@ -760,12 +756,12 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
         const unsigned int s      = (NUM_BATCH * gid + batch) % STRIDE;
         const unsigned int offset = o * INNER_SIZE * STRIDE + s;
         FLOAT_ACCUM channel_dot   = 0;
-        FLOAT_ACCUM y_values[VALUES_SIZE<T>];
+        FLOAT_ACCUM y_values[U_BATCH_SIZE * load_factor<T>];
         for(FLOAT_ACCUM& y_value : y_values)
         {
             y_value = 0;
         }
-        FLOAT_ACCUM dy_values[VALUES_SIZE<T>];
+        FLOAT_ACCUM dy_values[U_BATCH_SIZE * load_factor<T>];
         for(FLOAT_ACCUM& dy_value : dy_values)
         {
             dy_value = 0;
@@ -786,12 +782,11 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 {
                     y_values[index]  = CVT_FLOAT2ACCUM(ydata.data[k]);
                     dy_values[index] = CVT_FLOAT2ACCUM(dydata.data[k]);
-                    auto value       = dy_values[index];
                     if constexpr(!USE_SOFTMAX_LOG)
                     {
-                        value *= y_values[index];
+                        dy_values[index] *= y_values[index];
                     }
-                    channel_dot += value;
+                    channel_dot += dy_values[index];
                     ++index;
                 }
                 ydata  = ytmp;
@@ -802,12 +797,11 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
             {
                 y_values[index]  = CVT_FLOAT2ACCUM(ydata.data[k]);
                 dy_values[index] = CVT_FLOAT2ACCUM(dydata.data[k]);
-                auto value       = dy_values[index];
                 if constexpr(!USE_SOFTMAX_LOG)
                 {
-                    value *= y_values[index];
+                    dy_values[index] *= y_values[index];
                 }
-                channel_dot += value;
+                channel_dot += dy_values[index];
                 ++index;
             }
         }
@@ -819,12 +813,11 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 auto dy_idx      = i * STRIDE + offset + DY_OFFSET;
                 y_values[index]  = CVT_FLOAT2ACCUM(y[y_idx]);
                 dy_values[index] = CVT_FLOAT2ACCUM(dy[dy_idx]);
-                auto value       = dy_values[index];
                 if constexpr(!USE_SOFTMAX_LOG)
                 {
-                    value *= y_values[index];
+                    dy_values[index] *= y_values[index];
                 }
-                channel_dot += value;
+                channel_dot += dy_values[index];
                 ++index;
             }
         }
@@ -849,16 +842,15 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                     }
                     else
                     {
-                        dy_values[index] = (dy_values[index] - channel_dot) * y_values[index];
+                        dy_values[index] -= channel_dot * y_values[index];
                     }
-                    auto value = dy_values[index] * CVT_FP32_2ACCUM(alpha) +
-                                 CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta);
-                    dxdata.data[k] = CVT_ACCUM2FLOAT(value);
+                    dxdata.data[k] =
+                        CVT_ACCUM2FLOAT(dy_values[index] * CVT_FP32_2ACCUM(alpha) +
+                                        CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta));
                     ++index;
                 }
-                auto dxtmpout = dxdata;
-                dxdata        = dxtmp;
-                store(i - BATCH_SIZE * load_factor<T>, offset + DX_OFFSET, dx, dxtmpout);
+                store(i - BATCH_SIZE * load_factor<T>, offset + DX_OFFSET, dx, dxdata);
+                dxdata = dxtmp;
             }
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
@@ -869,11 +861,11 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 }
                 else
                 {
-                    dy_values[index] = (dy_values[index] - channel_dot) * y_values[index];
+                    dy_values[index] -= channel_dot * y_values[index];
                 }
-                auto value = dy_values[index] * CVT_FP32_2ACCUM(alpha) +
-                             CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta);
-                dxdata.data[k] = CVT_ACCUM2FLOAT(value);
+                dxdata.data[k] =
+                    CVT_ACCUM2FLOAT(dy_values[index] * CVT_FP32_2ACCUM(alpha) +
+                                    CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta));
                 ++index;
             }
             store(i - BATCH_SIZE * load_factor<T>, offset + DX_OFFSET, dx, dxdata);
@@ -889,11 +881,10 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 }
                 else
                 {
-                    dy_values[index] = (dy_values[index] - channel_dot) * y_values[index];
+                    dy_values[index] -= channel_dot * y_values[index];
                 }
-                auto value = dy_values[index] * CVT_FP32_2ACCUM(alpha) +
-                             CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta);
-                dx[dx_idx] = CVT_ACCUM2FLOAT(value);
+                dx[dx_idx] = CVT_ACCUM2FLOAT(dy_values[index] * CVT_FP32_2ACCUM(alpha) +
+                                             CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta));
                 ++index;
             }
         }

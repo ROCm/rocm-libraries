@@ -121,12 +121,18 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
     auto algorithm  = problem.GetAlgorithm();
     auto mode       = problem.GetMode();
 
-    auto grid_size  = problem.outer_size * problem.stride;
-    auto num_batch  = problem.inner_size < config.local_size
-                          ? nextPow2(config.local_size / problem.inner_size)
-                          : 1;
+    auto grid_size        = problem.outer_size * problem.stride;
+    auto num_batch        = problem.inner_size < config.local_size
+                                ? nextPow2(config.local_size / problem.inner_size)
+                                : 1;
+    auto batch_size       = config.local_size / num_batch;
+    auto vectorized_count = dtype == miopenFloat ? 4 : 8;
+    if(num_batch > 1 && batch_size >= vectorized_count)
+    {
+        num_batch *= vectorized_count;
+        batch_size /= vectorized_count;
+    }
     auto workgroups = (grid_size + num_batch - 1) / num_batch;
-    auto batch_size = config.local_size / num_batch;
     auto u_batch_size =
         batch_size < problem.inner_size ? nextPow2(problem.inner_size / batch_size) : 1;
 
