@@ -114,7 +114,7 @@ struct GemmConfigMxFP4 : public GemmConfigBase
     static constexpr ck_tile::index_t M_Tile      = 128;
     static constexpr ck_tile::index_t N_Tile      = 128;
     static constexpr ck_tile::index_t K_Tile      = 128;
-    static constexpr ck_tile::index_t K_Warp_Tile = 64;
+    static constexpr ck_tile::index_t K_Warp_Tile = get_k_warp_tile<true>();
 };
 
 struct GemmConfigPreshuffleQuant : public GemmConfigBase
