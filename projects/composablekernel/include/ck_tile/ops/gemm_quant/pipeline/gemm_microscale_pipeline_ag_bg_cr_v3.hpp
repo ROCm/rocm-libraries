@@ -378,9 +378,6 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
 
                 sweep_tile_span(b_block[number<0>{}], [&](auto idx0) {
                     sweep_tile_span(b_block[number<1>{}], [&](auto idx1) {
-                        constexpr auto i_j_idx       = make_tuple(idx0, idx1);
-                        constexpr auto i_j_idx_scale = make_bq_index(idx0, idx1);
-                        float scale                  = float(scale_tile[i_j_idx_scale]);
                         if constexpr(std::is_same_v<BDataType, ck_tile::pk_fp4_t>)
                         {
                             if constexpr(idx1.impl_.at(0) % BPackedSize == 0)
@@ -388,16 +385,48 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
                                 constexpr auto idx1_lo = tile_distributed_index<idx1.impl_.at(0)>{};
                                 constexpr auto idx1_hi =
                                     tile_distributed_index<idx1.impl_.at(0) + 1>{};
-                                constexpr auto i_j_idx_lo   = make_tuple(idx0, idx1_lo);
-                                constexpr auto i_j_idx_hi   = make_tuple(idx0, idx1_hi);
-                                auto b_pack                 = block_tile[i_j_idx];
-                                auto cvt                    = pk_mxfp4_to_compute_v2(b_pack, scale);
-                                block_tile_cast(i_j_idx_lo) = cvt.x;
-                                block_tile_cast(i_j_idx_hi) = cvt.y;
+
+                                constexpr auto i_j_idx_lo = make_tuple(idx0, idx1_lo);
+                                constexpr auto i_j_idx_hi = make_tuple(idx0, idx1_hi);
+
+                                constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                                auto b_pack            = block_tile[i_j_idx];
+
+                                constexpr auto i_j_idx_scale_lo = make_bq_index(idx0, idx1_lo);
+                                constexpr auto i_j_idx_scale_hi = make_bq_index(idx0, idx1_hi);
+                                if constexpr(i_j_idx_scale_lo[I0{}].impl_.at(0) ==
+                                                 i_j_idx_scale_hi[I0{}].impl_.at(0) &&
+                                             i_j_idx_scale_lo[I1{}].impl_.at(0) ==
+                                                 i_j_idx_scale_hi[I1{}].impl_.at(0))
+                                {
+                                    float scale = float(scale_tile[i_j_idx_scale_lo]);
+                                    auto cvt    = pk_mxfp4_to_compute_v2(b_pack, scale);
+
+                                    block_tile_cast(i_j_idx_lo) = cvt.x;
+                                    block_tile_cast(i_j_idx_hi) = cvt.y;
+                                }
+                                else
+                                {
+                                    float scale_lo = float(scale_tile[i_j_idx_scale_lo]);
+                                    auto b_f4_lo =
+                                        type_convert<pk_fp4_t>(b_pack.unpack(number<0>{}));
+                                    block_tile_cast(i_j_idx_lo) = type_convert<BDqDataType>(
+                                        type_convert<float>(b_f4_lo) * scale_lo);
+
+                                    float scale_hi = float(scale_tile[i_j_idx_scale_hi]);
+                                    auto b_f4_hi =
+                                        type_convert<pk_fp4_t>(b_pack.unpack(number<1>{}));
+                                    block_tile_cast(i_j_idx_hi) = type_convert<BDqDataType>(
+                                        type_convert<float>(b_f4_hi) * scale_hi);
+                                }
                             }
                         }
                         else
                         {
+                            constexpr auto i_j_idx       = make_tuple(idx0, idx1);
+                            constexpr auto i_j_idx_scale = make_bq_index(idx0, idx1);
+                            float scale                  = float(scale_tile[i_j_idx_scale]);
+
                             auto b_pack = block_tile[i_j_idx];
                             block_tile_cast(i_j_idx) =
                                 type_convert<BDqDataType>(type_convert<float>(b_pack) * scale);
