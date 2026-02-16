@@ -58,7 +58,7 @@ struct copy_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
 
         // primbench::log() calls report progress in gray
         // They help with discovering slow setup steps
@@ -147,7 +147,7 @@ It output this `results.json`:
             "clang_version": "19.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.4.0 25133 c7fe45cf4b819c5991fe208aaa96edf142730f1d)"
         },
         "settings": {
-            "bytes": 134217728,
+            "size": 134217728,
             "hot": false,
             "seed": 42,
             "json_out": "results.json",
@@ -248,7 +248,7 @@ You can also pass `--help` to benchmarks to print the available options.
 | Option                                   | Description                                                                                                                                                                        |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--help`                                 | Display this help and exit.                                                                                                                                                        |
-| `--bytes`                                | Input bytes. (default: 128 MiB)                                                                                                                                                    |
+| `--size`                                 | Input size. Benchmarks decide what this represents, but it is commonly the number of bytes or items. (default: 128 * 1024 * 1024)                                                  |
 | `--hot`                                  | Skip clearing the GPU cache between batch iterations.                                                                                                                              |
 | `--seed`                                 | Seed used for input generation. (default: 42)                                                                                                                                      |
 | `--json-out`                             | JSON path to write benchmark results to. (default: results.json)                                                                                                                   |

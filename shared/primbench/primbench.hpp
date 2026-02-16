@@ -105,7 +105,7 @@ void log(Args&&... args);
  */
 struct settings
 {
-    size_t      bytes    = 128 * primbench::MiB; /**< Input array size in bytes */
+    size_t      size     = 128 * primbench::MiB; /**< Input array size */
     bool        hot      = false; /**< Hot means not clearing GPU cache between batches */
     uint32_t    seed     = 42; /**< The seed to use for input array generation */
     std::string json_out = "results.json"; /**< Output JSON file path */
@@ -1314,7 +1314,7 @@ private:
 
         const auto& s = settings;
 
-        ss << "\"bytes\":" << s.bytes;
+        ss << "\"size\":" << s.size;
         ss << ",\"hot\":" << std::boolalpha << s.hot;
         ss << ",\"seed\":" << s.seed;
         ss << ",\"json_out\":\"" << s.json_out << "\"";
@@ -2612,7 +2612,7 @@ public:
           cache_thrasher&  cache,
           gpu_warmer&      warmer)
         : stream(stream)
-        , bytes(settings.bytes)
+        , size(settings.size)
         , seed(settings.seed)
         , m_algo(algo)
         , m_meta(std::move(meta))
@@ -2863,7 +2863,7 @@ public:
      * \brief Public fields accessed directly by benchmarks.
      */
     const hipStream_t stream; ///< HIP stream used by benchmarks for kernel launches.
-    const size_t      bytes; ///< Number of input bytes processed per iteration.
+    const size_t      size; ///< Input size processed per iteration.
     const uint32_t    seed; ///< Random seed used for reproducible benchmark inputs.
 
 private:
@@ -3243,7 +3243,7 @@ public:
         // Skip built-in arguments that are already in settings
         static const std::unordered_set<std::string> builtin_args
             = {"help",
-               "bytes",
+               "size",
                "hot",
                "seed",
                "json-out",
@@ -3790,10 +3790,13 @@ private:
         auto& cli = m_cli;
         auto& s   = m_settings;
 
-        s.bytes = cli.get<size_t>("bytes", s.bytes, "Input bytes.");
-        if(s.bytes == 0)
+        s.size = cli.get<size_t>("size",
+                                 s.size,
+                                 "Input size. Benchmarks decide what this represents, but it is "
+                                 "commonly the number of bytes or items.");
+        if(s.size == 0)
         {
-            std::cerr << "Error: --bytes must be greater than 0\n";
+            std::cerr << "Error: --size must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 

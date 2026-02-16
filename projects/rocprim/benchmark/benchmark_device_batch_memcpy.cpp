@@ -106,7 +106,7 @@ int main(int argc, char* argv[])
 {
     // Set the number of bytes to 1, because prepare_data() later on calculates it.
     primbench::settings settings;
-    settings.bytes = 1;
+    settings.size = 1;
     primbench::executor executor(argc, argv, settings);
 
     BENCHMARK_TYPE(1, 1)

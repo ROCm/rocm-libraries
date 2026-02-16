@@ -44,7 +44,7 @@
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
-    settings.bytes                   = 128 * primbench::MiB;
+    settings.size                    = 128 * primbench::MiB;
     settings.min_gpu_ms_per_batch    = 1000;
     settings.batch_window_size       = 3;
     settings.noise_tolerance_percent = 4;

@@ -54,7 +54,7 @@ void add_benchmarks(primbench::executor& executor)
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
-    settings.bytes = 128 * primbench::MiB;
+    settings.size = 128 * primbench::MiB;
     primbench::executor executor(argc, argv, settings);
 
     add_benchmarks<blocked_to_striped>(executor);

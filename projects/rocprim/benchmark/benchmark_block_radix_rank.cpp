@@ -45,7 +45,7 @@
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
-    settings.bytes = 512 * primbench::MiB;
+    settings.size = 512 * primbench::MiB;
     primbench::executor executor(argc, argv, settings);
 
     BENCHMARK_TYPE(int32_t, 128)

@@ -96,7 +96,7 @@
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
-    settings.bytes = 128 * primbench::MiB;
+    settings.size = 128 * primbench::MiB;
     primbench::executor executor(argc, argv, settings);
 
 #ifndef BENCHMARK_CONFIG_TUNING
