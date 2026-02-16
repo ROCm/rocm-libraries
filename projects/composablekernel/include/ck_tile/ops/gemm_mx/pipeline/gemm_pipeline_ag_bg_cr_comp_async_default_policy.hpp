@@ -24,52 +24,6 @@ struct MXGemmPipelineAgBgCrCompAsyncDefaultPolicy
     // MX scaling configuration: each e8m0 scale covers 32 elements in K
     static constexpr int BlockScaleSize = 32;  
 
-    // Override vector size methods to ensure compatibility with async buffer operations
-    // Valid sizes for amd_async_buffer_load are 4, 12, or 16 bytes
-    template <typename Problem, bool IsWave32Host = false>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetVectorSizeA()
-    {
-        using AsDataType = remove_cvref_t<typename Problem::AsDataTypeTuple>;
-        using ADataType  = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataType>>;
-        constexpr index_t APackedSize = numeric_traits<remove_cvref_t<ADataType>>::PackedSize;
-        
-        // Call base policy's dynamic vector size calculation
-        constexpr index_t vector_size = 
-            UniversalGemmBasePolicy<MXGemmPipelineAgBgCrCompAsyncDefaultPolicy>::
-                template GetVectorSizeA<Problem, IsWave32Host>();
-        
-        // Calculate actual byte load size (storage bytes = logical elements / PackedSize * sizeof)
-        constexpr index_t byte_load_size = vector_size * sizeof(ADataType) / APackedSize;
-        
-        // Ensure async buffer load requirements: must be 4, 12, or 16 bytes
-        static_assert(byte_load_size == 4 || byte_load_size == 12 || byte_load_size == 16,
-                      "Vector load size must be 4, 12, or 16 bytes for async buffer operations");
-        
-        return vector_size;
-    }
-
-    template <typename Problem, bool IsWave32Host = false>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetVectorSizeB()
-    {
-        using BsDataType = remove_cvref_t<typename Problem::BsDataTypeTuple>;
-        using BDataType  = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataType>>;
-        constexpr index_t BPackedSize = numeric_traits<remove_cvref_t<BDataType>>::PackedSize;
-        
-        // Call base policy's dynamic vector size calculation
-        constexpr index_t vector_size = 
-            UniversalGemmBasePolicy<MXGemmPipelineAgBgCrCompAsyncDefaultPolicy>::
-                template GetVectorSizeB<Problem, IsWave32Host>();
-        
-        // Calculate actual byte load size (storage bytes = logical elements / PackedSize * sizeof)
-        constexpr index_t byte_load_size = vector_size * sizeof(BDataType) / BPackedSize;
-        
-        // Ensure async buffer load requirements: must be 4, 12, or 16 bytes
-        static_assert(byte_load_size == 4 || byte_load_size == 12 || byte_load_size == 16,
-                      "Vector load size must be 4, 12, or 16 bytes for async buffer operations");
-        
-        return vector_size;
-    }
-
     template <typename Problem,
               typename OverrideADataType = remove_cvref_t<typename Problem::ADataType>>
     CK_TILE_HOST_DEVICE static constexpr auto MakeALdsBlockDescriptor()
@@ -203,7 +157,7 @@ struct MXGemmPipelineAgBgCrCompAsyncDefaultPolicy
                                              sequence<KIterPerWarp, K_Lane, KPerLane>>,   // K dimension (second)
                                        tuple<sequence<0, 1>, sequence<2, 1>>,        // <MWarp, NWarp>, <K_Lane, MPerXdl>
                                        tuple<sequence<0, 1>, sequence<1, 2>>,
-                                       sequence<2, 1, 2>,                               // <NIterPerWarp, ScaleKDimPerBlock / K_Lane>
+                                       sequence<2, 1, 2>,      // <KIterPerWarp, MIterPerWarp, KPerLane>
                                        sequence<0, 0, 2>>{}); 
     }
 
@@ -232,7 +186,7 @@ struct MXGemmPipelineAgBgCrCompAsyncDefaultPolicy
                                              sequence<KIterPerWarp, K_Lane, KPerLane>>,   // K dimension (second)
                                        tuple<sequence<0, 1>, sequence<2, 1>>,        // <MWarp, NWarp>, <K_Lane, MPerXdl>
                                        tuple<sequence<0, 1>, sequence<1, 2>>,
-                                       sequence<2, 1, 2>,                               // <NIterPerWarp, ScaleKDimPerBlock / K_Lane>
+                                       sequence<2, 1, 2>,                               // <KIterPerWarp, NIterPerWarp, KPerLane>
                                        sequence<0, 0, 2>>{}); 
     }
 };

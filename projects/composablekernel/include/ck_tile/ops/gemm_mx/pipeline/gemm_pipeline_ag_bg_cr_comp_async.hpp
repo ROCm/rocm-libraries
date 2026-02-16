@@ -621,8 +621,8 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                                    const ScaleADramBlockWindowTmp& scale_a_window,
                                    const ScaleBDramBlockWindowTmp& scale_b_window,
                                    index_t num_loop,
-                                   void* p_smem_0,
-                                   void* p_smem_1) const
+                                   void* __restrict__ p_smem_0,
+                                   void* __restrict__ p_smem_1) const
     {
         const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
         const auto tail_number  = Base::GetBlockLoopTailNum(num_loop);
