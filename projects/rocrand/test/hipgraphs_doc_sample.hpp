@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include "test_common.hpp"
+
 size_t        size = 1000;
 float*        data_0;
 unsigned int* data_1;
