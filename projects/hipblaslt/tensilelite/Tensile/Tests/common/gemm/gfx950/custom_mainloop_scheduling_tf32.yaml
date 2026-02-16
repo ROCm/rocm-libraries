@@ -176,6 +176,44 @@ BenchmarkProblems:
           - Range: [[128], [128], [1], [1,1,64]]
           - Range: [[128], [128], [1], [32, 64, 256]]
         - BiasTypeArgs: ['s']
+    - # BenchmarkProblemSizeGroup - Standard - All problem   
+      # This test verifies correctness for a specific parameter combination: CMS=1, MIArchVgpr=True, MfmaInitCVgprs=True (set manually in _get_schedule_128x128x32_TF32)
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 4,  2,2 ]         
+        - PrefetchGlobalRead: [2] 
+        - PrefetchLocalRead: [0]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1]
+        - LocalReadVectorWidth: [4]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [-1] 
+        - LdsPadB: [-1] 
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - NonTemporalA: [0]
+        - NonTemporalB: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [1]
+        - MIArchVgpr: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 8192, 1, 1980]
+        - BiasTypeArgs: ['s']
     - # BenchmarkProblemSizeGroup - Standard - All problem        
       InitialSolutionParameters:
       BenchmarkCommonParameters:

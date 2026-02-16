@@ -672,6 +672,10 @@ namespace TensileLite
             {
                 throw std::runtime_error("Unsupported type dgelu.");
             }
+            else if(new_type == ActivationType::DRelu)
+            {
+                throw std::runtime_error("Unsupported type drelu.");
+            }
             return val;
         }
 

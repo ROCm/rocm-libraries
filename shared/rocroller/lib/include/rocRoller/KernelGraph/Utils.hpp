@@ -578,7 +578,7 @@ namespace rocRoller
                                   int                                iMacY,
                                   std::array<unsigned int, 3> const& workgroupSizes,
                                   std::vector<unsigned int> const&   jammedTiles,
-                                  bool                               useSwappedAccess,
+                                  bool                               rightmostFastest,
                                   bool                               isGlobalToLDS = false);
 
         /**
@@ -659,7 +659,7 @@ namespace rocRoller
          *   - The row index of a thread tile is fast wrt the VGPR
          *     index.
          *
-         * When `useSwappedAccess` is true, both of these orders are
+         * When `rightmostFastest` is true, both of these orders are
          * reversed.
          *
          * Required (deferred) connections are appended to
@@ -672,7 +672,7 @@ namespace rocRoller
                                  int                                iMacY,
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::vector<unsigned int> const&   jammedTiles,
-                                 bool                               useSwappedAccess,
+                                 bool                               rightmostFastest,
                                  bool                               isGlobalToLDS = false);
 
         /**

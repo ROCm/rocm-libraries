@@ -24,7 +24,7 @@ class ConvFwdBiasActiv
           std::tuple<test_conv_common::ConvTestCase, bool, test_activation_common::ActivTestCase>>
 {
 protected:
-    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
+    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         // Skipping until CK is working on Windows
         SKIP_IF_WINDOWS();
