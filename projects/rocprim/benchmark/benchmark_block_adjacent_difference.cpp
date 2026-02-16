@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,19 +43,28 @@
 #include <vector>
 
 template<typename Benchmark,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         bool         WithTile,
+         typename T,
+         unsigned int                                 BlockSize,
+         unsigned int                                 ItemsPerThread,
+         bool                                         WithTile,
+         rocprim::block_adjacent_difference_algorithm Algorithm,
          typename... Args>
 __global__ __launch_bounds__(BlockSize)
 void kernel(Args... args)
 {
-    Benchmark::template run<BlockSize, ItemsPerThread, WithTile>(args...);
+    Benchmark::template run<T, BlockSize, ItemsPerThread, WithTile, Algorithm>(args...);
 }
 
 struct subtract_left
 {
-    template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
+    static constexpr bool is_partial       = false;
+    static constexpr bool enable_with_tile = true;
+
+    template<typename T,
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm>
     __device__
     static void run(const T* d_input, T* d_output, unsigned int trials)
     {
@@ -65,8 +74,9 @@ struct subtract_left
         T input[ItemsPerThread];
         rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
-        __shared__ typename adjacent_diff_t::storage_type storage;
+        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize, 1, 1, Algorithm>;
+        __shared__
+        typename adjacent_diff_t::storage_type storage;
 
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < trials; ++trial)
@@ -94,7 +104,14 @@ struct subtract_left
 
 struct subtract_left_partial
 {
-    template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
+    static constexpr bool is_partial       = true;
+    static constexpr bool enable_with_tile = true;
+
+    template<typename T,
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm>
     __device__
     static void
         run(const T* d_input, const unsigned int* tile_sizes, T* d_output, unsigned int trials)
@@ -105,8 +122,9 @@ struct subtract_left_partial
         T input[ItemsPerThread];
         rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
-        __shared__ typename adjacent_diff_t::storage_type storage;
+        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize, 1, 1, Algorithm>;
+        __shared__
+        typename adjacent_diff_t::storage_type storage;
 
         unsigned int tile_size = tile_sizes[blockIdx.x];
 
@@ -150,7 +168,14 @@ struct subtract_left_partial
 
 struct subtract_right
 {
-    template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
+    static constexpr bool is_partial       = false;
+    static constexpr bool enable_with_tile = true;
+
+    template<typename T,
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm>
     __device__
     static void run(const T* d_input, T* d_output, unsigned int trials)
     {
@@ -160,8 +185,9 @@ struct subtract_right
         T input[ItemsPerThread];
         rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
-        __shared__ typename adjacent_diff_t::storage_type storage;
+        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize, 1, 1, Algorithm>;
+        __shared__
+        typename adjacent_diff_t::storage_type storage;
 
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < trials; ++trial)
@@ -193,7 +219,14 @@ struct subtract_right
 
 struct subtract_right_partial
 {
-    template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
+    static constexpr bool is_partial       = true;
+    static constexpr bool enable_with_tile = false;
+
+    template<typename T,
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm>
     __device__
     static void
         run(const T* d_input, const unsigned int* tile_sizes, T* d_output, unsigned int trials)
@@ -204,8 +237,9 @@ struct subtract_right_partial
         T input[ItemsPerThread];
         rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
-        __shared__ typename adjacent_diff_t::storage_type storage;
+        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize, 1, 1, Algorithm>;
+        __shared__
+        typename adjacent_diff_t::storage_type storage;
 
         unsigned int tile_size = tile_sizes[blockIdx.x];
         // Try to evenly distribute the length of tile_sizes between all the trials
@@ -235,13 +269,12 @@ struct subtract_right_partial
 
 template<typename Benchmark,
          typename T,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         bool         WithTile,
-         unsigned int Trials = 100>
-auto run_benchmark(benchmark_utils::state&& state)
-    -> std::enable_if_t<!std::is_same<Benchmark, subtract_left_partial>::value
-                        && !std::is_same<Benchmark, subtract_right_partial>::value>
+         unsigned int                                 BlockSize,
+         unsigned int                                 ItemsPerThread,
+         bool                                         WithTile,
+         rocprim::block_adjacent_difference_algorithm Algorithm,
+         unsigned int                                 Trials = 100>
+auto run_benchmark(benchmark_utils::state&& state) -> std::enable_if_t<!Benchmark::is_partial>
 {
     const auto& bytes  = state.bytes;
     const auto& seed   = state.seed;
@@ -265,7 +298,7 @@ auto run_benchmark(benchmark_utils::state&& state)
     state.run(
         [&]
         {
-            kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>
+            kernel<Benchmark, T, BlockSize, ItemsPerThread, WithTile, Algorithm>
                 <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input.get(),
                                                                    d_output.get(),
                                                                    Trials);
@@ -277,13 +310,12 @@ auto run_benchmark(benchmark_utils::state&& state)
 
 template<typename Benchmark,
          typename T,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         bool         WithTile,
-         unsigned int Trials = 100>
-auto run_benchmark(benchmark_utils::state&& state)
-    -> std::enable_if_t<std::is_same<Benchmark, subtract_left_partial>::value
-                        || std::is_same<Benchmark, subtract_right_partial>::value>
+         unsigned int                                 BlockSize,
+         unsigned int                                 ItemsPerThread,
+         bool                                         WithTile,
+         rocprim::block_adjacent_difference_algorithm Algorithm,
+         unsigned int                                 Trials = 100>
+auto run_benchmark(benchmark_utils::state&& state) -> std::enable_if_t<Benchmark::is_partial>
 {
     const auto& bytes  = state.bytes;
     const auto& seed   = state.seed;
@@ -316,7 +348,7 @@ auto run_benchmark(benchmark_utils::state&& state)
     state.run(
         [&]
         {
-            kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>
+            kernel<Benchmark, T, BlockSize, ItemsPerThread, WithTile, Algorithm>
                 <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input.get(),
                                                                    d_tile_sizes.get(),
                                                                    d_output.get(),
@@ -327,24 +359,26 @@ auto run_benchmark(benchmark_utils::state&& state)
     state.set_throughput(size * Trials, sizeof(T));
 }
 
-#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE)                                         \
-    executor.queue_fn(                                                                  \
-        bench_naming::format_name("{lvl:block,algo:adjacent_difference,subalgo:" + name \
-                                  + ",key_type:" #T ",cfg:{bs:" #BS ",ipt:" #IPT        \
-                                    ",with_tile:" #WITH_TILE "}}")                      \
-            .c_str(),                                                                   \
-        run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>);
+#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, ALGO)                                             \
+    executor.queue_fn(bench_naming::format_name(                                                  \
+                          "{lvl:block,algo:adjacent_difference,subalgo:" + name                   \
+                          + ",key_type:" #T ",cfg:{bs:" #BS ",ipt:" #IPT ",with_tile:" #WITH_TILE \
+                          + ",method:" + method_name + "}}")                                      \
+                          .c_str(),                                                               \
+                      run_benchmark<Benchmark, T, BS, IPT, WITH_TILE, ALGO>);
 
-#define BENCHMARK_TYPE(type, block, with_tile)   \
-    CREATE_BENCHMARK(type, block, 1, with_tile)  \
-    CREATE_BENCHMARK(type, block, 3, with_tile)  \
-    CREATE_BENCHMARK(type, block, 4, with_tile)  \
-    CREATE_BENCHMARK(type, block, 8, with_tile)  \
-    CREATE_BENCHMARK(type, block, 16, with_tile) \
-    CREATE_BENCHMARK(type, block, 32, with_tile)
+#define BENCHMARK_TYPE(type, block, with_tile)              \
+    CREATE_BENCHMARK(type, block, 1, with_tile, Algorithm)  \
+    CREATE_BENCHMARK(type, block, 3, with_tile, Algorithm)  \
+    CREATE_BENCHMARK(type, block, 4, with_tile, Algorithm)  \
+    CREATE_BENCHMARK(type, block, 8, with_tile, Algorithm)  \
+    CREATE_BENCHMARK(type, block, 16, with_tile, Algorithm) \
+    CREATE_BENCHMARK(type, block, 32, with_tile, Algorithm)
 
-template<typename Benchmark>
-void add_benchmarks(const std::string& name, benchmark_utils::executor& executor)
+template<typename Benchmark, rocprim::block_adjacent_difference_algorithm Algorithm>
+void add_benchmarks(const std::string&         name,
+                    const std::string&         method_name,
+                    benchmark_utils::executor& executor)
 {
     BENCHMARK_TYPE(int, 256, false)
     BENCHMARK_TYPE(float, 256, false)
@@ -355,7 +389,7 @@ void add_benchmarks(const std::string& name, benchmark_utils::executor& executor
     BENCHMARK_TYPE(rocprim::int128_t, 256, false)
     BENCHMARK_TYPE(rocprim::uint128_t, 256, false)
 
-    if(!std::is_same<Benchmark, subtract_right_partial>::value)
+    if(Benchmark::enable_with_tile)
     {
         BENCHMARK_TYPE(int, 256, true)
         BENCHMARK_TYPE(float, 256, true)
@@ -370,12 +404,24 @@ void add_benchmarks(const std::string& name, benchmark_utils::executor& executor
 
 int main(int argc, char* argv[])
 {
+    constexpr auto crosslane
+        = rocprim::block_adjacent_difference_algorithm::adjacent_difference_crosslane;
+    constexpr auto shared_mem
+        = rocprim::block_adjacent_difference_algorithm::adjacent_difference_shared_mem;
+
     benchmark_utils::executor executor(argc, argv, 512 * benchmark_utils::MiB, 1, 0);
 
-    add_benchmarks<subtract_left>("subtract_left", executor);
-    add_benchmarks<subtract_right>("subtract_right", executor);
-    add_benchmarks<subtract_left_partial>("subtract_left_partial", executor);
-    add_benchmarks<subtract_right_partial>("subtract_right_partial", executor);
+    // clang-format off
+    add_benchmarks<subtract_left, shared_mem>("subtract_left", "shared_mem", executor);
+    add_benchmarks<subtract_right, shared_mem>("subtract_right", "shared_mem", executor);
+    add_benchmarks<subtract_left_partial, shared_mem>("subtract_left_partial", "shared_mem", executor);
+    add_benchmarks<subtract_right_partial, shared_mem>("subtract_right_partial", "shared_mem", executor);
+
+    add_benchmarks<subtract_left, crosslane>("subtract_left", "crosslane", executor);
+    add_benchmarks<subtract_right, crosslane>("subtract_right", "crosslane", executor);
+    add_benchmarks<subtract_left_partial, crosslane>("subtract_left_partial", "crosslane", executor);
+    add_benchmarks<subtract_right_partial, crosslane>("subtract_right_partial", "crosslane", executor);
+    // clang-format on
 
     executor.run();
 }

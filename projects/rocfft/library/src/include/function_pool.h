@@ -66,11 +66,13 @@ struct PartialPassParams
     PartialPassParams(const ComputeScheme&             scheme,
                       const unsigned int&              current_dim,
                       const unsigned int&              off_dim,
+                      const unsigned int&              pp_tpt,
                       const std::vector<unsigned int>& pp_factors_curr,
                       const std::vector<unsigned int>& pp_factors_other)
         : scheme(scheme)
         , current_dim(current_dim)
         , off_dim(off_dim)
+        , pp_tpt(pp_tpt)
         , pp_factors_curr(pp_factors_curr)
         , pp_factors_other(pp_factors_other)
     {
@@ -79,6 +81,7 @@ struct PartialPassParams
     ComputeScheme             scheme      = CS_NONE;
     unsigned int              current_dim = 0;
     unsigned int              off_dim     = 0;
+    unsigned int              pp_tpt      = 0;
     std::vector<unsigned int> pp_factors_curr;
     std::vector<unsigned int> pp_factors_other;
 };
@@ -121,6 +124,7 @@ struct FFTKernel
               ComputeScheme               scheme             = CS_NONE,
               unsigned int                current_dim        = 0,
               unsigned int                off_dim            = 0,
+              unsigned int                pp_tpt             = 0,
               std::vector<unsigned int>&& pp_factors_curr    = std::vector<unsigned int>(),
               std::vector<unsigned int>&& pp_factors_other   = std::vector<unsigned int>())
         : factors(factors)
@@ -131,7 +135,7 @@ struct FFTKernel
         , half_lds(half_lds)
         , direct_to_from_reg(direct_to_from_reg)
         , aot_rtc(aot_rtc)
-        , pp_params(scheme, current_dim, off_dim, pp_factors_curr, pp_factors_other)
+        , pp_params(scheme, current_dim, off_dim, pp_tpt, pp_factors_curr, pp_factors_other)
     {
     }
 
@@ -403,10 +407,16 @@ static void insert_default_entry(const FMKey&     def_key,
 {
     FMKey def_key_with_lds = def_key;
 
-    // Specifically add the current device's max LDS size if not a generic arch entry
-    def_key_with_lds.lds_size_bytes = def_key.gcn_arch_name == generic_gcn_arch_name
-                                          ? lds_size_bytes
-                                          : get_curr_device_prop().sharedMemPerBlock;
+    // Handle the case where this function is called within the AOT Stockham function
+    // pool build process. AOT kernels will always have gfx_generic as arch name, so
+    // skip retreiving device properties in this case.
+    auto is_device_visible = check_any_devices_visible();
+
+    // Specifically add the current device's max LDS size if not a generic arch entry.
+    def_key_with_lds.lds_size_bytes
+        = def_key.gcn_arch_name == generic_gcn_arch_name
+              ? lds_size_bytes
+              : (is_device_visible ? get_curr_device_prop().sharedMemPerBlock : 0);
 
     // simple_key means the same thing as def_key, but we just remove kernel-config
     // so we don't need to know the exact config when we're lookin' for the default kernel
@@ -428,10 +438,16 @@ static void insert_default_entry(const PPFMKey&   def_key,
 {
     PPFMKey def_key_with_lds = def_key;
 
-    // Specifically add the current device's max LDS size if not a generic arch entry
-    def_key_with_lds.lds_size_bytes = def_key.gcn_arch_name == generic_gcn_arch_name
-                                          ? lds_size_bytes
-                                          : get_curr_device_prop().sharedMemPerBlock;
+    // Handle the case where this function is called within the AOT Stockham function
+    // pool build process. AOT kernels will always have gfx_generic as arch name, so
+    // skip retrieving device properties in this case.
+    auto is_device_visible = check_any_devices_visible();
+
+    // Specifically add the current device's max LDS size if not a generic arch entry.
+    def_key_with_lds.lds_size_bytes
+        = def_key.gcn_arch_name == generic_gcn_arch_name
+              ? lds_size_bytes
+              : (is_device_visible ? get_curr_device_prop().sharedMemPerBlock : 0);
 
     PPFMKey simple_key(def_key_with_lds);
 

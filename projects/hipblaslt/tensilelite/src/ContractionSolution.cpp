@@ -973,9 +973,7 @@ namespace TensileLite
 
         // Dynamically pick the values
         if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
-           && sizeMapping.workGroupMappingXCC == -1
-           && sizeMapping.nonTemporalA < 4 /* Exclude NTs for now till we fix libs */
-           && sizeMapping.nonTemporalB < 4 /* Exclude NTs for now till we fix libs */)
+           && sizeMapping.workGroupMappingXCC == -1)
         {
             int32_t c_wgm = 0;
             uint32_t c_wgmxcc = 0;

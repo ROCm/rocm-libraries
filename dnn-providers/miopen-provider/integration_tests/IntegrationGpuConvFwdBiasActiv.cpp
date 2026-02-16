@@ -9,6 +9,7 @@
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_plugin::test_utilities;
@@ -23,7 +24,7 @@ class ConvFwdBiasActiv
           std::tuple<test_conv_common::ConvTestCase, bool, test_activation_common::ActivTestCase>>
 {
 protected:
-    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
+    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         // Skipping until CK is working on Windows
         SKIP_IF_WINDOWS();
@@ -38,11 +39,11 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xAttr = graph::makeTensorAttributes(
+        auto xAttr = makeTensorAttributes(
             "x", convTestCase.xDims, generateStrides(convTestCase.xDims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto wAttr = graph::makeTensorAttributes(
+        auto wAttr = makeTensorAttributes(
             "w", convTestCase.wDims, generateStrides(convTestCase.wDims, layout.strideOrder));
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
@@ -59,7 +60,7 @@ protected:
         {
             const auto biasDims = getDerivedShape(convTestCase.yDims);
 
-            auto biasAttr = graph::makeTensorAttributes(
+            auto biasAttr = makeTensorAttributes(
                 "bias", biasDims, generateStrides(biasDims, layout.strideOrder));
             auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 

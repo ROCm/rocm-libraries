@@ -51,7 +51,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 55fa089eecd5f20d13357b82b74b5572dda1d67b # 2026-02-03 commit
+          ref: 5028da50db14c24801a7695e754256016d5068db # 2026-02-10 commit
 
       - name: Install python deps
         run: |
@@ -145,6 +145,8 @@ jobs:
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
+    # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu'}}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
