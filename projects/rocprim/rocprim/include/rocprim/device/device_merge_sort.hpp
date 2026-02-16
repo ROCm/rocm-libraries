@@ -415,7 +415,8 @@ template<class Config,
          class KeysIterator,
          class ValuesIterator,
          class OffsetT,
-         class BinaryFunction>
+         class BinaryFunction,
+         block_merge_algorithm UseFusedKernel = false>
 inline hipError_t merge_sort_block_merge_impl(
     KeysIterator                                               keys,
     ValuesIterator                                             values,
@@ -517,22 +518,48 @@ inline hipError_t merge_sort_block_merge_impl(
         {
             if(use_mergepath)
             {
-                ROCPRIM_RETURN_ON_ERROR((
-                    launch_mergepath_fused_kernel<Config, selector>(
-                        keys_input_,
-                        keys_output_,
-                        values_input_,
-                        values_output_,
-                        size,
-                        current_run_len,
-                        merge_mergepath_number_of_blocks,
-                        merge_mergepath_block_size,
-                        compare_function,
-                        vsmem,
-                        current_target,
-                        stream,
-                        debug_synchronous)
-                ));
+                if constexpr(UseFusedKernel)
+                {
+                    ROCPRIM_RETURN_ON_ERROR((
+                        launch_mergepath_kernels<Config, selector>(
+                            keys_input_,
+                            keys_output_,
+                            values_input_,
+                            values_output_,
+                            size,
+                            current_run_len,
+                            merge_num_partitions,
+                            merge_partition_number_of_blocks,
+                            merge_partition_block_size,
+                            merge_mergepath_number_of_blocks,
+                            merge_mergepath_block_size,
+                            compare_function,
+                            d_merge_partitions,
+                            vsmem,
+                            current_target,
+                            stream,
+                            debug_synchronous)
+                    ));
+                }
+                else
+                {
+                    ROCPRIM_RETURN_ON_ERROR((
+                        launch_mergepath_fused_kernel<Config, selector>(
+                            keys_input_,
+                            keys_output_,
+                            values_input_,
+                            values_output_,
+                            size,
+                            current_run_len,
+                            merge_mergepath_number_of_blocks,
+                            merge_mergepath_block_size,
+                            compare_function,
+                            vsmem,
+                            current_target,
+                            stream,
+                            debug_synchronous)
+                    ));
+                }
             }
             else
             {
