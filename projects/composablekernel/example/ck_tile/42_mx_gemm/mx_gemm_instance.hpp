@@ -45,18 +45,18 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args,
                                                           GemmConfig::UseStructuredSparsity,
                                                           persistent,
                                                           GemmConfig::NumWaveGroups,
-                                                          true>;
+                                                          GemmConfig::Preshuffle>;
 
     using ComputeDataType = ADataType;
     static_assert(sizeof(ComputeDataType) >= sizeof(BDataType),
                   "mixed_prec_gemm requires ADataType is a wider type than BDataType");
 
-
-    using MXPipelineProblem = ck_tile::GemmPipelineProblem<ADataType,
-                                                    BDataType,
-                                                    AccDataType,
-                                                    GemmShape,
-                                                    MXGemmTraits>;
+    using MXPipelineProblem = ck_tile::UniversalGemmPipelineProblem<ADataType,
+                                                                     BDataType,
+                                                                     AccDataType,
+                                                                     GemmShape,
+                                                                     MXGemmTraits,
+                                                                     GemmConfig::Scheduler>;
 
     // Use the new MX comp_async pipeline with MX scaling support
     using MXGemmPipeline = ck_tile::MXGemmPipelineAgBgCrCompAsync<MXPipelineProblem>;

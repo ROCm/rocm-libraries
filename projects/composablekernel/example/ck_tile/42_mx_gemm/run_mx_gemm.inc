@@ -98,6 +98,7 @@ int run_mx_gemm_with_layouts(int argc,
 
     a_dev_buf.ToDevice(a_host.data());
     b_dev_buf.ToDevice(b_host.data());
+    c_dev_buf.SetZero();  // Initialize C buffer to zero
     scale_a_dev_buf.ToDevice(scale_a_host.data());
     scale_b_dev_buf.ToDevice(scale_b_host.data());
 
