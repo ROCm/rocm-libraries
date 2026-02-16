@@ -5,6 +5,12 @@ Documentation for rocRAND is available at
 
 ## rocRAND x.y.z for ROCm x.y.z
 
+### Resolved issue
+
+* Fixed dynamic ordering support for threefry generators.
+
+## rocRAND x.y.z for ROCm x.y.z
+
 ### Added
 
 * Occupancy-based tooling for `benchmark_rocrand_device_api` workload increase.
