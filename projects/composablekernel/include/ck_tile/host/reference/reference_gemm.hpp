@@ -680,7 +680,7 @@ CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
                 b_k_n_scaled(k, n)     = b_f4_lo * b_scale;
                 b_k_n_scaled(k + 1, n) = b_f4_hi * b_scale;
             }
-            else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
+            else if constexpr(std::is_same_v<BDataType, pk_fp6x16_t>)
             {
                 if(k % pk_fp6x16_t::packed_size != 0)
                     continue;
