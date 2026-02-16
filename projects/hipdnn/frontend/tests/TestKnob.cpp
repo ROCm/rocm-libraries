@@ -994,6 +994,73 @@ TEST(TestKnob, ZeroSizeFlatbufferDataReturnsError)
     EXPECT_NE(result.errorMessage.find("zero size"), std::string::npos);
 }
 
+TEST(TestKnob, InvalidFlatbufferDataReturnsError)
+{
+    // Create garbage data that won't pass flatbuffer verification
+    std::vector<uint8_t> garbageData = {0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD, 0xFC};
+    hipdnnBackendFlatbufferData_t bufferData{garbageData.data(), garbageData.size()};
+    auto result = hipdnn_frontend::Knob::fromFlatbuffer(bufferData);
+
+    EXPECT_TRUE(result.hasError());
+    EXPECT_NE(result.errorMessage.find("failed verification"), std::string::npos);
+}
+
+// Note: KnobValue::NONE and unknown default_value types are defensive code paths
+// that cannot be hit with a valid flatbuffer (the builder enforces required fields).
+// The InvalidFlatbufferDataReturnsError test covers corrupted data scenarios.
+
+TEST(TestKnob, InvalidDefaultValueNotInValidValuesReturnsError)
+{
+    // Create an int knob with valid_values={1,2,3} but default_value=5
+    fb::IntConstraintT constraintT;
+    constraintT.min_value = 0;
+    constraintT.max_value = 100;
+    constraintT.step = 1;
+    constraintT.valid_values = {1, 2, 3};
+
+    auto buffer = createIntKnobFlatbuffer(
+        "bad_valid_values_knob", "Default not in valid values", 5, false, &constraintT);
+    hipdnnBackendFlatbufferData_t bufferData{buffer.data(), buffer.size()};
+    auto result = hipdnn_frontend::Knob::fromFlatbuffer(bufferData);
+
+    EXPECT_TRUE(result.hasError());
+    EXPECT_NE(result.errorMessage.find("violates"), std::string::npos);
+    EXPECT_NE(result.errorMessage.find("bad_valid_values_knob"), std::string::npos);
+}
+
+TEST(TestKnob, InvalidDefaultStringTooLongReturnsError)
+{
+    // Create a string knob with max_length=5 but default_value="toolong"
+    fb::StringConstraintT constraintT;
+    constraintT.max_length = 5;
+
+    auto buffer = createStringKnobFlatbuffer(
+        "too_long_knob", "Default too long", "toolong", false, &constraintT);
+    hipdnnBackendFlatbufferData_t bufferData{buffer.data(), buffer.size()};
+    auto result = hipdnn_frontend::Knob::fromFlatbuffer(bufferData);
+
+    EXPECT_TRUE(result.hasError());
+    EXPECT_NE(result.errorMessage.find("violates"), std::string::npos);
+}
+
+TEST(TestKnob, InvalidDefaultIntStepViolationReturnsError)
+{
+    // Create an int knob with step=10 but default_value=5 (not a multiple of step)
+    fb::IntConstraintT constraintT;
+    constraintT.min_value = 0;
+    constraintT.max_value = 100;
+    constraintT.step = 10;
+
+    auto buffer = createIntKnobFlatbuffer(
+        "step_violation_knob", "Default violates step", 5, false, &constraintT);
+    hipdnnBackendFlatbufferData_t bufferData{buffer.data(), buffer.size()};
+    auto result = hipdnn_frontend::Knob::fromFlatbuffer(bufferData);
+
+    EXPECT_TRUE(result.hasError());
+    EXPECT_NE(result.errorMessage.find("violates"), std::string::npos);
+    EXPECT_NE(result.errorMessage.find("step_violation_knob"), std::string::npos);
+}
+
 // ============================================================================
 // EmptyConstraint Tests
 // ============================================================================
