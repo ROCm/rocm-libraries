@@ -1871,7 +1871,6 @@ def _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS):
                         23,23,
                         55,55,
                         94,
-                        # 91
                     ]],
             'GRIncA': [[0,1,2,3,4,5,6,7,8]],
             'GRIncB': [[9,10,11,12,13,14,15,16,17]],
@@ -1885,9 +1884,7 @@ def _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS):
                      [58,58,62,62,66,66,72,72,82,82,88,90,95,95]],
             'GRB': [[56,56, 60,60, 70,70, 80,80, 90,92, 100,100, 106,106, 109,109],
                     [58,58, 62,62, 72,72, 82,82, 91,93, 101,101, 107,107, 110,110]],                    
-            # 'LRB1': [[100,100,101,102,103,104,109,110]],
-            # 'LRB1': [[98,99,100,101,102,103,106,109]],
-            'LRB1': [[90,92,94,100,102,103,106,109]],
+            'LRB1': [[90,92,96,100,102,103,106,109]],
             'LRSA': [[54]],
             'LRSB': [[54]],
             'LWSA': [[87]],
@@ -1896,14 +1893,13 @@ def _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS):
         }
 
         syncCode = [
-            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=7 newLW=0 newLR=7 for iteration == 0"),
-            SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
-            SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1, comment=""),
+            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for 8-5 local reads // oldleft=8, completed=3"),
+            SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for 11-6 local reads // oldleft=5, new=6, completed=5"),
+            SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1, comment="waiting for prior global reads and local reads // oldleft=6, new=8, completed=14"),
             SBarrier(comment=""),
-            SWaitCnt(dscnt=0, vlcnt=7, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+            SWaitCnt(dscnt=0, vlcnt=7, vscnt=-1, comment="wait for prior global reads and local reads // oldleft=0, new=8, completed=8"),
             SBarrier(comment=""),
-            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for previous set of global reads"),
-            # SBarrier(comment="")
+            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for 14-5 local reads // oldleft=0, new=14, completed=9"),
         ]
 
         nglshift = nllshift = 15    
