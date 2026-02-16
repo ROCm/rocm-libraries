@@ -221,6 +221,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }},
            {rocRoller::GPUCapability::HasAccCD,
             {
@@ -242,6 +244,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }},
            {rocRoller::GPUCapability::ArchAccUnifiedRegs,
             {
@@ -256,6 +260,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }},
            {rocRoller::GPUCapability::HasNaNoo,
             {
@@ -270,6 +276,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }},
            {rocRoller::GPUCapability::HasWave64,
             std::vector<rocRoller::GPUArchitectureTarget>(rocRoller::SupportedArchitectures.begin(),
@@ -281,6 +289,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }},
            {rocRoller::GPUCapability::HasE8M0Scale,
             {
@@ -289,6 +299,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }},
            {rocRoller::GPUCapability::HasXCC,
             {
@@ -297,6 +309,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }}};
 
     inline std::vector<rocRoller::GPUArchitectureTarget> gfx908ISAs()

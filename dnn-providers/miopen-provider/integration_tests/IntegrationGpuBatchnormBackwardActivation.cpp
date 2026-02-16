@@ -60,7 +60,7 @@ protected:
             ->fillTensorWithRandomValues(1.9f, 2.0f, seed);
     }
 
-    void runGraphTest([[maybe_unused]] DataType tolerance, const TensorLayout& layout) override
+    void runGraphTest([[maybe_unused]] DataType tolerance, const TensorLayout& layout)
     {
         namespace fe = hipdnn_frontend;
 
