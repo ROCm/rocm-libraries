@@ -163,8 +163,8 @@ struct block_merge_impl<
         const OffsetT partition_beg = merge_partitions[flat_block_id];
         const OffsetT partition_end = merge_partitions[flat_block_id + 1];
 
-        // The number of items in a single run is current_run_length, so the number of items in the
-        // two merged runs will be 2 * current_run_length.
+        // current_run_length counts the number of items in a single run, thus
+        // the two merged runs will consist of 2 * current_run_length items.
         const OffsetT merged_run_length = 2 * current_run_length;
 
         // The begin index of Left Run in keys_input.
@@ -174,10 +174,9 @@ struct block_merge_impl<
         const OffsetT merge_run_base = (global_offset / merged_run_length) * merged_run_length;
         // diag is the output index relative to the current Merge Group. It represents the number of
         // items already consumed by previous blocks within this specific pair of runs.
-        const OffsetT diag
-            = static_cast<OffsetT>(flat_block_id) * items_per_block - merge_run_base;
+        const OffsetT diag = static_cast<OffsetT>(flat_block_id) * items_per_block - merge_run_base;
 
-        // For each pair of runs to be merged, the input keys for the Left the Right Runs are stored 
+        // For each pair of runs to be merged, the input keys for the Left the Right Runs are stored
         // adjacent to eachother
         const OffsetT run_beg_L = partition_beg;
         OffsetT       run_end_L = partition_end;
@@ -187,7 +186,7 @@ struct block_merge_impl<
         const OffsetT run_base_R = merge_run_base + current_run_length;
 
         // diag represents the number of items already consumed by previous blocks, and partition_beg
-        // represents partition point in Left Run, which is
+        // represents the partition point in Left Run, which is
         // Principle: Consumed_Right = Total_Consumed - Consumed_Left
         const OffsetT consumed_beg_L = partition_beg - merge_run_base;
         const OffsetT consumed_beg_R = diag - consumed_beg_L;
@@ -243,11 +242,11 @@ struct block_merge_impl<
         // Note: In shared memory, keys are stored as [Left Run ... | Right Run ...].
         // So, the first key for the right run is stored at &keys_shared[num_keys_L].
         const unsigned int consumed_L = merge_path(keys_shared,
-                                                    &keys_shared[num_keys_L],
-                                                    num_keys_L,
-                                                    num_keys_R,
-                                                    diag_local,
-                                                    compare_function);
+                                                   &keys_shared[num_keys_L],
+                                                   num_keys_L,
+                                                   num_keys_R,
+                                                   diag_local,
+                                                   compare_function);
 
         const unsigned int consumed_R = diag_local - consumed_L;
 
@@ -370,8 +369,7 @@ struct block_merge_impl<Key,
         const OffsetT global_offset = static_cast<OffsetT>(flat_block_id) * items_per_block;
 
         const OffsetT merge_run_base = (global_offset / merged_run_length) * merged_run_length;
-        const OffsetT diag
-            = static_cast<OffsetT>(flat_block_id) * items_per_block - merge_run_base;
+        const OffsetT diag = static_cast<OffsetT>(flat_block_id) * items_per_block - merge_run_base;
 
         const OffsetT run_beg_L = partition_beg;
         OffsetT       run_end_L = partition_end;
@@ -414,11 +412,11 @@ struct block_merge_impl<Key,
             = rocprim::min(num_keys_L + num_keys_R, ItemsPerThread * flat_id);
 
         const unsigned int consumed_L = merge_path(keys_shared,
-                                                    &keys_shared[num_keys_L],
-                                                    num_keys_L,
-                                                    num_keys_R,
-                                                    diag_local,
-                                                    compare_function);
+                                                   &keys_shared[num_keys_L],
+                                                   num_keys_L,
+                                                   num_keys_R,
+                                                   diag_local,
+                                                   compare_function);
 
         const unsigned int consumed_R = diag_local - consumed_L;
 
@@ -474,8 +472,8 @@ struct block_merge_impl<Key,
             }
 
             rocprim::syncthreads();
-            const OffsetT thread_offset = items_per_block * static_cast<OffsetT>(flat_block_id)
-                                            + ItemsPerThread * flat_id;
+            const OffsetT thread_offset
+                = items_per_block * static_cast<OffsetT>(flat_block_id) + ItemsPerThread * flat_id;
             if(is_incomplete_tile)
             {
                 ROCPRIM_UNROLL
@@ -575,8 +573,8 @@ struct block_merge_fused_impl<
 
         const bool is_incomplete_tile = (global_offset + items_per_block) > input_size;
 
-        // The number of items in a single run is current_run_length, so the number of items in the
-        // merged two runs will be 2 * current_run_length.
+        // current_run_length counts the number of items in a single run, thus
+        // the two merged runs will consist of 2 * current_run_length items.
         const OffsetT merged_run_length = 2 * current_run_length;
 
         // Left Run: [partition_beg, partition_end) are absolute indices in keys_input
@@ -588,7 +586,7 @@ struct block_merge_fused_impl<
         const OffsetT run_base_R = merge_run_base + current_run_length;
 
         // diag represents the number of items already consumed by previous blocks, and partition_beg
-        // represents partition point in Left Run, which is
+        // represents the partition point in Left Run, which is
         // Principle: Consumed_Right = Total_Consumed - Consumed_Left
         const OffsetT consumed_beg_L = partition_beg - merge_run_base;
         const OffsetT consumed_beg_R = diag - consumed_beg_L;
@@ -699,14 +697,15 @@ struct block_merge_fused_impl<
 // when storing/loading those ValueTypes to/from registers.
 // Thus this is a temporary workaround.
 template<class Key, class Value, unsigned int BlockSize, unsigned int ItemsPerThread>
-struct block_merge_fused_impl<Key,
-                        Value,
-                        BlockSize,
-                        ItemsPerThread,
-                        std::enable_if_t<std::is_trivially_copyable<Value>::value
-                                         && !rocprim::is_floating_point<Value>::value
-                                         && !rocprim::is_integral<Value>::value
-                                         && !std::is_same<Value, ::rocprim::empty_type>::value>>
+struct block_merge_fused_impl<
+    Key,
+    Value,
+    BlockSize,
+    ItemsPerThread,
+    std::enable_if_t<std::is_trivially_copyable<Value>::value
+                     && !rocprim::is_floating_point<Value>::value
+                     && !rocprim::is_integral<Value>::value
+                     && !std::is_same<Value, ::rocprim::empty_type>::value>>
 {
     static constexpr bool         with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
     static constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
