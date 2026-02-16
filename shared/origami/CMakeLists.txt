@@ -107,7 +107,6 @@ if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
 
     if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         rocm_install(TARGETS origami-tests COMPONENT tests)
-
     endif()
 
     rocm_install(
