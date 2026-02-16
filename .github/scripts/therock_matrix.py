@@ -5,6 +5,7 @@ This dictionary is used to map specific file directory changes to the correspond
 import os
 
 subtree_to_project_map = {
+    "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
     "dnn-providers/miopen-provider": "miopen-provider",
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
@@ -82,6 +83,7 @@ additional_options = {
     # due to MIOpen plugin project being inside the hipDNN directory, we cannot have the MIOpen plugin project as a separate project for now https://github.com/ROCm/rocm-libraries/issues/2316
     "hipdnn": {
         "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPBLASLT_PLUGIN=ON",
             "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
             "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
@@ -93,6 +95,7 @@ additional_options = {
             "hipdnn_install",
             "hipdnn-samples",
             "miopen_plugin",
+            "hipblaslt_plugin",
         ],
         "project_to_add": "miopen",
     },
@@ -105,6 +108,13 @@ additional_options = {
         ],
         "projects_to_test": ["miopen_plugin"],
         "project_to_add": "miopen",
+    },
+    "hipblaslt-provider": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPBLASLT_PLUGIN=ON",
+        ],
+        "projects_to_test": ["hipblaslt_plugin"],
+        "project_to_add": "blas",
     },
 }
 
