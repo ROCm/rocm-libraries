@@ -1895,9 +1895,9 @@ def _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS):
         syncCode = [
             SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for 8-5 local reads // oldleft=8, completed=3"),
             SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for 11-6 local reads // oldleft=5, new=6, completed=5"),
-            SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1, comment="waiting for prior global reads and local reads // oldleft=6, new=8, completed=14"),
+            SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1,  comment="wait for prior global reads and local reads // oldleft=6, new=8, completed=14"),
             SBarrier(comment=""),
-            SWaitCnt(dscnt=0, vlcnt=7, vscnt=-1, comment="wait for prior global reads and local reads // oldleft=0, new=8, completed=8"),
+            SWaitCnt(dscnt=0, vlcnt=7, vscnt=-1,  comment="wait for prior global reads and local reads // oldleft=0, new=8, completed=8"),
             SBarrier(comment=""),
             SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for 14-5 local reads // oldleft=0, new=14, completed=9"),
         ]
