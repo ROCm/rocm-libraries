@@ -513,10 +513,10 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     // The HIP API uses uint32_t for grid dimensions, so we must ensure:
     // grid_size * block_size < 2^32
     // max_grid_size = 2^32 / block_size = 4,294,967,296 / 256 = 16,777,216
-    constexpr size_t MAX_GRID_SIZE = 16 * 1024 * 1024; // 16M work groups max
+    constexpr size_t MAX_GRID_SIZE = static_cast<size_t>(16) * 1024 * 1024; // 16M work groups max
     size_t block_size              = 256;
 
-    int batch_chunk_size       = n;
+    int batch_chunk_size       = 1;
     size_t grid_size_per_batch = 1;
     bool is_layout_default     = problem.IsLayoutDefault();
 
