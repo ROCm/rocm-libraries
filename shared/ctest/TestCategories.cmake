@@ -12,6 +12,13 @@ function(apply_test_category_labels target_name yaml_file working_dir)
         return()
     endif()
 
+    # Verify the parser script exists
+    set(PARSE_SCRIPT "${ROCM_LIBRARIES_ROOT}/shared/ctest/parse_test_categories.py")
+    if(NOT EXISTS "${PARSE_SCRIPT}")
+        message(WARNING "Test category parser script not found: ${PARSE_SCRIPT}")
+        return()
+    endif()
+
     # Check if optional install_test_file parameter was provided
     set(install_test_file "${ARGV3}")
     if(install_test_file)
@@ -21,7 +28,7 @@ function(apply_test_category_labels target_name yaml_file working_dir)
     endif()
 
     execute_process(
-        COMMAND ${Python3_EXECUTABLE} ${ROCM_LIBRARIES_ROOT}/shared/ctest/parse_test_categories.py ${python_args}
+        COMMAND ${Python3_EXECUTABLE} ${PARSE_SCRIPT} ${python_args}
         OUTPUT_VARIABLE CMAKE_CATEGORY_CODE
         ERROR_VARIABLE PARSE_ERROR
         RESULT_VARIABLE PARSE_RESULT
@@ -37,6 +44,12 @@ function(apply_test_category_labels target_name yaml_file working_dir)
     file(WRITE "${CATEGORY_CMAKE}" "${CMAKE_CATEGORY_CODE}")
 
     message(STATUS "Generated test category configuration: ${CATEGORY_CMAKE}")
+
+    # Verify the generated CMake file exists before including it
+    if(NOT EXISTS "${CATEGORY_CMAKE}")
+        message(WARNING "Generated test categories file not found: ${CATEGORY_CMAKE}")
+        return()
+    endif()
 
     # Include and execute the generated CMake code
     include("${CATEGORY_CMAKE}")
