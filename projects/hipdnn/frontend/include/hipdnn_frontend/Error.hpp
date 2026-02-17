@@ -81,7 +81,7 @@ typedef ErrorCode error_code_t; ///< @brief Type alias for ErrorCode
 struct Error
 {
     ErrorCode code;              ///< The error code
-    std::string err_msg;         ///< Detailed error message
+    std::string err_msg;         ///< Detailed error message  // NOLINT(readability-identifier-naming)
 
     /**
      * @brief Default constructor, creates a success result

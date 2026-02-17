@@ -61,12 +61,14 @@ public:
     std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs;   ///< Input tensors
     std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs; ///< Output tensors
 
+    // NOLINTBEGIN(readability-identifier-naming)
     std::vector<int64_t> pre_padding;  ///< Padding before convolution (per spatial dim)
     std::vector<int64_t> post_padding; ///< Padding after convolution (per spatial dim)
     std::vector<int64_t> stride;       ///< Stride (per spatial dim)
     std::vector<int64_t> dilation;     ///< Dilation (per spatial dim)
     /// Convolution mode (CROSS_CORRELATION or CONVOLUTION)
     ConvolutionMode math_mode = ConvolutionMode::CROSS_CORRELATION;
+    // NOLINTEND(readability-identifier-naming)
 
     /// @brief Get the input activation tensor
     // NOLINTNEXTLINE(readability-identifier-naming)

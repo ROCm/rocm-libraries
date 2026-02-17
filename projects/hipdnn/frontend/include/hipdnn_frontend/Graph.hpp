@@ -1186,7 +1186,7 @@ public:
      * hipdnnHandle_t handle;
      * hipdnnCreate(&handle);
      * Error err = graph.build(handle);
-     * if(err.is_bad()) { /* handle error */ }
+     * if(err.is_bad()) { handleError(); }
      * @endcode
      */
     // NOLINTBEGIN(readability-identifier-naming)
