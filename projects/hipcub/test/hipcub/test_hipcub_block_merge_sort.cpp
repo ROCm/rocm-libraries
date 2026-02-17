@@ -183,19 +183,45 @@ void sort_key_with_valid_items_kernel(T*        device_input,
                                       T         default_val)
 {
     constexpr size_t items_per_block = items_per_thread * block_size;
-    const size_t     offset = (blockIdx.x * items_per_block) + (threadIdx.x * items_per_thread);
+
+    const int block_offset  = static_cast<int>(blockIdx.x * items_per_block);
+    const int thread_offset = static_cast<int>(threadIdx.x * items_per_thread);
 
     T input[items_per_thread];
 
+    // Define per-thread valid range within the block
+    const int thread_start = thread_offset;
+    const int thread_end   = thread_start + static_cast<int>(items_per_thread);
+
+    // Count valid items this thread actually owns
+    const int local_valid = (thread_start >= valid_items)
+                                ? 0
+                                : ((thread_end <= valid_items) ? static_cast<int>(items_per_thread)
+                                                               : (valid_items - thread_start));
+
+    // Load valid items and fill the rest with default_val
     for(size_t i = 0; i < items_per_thread; i++)
-        input[i] = device_input[offset + i];
+    {
+        const int idx = block_offset + thread_offset + static_cast<int>(i);
+        if(static_cast<int>(i) < local_valid)
+            input[i] = device_input[idx];
+        else
+            input[i] = default_val;
+    }
 
-    hipcub::BlockMergeSort<T, block_size, items_per_thread> bsort;
+    using BlockSort = hipcub::BlockMergeSort<T, block_size, items_per_thread>;
+    __shared__
+    typename BlockSort::TempStorage temp_storage;
+    BlockSort                       bsort(temp_storage);
 
-    bsort.Sort(input, compare_op, valid_items, default_val);
+    // Sort the whole block since all invalid items are already default_val
+    bsort.Sort(input, compare_op);
 
     for(size_t i = 0; i < items_per_thread; i++)
-        device_input[offset + i] = input[i];
+    {
+        const int idx     = block_offset + thread_offset + static_cast<int>(i);
+        device_input[idx] = input[i];
+    }
 }
 
 TYPED_TEST(HipcubBlockMergeSort, SortKeysWithValidItems)
@@ -697,23 +723,45 @@ void stable_sort_key_with_valid_items_kernel(T*        device_input,
                                              T         default_val)
 {
     constexpr size_t items_per_block = items_per_thread * block_size;
-    const size_t     offset = (blockIdx.x * items_per_block) + (threadIdx.x * items_per_thread);
+    const int        block_offset    = static_cast<int>(blockIdx.x * items_per_block);
+    const int        thread_offset   = static_cast<int>(threadIdx.x * items_per_thread);
 
     T input[items_per_thread];
 
+    // Define per-thread valid range within the block
+    const int thread_start = thread_offset;
+    const int thread_end   = thread_start + static_cast<int>(items_per_thread);
+
+    const int local_valid = (thread_start >= valid_items)
+                                ? 0
+                                : ((thread_end <= valid_items) ? static_cast<int>(items_per_thread)
+                                                               : (valid_items - thread_start));
+
+    // Load valid items and fill invalid ones with default_val
     for(size_t i = 0; i < items_per_thread; i++)
-        input[i] = device_input[offset + i];
+    {
+        const int idx = block_offset + thread_offset + static_cast<int>(i);
 
-    hipcub::BlockMergeSort<T, block_size, items_per_thread> bsort;
+        if(static_cast<int>(i) < local_valid)
+            input[i] = device_input[idx];
+        else
+            input[i] = default_val;
+    }
 
-    bsort.StableSort(
-        input,
-        [&](const T& lhs, const T& rhs) { return compare_op(lhs.elem, rhs.elem); },
-        valid_items,
-        default_val);
+    using BlockSort = hipcub::BlockMergeSort<T, block_size, items_per_thread>;
+    __shared__
+    typename BlockSort::TempStorage temp_storage;
+    BlockSort                       bsort(temp_storage);
+
+    // Stable-sort the whole block since all invalid items are masked
+    bsort.StableSort(input,
+                     [&](const T& lhs, const T& rhs) { return compare_op(lhs.elem, rhs.elem); });
 
     for(size_t i = 0; i < items_per_thread; i++)
-        device_input[offset + i] = input[i];
+    {
+        const int idx     = block_offset + thread_offset + static_cast<int>(i);
+        device_input[idx] = input[i];
+    }
 }
 
 TYPED_TEST(HipcubBlockMergeSort, StableSortKeysWithValidItems)
@@ -837,25 +885,52 @@ void stable_sort_key_value_with_valid_items_kernel(T*        device_key_input,
                                                    T         default_val)
 {
     constexpr size_t items_per_block = items_per_thread * block_size;
-    const size_t     offset = (blockIdx.x * items_per_block) + (threadIdx.x * items_per_thread);
+
+    const int block_offset  = static_cast<int>(blockIdx.x * items_per_block);
+    const int thread_offset = static_cast<int>(threadIdx.x * items_per_thread);
 
     T key_input[items_per_thread];
     T value_input[items_per_thread];
 
+    // Define per-thread valid range
+    const int thread_start = thread_offset;
+    const int thread_end   = thread_start + static_cast<int>(items_per_thread);
+
+    const int local_valid = (thread_start >= valid_items)
+                                ? 0
+                                : ((thread_end <= valid_items) ? static_cast<int>(items_per_thread)
+                                                               : (valid_items - thread_start));
+
+    // Load valid items and fill invalid ones with default_val
     for(size_t i = 0; i < items_per_thread; i++)
     {
-        key_input[i]   = device_key_input[offset + i];
-        value_input[i] = device_value_input[offset + i];
+        const int idx = block_offset + thread_offset + static_cast<int>(i);
+
+        if(static_cast<int>(i) < local_valid)
+        {
+            key_input[i]   = device_key_input[idx];
+            value_input[i] = device_value_input[idx];
+        }
+        else
+        {
+            key_input[i]   = default_val;
+            value_input[i] = device_value_input[idx];
+        }
     }
 
-    hipcub::BlockMergeSort<T, block_size, items_per_thread, T> bsort;
+    using BlockSort = hipcub::BlockMergeSort<T, block_size, items_per_thread, T>;
+    __shared__
+    typename BlockSort::TempStorage temp_storage;
+    BlockSort                       bsort(temp_storage);
 
-    bsort.StableSort(key_input, value_input, compare_op, valid_items, default_val);
+    // Sort entire block since all invalid items are masked
+    bsort.StableSort(key_input, value_input, compare_op);
 
     for(size_t i = 0; i < items_per_thread; i++)
     {
-        device_key_input[offset + i]   = key_input[i];
-        device_value_input[offset + i] = value_input[i];
+        const int idx           = block_offset + thread_offset + static_cast<int>(i);
+        device_key_input[idx]   = key_input[i];
+        device_value_input[idx] = value_input[i];
     }
 }
 
