@@ -52,7 +52,6 @@ struct UniversalInvoker
                                              GemmConfig::NumWaveGroups,
                                              GemmConfig::Preshuffle>;
 
-        static_assert(GemmConfig::UseStructuredSparsity == false, "UseStructuredSparsity must be false");
         constexpr auto scheduler = GemmConfig::Scheduler;
 
         using UniversalGemmProblem = ck_tile::UniversalGemmPipelineProblem<ADataType,

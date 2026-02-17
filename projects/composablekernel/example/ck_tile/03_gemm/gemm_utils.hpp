@@ -139,27 +139,6 @@ struct GemmConfigComputeV3_2 : public GemmConfigBase
 };
 
 template <typename PrecType>
-struct GemmConfigComputeV3_3 : public GemmConfigBase
-{
-    static constexpr ck_tile::index_t M_Tile = 64;
-    static constexpr ck_tile::index_t N_Tile = 64;
-    static constexpr ck_tile::index_t K_Tile = 256;
-
-    static constexpr ck_tile::index_t M_Warp = 1;
-    static constexpr ck_tile::index_t N_Warp = 4;
-    static constexpr ck_tile::index_t K_Warp = 1;
-
-    static constexpr ck_tile::index_t M_Warp_Tile = 16;
-    static constexpr ck_tile::index_t N_Warp_Tile = 16;
-    static constexpr ck_tile::index_t K_Warp_Tile = 128;
-
-    static constexpr bool DoubleSmemBuffer          = false;
-    static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
-
-    static constexpr int kBlockPerCu = 2;
-};
-
-template <typename PrecType>
 struct GemmConfigComputeV3_WMMA : public GemmConfigBase
 {
     static constexpr ck_tile::index_t M_Tile = 128;
@@ -277,12 +256,11 @@ struct GemmConfigComputeAsync : public GemmConfigBase
     static constexpr ck_tile::index_t M_Warp_Tile = 16;
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
     static constexpr ck_tile::index_t K_Warp_Tile = 128;
-    // static constexpr ck_tile::index_t K_Warp_Tile = 32;
 
     static constexpr bool DoubleSmemBuffer          = true;
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_ASYNC;
     static constexpr ck_tile::index_t NumWaveGroups = 1;
-    static constexpr bool UseStructuredSparsity = false;
+    static constexpr bool UseStructuredSparsity     = false;
 };
 
 template <typename PrecType>
@@ -483,7 +461,6 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_ASYNC>
     using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompAsync<PipelineProblem>;
     template <typename PipelineProblem>
     using UniversalGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrCompAsync<PipelineProblem>;
-    static constexpr auto Scheduler                 = ck_tile::GemmPipelineScheduler::Intrawave;
 };
 
 template <>
