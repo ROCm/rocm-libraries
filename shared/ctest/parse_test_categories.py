@@ -59,18 +59,12 @@ def main():
             install_file_handle = open(
                 install_test_file, "a", buffering=1
             )  # Line buffered
-            print(
-                f"# DEBUG: Opened install test file: {install_test_file}",
-                file=sys.stderr,
-            )
         except Exception as e:
             print(
                 f"Warning: Could not open install test file {install_test_file}: {e}",
                 file=sys.stderr,
             )
             install_file_handle = None
-    else:
-        print(f"# DEBUG: No install test file provided", file=sys.stderr)
 
     # ===============================================================================================================
     # Parse the YAML file, add excludes (including OS-specific), and write tests to CMake and install file.
@@ -94,9 +88,15 @@ def main():
 
     for category_name, category_info in categories.items():
         patterns = category_info.get("test_patterns", [])
+        if not patterns:
+            print(
+                f"Warning: Category '{category_name}' has no test_patterns defined, skipping.",
+                file=sys.stderr,
+            )
+            continue
         labels = category_info.get("labels", [])
         exclude = category_info.get("exclude", [])
-        if exclude == None:
+        if exclude is None:
             exclude = []
 
         # Add OS-specific exclusions
@@ -153,9 +153,6 @@ def main():
         # Write install-time test with relative path if install file is provided
         if install_file_handle:
             try:
-                print(
-                    f"# DEBUG: Writing category test {category_name}", file=sys.stderr
-                )
                 install_file_handle.write(
                     f'add_test({target_name}-{category_name}-suite "../{target_name}" --gtest_filter={pattern_string})\n'
                 )
@@ -279,10 +276,6 @@ def main():
             # Write install-time test with relative path if install file is provided
             if install_file_handle:
                 try:
-                    print(
-                        f"# DEBUG: Writing GPU exclude test {category_name}-{gpu_arch}",
-                        file=sys.stderr,
-                    )
                     install_file_handle.write(
                         f'add_test({target_name}-{category_name}-{gpu_arch}-suite "../{target_name}" --gtest_filter={pattern_string})\n'
                     )
@@ -301,9 +294,8 @@ def main():
         try:
             install_file_handle.flush()  # Ensure all data is written
             install_file_handle.close()
-            print(f"# DEBUG: Closed install test file successfully", file=sys.stderr)
         except Exception as e:
-            print(f"# DEBUG: Error closing install test file: {e}", file=sys.stderr)
+            print(f"Warning: Error closing install test file: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":
