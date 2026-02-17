@@ -162,6 +162,8 @@ namespace detail
         return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
 
+// atomic_load for uint128 is not supported for unknown targets or spirv
+#if !defined(ROCPRIM_TARGET_UNKNOWN) && !defined(ROCPRIM_TARGET_SPIRV)
     ROCPRIM_DEVICE ROCPRIM_INLINE
     __uint128_t atomic_load(const __uint128_t* address)
     {
@@ -198,10 +200,7 @@ namespace detail
         ROCPRIM_ATOMIC_LOAD("ds_read_b128", "", "s_waitcnt lgkmcnt(0)", ptr)
     // This architecture doesn't support atomics on the global AS.
     #define ROCPRIM_ATOMIC_LOAD_GLOBAL(ptr) ROCPRIM_ATOMIC_LOAD_FLAT(ptr)
-#elif ROCPRIM_TARGET_RDNA3 || ROCPRIM_TARGET_CDNA2 || ROCPRIM_TARGET_CDNA1 || ROCPRIM_TARGET_GCN5 \
-    || ROCPRIM_TARGET_SPIRV
-    // We don't really know what architecture we are on when targeting
-    // SPIR-V. Lets just assume it's one of these.
+#elif ROCPRIM_TARGET_RDNA3 || ROCPRIM_TARGET_CDNA2 || ROCPRIM_TARGET_CDNA1 || ROCPRIM_TARGET_GCN5
     #define ROCPRIM_ATOMIC_LOAD_FLAT(ptr) \
         ROCPRIM_ATOMIC_LOAD("flat_load_dwordx4", "glc", "s_waitcnt vmcnt(0)", ptr)
     #define ROCPRIM_ATOMIC_LOAD_SHARED(ptr) \
@@ -251,6 +250,7 @@ namespace detail
 #undef ROCPRIM_ATOMIC_LOAD_SHARED
 #undef ROCPRIM_ATOMIC_LOAD_GLOBAL
     }
+#endif
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void atomic_store(unsigned char* address, unsigned char value)
@@ -279,6 +279,8 @@ namespace detail
         __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
 
+// atomic_store for uint128 is not supported for unknown targets or spirv
+#if !defined(ROCPRIM_TARGET_UNKNOWN) && !defined(ROCPRIM_TARGET_SPIRV)
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void atomic_store(__uint128_t* address, const __uint128_t value)
     {
@@ -355,6 +357,7 @@ namespace detail
 #undef ROCPRIM_ATOMIC_STORE_SHARED
 #undef ROCPRIM_ATOMIC_STORE_GLOBAL
     }
+#endif
 
     /// \brief Wait for all vector memory operations to complete
     ///
