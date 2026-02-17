@@ -22,7 +22,6 @@ using namespace hip_kernel_plugin;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::flatbuffer_utilities;
 
-//tests in here
 namespace
 {
 

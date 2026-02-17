@@ -174,8 +174,8 @@ bool BatchnormPlanBuilder::isApplicable(
                 return false;
             }
 
-            // Since MIOpen does not provide an API to validate batchnorm applicability, we perform
-            // the checks manually.
+            // Validate applicability before kernel dispatch by checking tensor configurations
+            // and operation parameters manually.
             try
             {
                 checkBatchnormInferenceActivationTensorConfigSupported(

@@ -354,7 +354,7 @@ __forceinline__ __device__ FpVecType exp(FpVecType x)
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        static_assert(false, "Unsupported hip kernel provider vector operation.");
     }
 }
 
@@ -384,7 +384,7 @@ __forceinline__ __device__ FpVecType log(FpVecType x)
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        static_assert(false, "Unsupported hip kernel provider vector operation.");
     }
 }
 
@@ -414,7 +414,7 @@ __forceinline__ __device__ FpVecType sqrt(FpVecType x)
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        static_assert(false, "Unsupported hip kernel provider vector operation.");
     }
 }
 
@@ -444,7 +444,7 @@ __forceinline__ __device__ FpVecType rsqrt(FpVecType x)
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        static_assert(false, "Unsupported hip kernel provider vector operation.");
     }
 }
 
@@ -474,7 +474,7 @@ __forceinline__ __device__ FpVecType fma(FpVecType a, FpVecType b, FpVecType c)
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        static_assert(false, "Unsupported hip kernel provider vector operation.");
     }
 }
 
@@ -504,7 +504,7 @@ __forceinline__ __device__ FpVecType fmax(FpVecType x, FpVecType y)
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        static_assert(false, "Unsupported hip kernel provider vector operation.");
     }
 }
 
@@ -534,7 +534,7 @@ __forceinline__ __device__ FpVecType fmin(FpVecType x, FpVecType y)
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        static_assert(false, "Unsupported hip kernel provider vector operation.");
     }
 }
 
@@ -576,7 +576,7 @@ __forceinline__ __device__ FpVecType tanh(FpVecType x)
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        static_assert(false, "Unsupported hip kernel provider vector operation.");
     }
 }
 
@@ -606,7 +606,7 @@ __forceinline__ __device__ FpVecType pow(FpVecType x, FpVecType y)
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        static_assert(false, "Unsupported hip kernel provider vector operation.");
     }
 }
 
@@ -636,8 +636,8 @@ __forceinline__ __device__ FpVecType fabs(FpVecType x)
     }
     else
     {
-        static_assert(false, "Unsupported miopen vector operation.");
+        static_assert(false, "Unsupported hip kernel provider vector operation.");
     }
 }
 
-} // namespace miopen
+} // namespace hip_kernel_plugin

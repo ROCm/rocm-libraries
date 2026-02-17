@@ -1,8 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#ifndef VECTOR_TYPES_HPP
-#define VECTOR_TYPES_HPP
+#pragma once
 
 #include "Bfloat16Dev.hpp"
 #include <hip/hip_fp16.h>
@@ -176,5 +175,3 @@ __forceinline__ __device__ __host__ OutType cast(InType input)
 }
 
 } // namespace hip_kernel_plugin
-
-#endif

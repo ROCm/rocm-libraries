@@ -157,7 +157,7 @@ void checkBatchnormBwdActivationModeSupported(
 
 // --- Batchnorm Type Configuration ---
 
-// MIOpen v6.x requirements:
+// hip-kernel-provider batchnorm requirements (based on underlying kernel constraints):
 // - IO tensors: same type (FLOAT, HALF, or BFLOAT16)
 // - Affine/Stat/Intermediate tensors: FLOAT only
 struct BnTensorTypes

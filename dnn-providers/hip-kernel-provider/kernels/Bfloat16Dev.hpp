@@ -1,8 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#ifndef BFLOAT16_DEVICE_HPP
-#define BFLOAT16_DEVICE_HPP
+#pragma once
 
 #ifdef __cplusplus
 extern "C" {
@@ -79,5 +78,3 @@ EXECUTION_SPECIFIER ushort float_to_bfloat16(float src_val)
 #ifdef __cplusplus
 }
 #endif
-
-#endif // BFLOAT16_DEVICE_HPP

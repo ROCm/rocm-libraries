@@ -1,8 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#ifndef GUARD_FLOAT_TYPES_H
-#define GUARD_FLOAT_TYPES_H
+#pragma once
 
 #include "Bfloat16Dev.hpp"
 
@@ -11,35 +10,6 @@
 #define TWO 2
 #define FOUR 4
 #define EIGHT 8
-#if HIP_PLUGIN_USE_FP8 == 1
-#define FLOAT hip_f8<miopen_f8::hip_f8_type::fp8>
-#define FLOAT_ACCUM float
-// HIP implements the correct operators for conversion
-#define SIZEOF_FLOAT 1
-// Max value for the main datatype
-#define MAX_VAL 0x7F
-// Max value for accumulator
-// #ifndef FLT_MAX
-// #define MAX_VAL_ACCUM 3.402823466e+38F
-// #else
-// #define MAX_VAL_ACCUM FLT_MAX
-// #endif
-#endif // HIP_PLUGIN_USE_FP8
-
-#if HIP_PLUGIN_USE_BFP8 == 1
-#define FLOAT hip_f8<miopen_f8::hip_f8_type::bf8>
-#define FLOAT_ACCUM float
-// HIP implements the correct operators for conversion
-#define SIZEOF_FLOAT 1
-// Max value for the main datatype
-#define MAX_VAL 0x7F
-// Max value for accumulator
-// #ifndef FLT_MAX
-// #define MAX_VAL_ACCUM 3.402823466e+38F
-// #else
-// #define MAX_VAL_ACCUM FLT_MAX
-// #endif
-#endif // HIP_PLUGIN_USE_BFP8
 
 /// If HIP_PLUGIN_USE_DOUBLE_ACCUM is defined as 1 when "float_types.h" is included,
 /// then all the ACCUM macros (the represent operations and types) will use FP64
@@ -177,5 +147,3 @@
 #endif
 
 #endif // HIP_PLUGIN_USE_NATIVE_DATATYPE_ACCUM
-
-#endif // GUARD_FLOAT_TYPES_H

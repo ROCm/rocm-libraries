@@ -303,7 +303,7 @@ void checkTensorLayoutsAndDimsSupported(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
-    // Skip scalars (epsilon, momentum) - their type is validated by MIOpen
+    // Skip tensors with embedded scalar values (epsilon, momentum) - they don't have layouts or dimensions to validate
     std::vector<BatchnormTensorDescriptor> tensors;
     tensors.reserve(tensorMap.size());
 
@@ -649,7 +649,7 @@ namespace
 void checkBatchnormActivationModeSupported(
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr, bool isBwd)
 {
-    // MIOpen supports: PASSTHRU, RELU, CLIPPEDREU, CLAMP (no Leaky ReLU)
+    // hip-kernel-provider batchnorm supports: PASSTHRU, RELU, CLIPPEDREU, CLAMP (no Leaky ReLU)
 
     if(activAttr.operation() == hipdnn_data_sdk::data_objects::PointwiseMode::IDENTITY)
     {
