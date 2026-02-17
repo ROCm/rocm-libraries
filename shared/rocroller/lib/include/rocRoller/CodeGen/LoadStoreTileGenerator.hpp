@@ -143,17 +143,12 @@ namespace rocRoller
                 BufferInstructionOptions       bufOpts          = {};
                 bool                           isTransposedTile = false;
                 bool                           isPadded         = false;
-            };
-
-            struct LoadLDSTileInfoResult
-            {
-                LoadStoreTileInfo  info;
+                // Optional extras for LDS loads
                 Register::ValuePtr ldsAllocation = nullptr;
                 std::string        comment;
             };
 
-            LoadLDSTileInfoResult getLoadLDSTileInfo(int                              tag,
-                                                     ControlGraph::LoadLDSTile const& load);
+            LoadStoreTileInfo getLoadLDSTileInfo(int tag, ControlGraph::LoadLDSTile const& load);
 
         private:
             ContextPtr                       m_context;
@@ -241,10 +236,9 @@ namespace rocRoller
                 loadMacroTileDirect2LDS(int                                     tag,
                                         ControlGraph::LoadTileDirect2LDS const& load,
                                         CoordinateGraph::Transformer            coords);
-            LoadLDSTileInfoResult loadMacroTileLDSInfo(int                              tag,
-                                                        ControlGraph::LoadLDSTile const& load);
-            LoadLDSTileInfoResult loadMacroTileWAVELDSInfo(int                              tag,
-                                                            ControlGraph::LoadLDSTile const& load);
+            LoadStoreTileInfo loadMacroTileLDSInfo(int tag, ControlGraph::LoadLDSTile const& load);
+            LoadStoreTileInfo loadMacroTileWAVELDSInfo(int tag,
+                                                       ControlGraph::LoadLDSTile const& load);
 
             // Store Tile Helpers
             Generator<Instruction> storeMacroTileLDS(int                               tag,

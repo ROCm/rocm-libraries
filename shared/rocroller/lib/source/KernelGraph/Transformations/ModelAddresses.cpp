@@ -115,9 +115,9 @@ namespace rocRoller::KernelGraph
                 graphPtr, m_context, m_context->kernel()->max_flat_workgroup_size());
             auto infoResult = tileGenerator.getLoadLDSTileInfo(tag, op);
 
-            const auto varInfo     = DataTypeInfo::Get(infoResult.info.varType);
+            const auto varInfo     = DataTypeInfo::Get(infoResult.varType);
             const auto packedCount = std::max<uint32_t>(1u, varInfo.packing);
-            const uint64_t numElements = infoResult.info.m * infoResult.info.n * packedCount;
+            const uint64_t numElements = infoResult.m * infoResult.n * packedCount;
             const uint64_t numBits     = static_cast<uint64_t>(varInfo.elementBits);
 
             AssertFatal(numElements > 0, "Invalid LDS tile element count.", ShowValue(numElements));

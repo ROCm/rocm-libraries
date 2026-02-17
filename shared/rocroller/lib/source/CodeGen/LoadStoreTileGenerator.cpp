@@ -969,9 +969,8 @@ namespace rocRoller
             co_yield moveTile<MemoryInstructions::MemoryDirection::Load>(info, coords);
         }
 
-        LoadStoreTileGenerator::LoadLDSTileInfoResult
-            LoadStoreTileGenerator::loadMacroTileLDSInfo(int                tag,
-                                                         LoadLDSTile const& load)
+        LoadStoreTileGenerator::LoadStoreTileInfo
+            LoadStoreTileGenerator::loadMacroTileLDSInfo(int tag, LoadLDSTile const& load)
         {
             auto [ldsTag, lds]   = m_graph->getDimension<LDS>(tag);
             auto [tileTag, tile] = m_graph->getDimension<MacroTile>(tag);
@@ -984,23 +983,22 @@ namespace rocRoller
                 ldsTag,
                 tileTag);
 
-            LoadLDSTileInfoResult result;
+            LoadStoreTileInfo result;
             result.comment = concatenate(
                 "GEN: loadMacroTileLDS OP ", tag, " LDS ", ldsTag, " MacroTile ", tileTag);
 
-            Register::ValuePtr ldsAllocation;
-            Register::ValuePtr ldsOffset;
             if(m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                ldsAllocation
+                result.ldsAllocation
                     = m_context->registerTagManager()->getRegister(ldsTag); // stores offset
-                ldsOffset = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
+                result.offset
+                    = Register::Value::Literal(result.ldsAllocation->getLDSAllocation()->offset());
             }
             else
             {
                 // Offset not available yet (e.g., modelling before codegen)
-                ldsAllocation = nullptr;
-                ldsOffset     = nullptr;
+                result.ldsAllocation = nullptr;
+                result.offset        = nullptr;
             }
 
             auto [elemXTag, elemX] = m_graph->getDimension<ElementNumber>(tag, 0);
@@ -1012,14 +1010,12 @@ namespace rocRoller
             AssertFatal(n % packing == 0, ShowValue(n), ShowValue(packing));
             n /= packing;
 
-            result.info = LoadStoreTileInfo{.tag     = tag,
-                                            .kind    = MemoryInstructions::MemoryKind::Local,
-                                            .m       = m,
-                                            .n       = n,
-                                            .data    = nullptr,
-                                            .varType = load.varType,
-                                            .offset  = ldsOffset};
-            result.ldsAllocation = ldsAllocation;
+            result.tag     = tag;
+            result.kind    = MemoryInstructions::MemoryKind::Local;
+            result.m       = m;
+            result.n       = n;
+            result.data    = nullptr;
+            result.varType = load.varType;
             return result;
         }
 
@@ -1083,9 +1079,8 @@ namespace rocRoller
                 .map(MemoryInstructions::addExtraDst(ldsAllocation));
         }
 
-        LoadStoreTileGenerator::LoadLDSTileInfoResult
-            LoadStoreTileGenerator::loadMacroTileWAVELDSInfo(int                tag,
-                                                             LoadLDSTile const& load)
+        LoadStoreTileGenerator::LoadStoreTileInfo
+            LoadStoreTileGenerator::loadMacroTileWAVELDSInfo(int tag, LoadLDSTile const& load)
         {
             auto [ldsTag, lds]           = m_graph->getDimension<LDS>(tag);
             auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
@@ -1097,7 +1092,7 @@ namespace rocRoller
                                                ldsTag,
                                                waveTileTag);
 
-            LoadLDSTileInfoResult result;
+            LoadStoreTileInfo result;
             result.comment = concatenate("GEN: loadMacroTileWAVELDS OP ",
                                          tag,
                                          " LDS ",
@@ -1109,17 +1104,16 @@ namespace rocRoller
                          .value_or(ldsTag);
             // Find the LDS allocation that contains the tile and store
             // the offset of the beginning of the allocation into ldsOffset.
-            Register::ValuePtr ldsAllocation;
-            Register::ValuePtr ldsOffset;
             if(m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                ldsAllocation = m_context->registerTagManager()->getRegister(ldsTag);
-                ldsOffset = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
+                result.ldsAllocation = m_context->registerTagManager()->getRegister(ldsTag);
+                result.offset
+                    = Register::Value::Literal(result.ldsAllocation->getLDSAllocation()->offset());
             }
             else
             {
-                ldsAllocation = nullptr;
-                ldsOffset     = nullptr;
+                result.ldsAllocation = nullptr;
+                result.offset        = nullptr;
             }
 
             uint numElements       = waveTile.sizes[0] * waveTile.sizes[1];
@@ -1135,15 +1129,13 @@ namespace rocRoller
             uint numVgpr = numElements / (activeLanesInWave * packing);
             AssertFatal(numVgpr > 0, "Invalid load dimensions.");
 
-            result.info = LoadStoreTileInfo{.tag              = tag,
-                                            .kind             = MemoryInstructions::MemoryKind::Local,
-                                            .m                = 1,
-                                            .n                = numVgpr,
-                                            .data             = nullptr,
-                                            .varType          = load.varType,
-                                            .offset           = ldsOffset,
-                                            .isTransposedTile = load.isTransposedTile};
-            result.ldsAllocation = ldsAllocation;
+            result.tag              = tag;
+            result.kind             = MemoryInstructions::MemoryKind::Local;
+            result.m                = 1;
+            result.n                = numVgpr;
+            result.data             = nullptr;
+            result.varType          = load.varType;
+            result.isTransposedTile = load.isTransposedTile;
             return result;
         }
 
@@ -1277,9 +1269,8 @@ namespace rocRoller
             }
         }
 
-        LoadStoreTileGenerator::LoadLDSTileInfoResult
-            LoadStoreTileGenerator::getLoadLDSTileInfo(int                tag,
-                                                       LoadLDSTile const& load)
+        LoadStoreTileGenerator::LoadStoreTileInfo
+            LoadStoreTileGenerator::getLoadLDSTileInfo(int tag, LoadLDSTile const& load)
         {
             auto [macTileTag, macTile] = m_graph->getDimension<MacroTile>(tag);
             (void)macTileTag;
@@ -1319,10 +1310,10 @@ namespace rocRoller
                 co_yield Instruction::Comment(info.comment);
 
             if(info.ldsAllocation)
-                co_yield moveTile<MemoryInstructions::MemoryDirection::Load>(info.info, coords)
+                co_yield moveTile<MemoryInstructions::MemoryDirection::Load>(info, coords)
                     .map(MemoryInstructions::addExtraSrc(info.ldsAllocation));
             else
-                co_yield moveTile<MemoryInstructions::MemoryDirection::Load>(info.info, coords);
+                co_yield moveTile<MemoryInstructions::MemoryDirection::Load>(info, coords);
         }
 
         Generator<Instruction> LoadStoreTileGenerator::genLoadTileDirect2LDS(
