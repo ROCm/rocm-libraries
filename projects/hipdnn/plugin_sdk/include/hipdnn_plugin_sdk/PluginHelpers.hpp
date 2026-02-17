@@ -9,18 +9,10 @@
 
 #include <iostream>
 
-// Logging macros for plugin API entry/exit
-// Use fmt-style if spdlog is enabled, otherwise stream-style
-#ifdef HIPDNN_PLUGIN_USE_SPDLOG
-#define LOG_API_ENTRY(format, ...) \
-    HIPDNN_PLUGIN_LOG_INFO("API called: [{}] " format, __func__, __VA_ARGS__)
-#define LOG_API_SUCCESS(func_name, format, ...) \
-    HIPDNN_PLUGIN_LOG_INFO("API success: [{}] " format, func_name, __VA_ARGS__)
-#else
+// Logging macros for plugin API entry/exit (stream-style)
 #define LOG_API_ENTRY(msg) HIPDNN_PLUGIN_LOG_INFO("API called: [" << __func__ << "] " << msg)
 #define LOG_API_SUCCESS(func_name, msg) \
     HIPDNN_PLUGIN_LOG_INFO("API success: [" << func_name << "] " << msg)
-#endif
 
 namespace hipdnn_plugin_sdk
 {

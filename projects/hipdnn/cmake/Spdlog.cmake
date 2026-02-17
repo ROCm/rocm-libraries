@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Shared spdlog/fmt configuration for hipDNN components (backend, plugins, etc.)
+# Shared spdlog/fmt configuration for hipDNN components
 # This module provides a unified function to enable spdlog support for any target.
 
 # Function to enable spdlog support for a target
@@ -14,7 +14,7 @@
 # - Finds spdlog if not already available
 # - Adds spdlog include directories (header-only, no linking to avoid compile option inheritance)
 # - Configures fmt (external or bundled)
-# - Adds required compile definitions (HIPDNN_PLUGIN_USE_SPDLOG, FMT_HEADER_ONLY, etc.)
+# - Adds required compile definitions (FMT_HEADER_ONLY, etc.)
 #
 # Note: We use hipdnn_add_dependency_includes() instead of target_link_libraries() to avoid
 # inheriting compile options like /Zc:__cplusplus from spdlog which are incompatible with
@@ -53,7 +53,7 @@ function(hipdnn_enable_spdlog TARGET_NAME)
     # Use include-only approach to avoid inheriting compile options (e.g., /Zc:__cplusplus)
     # that are incompatible with clang++ on Windows
     hipdnn_add_dependency_includes(${TARGET_NAME} ${_spdlog_target}
-        COMPILE_DEFINITIONS HIPDNN_PLUGIN_USE_SPDLOG FMT_HEADER_ONLY)
+        COMPILE_DEFINITIONS FMT_HEADER_ONLY)
 
     # Handle external fmt configuration
     # Only add SPDLOG_FMT_EXTERNAL if spdlog was actually built with it.
