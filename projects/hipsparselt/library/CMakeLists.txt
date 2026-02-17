@@ -40,6 +40,7 @@ endif()
 
 if(HIPSPARSELT_ENABLE_MARKER)
     target_compile_definitions(hipsparselt PRIVATE HIPSPARSELT_ENABLE_MARKER)
+    target_include_directories(hipsparselt PRIVATE ${ROCTRACER_INCLUDE_DIR})
     target_link_libraries(hipsparselt PRIVATE ${ROCTX64_LIBRARY})
 else()
     target_compile_definitions(hipsparselt PRIVATE DISABLE_ROCTX)
