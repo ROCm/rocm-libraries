@@ -95,7 +95,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 ## Working Examples
 
-### Complete Batch Normalization Backwards (hipDNN)
+### Complete Batch Normalization Inference -> ReLU Backward -> Batch Normalization Backwards (hipDNN)
 
 ```cpp
 #include <hipdnn_frontend.hpp>
@@ -208,7 +208,7 @@ void test_batchnorm_simple()
 }
 ```
 
-### Complete Batch Normalization Backwards (cuDNN)
+### Complete Batch Normalization Inference -> ReLU Backward -> Batch Normalization Backwards (cuDNN)
 
 ```cpp
 #include <cudnn_frontend.h>
