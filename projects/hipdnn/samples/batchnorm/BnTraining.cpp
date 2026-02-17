@@ -310,8 +310,6 @@ int main(int argc, char* argv[])
 {
     auto config = parseCommandLineArgs(argc, argv, SampleType::BN_TRAINING);
 
-    initializeFrontendLogging();
-
     hipdnnHandle_t handle;
     HIPDNN_CHECK(hipdnnCreate(&handle));
 

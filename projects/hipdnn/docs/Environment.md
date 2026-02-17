@@ -5,16 +5,19 @@ This document describes the environment variables and runtime configuration opti
 ## Table of Contents
 
 - [Environment Variables](#environment-variables)
-  - [Logging Configuration](#logging-configuration)
+  - [Logging Variables](#logging-variables)
   - [MIOpen Plugin Logging](#miopen-plugin-logging)
   - [Test Configuration](#test-configuration)
+- [Logging Configuration APIs](#logging-configuration-apis)
+  - [Global Log Callback](#global-log-callback)
+  - [Log Level APIs](#log-level-apis)
 - [Error Handling](#error-handling)
 
 ---
 
 ## Environment Variables
 
-### Logging Configuration
+### Logging Variables
 
 hipDNN provides two environment variables to control logging behavior:
 #### HIPDNN_LOG_LEVEL
@@ -42,14 +45,6 @@ Specifies the file path where logs will be **appended**. If not set, logs are wr
 ```bash
 export HIPDNN_LOG_FILE=/path/to/hipdnn.log
 ```
-
-### Frontend and Plugin Logging
-
-The frontend and plugins can be configured to use the same logging destination as the backend, which is lazy-initialized automatically:
-
-1. Initialize logging using the `initializeCallbackLogging` function
-2. Pass `hipdnnLoggingCallback_ext` as the callback function (accessible via plugin API or backend header)
-3. This ensures all components log to the same destination
 
 ### MIOpen Plugin Logging
 
@@ -91,6 +86,33 @@ export HIPDNN_GLOBAL_TEST_SEED=RANDOM
 - Use `RANDOM` during development to catch edge cases with different data patterns
 
 ---
+
+
+## Logging Configuration APIs
+
+### Global Log Callback
+
+A callback function can be registered to receive log messages from the hipDNN library. Once a callback function is registered, all logs will be output to the registered logging callback insteasd of the console or file specified by the `HIPDNN_LOG_FILE` environment variable. Setting the logging callback to `nullptr` will re-enable logging to the console or log file.
+
+The logging callback is registered using the following frontend API function:
+```
+Error setGlobalLoggingCallback(hipdnnBackendLogOutputCallback_t callback, bool async = true);
+```
+This function registers the logging callback with hipDNN. If `async` is true then logs will be output using a separate thread so that the hipDNN library is not blocked while the callback function is running. Setting `callback` to `nullptr` will disable the logging callback.
+
+Logs output using the callback function are filtered by the leve set by the `HIPDNN_LOG_LEVEL` environment variable described above, or programatically using the `getGlobalLogLevel()` API function described below.
+
+### Log Level APIs
+
+The following frontend API functions can programatically read and override the log level set by the `HIPDNN_LOG_LEVEL` environment variable:
+```
+Error getGlobalLogLevel(hipdnnSeverity_t& level)
+```
+Returns the current log level in use by the hipDNN library, including `HIPDNN_SEV_OFF` if logging is not enabled.
+```
+Error setGlobalLogLevel(hipdnnSeverity_t level)
+```
+Sets hipDNN to the specified log level. Use `HIPDNN_SEV_OFF` to disable logging.
 
 ## Error Handling
 
