@@ -167,11 +167,11 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         // Issue is due to the reference not splitting the input / output datatypes.
         const auto inputTol = 4e-2f;
 
-        auto dxValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
-            static_cast<InputType>(inputTol), static_cast<InputType>(inputTol));
+        auto dxValidator
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(inputTol, inputTol);
         auto dscaleDbiasValidator
-            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
-                static_cast<IntermediateType>(inputTol), static_cast<IntermediateType>(inputTol));
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(inputTol,
+                                                                                     inputTol);
 
         bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
         bool dscaleValid = dscaleDbiasValidator.allClose(dscaleRefTensor, dscaleTensor);
