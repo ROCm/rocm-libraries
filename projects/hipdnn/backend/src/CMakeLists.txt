@@ -44,6 +44,7 @@ target_link_libraries(hipdnn_backend_private PRIVATE ${CMAKE_DL_LIBS})
 target_compile_definitions(hipdnn_backend_private PRIVATE HIPDNN_BACKEND_COMPILATION)
 
 # Enable spdlog support via shared cmake function
+hipdnn_add_dependency(spdlog VERSION ${HIPDNN_SPDLOG_VERSION})
 hipdnn_enable_spdlog(hipdnn_backend_private)
 
 clang_tidy_check(hipdnn_backend_private)

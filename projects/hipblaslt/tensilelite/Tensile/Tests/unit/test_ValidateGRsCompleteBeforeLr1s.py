@@ -79,7 +79,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "GRA at index 0 is not valid. There are no guarantees on when it will be done."
+            "GRA @ idx=0 is not valid. There are no guarantees on when it will be done."
         )
 
     def test_no_sbarrier(self): 
@@ -105,7 +105,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "GRA at index 0 is not valid. There is no SBarrier acting on it."
+            "GRA @ idx=0 is not valid. There is no SBarrier acting on it."
         )
 
     def test_swait_after_sbarrier(self):
@@ -132,7 +132,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "GRA at index 0 is not valid. No SBarrier between SWait @ idx=3 and LR1 @ idx=6. Order must be GR -> SWait -> SBarrier -> LR1."
+            "GRA @ idx=0 is not valid. No SBarrier between SWait @ idx=3 and LR1 @ idx=6. Order must be GRA -> SWait -> SBarrier -> LR1."
         )
 
     def test_guaranteed_after_first_lr1(self):
@@ -160,7 +160,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
 
         self.validate(
             optSchedule, syncCode, 1, 4, 4, 0,
-            "GRA at index 0 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LR1 @ idx=3. Order must be GR -> SWait -> SBarrier -> LR1."
+            "GRA @ idx=0 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LR1 @ idx=3. Order must be GRA -> SWait -> SBarrier -> LR1."
         )
 
     def test_less_than_1_full_iteration_to_complete(self):
@@ -363,7 +363,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "GRB (Swapped, loading A) at index 3 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LR1 @ idx=2. Order must be GR -> SWait -> SBarrier -> LR1."
+            "GRB (Swapped, loading A) @ idx=3 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LR1 @ idx=2. Order must be GRB (Swapped, loading A) -> SWait -> SBarrier -> LR1."
         )
 
     def test_fail_with_odd_number_of_grs(self):
