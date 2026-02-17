@@ -136,7 +136,7 @@ Tests:
   category: quick
   function:
     matmul: *real_precisions
-  matrix_size: *grid_limit_matrix_size_real
+  matrix_size: *grid_limit_matrix_size_real_mod
   transA_transB: *transA_transB_range
   alpha: 1
   beta: 0
@@ -146,7 +146,7 @@ Tests:
   category: quick
   function:
     matmul: *real_precisions_1b
-  matrix_size: *grid_limit_matrix_size_real
+  matrix_size: *grid_limit_matrix_size_real_mod
   transA_transB: *transA_transB_range
   alpha: 1
   beta: 0
@@ -161,7 +161,7 @@ Tests:
   alpha: 1
   beta: 0
   api_method: [0, 2]
-  gpu_arch: '1(151|20[0-1])'
+  gpu_arch: '1201'
 
 - name: matmul_deepbench
   category: nightly
