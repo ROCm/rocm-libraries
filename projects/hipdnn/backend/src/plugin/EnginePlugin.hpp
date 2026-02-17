@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 
 #include "PluginCore.hpp"
 
@@ -83,6 +84,7 @@ private:
     hipdnnPluginStatus_t (*_funcSetStream)(hipdnnEnginePluginHandle_t, hipStream_t);
     hipdnnPluginStatus_t (*_funcGetApplicableEngineIds)(
         hipdnnEnginePluginHandle_t, const hipdnnPluginConstData_t*, int64_t*, uint32_t, uint32_t*);
+    hipdnnPluginStatus_t (*_funcPluginGetVersion)(const char**);
     hipdnnPluginStatus_t (*_funcGetEngineDetails)(hipdnnEnginePluginHandle_t,
                                                   int64_t,
                                                   const hipdnnPluginConstData_t*,

@@ -48,6 +48,7 @@ public:
 
     virtual std::string_view name() const;
     virtual std::string_view version() const;
+    virtual std::string_view apiVersion() const;
     virtual hipdnnPluginType_t type() const;
 
     static hipdnnPluginType_t getPluginType();
@@ -81,6 +82,7 @@ private:
 #endif
     hipdnnPluginStatus_t (*_funcGetName)(const char**);
     hipdnnPluginStatus_t (*_funcGetVersion)(const char**);
+    hipdnnPluginStatus_t (*_funcGetApiVersion)(const char**);
     hipdnnPluginStatus_t (*_funcGetType)(hipdnnPluginType_t*);
     void (*_funcGetLastErrorStr)(const char**);
     hipdnnPluginStatus_t (*_funcSetLoggingCallback)(hipdnnCallback_t);

@@ -1,0 +1,79 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include <cstdint>
+#include <cstdio>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+
+namespace hipdnn_data_sdk::utilities
+{
+// using Version = std::tuple<int, int, int>;
+
+struct Version
+{
+    int major, minor, patch;
+
+    Version()
+        : major(0)
+        , minor(0)
+        , patch(0)
+    {
+    }
+
+    Version(int inMajor, int inMinor, int inPatch)
+        : major(inMajor)
+        , minor(inMinor)
+        , patch(inPatch)
+    {
+    }
+
+    Version(std::string_view versionStr)
+    {
+        if(std::sscanf(versionStr.data(), "%d.%d.%d", &major, &minor, &patch) != 3)
+        {
+            throw std::invalid_argument("Version string does not match required format. String = "
+                                        + std::string(versionStr)
+                                        + " Required format: \"MAJOR.MINOR.TWEAK\"");
+        }
+    }
+};
+
+inline bool operator==(const Version& lhs, const Version& rhs)
+{
+    return std::make_tuple(lhs.major, lhs.minor, lhs.patch)
+           == std::make_tuple(rhs.major, rhs.minor, rhs.patch);
+}
+
+inline bool operator!=(const Version& lhs, const Version& rhs)
+{
+    return !(lhs == rhs);
+}
+
+inline bool operator<(const Version& lhs, const Version& rhs)
+{
+    return std::make_tuple(lhs.major, lhs.minor, lhs.patch)
+           < std::make_tuple(rhs.major, rhs.minor, rhs.patch);
+}
+
+inline bool operator>(const Version& lhs, const Version& rhs)
+{
+    return std::make_tuple(lhs.major, lhs.minor, lhs.patch)
+           > std::make_tuple(rhs.major, rhs.minor, rhs.patch);
+}
+
+inline bool operator<=(const Version& lhs, const Version& rhs)
+{
+    return std::make_tuple(lhs.major, lhs.minor, lhs.patch)
+           <= std::make_tuple(rhs.major, rhs.minor, rhs.patch);
+}
+
+inline bool operator>=(const Version& lhs, const Version& rhs)
+{
+    return std::make_tuple(lhs.major, lhs.minor, lhs.patch)
+           >= std::make_tuple(rhs.major, rhs.minor, rhs.patch);
+}
+}

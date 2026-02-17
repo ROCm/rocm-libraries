@@ -6,6 +6,9 @@ include(CMakePackageConfigHelpers)
 # Version handling
 hipdnn_setup_version(hipdnn_data_sdk)
 
+# Set project with version
+project(hipdnn_data_sdk VERSION ${HIPDNN_DATA_SDK_VERSION} LANGUAGES CXX)
+
 set(HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/data_sdk")
 set(HIP_DNN_DATA_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
