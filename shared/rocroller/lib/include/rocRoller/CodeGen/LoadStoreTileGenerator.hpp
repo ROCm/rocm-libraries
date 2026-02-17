@@ -150,6 +150,9 @@ namespace rocRoller
             };
 
             LoadStoreTileInfo getLoadLDSTileInfo(int tag, ControlGraph::LoadLDSTile const& load);
+            LoadStoreTileInfo getStoreLDSTileInfo(int                                 tag,
+                                                  ControlGraph::StoreLDSTile const&    store,
+                                                  std::vector<std::string>&            comments);
 
         private:
             ContextPtr                       m_context;
@@ -240,9 +243,6 @@ namespace rocRoller
             LoadStoreTileInfo loadMacroTileLDSInfo(int tag, ControlGraph::LoadLDSTile const& load);
             LoadStoreTileInfo loadMacroTileWAVELDSInfo(int tag,
                                                        ControlGraph::LoadLDSTile const& load);
-            LoadStoreTileInfo getStoreLDSTileInfo(int                                 tag,
-                                                  ControlGraph::StoreLDSTile const&    store,
-                                                  std::vector<std::string>&            comments);
             LoadStoreTileInfo storeMacroTileLDSInfo(int                                 tag,
                                                     ControlGraph::StoreLDSTile const&    store,
                                                     std::vector<std::string>&            comments);
