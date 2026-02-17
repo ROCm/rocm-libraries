@@ -211,11 +211,21 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
         cmake --build . -j$BUILD_JOBS; \
     fi && \
     cmake --install .
-
 # ================================================================================
-# Keep the output as slim as possible as this will be a base for the final image
+# Build debs for reuse
 # ================================================================================
-FROM scratch AS therock_base
+WORKDIR /TheRock/build_tools/packaging/linux/
 
-COPY --from=build_therock /opt/rocm /opt/rocm
-COPY --from=build_therock /usr/local /usr/local
+RUN apt update && apt install -y jq debhelper llvm && \
+    pip install -r requirements.txt 
+
+RUN  export ROCM_VERSION=$(jq -r '.["rocm-version"]' /TheRock/version.json) && \
+    ./build_package.py --artifacts-dir /TheRock/build/artifacts --target multiarch  --dest-dir /TheRock/build/artifacts/deb/  --pkg-name [amdrocm-blas amdrocm-llvm amdrocm-sysdeps amdrocm-amdsmi amdrocm-runtime amdrocm-base amdrocm-profiler-base amdrocm-profiler amdrocm-rand amdrocm-developer-tools ] --rocm-version ${ROCM_VERSION} --version-suffix ci  --pkg-type deb
+
+# # ================================================================================
+# # Keep the output as slim as possible as this will be a base for the final image
+# # ================================================================================
+# FROM scratch AS therock_base
+
+# COPY --from=build_therock /opt/rocm /opt/rocm
+# COPY --from=build_therock /usr/local /usr/local
