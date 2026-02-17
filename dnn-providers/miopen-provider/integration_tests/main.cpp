@@ -12,8 +12,6 @@ SPDX-License-Identifier: MIT
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
-#include <hipdnn_backend.h>
-
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
@@ -28,6 +26,5 @@ int main(int argc, char** argv)
 
     auto result = RUN_ALL_TESTS();
 
-    hipdnnDestroy(handle);
     return result;
 }
