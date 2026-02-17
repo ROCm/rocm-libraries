@@ -6,6 +6,9 @@
 #include "ck_tile/host.hpp"
 
 namespace ck_tile {
+
+// TODO: We should be able to get all the lengths / sizes from the tile distr itself. Check
+// print_derived_lengths().
 template <typename TileDistrEnc,
           index_t num_repeat,
           index_t mat_major_size,
@@ -18,18 +21,29 @@ struct NiceTileDistrEncWrapper
     // Vector mapping.
 
     static constexpr auto distr = make_static_tile_distribution(TileDistrEnc{});
+    static constexpr auto ps_ys_to_xs_adaptor = distr.get_ps_ys_to_xs_adaptor();
 
     static auto calc_matrix_indices_from_lane_vector(index_t lane_inx, index_t vector_inx)
     {
-        using arr1           = array<index_t, 1>;
-        const auto ps_ys_idx = container_concat(arr1{lane_inx}, arr1{vector_inx});
+        // For some reason the Y dimension is not treated the same as the P dimension and we need to
+        // manually unmerge the Y dimension index into its hidden indices before being able to use
+        // it...
+        array<index_t, TileDistrEnc::NDimY> y_hidden_inx;
+        for(index_t i = TileDistrEnc::NDimY - 1; i >= 0; --i)
+        {
+            y_hidden_inx[i] = vector_inx % TileDistrEnc::detail::ys_lengths_[i];
+            vector_inx /= TileDistrEnc::detail::ys_lengths_[i];
+        }
+
+        const auto ps_ys_idx = container_concat(array<index_t, 1>{lane_inx}, y_hidden_inx);
         const auto window_adaptor_thread_coord_tmp =
-            make_tensor_adaptor_coordinate(distr.get_ps_ys_to_xs_adaptor(), ps_ys_idx);
+            make_tensor_adaptor_coordinate(ps_ys_to_xs_adaptor, ps_ys_idx);
         return window_adaptor_thread_coord_tmp.get_bottom_index();
     }
 
     // TODO: Ugly inverse mapping implementation mat_major, mat_minor, rep -> LV;
     // Static storage duration variables are zero-initialized by default.
+    static inline bool inverse_map_calced = false;
     static inline index_t inverse_map_valid[64][128][4];
     static inline index_t inverse_map_lane[64][128][4];
     static inline index_t inverse_map_vec[64][128][4];
@@ -54,6 +68,7 @@ struct NiceTileDistrEncWrapper
                 }
             }
         }
+        inverse_map_calced = true;
     }
 
     static array<index_t, 2>
@@ -61,12 +76,31 @@ struct NiceTileDistrEncWrapper
                                          ck_tile::index_t mat_minor_inx, // K or M
                                          ck_tile::index_t repeat_inx = 0)
     {
+        if (!inverse_map_calced) calc_inverse_map();
         if(inverse_map_valid[mat_major_inx][mat_minor_inx][repeat_inx])
         {
             return {inverse_map_lane[mat_major_inx][mat_minor_inx][repeat_inx],
                     inverse_map_vec[mat_major_inx][mat_minor_inx][repeat_inx]};
         }
         return {-1, -1};
+    }
+
+    static void print_derived_lengths()
+    {
+        index_t maj_size =
+            container_reduce(typename TileDistrEnc::HsLengthss{}[number<0>{}], multiplies<>{}, 1);
+        index_t min_size =
+            container_reduce(typename TileDistrEnc::HsLengthss{}[number<0>{}], multiplies<>{}, 1);
+        index_t rep_size = typename TileDistrEnc::RsLengths{}[number<0>{}];
+        printf("Got sizes matMajor, matMinor, repeat %d %d %d\n", maj_size, min_size, rep_size);
+        auto lengths = distr.get_lengths();
+        printf("Got (top) lengths %d %d\n",
+               lengths.get(number<0>{}).value,
+               lengths.get(number<1>{}).value);
+        auto bottom_lengths = ps_ys_to_xs_adaptor.GetBottomDimensionLengths();
+        printf("Got bottom lengths %d %d\n",
+               bottom_lengths.get(number<0>{}),
+               bottom_lengths.get(number<1>{}));
     }
 
     static void print_mapping()
@@ -113,6 +147,13 @@ struct NiceTileDistrEncWrapper
             printf("\n");
         }
     }
+
+    static void print()
+    {
+        print_derived_lengths();
+        print_mapping();
+        print_inverse_mapping();
+    }
 };
 } // namespace ck_tile
 
@@ -133,33 +174,36 @@ int main()
                                    sequence<0>            // Y minor
                                    >;
 
-    // constexpr index_t mat_major_size =
-    //     container_reduce(typename Encoding::HsLengthss{}[number<0>{}], multiplies<>{}, 1);
-    // constexpr index_t mat_minor_size =
-    //     container_reduce(typename Encoding::HsLengthss{}[number<0>{}], multiplies<>{}, 1);
-    // constexpr index_t repeat_size = Encoding::RsLengths{}[number<0>{}];
-    // auto lengths = distr.get_lengths();
-    // printf("Got lengths %d %d\n", lengths.get(number<0>{}).value,
-    // lengths.get(number<1>{}).value);
-
-    // TODO: We should be able to get all these lengths from the tile distr itself (as tried above)
-    // but it's a bit awkard.
-    constexpr index_t num_repeat       = 2;
-    constexpr index_t mat_major_size   = 16; // M or N
-    constexpr index_t mat_minor_size   = 16; // K or M
-    constexpr index_t num_lanes        = 32;
-    constexpr index_t num_vector_items = 16;
-
     using NTDEW = NiceTileDistrEncWrapper<Encoding,
-                                          num_repeat,
-                                          mat_major_size,
-                                          mat_minor_size,
-                                          num_lanes,
-                                          num_vector_items>;
+                                          2,   // num_repeat
+                                          16,  // mat_major_size
+                                          16,  // mat_minor_size
+                                          32,  // num_lanes,
+                                          16>; // num_vector_items
 
-    NTDEW::print_mapping();
-    NTDEW::calc_inverse_map();
-    NTDEW::print_inverse_mapping();
+    NTDEW::print();
+
+    // Example RDNA3 V_WMMA_F32_16X16X16_F16 C Matrix (M, N)
+    // M{2, 1} L{M1N} V{M2M0} (dummy unmerge to be more similar to other layouts)
+    using Encoding2 =
+        tile_distribution_encoding<sequence<1>,                         // R (= Repeat)
+                                   tuple<sequence<8, 2, 1>, sequence<16>>, // H (= Hidden dims =
+                                                                        // unmerged dims) for M, N
+                                                                        // dimension
+                                   tuple<sequence<1, 2>>, // P major (= Parallelism = lanes)
+                                   tuple<sequence<1, 0>>, // P minor
+                                   sequence<1, 1>,        // Y major (= Yield = Vector items)
+                                   sequence<0, 2>         // Y minor
+                                   >;
+
+    using NTDEW2 = NiceTileDistrEncWrapper<Encoding2,
+                                          1,   // num_repeat
+                                          16,  // mat_major_size
+                                          16,  // mat_minor_size
+                                          32,  // num_lanes,
+                                          8>; // num_vector_items
+
+    NTDEW2::print();
 
     return 0;
 }

@@ -191,7 +191,7 @@ struct tensor_adaptor
         return get_hidden_dimension_length(TopDimensionHiddenIds::at(idim_top));
     }
 
-#if 0
+#if 1
     // FIXME: get_hidden_dimension_length is wrong when getting bottome dimension lengths
     template <index_t IDimBottom>
     CK_TILE_HOST_DEVICE constexpr index_t
@@ -207,7 +207,7 @@ struct tensor_adaptor
                               number<ndim_top_>{});
     }
 
-#if 0
+#if 1
     // FIXME: get_hidden_dimension_length is wrong when getting bottome dimension lengths
     CK_TILE_HOST_DEVICE constexpr auto GetBottomDimensionLengths() const
     {
