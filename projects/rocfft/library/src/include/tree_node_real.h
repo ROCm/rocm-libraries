@@ -156,6 +156,24 @@ protected:
 };
 
 /*****************************************************
+ * CS_REAL_3D_PP
+ *****************************************************/
+class Real3DPPNode : public InternalNode
+{
+    friend class NodeFactory;
+
+protected:
+    explicit Real3DPPNode(TreeNode* p)
+        : InternalNode(p)
+    {
+        scheme = CS_REAL_3D_PP;
+    }
+    size_t GetPPOffDim() const;
+    void   AssignParams_internal() override;
+    void   BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) override;
+};
+
+/*****************************************************
  * CS_KERNEL_COPY_R_TO_CMPLX
  * CS_KERNEL_COPY_HERM_TO_CMPLX
  * CS_KERNEL_COPY_CMPLX_TO_HERM

@@ -419,6 +419,8 @@ std::unique_ptr<TreeNode> NodeFactory::CreateNodeFromScheme(ComputeScheme s, Tre
         return std::unique_ptr<Real2DEvenNode>(new Real2DEvenNode(parent));
     case CS_REAL_3D_EVEN:
         return std::unique_ptr<Real3DEvenNode>(new Real3DEvenNode(parent));
+    case CS_REAL_3D_PP:
+        return std::unique_ptr<Real3DPPNode>(new Real3DPPNode(parent));
     case CS_BLUESTEIN:
         return std::unique_ptr<BluesteinNode>(new BluesteinNode(parent));
     case CS_L1D_TRTRT:
@@ -610,6 +612,10 @@ ComputeScheme NodeFactory::DecideRealScheme(const function_pool& pool, NodeMetaD
         case 2:
             return CS_REAL_2D_EVEN;
         case 3:
+            // Try 3D partial-pass first
+            if(use_CS_REAL_3D_PP(pool, nodeData))
+                return CS_REAL_3D_PP;
+
             return CS_REAL_3D_EVEN;
         default:
             throw std::runtime_error("Invalid dimension");
@@ -1112,4 +1118,19 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
                                && nodeData.outArrayType != rocfft_array_type_complex_planar);
 
     return (batchCondition && distCondition && strideCondition && arrayTypeCondition);
+}
+
+bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nodeData)
+{
+    const auto& realLength = nodeData.direction == -1 ? nodeData.length : nodeData.outputLength;
+
+    if(!pool.has_function(PPFMKey(realLength[0],
+                                  realLength[1],
+                                  realLength[2],
+                                  nodeData.precision,
+                                  nodeData.rootTransformType,
+                                  CS_REAL_3D_PP)))
+        return false;
+
+    return true;
 }

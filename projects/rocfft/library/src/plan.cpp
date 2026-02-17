@@ -4132,7 +4132,7 @@ void TreeNode::RefreshTree()
         // input/output even if their first/last child treats the
         // real data as complex
         const bool isRealEvenNode = scheme == CS_REAL_TRANSFORM_EVEN || scheme == CS_REAL_2D_EVEN
-                                    || scheme == CS_REAL_3D_EVEN;
+                                    || scheme == CS_REAL_3D_EVEN || scheme == CS_REAL_3D_PP;
         if(isRealEvenNode && direction == -1)
             this->inArrayType = rocfft_array_type_real;
         else
@@ -4507,7 +4507,7 @@ TreeNode* TreeNode::GetRealEvenAncestor()
     // If parent is directly an even-length plan, then that's what
     // we're looking for
     if(parent->scheme == CS_REAL_TRANSFORM_EVEN || parent->scheme == CS_REAL_2D_EVEN
-       || parent->scheme == CS_REAL_3D_EVEN)
+       || parent->scheme == CS_REAL_3D_EVEN || parent->scheme == CS_REAL_3D_PP)
         return parent;
 
     // Otherwise keep looking up the tree
@@ -4519,7 +4519,7 @@ TreeNode* TreeNode::GetPartialPassAncestor() const
     if(!parent)
         return nullptr;
 
-    if(parent->scheme == CS_3D_PP)
+    if(parent->scheme == CS_3D_PP || parent->scheme == CS_REAL_3D_PP)
         return parent;
 
     return parent->GetPartialPassAncestor();

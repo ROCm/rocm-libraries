@@ -501,7 +501,7 @@ public:
     // Check node scheme to see if partial pass is enabled
     bool isPartialPassEnabled() const
     {
-        return (scheme == CS_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
+        return (scheme == CS_3D_PP || scheme == CS_REAL_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
                 || scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC);
     }
 
@@ -608,7 +608,7 @@ public:
                                 : FMKey(length[0], length[1], precision, scheme);
     }
 
-    // Partial pass parent nodes, e.g., CS_3D_PP, have
+    // Partial pass parent nodes, e.g., CS_3D_PP or CS_REAL_3D_PP, have
     // two kernels associated with them. The key for
     // querying the function pool is different from the
     // the standard kernel key.

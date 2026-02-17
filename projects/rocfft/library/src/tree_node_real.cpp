@@ -1834,6 +1834,181 @@ void Real3DEvenNode::AssignParams_internal_TR_pairs()
 }
 
 /*****************************************************
+ * CS_REAL_3D_PP
+ *****************************************************/
+size_t Real3DPPNode::GetPPOffDim() const
+{
+    auto key
+        = PPFMKey(length[0], length[1], length[2], precision, GetRootPlanTransformType(), scheme);
+    if(!pool.has_function(key))
+        throw std::runtime_error("GetPPOffDim failed to find a valid kernel");
+
+    // CS_REAL_3D_PP will have two corresponding kernels in
+    // the function pool, both will have the same off-dim
+    // value, and at least of one them must be an SBCC PP
+    auto child_scheme = CS_KERNEL_STOCKHAM_PP_BLOCK_CC;
+    auto kernel       = pool.get_kernel(key, child_scheme);
+
+    return kernel.pp_params.off_dim;
+}
+
+void Real3DPPNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
+{
+    ppOffDim = GetPPOffDim();
+
+    const auto remainingLength = direction == -1 ? outputLength : length;
+
+    const std::vector<size_t>* realLength    = nullptr;
+    const std::vector<size_t>* complexLength = nullptr;
+    set_complex_length(*this, realLength, complexLength);
+
+    switch(ppOffDim)
+    {
+    case 0: // work along x will be split between y and z
+    {
+        // y col fft + partial pass along x
+        // partial pass along x + z col fft
+        throw std::runtime_error(
+            "Real3DPPNode::BuildTree_internal: partial-passes along x not currently supported");
+        break;
+    }
+    case 1: // work along y will be split between x and z
+    {
+        if(inArrayType != rocfft_array_type_real)
+            throw std::runtime_error("Real3DPPNode: c2r transform not yet implemented");
+
+        // x row fft + partial pass along y
+        // partial pass along y + z col fft
+
+        // Create node for x row fft + partial pass(es) along y
+        NodeMetaData xPartialPassPlanData(this);
+        xPartialPassPlanData.length    = *realLength;
+        xPartialPassPlanData.length[0] = xPartialPassPlanData.length[0] / 2;
+
+        // technically 1 < dimension < 2 for x node.
+        xPartialPassPlanData.dimension = 1;
+
+        // use explicit SBRR partial-pass kernel
+        std::unique_ptr<TreeNode> xPartialPassPlan;
+
+        xPartialPassPlan         = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_PP, this);
+        xPartialPassPlan->length = xPartialPassPlanData.length;
+        xPartialPassPlan->dimension    = 1;
+        xPartialPassPlan->ppOffDim     = ppOffDim;
+        xPartialPassPlan->allowInplace = true;
+
+        if(direction == -1)
+        {
+            // real-to-complex transform: complex transform then post-process
+            xPartialPassPlan->ebtype       = EmbeddedType::Real2C_POST;
+            xPartialPassPlan->outputLength = xPartialPassPlan->length;
+            xPartialPassPlan->outputLength.front() += 1;
+        }
+        else
+            throw std::runtime_error("Real3DPPNode: c2r transform not yet implemented");
+
+        xPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
+
+        // Create node for partial pass(es) along y + z col fft
+        NodeMetaData zPartialPassPlanData(this);
+        zPartialPassPlanData.length.push_back(remainingLength[2]);
+        // technically 1 < dimension < 2 for z node.
+        zPartialPassPlanData.dimension = 1;
+        zPartialPassPlanData.length.push_back(remainingLength[0]);
+        zPartialPassPlanData.length.push_back(remainingLength[1]);
+        zPartialPassPlanData.outputLength = outputLength;
+
+        // use explicit SBCC partial-pass kernel
+        std::unique_ptr<TreeNode> zPartialPassPlan;
+
+        zPartialPassPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_PP_BLOCK_CC, this);
+        zPartialPassPlan->length       = zPartialPassPlanData.length;
+        zPartialPassPlan->dimension    = 1;
+        zPartialPassPlan->ppOffDim     = ppOffDim;
+        zPartialPassPlan->allowInplace = false;
+        zPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
+
+        childNodes.emplace_back(std::move(xPartialPassPlan));
+        childNodes.emplace_back(std::move(zPartialPassPlan));
+
+        break;
+    }
+    case 2: // work along z will be split between x and y
+    {
+        // x row fft + partial pass along z
+        // partial pass along z + y col fft
+        throw std::runtime_error(
+            "Real3DPPNode::BuildTree_internal: partial-passes along z not currently supported");
+        break;
+    }
+    default:
+        throw std::runtime_error("Real3DPPNode::BuildTree_internal:: Unexpected ppOffDim");
+    }
+}
+
+void Real3DPPNode::AssignParams_internal()
+{
+    switch(ppOffDim)
+    {
+    case 0: // work along x will be split between y and z
+    {
+        // y col fft + partial pass along x
+        // partial pass along x + z col fft
+        throw std::runtime_error(
+            "Real3DPPNode::AssignParams_internal: partial-passes along x not currently supported");
+        break;
+    }
+    case 1: // work along y will be split between x and z
+    {
+        // xy plan is a x row 1D-FFT + plus partial pass(es) along y
+        // yz plan is partial pass(es) along y + z col 1D-FFT.
+        auto& xyPlan = childNodes[0];
+        auto& yzPlan = childNodes[1];
+
+        if(direction == -1)
+        {
+            // forward transform, r2c
+            xyPlan->inStride = inStride;
+            for(unsigned int i = 1; i < xyPlan->inStride.size(); ++i)
+            {
+                xyPlan->inStride[i] /= 2;
+            }
+            xyPlan->iDist = iDist / 2;
+
+            xyPlan->outStride = outStride;
+            xyPlan->oDist     = oDist;
+
+            xyPlan->AssignParams();
+        }
+        else
+            throw std::runtime_error("Real3DPPNode: c2r transform not yet implemented");
+
+        yzPlan->inStride.push_back(outStride[2]);
+        yzPlan->inStride.push_back(outStride[0]);
+        yzPlan->inStride.push_back(outStride[1]);
+
+        yzPlan->iDist = xyPlan->oDist;
+
+        yzPlan->outStride = yzPlan->inStride;
+        yzPlan->oDist     = yzPlan->iDist;
+
+        yzPlan->AssignParams();
+        break;
+    }
+    case 2: // work along z will be split between x and y
+    {
+        // x row fft + partial pass along z
+        // partial pass along z + y col fft
+        throw std::runtime_error(
+            "Real3DPPNode::AssignParams_internal: partial-passes along z not currently supported");
+        break;
+    }
+    default:
+        throw std::runtime_error("Real3DPPNode::AssignParams_internal: Unexpected ppOffDim");
+    }
+}
+
+/*****************************************************
  * CS_KERNEL_R_TO_CMPLX
  * CS_KERNEL_R_TO_CMPLX_TRANSPOSE
  * CS_KERNEL_CMPLX_TO_R

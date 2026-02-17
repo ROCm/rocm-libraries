@@ -355,7 +355,36 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
     }
     else if(specs1.scheme == "CS_REAL_3D_PP" && specs2.scheme == "CS_REAL_3D_PP")
     {
-        throw std::runtime_error("unhandled scheme");
+        if(params_1.current_dim == 0 && params_2.current_dim == 2)
+        {
+            StockhamPartialPassKernelRR kernelRR(specs1, params_1);
+            make_launcher(specs1.precision,
+                          *specs1.transform_type,
+                          {{"pp_stoc", specs1.scheme, "", ""}},
+                          kernelRR,
+                          specs1.gcn_arch_name,
+                          "CS_KERNEL_STOCKHAM_PP",
+                          params_1.pp_threads_per_transform,
+                          params_1.pp_factors_curr,
+                          params_1.pp_factors_other,
+                          params_1.current_dim,
+                          params_1.off_dim,
+                          launchers);
+
+            StockhamPartialPassKernelCC kernelCC(specs2, params_2, false);
+            make_launcher(specs2.precision,
+                          *specs2.transform_type,
+                          {{"pp_sbcc", specs2.scheme, "", ""}},
+                          kernelCC,
+                          specs2.gcn_arch_name,
+                          "CS_KERNEL_STOCKHAM_PP_BLOCK_CC",
+                          params_2.pp_threads_per_transform,
+                          params_2.pp_factors_curr,
+                          params_2.pp_factors_other,
+                          params_2.current_dim,
+                          params_2.off_dim,
+                          launchers);
+        }
     }
     else
     {
@@ -584,11 +613,20 @@ unsigned int get_pp_off_dim(const std::vector<unsigned int>& dims)
 
 // Validates that the current_dim is the correct index
 // in parent_length for the given factors.
-void validate_pp_length(const StockhamPartialPassParams& pp_params,
+void validate_pp_length(const std::string&               scheme,
+                        const StockhamPartialPassParams& pp_params,
                         const std::vector<unsigned int>& factors)
 
 {
     unsigned int length_curr = product(factors.begin(), factors.end());
+
+    if(scheme == "CS_REAL_3D_PP" && pp_params.current_dim == 0)
+    {
+        // For real 3D FFTs, the z-dimension length is halved in the
+        // complex domain. So we need to multiply by 2 here to get
+        // the correct length to compare against parent_length.
+        length_curr *= 2;
+    }
 
     auto curr_dim = pp_params.current_dim;
     if(length_curr != pp_params.parent_length[curr_dim])
@@ -680,6 +718,28 @@ void validate_pp_grid_params(const StockhamPartialPassParams& params_1,
                                      "pp_factors has only one factor");
         }
     }
+    else if(specs_1.scheme == "CS_REAL_3D_PP" && specs_2.scheme == "CS_REAL_3D_PP")
+    {
+        // SBRR_PP + SBCC_PP
+        if((params_1.current_dim == 0 && params_2.current_dim == 2)
+           || (params_1.current_dim == 2 && params_2.current_dim == 0))
+        {
+            // SBRR needs tpb to be prod(pp_factors),
+            // so that it has the required off-dim data in LDS
+            // to perform partial passes
+            auto tpb_sbrr = (params_1.current_dim == 0 && params_2.current_dim == 2)
+                                ? specs_1.workgroup_size / specs_1.threads_per_transform
+                                : specs_2.workgroup_size / specs_2.threads_per_transform;
+
+            auto prod_factors_off_dim
+                = product(params_1.pp_factors_curr.begin(), params_1.pp_factors_curr.end());
+            if(tpb_sbrr != prod_factors_off_dim)
+            {
+                throw std::runtime_error("CS_KERNEL_STOCKHAM_PP requires transform-per-block "
+                                         "to be prod(pp_factors)");
+            }
+        }
+    }
     else
     {
         throw std::runtime_error("unhandled scheme");
@@ -729,7 +789,7 @@ int main()
 
         std::vector<unsigned int> parent_length, dims, threads_per_transform_pp, pp_factors1,
             pp_factors2;
-        if(scheme == "CS_3D_PP")
+        if(scheme == "CS_3D_PP" || scheme == "CS_REAL_3D_PP")
         {
             ++arg;
             parent_length = parse_uints_csv(*arg);
@@ -775,7 +835,7 @@ int main()
         // create spec and pass to stockham_variants, writes partial output to stdout
         std::cout << DELIM;
 
-        if(scheme == "CS_3D_PP")
+        if(scheme == "CS_3D_PP" || scheme == "CS_REAL_3D_PP")
         {
             std::vector<unsigned int> factors1, factors2;
 
@@ -834,8 +894,8 @@ int main()
                                                   pp_factors2,
                                                   pp_factors1);
 
-            validate_pp_length(pp_params_1, factors1);
-            validate_pp_length(pp_params_2, factors2);
+            validate_pp_length(scheme, pp_params_1, factors1);
+            validate_pp_length(scheme, pp_params_2, factors2);
             validate_pp_off_dim_length(pp_params_1, pp_params_2);
             validate_pp_grid_params(pp_params_1, pp_params_2, specs1, specs2);
 
