@@ -6,7 +6,7 @@ For general information about hipDNN's operation support, please see the [hipDNN
 
 ## Current Operation Support
 
-hipBLASLt Provider Plugin currently supports only stand-alone GEMM (general matrix multiplication) operations with the following features and constraints:
+hipBLASLt Provider Plugin currently supports only stand-alone Matmul (GEMM, general matrix multiplication) operations with the following features and constraints:
 - Input and output data types: FP32, FP16, BF16
 - Compute data type: FP32
 - Transposed inputs: supported
