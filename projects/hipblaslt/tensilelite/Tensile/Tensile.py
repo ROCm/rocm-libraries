@@ -500,10 +500,11 @@ def Tensile(userArgs):
             help="Alternate format for config_file(s): first file is alternate config "
             "and optional second file is size list")
     argParser.add_argument("--use-cache", dest="useCache", action="store_true",
-            help="Ignore cache; redo parameter forking and solution generation")
+            help="Bypass redo parameter forking and solution generation and used existing solutions.")
     argParser.add_argument("--build-only", dest="buildOnly", action="store_true",
             help="Generate and compile kernels but skip benchmarking. "
-                 "Use with --use-cache on target machine to run benchmarks.")
+                 "Useful for splitting compilation and benchmarking across runs/nodes. "
+                 "First run using this flag, then rerun with --use-cache.")
     argParser.add_argument("--restore-from-log", type=str, dest="RestoreLog",
             help="A log file captured in previous tuning. ONLY RELIABLE when configs yaml not changes")
 
