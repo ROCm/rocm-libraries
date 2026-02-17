@@ -449,16 +449,19 @@ staggerU_t select_staggerU(const problem_t& problem,
   size_t L2_mapping = (L2Tile_M > L2Tile_N) ? 0 : 1;
   size_t L2_value   = (L2_mapping == 0) ? std::min(L2Tile_M, numMT_M)
                                         : std::min(L2Tile_N, numMT_N);
-  // L2 capacity check: direction-aware working set.
-  // Stagger only expands the SHARED matrix (the one whose reads are distributed):
-  //   SUM0: A unchanged, B expanded by min(stagger, L2Tile_M) K-offsets
-  //   SUM1: B unchanged, A expanded by min(stagger, L2Tile_N) K-offsets
-  size_t stagger_check = std::min(L2_value, max_staggerU);
-  size_t ws_sum0 = MT_K * (L2Tile_M * MT_M * bpe_a + std::min(stagger_check, L2Tile_M) * L2Tile_N * MT_N * bpe_b);
-  size_t ws_sum1 = MT_K * (std::min(stagger_check, L2Tile_N) * L2Tile_M * MT_M * bpe_a + L2Tile_N * MT_N * bpe_b);
-  size_t working_set = (L2_mapping == 0) ? ws_sum0 : ws_sum1;
-  if (working_set > 0.95 * hardware.L2_capacity)
-    return staggerU_t{0, 0, 0};
+  // L2 capacity check
+  size_t per_slice = MT_K * (L2Tile_M * MT_M * bpe_a + L2Tile_N * MT_N * bpe_b);
+  // 95% is a conservative limit mostly to handle not-nice L2 tiles (wrapping around).
+  if (L2_value > max_staggerU) {
+    if (max_staggerU * per_slice > 0.95 * hardware.L2_capacity)
+      return staggerU_t{0, 0, 0};
+    else
+      return staggerU_t{L2_mapping, max_staggerU, out_staggerUStrideShift};
+  }
+  else {
+    if (L2_value * per_slice > 0.95 * hardware.L2_capacity)
+      return staggerU_t{0, 0, 0};
+  }
   L2_value = std::min(L2_value, max_staggerU);
   
   // Compute MALL optimal direction
