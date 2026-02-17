@@ -44,7 +44,8 @@ namespace rocRoller
             std::string name() const override;
 
         private:
-            Generator<size_t> getLDSAddresses(KernelGraph& graph, int tag, VariableType varType);
+            Generator<size_t>
+                getLDSAddresses(KernelGraph& graph, int tag, ControlGraph::LoadLDSTile const& op);
             void              setup();
             void              setWorkgroup(uint offset, uint value);
             void              setWorkitem(uint offset, uint value);

@@ -988,11 +988,20 @@ namespace rocRoller
             result.comment = concatenate(
                 "GEN: loadMacroTileLDS OP ", tag, " LDS ", ldsTag, " MacroTile ", tileTag);
 
-            // Find the LDS allocation that contains the tile and store
-            // the offset of the beginning of the allocation into ldsOffset.
-            auto ldsAllocation = m_context->registerTagManager()->getRegister(ldsTag);
-
-            auto ldsOffset = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
+            Register::ValuePtr ldsAllocation;
+            Register::ValuePtr ldsOffset;
+            if(m_context->registerTagManager()->hasRegister(ldsTag))
+            {
+                ldsAllocation
+                    = m_context->registerTagManager()->getRegister(ldsTag); // stores offset
+                ldsOffset = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
+            }
+            else
+            {
+                // Offset not available yet (e.g., modelling before codegen)
+                ldsAllocation = nullptr;
+                ldsOffset     = nullptr;
+            }
 
             auto [elemXTag, elemX] = m_graph->getDimension<ElementNumber>(tag, 0);
             auto [elemYTag, elemY] = m_graph->getDimension<ElementNumber>(tag, 1);
@@ -1100,9 +1109,18 @@ namespace rocRoller
                          .value_or(ldsTag);
             // Find the LDS allocation that contains the tile and store
             // the offset of the beginning of the allocation into ldsOffset.
-            auto ldsAllocation = m_context->registerTagManager()->getRegister(ldsTag);
-
-            auto ldsOffset = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
+            Register::ValuePtr ldsAllocation;
+            Register::ValuePtr ldsOffset;
+            if(m_context->registerTagManager()->hasRegister(ldsTag))
+            {
+                ldsAllocation = m_context->registerTagManager()->getRegister(ldsTag);
+                ldsOffset = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
+            }
+            else
+            {
+                ldsAllocation = nullptr;
+                ldsOffset     = nullptr;
+            }
 
             uint numElements       = waveTile.sizes[0] * waveTile.sizes[1];
             auto [_, lane]         = m_graph->getDimension<Lane>(tag);

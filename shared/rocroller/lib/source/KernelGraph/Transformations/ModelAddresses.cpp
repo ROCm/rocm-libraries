@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/CodeGen/LoadStoreTileGenerator.hpp>
 #include <rocRoller/Graph/Hypergraph.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/ModelAddresses.hpp>
@@ -31,7 +32,7 @@
 #include <rocRoller/KernelGraph/Visitors.hpp>
 
 #include <algorithm>
-#include <optional>
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -89,7 +90,7 @@ namespace rocRoller::KernelGraph
     }
 
     Generator<size_t>
-        ModelAddresses::getLDSAddresses(KernelGraph& graph, int tag, VariableType varType)
+        ModelAddresses::getLDSAddresses(KernelGraph& graph, int tag, LoadLDSTile const& op)
     {
         namespace CT         = rocRoller::KernelGraph::CoordinateGraph;
         namespace Expression = rocRoller::Expression;
@@ -109,10 +110,19 @@ namespace rocRoller::KernelGraph
         {
             auto [vgprTag, vgpr] = graph.getDimension<VGPR>(tag);
 
-            auto dataTypeInfo = DataTypeInfo::Get(varType);
-            auto numBits      = static_cast<uint>(dataTypeInfo.elementBits / dataTypeInfo.packing);
-            auto numElements  = getUnsignedInt(evaluate(vgpr.size));
-            auto numBytes     = (numBits * numElements) / 8u;
+            auto graphPtr = std::make_shared<KernelGraph>(graph);
+            LoadStoreTileGenerator tileGenerator(
+                graphPtr, m_context, m_context->kernel()->max_flat_workgroup_size());
+            auto infoResult = tileGenerator.getLoadLDSTileInfo(tag, op);
+
+            const auto varInfo     = DataTypeInfo::Get(infoResult.info.varType);
+            const auto packedCount = std::max<uint32_t>(1u, varInfo.packing);
+            const uint64_t numElements = infoResult.info.m * infoResult.info.n * packedCount;
+            const uint64_t numBits     = static_cast<uint64_t>(varInfo.elementBits);
+
+            AssertFatal(numElements > 0, "Invalid LDS tile element count.", ShowValue(numElements));
+
+            auto numBytes = (numBits * numElements + 7u) / 8u;
 
             auto coords = graph.buildTransformer(tag);
             coords.setCoordinate(vgprTag, Expression::literal(0));
@@ -182,7 +192,7 @@ namespace rocRoller::KernelGraph
                 [&](CIsAnyOf<LoadLDSTile> auto op) {
                     {
                         const auto addresses
-                            = getLDSAddresses(graph, node, op.varType).template to<std::vector>();
+                            = getLDSAddresses(graph, node, op).template to<std::vector>();
 
                         // TODO: add assert
                         // AssertFatal(!addresses.empty());
