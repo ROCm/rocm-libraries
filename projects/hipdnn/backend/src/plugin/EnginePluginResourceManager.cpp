@@ -78,8 +78,6 @@ void EnginePluginResourceManager::setPluginUnloadingMode(hipdnnPluginUnloadingMo
 {
     std::lock_guard<std::mutex> lock(pluginMutex);
 
-    pluginConfig.unloadingMode = mode;
-
     switch(mode)
     {
     case HIPDNN_PLUGIN_UNLOAD_EAGER:
@@ -100,6 +98,8 @@ void EnginePluginResourceManager::setPluginUnloadingMode(hipdnnPluginUnloadingMo
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                               "Invalid plugin unloading mode: " + std::to_string(mode));
     }
+
+    pluginConfig.unloadingMode = mode;
 }
 
 void EnginePluginResourceManager::getLoadedPluginFiles(size_t* numPlugins,
