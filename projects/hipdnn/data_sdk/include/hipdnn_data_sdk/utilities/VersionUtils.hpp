@@ -11,8 +11,6 @@
 
 namespace hipdnn_data_sdk::utilities
 {
-// using Version = std::tuple<int, int, int>;
-
 struct Version
 {
     int major, minor, patch;

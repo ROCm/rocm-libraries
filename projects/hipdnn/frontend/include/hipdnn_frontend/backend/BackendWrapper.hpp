@@ -3,7 +3,10 @@
 
 #pragma once
 
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_frontend/backend/HipdnnBackendInterface.hpp>
+// #include <hipdnn_frontend/backend/IncompatibleBackend.hpp>
+#include <hipdnn_frontend/Utilities.hpp>
 
 namespace hipdnn_frontend
 {
@@ -89,6 +92,11 @@ public:
         hipdnnGetLastErrorString(message, maxSize);
     }
 
+    hipdnnStatus_t versionExt(const char** version) override
+    {
+        return hipdnnGetVersion_ext(version);
+    }
+
     hipdnnStatus_t backendCreateAndDeserializeGraphExt(hipdnnBackendDescriptor_t* descriptor,
                                                        const uint8_t* serializedGraph,
                                                        size_t graphByteSize) override
@@ -115,7 +123,20 @@ inline static std::shared_ptr<IHipdnnBackend> hipdnnBackend()
 {
     if(!IHipdnnBackend::getInstance())
     {
-        IHipdnnBackend::setInstance(std::make_shared<HipdnnBackendWrapper>());
+        auto instance = std::make_shared<HipdnnBackendWrapper>();
+        const char* version;
+        auto status = instance->versionExt(&version);
+        if(status
+           != hipdnnStatus_t::HIPDNN_STATUS_SUCCESS /* or TODO: if major version different */)
+        {
+            // HIPDNN_FE_LOG_ERROR(
+            //     std::string{"Failed to get hipdnn version. Hipdnn backend cannot be loaded"});
+            //     //IHipdnnBackend::setInstance(std::make_shared<detail::IncompatibleBackendWrapper>());
+        }
+        else
+        {
+            IHipdnnBackend::setInstance(std::make_shared<HipdnnBackendWrapper>());
+        }
     }
 
     return IHipdnnBackend::getInstance();
