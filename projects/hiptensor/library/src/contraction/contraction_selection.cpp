@@ -232,6 +232,230 @@ namespace hiptensor
                                 _Float16,
                                 _Float16,
                                 ContractionOpId_t::SCALE,
+                                _Float16>
+    {
+        static hiptensorStatus_t
+            selectWinner(ContractionSolution**                                   winner,
+                         std::unordered_map<size_t, ContractionSolution*> const& candidates,
+                         hiptensorDataType_t                                     typeA,
+                         std::vector<std::size_t> const&                         a_ms_ks_lengths,
+                         std::vector<std::size_t> const&                         a_ms_ks_strides,
+                         std::vector<int32_t> const&                             a_ms_ks_modes,
+                         hiptensorDataType_t                                     typeB,
+                         std::vector<std::size_t> const&                         b_ns_ks_lengths,
+                         std::vector<std::size_t> const&                         b_ns_ks_strides,
+                         std::vector<int32_t> const&                             b_ns_ks_modes,
+                         hiptensorDataType_t                                     typeD,
+                         std::vector<std::size_t> const&                         d_ms_ns_lengths,
+                         std::vector<std::size_t> const&                         d_ms_ns_strides,
+                         std::vector<int32_t> const&                             d_ms_ns_modes,
+                         hiptensorDataType_t                                     typeE,
+                         std::vector<std::size_t> const&                         e_ms_ns_lengths,
+                         std::vector<std::size_t> const&                         e_ms_ns_strides,
+                         std::vector<int32_t> const&                             e_ms_ns_modes,
+                         const uint64_t                                          workspaceSize)
+        {
+            auto   rank      = getRank(a_ms_ks_strides);
+            size_t unique_id = 0;
+
+            auto& options = HiptensorOptions::instance();
+            if(options->isColMajorStrides())
+            {
+                // m1n1k1
+                if(rank == 1)
+                {
+                    unique_id = 16046312426561516674ull;
+                }
+                // m2n2k2
+                else if(rank == 2)
+                {
+                    unique_id = 5651259715737336589ull;
+                }
+                // m3n3k3
+                else if(rank == 3)
+                {
+                    unique_id = 5651259715737336589ull;
+                }
+                // m4n4k4
+                else if(rank == 4)
+                {
+                    unique_id = 16046312426561516674ull;
+                }
+                // m5n5k5
+                else if(rank == 5)
+                {
+                    unique_id = 17447143014665713887ull;
+                }
+                // m6n6k6
+                else if(rank == 6)
+                {
+                    unique_id = 16046312426561516674ull;
+                }
+            }
+            else
+            {
+                // m1n1k1
+                if(rank == 1)
+                {
+                    unique_id = 9021620837589482599ull;
+                }
+                // m2n2k2
+                else if(rank == 2)
+                {
+                    unique_id = 6053663486226699267ull;
+                }
+                // m3n3k3
+                else if(rank == 3)
+                {
+                    unique_id = 6053663486226699267ull;
+                }
+                // m4n4k4
+                else if(rank == 4)
+                {
+                    unique_id = 6053663486226699267ull;
+                }
+                // m5n5k5
+                else if(rank == 5)
+                {
+                    unique_id = 10097482900535040320ull;
+                }
+                // m6n6k6
+                else if(rank == 6)
+                {
+                    unique_id = 6053663486226699267ull;
+                }
+            }
+
+            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
+            {
+                *winner = candidate->second;
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+            else
+            {
+                return HIPTENSOR_STATUS_EXECUTION_FAILED;
+            }
+        }
+    };
+
+    template <>
+    struct ActorCriticSelection<_Float16,
+                                _Float16,
+                                _Float16,
+                                _Float16,
+                                ContractionOpId_t::BILINEAR,
+                                _Float16>
+    {
+        static hiptensorStatus_t
+            selectWinner(ContractionSolution**                                   winner,
+                         std::unordered_map<size_t, ContractionSolution*> const& candidates,
+                         hiptensorDataType_t                                     typeA,
+                         std::vector<std::size_t> const&                         a_ms_ks_lengths,
+                         std::vector<std::size_t> const&                         a_ms_ks_strides,
+                         std::vector<int32_t> const&                             a_ms_ks_modes,
+                         hiptensorDataType_t                                     typeB,
+                         std::vector<std::size_t> const&                         b_ns_ks_lengths,
+                         std::vector<std::size_t> const&                         b_ns_ks_strides,
+                         std::vector<int32_t> const&                             b_ns_ks_modes,
+                         hiptensorDataType_t                                     typeD,
+                         std::vector<std::size_t> const&                         d_ms_ns_lengths,
+                         std::vector<std::size_t> const&                         d_ms_ns_strides,
+                         std::vector<int32_t> const&                             d_ms_ns_modes,
+                         hiptensorDataType_t                                     typeE,
+                         std::vector<std::size_t> const&                         e_ms_ns_lengths,
+                         std::vector<std::size_t> const&                         e_ms_ns_strides,
+                         std::vector<int32_t> const&                             e_ms_ns_modes,
+                         const uint64_t                                          workspaceSize)
+        {
+            auto   rank      = getRank(a_ms_ks_strides);
+            size_t unique_id = 0;
+
+            auto& options = HiptensorOptions::instance();
+            if(options->isColMajorStrides())
+            {
+                // m1n1k1
+                if(rank == 1)
+                {
+                    unique_id = 16046312426561516674ull;
+                }
+                // m2n2k2
+                else if(rank == 2)
+                {
+                    unique_id = 16046312426561516674ull;
+                }
+                // m3n3k3
+                else if(rank == 3)
+                {
+                    unique_id = 5651259715737336589ull;
+                }
+                // m4n4k4
+                else if(rank == 4)
+                {
+                    unique_id = 16046312426561516674ull;
+                }
+                // m5n5k5
+                else if(rank == 5)
+                {
+                    unique_id = 17447143014665713887ull;
+                }
+                // m6n6k6
+                else if(rank == 6)
+                {
+                    unique_id = 16046312426561516674ull;
+                }
+            }
+            else
+            {
+                // m1n1k1
+                if(rank == 1)
+                {
+                    unique_id = 6053663486226699267ull;
+                }
+                // m2n2k2
+                else if(rank == 2)
+                {
+                    unique_id = 6053663486226699267ull;
+                }
+                // m3n3k3
+                else if(rank == 3)
+                {
+                    unique_id = 6053663486226699267ull;
+                }
+                // m4n4k4
+                else if(rank == 4)
+                {
+                    unique_id = 6053663486226699267ull;
+                }
+                // m5n5k5
+                else if(rank == 5)
+                {
+                    unique_id = 10097482900535040320ull;
+                }
+                // m6n6k6
+                else if(rank == 6)
+                {
+                    unique_id = 6053663486226699267ull;
+                }
+            }
+
+            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
+            {
+                *winner = candidate->second;
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+            else
+            {
+                return HIPTENSOR_STATUS_EXECUTION_FAILED;
+            }
+        }
+    };
+
+    template <>
+    struct ActorCriticSelection<_Float16,
+                                _Float16,
+                                _Float16,
+                                _Float16,
+                                ContractionOpId_t::SCALE,
                                 float>
     {
         static hiptensorStatus_t
@@ -444,6 +668,230 @@ namespace hiptensor
                 else if(rank == 6)
                 {
                     unique_id = 2303552229010777601ull;
+                }
+            }
+
+            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
+            {
+                *winner = candidate->second;
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+            else
+            {
+                return HIPTENSOR_STATUS_EXECUTION_FAILED;
+            }
+        }
+    };
+
+    template <>
+    struct ActorCriticSelection<hip_bfloat16,
+                                hip_bfloat16,
+                                hip_bfloat16,
+                                hip_bfloat16,
+                                ContractionOpId_t::SCALE,
+                                hip_bfloat16>
+    {
+        static hiptensorStatus_t
+            selectWinner(ContractionSolution**                                   winner,
+                         std::unordered_map<size_t, ContractionSolution*> const& candidates,
+                         hiptensorDataType_t                                     typeA,
+                         std::vector<std::size_t> const&                         a_ms_ks_lengths,
+                         std::vector<std::size_t> const&                         a_ms_ks_strides,
+                         std::vector<int32_t> const&                             a_ms_ks_modes,
+                         hiptensorDataType_t                                     typeB,
+                         std::vector<std::size_t> const&                         b_ns_ks_lengths,
+                         std::vector<std::size_t> const&                         b_ns_ks_strides,
+                         std::vector<int32_t> const&                             b_ns_ks_modes,
+                         hiptensorDataType_t                                     typeD,
+                         std::vector<std::size_t> const&                         d_ms_ns_lengths,
+                         std::vector<std::size_t> const&                         d_ms_ns_strides,
+                         std::vector<int32_t> const&                             d_ms_ns_modes,
+                         hiptensorDataType_t                                     typeE,
+                         std::vector<std::size_t> const&                         e_ms_ns_lengths,
+                         std::vector<std::size_t> const&                         e_ms_ns_strides,
+                         std::vector<int32_t> const&                             e_ms_ns_modes,
+                         const uint64_t                                          workspaceSize)
+        {
+            auto   rank      = getRank(a_ms_ks_strides);
+            size_t unique_id = 0;
+
+            auto& options = HiptensorOptions::instance();
+            if(options->isColMajorStrides())
+            {
+                // m1n1k1
+                if(rank == 1)
+                {
+                    unique_id = 8024078432480148721ull;
+                }
+                // m2n2k2
+                else if(rank == 2)
+                {
+                    unique_id = 12894894255582471185ull;
+                }
+                // m3n3k3
+                else if(rank == 3)
+                {
+                    unique_id = 12894894255582471185ull;
+                }
+                // m4n4k4
+                else if(rank == 4)
+                {
+                    unique_id = 12894894255582471185ull;
+                }
+                // m5n5k5
+                else if(rank == 5)
+                {
+                    unique_id = 12894894255582471185ull;
+                }
+                // m6n6k6
+                else if(rank == 6)
+                {
+                    unique_id = 12894894255582471185ull;
+                }
+            }
+            else
+            {
+                // m1n1k1
+                if(rank == 1)
+                {
+                    unique_id = 9333825291905548205ull;
+                }
+                // m2n2k2
+                else if(rank == 2)
+                {
+                    unique_id = 17760782256758115565ull;
+                }
+                // m3n3k3
+                else if(rank == 3)
+                {
+                    unique_id = 9333825291905548205ull;
+                }
+                // m4n4k4
+                else if(rank == 4)
+                {
+                    unique_id = 13058678487168027ull;
+                }
+                // m5n5k5
+                else if(rank == 5)
+                {
+                    unique_id = 9333825291905548205ull;
+                }
+                // m6n6k6
+                else if(rank == 6)
+                {
+                    unique_id = 9333825291905548205ull;
+                }
+            }
+
+            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
+            {
+                *winner = candidate->second;
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+            else
+            {
+                return HIPTENSOR_STATUS_EXECUTION_FAILED;
+            }
+        }
+    };
+
+    template <>
+    struct ActorCriticSelection<hip_bfloat16,
+                                hip_bfloat16,
+                                hip_bfloat16,
+                                hip_bfloat16,
+                                ContractionOpId_t::BILINEAR,
+                                hip_bfloat16>
+    {
+        static hiptensorStatus_t
+            selectWinner(ContractionSolution**                                   winner,
+                         std::unordered_map<size_t, ContractionSolution*> const& candidates,
+                         hiptensorDataType_t                                     typeA,
+                         std::vector<std::size_t> const&                         a_ms_ks_lengths,
+                         std::vector<std::size_t> const&                         a_ms_ks_strides,
+                         std::vector<int32_t> const&                             a_ms_ks_modes,
+                         hiptensorDataType_t                                     typeB,
+                         std::vector<std::size_t> const&                         b_ns_ks_lengths,
+                         std::vector<std::size_t> const&                         b_ns_ks_strides,
+                         std::vector<int32_t> const&                             b_ns_ks_modes,
+                         hiptensorDataType_t                                     typeD,
+                         std::vector<std::size_t> const&                         d_ms_ns_lengths,
+                         std::vector<std::size_t> const&                         d_ms_ns_strides,
+                         std::vector<int32_t> const&                             d_ms_ns_modes,
+                         hiptensorDataType_t                                     typeE,
+                         std::vector<std::size_t> const&                         e_ms_ns_lengths,
+                         std::vector<std::size_t> const&                         e_ms_ns_strides,
+                         std::vector<int32_t> const&                             e_ms_ns_modes,
+                         const uint64_t                                          workspaceSize)
+        {
+            auto   rank      = getRank(a_ms_ks_strides);
+            size_t unique_id = 0;
+
+            auto& options = HiptensorOptions::instance();
+            if(options->isColMajorStrides())
+            {
+                // m1n1k1
+                if(rank == 1)
+                {
+                    unique_id = 8024078432480148721ull;
+                }
+                // m2n2k2
+                else if(rank == 2)
+                {
+                    unique_id = 12894894255582471185ull;
+                }
+                // m3n3k3
+                else if(rank == 3)
+                {
+                    unique_id = 12894894255582471185ull;
+                }
+                // m4n4k4
+                else if(rank == 4)
+                {
+                    unique_id = 12894894255582471185ull;
+                }
+                // m5n5k5
+                else if(rank == 5)
+                {
+                    unique_id = 12894894255582471185ull;
+                }
+                // m6n6k6
+                else if(rank == 6)
+                {
+                    unique_id = 12894894255582471185ull;
+                }
+            }
+            else
+            {
+                // m1n1k1
+                if(rank == 1)
+                {
+                    unique_id = 9333825291905548205ull;
+                }
+                // m2n2k2
+                else if(rank == 2)
+                {
+                    unique_id = 17760782256758115565ull;
+                }
+                // m3n3k3
+                else if(rank == 3)
+                {
+                    unique_id = 9333825291905548205ull;
+                }
+                // m4n4k4
+                else if(rank == 4)
+                {
+                    unique_id = 13058678487168027ull;
+                }
+                // m5n5k5
+                else if(rank == 5)
+                {
+                    unique_id = 9333825291905548205ull;
+                }
+                // m6n6k6
+                else if(rank == 6)
+                {
+                    unique_id = 9333825291905548205ull;
                 }
             }
 
@@ -2293,7 +2741,35 @@ namespace hiptensor
                          const uint64_t                                          workspaceSize)
     {
         if(typeA == HIPTENSOR_R_16F && typeB == HIPTENSOR_R_16F && typeD == NONE_TYPE
-           && typeE == HIPTENSOR_R_16F && computeType == HIPTENSOR_COMPUTE_DESC_32F)
+           && typeE == HIPTENSOR_R_16F && computeType == HIPTENSOR_COMPUTE_DESC_16F)
+        {
+            return ActorCriticSelection<_Float16,
+                                        _Float16,
+                                        _Float16,
+                                        _Float16,
+                                        ContractionOpId_t::SCALE,
+                                        _Float16>::selectWinner(winner,
+                                                                candidates,
+                                                                typeA,
+                                                                a_ms_ks_lengths,
+                                                                a_ms_ks_strides,
+                                                                a_ms_ks_modes,
+                                                                typeB,
+                                                                b_ns_ks_lengths,
+                                                                b_ns_ks_strides,
+                                                                b_ns_ks_modes,
+                                                                typeD,
+                                                                d_ms_ns_lengths,
+                                                                d_ms_ns_strides,
+                                                                d_ms_ns_modes,
+                                                                typeE,
+                                                                e_ms_ns_lengths,
+                                                                e_ms_ns_strides,
+                                                                e_ms_ns_modes,
+                                                                workspaceSize);
+        }
+        else if(typeA == HIPTENSOR_R_16F && typeB == HIPTENSOR_R_16F && typeD == NONE_TYPE
+                && typeE == HIPTENSOR_R_16F && computeType == HIPTENSOR_COMPUTE_DESC_32F)
         {
             return ActorCriticSelection<_Float16,
                                         _Float16,
@@ -2319,6 +2795,34 @@ namespace hiptensor
                                                              e_ms_ns_strides,
                                                              e_ms_ns_modes,
                                                              workspaceSize);
+        }
+        else if(typeA == HIPTENSOR_R_16F && typeB == HIPTENSOR_R_16F && typeD == HIPTENSOR_R_16F
+                && typeE == HIPTENSOR_R_16F && computeType == HIPTENSOR_COMPUTE_DESC_16F)
+        {
+            return ActorCriticSelection<_Float16,
+                                        _Float16,
+                                        _Float16,
+                                        _Float16,
+                                        ContractionOpId_t::BILINEAR,
+                                        _Float16>::selectWinner(winner,
+                                                                candidates,
+                                                                typeA,
+                                                                a_ms_ks_lengths,
+                                                                a_ms_ks_strides,
+                                                                a_ms_ks_modes,
+                                                                typeB,
+                                                                b_ns_ks_lengths,
+                                                                b_ns_ks_strides,
+                                                                b_ns_ks_modes,
+                                                                typeD,
+                                                                d_ms_ns_lengths,
+                                                                d_ms_ns_strides,
+                                                                d_ms_ns_modes,
+                                                                typeE,
+                                                                e_ms_ns_lengths,
+                                                                e_ms_ns_strides,
+                                                                e_ms_ns_modes,
+                                                                workspaceSize);
         }
         else if(typeA == HIPTENSOR_R_16F && typeB == HIPTENSOR_R_16F && typeD == HIPTENSOR_R_16F
                 && typeE == HIPTENSOR_R_16F && computeType == HIPTENSOR_COMPUTE_DESC_32F)
@@ -2349,6 +2853,34 @@ namespace hiptensor
                                                              workspaceSize);
         }
         else if(typeA == HIPTENSOR_R_16BF && typeB == HIPTENSOR_R_16BF && typeD == NONE_TYPE
+                && typeE == HIPTENSOR_R_16BF && computeType == HIPTENSOR_COMPUTE_DESC_16BF)
+        {
+            return ActorCriticSelection<hip_bfloat16,
+                                        hip_bfloat16,
+                                        hip_bfloat16,
+                                        hip_bfloat16,
+                                        ContractionOpId_t::SCALE,
+                                        hip_bfloat16>::selectWinner(winner,
+                                                                    candidates,
+                                                                    typeA,
+                                                                    a_ms_ks_lengths,
+                                                                    a_ms_ks_strides,
+                                                                    a_ms_ks_modes,
+                                                                    typeB,
+                                                                    b_ns_ks_lengths,
+                                                                    b_ns_ks_strides,
+                                                                    b_ns_ks_modes,
+                                                                    typeD,
+                                                                    d_ms_ns_lengths,
+                                                                    d_ms_ns_strides,
+                                                                    d_ms_ns_modes,
+                                                                    typeE,
+                                                                    e_ms_ns_lengths,
+                                                                    e_ms_ns_strides,
+                                                                    e_ms_ns_modes,
+                                                                    workspaceSize);
+        }
+        else if(typeA == HIPTENSOR_R_16BF && typeB == HIPTENSOR_R_16BF && typeD == NONE_TYPE
                 && typeE == HIPTENSOR_R_16BF && computeType == HIPTENSOR_COMPUTE_DESC_32F)
         {
             return ActorCriticSelection<hip_bfloat16,
@@ -2375,6 +2907,34 @@ namespace hiptensor
                                                              e_ms_ns_strides,
                                                              e_ms_ns_modes,
                                                              workspaceSize);
+        }
+        else if(typeA == HIPTENSOR_R_16BF && typeB == HIPTENSOR_R_16BF && typeD == HIPTENSOR_R_16BF
+                && typeE == HIPTENSOR_R_16BF && computeType == HIPTENSOR_COMPUTE_DESC_16BF)
+        {
+            return ActorCriticSelection<hip_bfloat16,
+                                        hip_bfloat16,
+                                        hip_bfloat16,
+                                        hip_bfloat16,
+                                        ContractionOpId_t::BILINEAR,
+                                        hip_bfloat16>::selectWinner(winner,
+                                                                    candidates,
+                                                                    typeA,
+                                                                    a_ms_ks_lengths,
+                                                                    a_ms_ks_strides,
+                                                                    a_ms_ks_modes,
+                                                                    typeB,
+                                                                    b_ns_ks_lengths,
+                                                                    b_ns_ks_strides,
+                                                                    b_ns_ks_modes,
+                                                                    typeD,
+                                                                    d_ms_ns_lengths,
+                                                                    d_ms_ns_strides,
+                                                                    d_ms_ns_modes,
+                                                                    typeE,
+                                                                    e_ms_ns_lengths,
+                                                                    e_ms_ns_strides,
+                                                                    e_ms_ns_modes,
+                                                                    workspaceSize);
         }
         else if(typeA == HIPTENSOR_R_16BF && typeB == HIPTENSOR_R_16BF && typeD == HIPTENSOR_R_16BF
                 && typeE == HIPTENSOR_R_16BF && computeType == HIPTENSOR_COMPUTE_DESC_32F)
