@@ -35201,237 +35201,6 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_SS_BSS_BH_UserArgs_MT16x16x512_MIz_1vgYKvAsjv4ZAKiQKfN_dMbe2JfMi3c1QqR8VDapE=
-    BufferLoad: true
-    BufferStore: true
-    CUCount: null
-    CUOccupancy: -1
-    ClusterLocalRead: 0
-    CodeObjectVersion: '4'
-    ConvertAfterDS: false
-    CustomKernelName: ''
-    DebugStreamK: 0
-    DepthU: 512
-    DirectToLds: 0
-    DirectToLdsA: false
-    DirectToLdsB: false
-    DirectToVgprA: false
-    DirectToVgprB: false
-    DirectToVgprSparseMetadata: false
-    EdgeType: ShiftPtr
-    EnableF32XdlMathOp: false
-    EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
-    ExpertSchedulingMode: 0
-    ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
-    GlobalSplitU: 0
-    GlobalSplitUAlgorithm: MultipleBuffer
-    GlobalSplitUCoalesced: false
-    GlobalSplitUWorkGroupMappingRoundRobin: false
-    GlobalWriteVectorWidth: 1
-    GroupLoadStore: false
-    GuaranteeNoPartialA: false
-    GuaranteeNoPartialB: false
-    GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
-    InnerUnroll: 1
-    InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseUniversalArgs: true}
-    Kernel: true
-    KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_SS_BSS_BH_UserArgs_MT16x16x512_MI16x16x1_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LBSPPA256_LBSPPB256_LBSPPM0_LPA16_LPB16_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_NTn1_NTA3_NTB2_NTC1_NTD5_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW1_SK3_SKXCCM4_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_4
-    LDSTrInst: 1
-    LSCA: 16
-    LSCB: 16
-    LSPA: 64
-    LSPB: 64
-    LVCA: 4
-    LVCB: 4
-    LVPA: 16
-    LVPB: 16
-    LdsBlockSizePerPadA: 256
-    LdsBlockSizePerPadB: 256
-    LdsBlockSizePerPadMetadata: 0
-    LdsBytesNoAmax: 102400
-    LdsInitCVgprs: false
-    LdsNumBytes: 102400
-    LdsNumElementsAlignedA: 18432
-    LdsNumElementsAlignedB: 18432
-    LdsNumElementsAlignedMetadata: 0
-    LdsOffsetA: 0
-    LdsOffsetA_Blk: 65536
-    LdsOffsetB: 18432
-    LdsOffsetB_Blk: 83968
-    LdsOffsetBias: 0
-    LdsOffsetBiasGSU: 0
-    LdsOffsetBiasNonGSU: 0
-    LdsOffsetMetadata: 18432
-    LdsOffsetMetadata_Blk: 83968
-    LdsPadA: 16
-    LdsPadB: 16
-    LdsPadMetadata: 0
-    LocalReadVectorWidth: 8
-    LocalSplitU: 4
-    LocalSplitUReuseLDS: 1
-    LocalWritePerMfma: -1
-    LocalWriteUseSgprA: false
-    LocalWriteUseSgprB: false
-    LoopIters: 4
-    LoopUnroll: 128
-    MFMA_BF16_1K: false
-    MIArchVgpr: 0
-    MIBlock: [16, 16, 32, 1, 1, 1]
-    MIInputPerThread: 8
-    MIInputPerThreadA: 8
-    MIInputPerThreadB: 8
-    MIInputPerThreadMetadata: 8
-    MIOutputVectorWidth: 4
-    MIRegPerOut: 1
-    MIWaveGroup: [1, 1]
-    MIWaveTile: [1, 1]
-    MIWaveTileA: 1
-    MIWaveTileB: 1
-    MIWaveTileMetadata: 0
-    MacroTile0: 16
-    MacroTile1: 16
-    MacroTileA: 16
-    MacroTileB: 16
-    MagicDivAlg: 2
-    MathClocksUnrolledLoop: 0
-    MatrixInstB: 1
-    MatrixInstBM: 1
-    MatrixInstBN: 1
-    MatrixInstK: 32
-    MatrixInstM: 16
-    MatrixInstN: 16
-    MatrixInstruction: [16, 16, 32, 1]
-    MaxLDS: 163840
-    MaxOccupancy: 40
-    MbskPrefetchMethod: 0
-    MfmaInitCVgprs: false
-    NoLdsWriteCode: false
-    NoReject: false
-    NoTailLoop: false
-    NonDTLTailLoopA: false
-    NonDTLTailLoopB: false
-    NonTemporal: -1
-    NonTemporalA: 0
-    NonTemporalB: 0
-    NonTemporalC: 1
-    NonTemporalD: 5
-    NonTemporalE: 0
-    NonTemporalMetadata: 0
-    NonTemporalWS: 0
-    NumElementsPerBatchStore: 14
-    NumElementsPerThread: 1
-    NumGlobalWriteVectorsPerThread: 1
-    NumLoadsA: 8
-    NumLoadsB: 8
-    NumLoadsCoalescedA: 1
-    NumLoadsCoalescedB: 1
-    NumLoadsPerpendicularA: 8
-    NumLoadsPerpendicularB: 8
-    NumThreads: 256
-    NumWaveSplitK: 1
-    OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
-    PrefetchGlobalRead: 2
-    PrefetchLocalRead: 1
-    PreloadKernArgs: true
-    ScheduleGlobalRead: 1
-    ScheduleIterAlg: 3
-    ScheduleLocalWrite: 1
-    SolutionIndex: 152
-    SolutionNameMin: Cijk_Ailk_Bjlk_SS_BSS_BH_UserArgs_MT16x16x512_MI16x16x1_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA256_LBSPPB256_LBSPPM0_LPA16_LPB16_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_NTn1_NTA3_NTB2_NTC1_NTD5_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SU8_SUM1_SUS1024_SPO0_SRVW0_SSO1_SVW1_SK3_SKXCCM4_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_4_WGM0_WGMXCCn1_WGMXCCGn1
-    SourceSwap: 1
-    StaggerU: 8
-    StaggerUMapping: 1
-    StaggerUStride: 1024
-    StorePriorityOpt: 0
-    StoreRemapVectorWidth: 0
-    StoreSwapAddr: false
-    StoreSyncOpt: 1
-    StoreVectorWidth: 1
-    StreamK: 3
-    StreamKAtomic: 0
-    StreamKXCCMapping: 0
-    SubGroup0: 4
-    SubGroup1: 16
-    SubGroupA: 4
-    SubGroupB: 16
-    SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
-    ThreadTile: [1, 1]
-    ThreadTile0: 4
-    ThreadTile1: 1
-    ThreadTileA: 4
-    ThreadTileB: 1
-    TransposeLDS: 0
-    TransposeLDSMetadata: true
-    ULSGRODoubleG2L: 0
-    UnrollLoopSwapGlobalReadOrder: 0
-    UnrollMajorLDSA: 0
-    UnrollMajorLDSB: 0
-    UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 0
-    UseDot2F32XEmulation: true
-    UseDotInstruction: false
-    UseF32XEmulation: false
-    UseInstOffsetForGRO: 0
-    UsePLRPack: false
-    UseSgprForGRO: 0
-    Valid: true
-    VectorStore: -1
-    VectorWidthA: 1
-    VectorWidthB: 1
-    WaveSeparateGlobalReadA: 0
-    WaveSeparateGlobalReadB: 0
-    WaveSeparateGlobalReadMetadata: 0
-    WaveSplitK: false
-    WavefrontSize: 64
-    WorkGroup: [16, 4, 4]
-    WorkGroupMapping: 0
-    WorkGroupMappingXCC: -1
-    WorkGroupMappingXCCGroup: -1
-    WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
-    _DepthU: 512
-    _DepthUA: 512
-    _DepthUB: 512
-    _DepthUMetadata: 512
-    _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 0
-    _VectorStore: 1
-    _WorkspaceSizePerElemBias: 0
-    _WorkspaceSizePerElemC: 4
-    _staggerStrideShift: 0
-    enableGLTrA: false
-    enableGLTrB: false
-    enableLDSTrA: true
-    enableLDSTrB: true
-    reorderGRInstForDTVA: false
-    reorderGRInstForDTVB: false
-    tailLoopOptA: false
-    tailLoopOptB: false
-  - 1LDSBuffer: 0
-    ActivationAlt: false
-    ActivationFuncCall: false
-    ActivationFused: true
-    AssertAIGreaterThanEqual: -1
-    AssertAILessThanEqual: -1
-    AssertFree0ElementMultiple: 1
-    AssertFree1ElementMultiple: 1
-    AssertSummationElementMultiple: 1
-    AssignedDerivedParameters: true
-    AssignedProblemIndependentDerivedParameters: true
     BaseName: Cijk_Ailk_Bjlk_SS_BSS_BH_UserArgs_MT96x160x128_Mlo2f7z4U4ncGgNuqu1ZBEecU-BU4bGzFrN2bDcXOTBU=
     BufferLoad: true
     BufferStore: true
@@ -35579,7 +35348,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 153
+    SolutionIndex: 152
     SolutionNameMin: Cijk_Ailk_Bjlk_SS_BSS_BH_UserArgs_MT96x160x128_MI16x16x1_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA1536_LBSPPB2560_LBSPPM0_LPA16_LPB16_LPM0_LRVW8_LWPMn1_MIAV0_MIWT3_5_MO40_NTn1_NTA1_NTB1_NTC1_NTD6_NTM0_NEPBS2_NLCA3_NLCB5_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SU0_SUM1_SUS256_SPO0_SRVW0_SSO0_SVW1_SK3_SKXCCM7_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM0_WGMXCCn16_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 0
@@ -35810,7 +35579,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 154
+    SolutionIndex: 153
     SolutionNameMin: Cijk_Ailk_Bjlk_SS_BSS_BH_UserArgs_MT96x128x128_MI16x16x1_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA1536_LBSPPB2048_LBSPPM0_LPA16_LPB16_LPM0_LRVW8_LWPMn1_MIAV0_MIWT6_2_MO40_NTn1_NTA4_NTB0_NTC4_NTD1_NTM0_NEPBS4_NLCA3_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SU8_SUM1_SUS256_SPO0_SRVW0_SSO0_SVW1_SK3_SKXCCM4_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGRO1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM02_WGMXCCn16_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
@@ -35860,7 +35629,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 02
+    WorkGroupMapping: 0
     WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -36041,7 +35810,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 155
+    SolutionIndex: 154
     SolutionNameMin: Cijk_Ailk_Bjlk_SS_BSS_BH_UserArgs_MT96x48x128_MI16x16x1_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA1536_LBSPPB768_LBSPPM0_LPA16_LPB16_LPM0_LRVW8_LWPMn1_MIAV0_MIWT3_3_MO40_NTn1_NTA4_NTB0_NTC6_NTD0_NTM0_NEPBS12_NLCA3_NLCB3_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SU16_SUM1_SUS256_SPO1_SRVW0_SSO0_SVW1_SK3_SKXCCM8_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGRO1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_4_1_WGM0_WGMXCCn12_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 16
@@ -36272,7 +36041,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 156
+    SolutionIndex: 155
     SolutionNameMin: Cijk_Ailk_Bjlk_SS_BSS_BH_UserArgs_MT256x256x32_MI32x32x1_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT4_4_MO40_NTn1_NTA4_NTB3_NTC4_NTD3_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SU16_SUM1_SUS64_SPO0_SRVW0_SSO0_SVW4_SK3_SKXCCM0_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG64_4_1_WGM08_WGMXCCn1_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 16
@@ -36322,7 +36091,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 08
+    WorkGroupMapping: 0
     WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
