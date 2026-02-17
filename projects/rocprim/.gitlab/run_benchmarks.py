@@ -36,7 +36,7 @@ def run_benchmarks(
     csv_out_dir,
     benchmark_executable_filter,
     skip_gathered,
-    bytes,
+    size,
     hot,
     seed,
     filter,
@@ -116,8 +116,8 @@ def run_benchmarks(
         args = [benchmark_path]
         args += ["--json-out", json_out_path]
 
-        if bytes:
-            args += ["--bytes", bytes]
+        if size:
+            args += ["--size", size]
         if hot:
             args += ["--hot"]
         if seed:
@@ -212,8 +212,8 @@ def main():
 
     # primbench arguments
     parser.add_argument(
-        "--bytes",
-        help="Overrides the number of input bytes passed to `primbench::executor`",
+        "--size",
+        help="Input size. Benchmarks decide what this represents, but it is commonly the number of bytes or items",
         default="",
         required=False,
     )
@@ -337,7 +337,7 @@ def main():
         args.csv_out_dir,
         args.benchmark_executable_filter,
         args.skip_gathered,
-        args.bytes,
+        args.size,
         args.hot,
         args.seed,
         args.filter,
