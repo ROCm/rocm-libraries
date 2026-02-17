@@ -28,6 +28,7 @@
 #include "TestContext.hpp"
 #include "TestKernels.hpp"
 #include "rocRoller/ExecutableKernel.hpp"
+#include "rocRoller/Utilities/Logging.hpp"
 
 #include <common/TestValues.hpp>
 #include <common/Utilities.hpp>
@@ -67,12 +68,12 @@ namespace ArgumentLoaderGPUTest
 
         struct ScalarArgument
         {
-            std::string               name;
-            DataType                  type;
-            Operations::OperationTag  valueTag;
-            CommandArgumentPtr        valueArg;
-            Operations::OperationTag  pointerTag;
-            CommandArgumentPtr        pointerArg;
+            std::string              name;
+            DataType                 type;
+            Operations::OperationTag valueTag;
+            CommandArgumentPtr       valueArg;
+            Operations::OperationTag pointerTag;
+            CommandArgumentPtr       pointerArg;
         };
 
         /**
@@ -93,9 +94,23 @@ namespace ArgumentLoaderGPUTest
                                      DataType             type,
                                      ResultExpressionFunc expression);
 
-        void addScalarArgument(std::string               name,
-                               DataType                  type);
+        void                               addScalarArgument(std::string name, DataType type);
         std::vector<ScalarArgument> const& scalarArgs() const;
+
+        struct ExpectedKernelStatistics
+        {
+            std::map<int, int> scalarLoadsByDWordCount;
+            int                numWaits = 0;
+
+            void combine(ExpectedKernelStatistics const& other)
+            {
+                for(auto const& [width, count] : other.scalarLoadsByDWordCount)
+                    scalarLoadsByDWordCount[width] += count;
+                numWaits += other.numWaits;
+            }
+        };
+
+        ExpectedKernelStatistics kernelStatistics() const;
 
         void operator()(std::vector<std::pair<CommandArgumentValue, std::shared_ptr<void>>> const&
                                                   scalarArgsValues,
@@ -216,6 +231,36 @@ namespace ArgumentLoaderGPUTest
 
             REQUIRE_NOTHROW(kernel.getExecutableKernel());
 
+            auto output        = context.output();
+            auto expectedStats = kernel.kernelStatistics();
+
+            auto countSubstr = [](std::string const& str, std::string const& substr) -> int {
+                int    count = 0;
+                size_t pos   = 0;
+                while((pos = str.find(substr, pos)) != std::string::npos)
+                {
+                    count++;
+                    pos += substr.length();
+                }
+                return count;
+            };
+
+            if(!doShuffle)
+            {
+                // Shuffling makes the number of waitcnt instructions very hard to predict.
+                CHECK(countSubstr(output, "s_waitcnt") == expectedStats.numWaits);
+            }
+
+            for(auto const& [width, count] : expectedStats.scalarLoadsByDWordCount)
+            {
+                std::string inst = "s_load_dword";
+                if(width > 1)
+                    inst += fmt::format("x{}", width);
+                inst += " ";
+                CAPTURE(width, inst);
+                CHECK(countSubstr(output, inst) == count);
+            }
+
             std::map<DataType, std::vector<CommandArgumentValue>> values;
             auto getRandomValue = [&](DataType dataType) -> CommandArgumentValue {
                 auto iter = values.find(dataType);
@@ -290,239 +335,317 @@ namespace ArgumentLoaderGPUTest
     }
 
     ArgumentLoaderExprKernel::ArgumentLoaderExprKernel(ContextPtr context, CommandPtr command)
-            : AssemblyTestKernel(context)
-            , m_command(command)
+        : AssemblyTestKernel(context)
+        , m_command(command)
+    {
+    }
+
+    void ArgumentLoaderExprKernel::setArgumentOptions(int                   numPreloaded,
+                                                      std::optional<size_t> shuffleSeed)
+    {
+        m_shuffleSeed  = shuffleSeed;
+        m_numPreloaded = numPreloaded;
+    }
+
+    void ArgumentLoaderExprKernel::setKernelDimensions(int dims)
+    {
+        m_kernelDimensions = dims;
+    }
+    void ArgumentLoaderExprKernel::setNumWorkgroups(std::array<unsigned int, 3> numWorkgroups)
+    {
+        m_numWorkgroups = numWorkgroups;
+    }
+
+    std::array<unsigned int, 3> const& ArgumentLoaderExprKernel::numWorkgroups() const
+    {
+        return m_numWorkgroups;
+    }
+    std::vector<ArgumentLoaderExprKernel::ScalarArgument> const&
+        ArgumentLoaderExprKernel::scalarArgs() const
+    {
+        return m_scalarArgs;
+    }
+
+    void ArgumentLoaderExprKernel::setVectorResultArgument(std::string          name,
+                                                           DataType             type,
+                                                           ResultExpressionFunc expression)
+    {
+        m_vectorResultArgName = std::move(name);
+        m_vectorResultArgType = type;
+        m_vectorResultTag     = m_command->allocateTag();
+        m_vectorResultArg
+            = m_command->allocateArgument(VariableType{type, PointerType::PointerGlobal},
+                                          m_vectorResultTag,
+                                          ArgumentType::Value,
+                                          DataDirection::WriteOnly,
+                                          m_vectorResultArgName);
+        m_resultExpressionFunc = std::move(expression);
+    }
+
+    void ArgumentLoaderExprKernel::addScalarArgument(std::string name, DataType type)
+    {
+        auto pointerTag = m_command->allocateTag();
+        auto pointerArg
+            = m_command->allocateArgument(VariableType{type, PointerType::PointerGlobal},
+                                          pointerTag,
+                                          ArgumentType::Value,
+                                          DataDirection::WriteOnly,
+                                          name + "_pointer");
+
+        auto valueTag = m_command->allocateTag();
+        auto valueArg = m_command->allocateArgument(VariableType{type, PointerType::Value},
+                                                    valueTag,
+                                                    ArgumentType::Value,
+                                                    DataDirection::ReadOnly,
+                                                    name + "_value");
+
+        m_scalarArgs.push_back({std::move(name), type, valueTag, valueArg, pointerTag, pointerArg});
+    }
+
+    void ArgumentLoaderExprKernel::operator()(
+        std::vector<std::pair<CommandArgumentValue, std::shared_ptr<void>>> const& scalarArgsValues,
+        std::shared_ptr<uint32_t>                                                  resultArray)
+    {
+        auto commandArgs = m_command->createArguments();
+
+        KernelInvocation invocation;
+        invocation.workitemCount = m_numWorkgroups;
+
+        REQUIRE(scalarArgsValues.size() == m_scalarArgs.size());
+
+        for(int i = 0; i < scalarArgsValues.size(); i++)
         {
+            auto const& [argValue, argValuePtr] = scalarArgsValues[i];
+            auto const& scalarArg               = m_scalarArgs[i];
+            commandArgs.setArgument(scalarArg.valueTag, ArgumentType::Value, argValue);
+            auto visitor = [&](auto value) {
+                using T = typename std::decay_t<decltype(value)>;
+                if constexpr(CCommandArgumentValue<T*>)
+                {
+                    auto ptr = std::reinterpret_pointer_cast<T>(argValuePtr);
+                    commandArgs.setArgument(scalarArg.pointerTag, ArgumentType::Value, ptr.get());
+                }
+                else
+                {
+                    throw std::runtime_error("Unsupported command argument value type");
+                }
+            };
+
+            std::visit(visitor, argValue);
         }
 
-        void ArgumentLoaderExprKernel::setArgumentOptions(int numPreloaded, std::optional<size_t> shuffleSeed)
+        if(m_resultExpressionFunc)
         {
-            m_shuffleSeed  = shuffleSeed;
-            m_numPreloaded = numPreloaded;
+            commandArgs.setArgument(m_vectorResultTag, ArgumentType::Value, resultArray.get());
         }
 
-        void ArgumentLoaderExprKernel::setKernelDimensions(int dims)
-        {
-            m_kernelDimensions = dims;
-        }
-        void ArgumentLoaderExprKernel::setNumWorkgroups(std::array<unsigned int, 3> numWorkgroups)
-        {
-            m_numWorkgroups = numWorkgroups;
-        }
+        KernelArguments kernelArgs(true);
 
-        std::array<unsigned int, 3> const& ArgumentLoaderExprKernel::numWorkgroups() const
+        for(auto karg : m_context->kernel()->arguments())
         {
-            return m_numWorkgroups;
-        }
-        std::vector<ArgumentLoaderExprKernel::ScalarArgument> const& ArgumentLoaderExprKernel::scalarArgs() const
-        {
-            return m_scalarArgs;
+            auto value = Expression::evaluate(karg.expression, commandArgs.runtimeArguments());
+            kernelArgs.append(karg.name, value);
         }
 
-        void ArgumentLoaderExprKernel::setVectorResultArgument(std::string          name,
-                                     DataType             type,
-                                     ResultExpressionFunc expression)
+        AssemblyTestKernel::operator()(invocation, kernelArgs);
+    }
+
+    void ArgumentLoaderExprKernel::generate()
+    {
+        auto k = m_context->kernel();
+
+        k->setKernelDimensions(m_kernelDimensions);
+
+        for(auto const& arg : m_scalarArgs)
         {
-            m_vectorResultArgName = std::move(name);
-            m_vectorResultArgType = type;
-            m_vectorResultTag     = m_command->allocateTag();
-            m_vectorResultArg
-                = m_command->allocateArgument(VariableType{type, PointerType::PointerGlobal},
-                                              m_vectorResultTag,
-                                              ArgumentType::Value,
-                                              DataDirection::WriteOnly,
-                                              m_vectorResultArgName);
-            m_resultExpressionFunc = std::move(expression);
+            k->addArgument({arg.name + "_pointer",
+                            {arg.type, PointerType::PointerGlobal},
+                            DataDirection::WriteOnly,
+                            std::make_shared<Expression::Expression>(arg.pointerArg)});
+            k->addArgument({arg.name + "_value",
+                            arg.type,
+                            DataDirection::ReadOnly,
+                            std::make_shared<Expression::Expression>(arg.valueArg)});
+        }
+        if(m_vectorResultArg)
+        {
+            k->addArgument({m_vectorResultArgName,
+                            {m_vectorResultArgType, PointerType::PointerGlobal},
+                            DataDirection::WriteOnly,
+                            std::make_shared<Expression::Expression>(m_vectorResultArg)});
         }
 
-        void ArgumentLoaderExprKernel::addScalarArgument(std::string               name,
-                               DataType                  type)
+        if(m_shuffleSeed)
         {
-            auto pointerTag = m_command->allocateTag();
-            auto pointerArg
-                = m_command->allocateArgument(VariableType{type, PointerType::PointerGlobal},
-                                              pointerTag,
-                                              ArgumentType::Value,
-                                              DataDirection::WriteOnly,
-                                              name + "_pointer");
+            auto         kargs = k->resetArguments();
+            std::mt19937 rng(*m_shuffleSeed);
+            std::shuffle(kargs.begin(), kargs.end(), rng);
 
-            auto valueTag = m_command->allocateTag();
-            auto valueArg = m_command->allocateArgument(VariableType{type, PointerType::Value},
-                                                        valueTag,
-                                                        ArgumentType::Value,
-                                                        DataDirection::ReadOnly,
-                                                        name + "_value");
-
-            m_scalarArgs.push_back({std::move(name),
-                                    type,
-                                    valueTag,
-                                    valueArg,
-                                    pointerTag,
-                                    pointerArg});
-        }
-
-        void ArgumentLoaderExprKernel::operator()(std::vector<std::pair<CommandArgumentValue, std::shared_ptr<void>>> const&
-                                                  scalarArgsValues,
-                        std::shared_ptr<uint32_t> resultArray)
-        {
-            auto commandArgs = m_command->createArguments();
-
-            KernelInvocation invocation;
-            invocation.workitemCount = m_numWorkgroups;
-
-            REQUIRE(scalarArgsValues.size() == m_scalarArgs.size());
-
-            for(int i = 0; i < scalarArgsValues.size(); i++)
+            for(auto& arg : kargs)
             {
-                auto const& [argValue, argValuePtr] = scalarArgsValues[i];
-                auto const& scalarArg               = m_scalarArgs[i];
-                commandArgs.setArgument(scalarArg.valueTag, ArgumentType::Value, argValue);
-                auto visitor = [&](auto value) {
-                    using T = typename std::decay_t<decltype(value)>;
-                    if constexpr(CCommandArgumentValue<T*>)
-                    {
-                        auto ptr = std::reinterpret_pointer_cast<T>(argValuePtr);
-                        commandArgs.setArgument(
-                            scalarArg.pointerTag, ArgumentType::Value, ptr.get());
-                    }
-                    else
-                    {
-                        throw std::runtime_error("Unsupported command argument value type");
-                    }
-                };
+                arg.offset = -1;
+                k->addArgument(std::move(arg));
+            }
+        }
 
-                std::visit(visitor, argValue);
+        if(m_numPreloaded > 0)
+        {
+            auto kargs = k->resetArguments();
+
+            int count = 0;
+
+            for(auto& arg : kargs)
+            {
+                arg.preloaded = arg.offset + arg.size <= m_numPreloaded;
+
+                arg.offset = -1;
+                k->addArgument(std::move(arg));
+                count++;
+            }
+        }
+
+        auto kb = [&]() -> Generator<Instruction> {
+            for(auto const& arg : m_scalarArgs)
+            {
+                auto               typeInfo = DataTypeInfo::Get(arg.type);
+                Register::ValuePtr argValue, argPointer;
+                co_yield m_context->argLoader()->getValue(arg.name + "_value", argValue);
+                co_yield m_context->argLoader()->getValue(arg.name + "_pointer", argPointer);
+
+                co_yield m_context->mem()->storeScalar(
+                    argPointer, argValue, 0, typeInfo.elementBytes);
             }
 
             if(m_resultExpressionFunc)
             {
-                commandArgs.setArgument(m_vectorResultTag, ArgumentType::Value, resultArray.get());
+                co_yield Instruction::Comment("Result expression");
+                auto               resultExpression = m_resultExpressionFunc(k->workgroupIndex());
+                Register::ValuePtr resultPointer,
+                    resultValue = Register::Value::Placeholder(
+                        m_context, Register::Type::Scalar, m_vectorResultArgType, 1);
+                auto typeInfo = DataTypeInfo::Get(m_vectorResultArgType);
+
+                co_yield Expression::generate(resultValue, resultExpression, m_context);
+
+                co_yield m_context->argLoader()->getValue(m_vectorResultArgName, resultPointer);
+
+                auto resultIndexExpr = k->workgroupIndex()[0]->expression();
+                int  stride          = 1;
+                for(int i = 1; i < m_kernelDimensions; i++)
+                {
+                    stride *= m_numWorkgroups[i - 1];
+                    resultIndexExpr
+                        = resultIndexExpr
+                          + k->workgroupIndex()[i]->expression() * Expression::literal(stride);
+                }
+                resultIndexExpr = resultIndexExpr * Expression::literal(typeInfo.elementBytes);
+
+                Register::ValuePtr storePointer;
+
+                co_yield Expression::generate(
+                    storePointer, resultPointer->expression() + resultIndexExpr, m_context);
+
+                co_yield m_context->mem()->storeScalar(
+                    storePointer, resultValue, 0, typeInfo.elementBytes);
             }
-
-            KernelArguments kernelArgs(true);
-
-            for(auto karg : m_context->kernel()->arguments())
+            else
             {
-                auto value = Expression::evaluate(karg.expression, commandArgs.runtimeArguments());
-                kernelArgs.append(karg.name, value);
+                co_yield Instruction::Comment("No result expression");
             }
 
-            AssemblyTestKernel::operator()(invocation, kernelArgs);
-        }
+            co_yield_(Instruction("s_dcache_wb", {}, {}, {}, "Flush data cache"));
 
-        void ArgumentLoaderExprKernel::generate()
+            co_yield_(Instruction("s_endpgm", {}, {}, {}, "End program"));
+        };
+
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+        m_context->schedule(kb());
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+    }
+
+        ArgumentLoaderExprKernel::ExpectedKernelStatistics ArgumentLoaderExprKernel::kernelStatistics() const
         {
-            auto k = m_context->kernel();
+            ExpectedKernelStatistics stats;
 
-            k->setKernelDimensions(m_kernelDimensions);
+            const auto widths = {16, 8, 4, 2, 1};
 
-            for(auto const& arg : m_scalarArgs)
+            for(auto width : widths)
+                stats.scalarLoadsByDWordCount[width] = 0;
+
+            auto lazyLoad = m_context->kernelOptions()->lazyLoadKernelArguments;
+            Log::debug("LazyLoad: {}", lazyLoad);
+
+            int eagerBegin = 0, eagerEnd = 0;
+
+            for(auto const& karg : m_context->kernel()->arguments())
             {
-                k->addArgument({arg.name + "_pointer",
-                                {arg.type, PointerType::PointerGlobal},
-                                DataDirection::WriteOnly,
-                                std::make_shared<Expression::Expression>(arg.pointerArg)});
-                k->addArgument({arg.name + "_value",
-                                arg.type,
-                                DataDirection::ReadOnly,
-                                std::make_shared<Expression::Expression>(arg.valueArg)});
-            }
-            if(m_vectorResultArg)
-            {
-                k->addArgument({m_vectorResultArgName,
-                                {m_vectorResultArgType, PointerType::PointerGlobal},
-                                DataDirection::WriteOnly,
-                                std::make_shared<Expression::Expression>(m_vectorResultArg)});
-            }
+                if(karg.preloaded)
+                    eagerBegin = karg.offset + karg.size;
 
-            if(m_shuffleSeed)
-            {
-                auto         kargs = k->resetArguments();
-                std::mt19937 rng(*m_shuffleSeed);
-                std::shuffle(kargs.begin(), kargs.end(), rng);
+                if(!karg.preloaded && !lazyLoad)
+                    eagerEnd = karg.offset + karg.size;
 
-                for(auto& arg : kargs)
+                if(lazyLoad && !karg.preloaded)
                 {
-                    arg.offset = -1;
-                    k->addArgument(std::move(arg));
-                }
-            }
-
-            if(m_numPreloaded > 0)
-            {
-                auto kargs = k->resetArguments();
-
-                int count = 0;
-
-                for(auto& arg : kargs)
-                {
-                    arg.preloaded = arg.offset + arg.size <= m_numPreloaded;
-
-                    arg.offset = -1;
-                    k->addArgument(std::move(arg));
-                    count++;
-                }
-            }
-
-            auto kb = [&]() -> Generator<Instruction> {
-                for(auto const& arg : m_scalarArgs)
-                {
-                    auto               typeInfo = DataTypeInfo::Get(arg.type);
-                    Register::ValuePtr argValue, argPointer;
-                    co_yield m_context->argLoader()->getValue(arg.name + "_value", argValue);
-                    co_yield m_context->argLoader()->getValue(arg.name + "_pointer", argPointer);
-
-                    co_yield m_context->mem()->storeScalar(
-                        argPointer, argValue, 0, typeInfo.elementBytes);
-                }
-
-                if(m_resultExpressionFunc)
-                {
-                    co_yield Instruction::Comment("Result expression");
-                    auto resultExpression = m_resultExpressionFunc(k->workgroupIndex());
-                    Register::ValuePtr resultPointer,
-                        resultValue = Register::Value::Placeholder(
-                            m_context, Register::Type::Scalar, m_vectorResultArgType, 1);
-                    auto typeInfo = DataTypeInfo::Get(m_vectorResultArgType);
-
-                    co_yield Expression::generate(resultValue, resultExpression, m_context);
-
-                    co_yield m_context->argLoader()->getValue(m_vectorResultArgName, resultPointer);
-
-                    auto resultIndexExpr = k->workgroupIndex()[0]->expression();
-                    int  stride          = 1;
-                    for(int i = 1; i < m_kernelDimensions; i++)
+                    stats.numWaits++;
+                    if(karg.size == 4)
                     {
-                        stride *= m_numWorkgroups[i - 1];
-                        resultIndexExpr
-                            = resultIndexExpr
-                              + k->workgroupIndex()[i]->expression() * Expression::literal(stride);
+                        stats.scalarLoadsByDWordCount[1]++;
                     }
-                    resultIndexExpr = resultIndexExpr * Expression::literal(typeInfo.elementBytes);
-
-                    Register::ValuePtr storePointer;
-
-                    co_yield Expression::generate(
-                        storePointer, resultPointer->expression() + resultIndexExpr, m_context);
-
-                    co_yield m_context->mem()->storeScalar(
-                        storePointer, resultValue, 0, typeInfo.elementBytes);
+                    else if(karg.size == 8)
+                    {
+                        stats.scalarLoadsByDWordCount[2]++;
+                    }
+                    else
+                    {
+                        FAIL("Unsupported argument size: " + std::to_string(karg.size));
+                    }
                 }
-                else
+            }
+
+            if(lazyLoad && stats.numWaits > 0)
+                stats.numWaits = CeilDivide(stats.numWaits, 2);
+
+            if(!lazyLoad)
+            {
+                ExpectedKernelStatistics eagerStats;
+
+                int numEagerBytes = eagerEnd - eagerBegin;
+
+                Log::debug("numEagerBytes: {}", numEagerBytes);
+                if(numEagerBytes > 0)
+                    eagerStats.numWaits++;
+
+                int numLoadedBytes = 0;
+
+                for(auto widthIter = widths.begin();
+                    numEagerBytes > numLoadedBytes && widthIter != widths.end();
+                    ++widthIter)
                 {
-                    co_yield Instruction::Comment("No result expression");
+                    auto widthBytes      = *widthIter * 4;
+                    auto numInstructions = (numEagerBytes - numLoadedBytes) / widthBytes;
+
+                    eagerStats.scalarLoadsByDWordCount[*widthIter] += numInstructions;
+
+                    numLoadedBytes += numInstructions * widthBytes;
                 }
 
-                co_yield_(Instruction("s_dcache_wb", {}, {}, {}, "Flush data cache"));
+                if(numEagerBytes > numLoadedBytes)
+                {
+                    eagerStats.scalarLoadsByDWordCount[1]++;
+                }
 
-                co_yield_(Instruction("s_endpgm", {}, {}, {}, "End program"));
-            };
+                Log::debug("numEagerBytes={}, numLoadedBytes={}, eagerBegin={}, eagerEnd={}",
+                           numEagerBytes,
+                           numLoadedBytes,
+                           eagerBegin,
+                           eagerEnd);
+                stats.combine(eagerStats);
+            }
 
-            m_context->schedule(k->preamble());
-            m_context->schedule(k->prolog());
-            m_context->schedule(kb());
-            m_context->schedule(k->postamble());
-            m_context->schedule(k->amdgpu_metadata());
+            return stats;
         }
 
 }

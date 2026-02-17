@@ -116,11 +116,14 @@ namespace rocRoller
 
         if(value == nullptr || value->registerCount() < totalRegisters)
         {
+            auto options = Register::AllocationOptions::FullyContiguous();
+            if(sizeBytes > 8)
+                options.alignment = 4;
             value = Register::Value::Placeholder(m_context.lock(),
                                                  Register::Type::Scalar,
                                                  DataType::Raw32,
                                                  totalRegisters,
-                                                 Register::AllocationOptions::FullyContiguous());
+                                                 options);
             value->setName(
                 fmt::format("Manually loaded argument block for range {}-{}", offset, endOffset));
         }
@@ -240,8 +243,7 @@ namespace rocRoller
                             "No bubbles allowed in either segment!",
                             ShowValue(offset),
                             ShowValue(arg.size),
-                            ShowValue(startedNonPreloaded)
-                        );
+                            ShowValue(startedNonPreloaded));
                 arg.offset = offset;
             }
 
