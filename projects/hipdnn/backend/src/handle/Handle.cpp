@@ -27,6 +27,11 @@ std::shared_ptr<EnginePluginResourceManager> hipdnnHandle::getPluginResourceMana
     return _pluginResourceManager;
 }
 
+std::vector<EngineInfo> hipdnnHandle::getEngineInfos() const
+{
+    return _pluginResourceManager->getEngineInfos();
+}
+
 std::string hipdnnHandle::toString() const
 {
     std::string str = "hipdnnHandle: {";

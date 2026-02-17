@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <mutex>
 #include <vector>
 
@@ -64,6 +65,48 @@ std::set<std::filesystem::path> EnginePluginResourceManager::getPluginPaths()
 {
     std::lock_guard<std::mutex> lock(pluginMutex);
     return pluginConfig.paths;
+}
+
+std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
+{
+    std::vector<EngineInfo> infos;
+    if(!_pm)
+    {
+        return infos;
+    }
+
+    const auto& plugins = _pm->getPlugins();
+    for(const auto& plugin : plugins)
+    {
+        auto pluginVersion = std::string(plugin->version());
+        auto pluginType = std::string(::toString(plugin->type()));
+
+        auto engineIds = plugin->getAllEngineIds();
+        for(const auto id : engineIds)
+        {
+            EngineInfo info;
+            info.engineId = id;
+            info.version = pluginVersion;
+            info.type = pluginType;
+
+            try
+            {
+                info.name = hipdnn_data_sdk::utilities::getEngineNameFromId(id);
+            }
+            catch(const std::out_of_range&)
+            {
+                info.name = hipdnn_data_sdk::utilities::formatEngineIdHex(id);
+            }
+
+            infos.push_back(std::move(info));
+        }
+    }
+
+    std::sort(infos.begin(), infos.end(), [](const EngineInfo& a, const EngineInfo& b) {
+        return a.name < b.name;
+    });
+
+    return infos;
 }
 
 void EnginePluginResourceManager::getLoadedPluginFiles(size_t* numPlugins,

@@ -363,6 +363,57 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                                                                           char** pluginPaths,
                                                                           size_t* maxStringLen);
 
+/**
+ * @brief Gets the number of loaded engines for a given handle.
+ *
+ * @param[in]  handle       A valid hipDNN handle.
+ * @param[out] numEngines   Pointer where the engine count will be stored.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM         Invalid handle or null pointer.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR    Internal error.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext(hipdnnHandle_t handle,
+                                                              size_t* numEngines);
+
+/**
+ * @brief Gets information about a loaded engine by index.
+ *
+ * Retrieves the id, name, version, and type of the engine at the given index.
+ * Valid indices are 0 to numEngines-1 as returned by hipdnnGetEngineCount_ext.
+ * Engines are sorted alphabetically by name.
+ *
+ * This function must be called twice per engine:
+ * 1. First call: Pass string buffers as `nullptr` to query required sizes.
+ *    - Sets `nameLen`, `versionLen`, and `typeLen` to the required buffer sizes
+ *      (including null terminator).
+ *
+ * 2. Second call: Pass allocated buffers to retrieve the actual strings.
+ *
+ * @param[in]     handle       A valid hipDNN handle.
+ * @param[in]     engineIndex  Zero-based index of the engine to query.
+ * @param[out]    engineId     Pointer where the engine ID will be stored, or `nullptr` to skip.
+ * @param[out]    name         Buffer for the engine name, or `nullptr` to query size.
+ * @param[in,out] nameLen      Pointer to buffer size; updated with required size.
+ * @param[out]    version      Buffer for the engine version, or `nullptr` to query size.
+ * @param[in,out] versionLen   Pointer to buffer size; updated with required size.
+ * @param[out]    type         Buffer for the engine type string, or `nullptr` to query size.
+ * @param[in,out] typeLen      Pointer to buffer size; updated with required size.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM         Invalid handle, null pointers, or out-of-range index.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR    Internal error.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t handle,
+                                                             size_t engineIndex,
+                                                             int64_t* engineId,
+                                                             char* name,
+                                                             size_t* nameLen,
+                                                             char* version,
+                                                             size_t* versionLen,
+                                                             char* type,
+                                                             size_t* typeLen);
+
 #ifdef __cplusplus
 }
 #endif

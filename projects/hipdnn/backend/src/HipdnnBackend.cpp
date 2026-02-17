@@ -354,3 +354,96 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                         *maxStringLen);
     });
 }
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext(hipdnnHandle_t handle,
+                                                              size_t* numEngines)
+{
+    LOG_API_ENTRY("handle={:p}, numEngines_ptr={:p}",
+                  static_cast<void*>(handle),
+                  static_cast<void*>(numEngines));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        throwIfNull(handle);
+        throwIfNull(numEngines);
+
+        auto infos = handle->getEngineInfos();
+        *numEngines = infos.size();
+
+        LOG_API_SUCCESS(apiName, "retrieved_numEngines={}", *numEngines);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t handle,
+                                                             size_t engineIndex,
+                                                             int64_t* engineId,
+                                                             char* name,
+                                                             size_t* nameLen,
+                                                             char* version,
+                                                             size_t* versionLen,
+                                                             char* type,
+                                                             size_t* typeLen)
+{
+    LOG_API_ENTRY("handle={:p}, engineIndex={}, engineId_ptr={:p}, name_ptr={:p}, "
+                  "version_ptr={:p}, type_ptr={:p}",
+                  static_cast<void*>(handle),
+                  engineIndex,
+                  static_cast<void*>(engineId),
+                  static_cast<void*>(name),
+                  static_cast<void*>(version),
+                  static_cast<void*>(type));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        throwIfNull(handle);
+        throwIfNull(nameLen);
+        throwIfNull(versionLen);
+        throwIfNull(typeLen);
+
+        auto infos = handle->getEngineInfos();
+        if(engineIndex >= infos.size())
+        {
+            throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                                  "Engine index " + std::to_string(engineIndex) + " out of range ("
+                                      + std::to_string(infos.size()) + " engines loaded).");
+        }
+
+        const auto& info = infos[engineIndex];
+
+        if(engineId != nullptr)
+        {
+            *engineId = info.engineId;
+        }
+
+        size_t requiredNameLen = info.name.size() + 1;
+        size_t requiredVersionLen = info.version.size() + 1;
+        size_t requiredTypeLen = info.type.size() + 1;
+
+        if(name == nullptr || version == nullptr || type == nullptr)
+        {
+            *nameLen = requiredNameLen;
+            *versionLen = requiredVersionLen;
+            *typeLen = requiredTypeLen;
+            return;
+        }
+
+        if(*nameLen < requiredNameLen || *versionLen < requiredVersionLen
+           || *typeLen < requiredTypeLen)
+        {
+            throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Insufficient buffer space provided.");
+        }
+
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            name, info.name.c_str(), *nameLen);
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            version, info.version.c_str(), *versionLen);
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            type, info.type.c_str(), *typeLen);
+
+        LOG_API_SUCCESS(apiName,
+                        "engine[{}]: engineId={}, name={}, version={}, type={}",
+                        engineIndex,
+                        info.engineId,
+                        info.name,
+                        info.version,
+                        info.type);
+    });
+}

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <memory>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -31,6 +32,14 @@ class EngineDetailsWrapper;
 class EngineExecutionContextWrapper;
 class EnginePlugin;
 class EnginePluginManager;
+
+struct EngineInfo
+{
+    std::string name;
+    int64_t engineId;
+    std::string version;
+    std::string type;
+};
 
 class EnginePluginResourceManager
 {
@@ -80,6 +89,8 @@ public:
                                int64_t engineId,
                                const hipdnnPluginConstData_t* engineConfig,
                                const GraphDescriptor* graphDesc);
+
+    virtual std::vector<EngineInfo> getEngineInfos() const;
 
     virtual void
         getLoadedPluginFiles(size_t* numPlugins, char** pluginPaths, size_t* maxStringLen) const;
