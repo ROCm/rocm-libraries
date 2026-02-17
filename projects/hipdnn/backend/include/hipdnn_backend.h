@@ -345,7 +345,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
  * hipdnnSetEnginePluginPaths_ext is called. This avoids expensive plugin reloading when
  * handles are frequently created and destroyed.
  *
- * This function can be called at any time. When switching from lazy to eager mode while
+ * This function can be called at any time. When switching from lazy to eager mode (HIPDNN_PLUGIN_UNLOAD_EAGER) while
  * no handles exist, plugins will be unloaded immediately.
  *
  * @param[in] unloadingMode  Specifies when plugins should be unloaded from memory.
