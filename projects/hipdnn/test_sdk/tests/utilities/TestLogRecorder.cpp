@@ -6,6 +6,9 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
+#include <array>
+#include <sstream>
+
 using namespace hipdnn_test_sdk::utilities;
 
 class TestLogRecorder : public ::testing::Test
@@ -291,6 +294,28 @@ TEST_F(TestLogRecorder, GetRecordedLogsAsStringMaxLogsGreaterThanCountShowsAll)
     EXPECT_EQ(output.find("Skipped"), std::string::npos);
 }
 
+TEST_F(TestLogRecorder, GetRecordedLogsAsStringFormatsSeverities)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "info msg");
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_ERROR, "error msg");
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_WARN, "warn msg");
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_FATAL, "fatal msg");
+
+    std::string output = recorder.getRecordedLogsAsString();
+
+    // Verify all severity levels formatted correctly
+    EXPECT_NE(output.find("[info] info msg"), std::string::npos);
+    EXPECT_NE(output.find("[error] error msg"), std::string::npos);
+    EXPECT_NE(output.find("[warn] warn msg"), std::string::npos);
+    EXPECT_NE(output.find("[fatal] fatal msg"), std::string::npos);
+
+    // Verify order preserved
+    EXPECT_LT(output.find("[info]"), output.find("[error]"));
+    EXPECT_LT(output.find("[error]"), output.find("[warn]"));
+    EXPECT_LT(output.find("[warn]"), output.find("[fatal]"));
+}
+
 // === LogRecordingOutput Filtering ===
 
 TEST_F(TestLogRecorder, LogRecordingOutputCallsCallbackWhenLevelAllows)
@@ -366,6 +391,115 @@ TEST_F(TestLogRecorder, MultipleRecordersCanExist)
     }
     // Outer recorder destroyed - should restore to original
     EXPECT_EQ(hipdnn_data_sdk::logging::getLogLevel(), HIPDNN_SEV_INFO);
+}
+
+TEST_F(TestLogRecorder, SeverityToStringReturnsCorrectStrings)
+{
+    EXPECT_STREQ(severityToString(HIPDNN_SEV_INFO), "info");
+    EXPECT_STREQ(severityToString(HIPDNN_SEV_WARN), "warn");
+    EXPECT_STREQ(severityToString(HIPDNN_SEV_ERROR), "error");
+    EXPECT_STREQ(severityToString(HIPDNN_SEV_FATAL), "fatal");
+    EXPECT_STREQ(severityToString(HIPDNN_SEV_OFF), "off");
+    // Cast invalid integer to severity type
+    auto invalidSeverity = static_cast<hipdnnSeverity_t>(999);
+    EXPECT_STREQ(severityToString(invalidSeverity), "UNKNOWN");
+}
+
+TEST_F(TestLogRecorder, LogRecordingCallbackIgnoresNullMessage)
+{
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    size_t countBefore = recorder.getRecordedLogCount();
+
+    logRecordingCallback(HIPDNN_SEV_INFO, nullptr);
+
+    // Should not record anything
+    EXPECT_EQ(recorder.getRecordedLogCount(), countBefore);
+}
+
+TEST_F(TestLogRecorder, LogRecordingCallbackRecordsValidMessage)
+{
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
+    logRecordingCallback(HIPDNN_SEV_WARN, "test message");
+
+    // Should record to SHARED instance
+    EXPECT_EQ(recorder.getRecordedLogCount(), 1);
+    auto logs = recorder.getRecordedLogs();
+    EXPECT_EQ(logs[0].message, "test message");
+    EXPECT_EQ(logs[0].severity, HIPDNN_SEV_WARN);
+}
+
+TEST_F(TestLogRecorder, LogChainedRecordingCallbackRecordsValidMessage)
+{
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
+    logChainedRecordingCallback(HIPDNN_SEV_ERROR, "chained test message");
+
+    // Should record to SHARED instance
+    EXPECT_EQ(recorder.getRecordedLogCount(), 1);
+    auto logs = recorder.getRecordedLogs();
+    EXPECT_EQ(logs[0].message, "chained test message");
+    EXPECT_EQ(logs[0].severity, HIPDNN_SEV_ERROR);
+}
+
+TEST_F(TestLogRecorder, LogChainedRecordingCallbackIgnoresNullMessage)
+{
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    size_t countBefore = recorder.getRecordedLogCount();
+
+    logChainedRecordingCallback(HIPDNN_SEV_INFO, nullptr);
+
+    // Should not record anything
+    EXPECT_EQ(recorder.getRecordedLogCount(), countBefore);
+}
+
+TEST_F(TestLogRecorder, SimpleStderrOutputCallbackOutputsValidMessage)
+{
+    // Redirect stderr to capture output
+    std::stringstream capturedOutput;
+    std::streambuf* oldCerr = std::cerr.rdbuf(capturedOutput.rdbuf());
+
+    simpleStderrOutputCallback(HIPDNN_SEV_WARN, "test warning message");
+
+    // Restore stderr
+    std::cerr.rdbuf(oldCerr);
+
+    // Verify output format: "[severity] message\n"
+    std::string output = capturedOutput.str();
+    EXPECT_EQ(output, "[warn] test warning message\n");
+}
+
+TEST_F(TestLogRecorder, SimpleStderrOutputCallbackHandlesNullMessage)
+{
+    // Should not crash with nullptr message
+    simpleStderrOutputCallback(HIPDNN_SEV_INFO, nullptr);
+    SUCCEED();
+}
+
+TEST_F(TestLogRecorder, SimpleStderrOutputCallbackFormatsAllSeverities)
+{
+    struct TestCase
+    {
+        hipdnnSeverity_t severity;
+        const char* expectedOutput;
+    };
+    std::array<TestCase, 5> testCases = {{{HIPDNN_SEV_INFO, "[info] test\n"},
+                                          {HIPDNN_SEV_WARN, "[warn] test\n"},
+                                          {HIPDNN_SEV_ERROR, "[error] test\n"},
+                                          {HIPDNN_SEV_FATAL, "[fatal] test\n"},
+                                          {HIPDNN_SEV_OFF, "[off] test\n"}}};
+
+    for(const auto& tc : testCases)
+    {
+        std::stringstream capturedOutput;
+        std::streambuf* oldCerr = std::cerr.rdbuf(capturedOutput.rdbuf());
+
+        simpleStderrOutputCallback(tc.severity, "test");
+
+        std::cerr.rdbuf(oldCerr);
+
+        std::string output = capturedOutput.str();
+        EXPECT_EQ(output, tc.expectedOutput)
+            << "Failed for severity: " << severityToString(tc.severity);
+    }
 }
 
 // === IsolatedLogRecorder ===
