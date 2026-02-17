@@ -96,7 +96,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         if constexpr(HasMainKBlockLoopInAllGemm || NoMainKBlockLoopInAllGemm)
         {
 
-            GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
+            GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BACKWARD,
+                                       AGridDesc_AK0_M_AK1,
                                        BGridDesc_BK0_N_BK1,
                                        DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock,
                                        EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
@@ -129,7 +130,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
             {
 
-                GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
+                GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BACKWARD,
+                                           AGridDesc_AK0_M_AK1,
                                            BGridDesc_BK0_N_BK1,
                                            DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock,
                                            EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
@@ -160,7 +162,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             else
             {
 
-                GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
+                GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BACKWARD,
+                                           AGridDesc_AK0_M_AK1,
                                            BGridDesc_BK0_N_BK1,
                                            DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock,
                                            EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,

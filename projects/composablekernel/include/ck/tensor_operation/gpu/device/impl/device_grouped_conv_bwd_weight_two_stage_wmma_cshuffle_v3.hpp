@@ -74,7 +74,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 
         auto epilogue_args = typename GridwiseGemm::EpilogueCShuffle{};
 
-        GridwiseGemm::template Run<AGridDesc_AK0_M_K1,
+        GridwiseGemm::template Run<GridwiseGemm::ConvRegime::GENERIC,
+                                   AGridDesc_AK0_M_K1,
                                    BGridDesc_BK0_N_K1,
                                    typename GridwiseGemm::EmptyType,
                                    typename GridwiseGemm::EmptyType,

@@ -100,7 +100,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         const auto b_grid_desc_bk0_n_bk1 =
             GridwiseGemm::MakeBGridDescriptor_BK0_N_BK1(b_grid_desc_n_k);
 
-        GridwiseGemm::template Run<decltype(a_grid_desc_ak0_m_ak1),
+        GridwiseGemm::template Run<GridwiseGemm::ConvRegime::FORWARD,
+                                   decltype(a_grid_desc_ak0_m_ak1),
                                    decltype(b_grid_desc_bk0_n_bk1),
                                    DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock,
                                    EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
@@ -118,12 +119,12 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             p_shared,
             a_grid_desc_ak0_m_ak1,
             b_grid_desc_bk0_n_bk1,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock, // bwd, fwd
-            e_grid_desc_mblock_mperblock_nblock_nperblock,  // bwd, fwd
-            GridwiseGemm::emptyArgument,                    // generic
-            GridwiseGemm::emptyArgument,                    // bwd
+            ds_grid_desc_mblock_mperblock_nblock_nperblock,
+            e_grid_desc_mblock_mperblock_nblock_nperblock,
+            GridwiseGemm::emptyArgument, // Variable used in generic grouped convolution
+            GridwiseGemm::emptyArgument, // Variable used in bwd grouped convolution
             compute_ptr_offset_of_batch,
-            compute_ptr_offset_of_n, // bwd, fwd
+            compute_ptr_offset_of_n,
             num_k_per_block,
             karg,
             epilogue_args);
