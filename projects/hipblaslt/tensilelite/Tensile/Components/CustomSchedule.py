@@ -3961,6 +3961,62 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
         }
 
         nglshift = nllshift = 16 # vmcnt shift for ngl and nll
+    elif isNT(kernel) and not useLDSTr and TLDS==0:
+        kernel["UsePLRPack"] = True
+        kernel["UseMFMAF32XEmulation"] = True
+        kernel["UseDot2F32XEmulation"] = False
+        optSchedule = {
+            'SYNC': [[18, 55, 73, 95, 95, 114, 164]],
+            'GRIncA': [[11, 11, 11, 12, 12, 12, 13, 13, 13]],
+            'GRIncB': [[47, 47, 47, 48, 48, 48, 49, 49, 49]],
+            'LRA0': [[0, 1, 2, 3, 7, 8, 9, 10]],
+            'LRB0': [[36, 37, 38, 39, 43, 44, 45, 46]],
+            
+            # 'PackA0': [[18,18,19,19, 26,26, 27,27,28,29, 
+            #             20,20,21,21, 26,26, 30,30,31,31, 
+            #             22,22,23,23, 26,26, 32,32,33,33, 
+            #             24,24,25,25, 26,26, 34,34,35,35,]],
+            'PackA0': [create_range(18, 2, 35, 1, 26)],
+            # 'PackB0': [[55,55,56,56, 63,63, 64,64,65,66,
+            #             57,57,58,58, 63,63, 67,67,68,68,
+            #             59,59,60,60, 63,63, 69,69,70,70,
+            #             61,61,62,62, 63,63, 71,71,72,72,]],
+            'PackB0': [create_range(55, 2, 72, 1, 26)],
+            
+            'GRA': [[73, 73, 75, 75, 77, 77, 79, 79, 107, 107, 109, 109, 111, 111, 113, 113]],
+            'GRB': [[132, 132, 134, 134, 136, 136, 138, 138, 182, 182, 184, 184, 186, 186, 188, 188]],
+            'LRSA': [[50]],
+            'LRSB': [[51]],
+            'LWSA': [[190]],
+            'LWSB': [[190]],
+            'LCC': [[191, 191]],
+            'LRA3': [[144, 145, 146, 147, 151, 152, 153, 154]],
+            'LRB3': [[96, 97, 98, 99, 103, 104, 105, 106]],
+            
+            # 'PackB3': [[114,114,115,115, 122,122, 123,123,124,125,
+            #             116,116,117,117, 122,122, 126,126,127,127,
+            #             118,118,119,119, 122,122, 128,128,129,129,
+            #             120,120,121,121, 122,122, 130,130,131,131]], 
+            
+            # 'PackA3': [[164,164,165,165, 172,172, 173,173,174,175,
+            #             166,166,167,167, 172,172, 176,176,177,177,
+            #             168,168,169,169, 172,172, 178,178,179,179,
+            #             170,170,171,171, 172,172, 180,180,181,181]]
+            'PackB3': [create_range(114, 2, 131, 1, 26)],
+            'PackA3': [create_range(164, 2, 181, 1, 26)],
+        }
+
+        syncCode = [                    
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),
+            SBarrier(comment="Barrier before GRA&GRB"),
+            SWaitCnt(dscnt=-1, vlcnt=4, vscnt=-1, comment="Wait for previous GRA&B"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3 to complete"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3 to complete"),                    
+        ]
+        nglshift = nllshift = 16 # vmcnt shift for ngl and nll
+
     else:
         return False, None
 
