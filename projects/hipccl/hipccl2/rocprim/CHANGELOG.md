@@ -16,6 +16,11 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Changed various APIs with undefined behaviors to abort with a trap instead of printing a runtime error with `ROCPRIM_PRINT_ERROR_ONCE` 
 
+### Removed
+
+* Removed unused `equality`, `inequality`, `sum`, `max`, `min` from thread_operator.hpp.
+* Removed duplicate `inequality_operator` from binary_op_warpper.hpp
+
 ## rocPRIM 4.2.0 for ROCm 7.2
 
 ### Added

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -101,30 +101,6 @@ struct headflag_scan_op_wrapper
 
 private:
     BinaryFunction scan_op_;
-};
-
-
-template<class EqualityOp>
-struct inequality_wrapper
-{
-    using equality_op_type = EqualityOp;
-
-    ROCPRIM_HOST_DEVICE inline
-    inequality_wrapper() = default;
-
-    ROCPRIM_HOST_DEVICE inline
-    inequality_wrapper(equality_op_type equality_op)
-        : equality_op(equality_op)
-    {}
-
-    template<class T, class U>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    bool operator()(const T &a, const U &b)
-    {
-        return !equality_op(a, b);
-    }
-
-    equality_op_type equality_op;
 };
 
 } // end of detail namespace
