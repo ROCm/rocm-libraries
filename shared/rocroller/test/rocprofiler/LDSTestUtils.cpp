@@ -272,7 +272,7 @@ namespace rocRoller
         kernelOpts->dsObserver = DSObserverType::WeightlessDSMemObserver;
         auto context           = TestContext::ForTestDevice(kernelOpts, "");
 
-        if(not context->targetArchitecture().target().isCDNA35GPU())
+        if(not context->targetArchitecture().target().isCDNA4GPU())
         {
             SKIP("Currently only testing on gfx950");
         }

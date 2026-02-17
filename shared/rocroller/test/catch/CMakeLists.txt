@@ -55,6 +55,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionSerializationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionToStringTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionTreeOrderingTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionTransformationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FastArithmeticTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FastDivisionTransformationTest.cpp"

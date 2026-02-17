@@ -195,9 +195,9 @@ TEST_CASE("LDS bank model with bank conflicts", "[rocprofiler][gpu][lds-model]")
 
                     auto context = TestContext::ForTestDevice({}, name);
 
-                    if(not context->targetArchitecture().target().isCDNA35GPU())
+                    if(not context->targetArchitecture().target().isCDNA4GPU())
                     {
-                        SKIP("Currently only testing on gfx950");
+                        SKIP("LDS Bank Model only implemented for CDNA 4 GPUs");
                     }
 
                     LDSBankConflictTestKernel kernel(

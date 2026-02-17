@@ -389,7 +389,7 @@ namespace MEMObserverTest
 
         auto context = TestContext::ForTestDevice(kernelOps);
 
-        if(not context->targetArchitecture().target().isCDNA35GPU())
+        if(not context->targetArchitecture().target().isCDNA4GPU())
         {
             // LDS bandwidth and observer weights being different in different architectures
             // results in different scheduling decisions.
