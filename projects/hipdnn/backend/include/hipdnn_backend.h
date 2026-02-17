@@ -350,8 +350,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
  *
  * @param[in] unloadingMode  Specifies when plugins should be unloaded from memory.
  *
- * @retval HIPDNN_STATUS_SUCCESS           The operation was successful.
- * @retval HIPDNN_STATUS_INTERNAL_ERROR    An internal error occurred.
+ * @retval HIPDNN_STATUS_SUCCESS    The operation was successful.
+ * @retval HIPDNN_STATUS_BAD_PARAM  An invalid unloading mode was specified.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     hipdnnSetPluginUnloadMode_ext(hipdnnPluginUnloadingMode_ext_t unloadingMode);
