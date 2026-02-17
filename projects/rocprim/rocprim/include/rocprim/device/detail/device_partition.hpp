@@ -926,12 +926,27 @@ struct partition_kernel_impl_
     static constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
     // Block primitives
-    using block_load_key_type
-        = ::rocprim::block_load<Key, block_size, items_per_thread, params.key_block_load_method>;
-    using block_load_value_type = ::rocprim::
-        block_load<Value, block_size, items_per_thread, params.value_block_load_method>;
-    using block_load_flag_type = ::rocprim::
-        block_load<FlagType, block_size, items_per_thread, params.flag_block_load_method>;
+    using block_load_key_type    = ::rocprim::block_load<Key,
+                                                         block_size,
+                                                         items_per_thread,
+                                                         params.key_block_load_method,
+                                                         1,
+                                                         1,
+                                                         TargetConfig::wavefront>;
+    using block_load_value_type  = ::rocprim::block_load<Value,
+                                                         block_size,
+                                                         items_per_thread,
+                                                         params.value_block_load_method,
+                                                         1,
+                                                         1,
+                                                         TargetConfig::wavefront>;
+    using block_load_flag_type   = ::rocprim::block_load<FlagType,
+                                                         block_size,
+                                                         items_per_thread,
+                                                         params.flag_block_load_method,
+                                                         1,
+                                                         1,
+                                                         TargetConfig::wavefront>;
     using block_scan_offset_type = ::rocprim::
         block_scan<OffsetType, block_size, params.block_scan_method, 1, 1, TargetConfig::wavefront>;
     using block_discontinuity_key_type = ::rocprim::block_discontinuity<Key, block_size>;

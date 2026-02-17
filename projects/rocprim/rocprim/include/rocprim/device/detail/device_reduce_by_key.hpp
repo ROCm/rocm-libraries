@@ -61,15 +61,22 @@ using lookback_scan_state_t
 
 template<typename KeyType,
          typename AccumulatorType,
-         unsigned int      BlockSize,
-         unsigned int      ItemsPerThread,
-         block_load_method load_keys_method,
-         block_load_method load_values_method>
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         block_load_method       load_keys_method,
+         block_load_method       load_values_method,
+         arch::wavefront::target TargetWaveSize>
 struct load_helper
 {
-    using block_load_keys = block_load<KeyType, BlockSize, ItemsPerThread, load_keys_method>;
-    using block_load_values
-        = block_load<AccumulatorType, BlockSize, ItemsPerThread, load_values_method>;
+    using block_load_keys
+        = block_load<KeyType, BlockSize, ItemsPerThread, load_keys_method, 1, 1, TargetWaveSize>;
+    using block_load_values = block_load<AccumulatorType,
+                                         BlockSize,
+                                         ItemsPerThread,
+                                         load_values_method,
+                                         1,
+                                         1,
+                                         TargetWaveSize>;
 
     /// We only need to sync between loading keys & values if BOTH the key and value
     /// loading method require shared memory.
@@ -297,7 +304,8 @@ private:
                                                  BlockSize,
                                                  ItemsPerThread,
                                                  load_keys_method,
-                                                 load_values_method>;
+                                                 load_values_method,
+                                                 TargetWaveSize>;
 
     using wrapped_type = reduce_by_key::wrapped_type_t<AccumulatorType>;
 

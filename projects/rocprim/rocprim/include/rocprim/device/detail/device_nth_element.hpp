@@ -131,9 +131,21 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
 
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
 
-    using block_load_key  = block_load<key_type, stop_recursion_size, 1>;
+    using block_load_key  = block_load<key_type,
+                                       stop_recursion_size,
+                                       1,
+                                       block_load_method::block_load_direct,
+                                       1,
+                                       1,
+                                       TargetConfig::wavefront>;
     using block_sort_key  = block_sort<key_type, stop_recursion_size>;
-    using block_store_key = block_store<key_type, stop_recursion_size, 1>;
+    using block_store_key = block_store<key_type,
+                                        stop_recursion_size,
+                                        1,
+                                        block_store_method::block_store_direct,
+                                        1,
+                                        1,
+                                        TargetConfig::wavefront>;
 
     ROCPRIM_SHARED_MEMORY union
     {
@@ -227,7 +239,13 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
 
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
 
-    using block_load_key = block_load<key_type, num_threads_per_block, num_items_per_thread>;
+    using block_load_key = block_load<key_type,
+                                      num_threads_per_block,
+                                      num_items_per_thread,
+                                      block_load_method::block_load_direct,
+                                      1,
+                                      1,
+                                      TargetConfig::wavefront>;
 
     ROCPRIM_SHARED_MEMORY struct
     {
@@ -384,7 +402,13 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                                  block_padding_hint::avoid_conflicts,
                                                  TargetConfig::wavefront>;
 
-    using block_load_element = block_load<key_type, num_threads_per_block, num_items_per_thread>;
+    using block_load_element = block_load<key_type,
+                                          num_threads_per_block,
+                                          num_items_per_thread,
+                                          block_load_method::block_load_direct,
+                                          1,
+                                          1,
+                                          TargetConfig::wavefront>;
 
     static_assert(block_rank::digits_per_thread == 1,
                   "The digits_per_thread is assumed to be one.");

@@ -155,7 +155,13 @@ void search_kernel_shared_impl(InputIterator1 input,
         }
     }
 
-    using block_load_input = block_load<value_type, items_per_thread, items_per_thread>;
+    using block_load_input = block_load<value_type,
+                                        items_per_thread,
+                                        items_per_thread,
+                                        block_load_method::block_load_direct,
+                                        1,
+                                        1,
+                                        TargetConfig::wavefront>;
 
     value_type elements[items_per_thread];
 

@@ -251,7 +251,10 @@ struct merge_kernel_impl_
         = ::rocprim::block_store<Key,
                                  block_size,
                                  items_per_thread,
-                                 ::rocprim::block_store_method::block_store_transpose>;
+                                 ::rocprim::block_store_method::block_store_transpose,
+                                 1,
+                                 1,
+                                 TargetConfig::wavefront>;
 
     union storage_type
     {

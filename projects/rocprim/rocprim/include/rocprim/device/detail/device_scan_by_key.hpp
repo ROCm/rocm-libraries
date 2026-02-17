@@ -47,16 +47,22 @@ template<bool         Exclusive,
          typename key_type,
          typename result_type,
          ::rocprim::block_load_method load_keys_method,
-         ::rocprim::block_load_method load_values_method>
+         ::rocprim::block_load_method load_values_method,
+         arch::wavefront::target      TargetWaveSize>
 struct load_values_flagged
 {
-    using block_load_keys
-        = ::rocprim::block_load<key_type, block_size, items_per_thread, load_keys_method>;
+    using block_load_keys = ::rocprim::
+        block_load<key_type, block_size, items_per_thread, load_keys_method, 1, 1, TargetWaveSize>;
 
     using block_discontinuity = ::rocprim::block_discontinuity<key_type, block_size>;
 
-    using block_load_values
-        = ::rocprim::block_load<result_type, block_size, items_per_thread, load_keys_method>;
+    using block_load_values = ::rocprim::block_load<result_type,
+                                                    block_size,
+                                                    items_per_thread,
+                                                    load_keys_method,
+                                                    1,
+                                                    1,
+                                                    TargetWaveSize>;
 
     union storage_type
     {
@@ -191,11 +197,12 @@ struct load_values_flagged
 template<unsigned int block_size,
          unsigned int items_per_thread,
          typename result_type,
-         ::rocprim::block_store_method store_method>
+         ::rocprim::block_store_method store_method,
+         arch::wavefront::target       TargetWaveSize>
 struct unwrap_store
 {
-    using block_store_values
-        = ::rocprim::block_store<result_type, block_size, items_per_thread, store_method>;
+    using block_store_values = ::rocprim::
+        block_store<result_type, block_size, items_per_thread, store_method, 1, 1, TargetWaveSize>;
 
     using storage_type = typename block_store_values::storage_type;
 
@@ -330,7 +337,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                                  key_type,
                                                  result_type,
                                                  load_keys_method,
-                                                 load_values_method>;
+                                                 load_values_method,
+                                                 TargetConfig::wavefront>;
 
         auto wrapped_op    = headflag_scan_op_wrapper<result_type, bool, BinaryFunction>{scan_op};
         using wrapped_type = rocprim::tuple<result_type, bool>;
@@ -343,7 +351,11 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                                       TargetConfig::wavefront>;
 
         constexpr auto store_method = params.block_store_method;
-        using store_unwrap = unwrap_store<block_size, items_per_thread, result_type, store_method>;
+        using store_unwrap          = unwrap_store<block_size,
+                                                   items_per_thread,
+                                                   result_type,
+                                                   store_method,
+                                                   TargetConfig::wavefront>;
 
         ROCPRIM_SHARED_MEMORY union
         {

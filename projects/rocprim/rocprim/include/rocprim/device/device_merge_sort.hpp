@@ -225,14 +225,16 @@ inline hipError_t merge_sort_block_merge_impl(
                 }
                 auto device_block_merge_mergepath_kernel = [=](auto target_config) mutable
                 {
+                    using TargetConfig = decltype(target_config);
                     static constexpr merge_sort_block_merge_config_params params
-                        = decltype(target_config)::params;
+                        = TargetConfig::params;
 
                     using merge_impl
                         = block_merge_impl<key_type,
                                            value_type,
                                            params.merge_mergepath_config.block_size,
-                                           params.merge_mergepath_config.items_per_thread>;
+                                           params.merge_mergepath_config.items_per_thread,
+                                           TargetConfig::wavefront>;
 
                     using VSmemHelperT = detail::vsmem_helper_impl<merge_impl>;
                     ROCPRIM_SHARED_MEMORY
@@ -644,7 +646,8 @@ inline size_t merge_sort_vsmem_size_for_target(size_t size)
     using bm_sort_impl = block_merge_impl<Key,
                                           Value,
                                           bm_params.merge_mergepath_config.block_size,
-                                          bm_params.merge_mergepath_config.items_per_thread>;
+                                          bm_params.merge_mergepath_config.items_per_thread,
+                                          BMTargetConfig::wavefront>;
 
     using BlockSortVSmemHelperT = detail::vsmem_helper_impl<bs_sort_impl>;
     using MergeSortVSmemHelperT = detail::vsmem_helper_impl<bm_sort_impl>;

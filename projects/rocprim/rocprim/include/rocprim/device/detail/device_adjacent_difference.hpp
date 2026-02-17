@@ -188,10 +188,20 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void adjacent_difference_kernel_impl(
     static constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
     static constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
-    using block_load_type
-        = ::rocprim::block_load<input_type, block_size, items_per_thread, params.block_load_method>;
-    using block_store_type = ::rocprim::
-        block_store<output_type, block_size, items_per_thread, params.block_store_method>;
+    using block_load_type  = ::rocprim::block_load<input_type,
+                                                   block_size,
+                                                   items_per_thread,
+                                                   params.block_load_method,
+                                                   1,
+                                                   1,
+                                                   TargetConfig::wavefront>;
+    using block_store_type = ::rocprim::block_store<output_type,
+                                                    block_size,
+                                                    items_per_thread,
+                                                    params.block_store_method,
+                                                    1,
+                                                    1,
+                                                    TargetConfig::wavefront>;
 
     using adjacent_helper = adjacent_diff_helper<input_type, block_size>;
 

@@ -134,16 +134,26 @@ void segmented_scan(InputIterator input,
     constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
     using result_type     = ResultType;
-    using block_load_type = ::rocprim::
-        block_load<result_type, block_size, items_per_thread, params.block_load_method>;
-    using block_store_type = ::rocprim::
-        block_store<result_type, block_size, items_per_thread, params.block_store_method>;
-    using block_scan_type = ::rocprim::block_scan<result_type,
-                                                  block_size,
-                                                  params.block_scan_method,
-                                                  1,
-                                                  1,
-                                                  TargetConfig::wavefront>;
+    using block_load_type  = ::rocprim::block_load<result_type,
+                                                   block_size,
+                                                   items_per_thread,
+                                                   params.block_load_method,
+                                                   1,
+                                                   1,
+                                                   TargetConfig::wavefront>;
+    using block_store_type = ::rocprim::block_store<result_type,
+                                                    block_size,
+                                                    items_per_thread,
+                                                    params.block_store_method,
+                                                    1,
+                                                    1,
+                                                    TargetConfig::wavefront>;
+    using block_scan_type  = ::rocprim::block_scan<result_type,
+                                                   block_size,
+                                                   params.block_scan_method,
+                                                   1,
+                                                   1,
+                                                   TargetConfig::wavefront>;
 
     ROCPRIM_SHARED_MEMORY union
     {
