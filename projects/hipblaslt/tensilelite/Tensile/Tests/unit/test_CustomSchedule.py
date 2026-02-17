@@ -53,7 +53,7 @@ def create_base_kernel():
             "TransposeB": False,
         },
         "MacroTile0": 0, "MacroTile1": 0, "DepthU": 64,
-        "PrefetchGlobalRead": 0, "PrefetchLocalRead": 0, "DirectToLds": True,
+        "PrefetchGlobalRead": 0, "PrefetchLocalRead": 0, "DirectToLds": 1,  "DtlPlusLdsBuf": False,
         "GlobalReadVectorWidthA": 0, "GlobalReadVectorWidthB": 0,
         "LocalReadVectorWidth": 0,
         "WaveSeparateGlobalReadA": 0,
