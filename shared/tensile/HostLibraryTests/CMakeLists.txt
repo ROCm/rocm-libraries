@@ -160,6 +160,14 @@ endif()
 
 if(TENSILE_USE_HIP)
     add_subdirectory(hip)
+    # Added the below line to workaround the CI failure issue manifesting from 
+    # amdclang++ v7.2.0 host optimization pass 140079 for the below compilation unit
+    # which was doing a tail call optimization. So below command line is stopping the 
+    # optimization one short of the problematic optimization. Will be consulting with 
+    # compiler team to understand the LLVM IR before and after the optimization to understand
+    # why the failure is occuring.
+    set_source_files_properties(hip/RunGEMMKernel_test.cpp PROPERTIES
+	    COMPILE_OPTIONS "-mllvm;-opt-bisect-limit=140078")
 endif()
 
 add_executable(TensileTests ${test_sources})
