@@ -21,6 +21,18 @@ target_include_directories(
                               $<INSTALL_INTERFACE:${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}>
 )
 
+# Warn if user manually defines HIPDNN_FRONTEND_SKIP_JSON_LIB
+if(CMAKE_CXX_FLAGS MATCHES "HIPDNN_FRONTEND_SKIP_JSON_LIB")
+    message(WARNING
+        "HIPDNN_FRONTEND_SKIP_JSON_LIB should not be manually defined. "
+        "Use -DHIPDNN_ENABLE_JSON=OFF instead to fully disable JSON support.")
+endif()
+
+# Automatically define HIPDNN_FRONTEND_SKIP_JSON_LIB when JSON is disabled
+if(NOT HIPDNN_ENABLE_JSON)
+    target_compile_definitions(hipdnn_frontend INTERFACE HIPDNN_FRONTEND_SKIP_JSON_LIB)
+endif()
+
 # Generate the config file from template
 configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_frontendConfig.cmake.in"

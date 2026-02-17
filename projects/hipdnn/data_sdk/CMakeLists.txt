@@ -10,7 +10,10 @@ set(HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/dat
 set(HIP_DNN_DATA_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
-hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+
+if(HIPDNN_ENABLE_JSON)
+    hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+endif()
 
 # For dependencies we are going to check if they weren't imported, and then install it along with
 # the SDK headers to allow it to work for local builds that want to install. If the dependecy is
@@ -82,9 +85,11 @@ if(TARGET FlatBuffers)
 endif()
 
 # Process nlohmann_json dependency
-_hipdnn_data_sdk_process_dependency(
-    nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
-)
+if(HIPDNN_ENABLE_JSON)
+    _hipdnn_data_sdk_process_dependency(
+        nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
+    )
+endif()
 
 add_library(hipdnn_data_sdk INTERFACE)
 
@@ -93,7 +98,9 @@ hipdnn_generate_version_header(hipdnn_data_sdk)
 
 # Add includes from dependency targets
 hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
-hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
+if(HIPDNN_ENABLE_JSON)
+    hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
+endif()
 
 target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>

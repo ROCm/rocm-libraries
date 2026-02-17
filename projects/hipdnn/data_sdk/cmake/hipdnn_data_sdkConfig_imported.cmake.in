@@ -46,7 +46,14 @@ include(CMakeFindDependencyMacro)
 find_dependency(hip CONFIG REQUIRED)
 
 find_dependency(flatbuffers REQUIRED)
-find_dependency(nlohmann_json REQUIRED)
+
+# Export HIPDNN_ENABLE_JSON setting for consumers
+set(HIPDNN_ENABLE_JSON @HIPDNN_ENABLE_JSON@ CACHE BOOL "Whether JSON support is enabled in hipDNN")
+
+# nlohmann_json is optional based on HIPDNN_ENABLE_JSON
+if(HIPDNN_ENABLE_JSON)
+    find_dependency(nlohmann_json REQUIRED)
+endif()
 
 # Subdirectory path for hipDNN engine plugins (relative to lib)
 set(HIPDNN_PLUGIN_ENGINE_SUBDIR "@HIPDNN_PLUGIN_ENGINE_SUBDIR@")
@@ -58,7 +65,9 @@ set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR "@HIPDNN_RELATIVE_INSTALL_PLUGIN_E
 include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_data_sdkTargets.cmake")
 
 hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
-hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
+if(HIPDNN_ENABLE_JSON)
+    hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
+endif()
 
 message(STATUS "hipDNN Data SDK: Engine plugin build directory is ${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
 message(STATUS "hipDNN Data SDK: Plugin absolute installation directory ${HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR}")
