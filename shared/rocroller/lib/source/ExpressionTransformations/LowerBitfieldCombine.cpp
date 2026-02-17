@@ -110,8 +110,11 @@ namespace rocRoller
                                 ShowValue(expr.width));
                 }
 
-                AssertFatal(expr.width > 0, "BitfieldCombine width must be greater than 0, width 0 should have been optimized away by simplify");
-                AssertFatal(expr.width <= 32, "BitfieldCombine width must be less than or equal to 32");
+                AssertFatal(expr.width > 0,
+                            "BitfieldCombine width must be greater than 0, width 0 should have "
+                            "been optimized away by simplify");
+                AssertFatal(expr.width <= 32,
+                            "BitfieldCombine width must be less than or equal to 32");
 
                 // Calculate width mask, handling width=32 case to avoid UB
                 uint32_t widthMask;

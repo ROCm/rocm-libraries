@@ -1536,9 +1536,9 @@ TEST_CASE("BitfieldCombine expression and lowering", "[expression][expression-tr
 
     SECTION("Lowering with width=32 (full width)")
     {
-        auto const fullWidth    = 32u;
-        auto const srcOffset32  = 0u;
-        auto const dstOffset32  = 0u;
+        auto const fullWidth   = 32u;
+        auto const srcOffset32 = 0u;
+        auto const dstOffset32 = 0u;
 
         auto bfc = std::make_shared<Expression::Expression>(
             Expression::BitfieldCombine{srcExpr, dstExpr, "", srcOffset32, dstOffset32, fullWidth});

@@ -141,7 +141,10 @@ namespace rocRollerTest
                 {
                     co_yield_(Instruction::Comment("Extract f8 from packed F8"));
                     co_yield generateOp<Expression::BitFieldExtract>(
-                        v_temp, v_a, Expression::BitFieldExtract{{}, F8Type, static_cast<uint32_t>(f8_idx * 8), 8});
+                        v_temp,
+                        v_a,
+                        Expression::BitFieldExtract{
+                            {}, F8Type, static_cast<uint32_t>(f8_idx * 8), 8});
 
                     co_yield_(Instruction::Comment("Convert to float"));
                     co_yield generateOp<Expression::Convert>(

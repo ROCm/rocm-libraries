@@ -571,8 +571,8 @@ namespace rocRoller
             constexpr static inline int  Complexity = 1;
 
             DataType outputDataType = DataType::None;
-            uint32_t      offset         = 0;
-            uint32_t      width          = 0;
+            uint32_t offset         = 0;
+            uint32_t width          = 0;
         };
 
         struct Nary
