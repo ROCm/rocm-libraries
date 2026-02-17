@@ -66,7 +66,7 @@ protected:
         }
     }
 
-    virtual void runGraphTest(DataType tolerance) = 0;
+    virtual void runGraphTest(float tolerance) = 0;
 
 protected:
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
