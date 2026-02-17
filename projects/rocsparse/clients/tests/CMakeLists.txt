@@ -405,7 +405,7 @@ set(ROCSPARSE_CLIENTS_COMMON
 if (BUILD_CLIENTS_ONLY)
   add_executable(rocsparse-test rocsparse_test_main.cpp ${ROCSPARSE_TEST_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
 else()
-  add_executable(rocsparse-test rocsparse_test_main.cpp test_atomic_add.cpp ${ROCSPARSE_TEST_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
+  add_executable(rocsparse-test rocsparse_test_main.cpp test_atomic_add.cpp test_bfloat16.cpp test_complex_types.cpp ${ROCSPARSE_TEST_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
 endif()
 
 # Set GOOGLE_TEST definition
@@ -419,7 +419,7 @@ target_include_directories(rocsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURR
 if (BUILD_CLIENTS_ONLY)
   target_include_directories(rocsparse-test PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
 else()
-  # Library internal headers for testing atomic_add
+  # Library internal headers for standalone tests (e.g., atomic_add)
   target_include_directories(rocsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>)
 endif()
 

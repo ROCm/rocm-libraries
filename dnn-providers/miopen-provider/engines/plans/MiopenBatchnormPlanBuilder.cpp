@@ -590,8 +590,8 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     {
         HIPDNN_PLUGIN_LOG_INFO(
             "Batchnorm plan builder is applicable only for 1, 2 or 3 node graphs. "
-            "Graph has {} nodes",
-            opGraph.nodeCount());
+            "Graph has "
+            << opGraph.nodeCount() << " nodes");
         return false;
     }
     }
@@ -760,20 +760,20 @@ void MiopenBatchnormPlanBuilder::buildPlan(
     switch(nodeWrapper.attributesType())
     {
     case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
-        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd inference plan for node: {}", nodeName);
+        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd inference plan for node: " << nodeName);
         buildPlanInferenceSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
-        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd inference with variance plan for node: {}",
-                               nodeName);
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Building batchnorm fwd inference with variance plan for node: " << nodeName);
         buildPlanInferenceWithVarianceSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd training plan for node: {}", nodeName);
+        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd training plan for node: " << nodeName);
         buildPlanFwdTrainingSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
-        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm backward plan for node: {}", nodeName);
+        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm backward plan for node: " << nodeName);
         buildPlanBwdSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
     default:

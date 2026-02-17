@@ -15,6 +15,7 @@
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities::conv;
@@ -29,7 +30,7 @@ class ConvBackwardWeights : public IntegrationGraphVerificationHarness<DataType,
 {
 protected:
     void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
-                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                          GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
         for(auto& tensorPair : bundle.tensors)
@@ -38,7 +39,7 @@ protected:
         }
     }
 
-    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
+    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         // Skipping until CK is working on Windows
         SKIP_IF_WINDOWS();
@@ -53,11 +54,11 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xAttr = graph::makeTensorAttributes(
+        auto xAttr = makeTensorAttributes(
             "x", testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto dyAttr = graph::makeTensorAttributes(
+        auto dyAttr = makeTensorAttributes(
             "dy", testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 

@@ -27,7 +27,8 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
   * Run the script with `--help` for usage instructions, and see `projects/rocprim/docs/concepts/tuning.rst` for documentation.
 * Kernel Tuner proof-of-concept.
 * Enhanced SPIR-V support and performance.
-  
+* Added `block_adjacent_difference_crosslane` using warp intrinsics, for better performance in some cases compared to using only LDS.
+
 ### Optimizations
 
 * Improved performance of `device_radix_sort` onesweep variant 
