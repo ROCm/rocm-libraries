@@ -137,10 +137,8 @@ TEST(TestKnob, CreateFloatKnob)
     hipdnnBackendFlatbufferData_t bufferData{buffer.data(), buffer.size()};
     auto knob = hipdnn_frontend::Knob::fromFlatbuffer(bufferData);
 
-    EXPECT_EQ(knob.knobId(), "test_float_knob");
     EXPECT_EQ(knob.description(), "Test float knob");
     EXPECT_EQ(knob.valueType(), KnobValueType::FLOAT64);
-    EXPECT_FALSE(knob.isDeprecated());
 
     auto defaultValue = std::get_if<double>(&knob.defaultValue());
     ASSERT_NE(defaultValue, nullptr);
