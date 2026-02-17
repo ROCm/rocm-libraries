@@ -355,26 +355,10 @@ staggerU_t select_staggerU(const problem_t& problem,
   // Early Exit: Batch and num_timesteps are not supported yet
   if (batch != 1 || num_timesteps != 1) return staggerU_t{0, 0, 0};
 
-  // Early Exit: if not enough K-slices, then no staggerU is needed
-  // if (numMT_K < 4 || numMT_K > 64) return staggerU_t{0, 0, 0};
-
   // Early Exit: splitK
   // TODO: support splitK
   if (split_factor > 1)     
       return staggerU_t{0, 0, 0};
-
-  // Early Exit: large macro tiles.
-  // When (MT_M + MT_N) * MT_K * bpe is large, each K-slice's data already spans
-  // all L2 slices, making contention inherently low. Stagger would just bloat
-  // the L2 working set for minimal benefit.
-  {
-    size_t max_bpe = std::max(data_type_to_bytes(problem.a_dtype),
-                              data_type_to_bytes(problem.b_dtype));
-    size_t tile_footprint = (MT_M + MT_N) * MT_K * max_bpe;
-    constexpr size_t ref_tile_footprint = (128 + 128) * 128 * 2; // 128x128x128 for 2 bytes
-    if (tile_footprint >= ref_tile_footprint)
-      return staggerU_t{0, 0, 0};
-  }
 
   // helper function to round up to power of 2
   auto next_pow2 = [](size_t v) -> size_t {
@@ -445,24 +429,32 @@ staggerU_t select_staggerU(const problem_t& problem,
     return staggerU_t{0, 0, 0};
   }
 
-  // Compute L2 optimal direction
-  size_t L2_mapping = (L2Tile_M > L2Tile_N) ? 0 : 1;
+  // Compute L2 optimal direction.
+  // Row-major WGM: consecutive WGs share A (row-mates). Their temporal overlap
+  // amplifies A contention → the consecutive dimension (N) gets squared.
+  // Column-major WGM: consecutive WGs share B (column-mates) → M gets squared.
+  size_t A_contention, B_contention;
+  if (wgm > 0) {
+    // Positive WGM (row-major): N is the consecutive dimension
+    A_contention = L2Tile_N * L2Tile_N * MT_M * bpe_a;
+    B_contention = L2Tile_M * MT_N * bpe_b;
+  } else {
+    // Negative WGM (column-major): M is the consecutive dimension
+    A_contention = L2Tile_N * MT_M * bpe_a;
+    B_contention = L2Tile_M * L2Tile_M * MT_N * bpe_b;
+  }
+  size_t L2_mapping = (B_contention > A_contention) ? 0 : 1;
   size_t L2_value   = (L2_mapping == 0) ? std::min(L2Tile_M, numMT_M)
                                         : std::min(L2Tile_N, numMT_N);
+  L2_value = std::min(L2_value, max_staggerU);
   // L2 capacity check
   size_t per_slice = MT_K * (L2Tile_M * MT_M * bpe_a + L2Tile_N * MT_N * bpe_b);
   // 95% is a conservative limit mostly to handle not-nice L2 tiles (wrapping around).
-  if (L2_value > max_staggerU) {
-    if (max_staggerU * per_slice > 0.95 * hardware.L2_capacity)
+  if (L2_value * per_slice > 0.95 * hardware.L2_capacity)
       return staggerU_t{0, 0, 0};
-    else
-      return staggerU_t{L2_mapping, max_staggerU, out_staggerUStrideShift};
-  }
-  else {
-    if (L2_value * per_slice > 0.95 * hardware.L2_capacity)
-      return staggerU_t{0, 0, 0};
-  }
-  L2_value = std::min(L2_value, max_staggerU);
+  // Early Exit: L2 value is already max_staggerU
+  if (L2_value == max_staggerU)
+    return staggerU_t{L2_mapping, max_staggerU, out_staggerUStrideShift};
   
   // Compute MALL optimal direction
   // Prefer direction with more XCD groups
@@ -477,8 +469,8 @@ staggerU_t select_staggerU(const problem_t& problem,
 
   // Decide L2 vs MALL direction
   // If they agree, use that direction. If they disagree, check how many intra-XCD
-  // offsets survive switching to MALL direction. If enough offsets remain (>= 4),
-  // the switch is safe. Otherwise the L2 loss is too severe — keep L2 direction.
+  // offsets survive switching to MALL direction. Otherwise the L2 loss is too 
+  // severe, keep L2 direction.
   size_t out_staggerUMapping;
   size_t out_staggerU;
   if (L2_mapping == Mall_mapping) {
@@ -489,7 +481,7 @@ staggerU_t select_staggerU(const problem_t& problem,
       // Not willing to sacrifice L2 for MALL
       out_staggerUMapping = L2_mapping;
       out_staggerU = L2_value;
-    } else if (numWGsPerL2Tile > numCUsPerXCD / 2 && L2Tile_N != numMT_N) {
+    } else if (numWGsPerL2Tile > numCUsPerXCD / 2) {
       // Willing to sacrifice L2 for MALL
       out_staggerUMapping = Mall_mapping;
       out_staggerU = max_staggerU;
