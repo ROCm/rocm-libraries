@@ -43,6 +43,26 @@ struct is_std_array<std::array<T, N>> : std::true_type
 {
 };
 
+
+// FIXME: docs
+template <typename C, std::enable_if_t<std::is_integral_v<typename C::value_type>, bool> = true>
+static C default_strides(fft_transform_type                        dft_type,
+                         fft_result_placement                      placement,
+                         fft_io                                    io,
+                         const C&                                  lower,
+                         const C&                                  upper,
+                         const std::optional<std::vector<size_t>>& dim_order = std::nullopt)
+{
+    if(lower.size() != upper.size())
+        throw std::invalid_argument("Lowers and uppers must be the same length");
+
+    C lengths;
+    for(size_t i = 0; i < lower.size(); ++i)
+        lengths.push_back(upper[i] - lower[i]);
+    
+    return default_strides(dft_type, placement, io, lengths, dim_order);
+}
+
 /**
  * @brief calculates the default strides for a given Discrete Fourier transform (observing row-major convention by default).
  * @note This function assumes interleaved complex representation for hermitian-symmetric data.

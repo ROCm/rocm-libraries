@@ -28,6 +28,11 @@
 #include <numeric>
 #include <vector>
 
+#include "fft_enums.h"
+#include "data_layout.h"
+#include "../library/include/hipfft/hipfft.h"
+#include "../library/include/hipfft/hipfftXt.h"
+
 // column-major ordering on indexes + strides, since these get passed
 // directly to rocFFT
 struct hipfft_brick
@@ -80,6 +85,7 @@ struct hipfft_brick
     }
 };
 
+
 // lengths include batch dimension (col-major), split_dim is counted with 0 = fastest dim.
 static void set_bricks(const std::vector<size_t>& length,
                        std::vector<hipfft_brick>& bricks,
@@ -109,6 +115,123 @@ static void set_bricks(const std::vector<size_t>& length,
             brick_len[d] = brick.field_upper[d] - brick.field_lower[d];
         brick.min_size = std::max(brick.min_size, compute_ptrdiff(brick_len, brick.brick_stride));
     }
+}
+
+// FIXME: documentation.
+static void hipfftxt_bricks(const std::vector<size_t>& length,
+                            std::vector<hipfft_brick>& bricks,
+                            const bool isrealcomplex,
+                            const hipfftXtSubFormat subformat)
+{
+    // We assume that the brick vector has already been allocated, but the brick data is not yet
+    // computed.
+    if(bricks.size() == 0)
+        throw std::runtime_error("Bricks vector needs to be allocated before passing");        
+    
+    // Format is row-major.
+
+    // length includes the (single) batch dimension, so the lengths are {batch, X, Y, Z},
+    // {batch, X, Y}, or {batch, X}.
+    const size_t dim = length.size();
+    if(dim < 2)
+        throw std::runtime_error("Need at least 1 length and batch dim");
+    
+    const size_t         nbatch   = length[length.size() - 1];
+    fft_result_placement placement;
+    fft_io               io;
+    fft_transform_type   dft_type = isrealcomplex ? fft_transform_type_real_forward : fft_transform_type_complex_forward;
+    
+    // The subformat tells us which dimension is split.
+    // Real in-place data needs extra padding.
+    size_t splitidx = 0;
+    if(nbatch == 1)
+    {
+        switch(subformat)
+        {
+        case HIPFFT_XT_FORMAT_INPUT:
+            splitidx = 1; // X-axis is split
+            placement = fft_placement_notinplace;
+            io = fft_io_in;
+            break;
+        case HIPFFT_XT_FORMAT_OUTPUT:
+            splitidx = 2; // Y-axis is split
+            placement = fft_placement_notinplace;
+            io = fft_io_out;
+            break;
+        case HIPFFT_XT_FORMAT_INPLACE:
+            splitidx = 1; // X-axis is split
+            placement = fft_placement_inplace;
+            io = fft_io_in;
+            break;
+        case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
+            splitidx = 2; // Y-axis is split
+            placement = fft_placement_inplace;
+            io = fft_io_out;
+            break;
+        case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
+            // TODO: impliment 1D version.
+            // TODO: what do we do with multi-gpu multi-batch 1D transforms?
+            throw std::runtime_error("HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED not implimented");
+            break;
+        case HIPFFT_FORMAT_UNDEFINED:
+            throw std::runtime_error("Format passed is HIPFFT_FORMAT_UNDEFINED");
+            break;
+        default:
+            throw std::runtime_error("Invalid subformat");
+        }
+    }
+    else
+    {
+        // Multi-batch transforms are trivially divided.
+        splitidx = 0;
+        throw std::runtime_error("Multi-batch multi-gpu transforms not implimented");
+    }
+
+    // datalength is the data dimensions, not the FFT lengths.  That is, we need to /2+1 for the
+    // Hermitian-symmetric dimension.
+    auto datalength = length;
+    if(isrealcomplex)
+    {
+        switch(subformat)
+        {
+        case HIPFFT_XT_FORMAT_INPLACE:
+            // This is real data for an in-place transform, so it needs padding.
+            break;
+        case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
+            // This is complex-Hermitian data.
+            datalength[1] = datalength[1] / 2 + 1; // FIXME: taken care of by the set_strides?
+            break;
+        default:
+            // TODO: can multi-batch real/complex transforms accept other subformats?
+            throw std::runtime_error("Invalid subformat for real/complex multi-gpu transform");
+        }
+    }
+
+    const auto ngpus = bricks.size();;
+    for(size_t ibrick = 0; ibrick < bricks.size(); ++ibrick)
+    {
+        auto& brick = bricks[ibrick];
+
+        brick.field_lower.resize(dim);
+        std::fill(brick.field_lower.begin(), brick.field_lower.end(), 0);
+        if(ibrick > 0)
+            brick.field_lower[splitidx] = bricks[ibrick-1].field_lower[splitidx];
+
+        const size_t splitlen = datalength[splitidx];
+        const size_t bricksplitlen = splitlen / ngpus + (ibrick < splitlen % ibrick ? 1 : 0);
+        brick.field_upper = datalength;
+        brick.field_upper[splitidx] = brick.field_lower[splitidx] + bricksplitlen;
+
+        brick.brick_stride = default_strides(dft_type, placement, io, brick.field_lower,
+                                        brick.field_upper);
+        // FIXME: strides, taking into account realpadding for r/c stuff
+    }
+
+    // FIXME: do we need to reverse everything now?
+
+    // FIXME: for hipfftxtmemcp, we would like to actually copy the passing as well.
+
+    // FIXME: real padding.
 }
 
 // length/strides are column-major.  in/out brick vectors are
