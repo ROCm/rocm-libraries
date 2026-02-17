@@ -134,7 +134,8 @@ int main(int argc, char* argv[])
 
     initializeFrontendLogging();
 
-    auto handle = create_hipdnn_handle();
+    auto [handle, handleError] = createHipdnnHandle();
+    HIPDNN_FE_CHECK(handleError);
 
     bool allPassed = run(SampleRunner{*handle, config});
 

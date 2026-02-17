@@ -37,6 +37,70 @@ protected:
     }
 };
 
+TEST_F(TestHandle, CreateHandlePairReturnSuccess)
+{
+    auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0x4567);
+
+    EXPECT_CALL(*_mockBackend, create(_)).WillOnce([&fakeHandle](hipdnnHandle_t* out) {
+        *out = fakeHandle;
+        return HIPDNN_STATUS_SUCCESS;
+    });
+    EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto [handle, error] = createHipdnnHandle();
+    EXPECT_TRUE(error.is_good());
+    EXPECT_NE(handle, nullptr);
+    EXPECT_EQ(*handle, fakeHandle);
+}
+
+TEST_F(TestHandle, CreateHandlePairReturnFailure)
+{
+    EXPECT_CALL(*_mockBackend, create(_)).WillOnce([](hipdnnHandle_t*) {
+        return HIPDNN_STATUS_INTERNAL_ERROR;
+    });
+
+    auto [handle, error] = createHipdnnHandle();
+    EXPECT_TRUE(error.is_bad());
+    EXPECT_EQ(handle, nullptr);
+}
+
+TEST_F(TestHandle, CreateHandlePairReturnWithStreamSuccess)
+{
+    auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0x5678);
+    auto fakeStream = reinterpret_cast<hipStream_t>(0xCDEF);
+
+    EXPECT_CALL(*_mockBackend, create(_)).WillOnce([&fakeHandle](hipdnnHandle_t* out) {
+        *out = fakeHandle;
+        return HIPDNN_STATUS_SUCCESS;
+    });
+    EXPECT_CALL(*_mockBackend, setStream(fakeHandle, fakeStream))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto [handle, error] = createHipdnnHandle(fakeStream);
+    EXPECT_TRUE(error.is_good());
+    EXPECT_NE(handle, nullptr);
+    EXPECT_EQ(*handle, fakeHandle);
+}
+
+TEST_F(TestHandle, CreateHandlePairReturnWithStreamFailure)
+{
+    auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0x6789);
+    auto fakeStream = reinterpret_cast<hipStream_t>(0xDEF0);
+
+    EXPECT_CALL(*_mockBackend, create(_)).WillOnce([&fakeHandle](hipdnnHandle_t* out) {
+        *out = fakeHandle;
+        return HIPDNN_STATUS_SUCCESS;
+    });
+    EXPECT_CALL(*_mockBackend, setStream(fakeHandle, fakeStream))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto [handle, error] = createHipdnnHandle(fakeStream);
+    EXPECT_TRUE(error.is_bad());
+    EXPECT_EQ(handle, nullptr);
+}
+
 TEST_F(TestHandle, CreateHandleSuccess)
 {
     auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0x1234);
@@ -47,7 +111,9 @@ TEST_F(TestHandle, CreateHandleSuccess)
     });
     EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto handle = createHipdnnHandle();
+    HipdnnHandlePtr handle;
+    auto error = createHipdnnHandle(handle);
+    EXPECT_TRUE(error.is_good());
     EXPECT_NE(handle, nullptr);
     EXPECT_EQ(*handle, fakeHandle);
 }
@@ -58,7 +124,10 @@ TEST_F(TestHandle, CreateHandleFailure)
         return HIPDNN_STATUS_INTERNAL_ERROR;
     });
 
-    EXPECT_THROW(createHipdnnHandle(), std::runtime_error);
+    HipdnnHandlePtr handle;
+    auto error = createHipdnnHandle(handle);
+    EXPECT_TRUE(error.is_bad());
+    EXPECT_EQ(handle, nullptr);
 }
 
 TEST_F(TestHandle, CreateHandleWithStreamSuccess)
@@ -74,7 +143,9 @@ TEST_F(TestHandle, CreateHandleWithStreamSuccess)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
     EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto handle = createHipdnnHandle(fakeStream);
+    HipdnnHandlePtr handle;
+    auto error = createHipdnnHandle(handle, fakeStream);
+    EXPECT_TRUE(error.is_good());
     EXPECT_NE(handle, nullptr);
     EXPECT_EQ(*handle, fakeHandle);
 }
@@ -92,71 +163,9 @@ TEST_F(TestHandle, CreateHandleWithStreamFailure)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
     EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    EXPECT_THROW(createHipdnnHandle(fakeStream), std::runtime_error);
-}
-
-TEST_F(TestHandle, TryCreateHandleSuccess)
-{
-    auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0x4567);
-
-    EXPECT_CALL(*_mockBackend, create(_)).WillOnce([&fakeHandle](hipdnnHandle_t* out) {
-        *out = fakeHandle;
-        return HIPDNN_STATUS_SUCCESS;
-    });
-    EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-    auto [handle, error] = tryCreateHipdnnHandle();
-    EXPECT_TRUE(error.is_good());
-    EXPECT_NE(handle, nullptr);
-    EXPECT_EQ(*handle, fakeHandle);
-}
-
-TEST_F(TestHandle, TryCreateHandleFailure)
-{
-    EXPECT_CALL(*_mockBackend, create(_)).WillOnce([](hipdnnHandle_t*) {
-        return HIPDNN_STATUS_INTERNAL_ERROR;
-    });
-
-    auto [handle, error] = tryCreateHipdnnHandle();
+    HipdnnHandlePtr handle;
+    auto error = createHipdnnHandle(handle, fakeStream);
     EXPECT_TRUE(error.is_bad());
-    EXPECT_EQ(handle, nullptr);
-}
-
-TEST_F(TestHandle, TryCreateHandleWithStreamSuccess)
-{
-    auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0x5678);
-    auto fakeStream = reinterpret_cast<hipStream_t>(0xCDEF);
-
-    EXPECT_CALL(*_mockBackend, create(_)).WillOnce([&fakeHandle](hipdnnHandle_t* out) {
-        *out = fakeHandle;
-        return HIPDNN_STATUS_SUCCESS;
-    });
-    EXPECT_CALL(*_mockBackend, setStream(fakeHandle, fakeStream))
-        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-    EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-    auto [handle, error] = tryCreateHipdnnHandle(fakeStream);
-    EXPECT_TRUE(error.is_good());
-    EXPECT_NE(handle, nullptr);
-    EXPECT_EQ(*handle, fakeHandle);
-}
-
-TEST_F(TestHandle, TryCreateHandleWithStreamFailure)
-{
-    auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0x6789);
-    auto fakeStream = reinterpret_cast<hipStream_t>(0xDEF0);
-
-    EXPECT_CALL(*_mockBackend, create(_)).WillOnce([&fakeHandle](hipdnnHandle_t* out) {
-        *out = fakeHandle;
-        return HIPDNN_STATUS_SUCCESS;
-    });
-    EXPECT_CALL(*_mockBackend, setStream(fakeHandle, fakeStream))
-        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
-    EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-    auto [handle, error] = tryCreateHipdnnHandle(fakeStream);
-    EXPECT_TRUE(error.is_bad());
-    EXPECT_EQ(handle, nullptr);
 }
 
 TEST_F(TestHandle, HandleDestroyedOnScopeExit)
@@ -170,7 +179,8 @@ TEST_F(TestHandle, HandleDestroyedOnScopeExit)
     EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     {
-        auto handle = createHipdnnHandle();
+        auto [handle, error] = createHipdnnHandle();
+        EXPECT_TRUE(error.is_good());
         EXPECT_NE(handle, nullptr);
     }
     // destroy is verified by the EXPECT_CALL expectation
@@ -188,7 +198,8 @@ TEST_F(TestHandle, MoveTransfersOwnership)
         .Times(1)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto handle1 = createHipdnnHandle();
+    auto [handle1, error] = createHipdnnHandle();
+    EXPECT_TRUE(error.is_good());
     EXPECT_EQ(*handle1, fakeHandle);
 
     auto handle2 = std::move(handle1);
@@ -205,6 +216,24 @@ TEST_F(TestHandle, NullHandleDeleterIsNoop)
     }
 }
 
+TEST_F(TestHandle, DestroyerHandlesFailure)
+{
+    auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0xBEEF);
+
+    EXPECT_CALL(*_mockBackend, create(_)).WillOnce([&fakeHandle](hipdnnHandle_t* out) {
+        *out = fakeHandle;
+        return HIPDNN_STATUS_SUCCESS;
+    });
+    EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
+
+    {
+        HipdnnHandlePtr handle;
+        auto error = createHipdnnHandle(handle);
+        EXPECT_TRUE(error.is_good());
+    }
+    // Scope exits, deleter runs, destroy fails but logs error without throwing
+}
+
 TEST_F(TestHandle, SetStreamOnValidHandle)
 {
     auto fakeHandle = reinterpret_cast<hipdnnHandle_t>(0x9012);
@@ -218,9 +247,10 @@ TEST_F(TestHandle, SetStreamOnValidHandle)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
     EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto handle = createHipdnnHandle();
-    auto error = setHipdnnHandleStream(handle, fakeStream);
+    auto [handle, error] = createHipdnnHandle();
     EXPECT_TRUE(error.is_good());
+    auto streamError = setHipdnnHandleStream(handle, fakeStream);
+    EXPECT_TRUE(streamError.is_good());
 }
 
 TEST_F(TestHandle, SetStreamOnNullHandle)
@@ -259,10 +289,11 @@ TEST_F(TestHandle, GetStreamFromValidHandle)
         });
     EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto handle = createHipdnnHandle();
-    hipStream_t stream = nullptr;
-    auto error = getHipdnnHandleStream(handle, &stream);
+    auto [handle, error] = createHipdnnHandle();
     EXPECT_TRUE(error.is_good());
+    hipStream_t stream = nullptr;
+    auto streamError = getHipdnnHandleStream(handle, &stream);
+    EXPECT_TRUE(streamError.is_good());
     EXPECT_EQ(stream, fakeStream);
 }
 
@@ -276,8 +307,9 @@ TEST_F(TestHandle, GetStreamNullPointer)
     });
     EXPECT_CALL(*_mockBackend, destroy(fakeHandle)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto handle = createHipdnnHandle();
-    auto error = getHipdnnHandleStream(handle, nullptr);
-    EXPECT_TRUE(error.is_bad());
-    EXPECT_EQ(error.get_code(), ErrorCode::INVALID_VALUE);
+    auto [handle, error] = createHipdnnHandle();
+    EXPECT_TRUE(error.is_good());
+    auto streamError = getHipdnnHandleStream(handle, nullptr);
+    EXPECT_TRUE(streamError.is_bad());
+    EXPECT_EQ(streamError.get_code(), ErrorCode::INVALID_VALUE);
 }
