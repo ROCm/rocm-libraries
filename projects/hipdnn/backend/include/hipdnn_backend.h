@@ -368,7 +368,12 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
  *
  * @param[in] severity   The severity level of the log message
  * @param[in] message    The log message (null-terminated string, includes component name)
+ * @note Callback should return promptly. For blocking operations (network, disk I/O),
+ *       queue work to a separate thread to avoid impacting hipDNN performance.
+ *
+ * @warning If callback blocks indefinitely, shutdown operations may hang.
  */
+
 typedef void (*hipdnnBackendLogOutputCallback_t)(hipdnnSeverity_t severity, const char* message);
 
 /**
