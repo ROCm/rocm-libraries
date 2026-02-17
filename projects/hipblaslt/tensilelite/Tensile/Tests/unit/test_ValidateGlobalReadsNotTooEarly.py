@@ -35,8 +35,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
     paired entries: even indices are m0-pointer-updates (ignored), odd indices are actual
     buffer_loads. For example, GRA: [[3, 5]] means m0-update at 3, load at 5.
     """
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_grs_not_too_early(sched, kernel_dict, codePathIdx)
+    def validation_function(self, sched, kernel_dict, codePathIdx, timeline=None):
+        return verify_grs_not_too_early(timeline, sched, kernel_dict, codePathIdx)
 
     def setUp(self):
         super().setUp()
