@@ -216,12 +216,28 @@ template <>
 struct BatchedTransposeTraits<TransposeSolutionDefault2Nhwc>
 {
     static constexpr const char* layout_transform = "NCHW-NHWC";
+    static constexpr int ndims                    = 4;
 };
 
 template <>
 struct BatchedTransposeTraits<TransposeSolutionNhwc2Default>
 {
     static constexpr const char* layout_transform = "NHWC-NCHW";
+    static constexpr int ndims                    = 4;
+};
+
+template <>
+struct BatchedTransposeTraits<TransposeSolutionDefault2Ndhwc>
+{
+    static constexpr const char* layout_transform = "NCDHW-NDHWC";
+    static constexpr int ndims                    = 5;
+};
+
+template <>
+struct BatchedTransposeTraits<TransposeSolutionNdhwc2Default>
+{
+    static constexpr const char* layout_transform = "NDHWC-NCDHW";
+    static constexpr int ndims                    = 5;
 };
 
 /// \brief Generic batched transpose solver template
@@ -242,13 +258,14 @@ struct BatchedTransposeSolverImpl : TransposePseudoSolver
         const auto& desc = problem.input;
         const auto& lens = desc.GetLengths();
 
-        // Batched transpose only supports 4D tensors (NCHW <-> NHWC)
-        if(lens.size() != 4)
+        // Batched transpose supports 4D (NCHW <-> NHWC) and 5D (NCDHW <-> NDHWC)
+        if(lens.size() != 4 && lens.size() != 5)
             return false;
 
         // Delegate to BatchedTransposeSolution's validation which checks data type and dimensions
-        return BatchedTransposeSolution::IsApplicable(
-            desc.GetType(), lens[0], lens[1], lens[2], lens[3]);
+        // For both 4D and 5D, we pass h*w (or d*h*w) as the spatial dimension
+        // Unified validation for both 4D and 5D
+        return BatchedTransposeSolution::IsApplicable(desc.GetType(), lens);
     }
 
     ConvSolution GetSolution(const ExecutionContext& ctx,
@@ -257,13 +274,28 @@ struct BatchedTransposeSolverImpl : TransposePseudoSolver
         const auto& desc = problem.input;
         const auto& lens = desc.GetLengths();
 
-        // Extract NCHW dimensions (lengths are always stored in NCHW order)
+        // Extract dimensions
         const uint32_t n = static_cast<uint32_t>(lens[0]);
         const uint32_t c = static_cast<uint32_t>(lens[1]);
-        const uint32_t h = static_cast<uint32_t>(lens[2]);
-        const uint32_t w = static_cast<uint32_t>(lens[3]);
 
-        TransposeSolution transpose_sol(ctx, desc.GetType(), n, c, h, w);
+        // Create the transpose solution based on dimensionality
+        // Use if constexpr to ensure only the correct branch is instantiated
+        TransposeSolution transpose_sol = [&]() {
+            constexpr int expected_dims = BatchedTransposeTraits<TransposeSolution>::ndims;
+            if constexpr(expected_dims == 4)
+            {
+                const uint32_t h = static_cast<uint32_t>(lens[2]);
+                const uint32_t w = static_cast<uint32_t>(lens[3]);
+                return TransposeSolution(ctx, desc.GetType(), n, c, h, w);
+            }
+            else // expected_dims == 5
+            {
+                const uint32_t d = static_cast<uint32_t>(lens[2]);
+                const uint32_t h = static_cast<uint32_t>(lens[3]);
+                const uint32_t w = static_cast<uint32_t>(lens[4]);
+                return TransposeSolution(ctx, desc.GetType(), n, c, d, h, w);
+            }
+        }();
 
         auto sln = ConvSolution{};
         sln.construction_params.push_back(transpose_sol.GetKernelInfo());
@@ -292,11 +324,15 @@ struct BatchedTransposeSolverImpl : TransposePseudoSolver
 /// Uses TransposeSolutionDefault2Nhwc which provides coalesced memory access and shared memory
 /// tiling for significantly better performance than the naive UniversalTransposeSolver.
 using BatchedNchw2NhwcTransposeSolver = BatchedTransposeSolverImpl<TransposeSolutionDefault2Nhwc>;
+using BatchedNcdhw2NdhwcTransposeSolver =
+    BatchedTransposeSolverImpl<TransposeSolutionDefault2Ndhwc>;
 
 /// \brief High-performance NHWC to NCHW transpose using LDS-tiled batched transpose kernel
 /// Uses TransposeSolutionNhwc2Default which provides coalesced memory access and shared memory
 /// tiling for significantly better performance than the naive UniversalTransposeSolver.
 using BatchedNhwc2NchwTransposeSolver = BatchedTransposeSolverImpl<TransposeSolutionNhwc2Default>;
+using BatchedNdhwc2NcdhwTransposeSolver =
+    BatchedTransposeSolverImpl<TransposeSolutionNdhwc2Default>;
 
 class SegmentedGpuBuffer
 {
@@ -519,9 +555,11 @@ struct TransposingSolver : Base
     static std::vector<AnyTransposePseudoSolver> GetTransposeSolvers()
     {
         return {
-            BatchedNchw2NhwcTransposeSolver{}, // High-performance NCHW->NHWC
-            BatchedNhwc2NchwTransposeSolver{}, // High-performance NHWC->NCHW
-            UniversalTransposeSolver{}         // Fallback for other layout conversions
+            BatchedNchw2NhwcTransposeSolver{},   // 4D: NCHW->NHWC
+            BatchedNhwc2NchwTransposeSolver{},   // 4D: NHWC->NCHW
+            BatchedNcdhw2NdhwcTransposeSolver{}, // 5D: NCDHW->NDHWC
+            BatchedNdhwc2NcdhwTransposeSolver{}, // 5D: NDHWC->NCDHW
+            UniversalTransposeSolver{}           // Fallback
         };
     }
 
@@ -639,17 +677,27 @@ struct TransposingSolver : Base
 
         for(auto transpose : Derived::GetTransposes())
         {
-            const auto& descriptor = (problem.*(transpose.cdescriptor))();
-            const auto layout      = descriptor.GetLayout_str();
-            const auto to          = SyncLayoutDims(layout.c_str(), transpose.to);
+            // For input transposes: use original problem's layout as source
+            // For output transposes: use transposed problem's layout as source
+            const auto& src_problem = transpose.is_input ? problem : transposed_problem;
+            const auto& dst_problem = transpose.is_input ? transposed_problem : problem;
+
+            const auto& src_descriptor = (src_problem.*(transpose.cdescriptor))();
+            const auto& dst_descriptor = (dst_problem.*(transpose.cdescriptor))();
+
+            const auto layout = src_descriptor.GetLayout_str();
+            const auto to = SyncLayoutDims(layout.c_str(), dst_descriptor.GetLayout_str().c_str());
 
             if(layout == to)
+            {
+                MIOPEN_LOG_I("TransposingSolver: skipping - layout already matches target");
                 continue;
+            }
 
             auto specific_pair = layout + "-";
             specific_pair.append(to);
 
-            const auto transpose_problem = TransposeProblem{descriptor, layout.c_str()};
+            const auto transpose_problem = TransposeProblem{src_descriptor, layout.c_str()};
 
             // Find an applicable transpose solver (specific first, then wildcards, then fallback)
             auto transpose_solver = transpose_solvers.end();

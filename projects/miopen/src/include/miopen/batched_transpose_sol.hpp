@@ -81,31 +81,37 @@ struct MIOPEN_INTERNALS_EXPORT BatchedTransposeSolution
                data_type == miopenInt8 || data_type == miopenBFloat16;
     }
 
-    /// Check if the given NCHW dimensions are supported by batched transpose
-    /// This validates both data type and dimension constraints for the batched transpose kernel
-    static bool IsApplicable(miopenDataType_t data_type, size_t n, size_t c, size_t h, size_t w)
+    /// Check if dimensions are supported by batched transpose (works for both 4D and 5D)
+    /// For 4D: lens = {N, C, H, W}
+    /// For 5D: lens = {N, C, D, H, W}
+    static bool IsApplicable(miopenDataType_t data_type, const std::vector<size_t>& lens)
     {
         // Check data type first
         if(!IsApplicable(data_type))
             return false;
 
-        // Check all dimensions fit in uint32_t (kernel parameter requirement)
-        if(n > std::numeric_limits<uint32_t>::max() || c > std::numeric_limits<uint32_t>::max() ||
-           h > std::numeric_limits<uint32_t>::max() || w > std::numeric_limits<uint32_t>::max())
+        // Must be 4D or 5D
+        if(lens.size() != 4 && lens.size() != 5)
             return false;
 
-        // Check h*w doesn't overflow uint32_t (required for width/height parameter)
-        const size_t hw_product = h * w;
-        if(hw_product > std::numeric_limits<uint32_t>::max())
-            return false;
+        // Check all dimensions fit in uint32_t
+        for(auto dim : lens)
+        {
+            if(dim > std::numeric_limits<uint32_t>::max())
+                return false;
+        }
 
-        // Check n*c*(h*w) doesn't overflow uint32_t (required for dim_total calculation)
-        // dim_total = batch * dim_h * dim_w where batch=n, and dim_h*dim_w ≈ c*(h*w)/tile_size
-        // Conservative check: ensure batch * height * width fits in uint32_t
-        if(c != 0 && hw_product > std::numeric_limits<uint32_t>::max() / c)
-            return false;
-        const size_t c_hw = c * hw_product;
-        if(n != 0 && c_hw > std::numeric_limits<uint32_t>::max() / n)
+        const size_t n = lens[0];
+        const size_t c = lens[1];
+
+        // Compute spatial product (H*W for 4D, D*H*W for 5D)
+        size_t spatial_product = 1;
+        for(size_t i = 2; i < lens.size(); ++i)
+            spatial_product *= lens[i];
+
+        // Check n*c*spatial doesn't overflow uint32_t
+        const size_t c_spatial = c * spatial_product;
+        if(n != 0 && c_spatial > std::numeric_limits<uint32_t>::max() / n)
             return false;
 
         return true;
