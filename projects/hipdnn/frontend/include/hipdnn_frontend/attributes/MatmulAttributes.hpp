@@ -43,7 +43,7 @@ public:
     enum class InputNames
     {
         A = 0, ///< Left input matrix
-        B = 1  ///< Right input matrix
+        B = 1 ///< Right input matrix
     };
     typedef InputNames input_names; ///< @brief Type alias for InputNames
 
@@ -54,7 +54,7 @@ public:
     };
     typedef OutputNames output_names; ///< @brief Type alias for OutputNames
 
-    std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs;   ///< Input tensors
+    std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs; ///< Input tensors
     std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs; ///< Output tensors
 
     /// @brief Get the left input matrix A

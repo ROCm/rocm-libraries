@@ -171,8 +171,8 @@ public:
     }
 
 private:
-    std::string _knobId;       ///< The knob identifier
-    KnobValueVariant _value;   ///< The knob value
+    std::string _knobId; ///< The knob identifier
+    KnobValueVariant _value; ///< The knob value
 };
 
 } // namespace hipdnn_frontend

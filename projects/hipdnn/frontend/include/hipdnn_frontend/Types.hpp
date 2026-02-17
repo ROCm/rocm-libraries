@@ -40,9 +40,9 @@ namespace hipdnn_frontend
  */
 enum class ConvolutionMode
 {
-    NOT_SET = 0,           ///< Mode not specified
+    NOT_SET = 0, ///< Mode not specified
     CROSS_CORRELATION = 1, ///< Cross-correlation mode (standard deep learning convolution)
-    CONVOLUTION = 2        ///< Mathematical convolution (filter is flipped)
+    CONVOLUTION = 2 ///< Mathematical convolution (filter is flipped)
 };
 typedef ConvolutionMode ConvolutionMode_t; ///< @brief Type alias for ConvolutionMode
 
@@ -57,54 +57,54 @@ typedef ConvolutionMode ConvolutionMode_t; ///< @brief Type alias for Convolutio
  */
 enum class PointwiseMode
 {
-    NOT_SET = 0,            ///< Mode not specified
-    ABS = 1,                ///< Absolute value: |x|
-    ADD = 2,                ///< Addition: x + y
-    ADD_SQUARE = 3,         ///< Add and square: (x + y)²
-    BINARY_SELECT = 4,      ///< Ternary select based on condition
-    CEIL = 5,               ///< Ceiling function
-    CMP_EQ = 6,             ///< Compare equal: x == y
-    CMP_GE = 7,             ///< Compare greater or equal: x >= y
-    CMP_GT = 8,             ///< Compare greater than: x > y
-    CMP_LE = 9,             ///< Compare less or equal: x <= y
-    CMP_LT = 10,            ///< Compare less than: x < y
-    CMP_NEQ = 11,           ///< Compare not equal: x != y
-    DIV = 12,               ///< Division: x / y
-    ELU_BWD = 13,           ///< ELU activation backward pass
-    ELU_FWD = 14,           ///< ELU activation forward pass
-    ERF = 15,               ///< Error function
-    EXP = 16,               ///< Exponential: e^x
-    FLOOR = 17,             ///< Floor function
+    NOT_SET = 0, ///< Mode not specified
+    ABS = 1, ///< Absolute value: |x|
+    ADD = 2, ///< Addition: x + y
+    ADD_SQUARE = 3, ///< Add and square: (x + y)²
+    BINARY_SELECT = 4, ///< Ternary select based on condition
+    CEIL = 5, ///< Ceiling function
+    CMP_EQ = 6, ///< Compare equal: x == y
+    CMP_GE = 7, ///< Compare greater or equal: x >= y
+    CMP_GT = 8, ///< Compare greater than: x > y
+    CMP_LE = 9, ///< Compare less or equal: x <= y
+    CMP_LT = 10, ///< Compare less than: x < y
+    CMP_NEQ = 11, ///< Compare not equal: x != y
+    DIV = 12, ///< Division: x / y
+    ELU_BWD = 13, ///< ELU activation backward pass
+    ELU_FWD = 14, ///< ELU activation forward pass
+    ERF = 15, ///< Error function
+    EXP = 16, ///< Exponential: e^x
+    FLOOR = 17, ///< Floor function
     GELU_APPROX_TANH_BWD = 18, ///< GELU (tanh approximation) backward
     GELU_APPROX_TANH_FWD = 19, ///< GELU (tanh approximation) forward
-    GELU_BWD = 20,          ///< GELU activation backward
-    GELU_FWD = 21,          ///< GELU activation forward
-    GEN_INDEX = 22,         ///< Generate index tensor
-    IDENTITY = 23,          ///< Identity: y = x
-    LOG = 24,               ///< Natural logarithm
-    LOGICAL_AND = 25,       ///< Logical AND
-    LOGICAL_NOT = 26,       ///< Logical NOT
-    LOGICAL_OR = 27,        ///< Logical OR
-    MAX = 28,               ///< Element-wise maximum
-    MIN = 29,               ///< Element-wise minimum
-    MUL = 30,               ///< Multiplication: x * y
-    NEG = 31,               ///< Negation: -x
-    RECIPROCAL = 32,        ///< Reciprocal: 1/x
-    RELU_BWD = 33,          ///< ReLU backward pass
-    RELU_FWD = 34,          ///< ReLU forward pass
-    RSQRT = 35,             ///< Reciprocal square root: 1/sqrt(x)
-    SIGMOID_BWD = 36,       ///< Sigmoid backward pass
-    SIGMOID_FWD = 37,       ///< Sigmoid forward pass
-    SIN = 38,               ///< Sine function
-    SOFTPLUS_BWD = 39,      ///< Softplus backward pass
-    SOFTPLUS_FWD = 40,      ///< Softplus forward pass
-    SQRT = 41,              ///< Square root
-    SUB = 42,               ///< Subtraction: x - y
-    SWISH_BWD = 43,         ///< Swish activation backward
-    SWISH_FWD = 44,         ///< Swish activation forward
-    TAN = 45,               ///< Tangent function
-    TANH_BWD = 46,          ///< Tanh backward pass
-    TANH_FWD = 47,          ///< Tanh forward pass
+    GELU_BWD = 20, ///< GELU activation backward
+    GELU_FWD = 21, ///< GELU activation forward
+    GEN_INDEX = 22, ///< Generate index tensor
+    IDENTITY = 23, ///< Identity: y = x
+    LOG = 24, ///< Natural logarithm
+    LOGICAL_AND = 25, ///< Logical AND
+    LOGICAL_NOT = 26, ///< Logical NOT
+    LOGICAL_OR = 27, ///< Logical OR
+    MAX = 28, ///< Element-wise maximum
+    MIN = 29, ///< Element-wise minimum
+    MUL = 30, ///< Multiplication: x * y
+    NEG = 31, ///< Negation: -x
+    RECIPROCAL = 32, ///< Reciprocal: 1/x
+    RELU_BWD = 33, ///< ReLU backward pass
+    RELU_FWD = 34, ///< ReLU forward pass
+    RSQRT = 35, ///< Reciprocal square root: 1/sqrt(x)
+    SIGMOID_BWD = 36, ///< Sigmoid backward pass
+    SIGMOID_FWD = 37, ///< Sigmoid forward pass
+    SIN = 38, ///< Sine function
+    SOFTPLUS_BWD = 39, ///< Softplus backward pass
+    SOFTPLUS_FWD = 40, ///< Softplus forward pass
+    SQRT = 41, ///< Square root
+    SUB = 42, ///< Subtraction: x - y
+    SWISH_BWD = 43, ///< Swish activation backward
+    SWISH_FWD = 44, ///< Swish activation forward
+    TAN = 45, ///< Tangent function
+    TANH_BWD = 46, ///< Tanh backward pass
+    TANH_FWD = 47, ///< Tanh forward pass
 };
 typedef PointwiseMode PointwiseMode_t; ///< @brief Type alias for PointwiseMode
 
@@ -117,16 +117,16 @@ typedef PointwiseMode PointwiseMode_t; ///< @brief Type alias for PointwiseMode
  */
 enum class DataType
 {
-    NOT_SET = 0,   ///< Data type not specified
-    FLOAT = 1,     ///< 32-bit floating point (fp32)
-    HALF = 2,      ///< 16-bit floating point (fp16, IEEE 754)
-    BFLOAT16 = 3,  ///< 16-bit brain floating point (bf16)
-    DOUBLE = 4,    ///< 64-bit floating point (fp64)
-    UINT8 = 5,     ///< 8-bit unsigned integer
-    INT32 = 6,     ///< 32-bit signed integer
-    INT8 = 7,      ///< 8-bit signed integer
-    FP8_E4M3 = 8,  ///< 8-bit floating point (4 exponent, 3 mantissa bits)
-    FP8_E5M2 = 9,  ///< 8-bit floating point (5 exponent, 2 mantissa bits)
+    NOT_SET = 0, ///< Data type not specified
+    FLOAT = 1, ///< 32-bit floating point (fp32)
+    HALF = 2, ///< 16-bit floating point (fp16, IEEE 754)
+    BFLOAT16 = 3, ///< 16-bit brain floating point (bf16)
+    DOUBLE = 4, ///< 64-bit floating point (fp64)
+    UINT8 = 5, ///< 8-bit unsigned integer
+    INT32 = 6, ///< 32-bit signed integer
+    INT8 = 7, ///< 8-bit signed integer
+    FP8_E4M3 = 8, ///< 8-bit floating point (4 exponent, 3 mantissa bits)
+    FP8_E5M2 = 9, ///< 8-bit floating point (5 exponent, 2 mantissa bits)
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -149,7 +149,7 @@ typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
 enum class BuildPlanPolicy
 {
     HEURISTICS_CHOICE, ///< Use heuristics to select the best plan
-    ALL                ///< Build all available plans (currently unused)
+    ALL ///< Build all available plans (currently unused)
 };
 typedef BuildPlanPolicy BuildPlanPolicy_t; ///< @brief Type alias for BuildPlanPolicy
 
@@ -164,10 +164,10 @@ typedef BuildPlanPolicy BuildPlanPolicy_t; ///< @brief Type alias for BuildPlanP
  */
 enum class KnobValueType
 {
-    NOT_SET = 0,  ///< Value type not specified
-    INT64 = 1,    ///< 64-bit signed integer value
-    FLOAT64 = 2,  ///< 64-bit floating point value
-    STRING = 3,   ///< String value
+    NOT_SET = 0, ///< Value type not specified
+    INT64 = 1, ///< 64-bit signed integer value
+    FLOAT64 = 2, ///< 64-bit floating point value
+    STRING = 3, ///< String value
 };
 typedef KnobValueType KnobValueType_t; ///< @brief Type alias for KnobValueType
 

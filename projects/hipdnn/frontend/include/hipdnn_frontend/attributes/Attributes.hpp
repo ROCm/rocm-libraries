@@ -71,7 +71,7 @@ private:
     }
 
 public:
-    std::string name;                               ///< Operation name for debugging
+    std::string name; ///< Operation name for debugging
     DataType compute_data_type = DataType::NOT_SET; ///< Compute/accumulation data type (NOLINT)
 
     /**

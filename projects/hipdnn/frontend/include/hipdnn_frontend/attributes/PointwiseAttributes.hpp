@@ -236,18 +236,18 @@ public:
     };
     typedef OutputNames output_names; ///< @brief Type alias for OutputNames
 
-    std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs;   ///< Input tensors
+    std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs; ///< Input tensors
     std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs; ///< Output tensors
 
     // NOLINTBEGIN(readability-identifier-naming)
-    PointwiseMode mode = PointwiseMode::NOT_SET;    ///< The operation mode
-    std::optional<float> relu_lower_clip = std::nullopt;       ///< ReLU lower clip bound
-    std::optional<float> relu_upper_clip = std::nullopt;       ///< ReLU upper clip bound
+    PointwiseMode mode = PointwiseMode::NOT_SET; ///< The operation mode
+    std::optional<float> relu_lower_clip = std::nullopt; ///< ReLU lower clip bound
+    std::optional<float> relu_upper_clip = std::nullopt; ///< ReLU upper clip bound
     std::optional<float> relu_lower_clip_slope = std::nullopt; ///< Leaky ReLU slope
-    std::optional<int64_t> axis = std::nullopt;                ///< Axis for reductions
-    std::optional<float> swish_beta = std::nullopt;            ///< Swish beta parameter
-    std::optional<float> elu_alpha = std::nullopt;             ///< ELU alpha parameter
-    std::optional<float> softplus_beta = std::nullopt;         ///< Softplus beta parameter
+    std::optional<int64_t> axis = std::nullopt; ///< Axis for reductions
+    std::optional<float> swish_beta = std::nullopt; ///< Swish beta parameter
+    std::optional<float> elu_alpha = std::nullopt; ///< ELU alpha parameter
+    std::optional<float> softplus_beta = std::nullopt; ///< Softplus beta parameter
     // NOLINTEND(readability-identifier-naming)
 
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::PointwiseAttributes>

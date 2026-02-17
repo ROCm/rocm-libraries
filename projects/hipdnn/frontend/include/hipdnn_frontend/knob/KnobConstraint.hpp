@@ -161,10 +161,10 @@ public:
     }
 
 private:
-    int64_t _minValue;                          ///< Minimum allowed value
-    int64_t _maxValue;                          ///< Maximum allowed value
-    int64_t _step;                              ///< Step increment
-    std::unordered_set<int64_t> _validValues;   ///< Explicit allowed values
+    int64_t _minValue; ///< Minimum allowed value
+    int64_t _maxValue; ///< Maximum allowed value
+    int64_t _step; ///< Step increment
+    std::unordered_set<int64_t> _validValues; ///< Explicit allowed values
 };
 
 /**
@@ -227,8 +227,8 @@ public:
     }
 
 private:
-    double _minValue;   ///< Minimum allowed value
-    double _maxValue;   ///< Maximum allowed value
+    double _minValue; ///< Minimum allowed value
+    double _maxValue; ///< Maximum allowed value
 };
 
 /**
@@ -317,8 +317,8 @@ public:
     }
 
 private:
-    int32_t _maxLength;                             ///< Maximum string length
-    std::unordered_set<std::string> _validValues;   ///< Explicit allowed values
+    int32_t _maxLength; ///< Maximum string length
+    std::unordered_set<std::string> _validValues; ///< Explicit allowed values
 };
 
 } // namespace hipdnn_frontend

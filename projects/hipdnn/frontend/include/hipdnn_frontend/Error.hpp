@@ -40,10 +40,10 @@ namespace hipdnn_frontend
  */
 enum class ErrorCode
 {
-    OK,                    ///< Operation completed successfully
-    INVALID_VALUE,         ///< An invalid value was provided
-    HIPDNN_BACKEND_ERROR,  ///< An error occurred in the hipDNN backend
-    ATTRIBUTE_NOT_SET      ///< A required attribute was not set
+    OK, ///< Operation completed successfully
+    INVALID_VALUE, ///< An invalid value was provided
+    HIPDNN_BACKEND_ERROR, ///< An error occurred in the hipDNN backend
+    ATTRIBUTE_NOT_SET ///< A required attribute was not set
 };
 
 // NOLINTNEXTLINE(readability-identifier-naming)
@@ -80,8 +80,8 @@ typedef ErrorCode error_code_t; ///< @brief Type alias for ErrorCode
  */
 struct Error
 {
-    ErrorCode code;              ///< The error code
-    std::string err_msg;         ///< Detailed error message  // NOLINT(readability-identifier-naming)
+    ErrorCode code; ///< The error code
+    std::string err_msg; ///< Detailed error message  // NOLINT(readability-identifier-naming)
 
     /**
      * @brief Default constructor, creates a success result
@@ -166,7 +166,7 @@ inline std::ostream& operator<<(std::ostream& os, const Error& error)
 }
 
 typedef Error error_object; ///< @brief Type alias for Error (cuDNN compatibility)
-typedef Error error_t;      ///< @brief Type alias for Error
+typedef Error error_t; ///< @brief Type alias for Error
 
 #define HIPDNN_RETURN_IF_NE(x, y, error_status, message) \
     do                                                   \

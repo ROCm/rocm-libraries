@@ -163,10 +163,10 @@ public:
     }
 
 private:
-    std::string _name;                                ///< Graph name for debugging
-    DataType _computeType = DataType::NOT_SET;        ///< Compute/accumulation data type
-    DataType _intermediateType = DataType::NOT_SET;   ///< Intermediate tensor data type
-    DataType _ioType = DataType::NOT_SET;             ///< Input/output tensor data type
+    std::string _name; ///< Graph name for debugging
+    DataType _computeType = DataType::NOT_SET; ///< Compute/accumulation data type
+    DataType _intermediateType = DataType::NOT_SET; ///< Intermediate tensor data type
+    DataType _ioType = DataType::NOT_SET; ///< Input/output tensor data type
 };
 
 typedef GraphAttributes Context; ///< @brief Type alias for GraphAttributes

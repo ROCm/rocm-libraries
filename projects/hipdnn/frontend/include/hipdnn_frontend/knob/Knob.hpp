@@ -274,12 +274,12 @@ private:
             variant);
     }
 
-    std::string _knobId;                         ///< Unique knob identifier
-    std::string _description;                    ///< Human-readable description
-    KnobValueVariant _defaultValue;              ///< Default value
-    bool _deprecated;                            ///< Whether this knob is deprecated
+    std::string _knobId; ///< Unique knob identifier
+    std::string _description; ///< Human-readable description
+    KnobValueVariant _defaultValue; ///< Default value
+    bool _deprecated; ///< Whether this knob is deprecated
 
-    std::shared_ptr<IConstraint> _constraint;    ///< Optional constraint
+    std::shared_ptr<IConstraint> _constraint; ///< Optional constraint
 };
 
 namespace detail

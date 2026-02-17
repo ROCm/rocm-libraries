@@ -45,7 +45,7 @@ public:
     enum class InputNames
     {
         DY = 0, ///< Gradient of output tensor
-        W = 1   ///< Weight/filter tensor
+        W = 1 ///< Weight/filter tensor
     };
     typedef InputNames input_names; ///< @brief Type alias for InputNames
 
@@ -56,14 +56,14 @@ public:
     };
     typedef OutputNames output_names; ///< @brief Type alias for OutputNames
 
-    std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs;   ///< Input tensors
+    std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs; ///< Input tensors
     std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs; ///< Output tensors
 
     // NOLINTBEGIN(readability-identifier-naming)
-    std::vector<int64_t> pre_padding;  ///< Padding before convolution (per spatial dim)
+    std::vector<int64_t> pre_padding; ///< Padding before convolution (per spatial dim)
     std::vector<int64_t> post_padding; ///< Padding after convolution (per spatial dim)
-    std::vector<int64_t> stride;       ///< Stride (per spatial dim)
-    std::vector<int64_t> dilation;     ///< Dilation (per spatial dim)
+    std::vector<int64_t> stride; ///< Stride (per spatial dim)
+    std::vector<int64_t> dilation; ///< Dilation (per spatial dim)
     /// Convolution mode (CROSS_CORRELATION or CONVOLUTION)
     ConvolutionMode math_mode = ConvolutionMode::CROSS_CORRELATION;
     // NOLINTEND(readability-identifier-naming)

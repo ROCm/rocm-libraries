@@ -42,11 +42,11 @@ public:
     /// Input tensor identifiers
     enum class InputNames
     {
-        X = 0,            ///< Input activation tensor
-        MEAN = 1,         ///< Pre-computed mean
+        X = 0, ///< Input activation tensor
+        MEAN = 1, ///< Pre-computed mean
         INV_VARIANCE = 2, ///< Pre-computed inverse variance (1/sqrt(var + epsilon))
-        SCALE = 3,        ///< Scale (gamma) parameter
-        BIAS = 4          ///< Bias (beta) parameter
+        SCALE = 3, ///< Scale (gamma) parameter
+        BIAS = 4 ///< Bias (beta) parameter
     };
     typedef InputNames input_names; ///< @brief Type alias for InputNames
 
@@ -57,7 +57,7 @@ public:
     };
     typedef OutputNames output_names; ///< @brief Type alias for OutputNames
 
-    std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs;   ///< Input tensors
+    std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs; ///< Input tensors
     std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs; ///< Output tensors
 
     /// @brief Get the input activation tensor
@@ -191,5 +191,6 @@ public:
     }
 };
 
-typedef BatchnormInferenceAttributes Batchnorm_inference_attributes; ///< @brief cuDNN compatibility alias
+typedef BatchnormInferenceAttributes
+    Batchnorm_inference_attributes; ///< @brief cuDNN compatibility alias
 } // namespace hipdnn_frontend::graph
