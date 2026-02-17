@@ -19,11 +19,13 @@
 // THE SOFTWARE.
 
 #include "../../shared/accuracy_test.h"
+#include "../../shared/fft_enums.h"
 #include "../../shared/params_gen.h"
 #include "../../shared/rocfft_params.h"
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
+extern size_t                 random_seed;
 extern fft_params::fft_mp_lib mp_lib;
 extern int                    mp_ranks;
 
@@ -50,15 +52,20 @@ enum SplitType
     // and another dimension contiguous on output, remaining dims are
     // both split
     PENCIL_3D,
+    // split I/O as (single-process) hipfft would implicitly do for the
+    // considered number of devices
+    IMPLICIT_HIPFFT,
+    // different I/O devices but no decomposition
+    DIFFERENT_IO_DEVICES
 };
 
 std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const int ngpus)
 {
-    int localDeviceCount = 0;
+    int gpusperrank = 0;
     if(ngpus <= 0)
     {
         // Use the command-line option as a priority
-        if(hipGetDeviceCount(&localDeviceCount) != hipSuccess)
+        if(hipGetDeviceCount(&gpusperrank) != hipSuccess)
         {
             throw std::runtime_error("hipGetDeviceCount failed");
         }
@@ -66,15 +73,20 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
         // Limit local device testing to 16 GPUs, as we have some
         // bottlenecks with larger device counts that unreasonably slow
         // down plan creation
-        localDeviceCount = std::min<int>(16, localDeviceCount);
+        gpusperrank = std::min<int>(16, gpusperrank);
     }
     else
     {
-        localDeviceCount = ngpus;
+        gpusperrank = ngpus;
     }
 
-    // need multiple devices or multiprocessing to test anything
-    if(localDeviceCount < 2 && mp_lib == fft_params::fft_mp_lib_none)
+    if(mp_lib == fft_params::fft_mp_lib_none && mp_ranks != 1)
+        throw std::runtime_error("Unexpected value of mp_ranks (" + std::to_string(mp_ranks)
+                                 + ") without a multi-process library.");
+
+    // need more than one device overall, of course
+    const auto total_num_devices = mp_ranks * gpusperrank;
+    if(total_num_devices < 2)
         return {};
 
     static const std::vector<std::vector<size_t>> stride_range = {{1}};
@@ -85,100 +97,151 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
 
     for(auto run_callbacks : {false, true})
     {
-        auto params = param_generator_complex(test_prob,
-                                              multi_gpu_sizes,
-                                              precision_range_sp_dp,
-                                              multi_gpu_batch_range,
-                                              stride_generator(stride_range),
-                                              stride_generator(stride_range),
-                                              ioffset_range_zero,
-                                              ooffset_range_zero,
-                                              {fft_placement_inplace, fft_placement_notinplace},
-                                              false,
-                                              run_callbacks);
-        std::copy(params.begin(), params.end(), std::back_inserter(params_single));
-
-        params = param_generator_real(test_prob,
-                                      multi_gpu_sizes,
-                                      precision_range_sp_dp,
-                                      multi_gpu_batch_range,
-                                      stride_generator(stride_range),
-                                      stride_generator(stride_range),
-                                      ioffset_range_zero,
-                                      ooffset_range_zero,
-                                      {fft_placement_notinplace},
-                                      false,
-                                      run_callbacks);
+        auto params = param_generator_base(test_prob,
+                                           trans_type_range_full,
+                                           multi_gpu_sizes,
+                                           precision_range_sp_dp,
+                                           multi_gpu_batch_range,
+                                           generate_types,
+                                           stride_generator(stride_range),
+                                           stride_generator(stride_range),
+                                           ioffset_range_zero,
+                                           ooffset_range_zero,
+                                           place_range,
+                                           false,
+                                           run_callbacks);
         std::copy(params.begin(), params.end(), std::back_inserter(params_single));
     }
 
     std::vector<fft_params> all_params;
 
     auto distribute_params = [=, &all_params](const std::vector<fft_params>& params) {
-        int brickCount = mp_lib == fft_params::fft_mp_lib_none ? localDeviceCount : mp_ranks;
-
         for(auto& p : params)
         {
             // start with all-ones in grids
-            std::vector<unsigned int> input_grid(p.length.size() + 1, 1);
-            std::vector<unsigned int> output_grid(p.length.size() + 1, 1);
+            std::vector<unsigned int>          input_grid(p.length.size() + 1, 1);
+            std::vector<unsigned int>          output_grid(p.length.size() + 1, 1);
+            int                                start_global_dev_id_input  = 0;
+            int                                start_global_dev_id_output = 0;
+            static std::ranlux24_base          gen(random_seed);
+            std::uniform_int_distribution<int> dev_rng(0, total_num_devices);
 
             auto p_dist = p;
             switch(type)
             {
             case SLOW_INOUT:
-                input_grid[1]  = brickCount;
-                output_grid[1] = brickCount;
+                input_grid[1]  = total_num_devices;
+                output_grid[1] = total_num_devices;
                 break;
             case SLOW_IN:
                 // this type only specifies input field and no output
                 // field, but multi-process transforms require both
                 // fields.
-                if(mp_lib != fft_params::fft_mp_lib_none)
+                if(mp_ranks > 1)
                     continue;
-                input_grid[1] = brickCount;
+                if(p_dist.placement == fft_placement_inplace)
+                    continue;
+                input_grid[1] = total_num_devices;
                 break;
             case SLOW_OUT:
                 // this type only specifies output field and no input
                 // field, but multi-process transforms require both
                 // fields.
-                if(mp_lib != fft_params::fft_mp_lib_none)
+                if(mp_ranks > 1)
                     continue;
-                output_grid[1] = brickCount;
+                if(p_dist.placement == fft_placement_inplace)
+                    continue;
+                output_grid[1] = total_num_devices;
                 break;
             case SLOW_IN_FAST_OUT:
                 // requires at least rank-2 FFT
                 if(p.length.size() < 2)
                     continue;
-                input_grid[1]      = brickCount;
-                output_grid.back() = brickCount;
+                input_grid[1]      = total_num_devices;
+                output_grid.back() = total_num_devices;
                 break;
             case PENCIL_3D:
                 // need at least 2 bricks per split dimension, or 4 devices.
                 // also needs to be a 3D problem.
-                if(brickCount < 4 || p.length.size() != 3)
+                if(total_num_devices < 4 || p.length.size() != 3)
                     continue;
 
                 // make fast dimension contiguous on input
-                input_grid[1] = static_cast<unsigned int>(sqrt(brickCount));
-                input_grid[2] = brickCount / input_grid[1];
+                input_grid[1] = static_cast<unsigned int>(sqrt(total_num_devices));
+                input_grid[2] = total_num_devices / input_grid[1];
                 // make middle dimension contiguous on output
                 output_grid[1] = input_grid[1];
                 output_grid[3] = input_grid[2];
                 break;
+            case IMPLICIT_HIPFFT:
+                // unbatched 1D cases are irrelevant at the moment
+                if(p.length.size() < 2 && p.nbatch <= 1)
+                    continue;
+                if(p.nbatch == 1 && p.placement != fft_placement_inplace)
+                    continue; // only in-place is relevant for unbatched cases
+                if(p.nbatch > 1)
+                {
+                    // only the batch dimension is split
+                    input_grid[0] = output_grid[0]
+                        = std::min(p.nbatch, static_cast<size_t>(total_num_devices));
+                }
+                else
+                {
+                    // Slowest nonbatch dimension is split on input (resp. output)
+                    // of forward (resp. inverse) transforms. Second-slowest nonbatch
+                    // dimension is split on output (resp. input) of forward (resp.
+                    // inverse) transforms
+                    if(p.is_forward())
+                    {
+                        input_grid[1]  = total_num_devices;
+                        output_grid[2] = total_num_devices;
+                    }
+                    else
+                    {
+                        input_grid[2]  = total_num_devices;
+                        output_grid[1] = total_num_devices;
+                    }
+                }
+                break;
+            case DIFFERENT_IO_DEVICES:
+                if(p.placement == fft_placement_inplace)
+                    continue; // only out-of-place
+                if(p.run_callbacks)
+                    continue; // known issue to fix w/ callbacks
+                start_global_dev_id_input  = dev_rng(gen);
+                start_global_dev_id_output = dev_rng(gen);
+                while(start_global_dev_id_input == start_global_dev_id_output)
+                    start_global_dev_id_output = dev_rng(gen);
+                break;
+            default:
+                throw std::invalid_argument("param_generator_multi_gpu: unkonwn split type");
             }
 
             p_dist.mp_lib = mp_lib;
-            p_dist.distribute_input(localDeviceCount, input_grid);
-            p_dist.distribute_output(localDeviceCount, output_grid);
+            p_dist.distribute_field<fft_io::fft_io_in>(
+                gpusperrank, input_grid, mp_ranks, start_global_dev_id_input);
+            p_dist.distribute_field<fft_io::fft_io_out>(
+                gpusperrank, output_grid, mp_ranks, start_global_dev_id_output);
 
-            // "placement" flag is meaningless if exactly one of
-            // input+output is a field.  So just add those cases if
-            // the flag is "out-of-place", since "in-place" is
-            // exactly the same test case.
-            if(p_dist.placement == fft_placement_inplace
-               && p_dist.ifields.empty() != p_dist.ofields.empty())
-                continue;
+            if(mp_ranks > 1)
+            {
+                std::set<int> used_ranks;
+                for(const auto& io_fields : {p_dist.ifields, p_dist.ofields})
+                {
+                    if(io_fields.empty())
+                        used_ranks.insert(0); // implicit "current" rank
+                    for(const auto& io_field : io_fields)
+                    {
+                        for(const auto& b : io_field.bricks)
+                            used_ranks.insert(b.rank);
+                    }
+                }
+                if(used_ranks.size() < static_cast<size_t>(mp_ranks))
+                {
+                    // some ranks have nothing to do...
+                    continue;
+                }
+            }
 
             all_params.push_back(p_dist);
             // also test result scaling for multi-GPU plans
@@ -221,15 +284,23 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu_3d_pencils,
                          ::testing::ValuesIn(param_generator_multi_gpu(PENCIL_3D, ngpus)),
                          accuracy_test::TestName);
 
+// decompositions as hipFFT would define under the hood
+INSTANTIATE_TEST_SUITE_P(multi_gpu_implicit_hipfft,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_multi_gpu(IMPLICIT_HIPFFT, ngpus)),
+                         accuracy_test::TestName);
+
+// input data on one device, output data on another
+INSTANTIATE_TEST_SUITE_P(multi_gpu_different_io_devices,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_multi_gpu(DIFFERENT_IO_DEVICES,
+                                                                       ngpus)),
+                         accuracy_test::TestName);
+
 TEST(multi_gpu_validate, catch_validation_errors)
 {
-    const auto all_split_types = {
-        SLOW_INOUT,
-        SLOW_IN,
-        SLOW_OUT,
-        SLOW_IN_FAST_OUT,
-        PENCIL_3D,
-    };
+    const auto all_split_types
+        = {SLOW_INOUT, SLOW_IN, SLOW_OUT, SLOW_IN_FAST_OUT, PENCIL_3D, IMPLICIT_HIPFFT};
 
     for(auto type : all_split_types)
     {
