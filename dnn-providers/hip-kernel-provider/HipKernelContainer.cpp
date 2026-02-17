@@ -4,6 +4,7 @@
 #include "HipKernelContainer.hpp"
 #include "EngineManager.hpp"
 #include "engines/HipKernelEngine.hpp"
+#include "engines/plans/BatchnormPlanBuilder.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
@@ -34,6 +35,7 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
         {HIP_KERNEL_ENGINE_ID,
          []() -> std::unique_ptr<IEngine> {
              auto engine = std::make_unique<HipKernelEngine>(HIP_KERNEL_ENGINE_ID);
+             engine->addPlanBuilder(std::make_unique<BatchnormPlanBuilder>());
              // add more plan builders here as they are created, for example:
              // engine->addPlanBuilder(std::make_unique<HipKernelBatchnormPlanBuilder>());
              return engine;
@@ -89,7 +91,7 @@ uint32_t
 
 HipKernelContainer::HipKernelContainer()
 {
-    HIPDNN_LOG_INFO("Creating HipKernelContainer");
+    HIPDNN_PLUGIN_LOG_INFO("Creating HipKernelContainer");
 
     _engineManager = std::make_unique<EngineManager>();
 
@@ -101,7 +103,7 @@ HipKernelContainer::HipKernelContainer()
 
 HipKernelContainer::~HipKernelContainer()
 {
-    HIPDNN_LOG_INFO("Destroying HipKernelContainer");
+    HIPDNN_PLUGIN_LOG_INFO("Destroying HipKernelContainer");
 }
 
 EngineManager& HipKernelContainer::getEngineManager()

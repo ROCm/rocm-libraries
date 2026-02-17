@@ -1,0 +1,112 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include "HipKernelUtils.hpp"
+
+namespace hip_kernel_plugin::hip_kernel_utils
+{
+
+ActivationParams parseActivation(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs)
+{
+    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
+
+    switch(attrs.operation())
+    {
+    case PM::RELU_FWD:
+    case PM::RELU_BWD:
+    {
+        if(attrs.relu_lower_clip() && attrs.relu_upper_clip())
+        {
+            return ActivationParams{ActivationMode::CLAMP,
+                                    static_cast<double>(*attrs.relu_lower_clip()),
+                                    static_cast<double>(*attrs.relu_upper_clip()),
+                                    0.0};
+        }
+        if(attrs.relu_upper_clip())
+        {
+            return ActivationParams{ActivationMode::CLIPPED_RELU,
+                                    static_cast<double>(*attrs.relu_upper_clip()),
+                                    0.0,
+                                    0.0};
+        }
+        if(attrs.relu_lower_clip_slope())
+        {
+            return ActivationParams{ActivationMode::LEAKY_RELU,
+                                    static_cast<double>(*attrs.relu_lower_clip_slope()),
+                                    0.0,
+                                    0.0};
+        }
+        if(attrs.relu_lower_clip().has_value() && attrs.relu_lower_clip().value() != 0.f)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Standard relu with a non-zero lower_clip is not supported");
+        }
+        return ActivationParams{ActivationMode::RELU, 0.0, 0.0, 0.0};
+    }
+    case PM::SIGMOID_FWD:
+    case PM::SIGMOID_BWD:
+        return ActivationParams{ActivationMode::LOGISTIC, 0.0, 0.0, 0.0};
+    case PM::TANH_FWD:
+    case PM::TANH_BWD:
+        return ActivationParams{ActivationMode::TANH, 1.0, 1.0, 0.0};
+    case PM::ELU_FWD:
+    case PM::ELU_BWD:
+    {
+        double alpha = attrs.elu_alpha() ? static_cast<double>(*attrs.elu_alpha()) : 1.0;
+        return ActivationParams{ActivationMode::ELU, alpha, 0.0, 0.0};
+    }
+    case PM::SOFTPLUS_FWD:
+    case PM::SOFTPLUS_BWD:
+        if(attrs.softplus_beta())
+        {
+            if(static_cast<double>(*attrs.softplus_beta()) != 1.0)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                               "Softplus only supports beta = 1.0");
+            }
+        }
+        return ActivationParams{ActivationMode::SOFTRELU, 0.0, 0.0, 0.0};
+    case PM::ABS:
+        return ActivationParams{ActivationMode::ABS, 0.0, 0.0, 0.0};
+    case PM::IDENTITY:
+        return ActivationParams{ActivationMode::PASTHRU, 0.0, 0.0, 0.0};
+    default:
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Unsupported activation operation");
+    }
+}
+
+hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
+                                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                            uint32_t numDeviceBuffers)
+{
+    for(uint32_t i = 0; i < numDeviceBuffers; i++)
+    {
+        if(uid == deviceBuffers[i].uid)
+        {
+            return deviceBuffers[i];
+        }
+    }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+        "Device buffer with the uid: " + std::to_string(uid)
+            + " not found in the provided device buffers.");
+}
+
+const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    int64_t uid)
+{
+    if(auto tensorAttr = tensorMap.find(uid); tensorAttr != tensorMap.end())
+    {
+        return *tensorAttr->second;
+    }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                   "Failed to find tensor with UID in tensorMap: "
+                                                       + std::to_string(uid));
+}
+}
