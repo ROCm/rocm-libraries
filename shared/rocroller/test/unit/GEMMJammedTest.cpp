@@ -44,7 +44,7 @@ namespace GEMMTests
     {
     };
 
-    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Optimization_Jammed_2x2)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_2x2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -69,7 +69,7 @@ namespace GEMMTests
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Optimization_Jammed_2x1)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_2x1)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -101,7 +101,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
-    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Optimization_Jammed_2x1_UnrollK)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_2x1_UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -133,7 +133,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
-    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Optimization_Jammed_1x2)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_1x2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -162,7 +162,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
-    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Optimization_Jammed_1x2_UnrollK)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_1x2_UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -193,7 +193,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
-    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Optimization_Jammed_1x8)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_1x8)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -216,7 +216,7 @@ namespace GEMMTests
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Optimization_Jammed_1x8_UnrollK)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_1x8_UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -240,7 +240,7 @@ namespace GEMMTests
 
         basicGEMM<Half>(gemm);
     }
-    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Optimization_Jammed_2x4)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_2x4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -268,7 +268,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "v_pack_b32_f16"), 152);
     }
 
-    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Optimization_Jammed_2x4_UnrollK)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_2x4_UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -301,7 +301,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 9);
     }
 
-    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Optimization_Jammed_4x2)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_4x2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -330,7 +330,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 3);
     }
 
-    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Optimization_Jammed_4x2_UnrollK)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_4x2_UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;

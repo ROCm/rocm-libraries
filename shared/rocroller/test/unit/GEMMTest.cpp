@@ -82,7 +82,7 @@ namespace GEMMTests
     };
 
     // This test is to ensure each scheduler properly yields insts for a basic GEMM
-    TEST_P(GEMMTestSuite, GPU_GEMM_Optimization_Schedulers)
+    TEST_P(GEMMTestSuite, GPU_GEMM_Schedulers)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -567,7 +567,7 @@ namespace GEMMTests
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMTestSuite, GPU_GEMM_Optimization_StoreDWave)
+    TEST_P(GEMMTestSuite, GPU_GEMM_StoreDWave)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -670,7 +670,7 @@ namespace GEMMTests
     };
 
     // Test to verify different random seeds produce different instruction sequences
-    TEST_P(GEMMSchedulerRandomTestSuite, GPU_GEMM_Optimization_Schedulers_Random)
+    TEST_P(GEMMSchedulerRandomTestSuite, GPU_GEMM_Schedulers_Random)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
