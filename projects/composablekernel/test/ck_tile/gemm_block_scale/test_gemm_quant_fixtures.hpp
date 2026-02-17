@@ -109,6 +109,9 @@ struct GemmConfigMx : public GemmConfigBase
     static constexpr ck_tile::index_t K_Tile = 128;
 };
 
+// This configuration uses K_Warp_Tile = 64 on CDNA. In this way, on gfx950 we can use
+// LDS load transpose on matrix B (FP4) because the instruction requires each
+// lane to load 16 4bits elements
 struct GemmConfigMxFP4 : public GemmConfigBase
 {
     static constexpr ck_tile::index_t M_Tile      = 128;

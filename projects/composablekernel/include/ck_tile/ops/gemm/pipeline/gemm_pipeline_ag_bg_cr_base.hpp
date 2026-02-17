@@ -11,12 +11,11 @@ namespace ck_tile {
 template <typename Problem, typename Policy>
 struct GemmPipelineAgBgCrImplBase
 {
-    using AsDataType      = remove_cvref_t<typename Problem::AsDataTypeTuple>;
-    using BsDataType      = remove_cvref_t<typename Problem::BsDataTypeTuple>;
-    using AsLayout        = remove_cvref_t<typename Problem::AsLayoutTuple>;
-    using BsLayout        = remove_cvref_t<typename Problem::BsLayoutTuple>;
-    using BlockGemmShape  = remove_cvref_t<typename Problem::BlockGemmShape>;
-    using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
+    using AsDataType     = remove_cvref_t<typename Problem::AsDataTypeTuple>;
+    using BsDataType     = remove_cvref_t<typename Problem::BsDataTypeTuple>;
+    using AsLayout       = remove_cvref_t<typename Problem::AsLayoutTuple>;
+    using BsLayout       = remove_cvref_t<typename Problem::BsLayoutTuple>;
+    using BlockGemmShape = remove_cvref_t<typename Problem::BlockGemmShape>;
 
     using ADataType   = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataType>>;
     using ALayout     = remove_cvref_t<std::tuple_element_t<number<0>{}, AsLayout>>;
@@ -242,7 +241,7 @@ struct GemmPipelineAgBgCrImplBase
     CK_TILE_DEVICE constexpr auto MakeALdsWindows(const ALdsTensorView& a_lds_block_view,
                                                   const ALdsLoadTileDistr&) const
     {
-        // with pk_int4_t the LDS type is always BDataType
+        // with pk_int4_t load transpose the LDS type is always BDataType
         using ADataTypeLDS =
             std::conditional_t<std::is_same_v<typename Problem::ADataType, pk_int4_t>,
                                typename Problem::BDataType,

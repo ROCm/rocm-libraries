@@ -394,6 +394,9 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
 
                                 constexpr auto i_j_idx_scale_lo = make_bq_index(idx0, idx1_lo);
                                 constexpr auto i_j_idx_scale_hi = make_bq_index(idx0, idx1_hi);
+
+                                // If the scale is the same for packed values, use pk cvt scale
+                                // instructions, otherwise scale and cast element by element
                                 if constexpr(i_j_idx_scale_lo[I0{}].impl_.at(0) ==
                                                  i_j_idx_scale_hi[I0{}].impl_.at(0) &&
                                              i_j_idx_scale_lo[I1{}].impl_.at(0) ==
