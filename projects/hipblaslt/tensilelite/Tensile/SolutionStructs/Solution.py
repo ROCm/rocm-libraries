@@ -38,8 +38,7 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     roundUpToNearestMultiple
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import defaultSolution, \
-                                            defaultInternalSupportParams, \
-                                            globalParameters
+                                            defaultInternalSupportParams
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.Toolchain.Component import Assembler
@@ -2026,7 +2025,7 @@ class Solution(collections.abc.Mapping):
             ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPad()
             ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, \
               ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
-            if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > globalParameters["MaxLDS"]:
+            if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > state["MaxLDS"]:
               if wlrA > 1:
                 state["LocalReadVectorWidthA"] //= 2
               if wlrB > 1:
