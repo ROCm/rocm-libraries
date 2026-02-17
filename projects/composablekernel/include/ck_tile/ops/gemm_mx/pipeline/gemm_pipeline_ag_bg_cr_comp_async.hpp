@@ -21,7 +21,7 @@ struct BaseMXGemmPipelineAgBgCrCompAsync
     static constexpr index_t PrefetchStages  = 2;
     static constexpr index_t PrefillStages   = 1;
     static constexpr index_t GlobalBufferNum = 1;
-    
+
     static constexpr bool UsePersistentKernel = Problem::Traits::UsePersistentKernel;
 
     CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)
@@ -123,9 +123,9 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
     using BDataType = remove_cvref_t<std::tuple_element_t<0, BsDataType>>;
 
     static_assert(!std::is_same_v<BDataType, pk_int4_t>, "Not implemented");
-    
+
     // Each scale covers 32 K elements
-    static constexpr index_t ScaleBlockSize = 32;  
+    static constexpr index_t ScaleBlockSize = 32;
 
     static constexpr index_t APackedSize =
         ck_tile::numeric_traits<remove_cvref_t<ADataType>>::PackedSize;
@@ -298,9 +298,9 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
             auto a_tile_windows = generate_tuple(
                 [&](auto idx) {
                     return make_tile_window(
-                        a_dram_block_window_tmp[number<idx>{}].get_bottom_tensor_view(), 
+                        a_dram_block_window_tmp[number<idx>{}].get_bottom_tensor_view(),
                         make_tuple(number<MPerBlock>{}, number<KPerBlock>{}),
-                        a_dram_block_window_tmp[number<idx>{}].get_window_origin(), 
+                        a_dram_block_window_tmp[number<idx>{}].get_window_origin(),
                         Policy::template MakeADramTileDistribution<Problem>());
                 },
                 number<AsLayout::size()>{});
@@ -308,7 +308,7 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
             auto b_tile_windows = generate_tuple(
                 [&](auto idx) {
                     return make_tile_window(
-                        b_dram_block_window_tmp[number<idx>{}].get_bottom_tensor_view(), 
+                        b_dram_block_window_tmp[number<idx>{}].get_bottom_tensor_view(),
                         make_tuple(number<NPerBlock>{}, number<KPerBlock>{}),
                         b_dram_block_window_tmp[number<idx>{}].get_window_origin(),
                         Policy::template MakeBDramTileDistribution<Problem>());
@@ -317,31 +317,31 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
 
             ////////////// MX Scale windows /////////////////
             // Get WarpGemm configuration
-            using BlockWarps = typename BlockGemmShape::BlockWarps;
+            using BlockWarps        = typename BlockGemmShape::BlockWarps;
             constexpr index_t MWarp = BlockWarps::at(I0{});
             constexpr index_t NWarp = BlockWarps::at(I1{});
-            
+
             // Calculate scale dimensions: KPerBlock elements need KPerBlock/32 e8m0_t scales
             constexpr index_t ScaleKDimPerBlock = KPerBlock / ScaleBlockSize;
-            
+
             // Scale tensor views and base origins for creating tile windows per iteration
             const auto& scale_a_tensor_view = scale_a_window.get_bottom_tensor_view();
             const auto& scale_b_tensor_view = scale_b_window.get_bottom_tensor_view();
-            auto scale_a_base_origin = scale_a_window.get_window_origin();
-            auto scale_b_base_origin = scale_b_window.get_window_origin();
-            
+            auto scale_a_base_origin        = scale_a_window.get_window_origin();
+            auto scale_b_base_origin        = scale_b_window.get_window_origin();
+
             // Create sample scale windows to determine tile types
-            auto scale_a_dram_window = make_tile_window(
-                scale_a_tensor_view,
-                make_tuple(number<MPerBlock>{}, number<ScaleKDimPerBlock>{}),
-                scale_a_base_origin,
-                Policy::template MakeMX_ScaleA_DramTileDistribution<Problem>());
-            
-            auto scale_b_dram_window = make_tile_window(
-                scale_b_tensor_view,
-                make_tuple(number<NPerBlock>{}, number<ScaleKDimPerBlock>{}),
-                scale_b_base_origin,
-                Policy::template MakeMX_ScaleB_DramTileDistribution<Problem>());
+            auto scale_a_dram_window =
+                make_tile_window(scale_a_tensor_view,
+                                 make_tuple(number<MPerBlock>{}, number<ScaleKDimPerBlock>{}),
+                                 scale_a_base_origin,
+                                 Policy::template MakeMX_ScaleA_DramTileDistribution<Problem>());
+
+            auto scale_b_dram_window =
+                make_tile_window(scale_b_tensor_view,
+                                 make_tuple(number<NPerBlock>{}, number<ScaleKDimPerBlock>{}),
+                                 scale_b_base_origin,
+                                 Policy::template MakeMX_ScaleB_DramTileDistribution<Problem>());
 
             // this pipeline has a pair of LDS buffers per logical tile
             auto&& [a_lds_block0, b_lds_block0] = Base::GetABLdsTensorViews(p_smem_0);
@@ -386,7 +386,7 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                 b_copy_lds_window0, b_tile_windows[number<0>{}], b_dram_tile_window_step);
 
             // Initialize block gemm and C block tile
-            auto block_gemm = BlockGemm();
+            auto block_gemm   = BlockGemm();
             auto c_block_tile = block_gemm.MakeCBlockTile();
             clear_tile(c_block_tile);
 
@@ -411,15 +411,25 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
             BLdsTile b_block_tile0, b_block_tile1;
 
             // Some sanity checks on the LDS tile sizes
-            static_assert(sizeof(ALdsTile) == MPerBlock * (KPerBlock * sizeof(ADataType) / APackedSize) * NWarp / BlockSize, "ALdsTile size is wrong!");
-            static_assert(sizeof(BLdsTile) == NPerBlock * (KPerBlock * sizeof(BDataType) / BPackedSize) * MWarp / BlockSize, "BLdsTile size is wrong!");
-            static_assert(Policy::template GetSmemSizeA<Problem>() == MPerBlock * (KPerBlock * sizeof(ADataType) / APackedSize), "SmemSizeA size is wrong!");
-            static_assert(Policy::template GetSmemSizeB<Problem>() == (KPerBlock * sizeof(BDataType) / BPackedSize) * NPerBlock, "SmemSizeB size is wrong!");
+            static_assert(sizeof(ALdsTile) == MPerBlock *
+                                                  (KPerBlock * sizeof(ADataType) / APackedSize) *
+                                                  NWarp / BlockSize,
+                          "ALdsTile size is wrong!");
+            static_assert(sizeof(BLdsTile) == NPerBlock *
+                                                  (KPerBlock * sizeof(BDataType) / BPackedSize) *
+                                                  MWarp / BlockSize,
+                          "BLdsTile size is wrong!");
+            static_assert(Policy::template GetSmemSizeA<Problem>() ==
+                              MPerBlock * (KPerBlock * sizeof(ADataType) / APackedSize),
+                          "SmemSizeA size is wrong!");
+            static_assert(Policy::template GetSmemSizeB<Problem>() ==
+                              (KPerBlock * sizeof(BDataType) / BPackedSize) * NPerBlock,
+                          "SmemSizeB size is wrong!");
 
             ////////////// MX Scale register tiles (ping-pong buffers) /////////////////
             // No packing needed - each thread gets e8m0_t elements directly
             // Each thread will cast e8m0_t to int32_t for WarpGemm with OpSel=0
-            
+
             using ScaleATileType = decltype(load_tile(scale_a_dram_window));
             using ScaleBTileType = decltype(load_tile(scale_b_dram_window));
             ScaleATileType scale_a_tile_ping, scale_a_tile_pong;
@@ -428,9 +438,11 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
             // initialize Scale DRAM window steps, used to advance the Scale DRAM windows
             using ScaleADramTileWindowStep = typename ScaleADramBlockWindowTmp::BottomTensorIndex;
             using ScaleBDramTileWindowStep = typename ScaleBDramBlockWindowTmp::BottomTensorIndex;
-            constexpr ScaleADramTileWindowStep scale_a_dram_tile_window_step = make_array(0, ScaleKDimPerBlock);
-            constexpr ScaleBDramTileWindowStep scale_b_dram_tile_window_step = make_array(0, ScaleKDimPerBlock);
-            
+            constexpr ScaleADramTileWindowStep scale_a_dram_tile_window_step =
+                make_array(0, ScaleKDimPerBlock);
+            constexpr ScaleBDramTileWindowStep scale_b_dram_tile_window_step =
+                make_array(0, ScaleKDimPerBlock);
+
             // Helper function to load scales
             auto load_scales_from_dram = [&](auto& scale_a, auto& scale_b) {
                 scale_a = load_tile(scale_a_dram_window);
@@ -493,9 +505,10 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
 
             // Load scales for iteration 0 (ping)
             load_scales_from_dram(scale_a_tile_ping, scale_b_tile_ping);
-            
+
             // Load scales for iteration 1 (pong) if needed
-            if (num_loop > 1) {
+            if(num_loop > 1)
+            {
                 load_scales_from_dram(scale_a_tile_pong, scale_b_tile_pong);
             }
 
@@ -523,7 +536,11 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                                                   b_tile_windows[number<0>{}],
                                                   b_dram_tile_window_step);
                         // C(i-3) = A(i-3) @ B(i-3) with MX scaling
-                        block_gemm(c_block_tile, a_block_tile0, b_block_tile0, scale_a_tile_ping, scale_b_tile_ping);
+                        block_gemm(c_block_tile,
+                                   a_block_tile0,
+                                   b_block_tile0,
+                                   scale_a_tile_ping,
+                                   scale_b_tile_ping);
                         HotLoopScheduler();
                         // Load next scales after using current scales above
                         load_scales_from_dram(scale_a_tile_ping, scale_b_tile_ping);
@@ -546,7 +563,11 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                                                   b_tile_windows[number<0>{}],
                                                   b_dram_tile_window_step);
                         // C(i-2) = A(i-2) @ B(i-2) with MX scaling
-                        block_gemm(c_block_tile, a_block_tile1, b_block_tile1, scale_a_tile_pong, scale_b_tile_pong);
+                        block_gemm(c_block_tile,
+                                   a_block_tile1,
+                                   b_block_tile1,
+                                   scale_a_tile_pong,
+                                   scale_b_tile_pong);
                         HotLoopScheduler();
                         // Load next scales after using current scales above
                         load_scales_from_dram(scale_a_tile_pong, scale_b_tile_pong);
@@ -563,8 +584,12 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                     Base::LocalPrefetch(a_block_tile1, a_lds_ld_window1, is_a_load_tr_v);
                     Base::LocalPrefetch(b_block_tile1, b_lds_ld_window1, is_b_load_tr_v);
                     // C(num_loop-2) = A(num_loop-2) @ B(num_loop-2) with MX scaling
-                    block_gemm(c_block_tile, a_block_tile0, b_block_tile0, scale_a_tile_ping, scale_b_tile_ping);
-                    
+                    block_gemm(c_block_tile,
+                               a_block_tile0,
+                               b_block_tile0,
+                               scale_a_tile_ping,
+                               scale_b_tile_ping);
+
                     // load last scales to ping for the last iteration to ping buffers
                     load_scales_from_dram(scale_a_tile_ping, scale_b_tile_ping);
                 }
@@ -575,11 +600,19 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                     Base::LocalPrefetch(a_block_tile0, a_lds_ld_window0, is_a_load_tr_v);
                     Base::LocalPrefetch(b_block_tile0, b_lds_ld_window0, is_b_load_tr_v);
                     // C(num_loop-1) = A(num_loop-1) @ B(num_loop-1) with MX scaling
-                    block_gemm(c_block_tile, a_block_tile1, b_block_tile1, scale_a_tile_pong, scale_b_tile_pong);
+                    block_gemm(c_block_tile,
+                               a_block_tile1,
+                               b_block_tile1,
+                               scale_a_tile_pong,
+                               scale_b_tile_pong);
                 }
                 {
                     // C(num_loop) = A(num_loop) @ B(num_loop) with MX scaling
-                    block_gemm(c_block_tile, a_block_tile0, b_block_tile0, scale_a_tile_ping, scale_b_tile_ping);
+                    block_gemm(c_block_tile,
+                               a_block_tile0,
+                               b_block_tile0,
+                               scale_a_tile_ping,
+                               scale_b_tile_ping);
                 }
             }
             else if(TailNum == TailNumber::Two)
@@ -589,21 +622,33 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                     // read A(num_loop), B(num_loop) from LDS window(1) to pipeline registers(1)
                     Base::LocalPrefetch(a_block_tile1, a_lds_ld_window1, is_a_load_tr_v);
                     Base::LocalPrefetch(b_block_tile1, b_lds_ld_window1, is_b_load_tr_v);
-                    block_gemm(c_block_tile, a_block_tile0, b_block_tile0, scale_a_tile_ping, scale_b_tile_ping);
+                    block_gemm(c_block_tile,
+                               a_block_tile0,
+                               b_block_tile0,
+                               scale_a_tile_ping,
+                               scale_b_tile_ping);
                 }
                 {
                     // C(num_loop) = A(num_loop) @ B(num_loop) with MX scaling
-                    block_gemm(c_block_tile, a_block_tile1, b_block_tile1, scale_a_tile_pong, scale_b_tile_pong);
+                    block_gemm(c_block_tile,
+                               a_block_tile1,
+                               b_block_tile1,
+                               scale_a_tile_pong,
+                               scale_b_tile_pong);
                 }
             }
             else if(TailNum == TailNumber::One)
             {
                 block_sync_lds();
                 // C(num_loop) = A(num_loop) @ B(num_loop) with MX scaling
-                block_gemm(c_block_tile, a_block_tile0, b_block_tile0, scale_a_tile_ping, scale_b_tile_ping);
+                block_gemm(c_block_tile,
+                           a_block_tile0,
+                           b_block_tile0,
+                           scale_a_tile_ping,
+                           scale_b_tile_ping);
                 __builtin_amdgcn_sched_barrier(0);
             }
-            
+
             return c_block_tile;
         }
     };
@@ -644,7 +689,7 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
     }
 
     public:
-    template <typename ADramBlockWindowTmp, 
+    template <typename ADramBlockWindowTmp,
               typename BDramBlockWindowTmp,
               typename ScaleADramBlockWindowTmp,
               typename ScaleBDramBlockWindowTmp>

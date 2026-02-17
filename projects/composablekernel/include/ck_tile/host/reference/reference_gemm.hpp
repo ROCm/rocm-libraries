@@ -467,8 +467,8 @@ CK_TILE_HOST void reference_gemm(const HostTensor<ADataType>& a_m_k,
             AccDataType v_b;
             if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
             {
-                // HostTensor automatically handles packed indexing: a_m_k(m,k) divides offset by PackedSize
-                // So a_m_k(m,0) and a_m_k(m,1) return the same packed byte
+                // HostTensor automatically handles packed indexing: a_m_k(m,k) divides offset by
+                // PackedSize So a_m_k(m,0) and a_m_k(m,1) return the same packed byte
                 const pk_fp4_t pk_val   = a_m_k(m, k);
                 const fp32x2_t fp32_val = pk_val.to_fp32x2(1.0f);
                 const float unpacked    = (k % 2 == 1) ? fp32_val.hi : fp32_val.lo;

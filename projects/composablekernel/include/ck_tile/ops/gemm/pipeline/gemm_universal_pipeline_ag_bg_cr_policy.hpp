@@ -518,7 +518,7 @@ struct UniversalGemmBasePolicy
 
         // Assume DataType is even!
         if constexpr(XPerTile % (PackedSize * 16 / sizeof(DataType)) == 0 &&
-                          elements_per_thread % (PackedSize * 16 / sizeof(DataType)) == 0)
+                     elements_per_thread % (PackedSize * 16 / sizeof(DataType)) == 0)
         {
             return (PackedSize * 16 / sizeof(DataType));
         }

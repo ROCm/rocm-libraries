@@ -10,11 +10,7 @@ template <typename ADataType,
           typename ALayout,
           typename BLayout,
           typename CLayout>
-int run_mx_gemm_with_layouts(int argc,
-                             char* argv[],
-                             ALayout,
-                             BLayout,
-                             CLayout)
+int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
@@ -34,7 +30,8 @@ int run_mx_gemm_with_layouts(int argc,
 
     using CDataType = ck_tile::fp16_t;
 
-    // Use get_default_stride helper for automatic leading dimension calculation (only if not explicitly provided)
+    // Use get_default_stride helper for automatic leading dimension calculation (only if not
+    // explicitly provided)
     if(stride_A == 0)
         stride_A = ck_tile::get_default_stride(M, K, 0, is_row_major(ALayout{}));
     if(stride_B == 0)
@@ -52,13 +49,15 @@ int run_mx_gemm_with_layouts(int argc,
     // Scale tensors - follow parent matrix layouts for optimal memory access
     // A scales: [M, K/32] with A's layout
     // B scales: [K/32, N] with B's layout
-    using ScaleType = ck_tile::e8m0_t;
+    using ScaleType               = ck_tile::e8m0_t;
     ck_tile::index_t scale_k_size = K / 32;
-    
+
     // Follow A/BLayout to get the layouts for the scale tensors
-    ck_tile::index_t stride_scale_a = ck_tile::get_default_stride(M, scale_k_size, 0, is_row_major(ALayout{}));
-    ck_tile::index_t stride_scale_b = ck_tile::get_default_stride(scale_k_size, N, 0, is_row_major(BLayout{}));
-    
+    ck_tile::index_t stride_scale_a =
+        ck_tile::get_default_stride(M, scale_k_size, 0, is_row_major(ALayout{}));
+    ck_tile::index_t stride_scale_b =
+        ck_tile::get_default_stride(scale_k_size, N, 0, is_row_major(BLayout{}));
+
     ck_tile::HostTensor<ScaleType> scale_a_host(
         ck_tile::host_tensor_descriptor(M, scale_k_size, stride_scale_a, is_row_major(ALayout{})));
     ck_tile::HostTensor<ScaleType> scale_b_host(
@@ -98,7 +97,7 @@ int run_mx_gemm_with_layouts(int argc,
 
     a_dev_buf.ToDevice(a_host.data());
     b_dev_buf.ToDevice(b_host.data());
-    c_dev_buf.SetZero();  // Initialize C buffer to zero
+    c_dev_buf.SetZero(); // Initialize C buffer to zero
     scale_a_dev_buf.ToDevice(scale_a_host.data());
     scale_b_dev_buf.ToDevice(scale_b_host.data());
 
@@ -118,9 +117,21 @@ int run_mx_gemm_with_layouts(int argc,
                                     CLayout,
                                     ScaleM,
                                     ScaleN,
-                                    UsePersistentKernel>(
-        a_dev_buf, b_dev_buf, c_dev_buf, M, N, K, stride_A, stride_B, stride_C, kbatch, scale_m, scale_n, n_warmup, n_repeat);
-    
+                                    UsePersistentKernel>(a_dev_buf,
+                                                         b_dev_buf,
+                                                         c_dev_buf,
+                                                         M,
+                                                         N,
+                                                         K,
+                                                         stride_A,
+                                                         stride_B,
+                                                         stride_C,
+                                                         kbatch,
+                                                         scale_m,
+                                                         scale_n,
+                                                         n_warmup,
+                                                         n_repeat);
+
     (void)ave_time;
 
     bool pass = true;
@@ -139,8 +150,7 @@ int run_mx_gemm_with_layouts(int argc,
 
         double rtol = 0.01;
         double atol = 0.01;
-        pass = ck_tile::check_err(
-            c_host, c_m_n_host_ref, "Error: Incorrect results!", rtol, atol);
+        pass = ck_tile::check_err(c_host, c_m_n_host_ref, "Error: Incorrect results!", rtol, atol);
 
         std::cout << "Relative error threshold: " << rtol << " Absolute error threshold: " << atol
                   << std::endl;
@@ -167,22 +177,22 @@ int run_mx_gemm_example(int argc, char* argv[])
         if(mx_prec == "fp4" || mx_prec == "fp4xfp4")
         {
             return run_mx_gemm_with_layouts<ck_tile::pk_fp4_t,
-                                                ck_tile::pk_fp4_t,
-                                                float,
-                                                MXfp4_GemmConfig16,
-                                                true>(argc, argv, Row{}, Col{}, Row{});
+                                            ck_tile::pk_fp4_t,
+                                            float,
+                                            MXfp4_GemmConfig16,
+                                            true>(argc, argv, Row{}, Col{}, Row{});
         }
         else if(mx_prec == "fp8" || mx_prec == "fp8xfp8")
         {
             return run_mx_gemm_with_layouts<ck_tile::fp8_t,
-                                                ck_tile::fp8_t,
-                                                float,
-                                                MXfp8_GemmConfig16,
-                                                true>(argc, argv, Row{}, Col{}, Row{});
+                                            ck_tile::fp8_t,
+                                            float,
+                                            MXfp8_GemmConfig16,
+                                            true>(argc, argv, Row{}, Col{}, Row{});
         }
         else
         {
-             throw std::runtime_error("Only fp4/8 is supported currently!");
+            throw std::runtime_error("Only fp4/8 is supported currently!");
         }
     }
     else

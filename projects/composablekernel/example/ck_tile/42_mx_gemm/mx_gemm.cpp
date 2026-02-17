@@ -33,19 +33,19 @@ template <typename GemmConfig,
           typename ScaleN,
           bool UsePersistentKernel = false>
 float invoke_mx_gemm(ck_tile::DeviceMem& a_dev_buf,
-                       ck_tile::DeviceMem& b_dev_buf,
-                       ck_tile::DeviceMem& c_dev_buf,
-                       ck_tile::index_t M,
-                       ck_tile::index_t N,
-                       ck_tile::index_t K,
-                       ck_tile::index_t stride_A,
-                       ck_tile::index_t stride_B,
-                       ck_tile::index_t stride_C,
-                       ck_tile::index_t kbatch,
-                       ScaleM scale_m,
-                       ScaleN scale_n,
-                       int n_warmup,
-                       int n_repeat)
+                     ck_tile::DeviceMem& b_dev_buf,
+                     ck_tile::DeviceMem& c_dev_buf,
+                     ck_tile::index_t M,
+                     ck_tile::index_t N,
+                     ck_tile::index_t K,
+                     ck_tile::index_t stride_A,
+                     ck_tile::index_t stride_B,
+                     ck_tile::index_t stride_C,
+                     ck_tile::index_t kbatch,
+                     ScaleM scale_m,
+                     ScaleN scale_n,
+                     int n_warmup,
+                     int n_repeat)
 {
     MXGemmHostArgs<ScaleM, ScaleN> args(a_dev_buf.GetDeviceBuffer(),
                                         b_dev_buf.GetDeviceBuffer(),
@@ -74,10 +74,9 @@ float invoke_mx_gemm(ck_tile::DeviceMem& a_dev_buf,
                             ScaleN,
                             UsePersistentKernel,
                             split_k_.value>(
-            args,
-            ck_tile::stream_config{nullptr, true, 1, n_warmup, n_repeat, true, true, 50});
+            args, ck_tile::stream_config{nullptr, true, 1, n_warmup, n_repeat, true, true, 50});
     };
-    
+
     float ave_time = (args.k_batch == 1) ? invoke_splitk_path(std::false_type{})
                                          : invoke_splitk_path(std::true_type{});
 
@@ -126,7 +125,4 @@ auto create_args(int argc, char* argv[])
 
 #include "run_mx_gemm.inc"
 
-int main(int argc, char* argv[])
-{
-    return run_mx_gemm_example(argc, argv);
-}
+int main(int argc, char* argv[]) { return run_mx_gemm_example(argc, argv); }

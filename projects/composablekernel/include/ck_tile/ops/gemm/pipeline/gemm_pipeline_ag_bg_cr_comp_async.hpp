@@ -90,10 +90,7 @@ struct BaseGemmPipelineAgBgCrCompAsync
 #endif
     }
 
-    CK_TILE_HOST static constexpr auto GetName()
-    {
-        return "COMPUTE_ASYNC";
-    }
+    CK_TILE_HOST static constexpr auto GetName() { return "COMPUTE_ASYNC"; }
 };
 
 /**

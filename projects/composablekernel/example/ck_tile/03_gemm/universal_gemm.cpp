@@ -264,7 +264,9 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
     }
     if(data_type == "fp4")
     {
-        if constexpr(GemmConfig<ck_tile::pk_fp4_t>::Pipeline == ck_tile::GemmPipeline::COMPUTE_ASYNC && GemmConfig<ck_tile::pk_fp4_t>::K_Warp_Tile == 128)
+        if constexpr(GemmConfig<ck_tile::pk_fp4_t>::Pipeline ==
+                         ck_tile::GemmPipeline::COMPUTE_ASYNC &&
+                     GemmConfig<ck_tile::pk_fp4_t>::K_Warp_Tile == 128)
         {
             return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::pk_fp4_t>,
                                                         ck_tile::pk_fp4_t,
@@ -296,7 +298,7 @@ int main(int argc, char* argv[])
 #if CK_TILE_USE_WMMA
         return !run_gemm_example<GemmConfigComputeV3_WMMA>(arg_parser);
 #else
-        return !run_gemm_example<run_gemm_example<GemmConfigComputeV3_2>(arg_parser);
+        return !run_gemm_example < run_gemm_example<GemmConfigComputeV3_2>(arg_parser);
 #endif
     }
     catch(const std::runtime_error& e)

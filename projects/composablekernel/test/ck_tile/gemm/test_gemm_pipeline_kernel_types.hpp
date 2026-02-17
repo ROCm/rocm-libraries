@@ -227,20 +227,20 @@ using CompAsyncConfig = std::tuple<ALayout,
 
 template <typename ALayout, typename BLayout, typename CLayout, typename InputType>
 using CompAsyncConfig16x16x128 = std::tuple<ALayout,
-                                   BLayout,
-                                   CLayout,
-                                   InputType, // AType
-                                   InputType, // BType
-                                   F32,       // AccType
-                                   F16,       // OutputType
-                                   I64,       // MBlockTileSize
-                                   I64,       // NBlockTileSize
-                                   I128,      // KBlockTileSize
-                                   I16,       // MWarpTileSize
-                                   I16,       // NWarpTileSize
-                                   I128,      // KWarpTileSize
-                                   Intrawave,
-                                   CompAsync>;
+                                            BLayout,
+                                            CLayout,
+                                            InputType, // AType
+                                            InputType, // BType
+                                            F32,       // AccType
+                                            F16,       // OutputType
+                                            I64,       // MBlockTileSize
+                                            I64,       // NBlockTileSize
+                                            I128,      // KBlockTileSize
+                                            I16,       // MWarpTileSize
+                                            I16,       // NWarpTileSize
+                                            I128,      // KWarpTileSize
+                                            Intrawave,
+                                            CompAsync>;
 
 using KernelTypesCompAsync = ::testing::Types<CompAsyncConfig<Row, Row, Row, F16>,
                                               CompAsyncConfig<Row, Col, Row, F16>,

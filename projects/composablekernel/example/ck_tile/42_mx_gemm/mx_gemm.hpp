@@ -28,7 +28,18 @@ struct MXGemmHostArgs : ck_tile::UniversalGemmHostArgs<1, 1, 0>
                    ck_tile::index_t stride_C_,
                    ScaleM scale_m_,
                    ScaleN scale_n_)
-        : Base({a_ptr}, {b_ptr}, {}, c_ptr_, k_batch_, M_, N_, K_, {stride_A_}, {stride_B_}, {}, stride_C_),
+        : Base({a_ptr},
+               {b_ptr},
+               {},
+               c_ptr_,
+               k_batch_,
+               M_,
+               N_,
+               K_,
+               {stride_A_},
+               {stride_B_},
+               {},
+               stride_C_),
           scale_m(scale_m_),
           scale_n(scale_n_)
     {
@@ -56,7 +67,7 @@ struct MxGemmConfig
 
     static constexpr bool kPadM = false;
     static constexpr bool kPadN = false;
-    static constexpr bool kPadK = true;  // Enable K padding to handle K < K_Tile
+    static constexpr bool kPadK = true; // Enable K padding to handle K < K_Tile
 
     static constexpr bool TransposeC            = false;
     static constexpr bool UseStructuredSparsity = false;
@@ -66,7 +77,7 @@ struct MxGemmConfig
     static constexpr int TileParitionerM01          = 4;
     static constexpr auto Scheduler                 = ck_tile::GemmPipelineScheduler::Intrawave;
     static constexpr ck_tile::index_t NumWaveGroups = 1;
-    static constexpr bool DoubleSmemBuffer          = false;  // comp_async uses double buffer
+    static constexpr bool DoubleSmemBuffer          = false; // comp_async uses double buffer
     static constexpr bool Preshuffle                = false;
 
     static constexpr int N_Repeat          = N_Tile / N_Warp_Tile / N_Warp;

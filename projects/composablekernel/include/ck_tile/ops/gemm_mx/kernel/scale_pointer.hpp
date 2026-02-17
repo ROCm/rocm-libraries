@@ -5,7 +5,6 @@
 
 #include "ck_tile/core.hpp"
 
-
 namespace ck_tile {
 
 template <typename ScaleType, int SharedGranularityMN, int SharedGranularityK = 0>

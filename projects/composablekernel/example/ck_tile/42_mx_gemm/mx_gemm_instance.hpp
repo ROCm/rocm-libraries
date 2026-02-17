@@ -24,15 +24,13 @@ template <typename GemmConfig,
           typename ScaleN,
           bool persistent,
           bool Splitk>
-float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args,
-                   const ck_tile::stream_config& s)
+float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::stream_config& s)
 {
     using GemmShape = ck_tile::TileGemmShape<
         ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
         ck_tile::sequence<GemmConfig::M_Warp, GemmConfig::N_Warp, GemmConfig::K_Warp>,
-        ck_tile::sequence<GemmConfig::M_Warp_Tile,
-                          GemmConfig::N_Warp_Tile,
-                          GemmConfig::K_Warp_Tile>>;
+        ck_tile::
+            sequence<GemmConfig::M_Warp_Tile, GemmConfig::N_Warp_Tile, GemmConfig::K_Warp_Tile>>;
 
     using MXGemmTraits = ck_tile::TileGemmUniversalTraits<GemmConfig::kPadM,
                                                           GemmConfig::kPadN,
@@ -52,11 +50,11 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args,
                   "mixed_prec_gemm requires ADataType is a wider type than BDataType");
 
     using MXPipelineProblem = ck_tile::UniversalGemmPipelineProblem<ADataType,
-                                                                     BDataType,
-                                                                     AccDataType,
-                                                                     GemmShape,
-                                                                     MXGemmTraits,
-                                                                     GemmConfig::Scheduler>;
+                                                                    BDataType,
+                                                                    AccDataType,
+                                                                    GemmShape,
+                                                                    MXGemmTraits,
+                                                                    GemmConfig::Scheduler>;
 
     // Use the new MX comp_async pipeline with MX scaling support
     using MXGemmPipeline = ck_tile::MXGemmPipelineAgBgCrCompAsync<MXPipelineProblem>;
@@ -65,24 +63,24 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args,
         ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
                                                    GemmConfig::TileParitionerGroupNum,
                                                    GemmConfig::TileParitionerM01>;
-    
-    using GemmEpilogue =
-        ck_tile::CShuffleEpilogue<ck_tile::CShuffleEpilogueProblem<ComputeDataType,
-                                                                   ComputeDataType,
-                                                                   ck_tile::tuple<>, // DsDataType
-                                                                   AccDataType,
-                                                                   CDataType,
-                                                                   ck_tile::tuple<>, // DsLayout
-                                                                   CLayout,
-                                                                   ck_tile::element_wise::PassThrough,
-                                                                   TilePartitioner::MPerBlock,
-                                                                   TilePartitioner::NPerBlock,
-                                                                   GemmConfig::M_Warp,
-                                                                   GemmConfig::N_Warp,
-                                                                   GemmConfig::M_Warp_Tile,
-                                                                   GemmConfig::N_Warp_Tile,
-                                                                   GemmConfig::K_Warp_Tile,
-                                                                   MXPipelineProblem::TransposeC>>;
+
+    using GemmEpilogue = ck_tile::CShuffleEpilogue<
+        ck_tile::CShuffleEpilogueProblem<ComputeDataType,
+                                         ComputeDataType,
+                                         ck_tile::tuple<>, // DsDataType
+                                         AccDataType,
+                                         CDataType,
+                                         ck_tile::tuple<>, // DsLayout
+                                         CLayout,
+                                         ck_tile::element_wise::PassThrough,
+                                         TilePartitioner::MPerBlock,
+                                         TilePartitioner::NPerBlock,
+                                         GemmConfig::M_Warp,
+                                         GemmConfig::N_Warp,
+                                         GemmConfig::M_Warp_Tile,
+                                         GemmConfig::N_Warp_Tile,
+                                         GemmConfig::K_Warp_Tile,
+                                         MXPipelineProblem::TransposeC>>;
 
     using Kernel = ck_tile::MXGemmKernel<TilePartitioner, MXGemmPipeline, GemmEpilogue>;
 
@@ -100,13 +98,9 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args,
                                         args.stride_E,
                                         args.scale_m,
                                         args.scale_n);
-    
+
     const auto kernel = ck_tile::make_kernel<Kernel::kBlockPerCu>(
-        Kernel{},
-        Kernel::GridSize(kargs),
-        Kernel::BlockSize(),
-        0,
-        kargs);
+        Kernel{}, Kernel::GridSize(kargs), Kernel::BlockSize(), 0, kargs);
 
     return ck_tile::launch_kernel(s, kernel);
 }
