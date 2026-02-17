@@ -34,6 +34,22 @@ hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)
     return hipdnnPluginSetLoggingCallbackImpl(callback);
 }
 
+hipdnnPluginStatus_t
+    hipdnnEnginePluginGetAllEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines)
+{
+    return hipdnnEnginePluginGetAllEngineIdsImpl(engineIds, maxEngines, numEngines);
+}
+
+hipdnnPluginStatus_t hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle)
+{
+    return hipdnnEnginePluginCreateImpl(handle);
+}
+
+hipdnnPluginStatus_t hipdnnEnginePluginDestroy(hipdnnEnginePluginHandle_t handle)
+{
+    return hipdnnEnginePluginDestroyImpl(handle);
+}
+
 hipdnnPluginStatus_t hipdnnEnginePluginSetStream(hipdnnEnginePluginHandle_t handle,
                                                  hipStream_t stream)
 {
