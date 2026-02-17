@@ -92,6 +92,7 @@ using RocprimDeviceSortTestsParams = ::testing::Types<
     DeviceSortParams<unsigned short, int>,
     DeviceSortParams<signed char, common::custom_type<float, float, true>>,
     DeviceSortParams<int>,
+    DeviceSortParams<common::custom_type<int, int, true>>,
     DeviceSortParams<common::custom_type_copyable<char, double, true>>,
     DeviceSortParams<unsigned long>,
     DeviceSortParams<long long>,
@@ -103,16 +104,9 @@ using RocprimDeviceSortTestsParams = ::testing::Types<
     DeviceSortParams<rocprim::bfloat16, rocprim::bfloat16, rocprim::less<rocprim::bfloat16>>,
     DeviceSortParams<int, float, ::rocprim::greater<int>>,
     DeviceSortParams<short, common::custom_type<int, int, true>>,
-
-// These two cases currently fail on gfx950 when BUILD_CODE_COVERAGE=ON.
-// Temporarily disable them while we investigate.
-#if !defined(__gfx950__)
-    DeviceSortParams<common::custom_type<int, int, true>>,
+    DeviceSortParams<double, common::custom_type<double, double, true>>,
     DeviceSortParams<common::custom_type<float, float, true>,
                      common::custom_type<double, double, true>>,
-#endif
-
-    DeviceSortParams<double, common::custom_type<double, double, true>>,
     DeviceSortParams<int, test_utils::custom_float_type>,
     DeviceSortParams<test_utils::custom_test_array_type<int, 4>>,
     // Test the algorithm with graphs
@@ -269,6 +263,19 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default
+
+    // This test currently fails on gfx950 with key types of custom_type when BUILD_CODE_COVERAGE=ON.
+    // Temporarily skip these cases while we investigate.
+#if defined(CODE_COVERAGE)
+    rocprim::detail::target_arch arch;
+    rocprim::detail::host_target_arch(stream, arch);
+    if (common::is_custom_type<key_type>::value && arch == rocprim::detail::target_arch::gfx950)
+    {
+        std::cout << "Temporarily skipping custom_type test on gfx950." << std::endl;
+        GTEST_SKIP();
+    }
+#endif
+
     if(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
