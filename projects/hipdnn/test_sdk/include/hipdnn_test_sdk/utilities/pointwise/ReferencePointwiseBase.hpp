@@ -5,8 +5,8 @@
 
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/PointwiseOperationFunctors.hpp>
 #include <stdexcept>
 #include <tuple>
@@ -58,7 +58,7 @@ public:
                                  const ParamType upperClip,
                                  const ParamType lowerSlope)
     {
-        static_assert(IS_VALID_TENSOR_TYPE_V<ParamType>,
+        static_assert(hipdnn_test_sdk::detail::IS_VALID_TENSOR_TYPE_V<ParamType>,
                       "ParamType must be a valid tensor type for scalar parameters");
         executeParameterizedUnaryOperation<InputType, ParamType, ComputeType>(
             operation, output, input, lowerClip, upperClip, lowerSlope);
@@ -88,7 +88,7 @@ public:
                                  const ParamType upperClip,
                                  const ParamType lowerSlope)
     {
-        static_assert(IS_VALID_TENSOR_TYPE_V<ParamType>,
+        static_assert(hipdnn_test_sdk::detail::IS_VALID_TENSOR_TYPE_V<ParamType>,
                       "ParamType must be a valid tensor type for scalar parameters");
         executeParameterizedBinaryOperation<Input1Type, Input2Type, ParamType, ComputeType>(
             operation, output, input1, input2, lowerClip, upperClip, lowerSlope);

@@ -6,6 +6,8 @@
 #include <optional>
 #include <unordered_map>
 
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
+
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
@@ -15,13 +17,13 @@
 
 #include "MiopenTensor.hpp"
 
-#define LOG_ON_MIOPEN_FAILURE(status)                                                    \
-    do                                                                                   \
-    {                                                                                    \
-        if(status != miopenStatusSuccess)                                                \
-        {                                                                                \
-            HIPDNN_LOG_ERROR("MIOpen error occurred: {}", miopenGetErrorString(status)); \
-        }                                                                                \
+#define LOG_ON_MIOPEN_FAILURE(status)                                                           \
+    do                                                                                          \
+    {                                                                                           \
+        if(status != miopenStatusSuccess)                                                       \
+        {                                                                                       \
+            HIPDNN_PLUGIN_LOG_ERROR("MIOpen error occurred: " << miopenGetErrorString(status)); \
+        }                                                                                       \
     } while(0)
 
 #define THROW_ON_MIOPEN_FAILURE(status)                                                 \
@@ -64,7 +66,8 @@ public:
         auto status = miopenGetTuningPolicy(_handle, &_originalPolicy);
         if(status != miopenStatusSuccess)
         {
-            HIPDNN_LOG_ERROR("Failed to get tuning policy: {}", miopenGetErrorString(status));
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "Failed to get tuning policy: " << miopenGetErrorString(status));
             _originalPolicy = miopenTuningPolicyNone; // Fallback
         }
 
@@ -73,7 +76,14 @@ public:
         status = miopenSetTuningPolicy(_handle, policy);
         if(status != miopenStatusSuccess)
         {
-            HIPDNN_LOG_ERROR("Failed to set tuning policy: {}", miopenGetErrorString(status));
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "Failed to set tuning policy: " << miopenGetErrorString(status));
+        }
+        else
+        {
+            HIPDNN_PLUGIN_LOG_INFO("Tuning policy set to "
+                                   << static_cast<int>(policy)
+                                   << " (benchmarking=" << benchmarkingEnabled << ")");
         }
     }
 
@@ -83,7 +93,13 @@ public:
         auto status = miopenSetTuningPolicy(_handle, _originalPolicy);
         if(status != miopenStatusSuccess)
         {
-            HIPDNN_LOG_ERROR("Failed to restore tuning policy: {}", miopenGetErrorString(status));
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "Failed to restore tuning policy: " << miopenGetErrorString(status));
+        }
+        else
+        {
+            HIPDNN_PLUGIN_LOG_INFO("Tuning policy restored to "
+                                   << static_cast<int>(_originalPolicy));
         }
     }
 
