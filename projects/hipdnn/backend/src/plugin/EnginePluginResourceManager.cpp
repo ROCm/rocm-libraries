@@ -47,12 +47,14 @@ void EnginePluginResourceManager::setPluginPaths(
 {
     std::lock_guard<std::mutex> lock(pluginMutex);
 
+    // Clear persistent pointer first to allow lazy mode check to work correctly.
+    // If only persistentPmPtr is keeping plugins alive (no active handles),
+    // then pmPtr will expire after this reset.
+    persistentPmPtr.reset();
+
     THROW_IF_FALSE(pmPtr.expired(),
                    HIPDNN_STATUS_NOT_SUPPORTED,
                    "hipdnnSetEnginePluginPaths_ext cannot be called with an active handle.");
-
-    // Clear persistent pointer to allow plugins to be reloaded with new paths
-    persistentPmPtr.reset();
 
     pluginConfig.mode = loadingMode;
 
