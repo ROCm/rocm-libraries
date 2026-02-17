@@ -13,7 +13,7 @@ This guide shows how to consume an already-installed hipDNN in a CMake project. 
 
 ## Prerequisites
 
-- **ROCm / TheRock** installed with hipDNN packages
+- **ROCm / TheRock** installed with hipDNN packages (see [TheRock Releases](https://github.com/ROCm/TheRock/blob/main/RELEASES.md))
 - **CMake**
 - **Ninja** (recommended)
 - **C++17** compatible compiler
