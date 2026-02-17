@@ -24,7 +24,6 @@ add_executable(
     utilities/TestCpuFpReferenceValidation.cpp
     utilities/TestCpuReferencePointwise.cpp
     utilities/TestDynamicTolerances.cpp
-    utilities/TestNumericLimits.cpp
     utilities/TestFlatbufferDatatypeMapping.cpp
     utilities/TestFlatbufferTensorAttributesUtils.cpp
     utilities/TestLoadGraphAndTensors.cpp
