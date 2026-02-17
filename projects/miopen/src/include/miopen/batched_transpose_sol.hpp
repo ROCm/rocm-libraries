@@ -104,14 +104,24 @@ struct MIOPEN_INTERNALS_EXPORT BatchedTransposeSolution
         const size_t n = lens[0];
         const size_t c = lens[1];
 
-        // Compute spatial product (H*W for 4D, D*H*W for 5D)
+        // Compute spatial product (H*W for 4D, D*H*W for 5D) with overflow protection
         size_t spatial_product = 1;
         for(size_t i = 2; i < lens.size(); ++i)
+        {
+            // Check for overflow before multiplying
+            if(lens[i] > 0 && spatial_product > std::numeric_limits<uint32_t>::max() / lens[i])
+                return false;
             spatial_product *= lens[i];
+        }
+
+        // Check c*spatial doesn't overflow uint32_t
+        if(c > 0 && spatial_product > std::numeric_limits<uint32_t>::max() / c)
+            return false;
+
+        const size_t c_spatial = c * spatial_product;
 
         // Check n*c*spatial doesn't overflow uint32_t
-        const size_t c_spatial = c * spatial_product;
-        if(n != 0 && c_spatial > std::numeric_limits<uint32_t>::max() / n)
+        if(n > 0 && c_spatial > std::numeric_limits<uint32_t>::max() / n)
             return false;
 
         return true;

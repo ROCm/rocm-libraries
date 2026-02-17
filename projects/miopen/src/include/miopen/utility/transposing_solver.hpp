@@ -258,10 +258,6 @@ struct BatchedTransposeSolverImpl : TransposePseudoSolver
         const auto& desc = problem.input;
         const auto& lens = desc.GetLengths();
 
-        // Batched transpose supports 4D (NCHW <-> NHWC) and 5D (NCDHW <-> NDHWC)
-        if(lens.size() != 4 && lens.size() != 5)
-            return false;
-
         // Delegate to BatchedTransposeSolution's validation which checks data type and dimensions
         // For both 4D and 5D, we pass h*w (or d*h*w) as the spatial dimension
         // Unified validation for both 4D and 5D
@@ -396,8 +392,7 @@ struct ProblemTensorTransposeDescriptor
     {
         const auto& desc_from = (src.*cdescriptor)();
         auto& desc_to         = (dest.*descriptor)();
-
-        desc_to = Transpose(desc_from);
+        desc_to               = Transpose(desc_from);
     }
 
     inline void Transpose(const InvokeParams& src, InvokeParams& dest) const
@@ -571,6 +566,7 @@ struct TransposingSolver : Base
         return ret;
     }
 
+    // Check applicability for transposing solvers that wraps an inner solver
     bool IsApplicable(const ExecutionContext& ctx, const Problem& problem) const override
     {
         const auto transpose_solvers = Derived::GetTransposeSolversMap();
@@ -603,19 +599,7 @@ struct TransposingSolver : Base
                 continue;
             }
 
-            transpose_solver = transpose_solvers.find(layout + "-*");
-            if(transpose_solver != transpose_solvers.end() &&
-               transpose_solver->second->IsApplicable(transpose_problem))
-            {
-                continue;
-            }
-
-            transpose_solver = transpose_solvers.find(std::string("*-") + to);
-            if(transpose_solver != transpose_solvers.end() &&
-               transpose_solver->second->IsApplicable(transpose_problem))
-            {
-                continue;
-            }
+            // Place (layout + "-*") and ("*-" + to) wildcard combinations here, if implemented
 
             transpose_solver = transpose_solvers.find("*-*");
             if(transpose_solver != transpose_solvers.end() &&
@@ -653,8 +637,7 @@ struct TransposingSolver : Base
         {
             const auto& descriptor = (transposed_problem.*(transpose.cdescriptor))();
             const auto e_size      = get_data_size(descriptor.GetType());
-            const auto tensor_size = descriptor.GetElementSpace() * e_size;
-            ws_size += tensor_size;
+            ws_size += descriptor.GetElementSpace() * e_size;
         }
 
         return ws_size;
@@ -707,21 +690,7 @@ struct TransposingSolver : Base
                candidate->second->IsApplicable(transpose_problem))
                 transpose_solver = candidate;
 
-            if(transpose_solver == transpose_solvers.end())
-            {
-                candidate = transpose_solvers.find(layout + "-*");
-                if(candidate != transpose_solvers.end() &&
-                   candidate->second->IsApplicable(transpose_problem))
-                    transpose_solver = candidate;
-            }
-
-            if(transpose_solver == transpose_solvers.end())
-            {
-                candidate = transpose_solvers.find(std::string("*-") + to);
-                if(candidate != transpose_solvers.end() &&
-                   candidate->second->IsApplicable(transpose_problem))
-                    transpose_solver = candidate;
-            }
+            // Place (layout + "-*") and ("*-" + to) wildcard combinations here, if implemented
 
             if(transpose_solver == transpose_solvers.end())
             {
