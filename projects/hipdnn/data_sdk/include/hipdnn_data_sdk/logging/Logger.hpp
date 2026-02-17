@@ -24,7 +24,7 @@
 //
 // Other components should use their scoped macros:
 // - Frontend: HIPDNN_FE_LOG_* (auto-inits, uses "hipdnn_frontend")
-// - Plugins: HIPDNN_PLUGIN_LOG_* (dual-mode: spdlog or stream)
+// - Plugins: HIPDNN_PLUGIN_LOG_*
 // - Backend: Has its own logging implementation
 
 namespace hipdnn_data_sdk::logging
