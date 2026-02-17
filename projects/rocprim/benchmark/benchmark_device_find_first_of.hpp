@@ -94,7 +94,7 @@ struct device_find_first_of_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         using type        = T;

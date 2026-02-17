@@ -100,7 +100,7 @@ struct device_reduce_by_key_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         constexpr std::array<int, 2> tuning_max_segment_lengths = {10, 1000};

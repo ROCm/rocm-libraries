@@ -151,8 +151,8 @@ struct device_merge_inplace_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& size_a = state.bytes;
-        const auto& size_b = state.bytes;
+        const auto& size_a = state.size;
+        const auto& size_b = state.size;
         const auto& seed   = state.seed;
 
         auto seeds = primbench::seeds<2>(seed);

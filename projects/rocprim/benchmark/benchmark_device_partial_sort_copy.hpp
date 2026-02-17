@@ -57,7 +57,7 @@ struct device_partial_sort_copy_benchmark : public primbench::benchmark_interfac
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         using key_type = Key;

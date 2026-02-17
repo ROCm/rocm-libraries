@@ -154,7 +154,7 @@ struct device_partition_flag_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         auto seeds = primbench::seeds<2>(seed);
@@ -253,7 +253,7 @@ struct device_partition_predicate_benchmark : public primbench::benchmark_interf
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         size_t items = bytes / sizeof(DataType);
@@ -334,7 +334,7 @@ struct device_partition_two_way_flag_benchmark : public primbench::benchmark_int
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         auto seeds = primbench::seeds<2>(seed);
@@ -436,7 +436,7 @@ struct device_partition_two_way_predicate_benchmark : public primbench::benchmar
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         size_t items = bytes / sizeof(DataType);
@@ -518,7 +518,7 @@ struct device_partition_three_way_benchmark : public primbench::benchmark_interf
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         size_t items = bytes / sizeof(DataType);

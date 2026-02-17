@@ -116,7 +116,7 @@ private:
         typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         using key_type = Key;
@@ -189,7 +189,7 @@ private:
         typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         using key_type   = Key;

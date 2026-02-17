@@ -196,7 +196,7 @@ struct warp_exchange_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
 
         size_t             N               = bytes / sizeof(T);
         constexpr uint64_t items_per_block = BlockSize * ItemsPerThread;

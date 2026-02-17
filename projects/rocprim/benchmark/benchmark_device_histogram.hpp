@@ -204,7 +204,7 @@ struct device_histogram_even_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
 
         size_t items = bytes / sizeof(T);
 
@@ -311,7 +311,7 @@ private:
     void run_benchmark(primbench::state& state)
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
 
         size_t items = bytes / sizeof(T);
 
@@ -382,7 +382,7 @@ private:
     void run_autotune(primbench::state& state)
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
 
         using counter_type = unsigned int;
         using level_type   = typename std::
@@ -536,7 +536,7 @@ struct device_histogram_range_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         size_t items = bytes / sizeof(T);
@@ -619,7 +619,7 @@ struct device_multi_histogram_range_benchmark : public primbench::benchmark_inte
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         size_t items = bytes / sizeof(T);

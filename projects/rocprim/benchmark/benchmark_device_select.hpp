@@ -120,7 +120,7 @@ struct device_select_flag_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         auto seeds = primbench::seeds<2>(seed);
@@ -218,7 +218,7 @@ struct device_select_predicate_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         size_t items = bytes / sizeof(DataType);
@@ -297,7 +297,7 @@ struct device_select_predicated_flag_benchmark : public primbench::benchmark_int
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         auto seeds = primbench::seeds<2>(seed);
@@ -416,7 +416,7 @@ struct device_select_unique_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         size_t items = bytes / sizeof(DataType);
@@ -506,7 +506,7 @@ struct device_select_unique_by_key_benchmark : public primbench::benchmark_inter
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         auto seeds = primbench::seeds<2>(seed);

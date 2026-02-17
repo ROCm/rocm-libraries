@@ -134,7 +134,7 @@ struct device_search_n_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream    = state.stream;
-        const auto& size_byte = state.bytes;
+        const auto& size_byte = state.size;
 
         InputType                      h_noise{0};
         InputType                      h_value{1};

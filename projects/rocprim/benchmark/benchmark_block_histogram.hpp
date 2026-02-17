@@ -136,7 +136,7 @@ struct block_histogram_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
 
         // Ensure items is a multiple of BlockSize
         size_t         N               = bytes / sizeof(T);

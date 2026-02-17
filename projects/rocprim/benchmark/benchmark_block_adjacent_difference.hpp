@@ -313,7 +313,7 @@ struct block_adjacent_difference_benchmark : public primbench::benchmark_interfa
 
     void run(primbench::state& state) override
     {
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
         const auto& stream = state.stream;
 

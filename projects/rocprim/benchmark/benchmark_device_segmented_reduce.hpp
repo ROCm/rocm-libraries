@@ -103,7 +103,7 @@ struct device_segmented_reduce_benchmark : public primbench::benchmark_interface
     void run_benchmark(primbench::state&& state, size_t desired_segment)
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         using offset_type = int;
