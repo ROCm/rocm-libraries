@@ -179,12 +179,15 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
             --preset=$THEROCK_BUILD_PRESET \
             -DCMAKE_INSTALL_PREFIX=/opt/rocm \
             -DTHEROCK_ENABLE_ALL=OFF \
-            -DTHEROCK_ENABLE_BLAS=ON \
-            -DTHEROCK_ENABLE_COMPILER=ON \
-            -DTHEROCK_ENABLE_CORE_RUNTIME=ON \
-            -DTHEROCK_ENABLE_HIP_RUNTIME=ON \
-            -DTHEROCK_ENABLE_RAND=ON \
-            -DTHEROCK_ENABLE_PROFILER=ON \
+            -DTHEROCK_MIOPEN_USE_COMPOSABLE_KERNEL= OFF \
+            -DTHEROCK_ENABLE_MIOPEN=ON \
+            -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=OFF \
+            -DTHEROCK_ENABLE_PROFILER=ON \       
+            # -DTHEROCK_ENABLE_BLAS=ON \
+            # -DTHEROCK_ENABLE_COMPILER=ON \
+            # -DTHEROCK_ENABLE_CORE_RUNTIME=ON \
+            # -DTHEROCK_ENABLE_HIP_RUNTIME=ON \
+            # -DTHEROCK_ENABLE_RAND=ON \
             -DTHEROCK_AMDGPU_DIST_BUNDLE_NAME=multiarch \
             -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
     else \
@@ -194,12 +197,16 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
             -DCMAKE_BUILD_TYPE=$THEROCK_BUILD_MODE \
             -DCMAKE_INSTALL_PREFIX=/opt/rocm \
             -DTHEROCK_ENABLE_ALL=OFF \
-            -DTHEROCK_ENABLE_BLAS=ON \
-            -DTHEROCK_ENABLE_COMPILER=ON \
-            -DTHEROCK_ENABLE_CORE_RUNTIME=ON \
-            -DTHEROCK_ENABLE_HIP_RUNTIME=ON \
+            -DTHEROCK_MIOPEN_USE_COMPOSABLE_KERNEL= OFF \
+            -DTHEROCK_ENABLE_MIOPEN=ON \
+            -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=OFF \
             -DTHEROCK_ENABLE_PROFILER=ON \
-            -DTHEROCK_ENABLE_RAND=ON \
+            # -DTHEROCK_ENABLE_ALL=OFF \
+            # -DTHEROCK_ENABLE_BLAS=ON \
+            # -DTHEROCK_ENABLE_COMPILER=ON \
+            # -DTHEROCK_ENABLE_CORE_RUNTIME=ON \
+            # -DTHEROCK_ENABLE_HIP_RUNTIME=ON \
+            # -DTHEROCK_ENABLE_RAND=ON \
             -DTHEROCK_AMDGPU_DIST_BUNDLE_NAME=multiarch \
             -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
     fi
@@ -209,8 +216,9 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
     else \
         echo "Building with $BUILD_JOBS parallel jobs"; \
         cmake --build . -j$BUILD_JOBS; \
-    fi && \
-    cmake --install .
+    fi
+    # fi && \
+    # cmake --install .
 # ================================================================================
 # Build debs for reuse
 # ================================================================================
