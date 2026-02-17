@@ -356,11 +356,60 @@ staggerU_t select_staggerU(const problem_t& problem,
   if (batch != 1 || num_timesteps != 1) return staggerU_t{0, 0, 0};
 
   // Early Exit: if not enough K-slices, then no staggerU is needed
-  if (numMT_K < 4) return staggerU_t{0, 0, 0};
+  // if (numMT_K < 4 || numMT_K > 64) return staggerU_t{0, 0, 0};
 
   // Early Exit: splitK
+  // TODO: support splitK
   if (split_factor > 1)     
       return staggerU_t{0, 0, 0};
+
+  // Early Exit: large macro tiles.
+  // When (MT_M + MT_N) * MT_K * bpe is large, each K-slice's data already spans
+  // all L2 slices, making contention inherently low. Stagger would just bloat
+  // the L2 working set for minimal benefit.
+  {
+    size_t max_bpe = std::max(data_type_to_bytes(problem.a_dtype),
+                              data_type_to_bytes(problem.b_dtype));
+    size_t tile_footprint = (MT_M + MT_N) * MT_K * max_bpe;
+    constexpr size_t ref_tile_footprint = (128 + 128) * 128 * 2; // 128x128x128 for 2 bytes
+    if (tile_footprint >= ref_tile_footprint)
+      return staggerU_t{0, 0, 0};
+  }
+
+  // helper function to round up to power of 2
+  auto next_pow2 = [](size_t v) -> size_t {
+    size_t p = 2;
+    while (p < v) p <<= 1;
+    return p;
+  };
+
+  // Compute stride shift and max staggerU from K
+  constexpr size_t L2_CACHE_LINE_BYTES = 128;
+  size_t bpe_a = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
+  size_t bpe_b = static_cast<size_t>(data_type_to_bytes(problem.b_dtype));
+  double min_bpe = std::min(bpe_a, bpe_b);
+  size_t bytes_per_k_iter = static_cast<size_t>(MT_K * min_bpe);
+  size_t min_shift = 0;
+  while ((bytes_per_k_iter << min_shift) < L2_CACHE_LINE_BYTES && min_shift < 5)
+    min_shift++;
+  size_t out_staggerUStrideShift = min_shift;
+  size_t max_staggerU = numMT_K >> out_staggerUStrideShift;
+  // Round down to power of 2 and cap at 32
+  {
+    size_t p = 1;
+    while (p * 2 <= max_staggerU) p <<= 1;
+    max_staggerU = std::min(p, static_cast<size_t>(32));
+  }
+
+  // Early Exit: few K-slices
+  if (max_staggerU == 1)
+    return staggerU_t{0, 0, 0};
+
+  // Early Exit: skinny GEMMs
+  if (numMT_M < 2 && numMT_N > numCUs / 2)
+    return staggerU_t{0, max_staggerU, out_staggerUStrideShift};
+  if (numMT_N < 2 && numMT_M > numCUs / 2)
+    return staggerU_t{1, max_staggerU, out_staggerUStrideShift};
 
   // Find WGM
   size_t abs_wgm = std::abs(wgm);
@@ -377,102 +426,80 @@ staggerU_t select_staggerU(const problem_t& problem,
     size_t L2Tile_M_temp = math::safe_ceil_div(numWGsPerL2Tile, L2Tile_N);
     L2Tile_M             = (L2Tile_M_temp < numMT_M) ? L2Tile_M_temp : numMT_M;
     while (L2Tile_M * L2Tile_N < numWGsPerL2Tile && L2Tile_N < numMT_N) L2Tile_N++;
+    // Account for XCD misalignment: when tiles don't fill exact rows,
+    // some XCDs start mid-row and span an extra row.
+    if (numWGsPerL2Tile % L2Tile_N != 0)
+      L2Tile_M = std::min(L2Tile_M + 1, numMT_M);
   } else if (wgm < 0) {
     // Negative WGM: column-major mapping
     L2Tile_M             = (abs_wgm < numMT_M) ? abs_wgm : numMT_M;
     size_t L2Tile_N_temp = math::safe_ceil_div(numWGsPerL2Tile, L2Tile_M);
     L2Tile_N             = (L2Tile_N_temp < numMT_N) ? L2Tile_N_temp : numMT_N;
     while (L2Tile_M * L2Tile_N < numWGsPerL2Tile && L2Tile_M < numMT_M) L2Tile_M++;
+    // Account for XCD misalignment: when tiles don't fill exact columns,
+    // some XCDs start mid-column and span an extra column.
+    if (numWGsPerL2Tile % L2Tile_M != 0)
+      L2Tile_N = std::min(L2Tile_N + 1, numMT_N);
   } else {
     std::cerr << "[ORIGAMI]: Invalid WGM value " << wgm << " in select_staggerU" << std::endl;
     return staggerU_t{0, 0, 0};
   }
 
-  // Stagger along the dimension with higher tiles
-  size_t out_staggerUMapping     = 0;
-  size_t out_staggerU            = 0;
-  size_t out_staggerUStrideShift = 0;
-  if (L2Tile_M > L2Tile_N) {
-    out_staggerUMapping = 0;  // SUM0: stagger along M
-    out_staggerU        = std::min(L2Tile_M, numMT_M);
-  } else {
-    out_staggerUMapping = 1;  // SUM1: stagger along N
-    out_staggerU        = std::min(L2Tile_N, numMT_N);
-  }
-
-  // L2 capacity check: base stagger must fit in L2.
-  size_t bpe_a = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
-  size_t bpe_b = static_cast<size_t>(data_type_to_bytes(problem.b_dtype));
-  size_t per_slice = MT_K * (L2Tile_M * MT_M * bpe_a + L2Tile_N * MT_N * bpe_b);
-  // 95% is a conservative limit mostly to handle not-nice L2 tiles (wrapping around).
-  if (out_staggerU * per_slice > 0.95 * hardware.L2_capacity)
+  // Compute L2 optimal direction
+  size_t L2_mapping = (L2Tile_M > L2Tile_N) ? 0 : 1;
+  size_t L2_value   = (L2_mapping == 0) ? std::min(L2Tile_M, numMT_M)
+                                        : std::min(L2Tile_N, numMT_N);
+  // L2 capacity check: direction-aware working set.
+  // Stagger only expands the SHARED matrix (the one whose reads are distributed):
+  //   SUM0: A unchanged, B expanded by min(stagger, L2Tile_M) K-offsets
+  //   SUM1: B unchanged, A expanded by min(stagger, L2Tile_N) K-offsets
+  size_t stagger_check = std::min(L2_value, max_staggerU);
+  size_t ws_sum0 = MT_K * (L2Tile_M * MT_M * bpe_a + std::min(stagger_check, L2Tile_M) * L2Tile_N * MT_N * bpe_b);
+  size_t ws_sum1 = MT_K * (std::min(stagger_check, L2Tile_N) * L2Tile_M * MT_M * bpe_a + L2Tile_N * MT_N * bpe_b);
+  size_t working_set = (L2_mapping == 0) ? ws_sum0 : ws_sum1;
+  if (working_set > 0.95 * hardware.L2_capacity)
     return staggerU_t{0, 0, 0};
-
-  // MALL coverage optimization. Per-XCD L2 working set is unchanged by direction/doubling
-  // choices, so no further L2 capacity checks needed.
-  // Step 1: Check if switching direction with the same value gives better GEMM coverage.
-  // Compare what fraction of each dimension the base value covers.
-  // Prefer the direction where more of the dimension is covered.
-  size_t base = out_staggerU;
-  {
-    size_t cov_M = std::min(base, numMT_M);
-    size_t cov_N = std::min(base, numMT_N);
-    // Compare fractions: cov_M/numMT_M vs cov_N/numMT_N
-    if (cov_N * numMT_M > cov_M * numMT_N && numMT_N >= base) {
-      out_staggerUMapping = 1;  // N has better relative coverage and fits
-    } else if (cov_M * numMT_N > cov_N * numMT_M && numMT_M >= base) {
-      out_staggerUMapping = 0;  // M has better relative coverage and fits
-    }
-    // If equal fractions, keep original direction from L2 contention
+  L2_value = std::min(L2_value, max_staggerU);
+  
+  // Compute MALL optimal direction
+  // Prefer direction with more XCD groups
+  size_t numXCD_M = math::safe_ceil_div(numMT_M, L2Tile_M);
+  size_t numXCD_N = math::safe_ceil_div(numMT_N, L2Tile_N);
+  size_t Mall_mapping;
+  if (numXCD_M > numXCD_N) {
+    Mall_mapping = 0; 
+  } else {
+    Mall_mapping = 1; 
   }
 
-  // Step 2: Try doubling. StaggerU cannot exceed numMT in the chosen direction.
-  // If both directions fit, pick the one with best XCD coverage.
-  {
-    // XCD coverage = number of distinct XCDs spanned by the stagger pattern.
-    size_t numXCDs_M = math::safe_ceil_div(numMT_M, L2Tile_M);
-    size_t numXCDs_N = math::safe_ceil_div(numMT_N, L2Tile_N);
-    size_t doubled = 2 * base;
-    bool can_M = (doubled <= numMT_M);
-    bool can_N = (doubled <= numMT_N);
-    if (can_M && can_N) {
-      size_t xcd_M = std::min(math::safe_ceil_div(doubled, L2Tile_M), numXCDs_M);
-      size_t xcd_N = std::min(math::safe_ceil_div(doubled, L2Tile_N), numXCDs_N);
-      out_staggerUMapping = (xcd_N >= xcd_M) ? 1 : 0;
-      out_staggerU = doubled;
+  // Decide L2 vs MALL direction
+  // If they agree, use that direction. If they disagree, check how many intra-XCD
+  // offsets survive switching to MALL direction. If enough offsets remain (>= 4),
+  // the switch is safe. Otherwise the L2 loss is too severe — keep L2 direction.
+  size_t out_staggerUMapping;
+  size_t out_staggerU;
+  if (L2_mapping == Mall_mapping) {
+    out_staggerUMapping = L2_mapping;
+    out_staggerU = max_staggerU;
+  } else {
+    if(std::max(L2Tile_M, L2Tile_N) < 2 * std::min(L2Tile_M, L2Tile_N)) {
+      // Not willing to sacrifice L2 for MALL
+      out_staggerUMapping = L2_mapping;
+      out_staggerU = L2_value;
+    } else if (numWGsPerL2Tile > numCUsPerXCD / 2 && L2Tile_N != numMT_N) {
+      // Willing to sacrifice L2 for MALL
+      out_staggerUMapping = Mall_mapping;
+      out_staggerU = max_staggerU;
+    } else {
+      // Not willing to sacrifice L2 for MALL
+      out_staggerUMapping = L2_mapping;
+      out_staggerU = L2_value;
     }
-    // If neither fits, keep the base value and direction from step 1.
   }
 
-  // If the stagger size is <= 2, there is nothing to stagger
+  // Sanity checks
+  out_staggerU = std::min(next_pow2(out_staggerU), max_staggerU);
   if (out_staggerU <= 2) return staggerU_t{0, 0, 0};
-
-  // Compute smallest power of 2 larger than or equal to out_staggerU
-  // 64 is the maximum value for staggerU, however, 32 is a more practical value for most cases.
-  size_t powerOf2 = 2;
-  while (powerOf2 < out_staggerU) powerOf2 <<= 1;
-  out_staggerU = (powerOf2 < 32) ? powerOf2 : 32;
-
-  // Choose StaggerUStrideShift so that each stagger step crosses at least one
-  // L2 cache line boundary. Without this, adjacent stagger positions may hit the
-  // same cache line and staggering provides no benefit.
-  // Each stagger step spans: DepthU * bpe * 2^shift bytes.
-  // We need: DepthU * bpe * 2^shift >= L2_CACHE_LINE_BYTES
-  constexpr size_t L2_CACHE_LINE_BYTES = 128;
-  double min_bpe = std::min(bpe_a, bpe_b);
-  size_t bytes_per_k_iter = static_cast<size_t>(MT_K * min_bpe);
-  size_t min_shift = 0;
-  while ((bytes_per_k_iter << min_shift) < L2_CACHE_LINE_BYTES && min_shift < 5)
-    min_shift++;
-  out_staggerUStrideShift = min_shift;
-
-  // Ensure the total K-range (out_staggerU * 2^shift) fits within numMT_K.
-  // Kernel silently halves the effective stagger if it doesn't fit, so we reduce for consistency.
-  while (out_staggerU > 1 && numMT_K < out_staggerU * (1ULL << out_staggerUStrideShift))
-    out_staggerU >>= 1;
-
-  // If staggerU was reduced to <= 1, there's no meaningful stagger left
-  if (out_staggerU <= 1) return staggerU_t{0, 0, 0};
 
   return staggerU_t{out_staggerUMapping, out_staggerU, out_staggerUStrideShift};
 }
