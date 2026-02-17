@@ -27,11 +27,6 @@ function(apply_test_category_labels target_name yaml_file working_dir)
         RESULT_VARIABLE PARSE_RESULT
     )
 
-    # Enable the following to show debug/error output if present in writing the install-time test file
-    #if(PARSE_ERROR)
-    #    message(STATUS "Test category parser output: ${PARSE_ERROR}")
-    #endif()
-
     if(NOT PARSE_RESULT EQUAL 0)
         message(WARNING "Failed to parse test categories YAML: ${PARSE_ERROR}")
         return()
