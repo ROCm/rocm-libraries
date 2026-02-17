@@ -41,8 +41,8 @@ class TestGroupedGemm
     }
 };
 
+// clang-format off
 using KernelTypes = ::testing::Types<
-
 #if CK_USE_OCP_FP8 || CK_USE_FNUZ_FP8 || defined(CK_USE_FP8_ON_UNSUPPORTED_ARCH) || \
     defined(CK_USE_WMMA_FP8)
     ck::Tuple<Row, Row, Row, F16, F8, F16>,
@@ -58,7 +58,9 @@ using KernelTypes = ::testing::Types<
     ck::Tuple<Row, Col, Row, BF16, I8, BF16>,
 
     ck::Tuple<Row, Row, Row, F16, I8, F16>,
-    ck::Tuple<Row, Col, Row, F16, I8, F16>>;
+    ck::Tuple<Row, Col, Row, F16, I8, F16>
+>;
+
 // clang-format on
 
 TYPED_TEST_SUITE(TestGroupedGemm, KernelTypes);
