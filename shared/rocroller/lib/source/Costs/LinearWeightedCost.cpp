@@ -270,7 +270,7 @@ namespace rocRoller
 
                 if(fn == CostFunction::LinearWeightedSimple)
                 {
-                    if(!arch.isCDNA35GPU())
+                    if(!arch.isCDNA4GPU())
                         Log::warn("Architecture {} not tested for simplifed weights.",
                                   arch.toString());
 
@@ -283,7 +283,7 @@ namespace rocRoller
                     return GFX90A_WEIGHTS;
                 else if(arch.isCDNA3GPU())
                     return GFX942_WEIGHTS;
-                else if(arch.isCDNA35GPU())
+                else if(arch.isCDNA4GPU())
                     return GFX950_WEIGHTS;
                 else
                 {

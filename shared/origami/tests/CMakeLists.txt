@@ -47,7 +47,7 @@ if(ORIGAMI_ENABLE_PYTHON)
     find_package(Python COMPONENTS Interpreter REQUIRED)
     
     set(ORIGAMI_INSTALL_LIBDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
-    set(ORIGAMI_INSTALL_PYTHON_BINDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/origami")
+    set(ORIGAMI_INSTALL_PYTHON_BINDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/python${Python_VERSION_MAJOR}.${Python_VERSION_MINOR}/site-packages")
     
     string(APPEND _ctest_content [=[
 # Python tests (using pytest)

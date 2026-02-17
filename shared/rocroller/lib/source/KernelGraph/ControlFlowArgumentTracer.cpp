@@ -120,7 +120,7 @@ namespace rocRoller::KernelGraph
         {
             auto& dest = m_referencedArgs[node];
 
-            dest.insert(m_kernel->findArgument(arg).name);
+            dest.insert(m_kernel->findArgument(arg).getName());
         }
 
         void operator()(int node, CG::SetCoordinate const& op)
@@ -255,10 +255,10 @@ namespace rocRoller::KernelGraph
         {
             for(auto const& arg : m_kernel->arguments())
             {
-                auto argArgs = referencedKernelArguments(arg.expression);
+                auto argArgs = referencedKernelArguments(arg.getExpression());
                 for(auto const& argArg : argArgs)
                 {
-                    m_subReferencedArgs[argArg].insert(arg.name);
+                    m_subReferencedArgs[argArg].insert(arg.getName());
                 }
             }
 
@@ -367,7 +367,7 @@ namespace rocRoller::KernelGraph
         m_referencedArguments = std::move(visitor.m_referencedArgs);
 
         for(auto arg : kernel->arguments())
-            m_neverReferencedArguments.insert(arg.name);
+            m_neverReferencedArguments.insert(arg.getName());
 
         // Collect all referenced args and compute launch-time-only args
         std::set<std::string> allReferenced;
