@@ -70,6 +70,7 @@ Definitions:
     - { M: 2, N: 2097152, K:1 }
     - { M: 64, N: 1048576, K: 1 }
     - { M: 256, N: 1048576, K: 1 }
+    - { M: 512, N: 524288, K: 1 }
 
   - &grid_limit_matrix_size_double
     - { M: 2, N: 1048576, K:1 }
