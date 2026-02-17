@@ -32,6 +32,7 @@
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 
 #include <rocRoller/Expression_fwd.hpp>
+#include <string>
 
 namespace rocRoller
 {
@@ -144,6 +145,16 @@ namespace rocRoller
                 bool                           isPadded         = false;
             };
 
+            struct LoadLDSTileInfoResult
+            {
+                LoadStoreTileInfo  info;
+                Register::ValuePtr ldsAllocation = nullptr;
+                std::string        comment;
+            };
+
+            LoadLDSTileInfoResult getLoadLDSTileInfo(int                              tag,
+                                                     ControlGraph::LoadLDSTile const& load);
+
         private:
             ContextPtr                       m_context;
             KernelGraphPtr                   m_graph;
@@ -220,12 +231,6 @@ namespace rocRoller
             Generator<Instruction> loadMacroTileVGPR(int                            tag,
                                                      ControlGraph::LoadTiled const& load,
                                                      CoordinateGraph::Transformer   coords);
-            Generator<Instruction> loadMacroTileLDS(int                              tag,
-                                                    ControlGraph::LoadLDSTile const& load,
-                                                    CoordinateGraph::Transformer     coords);
-            Generator<Instruction> loadMacroTileWAVELDS(int                              tag,
-                                                        ControlGraph::LoadLDSTile const& load,
-                                                        CoordinateGraph::Transformer     coords);
             Generator<Instruction> loadMacroTileWAVE(int                            tag,
                                                      ControlGraph::LoadTiled const& load,
                                                      CoordinateGraph::Transformer   coords);
@@ -236,6 +241,10 @@ namespace rocRoller
                 loadMacroTileDirect2LDS(int                                     tag,
                                         ControlGraph::LoadTileDirect2LDS const& load,
                                         CoordinateGraph::Transformer            coords);
+            LoadLDSTileInfoResult loadMacroTileLDSInfo(int                              tag,
+                                                        ControlGraph::LoadLDSTile const& load);
+            LoadLDSTileInfoResult loadMacroTileWAVELDSInfo(int                              tag,
+                                                            ControlGraph::LoadLDSTile const& load);
 
             // Store Tile Helpers
             Generator<Instruction> storeMacroTileLDS(int                               tag,
