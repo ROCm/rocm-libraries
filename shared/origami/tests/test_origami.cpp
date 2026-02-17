@@ -596,14 +596,14 @@ TEST_CASE("Origami: select_staggerU unit test", "[origami]") {
       }
 
       // Test 5: StaggerU mapping should be SUM1 for positive WGM when A contention dominates
-      // [1320, 256, 2048] MT=64x32x256 WGM=1: L2Tile_N > L2Tile_M, row-mates share A
+      // [1320, 256, 2048] MT=64x32x256 WGM=8: L2Tile_N=8 > L2Tile_M=4, row-mates share A
       {
         auto problem = make_problem(1320, 256, 2048, origami::transpose_t::T, origami::transpose_t::N);
         problem.a_dtype = origami::data_type_t::BFloat16;
         problem.b_dtype = origami::data_type_t::BFloat16;
         auto config  = make_config(64, 32, 256, 16, 16, 32);
         auto skGrid  = compute_skGrid(1320, 256, 64, 32);
-        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 1);
+        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 8);
         REQUIRE(result.staggerU > 0);
         REQUIRE(result.staggerUMapping == 1);  // SUM1: distribute A reads
       }

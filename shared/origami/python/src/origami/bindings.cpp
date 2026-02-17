@@ -217,10 +217,6 @@ NB_MODULE(origami, m) {
   m.def("select_config_mnk",
         &origami::select_config_mnk,
         "Select best configuration for M,N,K dimensions");
-<<<<<<< HEAD:shared/origami/python/src/origami/bindings.cpp
-  m.def("select_topk_configs", &origami::select_topk_configs, "Select topk configurations");
-  m.def("compute_perf_gflops", &origami::compute_perf_gflops, "Compute performance in GFLOPS");
-=======
 
   m.def("select_topk_configs",
         &origami::select_topk_configs,
@@ -236,7 +232,6 @@ NB_MODULE(origami, m) {
         "problem"_a,
         "latency"_a,
         "Compute performance in GFLOPS");
->>>>>>> c1d7051fea (Formatting):shared/origami/python/origami_module.cpp
 
   // StreamK functions
   m.def("select_reduction",

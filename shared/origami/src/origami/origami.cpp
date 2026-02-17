@@ -307,8 +307,8 @@ staggerU_t select_staggerU(const problem_t& problem,
   // StaggerU offsets the starting K-position per workgroup to distribute L2 traffic.
   //
   // Mapping direction: contention = sharers × data_size (macro tile).
-  // A is shared along N (L2Tile_N sharers within XCD), data size ∝ MT_M.
-  // B is shared along M (L2Tile_M sharers within XCD), data size ∝ MT_N.
+  // A is shared along N (L2Tile_N sharers within XCD)
+  // B is shared along M (L2Tile_M sharers within XCD)
   // SUM0 (stagger along M) distributes B reads; SUM1 (stagger along N) distributes A reads.
   // Pick the mapping that targets the higher contention.
   //
@@ -354,6 +354,10 @@ staggerU_t select_staggerU(const problem_t& problem,
 
   // Early Exit: Batch and num_timesteps are not supported yet
   if (batch != 1 || num_timesteps != 1) return staggerU_t{0, 0, 0};
+
+  // Early Exit: no staggerU needed
+  if (numMT_K < 64)
+    return staggerU_t{0, 0, 0};
 
   // Early Exit: splitK
   // TODO: support splitK
@@ -434,8 +438,9 @@ staggerU_t select_staggerU(const problem_t& problem,
   // amplifies A contention → the consecutive dimension (N) gets squared.
   // Column-major WGM: consecutive WGs share B (column-mates) → M gets squared.
   size_t A_contention, B_contention;
-  if (wgm > 0) {
+  if (wgm > 1) {
     // Positive WGM (row-major): N is the consecutive dimension
+    // Note: WGM = 1 is column-major
     A_contention = L2Tile_N * L2Tile_N * MT_M * bpe_a;
     B_contention = L2Tile_M * MT_N * bpe_b;
   } else {
@@ -447,11 +452,21 @@ staggerU_t select_staggerU(const problem_t& problem,
   size_t L2_value   = (L2_mapping == 0) ? std::min(L2Tile_M, numMT_M)
                                         : std::min(L2Tile_N, numMT_N);
   L2_value = std::min(L2_value, max_staggerU);
-  // L2 capacity check
-  size_t per_slice = MT_K * (L2Tile_M * MT_M * bpe_a + L2Tile_N * MT_N * bpe_b);
-  // 95% is a conservative limit mostly to handle not-nice L2 tiles (wrapping around).
-  if (L2_value * per_slice > 0.95 * hardware.L2_capacity)
-      return staggerU_t{0, 0, 0};
+  // L2 capacity check (direction-aware).
+  // Stagger only expands the SHARED matrix — the other matrix's footprint is unchanged:
+  //   SUM0: A unchanged (each M-position already reads different A data),
+  //         B expanded by min(stagger, L2Tile_M) K-offsets (B sharing is broken).
+  //   SUM1: B unchanged, A expanded by min(stagger, L2Tile_N) K-offsets.
+  size_t working_set;
+  if (L2_mapping == 0) {
+    working_set = MT_K * (L2Tile_M * MT_M * bpe_a +
+                          std::min(L2_value, L2Tile_M) * L2Tile_N * MT_N * bpe_b);
+  } else {
+    working_set = MT_K * (std::min(L2_value, L2Tile_N) * L2Tile_M * MT_M * bpe_a +
+                          L2Tile_N * MT_N * bpe_b);
+  }
+  if (working_set > 0.95 * hardware.L2_capacity)
+    return staggerU_t{0, 0, 0};
   // Early Exit: L2 value is already max_staggerU
   if (L2_value == max_staggerU)
     return staggerU_t{L2_mapping, max_staggerU, out_staggerUStrideShift};
@@ -481,7 +496,7 @@ staggerU_t select_staggerU(const problem_t& problem,
       // Not willing to sacrifice L2 for MALL
       out_staggerUMapping = L2_mapping;
       out_staggerU = L2_value;
-    } else if (numWGsPerL2Tile > numCUsPerXCD / 2) {
+    } else if (numWGsPerL2Tile > numCUsPerXCD / 2) { // very few tiles in L2
       // Willing to sacrifice L2 for MALL
       out_staggerUMapping = Mall_mapping;
       out_staggerU = max_staggerU;
