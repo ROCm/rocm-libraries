@@ -1,5 +1,9 @@
 # Welcome to hipThreads
 
+> **Caution:** This release is an *early-access* software technology preview. Running production workloads is *not* recommended.
+>
+> **hipThreads currently works only with ROCm 7.0.2.** Other ROCm versions (including newer ones) are not supported. See [Setup](md_docs_setup.html) for detailed installation instructions.
+
 hipThreads introduce a GPU execution model that lets developers launch and coordinate work on AMD GPUs using an idiom they already know: the C++ Concurrency Support Library. Instead of beginning the journey by learning kernel configuration and grid/block semantics, a developer can write `hip::thread`, `hip::mutex`, and `hip::condition_variable` code that feels structurally similar to `std::thread`-driven CPU programs.
 
 The goal is to lower the barrier to entry and make first contact with GPU compute feel like an incremental extension of existing C++ expertise, not a wholesale shift in mental model.
@@ -32,8 +36,6 @@ The primary components you will interact with are:
 | [`hip::condition_variable_any`](clasship_1_1condition__variable__any.html) | A mechanism for blocking a thread until notified by another.                                            |
 | [`hip::this_thread`](this__thread_8h.html)       | A namespace for functions that query or control the calling thread (e.g., `get_id`, `pseudo_yield`). |
 
-### Example: "Ray Tracing in One Weekend"
+### Examples
 
-To see `hipThreads` in action, check out the **[InOneWeekend RayTracer sample](https://github.amd.com/ArchSWTech/IowRaytracer)**. It demonstrates how a `std::thread`-based CPU application can be ported to the GPU, highlighting the key changes for memory management and thread creation.
-
-A baseline port shows a **2x speedup** moving from a 12-core Ryzen 9 CPU to a Navi48 XT GPU, illustrating the potential of this programming model.
+To see `hipThreads` in action, explore the **[examples/](https://github.com/ROCm/hipThreads/tree/release/0.1.0/examples)** directory. It includes SAXPY, sparse matrix multiply, a ray tracer, and llama3.c — each demonstrating how a `std::thread`-based CPU application can be ported to the GPU with minimal code changes, highlighting key patterns for memory management, fiber-based execution, and thread creation.
