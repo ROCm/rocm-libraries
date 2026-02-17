@@ -59,15 +59,15 @@ TEST(TestMatmulParams, InitializesAllTensorsFromValidGraph)
 
 TEST(TestMatmulParams, InitializesWithBiasAndActivation)
 {
-    auto builder
-        = createValidMatmulBiasActivGraph({4, 8},
-                                          {8, 1},
-                                          {8, 5},
-                                          {5, 1},
-                                          {4, 5},
-                                          {5, 1},
-                                          true,
-                                          hipdnn_data_sdk::data_objects::PointwiseMode::GELU_FWD);
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
     GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
@@ -557,15 +557,15 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithBFloat16)
 
 TEST_F(TestGpuMatmulPlan, CreatesPlanWithBiasAndGelu)
 {
-    auto builder
-        = createValidMatmulBiasActivGraph({4, 8},
-                                          {8, 1},
-                                          {8, 5},
-                                          {5, 1},
-                                          {4, 5},
-                                          {5, 1},
-                                          true,
-                                          hipdnn_data_sdk::data_objects::PointwiseMode::GELU_FWD);
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
     GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
@@ -640,7 +640,10 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithBiasAndSwish)
                                           {4, 5},
                                           {5, 1},
                                           true,
-                                          hipdnn_data_sdk::data_objects::PointwiseMode::SWISH_FWD);
+                                          hipdnn_data_sdk::data_objects::PointwiseMode::SWISH_FWD,
+                                          std::nullopt,
+                                          std::nullopt,
+                                          1.0f);
     GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
@@ -704,15 +707,15 @@ TEST_F(TestGpuMatmulPlan, PlanReturnValidWorkspaceSizeWithBiasOnly)
 
 TEST_F(TestGpuMatmulPlan, PlanReturnValidWorkspaceSizeWithBiasActivation)
 {
-    auto builder
-        = createValidMatmulBiasActivGraph({4, 8},
-                                          {8, 1},
-                                          {8, 5},
-                                          {5, 1},
-                                          {4, 5},
-                                          {5, 1},
-                                          true,
-                                          hipdnn_data_sdk::data_objects::PointwiseMode::GELU_FWD);
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
     GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();

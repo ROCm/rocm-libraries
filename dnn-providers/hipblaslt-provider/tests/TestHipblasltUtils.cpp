@@ -24,10 +24,20 @@ struct PointwiseAttrsHolder
 
     PointwiseAttrsHolder(PM operation,
                          flatbuffers::Optional<float> reluLowerClip = flatbuffers::nullopt,
-                         flatbuffers::Optional<float> reluUpperClip = flatbuffers::nullopt)
+                         flatbuffers::Optional<float> reluUpperClip = flatbuffers::nullopt,
+                         flatbuffers::Optional<float> swishBeta = flatbuffers::nullopt)
     {
-        auto offset = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
-            builder, operation, reluLowerClip, reluUpperClip);
+        auto offset = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(builder,
+                                                                               operation,
+                                                                               reluLowerClip,
+                                                                               reluUpperClip,
+                                                                               flatbuffers::nullopt,
+                                                                               flatbuffers::nullopt,
+                                                                               0,
+                                                                               flatbuffers::nullopt,
+                                                                               flatbuffers::nullopt,
+                                                                               0,
+                                                                               swishBeta);
         builder.Finish(offset);
         attrs = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
@@ -70,22 +80,6 @@ TEST(TestHipblasltUtils, MapPointwiseModeToHipblasLtEpilogue)
         EXPECT_FLOAT_EQ(result.act1, 6.0f);
     }
     {
-        // RELU_BWD with both clips → CLAMP without bias
-        PointwiseAttrsHolder h(PM::RELU_BWD, -2.0f, 5.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
-        EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_CLAMP_EXT);
-        EXPECT_FLOAT_EQ(result.act0, -2.0f);
-        EXPECT_FLOAT_EQ(result.act1, 5.0f);
-    }
-    {
-        // RELU_BWD with both clips → CLAMP with bias
-        PointwiseAttrsHolder h(PM::RELU_BWD, -2.0f, 5.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
-        EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT);
-        EXPECT_FLOAT_EQ(result.act0, -2.0f);
-        EXPECT_FLOAT_EQ(result.act1, 5.0f);
-    }
-    {
         // RELU_FWD standard (lower_clip = 0, no upper_clip) without bias
         PointwiseAttrsHolder h(PM::RELU_FWD, 0.0f);
         auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
@@ -96,22 +90,6 @@ TEST(TestHipblasltUtils, MapPointwiseModeToHipblasLtEpilogue)
     {
         // RELU_FWD standard (lower_clip = 0, no upper_clip) with bias
         PointwiseAttrsHolder h(PM::RELU_FWD, 0.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
-        EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_RELU_BIAS);
-        EXPECT_FLOAT_EQ(result.act0, 0.0f);
-        EXPECT_FLOAT_EQ(result.act1, 0.0f);
-    }
-    {
-        // RELU_BWD standard (lower_clip = 0, no upper_clip) without bias
-        PointwiseAttrsHolder h(PM::RELU_BWD, 0.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
-        EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_RELU);
-        EXPECT_FLOAT_EQ(result.act0, 0.0f);
-        EXPECT_FLOAT_EQ(result.act1, 0.0f);
-    }
-    {
-        // RELU_BWD standard (lower_clip = 0, no upper_clip) with bias
-        PointwiseAttrsHolder h(PM::RELU_BWD, 0.0f);
         auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_RELU_BIAS);
         EXPECT_FLOAT_EQ(result.act0, 0.0f);
@@ -129,83 +107,38 @@ TEST(TestHipblasltUtils, MapPointwiseModeToHipblasLtEpilogue)
         EXPECT_THROW(hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
-    {
-        // RELU_BWD with non-zero lower_clip only → throws
-        PointwiseAttrsHolder h(PM::RELU_BWD, 2.0f);
-        EXPECT_THROW(hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true),
-                     hipdnn_plugin_sdk::HipdnnPluginException);
-    }
-
-    // -- Sigmoid -------------------------------------------------------------
-    {
-        PointwiseAttrsHolder h(PM::SIGMOID_FWD);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
-        EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_SIGMOID);
-        EXPECT_FLOAT_EQ(result.act0, 0.0f);
-        EXPECT_FLOAT_EQ(result.act1, 0.0f);
-    }
-    {
-        // Sigmoid ignores withBias flag
-        PointwiseAttrsHolder h(PM::SIGMOID_FWD);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
-        EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_SIGMOID);
-        EXPECT_FLOAT_EQ(result.act0, 0.0f);
-        EXPECT_FLOAT_EQ(result.act1, 0.0f);
-    }
-    {
-        PointwiseAttrsHolder h(PM::SIGMOID_BWD);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
-        EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_SIGMOID);
-        EXPECT_FLOAT_EQ(result.act0, 0.0f);
-        EXPECT_FLOAT_EQ(result.act1, 0.0f);
-    }
 
     // -- GELU ----------------------------------------------------------------
     {
-        PointwiseAttrsHolder h(PM::GELU_FWD);
+        PointwiseAttrsHolder h(PM::GELU_APPROX_TANH_FWD);
         auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_GELU);
         EXPECT_FLOAT_EQ(result.act0, 0.0f);
         EXPECT_FLOAT_EQ(result.act1, 0.0f);
     }
     {
-        PointwiseAttrsHolder h(PM::GELU_FWD);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
-        EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_GELU_BIAS);
-    }
-    {
-        PointwiseAttrsHolder h(PM::GELU_BWD);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
-        EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_GELU);
-    }
-    {
-        PointwiseAttrsHolder h(PM::GELU_BWD);
+        PointwiseAttrsHolder h(PM::GELU_APPROX_TANH_FWD);
         auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_GELU_BIAS);
     }
 
     // -- Swish ---------------------------------------------------------------
     {
-        PointwiseAttrsHolder h(PM::SWISH_FWD);
+        PointwiseAttrsHolder h(PM::SWISH_FWD, flatbuffers::nullopt, flatbuffers::nullopt, 1.0f);
         auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_SWISH_EXT);
         EXPECT_FLOAT_EQ(result.act0, 0.0f);
         EXPECT_FLOAT_EQ(result.act1, 0.0f);
     }
     {
-        PointwiseAttrsHolder h(PM::SWISH_FWD);
+        PointwiseAttrsHolder h(PM::SWISH_FWD, flatbuffers::nullopt, flatbuffers::nullopt, 1.0f);
         auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT);
     }
     {
-        PointwiseAttrsHolder h(PM::SWISH_BWD);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
-        EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_SWISH_EXT);
-    }
-    {
-        PointwiseAttrsHolder h(PM::SWISH_BWD);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
-        EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT);
+        PointwiseAttrsHolder h(PM::SWISH_FWD, flatbuffers::nullopt, flatbuffers::nullopt, 2.0f);
+        EXPECT_THROW(hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false),
+                     hipdnn_plugin_sdk::HipdnnPluginException);
     }
 
     // -- Unsupported operations → throw --------------------------------------

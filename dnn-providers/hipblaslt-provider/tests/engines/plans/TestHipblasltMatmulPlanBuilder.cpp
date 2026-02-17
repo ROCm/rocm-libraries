@@ -166,7 +166,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             {4, 5},
             {5, 1},
             true,
-            hipdnn_data_sdk::data_objects::PointwiseMode::GELU_FWD);
+            hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
@@ -199,7 +199,10 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             {4, 5},
             {5, 1},
             true,
-            hipdnn_data_sdk::data_objects::PointwiseMode::SWISH_FWD);
+            hipdnn_data_sdk::data_objects::PointwiseMode::SWISH_FWD,
+            std::nullopt,
+            std::nullopt,
+            1.0f);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
@@ -233,7 +236,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             {4, 5},
             {5, 1},
             true,
-            hipdnn_data_sdk::data_objects::PointwiseMode::GELU_FWD);
+            hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
 
         auto mutableGraph
             = hipdnn_data_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
@@ -297,7 +300,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)
             {4, 5},
             {5, 1},
             true,
-            hipdnn_data_sdk::data_objects::PointwiseMode::GELU_FWD);
+            hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_NO_THROW(_planBuilder.getWorkspaceSize(_handle, graph));
@@ -381,7 +384,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, BuildPlan)
             {4, 5},
             {5, 1},
             true,
-            hipdnn_data_sdk::data_objects::PointwiseMode::GELU_FWD);
+            hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         HipdnnEnginePluginExecutionContext ctx;
 

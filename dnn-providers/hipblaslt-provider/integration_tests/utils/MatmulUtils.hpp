@@ -167,4 +167,32 @@ inline std::vector<MatmulTestCase> getMatmulTestCases()
     };
 }
 
+inline std::vector<MatmulTestCase> getMatmulBiasActivTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        // Not unit batch
+        {{3, 16, 32}, {3, 32, 128}, false, false, seed},
+        // Transpose A matrix (matching batch)
+        {{3, 16, 32}, {3, 32, 128}, true, false, seed},
+        // Transpose B matrix (matching batch)
+        {{3, 16, 32}, {3, 32, 128}, false, true, seed},
+        // Transpose both matrices (matching batch)
+        {{3, 16, 32}, {3, 32, 128}, true, true, seed},
+
+        // Broadcasted A batch
+        {{1, 1, 16, 32}, {2, 3, 32, 128}, false, false, seed},
+        // Broadcasted B batch
+        {{2, 3, 16, 32}, {1, 1, 32, 128}, false, false, seed},
+
+        // Transpose A matrix (matching batch) + Broadcasted A batch
+        {{1, 1, 16, 32}, {2, 3, 32, 128}, true, false, seed},
+        // Transpose B matrix (matching batch) + Broadcasted A batch
+        {{1, 1, 16, 32}, {2, 3, 32, 128}, false, true, seed},
+        // Transpose both matrices (matching batch) + Broadcasted B batch
+        {{2, 3, 16, 32}, {1, 1, 32, 128}, true, true, seed},
+    };
+}
+
 } // namespace test_matmul_common

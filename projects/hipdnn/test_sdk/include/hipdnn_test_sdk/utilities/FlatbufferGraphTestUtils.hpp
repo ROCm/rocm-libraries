@@ -1497,6 +1497,7 @@ inline flatbuffers::FlatBufferBuilder
                                     = hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
                                     std::optional<float> reluLowerClip = std::nullopt,
                                     std::optional<float> reluUpperClip = std::nullopt,
+                                    std::optional<float> swishBeta = std::nullopt,
                                     hipdnn_data_sdk::data_objects::DataType dataType
                                     = hipdnn_data_sdk::data_objects::DataType::FLOAT)
 {
@@ -1585,7 +1586,8 @@ inline flatbuffers::FlatBufferBuilder
             doBias ? cBiasTensorUid : cMatmulTensorUid,
             flatbuffers::nullopt, // in_1_tensor_uid
             flatbuffers::nullopt, // in_2_tensor_uid
-            cTensorUid);
+            cTensorUid,
+            swishBeta); // swish_beta
         nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
             builder,
             "activation",

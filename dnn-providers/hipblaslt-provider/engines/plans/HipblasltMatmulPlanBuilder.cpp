@@ -17,24 +17,19 @@ namespace hipblaslt_plugin
 namespace
 {
 
-bool isNodeBias(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attr)
+bool isBias(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attr)
 {
     return attr.operation() == hipdnn_data_sdk::data_objects::PointwiseMode::ADD;
 }
 
-bool isNodeActiv(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attr)
+bool isSupportedActivation(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attr)
 {
     using PointwiseMode = hipdnn_data_sdk::data_objects::PointwiseMode;
     switch(attr.operation())
     {
     case PointwiseMode::RELU_FWD:
-    case PointwiseMode::RELU_BWD:
-    case PointwiseMode::SIGMOID_FWD:
-    case PointwiseMode::SIGMOID_BWD:
-    case PointwiseMode::GELU_FWD:
-    case PointwiseMode::GELU_BWD:
+    case PointwiseMode::GELU_APPROX_TANH_FWD:
     case PointwiseMode::SWISH_FWD:
-    case PointwiseMode::SWISH_BWD:
         return true;
     default:
         return false;
@@ -92,7 +87,7 @@ std::tuple<const hipdnn_data_sdk::data_objects::MatmulAttributes&,
         = opGraph.getNodeWrapper(1)
               .attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
 
-    if(isNodeActiv(secondNodeAttr))
+    if(isSupportedActivation(secondNodeAttr))
     {
         // The second node is activation.
         // If activation node is already present, then graph must have only 2 nodes
@@ -109,7 +104,7 @@ std::tuple<const hipdnn_data_sdk::data_objects::MatmulAttributes&,
         return {matmulAttr, nullptr, &activAttr};
     }
 
-    if(!isNodeBias(secondNodeAttr))
+    if(!isBias(secondNodeAttr))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -143,7 +138,7 @@ std::tuple<const hipdnn_data_sdk::data_objects::MatmulAttributes&,
         = opGraph.getNodeWrapper(2)
               .attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
 
-    if(!isNodeActiv(thirdNodeAttr))
+    if(!isSupportedActivation(thirdNodeAttr))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,

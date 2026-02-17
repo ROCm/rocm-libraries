@@ -19,7 +19,6 @@ EpilogueParams mapPointwiseModeToHipblasLtEpilogue(
     switch(attrs->operation())
     {
     case PM::RELU_FWD:
-    case PM::RELU_BWD:
     {
         if(attrs->relu_lower_clip() && attrs->relu_upper_clip())
         {
@@ -41,17 +40,19 @@ EpilogueParams mapPointwiseModeToHipblasLtEpilogue(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Supports only clamp and standard relu with zero min value");
     }
-    case PM::SIGMOID_FWD:
-    case PM::SIGMOID_BWD:
-        return EpilogueParams{HIPBLASLT_EPILOGUE_SIGMOID, 0.0, 0.0};
-    case PM::GELU_FWD:
-    case PM::GELU_BWD:
+    case PM::GELU_APPROX_TANH_FWD:
         return EpilogueParams{
             withBias ? HIPBLASLT_EPILOGUE_GELU_BIAS : HIPBLASLT_EPILOGUE_GELU, 0.0, 0.0};
     case PM::SWISH_FWD:
-    case PM::SWISH_BWD:
-        return EpilogueParams{
-            withBias ? HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT : HIPBLASLT_EPILOGUE_SWISH_EXT, 0.0, 0.0};
+        if(attrs->swish_beta().has_value() && attrs->swish_beta().value() == 1.0f)
+        {
+            return EpilogueParams{withBias ? HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT
+                                           : HIPBLASLT_EPILOGUE_SWISH_EXT,
+                                  0.0,
+                                  0.0};
+        }
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Supports only swish with beta = 1.0");
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "Unsupported activation operation");
