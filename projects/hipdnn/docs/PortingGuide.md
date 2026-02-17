@@ -14,32 +14,24 @@ This guide helps developers migrate cuDNN Frontend code to hipDNN. It focuses on
 
 **CMakeLists.txt**:
 ```cmake
-cmake_minimum_required(VERSION 3.25.2)
+cmake_minimum_required(VERSION <your_minimum>)
 
-# CRITICAL: Enable PIC for plugin system compatibility
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-
-# CRITICAL: Use hipcc compiler (not g++)
-if(NOT DEFINED CMAKE_CXX_COMPILER)
-    set(CMAKE_CXX_COMPILER "/opt/rocm/lib/llvm/bin/amdclang++")
-endif()
 
 project(my_hipdnn_project VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 
+# CRITICAL: Enable PIC for plugin system compatibility
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 # Find required packages
-find_package(hip REQUIRED)
 find_package(hipdnn_frontend CONFIG REQUIRED)
-find_package(hipdnn_data_sdk CONFIG REQUIRED)
 
 # Create executable
 add_executable(my_app main.cpp)
 
 # Link libraries
 target_link_libraries(my_app PRIVATE
-    hip::host
     hipdnn_frontend
-    hipdnn_data_sdk
 )
 ```
 
