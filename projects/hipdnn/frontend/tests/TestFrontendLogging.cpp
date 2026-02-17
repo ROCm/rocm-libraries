@@ -110,8 +110,13 @@ TEST_F(TestFrontendLogging, SetAndGetLogLevel)
 {
     hipdnnSeverity_t level = HIPDNN_SEV_OFF;
 
+    // Invalid severity
+    auto error = setGlobalLogLevel(static_cast<hipdnnSeverity_t>(999));
+    EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_TRUE(error.get_message().find("Failed to set global log level") != std::string::npos);
+
     // Set to WARN
-    auto error = setGlobalLogLevel(HIPDNN_SEV_WARN);
+    error = setGlobalLogLevel(HIPDNN_SEV_WARN);
     EXPECT_EQ(error.code, ErrorCode::OK);
     error = getGlobalLogLevel(level);
     EXPECT_EQ(error.code, ErrorCode::OK);

@@ -87,6 +87,7 @@ TEST_F(TestBackendLogger, MacrosDontLogWhenOff)
     HIPDNN_BACKEND_LOG_INFO("Initializing with info message");
     HIPDNN_BACKEND_LOG_WARN("Initializing with warn message");
     HIPDNN_BACKEND_LOG_ERROR("Initializing with error message");
+    HIPDNN_BACKEND_LOG_FATAL("Initializing with fatal message");
 
     std::string logContent = getStderrContent();
     EXPECT_TRUE(logContent.empty())
@@ -100,11 +101,13 @@ TEST_F(TestBackendLogger, MacrosRespectLogLevelInfo)
     HIPDNN_BACKEND_LOG_INFO("Info test message");
     HIPDNN_BACKEND_LOG_WARN("Warn test message");
     HIPDNN_BACKEND_LOG_ERROR("Error test message");
+    HIPDNN_BACKEND_LOG_FATAL("Fatal test message");
 
     std::string logContent = getStderrContent();
     EXPECT_NE(logContent.find("Info test message"), std::string::npos);
     EXPECT_NE(logContent.find("Warn test message"), std::string::npos);
     EXPECT_NE(logContent.find("Error test message"), std::string::npos);
+    EXPECT_NE(logContent.find("Fatal test message"), std::string::npos);
 }
 
 TEST_F(TestBackendLogger, MacrosRespectLogLevelWarn)
@@ -114,11 +117,13 @@ TEST_F(TestBackendLogger, MacrosRespectLogLevelWarn)
     HIPDNN_BACKEND_LOG_INFO("Info should not appear");
     HIPDNN_BACKEND_LOG_WARN("Warn should appear");
     HIPDNN_BACKEND_LOG_ERROR("Error should appear");
+    HIPDNN_BACKEND_LOG_FATAL("Fatal should appear");
 
     std::string logContent = getStderrContent();
     EXPECT_EQ(logContent.find("Info should not appear"), std::string::npos);
     EXPECT_NE(logContent.find("Warn should appear"), std::string::npos);
     EXPECT_NE(logContent.find("Error should appear"), std::string::npos);
+    EXPECT_NE(logContent.find("Fatal should appear"), std::string::npos);
 }
 
 TEST_F(TestBackendLogger, MacrosRespectLogLevelError)
@@ -128,11 +133,13 @@ TEST_F(TestBackendLogger, MacrosRespectLogLevelError)
     HIPDNN_BACKEND_LOG_INFO("Info should not appear");
     HIPDNN_BACKEND_LOG_WARN("Warn should not appear");
     HIPDNN_BACKEND_LOG_ERROR("Error should appear");
+    HIPDNN_BACKEND_LOG_ERROR("Fatal should appear");
 
     std::string logContent = getStderrContent();
     EXPECT_EQ(logContent.find("Info should not appear"), std::string::npos);
     EXPECT_EQ(logContent.find("Warn should not appear"), std::string::npos);
     EXPECT_NE(logContent.find("Error should appear"), std::string::npos);
+    EXPECT_NE(logContent.find("Fatal should appear"), std::string::npos);
 }
 
 TEST_F(TestBackendLogger, LoggingCanBeReinitialized)
