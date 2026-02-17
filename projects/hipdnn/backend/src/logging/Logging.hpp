@@ -6,64 +6,64 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <memory>
-#include <spdlog/spdlog.h>
 #include <sstream>
 #include <string>
 
 // Backend-specific logging macros
 // These are separate from HIPDNN_LOG_* used by frontend/plugins to avoid conflicts
 #ifdef HIPDNN_BACKEND_COMPILATION
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
 
-#define HIPDNN_BACKEND_LOG_INFO(msg)                                              \
-    do                                                                            \
-    {                                                                             \
-        hipdnn_backend::logging::initialize();                                    \
-        auto _logger = hipdnn_backend::logging::getBackendLogger();               \
-        if(_logger && _logger->should_log(spdlog::level::level_enum::info))       \
-        {                                                                         \
-            std::ostringstream _hipdnn_log_oss;                                   \
-            _hipdnn_log_oss << msg;                                               \
-            _logger->log(spdlog::level::level_enum::info, _hipdnn_log_oss.str()); \
-        }                                                                         \
+#define HIPDNN_BACKEND_LOG_INFO(msg)                                                          \
+    do                                                                                        \
+    {                                                                                         \
+        hipdnn_backend::logging::initialize();                                                \
+        if(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO))                      \
+        {                                                                                     \
+            std::ostringstream _hipdnn_log_oss;                                               \
+            _hipdnn_log_oss << msg;                                                           \
+            hipdnn_backend::logging::logMessage(HIPDNN_SEV_INFO,                              \
+                                                "[hipdnn_backend] " + _hipdnn_log_oss.str()); \
+        }                                                                                     \
     } while(0)
 
-#define HIPDNN_BACKEND_LOG_WARN(msg)                                              \
-    do                                                                            \
-    {                                                                             \
-        hipdnn_backend::logging::initialize();                                    \
-        auto _logger = hipdnn_backend::logging::getBackendLogger();               \
-        if(_logger && _logger->should_log(spdlog::level::level_enum::warn))       \
-        {                                                                         \
-            std::ostringstream _hipdnn_log_oss;                                   \
-            _hipdnn_log_oss << msg;                                               \
-            _logger->log(spdlog::level::level_enum::warn, _hipdnn_log_oss.str()); \
-        }                                                                         \
+#define HIPDNN_BACKEND_LOG_WARN(msg)                                                          \
+    do                                                                                        \
+    {                                                                                         \
+        hipdnn_backend::logging::initialize();                                                \
+        if(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN))                      \
+        {                                                                                     \
+            std::ostringstream _hipdnn_log_oss;                                               \
+            _hipdnn_log_oss << msg;                                                           \
+            hipdnn_backend::logging::logMessage(HIPDNN_SEV_WARN,                              \
+                                                "[hipdnn_backend] " + _hipdnn_log_oss.str()); \
+        }                                                                                     \
     } while(0)
 
-#define HIPDNN_BACKEND_LOG_ERROR(msg)                                            \
-    do                                                                           \
-    {                                                                            \
-        hipdnn_backend::logging::initialize();                                   \
-        auto _logger = hipdnn_backend::logging::getBackendLogger();              \
-        if(_logger && _logger->should_log(spdlog::level::level_enum::err))       \
-        {                                                                        \
-            std::ostringstream _hipdnn_log_oss;                                  \
-            _hipdnn_log_oss << msg;                                              \
-            _logger->log(spdlog::level::level_enum::err, _hipdnn_log_oss.str()); \
-        }                                                                        \
+#define HIPDNN_BACKEND_LOG_ERROR(msg)                                                         \
+    do                                                                                        \
+    {                                                                                         \
+        hipdnn_backend::logging::initialize();                                                \
+        if(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_ERROR))                     \
+        {                                                                                     \
+            std::ostringstream _hipdnn_log_oss;                                               \
+            _hipdnn_log_oss << msg;                                                           \
+            hipdnn_backend::logging::logMessage(HIPDNN_SEV_ERROR,                             \
+                                                "[hipdnn_backend] " + _hipdnn_log_oss.str()); \
+        }                                                                                     \
     } while(0)
 
-#define HIPDNN_BACKEND_LOG_FATAL(msg)                                                 \
-    do                                                                                \
-    {                                                                                 \
-        hipdnn_backend::logging::initialize();                                        \
-        auto _logger = hipdnn_backend::logging::getBackendLogger();                   \
-        if(_logger && _logger->should_log(spdlog::level::level_enum::critical))       \
-        {                                                                             \
-            std::ostringstream _hipdnn_log_oss;                                       \
-            _hipdnn_log_oss << msg;                                                   \
-            _logger->log(spdlog::level::level_enum::critical, _hipdnn_log_oss.str()); \
-        }                                                                             \
+#define HIPDNN_BACKEND_LOG_FATAL(msg)                                                         \
+    do                                                                                        \
+    {                                                                                         \
+        hipdnn_backend::logging::initialize();                                                \
+        if(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_FATAL))                     \
+        {                                                                                     \
+            std::ostringstream _hipdnn_log_oss;                                               \
+            _hipdnn_log_oss << msg;                                                           \
+            hipdnn_backend::logging::logMessage(HIPDNN_SEV_FATAL,                             \
+                                                "[hipdnn_backend] " + _hipdnn_log_oss.str()); \
+        }                                                                                     \
     } while(0)
 
 #endif // HIPDNN_BACKEND_COMPILATION
@@ -75,11 +75,7 @@ void initialize();
 
 void cleanup();
 
-void setLogLevel(const std::string& level);
-
-std::shared_ptr<spdlog::logger> getBackendLogger();
-
-std::shared_ptr<spdlog::logger> getCallbackReceiverLogger();
+void logMessage(hipdnnSeverity_t severity, const std::string& message);
 
 void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg);
 

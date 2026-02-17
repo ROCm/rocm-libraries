@@ -246,8 +246,6 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
@@ -278,7 +276,6 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
-matchMemoryAccess: true
 tailLoops: true
 streamK: None
 loadScale_A: BufferToVGPR
@@ -312,8 +309,6 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
@@ -326,7 +321,6 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
-matchMemoryAccess: true
 tailLoops: true
 types:
   trans_A: N
@@ -377,8 +371,6 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
@@ -391,7 +383,6 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
-matchMemoryAccess: true
 tailLoops: true
 types:
   trans_A: N

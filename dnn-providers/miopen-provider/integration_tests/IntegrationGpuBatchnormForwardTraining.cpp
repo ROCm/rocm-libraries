@@ -53,7 +53,7 @@ template <typename InputType, typename IntermediateType, typename TestCaseType>
 class BatchnormForwardTraining : public IntegrationGraphVerificationHarness<InputType, TestCaseType>
 {
 protected:
-    void runGraphTest(InputType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
+    void runGraphTest(InputType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         runGraphTestWithScenario(tolerance, BatchnormTrainingScenario::FULL_TRAINING, layout);
     }
@@ -64,7 +64,7 @@ protected:
     {
         const TestCaseType& testCase = this->GetParam();
 
-        HIPDNN_PLUGIN_LOG_INFO("Test is using {} for its random seed", testCase.seed);
+        HIPDNN_PLUGIN_LOG_INFO("Test is using " << testCase.seed << " for its random seed");
 
         hipdnn_frontend::graph::Graph graphObj;
         graphObj.set_name("BatchnormForwardTrainingTest");

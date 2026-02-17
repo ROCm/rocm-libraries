@@ -12,7 +12,7 @@ namespace miopen_plugin
 class MiopenConvFwdBiasActivPlanBuilder : public IPlanBuilder
 {
 public:
-    MiopenConvFwdBiasActivPlanBuilder() = default;
+    explicit MiopenConvFwdBiasActivPlanBuilder(bool deterministic = false);
     ~MiopenConvFwdBiasActivPlanBuilder() override = default;
 
     // Disallow copy and assignment
@@ -33,6 +33,9 @@ public:
     std::vector<hipdnn_data_sdk::data_objects::KnobT>
         getCustomKnobs(const HipdnnEnginePluginHandle& handle,
                        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+
+private:
+    bool _deterministic;
 };
 
 }
