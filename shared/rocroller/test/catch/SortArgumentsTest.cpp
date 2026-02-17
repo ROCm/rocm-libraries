@@ -36,8 +36,6 @@
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/KernelGraph/Transforms/SortArguments_detail.hpp>
 
-#include <algorithm>
-#include <set>
 #include <vector>
 
 namespace
@@ -50,7 +48,7 @@ namespace
         std::vector<std::string> names;
         names.reserve(args.size());
         for(auto const& a : args)
-            names.push_back(a.name);
+            names.push_back(a.getName());
         return names;
     }
 
@@ -148,17 +146,17 @@ TEST_CASE("SortArguments transform works as expected", "[kernel-graph][SortArgum
             int totalSize = 0;
             for(auto const& arg : args)
             {
-                totalSize += arg.size;
+                totalSize += arg.getSize();
 
                 CAPTURE(arg, totalSize);
 
                 if(totalSize <= 56)
                 {
-                    CHECK(arg.preloaded);
+                    CHECK(arg.getPreloaded());
                 }
                 else
                 {
-                    CHECK_FALSE(arg.preloaded);
+                    CHECK_FALSE(arg.getPreloaded());
                 }
             }
         }

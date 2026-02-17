@@ -79,7 +79,7 @@ namespace rocRoller::KernelGraph
             visitor.walk();
 
             std::ranges::stable_sort(arguments, [&](auto const& a, auto const& b) {
-                return visitor.argumentFirstUse(a.name) < visitor.argumentFirstUse(b.name);
+                return visitor.argumentFirstUse(a.getName()) < visitor.argumentFirstUse(b.getName());
             });
         }
     }
@@ -92,7 +92,7 @@ namespace rocRoller::KernelGraph
         Log::debug("SortArguments: Before sorting by first use:");
         for(auto const& arg : arguments)
         {
-            Log::debug("Argument: {} ({})", arg.name, arg.size);
+            Log::debug("Argument: {} ({})", arg.getName(), arg.getSize());
         }
 
         SortArguments_detail::sortArgumentsByFirstUse(graph, kernel, arguments);
@@ -100,7 +100,7 @@ namespace rocRoller::KernelGraph
         Log::debug("SortArguments: After sorting by first use:");
         for(auto const& arg : arguments)
         {
-            Log::debug("Argument: {} ({})", arg.name, arg.size);
+            Log::debug("Argument: {} ({})", arg.getName(), arg.getSize());
         }
 
         m_context->argLoader()->decidePreloadedKernargs(arguments);
@@ -108,14 +108,14 @@ namespace rocRoller::KernelGraph
         Log::debug("SortArguments: After deciding preloaded kernargs:");
         for(auto const& arg : arguments)
         {
-            Log::debug("Argument: {} ({})", arg.name, arg.size);
+            Log::debug("Argument: {} ({})", arg.getName(), arg.getSize());
         }
 
         kernel->resetArguments();
 
         for(auto& arg : arguments)
         {
-            arg.offset = -1;
+            arg.setOffset(-1);
             m_context->kernel()->addArgument(arg);
         }
 

@@ -60,11 +60,11 @@ namespace rocRoller
 
         for(auto const& arg : m_kernel->arguments())
         {
-            if(arg.preloaded)
-                count += std::max(1, arg.size / 4);
+            if(arg.getPreloaded())
+                count += std::max(1, arg.getSize() / 4);
             else
             {
-                m_manuallyLoadedOffset = arg.offset;
+                m_manuallyLoadedOffset = arg.getOffset();
                 break;
             }
         }
@@ -170,7 +170,7 @@ namespace rocRoller
         auto optionPreloadedSGPRs = ctx->kernelOptions()->systemPreloadedKernelArguments;
 
         auto getArgSGPRs
-            = [](AssemblyKernelArgument const& arg) { return std::max(arg.size / 4, 1); };
+            = [](AssemblyKernelArgument const& arg) { return std::max(arg.getSize() / 4, 1); };
 
         auto totalArgSGPRs = [&]() {
             auto view = args | std::views::transform(getArgSGPRs);
@@ -197,22 +197,22 @@ namespace rocRoller
 
             if(totalAssignedSGPRs + argSGPRs <= maxPreloadedSGPRs)
             {
-                arg.preloaded = true;
+                arg.setPreloaded(true);
                 totalAssignedSGPRs += argSGPRs;
             }
             else
             {
-                arg.preloaded = false;
+                arg.setPreloaded(false);
             }
         }
 
-        auto isPreloaded = [](AssemblyKernelArgument const& arg) { return arg.preloaded; };
+        auto isPreloaded = [](AssemblyKernelArgument const& arg) { return arg.getPreloaded(); };
 
         auto firstNonPreloaded = std::stable_partition(args.begin(), args.end(), isPreloaded);
 
         auto largestArgFirst
             = [&totalArgSGPRs](AssemblyKernelArgument const& a, AssemblyKernelArgument const& b) {
-                  return a.size > b.size;
+                  return a.getSize() > b.getSize();
               };
 
         std::stable_sort(args.begin(), firstNonPreloaded, largestArgFirst);
@@ -220,7 +220,7 @@ namespace rocRoller
 
         for(auto const& arg : args)
         {
-            Log::debug("Argument: {} ({}) ({})", arg.name, arg.size, arg.preloaded);
+            Log::debug("Argument: {} ({}) ({})", arg.getName(), arg.getSize(), arg.getPreloaded());
         }
 
         int  offset              = 0;
@@ -228,28 +228,28 @@ namespace rocRoller
 
         for(auto& arg : args)
         {
-            if(!arg.preloaded && !startedNonPreloaded)
+            if(!arg.getPreloaded() && !startedNonPreloaded)
             {
                 startedNonPreloaded = true;
                 // AssertFatal(offset / 4 == (firstNonPreloaded - args.begin()),
                 //             "Offset mismatch",
                 //             ShowValue(offset),
                 //             ShowValue(firstNonPreloaded - args.begin()));
-                arg.offset = RoundUpToMultiple(offset, arg.size);
+                arg.setOffset(RoundUpToMultiple(offset, arg.getSize()));
             }
             else
             {
-                AssertFatal(offset % arg.size == 0,
+                AssertFatal(offset % arg.getSize() == 0,
                             "No bubbles allowed in either segment!",
                             ShowValue(offset),
-                            ShowValue(arg.size),
+                            ShowValue(arg.getSize()),
                             ShowValue(startedNonPreloaded));
-                arg.offset = offset;
+                arg.setOffset(offset);
             }
 
-            Log::debug("Arg: {} size {} offset {}", arg.name, arg.size, arg.offset);
+            Log::debug("Arg: {} size {} offset {}", arg.getName(), arg.getSize(), arg.getOffset());
 
-            offset = arg.offset + arg.size;
+            offset = arg.getOffset() + arg.getSize();
         }
     }
 
@@ -269,16 +269,16 @@ namespace rocRoller
         for(int i = 0; i < args.size(); i++)
         {
             auto const& arg    = args[i];
-            auto        argEnd = arg.offset + arg.size;
-            if(arg.offset >= beginOffset && argEnd <= endOffset)
+            auto        argEnd = arg.getOffset() + arg.getSize();
+            if(arg.getOffset() >= beginOffset && argEnd <= endOffset)
             {
-                AssertFatal(!m_loadedValues.contains(arg.name),
+                AssertFatal(!m_loadedValues.contains(arg.getName()),
                             ShowValue(arg),
                             ShowValue(beginOffset),
                             ShowValue(endOffset));
 
-                auto beginReg = (arg.offset - beginOffset) / 4;
-                auto endReg   = beginReg + (arg.size / 4);
+                auto beginReg = (arg.getOffset() - beginOffset) / 4;
+                auto endReg   = beginReg + (arg.getSize() / 4);
                 auto range    = iota(beginReg, endReg);
 
                 indices.emplace_back(range.begin(), range.end());
@@ -295,10 +295,10 @@ namespace rocRoller
             {
                 auto        argIdx = argIndices[i];
                 std::string ltOnly
-                    = launchTimeOnly.contains(args.at(argIdx).name) ? " (LT only)" : "";
+                    = launchTimeOnly.contains(args.at(argIdx).getName()) ? " (LT only)" : "";
                 Log::debug("{} ({}){}: {}",
                            argIdx,
-                           args.at(argIdx).name,
+                           args.at(argIdx).getName(),
                            ltOnly,
                            fmt::join(indices[i], ", "));
             }
@@ -312,14 +312,14 @@ namespace rocRoller
             auto const& arg    = args.at(argIdx);
 
             auto subReg = valueRegs[valIdx];
-            subReg->setName(arg.name);
-            subReg->setVariableType(arg.variableType);
+            subReg->setName(arg.getName());
+            subReg->setVariableType(arg.getVariableType());
             subReg->allocation()->setOptions(Register::AllocationOptions::FullyContiguous());
 
             co_yield Instruction::Comment(subReg->description());
 
             // if(!launchTimeOnly.contains(arg.name))
-            m_loadedValues[arg.name] = subReg;
+            m_loadedValues[arg.getName()] = subReg;
         }
     }
 
@@ -345,7 +345,7 @@ namespace rocRoller
 
         for(auto const& arg : m_kernel->arguments())
         {
-            if(arg.preloaded)
+            if(arg.getPreloaded())
                 m_anyPreloadedArguments = true;
             else
                 m_anyManuallyLoadedArguments = true;
@@ -372,10 +372,10 @@ namespace rocRoller
 
         for(auto const& arg : args)
         {
-            if(!m_loadedValues.contains(arg.name) && !arg.preloaded)
+            if(!m_loadedValues.contains(arg.getName()) && !arg.getPreloaded())
             {
-                beginOffset = std::min<int>(beginOffset, arg.offset);
-                endOffset   = std::max<int>(endOffset, arg.offset + arg.size);
+                beginOffset = std::min<int>(beginOffset, arg.getOffset());
+                endOffset   = std::max<int>(endOffset, arg.getOffset() + arg.getSize());
             }
         }
 

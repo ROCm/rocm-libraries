@@ -443,8 +443,8 @@ namespace ArgumentLoaderGPUTest
 
         for(auto karg : m_context->kernel()->arguments())
         {
-            auto value = Expression::evaluate(karg.expression, commandArgs.runtimeArguments());
-            kernelArgs.append(karg.name, value);
+            auto value = Expression::evaluate(karg.getExpression(), commandArgs.runtimeArguments());
+            kernelArgs.append(karg.getName(), value);
         }
 
         AssemblyTestKernel::operator()(invocation, kernelArgs);
@@ -483,7 +483,7 @@ namespace ArgumentLoaderGPUTest
 
             for(auto& arg : kargs)
             {
-                arg.offset = -1;
+                arg.setOffset(-1);
                 k->addArgument(std::move(arg));
             }
         }
@@ -496,9 +496,9 @@ namespace ArgumentLoaderGPUTest
 
             for(auto& arg : kargs)
             {
-                arg.preloaded = arg.offset + arg.size <= m_numPreloaded;
+                arg.setPreloaded(arg.getOffset() + arg.getSize() <= m_numPreloaded);
 
-                arg.offset = -1;
+                arg.setOffset(-1);
                 k->addArgument(std::move(arg));
                 count++;
             }
@@ -581,26 +581,26 @@ namespace ArgumentLoaderGPUTest
 
             for(auto const& karg : m_context->kernel()->arguments())
             {
-                if(karg.preloaded)
-                    eagerBegin = karg.offset + karg.size;
+                if(karg.getPreloaded())
+                    eagerBegin = karg.getOffset() + karg.getSize();
 
-                if(!karg.preloaded && !lazyLoad)
-                    eagerEnd = karg.offset + karg.size;
+                if(!karg.getPreloaded() && !lazyLoad)
+                    eagerEnd = karg.getOffset() + karg.getSize();
 
-                if(lazyLoad && !karg.preloaded)
+                if(lazyLoad && !karg.getPreloaded())
                 {
                     stats.numWaits++;
-                    if(karg.size == 4)
+                    if(karg.getSize() == 4)
                     {
                         stats.scalarLoadsByDWordCount[1]++;
                     }
-                    else if(karg.size == 8)
+                    else if(karg.getSize() == 8)
                     {
                         stats.scalarLoadsByDWordCount[2]++;
                     }
                     else
                     {
-                        FAIL("Unsupported argument size: " + std::to_string(karg.size));
+                        FAIL("Unsupported argument size: " + std::to_string(karg.getSize()));
                     }
                 }
             }
