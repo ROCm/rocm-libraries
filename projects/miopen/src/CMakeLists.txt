@@ -577,13 +577,10 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenBatchNormActivFwdTrainSpatial.cpp
         kernels/MIOpenBatchNormFwdTrainSpatial.cpp
         kernels/MIOpenBatchNormFwdTrainPerAct.cpp
-        kernels/MIOpenBatchNormFwdInferSpatial.cl
-        kernels/MIOpenBatchNormFwdInferSpatialHIP.cpp
-        kernels/MIOpenBatchNormFwdInferPerAct.cl
-        kernels/MIOpenBatchNormFwdInferPerActHIP.cpp
+        kernels/MIOpenBatchNormFwdInferSpatial.cpp
+        kernels/MIOpenBatchNormFwdInferPerAct.cpp
         kernels/MIOpenBatchNormBwdSpatial.cpp
-        kernels/MIOpenBatchNormBwdPerAct.cl
-        kernels/MIOpenBatchNormBwdPerActHIP.cpp
+        kernels/MIOpenBatchNormBwdPerAct.cpp
         kernels/MIOpenConvDirUni.cl
         kernels/MIOpenConvDirBatchNormActiv.cl
         kernels/MIOpenConvDirGenFwd.cl
@@ -627,7 +624,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenGroupConvBwdWrWS2.cl
         kernels/MIOpenConvBwdWrW_LxG_P53.cl
         kernels/MIOpenGroupConvBwdWrW_LxG_P53.cl
-        kernels/MIOpenConvBwdWrW_LxG_5x5.cl
         kernels/MIOpenConvBwdWrW1x1_PAD_read4.cl
         kernels/MIOpenConvFwd_LxL_11.cl
         kernels/MIOpenConvFFT.cpp
@@ -698,8 +694,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride1.s
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride2.s
         kernels/MIOpenConvBwdBias.cl
-        kernels/MIOpenBatchNormActivInfer.cl
-        kernels/MIOpenBatchNormActivInferHIP.cpp
+        kernels/MIOpenBatchNormActivInfer.cpp
         kernels/MIOpenCTCLoss.cpp
         kernels/MIOpenDropoutHIP.cpp
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_fp16_fp16acc_f2x3_c16_stride1.s
