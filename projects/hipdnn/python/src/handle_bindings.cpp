@@ -26,13 +26,21 @@ private:
 
 public:
     HandleWrapper()
-        : _handle(createHipdnnHandle())
     {
+        auto error = createHipdnnHandle(_handle);
+        if(error.is_bad())
+        {
+            throw std::runtime_error("Failed to create hipdnn handle: " + error.get_message());
+        }
     }
 
     explicit HandleWrapper(uintptr_t streamPtr)
-        : _handle(createHipdnnHandle(reinterpret_cast<hipStream_t>(streamPtr)))
     {
+        auto error = createHipdnnHandle(_handle, reinterpret_cast<hipStream_t>(streamPtr));
+        if(error.is_bad())
+        {
+            throw std::runtime_error("Failed to create hipdnn handle: " + error.get_message());
+        }
     }
 
     hipdnnHandle_t get() const
