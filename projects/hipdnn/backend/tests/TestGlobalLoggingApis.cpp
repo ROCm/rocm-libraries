@@ -48,6 +48,9 @@ TEST_F(IntegrationBackendGlobalLoggingApis, SetAndGetLogLevel)
 {
     hipdnnSeverity_t level = HIPDNN_SEV_OFF;
 
+    // nullptr doesn't cause exception.
+    ASSERT_EQ(hipdnnBackendGetGlobalLogLevel_ext(nullptr), HIPDNN_STATUS_BAD_PARAM);
+
     // Set to WARN
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_WARN), HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnBackendGetGlobalLogLevel_ext(&level), HIPDNN_STATUS_SUCCESS);
