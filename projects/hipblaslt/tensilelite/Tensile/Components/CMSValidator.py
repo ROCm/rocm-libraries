@@ -1983,6 +1983,7 @@ def add_pack_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
         2. The minimum number of quad-cycles that must pass between issuing certain pack instructions and when their results get used. These restrictions are defined in section 7.6 of the CDNA 4 ISA.
     """
     if ctx.kernel.get("UseF32XEmulation", False) and not ctx.kernel.get("UseDirect32XEmulation", False):
+        printWarning("UseF32XEmulation is set to True but UseDirect32XEmulation is not set to True. Skipping CMS validation for packs.")
         return
     apply_swaits(timeline)
     hook_up_packs(timeline, ctx.kernel, ctx.mfma_reorder)
@@ -2020,50 +2021,6 @@ TIMELINE_PASSES: list[Callable[['Timeline', 'ValidatorPassContext'], None]] = [
     add_gr_not_too_early_constraints,
     add_gr_finish_before_lr_constraints,
 ]
-
-
-def verify_grs_finish_before_lrs(timeline: Timeline, schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
-    """
-    Ensure that the GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LR1/3 of this iteration.
-    """
-    kernel = context["kernel"]
-    ctx = ValidatorPassContext(
-        kernel=kernel,
-        mfma_reorder=schedule_info.mfmaReorder or [],
-        swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
-    )
-    add_gr_finish_before_lr_constraints(timeline, ctx)
-
-    message = validate_timeline(timeline)
-    if message:
-        return False, message
-    return True, ""
-
-
-def verify_grs_not_too_early(timeline: Timeline, schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
-    """
-    Ensure that GlobalReads are not issued before the corresponding LR0s are guaranteed complete.
-
-    Required ordering per operand:
-        last LR0 -> SWaitCnt (ensures LR0 done for wave) -> SBarrier (ensures LR0 done for workgroup) -> first GR
-
-    GRA writes (DDR->LDS) to the LDS that LRA0 reads from (LDS->VGPR).
-    We conservatively assume GRA always writes everywhere that a thread in the workgroup is reading from in LRA0.
-    Thus we must ensure that every thread in every wave in the workgroup has finished all of its LRA0 instructions
-    before GRA is issued. Same logic applies for B. No cross-operand constraints (LRA0 vs GRB are independent).
-    """
-    kernel = context["kernel"]
-    ctx = ValidatorPassContext(
-        kernel=kernel,
-        mfma_reorder=schedule_info.mfmaReorder or [],
-        swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
-    )
-    add_gr_not_too_early_constraints(timeline, ctx)
-
-    message = validate_timeline(timeline)
-    if message:
-        return False, message
-    return True, ""
 
 
 def index_for_force_unroll_sub_iter(original_idx: int, M: int, N: int) -> int:
@@ -2110,57 +2067,6 @@ def index_for_force_unroll_sub_iter(original_idx: int, M: int, N: int) -> int:
     local_idx = local_col * block_rows + local_row
     
     return block_idx * block_size + local_idx
-
-
-def verify_lrs_finished_before_vmfma(timeline: Timeline, schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
-    """
-    Ensure that the LocalReads are guaranteed to be complete before the first VMFMA that uses their data.
-    """
-    kernel = context["kernel"]
-    ctx = ValidatorPassContext(
-        kernel=kernel,
-        mfma_reorder=schedule_info.mfmaReorder or [],
-        swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
-    )
-    add_local_read_constraints(timeline, ctx)
-
-    message = validate_timeline(timeline)
-    if message:
-        return False, message
-    return True, ""
-
-
-def verify_packs_start_and_end_at_correct_indices(timeline: Timeline, schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
-    """
-    Ensure that the Packs start and end at the correct indices.
-    The pack commands take the data loaded into registers by LR commands and manipulate it in various ways to prepare it for the VMFMA instructions.
-
-    There are several restrictions placed on Pack instructions:
-    1. For all gemm types (tf32, bf16, etc.) the Pack instructions must be issued after the data is guaranteed to be loaded into the registers (guaranteed by SWaitCnt instructions). And they must finish before the first VMFMA that uses their results.
-    2. For fp32 GEMMs, there are additional restrictions on:
-        1. The ordering of the Pack instructions.
-        2. The minimum number of quad-cycles that must pass between issuing certain pack instructions and when their results get used. These restrictions are defined in section 7.6 of the CDNA 4 ISA.
-    """
-    kernel = context["kernel"]
-
-    if kernel.get("UseF32XEmulation", False) and not kernel.get("UseDirect32XEmulation", False):
-        printWarning("UseF32XEmulation is set to True but UseDirect32XEmulation is not set to True. Skipping CMS validation for packs.")
-        return True, ""
-
-    ctx = ValidatorPassContext(
-        kernel=kernel,
-        mfma_reorder=schedule_info.mfmaReorder or [],
-        swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
-    )
-    # LR constraints must be set before pack constraints (packs depend on LR.needed_by)
-    add_local_read_constraints(timeline, ctx)
-    add_pack_constraints(timeline, ctx)
-
-    message = validate_timeline(timeline)
-
-    if message:
-        return False, message
-    return True, ""
 
 
 def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
