@@ -2788,6 +2788,12 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment=""),
                    ]
         nglshift = nllshift = 11 # vmcnt shift for ngl and nll
+    elif isNT(kernel) and useLDSTr and TLDS == 0:
+        valid, opt = _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS)
+        if not valid:
+            return False, None
+        optSchedule = switch_A_B_schedule(opt.optSchedule)
+        return True, ScheduleInfo(opt.numCodePaths, opt.numMfma, optSchedule, opt.syncCode, opt.nglshift, opt.nllshift)
     else:
         return False, None
 
