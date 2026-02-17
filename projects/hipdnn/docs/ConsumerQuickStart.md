@@ -27,9 +27,6 @@ cmake_minimum_required(VERSION <your_minimum>)
 project(my_app LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 
-# Required for the plugin loader (dlopen) — prevents TLS issues
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-
 find_package(hipdnn_frontend CONFIG REQUIRED)
 
 add_executable(my_app main.cpp)
@@ -37,7 +34,7 @@ target_link_libraries(my_app PRIVATE hipdnn_frontend)
 ```
 
 > [!NOTE]
-> `find_package(hipdnn_frontend)` transitively brings in `hipdnn_backend` and `hipdnn_data_sdk` — only one `find_package` call is needed.
+> `find_package(hipdnn_frontend)` transitively brings in `hipdnn_backend`, `hipdnn_data_sdk`, and `hip` — only one `find_package` call is needed. HIP runtime APIs (`hipMalloc`, `hipFree`, etc.) are available through the transitive `hip::host` link dependency.
 
 > [!NOTE]
 > If CMake cannot find the packages, set `CMAKE_PREFIX_PATH` to the install location. hipDNN CMake files are installed to `/opt/rocm/lib/cmake` by default, which CMake may already search automatically depending on your system configuration.
