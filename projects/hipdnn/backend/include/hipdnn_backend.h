@@ -354,7 +354,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
  * @retval HIPDNN_STATUS_INTERNAL_ERROR    An internal error occurred.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
-    hipdnnSetPluginUnloadingMode_ext(hipdnnPluginUnloadingMode_ext_t unloadingMode);
+    hipdnnSetPluginUnloadMode_ext(hipdnnPluginUnloadingMode_ext_t unloadingMode);
 
 /**
  * @brief Gets file paths of loaded engine plugins for a given handle.

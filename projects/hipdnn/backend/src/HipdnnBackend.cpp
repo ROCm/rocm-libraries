@@ -329,7 +329,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
-    hipdnnSetPluginUnloadingMode_ext(hipdnnPluginUnloadingMode_ext_t unloadingMode)
+    hipdnnSetPluginUnloadMode_ext(hipdnnPluginUnloadingMode_ext_t unloadingMode)
 {
     LOG_API_ENTRY("unloadingMode={}", unloadingMode);
 
