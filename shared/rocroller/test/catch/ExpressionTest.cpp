@@ -3233,9 +3233,9 @@ namespace ExpressionTest
             // 4294965263 = 11111111111111111111100000001111
             std::string expected = R"(
                 v_and_b32 v2, 130048, v0
-                v_and_b32 v3, 4294965263, v1
-                v_lshrrev_b32 v4, 6, v2
-                v_or_b32 v2, v4, v3
+                v_lshrrev_b32 v3, 6, v2
+                v_and_b32 v2, 4294965263, v1
+                v_or_b32 v4, v3, v2
             )";
 
             CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
