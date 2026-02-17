@@ -3923,13 +3923,13 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
 
         lra0   = [0,0,0,0,
                     1,1,1,1]
-        lrb0   = [     3,  4,5,6]
+        lrb0   = [     3,  4,6,6]
         #                wait then read
         syncs.add(     3, dscnt=4, comment="wait for the first 2x2 LRAs before packing")
         syncs.add(         4, dscnt=1, comment="wait for the rest of LRAs")
         pack_a0 = [    3,3,4,4, # swap instructions, must come after LR and before other packs
                              4,5,5,5, 6,6, 7,7,7,7, 
-                             5,5,5,5, 6,6, 8,8,8,8]
+                             5,5,6,6, 6,6, 8,8,8,8]
         # because of GR starting at 10, we need barrier at 9, will use that for sync too.
         syncs.add(                               9, dscnt=0, comment="wait for LRBs before the packing them",
                                                  barrier=True, barrier_comment="make sure all LRs are done before starting GR")
