@@ -102,12 +102,14 @@ struct BQuantBlockUniversalGemmAsBsCr
         // 2. bf8, bf8, fp32 -> f32
         // 3. i4,  fp8, (fp8/fp32) -> f32
         // 4. i4,  bf8, (fp8/fp32) -> f32
-        // 5. bf16, (bf16/bf8/fp4), e8m0 -> f32
-        static_assert(is_any_of<ADataType, fp8_t, bf8_t, bf16_t>::value &&
-                      is_any_of<BDataType, fp8_t, bf8_t, pk_int4_t, bf16_t, pk_fp4_t>::value &&
-                      is_any_of<BQDataType, float, fp8_t, bf8_t, e8m0_t>::value &&
-                      is_any_of<ComputeDataType, fp8_t, bf8_t, bf16_t>::value &&
-                      std::is_same_v<CDataType, fp32_t>);
+        // 5. bf16, (bf16/bf8/fp8/fp4), e8m0 -> f32
+        // 6. fp16, (fp16/fp8/bf8/fp4), e8m0 -> f32
+        static_assert(
+            is_any_of<ADataType, fp8_t, bf8_t, bf16_t, fp16_t>::value &&
+            is_any_of<BDataType, fp8_t, bf8_t, pk_int4_t, bf16_t, pk_fp4_t, fp16_t>::value &&
+            is_any_of<BQDataType, float, fp8_t, bf8_t, e8m0_t>::value &&
+            is_any_of<ComputeDataType, fp8_t, bf8_t, bf16_t, fp16_t>::value &&
+            std::is_same_v<CDataType, fp32_t>);
 
         static constexpr index_t InterWaveSchedulingMacClusters = 1;
 
@@ -125,8 +127,10 @@ struct BQuantBlockUniversalGemmAsBsCr
     using CDataType       = remove_cvref_t<typename Traits::CDataType>;
 
     // BDataType gets converted from PkInt4 during loading
+    // This is only needed when BCastPolicy is CastBeforeLDSWrite. This is always the case
+    // for pk_int4_t but not for pk_fp4_t
     using OverrideBDataType = std::conditional_t<
-        std::is_same_v<BDataType, pk_int4_t> &&
+        (std::is_same_v<BDataType, pk_int4_t> || std::is_same_v<BDataType, pk_fp4_t>) &&
             std::is_same_v<typename Traits::BLayout, tensor_layout::gemm::RowMajor>,
         ADataType,
         BDataType>;

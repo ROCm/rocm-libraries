@@ -860,6 +860,7 @@ int run_gemm_example_with_layouts(const ck_tile::ArgParser& arg_parser,
                                                   AccDataType,
                                                   CDataType,
                                                   BQuantGroupSize,
+                                                  BLayout,
                                                   false>(
                     a_m_k, *bq_tensor_ptr, b_k_n, c_m_n_host_ref);
             else

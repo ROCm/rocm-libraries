@@ -79,10 +79,23 @@ struct GemmQuantPipelineProblemBase
     using AQLayout = remove_cvref_t<typename Traits::AQLayout>;
     using BQLayout = remove_cvref_t<typename Traits::BQLayout>;
 
-    static constexpr auto Scheduler   = Scheduler_;
-    static constexpr auto HasHotLoop  = HasHotLoop_;
-    static constexpr auto TailNum     = TailNum_;
+    static constexpr auto Scheduler  = Scheduler_;
+    static constexpr auto HasHotLoop = HasHotLoop_;
+    static constexpr auto TailNum    = TailNum_;
+
+    // gfx950 supports load with transpose for 4bit types, so we can transpose
+    // pk_fp4_t from LDS in registers. But without this instruction,
+    // the transpose is done in register between Vmem read and LDS write and
+    // the implementation does not support 4 bit types
+#ifdef __gfx950__
     static constexpr auto BCastPolicy = BCastPolicy_;
+#else
+    static constexpr auto BCastPolicy =
+        std::is_same_v<BDataType, pk_fp4_t> &&
+                std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>
+            ? CastPolicy::BeforeLDSWrite
+            : BCastPolicy_;
+#endif
 
     static_assert(BlockGemmShape::kM % AQuantGroupSize::kM == 0);
     static_assert(BlockGemmShape::kK % AQuantGroupSize::kK == 0);
