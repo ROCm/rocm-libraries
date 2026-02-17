@@ -310,7 +310,7 @@ bool rocfft_plan_t::is_contiguous_input()
 }
 bool rocfft_plan_t::is_contiguous_output()
 {
-    return is_contiguous(lengths, desc.outStrides, desc.outDist);
+    return is_contiguous(outputLengths, desc.outStrides, desc.outDist);
 }
 
 size_t rocfft_plan_t::AddMultiPlanItem(std::unique_ptr<MultiPlanItem>&& item,
@@ -578,17 +578,17 @@ bool rocfft_brick_t::is_contiguous() const
     return true;
 }
 
-bool rocfft_brick_t::is_contiguous_in_field(const std::vector<size_t>& field_length,
-                                            const std::vector<size_t>& field_stride) const
+bool rocfft_brick_t::is_contiguous_in_field(const std::vector<size_t>& field_length) const
 {
     const auto brick_len = length();
 
     // a contiguous brick in a field is shorter than field length
-    // only on the highest dimension, ignoring dimensions of
-    // length-1, and strides must match the field for all those
-    // dimensions.
-    size_t shortDim       = std::numeric_limits<size_t>::max();
-    size_t highestNot1Dim = std::numeric_limits<size_t>::max();
+    // only on the highest dimension (ignoring dimensions of
+    // length-1), and its strides must be consistent with contiguous
+    // storage of the field.
+    size_t shortDim        = std::numeric_limits<size_t>::max();
+    size_t highestNot1Dim  = std::numeric_limits<size_t>::max();
+    size_t expected_stride = 1;
     for(size_t i = 0; i < brick_len.size(); ++i)
     {
         if(field_length[i] == 1)
@@ -602,6 +602,9 @@ bool rocfft_brick_t::is_contiguous_in_field(const std::vector<size_t>& field_len
                 return false;
             shortDim = i;
         }
+        if(stride[i] != expected_stride)
+            return false;
+        expected_stride *= field_length[i];
     }
 
     return shortDim == highestNot1Dim;
@@ -1335,15 +1338,14 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
     std::vector<TempBufferLease>   gatherPackBufs;
     std::optional<TempBufferLease> gatherDestBuf;
 
-    std::vector<BufferPtr> outputBufs = GatherUserBuffers(BufferPtr::user_input, bricks);
+    std::vector<BufferPtr> inputBufs = GatherUserBuffers(BufferPtr::user_input, bricks);
 
     const auto local_comm_rank = get_local_comm_rank();
 
     BufferPtr  gatherDest;
     const bool gatherToTemp
         = std::any_of(bricks.begin(), bricks.end(), [&](const rocfft_brick_t& brick) {
-              return !brick.is_contiguous()
-                     || !brick.is_contiguous_in_field(field_length, field_stride);
+              return !brick.is_contiguous() || !brick.is_contiguous_in_field(field_length);
           });
     if(gatherToTemp)
     {
@@ -1389,9 +1391,12 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
         if(brick.is_contiguous())
         {
             // Contiguous brick, just copy the data
-            gather->AddOperation(
-                local_comm_rank,
-                {brick.location, outputBufs[brickIdx], 0, gatherOffset, brick.count_elems()});
+            gather->AddOperation(local_comm_rank,
+                                 {brick.location,
+                                  inputBufs[brickIdx],
+                                  0,
+                                  gatherToTemp ? gatherOffset : brick.offset_in_field(field_stride),
+                                  brick.count_elems()});
         }
         else
         {
@@ -1407,7 +1412,7 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
                                                    brick.length(),
                                                    precision,
                                                    arrayType,
-                                                   outputBufs[brickIdx],
+                                                   inputBufs[brickIdx],
                                                    0,
                                                    brick.stride,
                                                    BufferPtr::temp(gatherPackBufs.back().data()),
@@ -1428,7 +1433,7 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
         // if brick is not contiguous in the field, it was packed to
         // be contiguous for communication.  unpack it so it's
         // contiguous in the field.
-        if(!brick.is_contiguous() || !brick.is_contiguous_in_field(field_length, field_stride))
+        if(!brick.is_contiguous() || !brick.is_contiguous_in_field(field_length))
         {
             std::string description = "unpack brick " + std::to_string(brickIdx) + " after gather";
 
@@ -1481,7 +1486,7 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
     BufferPtr  scatterSrc;
     const bool scatterFromTemp
         = std::any_of(bricks.begin(), bricks.end(), [&](const rocfft_brick_t& b) {
-              return !b.is_contiguous_in_field(field_length, field_stride);
+              return !b.is_contiguous_in_field(field_length);
           });
     if(scatterFromTemp)
     {
@@ -1515,12 +1520,16 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
     {
         const auto& brick = bricks[brickIdx];
 
-        if(brick.is_contiguous_in_field(field_length, field_stride))
+        if(brick.is_contiguous_in_field(field_length))
         {
             // contiguous brick, just copy the data
             scatter->AddOperation(
                 local_comm_rank,
-                {brick.location, outputBufs[brickIdx], scatterOffset, 0, brick.count_elems()});
+                {brick.location,
+                 outputBufs[brickIdx],
+                 scatterFromTemp ? scatterOffset : brick.offset_in_field(field_stride),
+                 0,
+                 brick.count_elems()});
         }
         else
         {
@@ -1645,14 +1654,14 @@ void rocfft_plan_t::GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& ex
     std::shared_ptr<TempBufferLease> fftBuf;
     std::shared_ptr<TempBufferLease> fftOutBuf;
 
-    // Gather to temp buf if infields were specified and output is not contiguous or is also a field
     BufferPtr gatherBuf;
     {
-        if(!desc.inFields.empty() && (!is_contiguous_output() || !desc.outFields.empty()))
+        if(!desc.inFields.empty() && desc.outFields.empty() && is_contiguous_output()
+           && execPlan->rootPlan->placement == rocfft_placement_inplace)
         {
-            fftBuf = std::make_shared<TempBufferLease>(
-                tempBuffers, local_comm_rank, execPlanPtr->location, in_elem_count, in_elem_size);
-            gatherBuf = BufferPtr::temp(fftBuf->data());
+            // We can gather directly to the output buffer and will operate in-place
+            // thereafter
+            gatherBuf = BufferPtr::user_output(0, 0);
         }
         else if(desc.inFields.empty())
         {
@@ -1660,14 +1669,15 @@ void rocfft_plan_t::GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& ex
         }
         else
         {
-            // Else, we can gather directly to the output buffer
-            gatherBuf = BufferPtr::user_output(0, 0);
+            fftBuf = std::make_shared<TempBufferLease>(
+                tempBuffers, local_comm_rank, execPlanPtr->location, in_elem_count, in_elem_size);
+            gatherBuf = BufferPtr::temp(fftBuf->data());
         }
     }
 
     // Allocate another temp buf if FFT is not-in-place and outfield was specified
     // TODO: this only needs to be done if there are multiple bricks in the output field.
-    if(placement == rocfft_placement_notinplace && !desc.outFields.empty())
+    if(execPlan->rootPlan->placement == rocfft_placement_notinplace && !desc.outFields.empty())
     {
         const auto   out_elem_size  = element_size(precision, desc.outArrayType);
         const size_t out_elem_count = compute_ptrdiff(
@@ -1719,7 +1729,7 @@ void rocfft_plan_t::GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& ex
         auto fieldStrideWithBatch = desc.outStrides;
         fieldStrideWithBatch.push_back(desc.outDist);
 
-        auto fieldLengthWithBatch = lengths;
+        auto fieldLengthWithBatch = outputLengths;
         fieldLengthWithBatch.push_back(batch);
 
         auto scatterSrcBuf = execPlan->rootPlan->placement == rocfft_placement_notinplace

@@ -102,6 +102,10 @@ private:
         return {ErrorCode::OK, ""};
     }
 
+    /// Initialize engine config for a specific engine ID.
+    /// @param engineId The engine to configure
+    /// @note This method does NOT finalize the engine config. The caller must
+    ///       finalize after setting any knobs on the config.
     Error initializeEngineConfig(int64_t engineId)
     {
         detail::ScopedHipdnnBackendDescriptor engineDesc;
@@ -121,7 +125,6 @@ private:
             "Failed to set engine on the engine config descriptor.");
 
         _engineConfigDesc = std::move(engineConfigDesc);
-
         return {ErrorCode::OK, ""};
     }
 
@@ -725,8 +728,7 @@ public:
             engineHeuristicDesc, _graphDesc->get(), modes));
 
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
-        std::vector<int64_t> engineIds;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getEngineConfigs(
+        HIPDNN_CHECK_ERROR(detail::getEngineConfigs(
             engineConfigs, rankedEngineIds, engineHeuristicDesc.get(), true));
 
         return {ErrorCode::OK, ""};
@@ -778,11 +780,10 @@ public:
 
         std::unordered_map<KnobType_t, Knob> existingKnobs;
         HIPDNN_CHECK_ERROR(get_knob_lookup_for_engine(engineId, existingKnobs));
-
         HIPDNN_CHECK_ERROR(initializeEngineConfig(engineId));
 
         std::vector<KnobSetting> validatedSettings;
-        for(auto& setting : settings)
+        for(const auto& setting : settings)
         {
             auto knobIt = existingKnobs.find(setting.knobId());
             if(knobIt == existingKnobs.end())
@@ -843,6 +844,16 @@ public:
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
             detail::hipdnnBackend()->backendFinalize(_engineConfigDesc->get()),
             "Failed to finalize engine config descriptor");
+
+        // Create execution plan descriptor
+        _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
+            HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+
+        if(!_executionPlanDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Failed to create backend execution descriptor."};
+        }
 
         return {ErrorCode::OK, ""};
     }
