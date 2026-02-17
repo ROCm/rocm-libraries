@@ -97,6 +97,7 @@ namespace rocRoller
             {
                 return stream << toString(mode);
             }
+
         } // namespace Solution
     } // namespace Parameters
 } // namespace rocRoller

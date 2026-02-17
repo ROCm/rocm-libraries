@@ -119,13 +119,3 @@ private:
 };
 
 } // namespace hipdnn_frontend
-
-template <>
-struct fmt::formatter<hipdnn_frontend::KnobSetting> : fmt::formatter<const char*>
-{
-    template <typename FormatContext>
-    auto format(const hipdnn_frontend::KnobSetting& setting, FormatContext& ctx) const
-    {
-        return fmt::formatter<const char*>::format(setting.toString().c_str(), ctx);
-    }
-};

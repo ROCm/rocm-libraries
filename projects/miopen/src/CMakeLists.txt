@@ -576,14 +576,11 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenBatchNormActivFwdTrainPerAct.cpp
         kernels/MIOpenBatchNormActivFwdTrainSpatial.cpp
         kernels/MIOpenBatchNormFwdTrainSpatial.cpp
-        kernels/MIOpenBatchNormFwdTrainPerAct.cl
-        kernels/MIOpenBatchNormFwdInferSpatial.cl
-        kernels/MIOpenBatchNormFwdInferSpatialHIP.cpp
-        kernels/MIOpenBatchNormFwdInferPerAct.cl
-        kernels/MIOpenBatchNormFwdInferPerActHIP.cpp
-        kernels/MIOpenBatchNormBwdSpatial.cl
-        kernels/MIOpenBatchNormBwdPerAct.cl
-        kernels/MIOpenBatchNormBwdPerActHIP.cpp
+        kernels/MIOpenBatchNormFwdTrainPerAct.cpp
+        kernels/MIOpenBatchNormFwdInferSpatial.cpp
+        kernels/MIOpenBatchNormFwdInferPerAct.cpp
+        kernels/MIOpenBatchNormBwdSpatial.cpp
+        kernels/MIOpenBatchNormBwdPerAct.cpp
         kernels/MIOpenConvDirUni.cl
         kernels/MIOpenConvDirBatchNormActiv.cl
         kernels/MIOpenConvDirGenFwd.cl
@@ -627,7 +624,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenGroupConvBwdWrWS2.cl
         kernels/MIOpenConvBwdWrW_LxG_P53.cl
         kernels/MIOpenGroupConvBwdWrW_LxG_P53.cl
-        kernels/MIOpenConvBwdWrW_LxG_5x5.cl
         kernels/MIOpenConvBwdWrW1x1_PAD_read4.cl
         kernels/MIOpenConvFwd_LxL_11.cl
         kernels/MIOpenConvFFT.cpp
@@ -647,10 +643,10 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/gcnAsmBNBwdTrainSpatial.s
         kernels/MIOpenTensorKernels.cl
         kernels/MIOpenTensorKernelsHip.cpp
-        kernels/MIOpenSubTensorOpWithScalarKernel.cl
-        kernels/MIOpenSubTensorOpWithSubTensorKernel.cl
-        kernels/MIOpenSubTensorOpWithCastTensorKernel.cl
-        kernels/MIOpenSubTensorOpWithTransformKernel.cl
+        kernels/MIOpenSubTensorOpWithScalarKernel.cpp
+        kernels/MIOpenSubTensorOpWithSubTensorKernel.cpp
+        kernels/MIOpenSubTensorOpWithCastTensorKernel.cpp
+        kernels/MIOpenSubTensorOpWithTransformKernel.cpp
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride1.s
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride2_dec.s
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride2_dil.s
@@ -698,8 +694,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride1.s
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride2.s
         kernels/MIOpenConvBwdBias.cl
-        kernels/MIOpenBatchNormActivInfer.cl
-        kernels/MIOpenBatchNormActivInferHIP.cpp
+        kernels/MIOpenBatchNormActivInfer.cpp
         kernels/MIOpenCTCLoss.cpp
         kernels/MIOpenDropoutHIP.cpp
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_fp16_fp16acc_f2x3_c16_stride1.s
@@ -950,6 +945,12 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
     else()
         # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
+        
+        if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
+            add_subdirectory(kernels/ck_builder)
+            list(APPEND MIOPEN_CK_LINK_FLAGS ck_builder)
+            add_definitions(-DCK_EXPERIMENTAL_BUILDER)
+        endif()
     endif()
     if(GPU_TARGETS MATCHES "gfx942" OR GPU_TARGETS MATCHES "gfx950")
         target_compile_definitions(MIOpen PRIVATE CK_ENABLE_TF32)

@@ -96,7 +96,7 @@ namespace rocRoller
          * If you are running out of registers (particularly SGPRs), reducing this number
          * might help.
          */
-        int maxConcurrentSubExpressions = 2;
+        int maxConcurrentSubExpressions = 1;
 
         /**
          * The maximum number of concurrent control operations given at once to the scheduler
