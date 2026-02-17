@@ -3269,7 +3269,7 @@ void local_gemm(rocblas_handle handle,
 /******************************************************************************
  * LACN2: 1-Norm Estimator for Inverse Matrices
  *
- * This is an internal utility routine that estimates ||A^{-1}||1 using a
+ * This is an internal utility routine that estimates ||A^{-1}||_1 using a
  * reverse-communication iterative algorithm based on power iteration.
  *
  * ALGORITHM OVERVIEW:
