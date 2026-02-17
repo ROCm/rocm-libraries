@@ -2014,6 +2014,14 @@ def add_gr_finish_before_lr_constraints(timeline: Timeline, ctx: ValidatorPassCo
     apply_barriers(timeline)
 
 
+TIMELINE_PASSES: list[Callable[['Timeline', 'ValidatorPassContext'], None]] = [
+    add_local_read_constraints,
+    add_pack_constraints,
+    add_gr_not_too_early_constraints,
+    add_gr_finish_before_lr_constraints,
+]
+
+
 def verify_grs_finish_before_lrs(timeline: Timeline, schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
     """
     Ensure that the GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LR1/3 of this iteration.
@@ -2240,33 +2248,33 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
 
     kernel = context["kernel"]
 
-    # The set of validation rules to run (code-path aware)
-    structural_rules = [
+    structural_checks = [
         verify_correct_number_of_instructions,
         verify_ascending_order,
         verify_scc_overlap,
         verify_gr_inc_order,
     ]
 
-    # Timeline-based rules: each gets its own unified timeline (for now)
-    timeline_rules = [
-        verify_lrs_finished_before_vmfma,
-        verify_packs_start_and_end_at_correct_indices,
-        verify_grs_not_too_early,
-        verify_grs_finish_before_lrs,
-    ]
-
     for code_path in range(scheduleInfo.numCodePaths):
-        for rule in structural_rules:
-            status, message = rule(scheduleInfo, context, code_path)
+        # === Structural checks (no Timeline needed) ===
+        for check in structural_checks:
+            status, message = check(scheduleInfo, context, code_path)
             if not status:
                 return False, f"Code path {code_path}: {message}"
 
-        for rule in timeline_rules:
-            timeline = create_unified_timeline(scheduleInfo, kernel, code_path)
-            status, message = rule(timeline, scheduleInfo, context, code_path)
-            if not status:
-                return False, f"Code path {code_path}: {message}"
+        # === Timeline-based checks ===
+        ctx = ValidatorPassContext(
+            kernel=kernel,
+            mfma_reorder=scheduleInfo.mfmaReorder or [],
+            swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
+        )
+
+        timeline = create_unified_timeline(scheduleInfo, kernel, code_path)
+
+        for add_constraints in TIMELINE_PASSES:
+            add_constraints(timeline, ctx)
+            if error := validate_timeline(timeline):
+                return False, f"Code path {code_path}: {error}"
 
     # All rules passed, considered valid.
     return True, ""
