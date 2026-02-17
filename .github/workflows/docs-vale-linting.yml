@@ -30,4 +30,4 @@ jobs:
       - uses: errata-ai/vale-action@v2.1.1
         with:
           fail_on_error: true
-          vale_flags: "--minAlertLevel=error"
+          vale_flags: "--minAlertLevel=suggestion"
