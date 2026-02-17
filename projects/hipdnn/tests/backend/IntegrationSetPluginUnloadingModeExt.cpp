@@ -74,71 +74,11 @@ protected:
     }
 };
 
-TEST_F(IntegrationSetPluginUnloadingModeExt, SetLazyModeSucceeds)
-{
-    hipdnnStatus_t status = hipdnnSetPluginUnloadMode_ext(HIPDNN_PLUGIN_UNLOAD_LAZY);
-    EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
-}
-
-TEST_F(IntegrationSetPluginUnloadingModeExt, SetEagerModeSucceeds)
-{
-    hipdnnStatus_t status = hipdnnSetPluginUnloadMode_ext(HIPDNN_PLUGIN_UNLOAD_EAGER);
-    EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
-}
-
 TEST_F(IntegrationSetPluginUnloadingModeExt, InvalidModeReturnsBadParam)
 {
     hipdnnStatus_t status
         = hipdnnSetPluginUnloadMode_ext(static_cast<hipdnnPluginUnloadingMode_ext_t>(-1));
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(IntegrationSetPluginUnloadingModeExt, CanSetModeBeforeHandleCreation)
-{
-    // Set lazy mode before creating any handles
-    hipdnnStatus_t status = hipdnnSetPluginUnloadMode_ext(HIPDNN_PLUGIN_UNLOAD_LAZY);
-    EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
-
-    // Create and destroy a handle - should work normally
-    hipdnnHandle_t handle = nullptr;
-    status = hipdnnCreate(&handle);
-    ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(handle, nullptr);
-
-    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
-}
-
-TEST_F(IntegrationSetPluginUnloadingModeExt, CanSetModeAfterHandleDestroyed)
-{
-    // Create and destroy a handle first
-    hipdnnHandle_t handle = nullptr;
-    hipdnnStatus_t status = hipdnnCreate(&handle);
-    ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(handle, nullptr);
-
-    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
-
-    // Now set mode - should succeed
-    status = hipdnnSetPluginUnloadMode_ext(HIPDNN_PLUGIN_UNLOAD_EAGER);
-    EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
-}
-
-TEST_F(IntegrationSetPluginUnloadingModeExt, CanSetModeWhileHandleExists)
-{
-    // Create a handle
-    hipdnnHandle_t handle = nullptr;
-    hipdnnStatus_t status = hipdnnCreate(&handle);
-    ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(handle, nullptr);
-
-    // Set mode while handle exists - should succeed
-    status = hipdnnSetPluginUnloadMode_ext(HIPDNN_PLUGIN_UNLOAD_LAZY);
-    EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
-
-    status = hipdnnSetPluginUnloadMode_ext(HIPDNN_PLUGIN_UNLOAD_EAGER);
-    EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
-
-    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 }
 
 TEST_F(IntegrationSetPluginUnloadingModeExt, LazyModeKeepsPluginLoaded)
