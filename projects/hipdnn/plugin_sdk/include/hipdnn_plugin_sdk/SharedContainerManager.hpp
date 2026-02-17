@@ -5,67 +5,21 @@
 
 #include <memory>
 #include <mutex>
-#include <type_traits>
-
-#include <hipdnn_plugin_sdk/EngineManager.hpp>
 
 namespace hipdnn_plugin_sdk
 {
 
 /**
- * @brief Compile-time checks for engine plugin container requirements.
+ * @file SharedContainerManager.hpp
+ * @brief Helper template for managing shared plugin container lifecycle.
  *
- * These type traits verify that a container class meets the requirements
- * for use with DECLARE_ENGINE_PLUGIN_DEFAULT_IMPL macro.
+ * This file provides the SharedContainerManager class which implements the
+ * shared_ptr/weak_ptr pattern for managing a single container instance that
+ * is shared across multiple plugin handles.
  *
- * Required methods:
- * 1. static uint32_t copyEngineIds(int64_t*, uint32_t, uint32_t&)
- * 2. EngineManager& getEngineManager()
+ * @see EnginePluginImpl.inl for the plugin implementation
+ * @see EnginePluginTypeTraits.hpp for type validation
  */
-
-// Check for getEngineManager() method
-template <typename T, typename = void>
-struct HasGetEngineManager : std::false_type
-{
-};
-
-template <typename T>
-struct HasGetEngineManager<T, std::void_t<decltype(std::declval<T&>().getEngineManager())>>
-    : std::true_type
-{
-};
-
-// Check for static copyEngineIds method
-template <typename T, typename = void>
-struct HasCopyEngineIds : std::false_type
-{
-};
-
-template <typename T>
-struct HasCopyEngineIds<
-    T,
-    std::void_t<decltype(T::copyEngineIds(
-        std::declval<int64_t*>(), std::declval<uint32_t>(), std::declval<uint32_t&>()))>>
-    : std::true_type
-{
-};
-
-/**
- * @brief Validates that a container type meets all requirements.
- *
- * This function uses static_assert to provide clear error messages if
- * a container is missing required methods.
- */
-template <typename ContainerType>
-constexpr void validateContainerType()
-{
-    static_assert(HasGetEngineManager<ContainerType>::value,
-                  "Container type must have a 'EngineManager& getEngineManager()' method");
-
-    static_assert(HasCopyEngineIds<ContainerType>::value,
-                  "Container type must have a 'static uint32_t copyEngineIds(int64_t*, uint32_t, "
-                  "uint32_t&)' method");
-}
 
 /**
  * @brief Helper template for managing a shared plugin container instance.
@@ -78,7 +32,7 @@ constexpr void validateContainerType()
  *
  * ```cpp
  * // In your plugin implementation:
- * class MyContainer : public EnginePluginContainer { ... };
+ * class MyContainer { ... };
  *
  * static SharedContainerManager<MyContainer> containerManager;
  *
@@ -89,7 +43,7 @@ constexpr void validateContainerType()
  * // When all handles are destroyed, the container is automatically cleaned up.
  * ```
  *
- * @tparam ContainerType The derived container type to manage.
+ * @tparam ContainerType The container type to manage.
  */
 template <typename ContainerType>
 class SharedContainerManager

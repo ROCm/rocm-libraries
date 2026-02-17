@@ -54,10 +54,10 @@ public:
         return _stream;
     }
 
-    std::shared_ptr<miopen_plugin::MiopenContainer> miopenContainer;
+    std::shared_ptr<miopen_plugin::MiopenContainer> container;
     hipdnn_plugin_sdk::EngineManager& getEngineManager()
     {
-        return miopenContainer->getEngineManager();
+        return container->getEngineManager();
     }
 
     void storeEngineDetailsDetachedBuffer(const void* ptr,

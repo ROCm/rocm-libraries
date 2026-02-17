@@ -25,7 +25,7 @@ TEST_F(TestMiopenHipdnnEnginePluginHandle, DefaultConstruction)
 {
 
     EXPECT_NE(_handle->miopenHandle, nullptr);
-    EXPECT_EQ(_handle->miopenContainer, nullptr);
+    EXPECT_EQ(_handle->container, nullptr);
     EXPECT_EQ(_handle->getStream(), nullptr);
 }
 

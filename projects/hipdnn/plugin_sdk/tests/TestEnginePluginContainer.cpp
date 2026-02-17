@@ -6,8 +6,9 @@
 #include <thread>
 #include <vector>
 
-#include <hipdnn_plugin_sdk/EnginePluginContainer.hpp>
-#include <hipdnn_plugin_sdk/EnginePluginMacros.hpp>
+#include <hipdnn_plugin_sdk/EngineManager.hpp>
+#include <hipdnn_plugin_sdk/EnginePluginTypeTraits.hpp>
+#include <hipdnn_plugin_sdk/SharedContainerManager.hpp>
 
 using namespace hipdnn_plugin_sdk;
 
@@ -135,4 +136,51 @@ TEST(TestEnginePluginContainer, ValidContainerPassesCompileTimeValidation)
     // Test that the compile-time validation works for containers meeting requirements
     constexpr bool K_VALID = (validateContainerType<TestContainer>(), true);
     EXPECT_TRUE(K_VALID);
+}
+
+namespace
+{
+
+// Test handle that meets all requirements for validateHandleType
+struct TestHandle
+{
+    std::shared_ptr<TestContainer> container;
+
+    void setStream(hipStream_t /*stream*/) {}
+
+    EngineManager& getEngineManager()
+    {
+        return container->getEngineManager();
+    }
+
+    void removeEngineDetailsDetachedBuffer(const void* /*ptr*/) {}
+};
+
+} // namespace
+
+TEST(TestEnginePluginContainer, ValidHandlePassesCompileTimeValidation)
+{
+    // Test that the compile-time validation works for handles meeting requirements
+    constexpr bool K_VALID = (validateHandleType<TestHandle, TestContainer>(), true);
+    EXPECT_TRUE(K_VALID);
+}
+
+TEST(TestEnginePluginContainer, HandleTypeTraitsDetectContainerMember)
+{
+    EXPECT_TRUE((HasContainerMember<TestHandle, TestContainer>::value));
+}
+
+TEST(TestEnginePluginContainer, HandleTypeTraitsDetectSetStream)
+{
+    EXPECT_TRUE((HasSetStream<TestHandle>::value));
+}
+
+TEST(TestEnginePluginContainer, HandleTypeTraitsDetectGetEngineManager)
+{
+    EXPECT_TRUE((HasGetEngineManager<TestHandle>::value));
+}
+
+TEST(TestEnginePluginContainer, HandleTypeTraitsDetectRemoveEngineDetailsDetachedBuffer)
+{
+    EXPECT_TRUE((HasRemoveEngineDetailsDetachedBuffer<TestHandle>::value));
 }
