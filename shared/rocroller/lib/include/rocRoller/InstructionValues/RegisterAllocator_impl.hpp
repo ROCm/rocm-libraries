@@ -103,14 +103,17 @@ namespace rocRoller
             {
                 return m_candidates.begin();
             }
+
             iterator end()
             {
                 return m_candidates.end();
             }
+
             const_iterator begin() const
             {
                 return m_candidates.begin();
             }
+
             const_iterator end() const
             {
                 return m_candidates.end();
@@ -283,7 +286,7 @@ namespace rocRoller
             case AllocatorScheme::FirstFit:
                 return findFreeFirstFit(count, options);
             case AllocatorScheme::PerfectFit:
-                return tryPerfectFit(count, options);
+                return findFreePerfectFit(count, options);
             default:
                 Throw<FatalError>("Allocator scheme not implemented.");
             }
@@ -324,13 +327,14 @@ namespace rocRoller
             return rv;
         }
 
-        inline std::vector<int> Allocator::tryPerfectFit(int                      count,
-                                                         AllocationOptions const& options) const
+        inline std::vector<int>
+            Allocator::findFreePerfectFit(int count, AllocationOptions const& options) const
         {
             AssertFatal(options.alignment <= options.contiguousChunkWidth,
                         "Not yet supported",
                         ShowValue(options));
-            AssertFatal(count > 0, "Invalid register count for tryPerfectFit", ShowValue(count));
+            AssertFatal(
+                count > 0, "Invalid register count for findFreePerfectFit", ShowValue(count));
 
             std::vector<int> rv;
             rv.reserve(count);

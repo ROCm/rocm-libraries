@@ -130,7 +130,7 @@ namespace rocRoller
              * @param options Allocation options (alignment, contiguity)
              * @return Vector of register indices, or empty if allocation failed
              */
-            std::vector<int> tryPerfectFit(int count, AllocationOptions const& options) const;
+            std::vector<int> findFreePerfectFit(int count, AllocationOptions const& options) const;
 
             AllocatorScheme m_scheme;
 
