@@ -30,8 +30,7 @@ auto calculate_rtol_atol(const ck_tile::index_t K,
         ck_tile::get_relative_threshold<CDataType, CDataType, CDataType>(kbatch);
     const auto atol_split_k = ck_tile::get_absolute_threshold<CDataType, CDataType, CDataType>(
         max_accumulated_value, kbatch);
-    Use higher threshold return ck_tile::make_tuple(std::max(rtol, rtol_split_k),
-                                                    std::max(atol, atol_split_k));
+    return ck_tile::make_tuple(std::max(rtol, rtol_split_k), std::max(atol, atol_split_k));
 }
 
 template <typename GemmConfig,
