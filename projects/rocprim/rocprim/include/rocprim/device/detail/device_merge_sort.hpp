@@ -45,11 +45,17 @@ template<bool         WithValues,
          unsigned int BlockSize,
          unsigned int ItemsPerThread,
          class Key,
-         class Value>
+         class Value,
+         arch::wavefront::target TargetWaveSize>
 struct block_store_impl
 {
-    using block_store_type
-        = block_store<Key, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
+    using block_store_type = block_store<Key,
+                                         BlockSize,
+                                         ItemsPerThread,
+                                         block_store_method::block_store_transpose,
+                                         1,
+                                         1,
+                                         TargetWaveSize>;
 
     using storage_type = typename block_store_type::storage_type;
 
@@ -81,13 +87,27 @@ struct block_store_impl
     }
 };
 
-template<unsigned int BlockSize, unsigned int ItemsPerThread, class Key, class Value>
-struct block_store_impl<true, BlockSize, ItemsPerThread, Key, Value>
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         class Key,
+         class Value,
+         arch::wavefront::target TargetWaveSize>
+struct block_store_impl<true, BlockSize, ItemsPerThread, Key, Value, TargetWaveSize>
 {
-    using block_store_key_type
-        = block_store<Key, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
-    using block_store_value_type
-        = block_store<Value, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
+    using block_store_key_type   = block_store<Key,
+                                               BlockSize,
+                                               ItemsPerThread,
+                                               block_store_method::block_store_transpose,
+                                               1,
+                                               1,
+                                               TargetWaveSize>;
+    using block_store_value_type = block_store<Value,
+                                               BlockSize,
+                                               ItemsPerThread,
+                                               block_store_method::block_store_transpose,
+                                               1,
+                                               1,
+                                               TargetWaveSize>;
 
     union storage_type
     {
@@ -149,8 +169,13 @@ struct block_permute_values_impl
                                                 block_padding_hint::avoid_conflicts,
                                                 TargetWaveSize>;
 
-    using values_store_type
-        = block_store<Value, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
+    using values_store_type = block_store<Value,
+                                          BlockSize,
+                                          ItemsPerThread,
+                                          block_store_method::block_store_transpose,
+                                          1,
+                                          1,
+                                          TargetWaveSize>;
 
     union storage_type
     {
@@ -332,8 +357,13 @@ template<typename Key,
          arch::wavefront::target TargetWaveSize>
 struct block_sort_impl<Key, rocprim::empty_type, BlockSize, ItemsPerThread, TargetWaveSize>
 {
-    using keys_load_type
-        = block_load<Key, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>;
+    using keys_load_type = block_load<Key,
+                                      BlockSize,
+                                      ItemsPerThread,
+                                      block_load_method::block_load_transpose,
+                                      1,
+                                      1,
+                                      TargetWaveSize>;
 
     using sort_type = block_sort<Key,
                                  BlockSize,
@@ -341,8 +371,13 @@ struct block_sort_impl<Key, rocprim::empty_type, BlockSize, ItemsPerThread, Targ
                                  rocprim::empty_type,
                                  block_sort_algorithm::stable_merge_sort>;
 
-    using keys_store_type
-        = block_store<Key, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
+    using keys_store_type = block_store<Key,
+                                        BlockSize,
+                                        ItemsPerThread,
+                                        block_store_method::block_store_transpose,
+                                        1,
+                                        1,
+                                        TargetWaveSize>;
 
     union storage_type
     {
@@ -400,11 +435,21 @@ struct block_sort_impl<Key,
                        TargetWaveSize,
                        std::enable_if_t<(sizeof(Value) <= sizeof(int))>>
 {
-    using keys_load_type
-        = block_load<Key, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>;
+    using keys_load_type = block_load<Key,
+                                      BlockSize,
+                                      ItemsPerThread,
+                                      block_load_method::block_load_transpose,
+                                      1,
+                                      1,
+                                      TargetWaveSize>;
 
-    using values_load_type
-        = block_load<Value, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>;
+    using values_load_type = block_load<Value,
+                                        BlockSize,
+                                        ItemsPerThread,
+                                        block_load_method::block_load_transpose,
+                                        1,
+                                        1,
+                                        TargetWaveSize>;
 
     using sort_type = block_sort<Key,
                                  BlockSize,
@@ -412,11 +457,21 @@ struct block_sort_impl<Key,
                                  Value,
                                  block_sort_algorithm::stable_merge_sort>;
 
-    using keys_store_type
-        = block_store<Key, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
+    using keys_store_type = block_store<Key,
+                                        BlockSize,
+                                        ItemsPerThread,
+                                        block_store_method::block_store_transpose,
+                                        1,
+                                        1,
+                                        TargetWaveSize>;
 
-    using values_store_type
-        = block_store<Value, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
+    using values_store_type = block_store<Value,
+                                          BlockSize,
+                                          ItemsPerThread,
+                                          block_store_method::block_store_transpose,
+                                          1,
+                                          1,
+                                          TargetWaveSize>;
 
     union storage_type
     {
@@ -486,8 +541,13 @@ struct block_sort_impl<Key,
                        TargetWaveSize,
                        std::enable_if_t<(sizeof(Value) > sizeof(int))>>
 {
-    using keys_load_type
-        = block_load<Key, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>;
+    using keys_load_type = block_load<Key,
+                                      BlockSize,
+                                      ItemsPerThread,
+                                      block_load_method::block_load_transpose,
+                                      1,
+                                      1,
+                                      TargetWaveSize>;
 
     using sort_type = block_sort<Key,
                                  BlockSize,
@@ -495,8 +555,13 @@ struct block_sort_impl<Key,
                                  unsigned int,
                                  block_sort_algorithm::stable_merge_sort>;
 
-    using keys_store_type
-        = block_store<Key, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
+    using keys_store_type = block_store<Key,
+                                        BlockSize,
+                                        ItemsPerThread,
+                                        block_store_method::block_store_transpose,
+                                        1,
+                                        1,
+                                        TargetWaveSize>;
 
     using values_permute_type
         = block_permute_values_impl<Value, BlockSize, ItemsPerThread, TargetWaveSize>;

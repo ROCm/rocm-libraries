@@ -255,18 +255,26 @@ inline auto scan_impl(void*               temporary_storage,
                     constexpr unsigned int block_size       = params.kernel_config.block_size;
                     constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
 
-                    using block_load_type = ::rocprim::
-                        block_load<AccType, block_size, items_per_thread, params.block_load_method>;
+                    using block_load_type  = ::rocprim::block_load<AccType,
+                                                                   block_size,
+                                                                   items_per_thread,
+                                                                   params.block_load_method,
+                                                                   1,
+                                                                   1,
+                                                                   TargetConfig::wavefront>;
                     using block_store_type = ::rocprim::block_store<AccType,
                                                                     block_size,
                                                                     items_per_thread,
-                                                                    params.block_store_method>;
+                                                                    params.block_store_method,
+                                                                    1,
+                                                                    1,
+                                                                    TargetConfig::wavefront>;
                     using block_scan_type  = ::rocprim::block_scan<AccType,
-                                                                  block_size,
-                                                                  params.block_scan_method,
-                                                                  1,
-                                                                  1,
-                                                                  TargetConfig::wavefront>;
+                                                                   block_size,
+                                                                   params.block_scan_method,
+                                                                   1,
+                                                                   1,
+                                                                   TargetConfig::wavefront>;
 
                     ROCPRIM_SHARED_MEMORY union
                     {

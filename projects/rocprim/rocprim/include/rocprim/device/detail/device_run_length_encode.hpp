@@ -47,12 +47,14 @@ template<typename OffsetType, typename CountType>
 using offset_count_pair_type_t = ::rocprim::tuple<OffsetType, CountType>;
 
 template<typename InputType,
-         unsigned int      BlockSize,
-         unsigned int      ItemsPerThread,
-         block_load_method load_input_method>
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         block_load_method       load_input_method,
+         arch::wavefront::target TargetWaveSize>
 struct load_helper
 {
-    using block_load_input = block_load<InputType, BlockSize, ItemsPerThread, load_input_method>;
+    using block_load_input
+        = block_load<InputType, BlockSize, ItemsPerThread, load_input_method, 1, 1, TargetWaveSize>;
     union storage_type
     {
         typename block_load_input::storage_type input;
@@ -432,8 +434,8 @@ private:
     using prefix_op_factory = detail::offset_lookback_scan_factory<OffsetCountPairType>;
 
     // Helper class for loading input values.
-    using load_type
-        = run_length_encode::load_helper<InputType, BlockSize, ItemsPerThread, load_input_method>;
+    using load_type = run_length_encode::
+        load_helper<InputType, BlockSize, ItemsPerThread, load_input_method, TargetWaveSize>;
     // Helper class for flagging the heads and tails of the input values.
     using discontinuity_type
         = run_length_encode::discontinuity_helper<InputType, equal_op, BlockSize>;

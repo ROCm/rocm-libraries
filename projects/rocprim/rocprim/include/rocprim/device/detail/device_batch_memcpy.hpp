@@ -453,11 +453,13 @@ private:
         ROCPRIM_DEVICE static constexpr uint32_t blev_buffers_per_thread = buffers_per_thread;
         ROCPRIM_DEVICE static constexpr uint32_t tlev_buffers_per_thread = buffers_per_thread;
 
-        using buffer_load_type
-            = rocprim::block_load<buffer_size_type,
-                                  block_size,
-                                  buffers_per_thread,
-                                  rocprim::block_load_method::block_load_striped>;
+        using buffer_load_type = rocprim::block_load<buffer_size_type,
+                                                     block_size,
+                                                     buffers_per_thread,
+                                                     rocprim::block_load_method::block_load_striped,
+                                                     1,
+                                                     1,
+                                                     TargetConfig::wavefront>;
 
         using block_size_scan_type = rocprim::block_scan<size_class_counter,
                                                          block_size,
