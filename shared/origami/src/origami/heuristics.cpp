@@ -330,6 +330,43 @@ void heuristics_database_t::initialize_defaults() {
       params.main_loop_efficiency = cfg.eff;
       add_entry(key, params);
     }
+
+    // TF32 NN
+    std::vector<cms_config> tf32_nn_configs = {
+        {192, 256, 32, 1.0 / 1.23},
+    };
+
+    for (const auto& cfg : tf32_nn_configs) {
+      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
+                                                data_type_t::XFloat32,
+                                                transpose_t::N,
+                                                transpose_t::N,
+                                                cfg.m,
+                                                cfg.n,
+                                                cfg.k);
+      heuristic_params_t params;
+      params.main_loop_efficiency = cfg.eff;
+      add_entry(key, params);
+    }
+
+    // TF32 TN
+    std::vector<cms_config> tf32_tn_configs = {
+        {128, 256, 32, 1.0 / 1.26},
+        {192, 256, 32, 1.0 / 1.23},
+    };
+
+    for (const auto& cfg : tf32_tn_configs) {
+      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
+                                                data_type_t::XFloat32,
+                                                transpose_t::T,
+                                                transpose_t::N,
+                                                cfg.m,
+                                                cfg.n,
+                                                cfg.k);
+      heuristic_params_t params;
+      params.main_loop_efficiency = cfg.eff;
+      add_entry(key, params);
+    }
   }
 }
 
