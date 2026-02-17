@@ -60,10 +60,10 @@ Keeping “build-time Tensile (generator + device libs)” vs “runtime Tensile
 
 ## Standalone build: use the hipBLASLt project directory
 
-**Configure and build from `projects/hipblaslt`**, not from the rocm-libraries repo root.
+**Configure and build from `projects/hipblaslt`** for standalone hipBLASLt development and testing.
 
-- The repo root uses a superbuild that does not include the CMake modules and layout that hipBLASLt expects (e.g. `add_subdirectory_with_message`, `fetch_rocm_cmake`). Configuring from the root will fail or produce an incomplete build.
-- Always run CMake with the hipBLASLt project as the source directory:
+- The repo root uses a superbuild that can build the `hipblaslt` component (for example via `ROCM_LIBS_ENABLE_COMPONENTS` and `add_subdirectory_with_message`), but it is heavier-weight and configures additional projects you may not need. For a faster, focused, standalone hipBLASLt workflow, it is recommended to configure directly in `projects/hipblaslt`.
+- For standalone development, run CMake with the hipBLASLt project as the source directory:
 
 ```bash
 cd rocm-libraries/projects/hipblaslt   # or your path to the hipblaslt project
@@ -186,7 +186,7 @@ If these are missing, matmul tests will fail with errors about a missing Tensile
 
 ### How the runtime finds the library
 
-- If **`HIPBLASLT_TENSILE_LIBPATH`** is set, that directory is used (and should contain a `library` subdir with the `.dat` and code objects, or the path is the one that directly contains the `.dat`—see code in `library/src/amd_detail/rocblaslt/src/tensile_host.cpp`).
+- If **`HIPBLASLT_TENSILE_LIBPATH`** is set, it must point directly to the directory that contains the Tensile library files (`TensileLibrary_lazy_<arch>.dat`/`.yaml` and the corresponding `.hsaco`/`.co` code objects), for example `build/Tensile/library`.
 - If unset, the library looks relative to `librocblaslt.so`: it checks `{lib_dir}/hipblaslt/library`, then `{lib_dir}/../Tensile/library`, then `{lib_dir}/library`. So when running from a **build tree**, it typically resolves to `build/Tensile/library`.
 
 ### Building the device libraries
@@ -211,7 +211,7 @@ This can be slow (it runs TensileCreateLibrary for all configured `GPU_TARGETS`)
 If you have a full ROCm installation that already includes hipBLASLt device libraries (e.g. under `/opt/rocm`), you can point the test run at that directory instead of building device libraries yourself:
 
 ```bash
-export HIPBLASLT_TENSILE_LIBPATH=/opt/rocm/lib/hipblaslt
+export HIPBLASLT_TENSILE_LIBPATH=/opt/rocm/lib/hipblaslt/library
 # Or the directory that directly contains TensileLibrary_lazy_<arch>.dat
 ./build/clients/hipblaslt-test --gtest_filter=*your_test*
 ```
@@ -259,7 +259,7 @@ If you run from another directory, the test may not find `hipblaslt_gtest.data` 
 ## Test data and adding/changing tests
 
 - **YAML data:** Test cases are driven by YAML under `clients/tests/data/` (e.g. `matmul_gtest.yaml`, `hipblaslt_common.yaml`). The build process generates `hipblaslt_gtest.data` from these.
-- **Test coverage:** For a high-level overview of what the tests cover and notable gaps (e.g. special floating-point values, initialization types), see `docs/TEST_COVERAGE_OVERVIEW.md`.
+- **Test coverage:** For a high-level overview of what the tests cover and notable gaps (e.g. special floating-point values, initialization types), inspect the YAML files under `clients/tests/data/` and the corresponding test sources under `clients/`.
 - **Known bugs:** To skip tests on specific platforms (e.g. a known bug on one GPU architecture), add an entry in `clients/tests/data/known_bugs.yaml`. The top-level key is `Known bugs:` and each entry can specify `function`, `initialization`, `known_bug_platforms`, etc., so that the test is skipped on those platforms until the bug is fixed.
 - After editing YAML under `clients/tests/data/`, reconfigure/build so that `hipblaslt_gtest.data` is regenerated.
 
