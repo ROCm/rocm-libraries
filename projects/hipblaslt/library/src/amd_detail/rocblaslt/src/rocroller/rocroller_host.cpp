@@ -29,6 +29,7 @@
  *********************************************************/
 
 #include "rocroller_host.hpp"
+#include "custom_kernels.hpp"
 #include "gemm.hpp"
 #include "kernel_type.hpp"
 #include "parameter_selection.hpp"
@@ -62,7 +63,14 @@ struct RocRollerHandle
  */
 void rocroller_create_handle(void** handle)
 {
-    *handle = new RocRollerHandle();
+    auto rr_handle = new RocRollerHandle();
+    *handle        = rr_handle;
+
+    if(getenv("HIPBLASLT_ROCROLLER_NO_CUSTOM_KERNEL") == nullptr)
+    {
+        // If these kernels are loaded, they are used instead of RocRoller kernels
+        preloadCustomKernels(rr_handle->cache);
+    }
 }
 
 /**
@@ -663,16 +671,7 @@ rocblaslt_status isRocRollerSolutionSupported(rocblaslt_handle             handl
     if(status != rocblaslt_status_success)
         return status;
 
-    auto workSpaceRequired = workspaceRequired(kernel, prob);
-
-    if(workSpaceRequired > prob.workspaceSize)
-        return rocblaslt_status_invalid_value;
-
-    auto commandArgs = createCommandArguments(kernel, prob, DEFAULT_WGM);
-    auto runtimeArgs = commandArgs.runtimeArguments();
-
-
-    if(!kernel->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error))
+    if(!isSupportedProblem(kernel, prob))
     {
         return rocblaslt_status_invalid_value;
     }
@@ -749,6 +748,9 @@ rocblaslt_status runRocRollerContractionProblem(rocblaslt_handle                
                            coldIterations,
                            hotIterations);
     }
+
+    if(kernel->isCustomKernel())
+        return runCustomKernel(kernel, prob);
 
     return runGemmKernel(kernel, prob);
 }
