@@ -9,6 +9,8 @@ find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 add_executable(
     hip_kernel_plugin_integration_tests
     main.cpp
+    IntegrationGpuBatchnormForwardInference.cpp
+    IntegrationGpuBatchnormForwardInferenceAndActivation.cpp
 )
 
 target_compile_options(hip_kernel_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

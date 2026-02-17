@@ -117,15 +117,15 @@ void HipKernelEngine::initializeExecutionContext(
             }
             else
             {
-                HIPDNN_LOG_WARN(
-                    "Benchmarking knob setting value is not an integer. Type: {}",
-                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
+                HIPDNN_PLUGIN_LOG_WARN(
+                    "Benchmarking knob setting value is not an integer. Type: "
+                    << hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
             }
         }
     }
     else
     {
-        HIPDNN_LOG_WARN("Engine config is invalid");
+        HIPDNN_PLUGIN_LOG_WARN("Engine config is invalid");
     }
 
     for(const auto& planBuilder : _planBuilders)
