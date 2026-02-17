@@ -5518,8 +5518,8 @@ class KernelWriterAssembly(KernelWriter):
         jumpLabel(tP, sLoadTileIdx, checkAddrLabel)
         imod.add(checkAddrLabel)
         imod.add(VSubU32(dst=vgpr(tmpVgpr), src0=vgpr(tmpVgpr),
-                         src1=self.states.srdShiftLeft[tc] * tP["bpeGR"], comment="sub prepad"))
-        loadRangePerThread = tP["glvw"] * tP["bpeGR"] - 1
+                         src1=int(self.states.srdShiftLeft[tc] * tP["bpeGR"]), comment="sub prepad"))
+        loadRangePerThread = int(tP["glvw"] * tP["bpeGR"] - 1)
         imod.add(VAddU32(dst=vgpr(tmpVgpr+1), src0=vgpr(tmpVgpr), src1=loadRangePerThread, \
                          comment="Calculate load range per thread"))
         imod.add(VCmpLtI32(dst=sgpr(sCmpLoadStartAddrStatusx2, 2), src0=vgpr(tmpVgpr), \
@@ -8439,7 +8439,7 @@ class KernelWriterAssembly(KernelWriter):
                     destVgpr="G2L%s+%u+%u"%(tc, g2lIdx + tP["shiftGR"] if not tP["isM"] else g2lIdxM, regIdx+eccOffset)
                     self.vgprs.globalReadRegisters[tc].append( (g2lIdx + tP["shiftGR"] if not tP["isM"] else g2lIdxM) + regIdx+eccOffset)
 
-                  offset = r * tP["bpeGR"] + instOffset
+                  offset = int(r * tP["bpeGR"] + instOffset)
                   comment = "load one buffer value"
 
                   if (dataType.isHalf() or dataType.isBFloat16()) and not tP["isM"]:
