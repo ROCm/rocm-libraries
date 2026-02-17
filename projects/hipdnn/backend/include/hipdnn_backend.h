@@ -340,7 +340,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
 /**
  * @brief Sets the plugin unloading mode for hipDNN.
  *
- * This function controls when plugins are unloaded from memory. By default, lazy unloading
+ * This function controls when plugins are unloaded from memory. By default, lazy unloading (HIPDNN_PLUGIN_UNLOAD_LAZY)
  * is used, which keeps plugins loaded until the application exits or until
  * hipdnnSetEnginePluginPaths_ext is called. This avoids expensive plugin reloading when
  * handles are frequently created and destroyed.
