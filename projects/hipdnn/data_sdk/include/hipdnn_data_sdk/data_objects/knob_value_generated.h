@@ -894,7 +894,7 @@ struct Knob FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyOffset(verifier, VT_DESCRIPTION) &&
            verifier.VerifyString(description()) &&
            VerifyField<uint8_t>(verifier, VT_DEFAULT_VALUE_TYPE, 1) &&
-           VerifyOffset(verifier, VT_DEFAULT_VALUE) &&
+           VerifyOffsetRequired(verifier, VT_DEFAULT_VALUE) &&
            VerifyKnobValue(verifier, default_value(), default_value_type()) &&
            VerifyField<uint8_t>(verifier, VT_CONSTRAINT_TYPE, 1) &&
            VerifyOffset(verifier, VT_CONSTRAINT) &&
@@ -963,6 +963,7 @@ struct KnobBuilder {
   ::flatbuffers::Offset<Knob> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = ::flatbuffers::Offset<Knob>(end);
+    fbb_.Required(o, Knob::VT_DEFAULT_VALUE);
     return o;
   }
 };
