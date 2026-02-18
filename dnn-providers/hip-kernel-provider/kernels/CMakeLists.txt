@@ -49,24 +49,24 @@ function(embed_kernel_sources OUTPUT_SRCS_CPP OUTPUT_SRCS_HPP OUTPUT_INCS_CPP OU
 
     # Generate kernel source files
     configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/kernel_sources.hpp.in
+        ${CMAKE_CURRENT_SOURCE_DIR}/templates/kernel_sources.hpp.in
         ${OUTPUT_SRCS_HPP}
         @ONLY
     )
     configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/kernel_sources.cpp.in
+        ${CMAKE_CURRENT_SOURCE_DIR}/templates/kernel_sources.cpp.in
         ${OUTPUT_SRCS_CPP}
         @ONLY
     )
 
     # Generate kernel include files
     configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/kernel_includes.hpp.in
+        ${CMAKE_CURRENT_SOURCE_DIR}/templates/kernel_includes.hpp.in
         ${OUTPUT_INCS_HPP}
         @ONLY
     )
     configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/kernel_includes.cpp.in
+        ${CMAKE_CURRENT_SOURCE_DIR}/templates/kernel_includes.cpp.in
         ${OUTPUT_INCS_CPP}
         @ONLY
     )
@@ -74,12 +74,12 @@ endfunction()
 
 # List kernel files to embed
 set(KERNEL_FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/Batchnorm/BatchNormFwdInferSpatial.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/vector_add.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/FloatTypes.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/VectorTypes.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Bfloat16Dev.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Batchnorm/BatchnormActivation.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormFwdInferSpatial.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hip/vector_add.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/types/FloatTypes.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/types/VectorTypes.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/types/Bfloat16Dev.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchnormActivation.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/HipKernelMath.hpp
 )
 
