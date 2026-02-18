@@ -303,17 +303,23 @@ staggerU_t select_staggerU(const problem_t& problem,
                            const config_t& config,
                            size_t skGrid,
                            int32_t wgm) {
-  // In a typical GEMM, CUs on the same XCD compete to access K-slices in L2.
-  // StaggerU offsets the starting K-position per workgroup to distribute L2 traffic.
+  // StaggerU offsets the starting K-position per workgroup so that CUs on the same
+  // XCD don't all hammer the same K-slice simultaneously. This function selects:
+  //   - StaggerUMapping (SUM): which WG dimension determines the K-offset (0=M, 1=N)
+  //   - StaggerU: number of unique K-offset positions (power of 2, <= 32)
+  //   - StaggerUStrideShift: stride multiplier ensuring each step crosses an L2 cache line
   //
-  // Mapping direction: contention = sharers × data_size (macro tile).
-  // A is shared along N (L2Tile_N sharers within XCD)
-  // B is shared along M (L2Tile_M sharers within XCD)
-  // SUM0 (stagger along M) distributes B reads; SUM1 (stagger along N) distributes A reads.
-  // Pick the mapping that targets the higher contention.
-  //
-  // L2 capacity: stagger expands the L2 working set (multiple K-slices active).
-  //   If the expanded working set exceeds L2 capacity -> disable stagger.
+  // Approach:
+  //   1. Compute max stagger from K-dimension (must fit within numMT_K iterations).
+  //   2. Estimate the L2 tile shape (tiles per XCD) from WGM and XCD count.
+  //   3. Choose the L2-optimal mapping direction using a contention model:
+  //      - With row-major WGM, consecutive WGs form a row sharing A data. Their
+  //        temporal overlap amplifies A contention (squared term). Compare against
+  //        B contention from "column-mates" to pick SUM0 (distribute B) or SUM1 (distribute A).
+  //   4. Validate the L2 working set: stagger only expands the shared matrix
+  //      (the one whose reads are distributed). If it exceeds L2 capacity, disable.
+  //   5. Optionally override the direction for MALL (inter-XCD) benefit when the
+  //      L2 tile is asymmetric and enough intra-XCD offsets survive the switch.
 
   // Extract parameters from structured types
   size_t M     = problem.size.m;
@@ -347,16 +353,11 @@ staggerU_t select_staggerU(const problem_t& problem,
       skGrid > numMTs ? math::safe_ceil_div(skGrid, numCUs) : math::safe_ceil_div(numMTs, numCUs);
   auto split_factor = math::safe_ceil_div(skGrid, numMTs);
 
-  // Early Exit: Non-temporal accesses bypass L2 cache, so staggerU (which reduces L2 contention)
-  // provides no benefit.
-  if (nta > 3 || ntb > 3)
-    return staggerU_t{0, 0, 0};
-
-  // Early Exit: Batch and num_timesteps are not supported yet
-  if (batch != 1 || num_timesteps != 1) return staggerU_t{0, 0, 0};
+  // Early Exit: Batch is not supported yet
+  if (batch != 1) return staggerU_t{0, 0, 0};
 
   // Early Exit: no staggerU needed
-  if (numMT_K < 64)
+  if (numMT_K > 64)
     return staggerU_t{0, 0, 0};
 
   // Early Exit: splitK
@@ -393,11 +394,11 @@ staggerU_t select_staggerU(const problem_t& problem,
   if (max_staggerU == 1)
     return staggerU_t{0, 0, 0};
 
-  // Early Exit: skinny GEMMs
-  if (numMT_M < 2 && numMT_N > numCUs / 2)
-    return staggerU_t{0, max_staggerU, out_staggerUStrideShift};
-  if (numMT_N < 2 && numMT_M > numCUs / 2)
+  // Early Exit: Non-temporal cases
+  if (nta > 3)
     return staggerU_t{1, max_staggerU, out_staggerUStrideShift};
+  if (ntb > 3)
+    return staggerU_t{0, max_staggerU, out_staggerUStrideShift};
 
   // Find WGM
   size_t abs_wgm = std::abs(wgm);
@@ -452,7 +453,7 @@ staggerU_t select_staggerU(const problem_t& problem,
   size_t L2_value   = (L2_mapping == 0) ? std::min(L2Tile_M, numMT_M)
                                         : std::min(L2Tile_N, numMT_N);
   L2_value = std::min(L2_value, max_staggerU);
-  // L2 capacity check (direction-aware).
+  // L2 capacity check.
   // Stagger only expands the SHARED matrix — the other matrix's footprint is unchanged:
   //   SUM0: A unchanged (each M-position already reads different A data),
   //         B expanded by min(stagger, L2Tile_M) K-offsets (B sharing is broken).
