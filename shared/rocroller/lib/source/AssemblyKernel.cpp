@@ -155,7 +155,7 @@ namespace rocRoller
         co_yield Instruction::Comment(ctx->kernelOptions()->toString());
 
         if(!ctx->kernelOptions()->lazyLoadKernelArguments)
-            co_yield ctx->argLoader()->loadAllArguments();
+            co_yield ctx->argLoader()->eagerLoadArguments();
 
         co_yield ctx->argLoader()->splitOutArgumentRegisters();
 

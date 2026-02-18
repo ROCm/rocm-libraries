@@ -66,7 +66,7 @@ namespace rocRoller
          * Loads all manually loaded arguments into a single allocation of SGPRs.  Uses the
          * widest load instructions possible given alignment constraints.
          */
-        Generator<Instruction> loadAllArguments();
+        Generator<Instruction> eagerLoadArguments();
 
         /**
          * Obtain the `Value` for a given argument.  If the argument has not been loaded yet,
@@ -84,12 +84,6 @@ namespace rocRoller
             loadRange(int offset, int sizeBytes, Register::ValuePtr& value) const;
 
         Generator<Instruction> allocatePreloadedRegisters(int& offset, int& count);
-
-        // /**
-        //  * Returns true if we need to request the kernel argument pointer in the initial kernel
-        //  * execution state (this would be false if we can preload every single kernel argument).
-        //  */
-        // bool needsKernargPointer() const;
 
         bool anyPreloadedArguments() const;
         bool anyManuallyLoadedArguments() const;

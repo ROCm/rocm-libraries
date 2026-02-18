@@ -33,12 +33,9 @@
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
-#include <rocRoller/KernelOptions_detail.hpp>
 
 #include "CustomMatchers.hpp"
-#include "CustomSections.hpp"
 #include "TestContext.hpp"
-#include "TestKernels.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -293,7 +290,6 @@ namespace RandomNumberGenerationTest
                 = command->addOperation(rocRoller::Operations::Tensor(1, DataType::UInt32));
             command->addOperation(rocRoller::Operations::T_Store_Linear(addOp2, outputTag2));
 
-            // auto context = TestContext::ForTestDevice({{.systemPreloadedKernelArguments = 0}}, seedMode);
             auto context = TestContext::ForTestDevice({}, seedMode);
 
             CommandKernel commandKernel(command, context->kernel()->kernelName());

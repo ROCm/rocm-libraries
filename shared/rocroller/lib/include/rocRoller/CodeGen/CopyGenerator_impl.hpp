@@ -386,7 +386,6 @@ namespace rocRoller
 
             // Allocation ctor mutates contiguousChunkWidth, so it is not directly copyable
             auto contiguousChunkWidth
-                    //   = Register::VALUE_CONTIGUOUS;
                 = src->allocation() != nullptr
                       ? std::max(src->allocation()->options().contiguousChunkWidth,
                                  src->allocation()->options().alignment)

@@ -24,20 +24,13 @@
  *
  *******************************************************************************/
 
-/**
- */
-
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
-// #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
-
-// #define debug critical
-// #define Debug Critical
 
 namespace rocRoller
 {
@@ -231,10 +224,6 @@ namespace rocRoller
             if(!arg.getPreloaded() && !startedNonPreloaded)
             {
                 startedNonPreloaded = true;
-                // AssertFatal(offset / 4 == (firstNonPreloaded - args.begin()),
-                //             "Offset mismatch",
-                //             ShowValue(offset),
-                //             ShowValue(firstNonPreloaded - args.begin()));
                 arg.setOffset(RoundUpToMultiple(offset, arg.getSize()));
             }
             else
@@ -263,7 +252,6 @@ namespace rocRoller
         int endOffset = beginOffset + (rawRegs->registerCount() * 4);
 
         std::vector<std::vector<int>> indices;
-        // indices.reserve(args.size());
         std::vector<int> argIndices;
 
         for(int i = 0; i < args.size(); i++)
@@ -318,7 +306,6 @@ namespace rocRoller
 
             co_yield Instruction::Comment(subReg->description());
 
-            // if(!launchTimeOnly.contains(arg.name))
             m_loadedValues[arg.getName()] = subReg;
         }
     }
@@ -352,8 +339,7 @@ namespace rocRoller
         }
     }
 
-#if 1
-    Generator<Instruction> ArgumentLoader::loadAllArguments()
+    Generator<Instruction> ArgumentLoader::eagerLoadArguments()
     {
         auto const& args    = m_kernel->arguments();
         std::string comment = "Loading Kernel Arguments: \n";
@@ -379,65 +365,11 @@ namespace rocRoller
             }
         }
 
-        // beginOffset = std::max(beginOffset, m_manuallyLoadedOffset);
-
-        // Register::ValuePtr allArgs;
-
         if(beginOffset >= endOffset)
             co_return;
 
         co_yield loadRange(beginOffset, endOffset, m_manuallyLoadedBlock);
-
-        // Log::critical("Splitting out manually loaded args:");
-        // co_yield splitOutArgs(allArgs, beginOffset);
     }
-
-#else
-    Generator<Instruction> ArgumentLoader::loadAllArguments()
-    {
-        auto const& args    = m_kernel->arguments();
-        std::string comment = "Loading Kernel Arguments: \n";
-        for(auto const& arg : args)
-            comment += arg.toString() + "\n";
-        co_yield Instruction::Comment(comment);
-
-        if(args.empty())
-        {
-            co_yield Instruction::Comment("No kernel arguments");
-            co_return;
-        }
-
-        auto        argPtr         = argumentPointer();
-        auto const& launchTimeOnly = m_kernel->launchTimeOnlyArguments();
-
-        // TODO: coalesce loads when possible
-        for(auto const& arg : args)
-        {
-            // Skip loading arguments that are only used at launch time
-            // (for expression evaluation) and not during kernel execution
-            if(launchTimeOnly.contains(arg.getName()))
-            {
-                Log::debug("Skipping load of launch-time-only arg {}", arg.getName());
-                co_yield Instruction::Comment(
-                    concatenate("Skipping load of launch-time-only arg ", arg.getName()));
-                continue;
-            }
-
-            Log::debug("Loading argument {}", arg.getName());
-            auto numRegisters = std::max(1u, arg.getSize() / (Register::bitsPerRegister / 8));
-            auto r            = Register::Value::Placeholder(m_context.lock(),
-                                                  Register::Type::Scalar,
-                                                  DataType::Raw32,
-                                                  numRegisters,
-                                                  Register::AllocationOptions::FullyContiguous());
-            r->allocateNow();
-            r->setName(arg.getName());
-            r->setVariableType(arg.getVariableType());
-            m_loadedValues[arg.getName()] = r;
-            co_yield m_context.lock()->mem()->loadScalar(r, argPtr, arg.getOffset(), arg.getSize());
-        }
-    }
-#endif
 
     Generator<Instruction> ArgumentLoader::loadArgument(std::string const& argName)
     {
