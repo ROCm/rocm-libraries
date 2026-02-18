@@ -93,7 +93,7 @@ static bool lexical_cast(const std::string& word, fft_input_generator& gen)
 #ifndef USE_HIPRAND
     if(gen == fft_input_random_generator_device)
         throw std::runtime_error(
-            "Device input generation is not available, as hipRAND support is not enabled");
+            "Device random input generation is not available, as hipRAND support is not enabled");
 #endif
     return true;
 }
