@@ -205,6 +205,9 @@ Here are the available options to build the rocWMMA library, with or without cli
     *   -   ``ROCWMMA_BUILD_VALIDATION_TESTS``
         -   Build validation tests
         -   ``ON`` (requires ``ROCWMMA_BUILD_TESTS=ON``)
+    *   -   ``ROCWMMA_BUILD_REGRESSION_TESTS``
+        -   Build regression tests
+        -   ``ON`` (requires ``ROCWMMA_BUILD_TESTS=ON``)
     *   -   ``ROCWMMA_BUILD_BENCHMARK_TESTS``
         -   Build benchmark tests
         -   ``OFF`` (requires ``ROCWMMA_BUILD_TESTS=ON``)

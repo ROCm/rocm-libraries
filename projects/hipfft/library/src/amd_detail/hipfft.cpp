@@ -468,7 +468,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     const bool ignore_user_distances = !plan->ionembed.get_nembed(fft_io::fft_io_in)
                                        && !plan->ionembed.get_nembed(fft_io::fft_io_out);
     std::vector<size_t> i_strides, o_strides;
-    size_t              inDist, outDist;
+    size_t              inDist = 0, outDist = 0;
     for(auto dft_type : iotype.transform_types())
     {
         for(auto placement : {rocfft_placement_inplace, rocfft_placement_notinplace})

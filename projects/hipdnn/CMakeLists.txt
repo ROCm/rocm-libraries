@@ -158,11 +158,13 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL
 )
 
 include(cmake/Dependencies.cmake)
+include(cmake/VersionUtils.cmake)
 include(cmake/CheckToolVersion.cmake)
 include(cmake/ClangCheck.cmake)
 include(cmake/ClangTidy.cmake)
 include(cmake/Sanitizers.cmake)
 include(cmake/Tests.cmake)
+include(cmake/Spdlog.cmake)
 
 # Add global compile options
 set(EXTRA_COMPILE_OPTIONS)
@@ -234,13 +236,13 @@ if(HIPDNN_ENABLE_COVERAGE)
 
     if(HIPDNN_BUILD_PLUGINS)
         set(MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT
-            -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_legacy_plugin.so -object
-            ./${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin_tests
+            -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_plugin.so -object
+            ./${CMAKE_INSTALL_BINDIR}/miopen_plugin_tests
         )
     endif()
 
     set(CODE_COVERAGE_IGNORE_REGEX
-        "\(.*deps.*\)|\(.*tests.*\)|\(.*data_sdk/include/hipdnn_data_sdk/data_objects.*\)"
+        ".*deps.*|.*tests.*|.*data_sdk.*data_objects.*|.*HipErrorHandler.*"
     )
     set(CODE_COVERAGE_OBJECTS
         -object
@@ -278,21 +280,22 @@ if(HIPDNN_ENABLE_COVERAGE)
         add_custom_target(
             ${TARGET_NAME}
             COMMAND find . -name "*.profraw" -print0 | xargs -0 ${LLVM_PROFDATA_BINARY} merge
-                    -sparse -o ./coverage_report/hipdnn.profdata
+                    -sparse -o ./coverage-report/hipdnn.profdata
             COMMAND
                 ${LLVM_COV_BINARY} report ${CODE_COVERAGE_OBJECTS}
-                -instr-profile=./coverage_report/hipdnn.profdata
-                -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" >
-                ./coverage_report/code_cov_hipdnn.report
+                -instr-profile=./coverage-report/hipdnn.profdata
+                -ignore-filename-regex=${CODE_COVERAGE_IGNORE_REGEX} >
+                ./coverage-report/code_cov_hipdnn.report
             COMMAND
                 ${LLVM_COV_BINARY} show -Xdemangler=${LLVM_CXXFILT_BINARY} ${CODE_COVERAGE_OBJECTS}
-                -instr-profile=./coverage_report/hipdnn.profdata
-                -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=html
-                --output-dir=coverage_report
+                -instr-profile=./coverage-report/hipdnn.profdata
+                -ignore-filename-regex=${CODE_COVERAGE_IGNORE_REGEX} --format=html
+                --output-dir=coverage-report
             COMMAND
                 ${LLVM_COV_BINARY} export ${CODE_COVERAGE_OBJECTS}
-                -instr-profile=./coverage_report/hipdnn.profdata --format=lcov >
-                ./coverage_report/coverage.info
+                -instr-profile=./coverage-report/hipdnn.profdata
+                -ignore-filename-regex=${CODE_COVERAGE_IGNORE_REGEX} --format=lcov >
+                ./coverage-report/coverage.info
             ${DEPENDS_CLAUSE}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             COMMENT "Generating code coverage report"

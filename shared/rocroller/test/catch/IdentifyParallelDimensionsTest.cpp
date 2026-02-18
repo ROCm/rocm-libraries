@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -94,7 +94,7 @@ struct HasKernelArgMatcher : Catch::Matchers::MatcherGenericBase
     {
         for(auto const& arg : kargs)
         {
-            if(arg.name.starts_with(name))
+            if(arg.getName().starts_with(name))
                 return true;
         }
 

@@ -570,6 +570,8 @@ private:
     // rocblas by default take the system default stream 0 users cannot create
     hipStream_t stream = 0;
 
+    rocblas_status set_stream(hipStream_t new_stream);
+
 #if ROCBLAS_REALLOC_ON_DEMAND
     // Helper for device memory allocator
     bool ROCBLAS_EXPORT device_allocator(size_t size);

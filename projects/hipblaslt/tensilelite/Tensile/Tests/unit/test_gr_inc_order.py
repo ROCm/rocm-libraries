@@ -22,19 +22,20 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-import unittest
 from rocisa.instruction import SWaitCnt
 
 from Tensile.Components.CMSValidator import verify_gr_inc_order
-from test_CustomSchedule import create_base_kernel, ScheduleInfo
+from cms_validation_base import CMSValidationTestBase
 
-class TestGRIncOrder(unittest.TestCase):
+class TestGRIncOrder(CMSValidationTestBase):
+    def validation_function(self, sched, kernel_dict, codePathIdx):
+        return verify_gr_inc_order(sched, kernel_dict, codePathIdx)
+
     def setUp(self):
-        self.kernel = create_base_kernel()
+        super().setUp()
         self.kernel["MIWaveTileA"] = 4
         self.kernel["MIWaveTileB"] = 4
-        
-        self.kernel["DirectToLds"] = 1
+
         self.num_vmfma = 2 * self.kernel["MIWaveTileA"] * self.kernel["MIWaveTileB"]
 
     
@@ -54,31 +55,28 @@ class TestGRIncOrder(unittest.TestCase):
             SWaitCnt(dscnt=-1, vlcnt=-1, vscnt=-1, comment=""),
         ]
 
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
-        assert status, f"Schedule should have passed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
 
         # GRA before GRIncA
         optSchedule["GRA"] = [[0, 0]]
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
-        assert not status, f"Schedule should have failed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, None, None, 0,
+                                         "GRIncA finishes after GRA starts (5 vs 0)")
 
         # GRA before GRIncB
         optSchedule["GRA"] = [[11, 11]]
         optSchedule["GRB"] = [[6, 6]]
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
-        assert not status, f"Schedule should have failed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, None, None, 0,
+                                         "GRIncB finishes after GRB starts (10 vs 6)")
 
         # GRA Pass with same index
         optSchedule["GRA"] = [[5, 5]]
         optSchedule["GRB"] = [[12, 12]]
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
-        assert  status, f"Schedule should have passed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
 
         # GRB Fail with same index
         optSchedule["GRB"] = [[10, 10]]
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
-        assert  not status, f"Schedule should have failed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, None, None, 0,
+                                         "GRIncB finishes after GRB starts (10 vs 10)")
 
 
     def test_gr_swap(self):
@@ -97,17 +95,15 @@ class TestGRIncOrder(unittest.TestCase):
             SWaitCnt(dscnt=-1, vlcnt=-1, vscnt=-1, comment=""),
         ]
 
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
-        assert status, f"Schedule should have passed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
 
         # GRA before GRIncB
         optSchedule["GRA"] = [[0, 0]]
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
-        assert not status, f"Schedule should have failed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, None, None, 0,
+                                         "GRIncB finishes after GRA starts (5 vs 0)")
 
         # GRB before GRIncA
         optSchedule["GRA"] = [[11, 11]]
         optSchedule["GRB"] = [[6, 6]]
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
-        assert not status, f"Schedule should have failed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, None, None, 0,
+                                         "GRIncA finishes after GRB starts (10 vs 6)")

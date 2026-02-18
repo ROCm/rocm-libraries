@@ -6,12 +6,13 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "MiopenActivationDescriptor.hpp"
+#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
 #include "PlanBuilderInterface.hpp"
 #include "PlanInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class BatchnormFwdInferenceWithVarianceParams
@@ -66,8 +67,8 @@ private:
 class BatchnormFwdInferenceWithVariancePlan : public IPlan
 {
 public:
-    BatchnormFwdInferenceWithVariancePlan(
-        BatchnormFwdInferenceWithVarianceParams&& inferenceParams);
+    BatchnormFwdInferenceWithVariancePlan(BatchnormFwdInferenceWithVarianceParams&& inferenceParams,
+                                          const MiopenExecutionSettings& executionSettings);
 
     BatchnormFwdInferenceWithVariancePlan(const BatchnormFwdInferenceWithVariancePlan&) = delete;
     BatchnormFwdInferenceWithVariancePlan& operator=(const BatchnormFwdInferenceWithVariancePlan&)
@@ -86,6 +87,7 @@ public:
 
 private:
     BatchnormFwdInferenceWithVarianceParams _inferenceParams;
+    MiopenExecutionSettings _executionSettings;
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

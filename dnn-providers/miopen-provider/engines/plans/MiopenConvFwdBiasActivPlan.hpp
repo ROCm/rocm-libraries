@@ -13,11 +13,12 @@
 #include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
+#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
 #include "PlanInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class ConvFwdBiasActivParams
@@ -28,7 +29,8 @@ public:
         const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
         const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-            tensorMap);
+            tensorMap,
+        bool deterministicEnabled = false);
     ConvFwdBiasActivParams(const ConvFwdBiasActivParams&) = delete;
     ConvFwdBiasActivParams& operator=(const ConvFwdBiasActivParams&) = delete;
 
@@ -57,6 +59,7 @@ class ConvFwdBiasActivPlan : public IPlan
 public:
     ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle,
                          ConvFwdBiasActivParams&& params,
+                         const MiopenExecutionSettings& executionSettings,
                          bool compile = true,
                          bool getWsSize = true);
     ~ConvFwdBiasActivPlan() override = default;
@@ -78,6 +81,7 @@ private:
     ConvFwdBiasActivParams _params;
     hipdnn_data_sdk::utilities::ScopedResource<miopenFusionPlanDescriptor_t> _fusePlanDesc;
     size_t _workspaceSize = 0;
+    MiopenExecutionSettings _executionSettings;
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

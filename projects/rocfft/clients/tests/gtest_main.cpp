@@ -40,6 +40,7 @@
 #include "../../shared/concurrency.h"
 #include "../../shared/device_properties.h"
 #include "../../shared/environment.h"
+#include "../../shared/fft_enums.h"
 #include "../../shared/hostbuf.h"
 #include "../../shared/rocfft_accuracy_test.h"
 #include "../../shared/sys_mem.h"
@@ -799,8 +800,8 @@ TEST(manual, vs_fftw) // MANUAL TESTS HERE
         std::vector<unsigned int> deviceGrid(params.length.size() + 1, 1);
         deviceGrid[1] = manual_devices;
 
-        params.distribute_input(manual_devices, deviceGrid);
-        params.distribute_output(manual_devices, deviceGrid);
+        params.distribute_field<fft_io::fft_io_in>(manual_devices, deviceGrid);
+        params.distribute_field<fft_io::fft_io_out>(manual_devices, deviceGrid);
     }
 
     // Run an individual test using the provided command-line parameters.
@@ -864,17 +865,21 @@ TEST(manual, bitwise_reproducibility) // MANUAL TESTS HERE
     {
         bitwise_repro(params);
     }
-    catch(std::bad_alloc&)
+    catch(const std::bad_alloc&)
     {
         GTEST_SKIP() << "host memory allocation failure";
     }
-    catch(ROCFFT_SKIP& e)
+    catch(const ROCFFT_SKIP& e)
     {
         GTEST_SKIP() << e.what();
     }
-    catch(ROCFFT_FAIL& e)
+    catch(const ROCFFT_FAIL& e)
     {
         GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
     SUCCEED();
 }

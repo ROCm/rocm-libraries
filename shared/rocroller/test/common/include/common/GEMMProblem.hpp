@@ -29,6 +29,7 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/StoreOption.hpp>
 #include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <string>
 
@@ -65,11 +66,10 @@ struct GEMMProblem
     std::string transB = "T";
 
     // Unroll Sizes
-    unsigned int unrollX = 0;
-    unsigned int unrollY = 0;
     unsigned int unrollK = 0;
 
-    bool                     storeLDSD = true;
+    SolutionParams::StorePath storePath{
+        SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer};
     SolutionParams::LoadPath loadPathA{SolutionParams::LoadPath::BufferToLDSViaVGPR};
     SolutionParams::LoadPath loadPathB{SolutionParams::LoadPath::BufferToLDSViaVGPR};
 
@@ -114,6 +114,10 @@ struct GEMMProblem
     rocRoller::DataType scaleTypeB = rocRoller::DataType::None;
 
     int scaleBlockSize = -1;
+
+    // LDS padding for MATRIX_A and MATRIX_B; default no padding
+    std::pair<int, int> padA = {0, 0};
+    std::pair<int, int> padB = {0, 0};
 
     auto operator<=>(GEMMProblem const& rhs) const = default;
 };

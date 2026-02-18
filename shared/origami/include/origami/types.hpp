@@ -181,6 +181,33 @@ enum class reduction_t : std::uint32_t {
 };
 
 /**
+ * @brief Prediction mode types for latency estimation.
+ *
+ * Different approaches for predicting kernel performance.
+ */
+enum class prediction_modes_t : std::uint32_t {
+  estimation = 0,     ///< Fast analytical estimation-based prediction (typically faster)
+  simulation = 1,     ///< Slow simulation-like prediction (typically more accurate)
+  count,              ///< Count of prediction modes
+  none = 0xFFFFFFFFu  ///< Explicitly invalid
+};
+
+/**
+ * @brief Target backend types for kernel execution.
+ *
+ * Different backends that kernels can target.
+ */
+enum class target_t : std::uint32_t {
+  generic           = 0,  ///< Generic backend (backend agnostic, not supported yet)
+  tensilelite       = 1,  ///< hipBLASLt (tensilelite) backend
+  rocroller         = 2,  ///< hipBLASLt (rocroller) backend
+  triton            = 3,  ///< Triton backend
+  composable_kernel = 4,  ///< Composable Kernel backend (Not supported yet)
+  count,                  ///< Count of target types
+  none = 0xFFFFFFFFu      ///< Explicitly invalid
+};
+
+/**
  * @brief Convert integer to reduction_t enum.
  *
  * @param rt Integer value to convert
@@ -250,11 +277,6 @@ struct runtime_options {
   double heuristics_variance;
 
   /**
-   * @brief Default constructor that reads from environment variables.
-   */
-  runtime_options();
-
-  /**
    * @brief Constructor with explicit values (does not read from environment).
    */
   runtime_options(bool debug, bool heuristics, double variance);
@@ -284,7 +306,7 @@ struct runtime_options {
 
   /**
    * @brief Read heuristics variance from environment variable.
-   * @return double Variance value from ANALYTICAL_GEMM_HEURISTICS_VARIANCE, or 0.0 if not set
+   * @return double Variance value from ANALYTICAL_GEMM_HEURISTICS_VARIANCE, or 0.01 if not set
    */
   static double read_heuristics_variance_from_env();
 
@@ -292,6 +314,14 @@ struct runtime_options {
    * @brief Update runtime options from environment variables.
    */
   void update_from_env();
+
+  private:
+  /**
+   * @brief Default constructor that reads from environment variables.
+   *
+   * This is made private because it should only be used through the static get() member.
+   */
+  runtime_options();
 };
 
 /**
@@ -304,6 +334,9 @@ struct config_t {
   /// Macro tile and matrix-instruction shape.
   dim3_t mt{0, 0, 0};
   dim3_t mi{0, 0, 0};
+
+  /// Main loop optimization flag (indicates use of any optimized kernel variant)
+  bool hand_optimized_main_loop = false;
 
   /// Occupancy (number of wavefronts resident per CU).
   int occupancy = -1;
@@ -324,19 +357,28 @@ struct config_t {
   /// Reduction strategy.
   reduction_t reduction_strategy = reduction_t::none;
 
+  /// Prediction mode for latency estimation.
+  prediction_modes_t prediction_mode = prediction_modes_t::estimation;
+
+  /// Target backend for kernel execution.
+  target_t target = target_t::tensilelite;
   /// Grid selection algorithm.
   grid_selection_t grid_selection = grid_selection_t::k_split_aware;
 
   constexpr bool operator==(const config_t& o) const noexcept {
-    return mt == o.mt && mi == o.mi && cache_hints_a == o.cache_hints_a &&
-           cache_hints_b == o.cache_hints_b && workgroup_mapping == o.workgroup_mapping;
+    return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
+           cache_hints_a == o.cache_hints_a && cache_hints_b == o.cache_hints_b &&
+           workgroup_mapping == o.workgroup_mapping && prediction_mode == o.prediction_mode &&
+           target == o.target;
   }
 
   std::size_t hash() const {
     return std::hash<size_t>()(mt.m) ^ std::hash<size_t>()(mt.n) ^ std::hash<size_t>()(mt.k) ^
            std::hash<size_t>()(mi.m) ^ std::hash<size_t>()(mi.n) ^ std::hash<size_t>()(mi.k) ^
-           std::hash<int>()(cache_hints_a) ^ std::hash<int>()(cache_hints_b) ^
-           std::hash<int>()(workgroup_mapping);
+           std::hash<int>()(hand_optimized_main_loop) ^ std::hash<int>()(cache_hints_a) ^
+           std::hash<int>()(cache_hints_b) ^ std::hash<int>()(workgroup_mapping) ^
+           std::hash<std::uint32_t>()(static_cast<std::uint32_t>(prediction_mode)) ^
+           std::hash<std::uint32_t>()(static_cast<std::uint32_t>(target));
   }
 
   void validate() const {
@@ -387,6 +429,22 @@ struct problem_t {
   /// MX block size.
   std::size_t a_mx_block_size = 0;
   std::size_t b_mx_block_size = 0;
+};
+
+/**
+ * @brief Struct to define various workgroup mapping parameters.
+ *
+ * Contains all the parameters needed to describe various workgroup mapping parameters.
+ */
+struct workgroup_mapping_t {
+  /// Workgroup mapping chunk size.
+  std::size_t wgmxccchunk = 0;
+
+  /// Workgroup mapping size.
+  std::size_t wgmxcc = 8;
+
+  /// Workgroup mapping size.
+  int32_t wgm = 1;
 };
 
 /**

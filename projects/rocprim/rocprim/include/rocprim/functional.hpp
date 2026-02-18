@@ -62,6 +62,47 @@ void swap(T& a, T& b)
     b = c;
 }
 
+namespace detail
+{
+
+enum class swap_method
+{
+    ternary  = 0,
+    branched = 1
+};
+
+/// \brief The ternary conditional swap and the branched conditional swap are optimized
+/// differently by the compiler, which can lead to performance variations. This internal API
+/// allows switching between these two swap implementations, enabling the selection of
+/// the most suitable one for a given algorithm.
+/// \tparam Method Enable or disable branched conditional swap
+/// \tparam T [inferred] the type of inputs
+template<swap_method Method, class T>
+ROCPRIM_HOST_DEVICE ROCPRIM_FORCE_INLINE
+void swap_if(bool cond, T& a, T& b)
+{
+    if constexpr(Method == rocprim::detail::swap_method::branched)
+    {
+        if(cond)
+        {
+            ::rocprim::swap(a, b);
+        }
+    }
+    else if constexpr(Method == rocprim::detail::swap_method::ternary)
+    {
+        T a_ = a;
+        T b_ = b;
+        a    = cond ? b_ : a_;
+        b    = cond ? a_ : b_;
+    }
+    else
+    {
+        static_assert(false, "This swap method is not supported yet");
+    }
+}
+
+} // namespace detail
+
 /// \brief Returns true if a < b. Otherwise returns false.
 template<class T = void>
 struct less

@@ -307,6 +307,7 @@ class GemmKernelBuilder:
             "fp16": "ck_tile::fp16_t",
             "fp8": "ck_tile::fp8_t",
             "bf16": "ck_tile::bf16_t",
+            "bf8": "ck_tile::bf8_t",
             "fp32": "float",
             "fp64": "double",
         }
@@ -376,6 +377,7 @@ class GemmKernelBuilder:
         reduction_strategy_map = {
             "atomic": "ck_tile::StreamKReductionStrategy::Atomic",
             "reduction": "ck_tile::StreamKReductionStrategy::Reduction",
+            "tree": "ck_tile::StreamKReductionStrategy::TreeReduction",
         }
 
         # Determine accumulator type based on datatype
@@ -479,8 +481,9 @@ struct SelectedKernel {{
         AccDataType,
         TileShape,
         GemmUniversalTraits>;
-    
-    static float launch(const ck_tile::StreamKHostArgs& args, const ck_tile::stream_config& stream) {{
+
+    static std::tuple<float, ck_tile::index_t> launch(const ck_tile::StreamKHostArgs& args,
+                                                      const ck_tile::stream_config& stream) {{
             constexpr auto scheduler        = ck_tile::GemmPipelineScheduler::Intrawave;
 
             using UniversalGemmProblem = ck_tile::UniversalGemmPipelineProblem<ADataType,
@@ -554,13 +557,22 @@ struct SelectedKernel {{
                     // Reset sk flags to zero before each repetition of the kernel
                     workspace_data.SetZero();
                 }}
+                else if(reduction_strategy == ck_tile::StreamKReductionStrategy::TreeReduction)
+                {{
+                    // Reset sk flags to zero before each repetition of the kernel
+                    workspace_data.SetZero();
+                }}
             }};
+
+            const ck_tile::index_t num_wgs_per_tile = kargs.tile_partitioner.estimate_num_wgs_per_tile();
      
             // Launch kernel
-            return ck_tile::launch_kernel_time_mask(
+            const float time = ck_tile::launch_kernel_time_mask(
                 stream,
                 reset_data_buffers,
                 ck_tile::make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
+            
+            return std::tuple<float, ck_tile::index_t>{{time, num_wgs_per_tile}};
     }}
 }};
 """
@@ -776,7 +788,7 @@ def main():
     parser.add_argument(
         "--datatype",
         required=True,
-        choices=["fp16", "fp8", "bf16", "fp32", "fp64"],
+        choices=["fp16", "fp8", "bf16", "bf8", "fp32", "fp64"],
         help="Data type",
     )
     parser.add_argument(

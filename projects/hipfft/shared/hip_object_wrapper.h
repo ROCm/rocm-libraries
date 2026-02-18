@@ -34,9 +34,11 @@ struct hip_object_wrapper_t
     {
     }
 
-    void alloc()
+    template <typename... Args>
+    void alloc(Args&&... arg)
     {
-        if(obj == nullptr && TCreate(&obj) != hipSuccess)
+        free();
+        if(TCreate(&obj, std::forward<Args>(arg)...) != hipSuccess)
             throw std::runtime_error("hip create failure");
     }
 
@@ -76,11 +78,18 @@ struct hip_object_wrapper_t
         other.obj = nullptr;
     }
 
+    hip_object_wrapper_t& operator=(hip_object_wrapper_t&& other)
+    {
+        std::swap(obj, other.obj);
+        return *this;
+    }
+
 private:
     T obj;
 };
 
-typedef hip_object_wrapper_t<hipStream_t, hipStreamCreate, hipStreamDestroy> hipStream_wrapper_t;
-typedef hip_object_wrapper_t<hipEvent_t, hipEventCreate, hipEventDestroy>    hipEvent_wrapper_t;
+typedef hip_object_wrapper_t<hipStream_t, hipStreamCreate, hipStreamDestroy>  hipStream_wrapper_t;
+typedef hip_object_wrapper_t<hipEvent_t, hipEventCreate, hipEventDestroy>     hipEvent_wrapper_t;
+typedef hip_object_wrapper_t<hipModule_t, hipModuleLoadData, hipModuleUnload> hipModule_wrapper_t;
 
 #endif // ROCFFT_HIP_OBJ_WRAPPER_H

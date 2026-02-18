@@ -101,6 +101,11 @@ inline const char* hipdnnGetAttributeTypeString(hipdnnBackendAttributeType_t typ
         return "HIPDNN_TYPE_NORM_FWD_PHASE";
     case HIPDNN_TYPE_RNG_DISTRIBUTION:
         return "HIPDNN_TYPE_RNG_DISTRIBUTION";
+
+    // Extension API
+    case HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT:
+        return "HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT";
+
     default:
         return "HIPDNN_ATTRIBUTE_UNKNOWN";
     }
@@ -254,6 +259,13 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_DEVICEPROP_HANDLE";
     case HIPDNN_ATTR_DEVICEPROP_JSON_REPRESENTATION:
         return "HIPDNN_ATTR_DEVICEPROP_JSON_REPRESENTATION";
+
+    // Extension API
+    case HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT:
+        return "HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT";
+    case HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT:
+        return "HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT";
+
     default:
         return "HIPDNN_ATTR_UNKNOWN";
     }

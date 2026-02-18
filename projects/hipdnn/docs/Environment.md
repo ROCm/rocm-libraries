@@ -54,9 +54,9 @@ The frontend and plugins can be configured to use the same logging destination a
 ### MIOpen Plugin Logging
 
 > [!TIP]
-> 💡 When using the MIOpen legacy plugin, you can use MIOpen-specific environment variables to control the underlying library's logging behavior.
+> 💡 When using the MIOpen Provider Plugin, you can use MIOpen-specific environment variables to control the underlying library's logging behavior.
 
-For more details about MIOpen logging, see the latest [MIOpen Debug and Logging documentation](https://rocm.docs.amd.com/projects/MIOpen/en/develop/how-to/debug-log.html). All MIOpen environment variables remain compatible with hipDNN's MIOpen legacy plugin.
+For more details about MIOpen logging, see the latest [MIOpen Debug and Logging documentation](https://rocm.docs.amd.com/projects/MIOpen/en/develop/how-to/debug-log.html). All MIOpen environment variables remain compatible with hipDNN's MIOpen Provider Plugin.
 
 ### Test Configuration
 

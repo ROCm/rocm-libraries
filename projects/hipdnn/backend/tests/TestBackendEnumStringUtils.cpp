@@ -155,6 +155,11 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_DEVICEPROP_HANDLE");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_DEVICEPROP_JSON_REPRESENTATION),
                  "HIPDNN_ATTR_DEVICEPROP_JSON_REPRESENTATION");
+
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT),
+                 "HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT),
+                 "HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT");
 }
 
 TEST(TestBackendEnumStringUtils, GetStatusString)
@@ -222,6 +227,9 @@ TEST(TestBackendEnumStringUtils, GetAttributeTypeString)
                  "HIPDNN_TYPE_NORM_FWD_PHASE");
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_RNG_DISTRIBUTION),
                  "HIPDNN_TYPE_RNG_DISTRIBUTION");
+
+    EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT),
+                 "HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT");
 
     EXPECT_STREQ(hipdnnGetAttributeTypeString(static_cast<hipdnnBackendAttributeType_t>(-1)),
                  "HIPDNN_ATTRIBUTE_UNKNOWN");

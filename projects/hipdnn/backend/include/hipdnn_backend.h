@@ -10,12 +10,12 @@
 
 #include "HipdnnBackendAttributeName.h"
 #include "HipdnnBackendAttributeType.h"
+#include "HipdnnBackendCallbackTypes.h"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendHeuristicType.h"
 #include "HipdnnBackendLimits.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnStatus.h"
-#include <hipdnn_data_sdk/logging/CallbackTypes.h>
 
 // NOLINTBEGIN
 #ifdef __cplusplus
