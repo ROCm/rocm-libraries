@@ -706,14 +706,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     }
     ASSERT_EQ(plan_status, fft_status_success) << "plan creation failed";
 
-    fft_params contiguous_params;
-    contiguous_params.length         = params.length;
-    contiguous_params.precision      = params.precision;
-    contiguous_params.placement      = fft_placement_notinplace;
-    contiguous_params.transform_type = params.transform_type;
-    contiguous_params.nbatch         = params.nbatch;
-    contiguous_params.itype          = contiguous_itype(params.transform_type);
-    contiguous_params.otype          = contiguous_otype(contiguous_params.transform_type);
+    auto contiguous_params = params.make_params_for_reference_cpu();
 
     contiguous_params.validate();
 
@@ -1190,7 +1183,6 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     {
         pobuffer[i] = obuffer->at(i).data();
     }
-
     // scatter data out to multi-GPUs if this is a multi-GPU test
     params.multi_gpu_prepare(cpu_input, ibuffer, pibuffer, pobuffer);
 

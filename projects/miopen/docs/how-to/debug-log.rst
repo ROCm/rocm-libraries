@@ -48,6 +48,12 @@ environmental variables to control logging. Both variables are disabled by defau
 
 * ``MIOPEN_WARN_SEARCH``: Elevate log messages for Search to warnings.
 
+* ``MIOPEN_LOG_BUFFER_SIZE``: Message length of the Info2 buffer.
+  If ``MIOPEN_LOG_LEVEL`` is less than 6, then log messages will be buffered.
+  The buffered logs will be dumped to a log file when MIOpen logs an error message,
+  or an error is thrown by MIOpen.
+  This log can be found in ``/tmp/miopen_error_<pid>``.
+
 .. note::
 
   If you require technical support, include the console log that is produced from these settings:

@@ -1,28 +1,5 @@
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include "solution_selection.hpp"
 #include "analytical_utils.hpp"
@@ -225,6 +202,12 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             // check if this size is valid for pre-swizzled data
             if (hasPreSwizzle)
             {
+                if (kernelType.typeA != rocRoller::DataType::FP4 ||
+                    kernelType.typeB != rocRoller::DataType::FP4 ||
+                    kernelType.typeD != rocRoller::DataType::BFloat16)
+                    continue;
+                if (wgt.m != 256 || wgt.n != 256 || wgt.k != 256)
+                    continue;
                 if (wgt.m % 32 != 0 || wgt.n % 32 != 0)
                     continue;
                 if (wgt.m == 96 || wgt.n == 96)
@@ -256,11 +239,18 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                 params.back().workgroupMapping = false;
             }
 
-            // Enable StreamK when number of output tiles < number of CUs and not f6 data type
-            size_t numTilesM = prob.m / wgt.m;
-            size_t numTilesN = prob.n / wgt.n;
-            size_t numTiles  = numTilesM * numTilesN * prob.batch_count;
-            auto   isF6      = (kernelType.typeA == rocRoller::DataType::FP6
+            // Enable StreamK when:
+            // 1. Number of output tiles < number of CUs
+            // 2. There are enough K iterations per tile (itersPerTile >= 16) to
+            //    amortize StreamK overhead. Threshold is derived from origami's
+            //    MinItersPerCU (8) applied to the smallest useful split factor (2).
+            // 3. Data type is not f6 (unsupported) or large f8 (register pressure).
+            // 4. Not the 256x256x256 FP4 pre-swizzled tile.
+            size_t numTilesM    = prob.m / wgt.m;
+            size_t numTilesN    = prob.n / wgt.n;
+            size_t numTiles     = numTilesM * numTilesN * prob.batch_count;
+            size_t itersPerTile = prob.k / wgt.k;
+            auto   isF6         = (kernelType.typeA == rocRoller::DataType::FP6
                          || kernelType.typeA == rocRoller::DataType::BF6
                          || kernelType.typeB == rocRoller::DataType::FP6
                          || kernelType.typeB == rocRoller::DataType::BF6);
@@ -269,7 +259,8 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                 || kernelType.typeB == rocRoller::DataType::FP8
                 || kernelType.typeB == rocRoller::DataType::BF8)
                && wgt.m + wgt.n > 256);
-            if(numTiles < analytical_hardware.N_CU && !isF6 && !isLargeF8 && !is256Tile)
+            if(numTiles < analytical_hardware.N_CU && itersPerTile >= 16
+               && !isF6 && !isLargeF8 && !is256Tile)
             {
                 params.back().streamK = true;
             }
