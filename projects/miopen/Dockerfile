@@ -98,34 +98,11 @@ RUN pip3 install --break-system-packages -r /doc-requirements.txt && \
     groupadd -f video && \
     usermod -a -G render,video root
 
-# ============================================================================
-# Build from source stage - clones and builds TheRock
-#
-# Example build command for default source build (default branch, gfx90a):
-# docker build -f Dockerfile.ubuntu24 -t miopen:fullbuild .
-#
-# Example build command for overriding ASIC and git hash:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_HASH=abc123def456 -t miopen:custom_source_build .
-#
-# Build mode options:
-# - THEROCK_BUILD_MODE can be: Preset, Debug, or Release (default)
-# - When using "Preset", specify the preset with THEROCK_BUILD_PRESET
-# - When using "Debug" or "Release", standard CMake build types are used
-#
-# Note: When THEROCK_BUILD_MODE=Preset, the THEROCK_BUILD_PRESET value is used.
-#       When THEROCK_BUILD_MODE=Debug/Release, THEROCK_BUILD_PRESET is ignored.
-#
-# Build parallelism:
-# - BUILD_JOBS controls the number of parallel build jobs
-# - Default is 0, which means use all available CPU cores
-#
-# Example build command for Debug build with 4 cores:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_BUILD_MODE=Debug --build-arg BUILD_JOBS=4 -t miopen:debug .
-#
-# Example build command with custom TheRock preset:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_BUILD_MODE=Preset --build-arg THEROCK_BUILD_PRESET=linux-debug-package -t miopen:custom-preset .
-# ============================================================================
-FROM base AS build_therock_and_miopen_deps
+# ========================================================================================
+# Build from source stage - clones and builds projects from TheRock that MIOpen depends on
+# with the exception of CK and external MIOpen deps which are built separately
+# ========================================================================================
+FROM base AS build_therock
 
 ARG THEROCK_ASIC=gfx90a
 ARG THEROCK_GIT_HASH=default
@@ -201,12 +178,20 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
             --preset=$THEROCK_BUILD_PRESET \
             -DCMAKE_INSTALL_PREFIX=/opt/rocm \
             -DTHEROCK_ENABLE_ALL=OFF \
-            -DTHEROCK_ENABLE_BLAS=ON \
+            -DTHEROCK_ENABLE_PROFILER=ON \
+            -DTHEROCK_ENABLE_SYSDEPS=ON \
+            -DTHEROCK_ENABLE_BASE=ON \
             -DTHEROCK_ENABLE_COMPILER=ON \
-            -DTHEROCK_ENABLE_OCL_RUNTIME=ON \
             -DTHEROCK_ENABLE_CORE_RUNTIME=ON \
+            -DTHEROCK_ENABLE_HOST_BLAS=ON \
+            -DTHEROCK_ENABLE_HOST_SUITE_SPARSE=ON \
             -DTHEROCK_ENABLE_HIP_RUNTIME=ON \
+            -DTHEROCK_ENABLE_ROCPROFV3=ON \
+            -DTHEROCK_ENABLE_ROCPROFILER_COMPUTE=ON \
+            -DTHEROCK_ENABLE_BLAS=ON \
             -DTHEROCK_ENABLE_RAND=ON \
+            -DTHEROCK_ENABLE_ROCPROFSYS=ON \
+            -DTHEROCK_ENABLE_ROCPROF_TRACE_DECODER_BINARY=ON \
             -DTHEROCK_AMDGPU_DIST_BUNDLE_NAME=multiarch \
             -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
     else \
@@ -216,12 +201,20 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
             -DCMAKE_BUILD_TYPE=$THEROCK_BUILD_MODE \
             -DCMAKE_INSTALL_PREFIX=/opt/rocm \
             -DTHEROCK_ENABLE_ALL=OFF \
-            -DTHEROCK_ENABLE_BLAS=ON \
+            -DTHEROCK_ENABLE_PROFILER=ON \
+            -DTHEROCK_ENABLE_SYSDEPS=ON \
+            -DTHEROCK_ENABLE_BASE=ON \
             -DTHEROCK_ENABLE_COMPILER=ON \
-            -DTHEROCK_ENABLE_OCL_RUNTIME=ON \
             -DTHEROCK_ENABLE_CORE_RUNTIME=ON \
+            -DTHEROCK_ENABLE_HOST_BLAS=ON \
+            -DTHEROCK_ENABLE_HOST_SUITE_SPARSE=ON \
             -DTHEROCK_ENABLE_HIP_RUNTIME=ON \
+            -DTHEROCK_ENABLE_ROCPROFV3=ON \
+            -DTHEROCK_ENABLE_ROCPROFILER_COMPUTE=ON \
+            -DTHEROCK_ENABLE_BLAS=ON \
             -DTHEROCK_ENABLE_RAND=ON \
+            -DTHEROCK_ENABLE_ROCPROFSYS=ON \
+            -DTHEROCK_ENABLE_ROCPROF_TRACE_DECODER_BINARY=ON \
             -DTHEROCK_AMDGPU_DIST_BUNDLE_NAME=multiarch \
             -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
     fi
@@ -233,10 +226,25 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
         cmake --build . -j$BUILD_JOBS; \
     fi && \
     cmake --install .
+# # ================================================================================
+# # Build debs for reuse
+# # ================================================================================
+# WORKDIR /TheRock/build_tools/packaging/linux/
 
-# ============================================================================
-# Build and install miopen dependencies via rbuild
-# ============================================================================
+# RUN apt update && apt install -y jq debhelper llvm && \
+#     pip install -r requirements.txt 
+
+# RUN  export ROCM_VERSION=$(jq -r '.["rocm-version"]' /TheRock/version.json) && \
+#     ./build_package.py --artifacts-dir /TheRock/build/artifacts --target multiarch  --dest-dir /TheRock/build/artifacts/deb/  --pkg-name [amdrocm-blas amdrocm-llvm amdrocm-sysdeps amdrocm-amdsmi amdrocm-runtime amdrocm-base amdrocm-profiler-base amdrocm-profiler amdrocm-rand amdrocm-developer-tools ] --rocm-version ${ROCM_VERSION} --version-suffix ci  --pkg-type deb
+
+# # ================================================================================
+# # Build and install other deps and CK
+# # ================================================================================
+FROM build_therock AS miopen_deps
+ARG PROJ="miopen"
+ARG PREFIX="/usr/local"
+ARG USE_FIN="OFF"
+
 # Add requirements files
 ADD ${PROJ}/rbuild.ini /rbuild.ini
 ADD ${PROJ}/requirements.txt /requirements.txt
@@ -247,17 +255,14 @@ ADD ${PROJ}/dev-requirements.txt /dev-requirements.txt
 RUN cd / && \
     sed -i '/composablekernel/d; /half/d; /nlohmann/d' /requirements.txt && \
     if [ "$USE_FIN" = "ON" ]; then \
-        rbuild prepare -s fin -d ${PREFIX} -DGPU_ARCHS=${THEROCK_ASIC}; \
+        rbuild prepare -s fin -d ${PREFIX} -DGPU_ARCHS="${THEROCK_ASIC}"; \
     else \
-        rbuild prepare -s develop -d ${PREFIX} -DGPU_ARCHS=${THEROCK_ASIC}; \
-    fi && \
-    ccache -s
+        rbuild prepare -s develop -d ${PREFIX} -DGPU_ARCHS="${THEROCK_ASIC}"; \
+    fi
 
 # ============================================================================
 # Build and install CK
 # ============================================================================
-# Make sure /opt/rocm is in the paths
-ENV PATH="/opt/rocm:${PATH}"
 
 ADD ${PROJ}/script/redis-cli.conf /redis-cli.conf
 ADD ${PROJ}/script/sccache_wrapper.sh /sccache_wrapper.sh
@@ -267,25 +272,31 @@ ARG SCCACHE_REPO_URL=http://compute-artifactory.amd.com/artifactory/rocm-generic
 ENV SCCACHE_INSTALL_LOCATION=/usr/local/.cargo/bin
 ENV PATH=$PATH:${SCCACHE_INSTALL_LOCATION}
 ARG MIOPEN_SCCACHE=""
+ENV MIOPEN_SCCACHE=$MIOPEN_SCCACHE
 ARG COMPILER_LAUNCHER=""
 ARG MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="MiOpen-Docker-CK"
 ENV MIOPEN_SCCACHE=$MIOPEN_SCCACHE
+ARG THEROCK_ASIC=""
+ENV THEROCK_ASIC=${THEROCK_ASIC}
 
 # Copy Composable Kernel
-COPY composablekernel /composable_kernel
+COPY /composablekernel /composable_kernel
 
 # Build and install Composable Kernel
-RUN echo Building for GPU Archs: ${THEROCK_ASIC} && \
+RUN set -x && \
+    echo Building for GPU Archs: ${THEROCK_ASIC} && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
     mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
-    curl ${SCCACHE_REPO_URL}/portable/0.2.16/sccache-0.2.16-alpha.1-rocm --output ${SCCACHE_INSTALL_LOCATION}/sccache && \
-    chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache; \
+    export SCCACHE_VERSION=$(curl -s "https://api.github.com/repos/mozilla/sccache/releases/latest" | grep -Po '"tag_name": "v\K[0-9.]+') && \
+    wget -qO sccache.tar.gz https://github.com/mozilla/sccache/releases/latest/download/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl.tar.gz && \
+    tar -xzf sccache.tar.gz --strip-components=1 -C ${SCCACHE_INSTALL_LOCATION} && \
+    chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache && \
     export ROCM_PATH=/opt/rocm && \
     export SCCACHE_ENABLED=true && \
     export SCCACHE_LOG_LEVEL=debug && \
     export SCCACHE_IDLE_TIMEOUT=14400 && \
     export COMPILERS_HASH_DIR=/tmp/.sccache && \
-    export SCCACHE_BIN=/usr/local/.cargo/bin/sccache && \
+    export SCCACHE_BIN=${SCCACHE_INSTALL_LOCATION}/sccache && \
     export SCCACHE_EXTRAFILES=/tmp/.sccache/rocm_compilers_hash_file && \
     export SCCACHE_REDIS="redis://$MIOPEN_SCCACHE" && \
     cd / && \
@@ -295,31 +306,42 @@ RUN echo Building for GPU Archs: ${THEROCK_ASIC} && \
     stunnel redis-cli.conf && \
     export PATH=$PATH:${SCCACHE_INSTALL_LOCATION} && \
     ./sccache_wrapper.sh --enforce_redis; \
+    pwd; \
     fi &&\
+    # Clear the ROCM_PATH TheRock causes HIP errors
+    unset ROCM_PATH && \
     cd /composable_kernel && \
     mkdir build && cd build && \
-    #########################################################################
-    ## Determine number of build threads based on CPU cores and RAM
-    #########################################################################
-    # Calculate optimal build threads based on available memory
-    cpu_cores=$(nproc) && \
-    mem_gb=$(awk '/MemTotal/ {printf "%.0f", $2/1024/1024}' /proc/meminfo) && \
-    # Use 1 thread per ~4GB of RAM, capped by CPU cores
-    mem_threads=$((mem_gb / 4)) && \
-    num_threads=$((mem_threads < cpu_cores ? mem_threads : cpu_cores)) && \
-    # Ensure at least 1 thread
-    [ "$num_threads" -lt 1 ] && num_threads=1 && \
-    echo "Building CK with ${num_threads} threads (CPU: ${cpu_cores}, Memory: ${mem_gb}GB)" && \
-    #########################################################################
+    #Get the number of threads and RAM available
+    num_threads=$(nproc) && \
+    ram_gb=$(free -g | awk '/^Mem:/{print $2}') && \
+    # ram per thread is ~ 4 GB, so limit the number of threads 
+    # based on the RAM
+    if [ "$num_threads" -le 0 ]; then \
+        num_threads=1; \
+    fi && \
+    if [ "$ram_gb" -lt $((num_threads * 4)) ]; then \
+        if [ "$ram_gb" -ge 4 ]; then \
+            num_threads=$((ram_gb / 4)); \
+        else \
+            num_threads=1; \
+        fi; \
+    fi && \
+    echo Building CK with ${num_threads} threads && \
+    export HIPCXX=/opt/rocm/llvm/bin/amdclang++ && \
     CXX=/opt/rocm/llvm/bin/amdclang++ cmake \
+    -G Ninja \
+    -D CMAKE_HIP_COMPILER_ROCM_ROOT=/opt/rocm \
     -D CMAKE_PREFIX_PATH=/opt/rocm \
-    -D CMAKE_CXX_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
-    -D CMAKE_C_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
+    -D CMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/amdclang++ \
+    -D CMAKE_CXX_COMPILER_LAUNCHER=sccache \
+    -D CMAKE_HIP_COMPILER_LAUNCHER=sccache \
+    -D CMAKE_C_COMPILER_LAUNCHER=sccache \
     -D CMAKE_BUILD_TYPE=Release \
-    -D GPU_ARCHS="${THEROCK_ASIC}" \
+    -D GPU_TARGETS="${THEROCK_ASIC}" \
     -D MIOPEN_REQ_LIBS_ONLY=ON \
-    -D CMAKE_CXX_FLAGS=" -O3 " .. && \
-    make -j ${num_threads} install && \
+    -D CMAKE_CXX_FLAGS=" -O3 " .. && \    
+    ninja -j ${num_threads} install && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
     sccache -s; \
     fi
@@ -329,7 +351,35 @@ RUN echo Building for GPU Archs: ${THEROCK_ASIC} && \
 # ============================================================================
 FROM base AS miopen
 
-COPY --from=build_therock_and_miopen_deps /opt/rocm /opt/rocm
-COPY --from=build_therock_and_miopen_deps /usr/local /usr/local
+COPY --from=miopen_deps /opt/rocm /opt/rocm
+COPY --from=miopen_deps /usr/local /usr/local
 
+ENV HIP_PLATFORM=amd
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
+
+# # ================================================================================
+# # Keep the output as slim as possible as this will be a base for the final image
+# # ================================================================================
+# FROM scratch AS therock_base
+
+# COPY --from=build_therock /opt/rocm /opt/rocm
+# COPY --from=build_therock /usr/local /usr/local
+
+# # ================================================================================
+# # Build debs for reuse
+# # ================================================================================
+# WORKDIR /TheRock/build_tools/packaging/linux/
+
+# RUN apt update && apt install -y jq debhelper llvm && \
+#     pip install -r requirements.txt 
+
+# RUN  export ROCM_VERSION=$(jq -r '.["rocm-version"]' /TheRock/version.json) && \
+#     ./build_package.py --artifacts-dir /TheRock/build/artifacts --target multiarch  --dest-dir /TheRock/build/artifacts/deb/  --pkg-name [amdrocm-blas amdrocm-llvm amdrocm-sysdeps amdrocm-amdsmi amdrocm-runtime amdrocm-base amdrocm-profiler-base amdrocm-profiler amdrocm-rand amdrocm-developer-tools ] --rocm-version ${ROCM_VERSION} --version-suffix ci  --pkg-type deb
+
+# # # ================================================================================
+# # # Keep the output as slim as possible as this will be a base for the final image
+# # # ================================================================================
+# # FROM scratch AS therock_base
+
+# # COPY --from=build_therock /opt/rocm /opt/rocm
+# # COPY --from=build_therock /usr/local /usr/local
