@@ -33,8 +33,8 @@ add_executable(
     TestError.cpp
     TestGraph.cpp
     TestGraphAttributes.cpp
-    TestGraphSerialization.cpp
     TestGraphGenerated.cpp
+    TestGraphSerialization.cpp
     TestINode.cpp
     TestKnob.cpp
     TestMatmulAttributes.cpp
