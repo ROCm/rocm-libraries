@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "HipdnnEnginePluginHandle.hpp"
-#include "MiopenExecutionSettings.hpp"
+#include "HipdnnEngineSpecificSettings.hpp"
 #include "engines/plans/MiopenBatchnormBwdPlan.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -182,7 +182,7 @@ TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZeroForFusedMode)
 
     BatchnormBwdParams params(
         *batchnormBwdAttrs, *pointwiseAttrs, *batchnormInfAttrs, graph.getTensorMap());
-    MiopenExecutionSettings executionSettings;
+    HipdnnEngineSpecificSettings executionSettings;
     BatchnormBwdPlan plan(std::move(params), executionSettings);
 
     HipdnnEnginePluginHandle handle;
@@ -200,7 +200,7 @@ TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZero)
     ASSERT_NE(attrs, nullptr);
 
     BatchnormBwdParams params(*attrs, graph.getTensorMap());
-    MiopenExecutionSettings executionSettings;
+    HipdnnEngineSpecificSettings executionSettings;
     BatchnormBwdPlan plan(std::move(params), executionSettings);
 
     HipdnnEnginePluginHandle handle;

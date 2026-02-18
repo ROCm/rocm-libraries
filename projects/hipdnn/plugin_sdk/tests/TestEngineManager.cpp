@@ -8,6 +8,7 @@
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngine.hpp>
+#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/MockPlan.hpp>
 
@@ -35,7 +36,7 @@ std::unique_ptr<NiceMock<MockEngine>>
     auto engine = std::make_unique<NiceMock<MockEngine>>();
     ON_CALL(*engine, id()).WillByDefault(Return(engineId));
     ON_CALL(*engine, isApplicable(_, _)).WillByDefault(Return(applicable));
-    ON_CALL(*engine, getMaxWorkspaceSize(_, _)).WillByDefault(Return(workspaceSize));
+    ON_CALL(*engine, getMaxWorkspaceSize(_, _, _)).WillByDefault(Return(workspaceSize));
     return engine;
 }
 
@@ -93,7 +94,10 @@ TEST(TestEngineManager, GetWorkspaceSizeReturnsEngineWorkspace)
 
     HipdnnEnginePluginHandle handle;
     NiceMock<MockGraph> mockGraph;
-    auto workspaceSize = manager.getWorkspaceSize(handle, 1, mockGraph);
+    NiceMock<MockEngineConfig> mockConfig;
+    ON_CALL(mockConfig, engineId()).WillByDefault(Return(1));
+
+    auto workspaceSize = manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig);
     EXPECT_EQ(workspaceSize, 2048u);
 }
 
@@ -104,5 +108,8 @@ TEST(TestEngineManager, GetWorkspaceSizeThrowsForUnknownEngine)
 
     HipdnnEnginePluginHandle handle;
     NiceMock<MockGraph> mockGraph;
-    EXPECT_THROW(manager.getWorkspaceSize(handle, 999, mockGraph), HipdnnPluginException);
+    NiceMock<MockEngineConfig> mockConfig;
+    ON_CALL(mockConfig, engineId()).WillByDefault(Return(999));
+
+    EXPECT_THROW(manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig), HipdnnPluginException);
 }

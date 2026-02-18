@@ -26,7 +26,7 @@ public:
                 getMaxWorkspaceSize,
                 (const HipdnnEnginePluginHandle& handle,
                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                 const MiopenExecutionSettings& executionSettings),
+                 const HipdnnEngineSpecificSettings& executionSettings),
                 (const, override));
 
     MOCK_METHOD(void,
@@ -34,13 +34,14 @@ public:
                 (const HipdnnEnginePluginHandle& handle,
                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                  const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-                 MiopenExecutionSettings& executionSettings),
+                 HipdnnEngineSpecificSettings& executionSettings),
                 (const, override));
 
     MOCK_METHOD(void,
                 buildPlan,
                 (const HipdnnEnginePluginHandle& handle,
                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
                  HipdnnEnginePluginExecutionContext& executionContext),
                 (const, override));
 

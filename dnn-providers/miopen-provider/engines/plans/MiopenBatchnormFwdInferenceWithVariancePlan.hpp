@@ -6,8 +6,8 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
+#include "HipdnnEngineSpecificSettings.hpp"
 #include "MiopenActivationDescriptor.hpp"
-#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
 
@@ -67,7 +67,7 @@ class BatchnormFwdInferenceWithVariancePlan : public hipdnn_plugin_sdk::IPlan
 {
 public:
     BatchnormFwdInferenceWithVariancePlan(BatchnormFwdInferenceWithVarianceParams&& inferenceParams,
-                                          const MiopenExecutionSettings& executionSettings);
+                                          const HipdnnEngineSpecificSettings& executionSettings);
 
     BatchnormFwdInferenceWithVariancePlan(const BatchnormFwdInferenceWithVariancePlan&) = delete;
     BatchnormFwdInferenceWithVariancePlan& operator=(const BatchnormFwdInferenceWithVariancePlan&)
@@ -86,7 +86,7 @@ public:
 
 private:
     BatchnormFwdInferenceWithVarianceParams _inferenceParams;
-    MiopenExecutionSettings _executionSettings;
+    HipdnnEngineSpecificSettings _executionSettings;
 };
 
 } // namespace miopen_plugin

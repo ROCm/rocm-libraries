@@ -12,8 +12,8 @@
 
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
+#include "HipdnnEngineSpecificSettings.hpp"
 #include "MiopenActivationDescriptor.hpp"
-#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 
 namespace miopen_plugin
@@ -71,7 +71,8 @@ private:
 class BatchnormBwdPlan : public hipdnn_plugin_sdk::IPlan
 {
 public:
-    BatchnormBwdPlan(BatchnormBwdParams&& params, const MiopenExecutionSettings& executionSettings);
+    BatchnormBwdPlan(BatchnormBwdParams&& params,
+                     const HipdnnEngineSpecificSettings& executionSettings);
 
     BatchnormBwdPlan(const BatchnormBwdPlan&) = delete;
     BatchnormBwdPlan& operator=(const BatchnormBwdPlan&) = delete;
@@ -88,7 +89,7 @@ public:
 
 private:
     BatchnormBwdParams _params;
-    MiopenExecutionSettings _executionSettings;
+    HipdnnEngineSpecificSettings _executionSettings;
 };
 
 } // namespace miopen_plugin

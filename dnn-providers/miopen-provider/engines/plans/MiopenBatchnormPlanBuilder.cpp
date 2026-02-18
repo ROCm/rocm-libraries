@@ -600,7 +600,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 size_t MiopenBatchnormPlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const MiopenExecutionSettings& executionSettings) const
+    [[maybe_unused]] const HipdnnEngineSpecificSettings& executionSettings) const
 {
     // batchnorm plan builder does not require workspace size
     return 0u;
@@ -610,7 +610,7 @@ void MiopenBatchnormPlanBuilder::initializeExecutionSettings(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    [[maybe_unused]] MiopenExecutionSettings& executionSettings) const
+    [[maybe_unused]] HipdnnEngineSpecificSettings& executionSettings) const
 {
 }
 
@@ -733,6 +733,7 @@ void buildPlanFusedFwdInferenceWithVarianceActivation(
 void MiopenBatchnormPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() == 2)

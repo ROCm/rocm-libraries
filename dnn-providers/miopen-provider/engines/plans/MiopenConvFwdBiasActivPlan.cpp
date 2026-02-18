@@ -107,7 +107,7 @@ const MiopenTensor& ConvFwdBiasActivParams::y() const
 
 ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle,
                                            ConvFwdBiasActivParams&& params,
-                                           const MiopenExecutionSettings& executionSettings,
+                                           const HipdnnEngineSpecificSettings& executionSettings,
                                            bool compile,
                                            bool getWsSize)
     : _params(std::move(params))

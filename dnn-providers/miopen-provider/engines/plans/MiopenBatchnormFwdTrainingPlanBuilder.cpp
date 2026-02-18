@@ -310,7 +310,7 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
 size_t MiopenBatchnormFwdTrainingPlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const MiopenExecutionSettings& executionSettings) const
+    [[maybe_unused]] const HipdnnEngineSpecificSettings& executionSettings) const
 {
     // No workspace needed for batchnorm forward training
     return 0;
@@ -320,13 +320,14 @@ void MiopenBatchnormFwdTrainingPlanBuilder::initializeExecutionSettings(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    [[maybe_unused]] MiopenExecutionSettings& executionSettings) const
+    [[maybe_unused]] HipdnnEngineSpecificSettings& executionSettings) const
 {
 }
 
 void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() == 1)

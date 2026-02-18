@@ -205,8 +205,9 @@ const std::optional<MiopenTensor>& BatchnormFwdTrainingParams::activationOut() c
     return _activationOut;
 }
 
-BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,
-                                                   const MiopenExecutionSettings& executionSettings)
+BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(
+    BatchnormFwdTrainingParams&& trainingParams,
+    const HipdnnEngineSpecificSettings& executionSettings)
     : _trainingParams(std::move(trainingParams))
     , _executionSettings(executionSettings)
 {

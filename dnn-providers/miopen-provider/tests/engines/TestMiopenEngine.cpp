@@ -36,7 +36,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillOnce(::testing::Return(false));
 
-    EXPECT_EQ(engine.getMaxMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 0u);
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 0u);
 }
 
 TEST(TestMiopenEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
@@ -47,7 +47,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
     EXPECT_CALL(*mockPlanBuilder,
                 initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
-    EXPECT_CALL(*mockPlanBuilder, getMaxMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
+    EXPECT_CALL(*mockPlanBuilder, getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
         .WillOnce(::testing::Return(1337u));
 
     MiopenEngine engine(1);
@@ -58,7 +58,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillOnce(::testing::Return(false));
 
-    EXPECT_EQ(engine.getMaxMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 1337u);
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 1337u);
 }
 
 TEST(TestMiopenEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
@@ -71,7 +71,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     EXPECT_CALL(*mockPlanBuilder,
                 initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
-    EXPECT_CALL(*mockPlanBuilder, getMaxMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
+    EXPECT_CALL(*mockPlanBuilder, getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
         .WillOnce(::testing::Return(1337u));
 
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
@@ -79,7 +79,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     EXPECT_CALL(*mockPlanBuilder2,
                 initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
-    EXPECT_CALL(*mockPlanBuilder2, getMaxMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
+    EXPECT_CALL(*mockPlanBuilder2, getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
         .WillOnce(::testing::Return(45000u));
 
     MiopenEngine engine(1);
@@ -91,7 +91,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
-    EXPECT_EQ(engine.getMaxMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 45000u);
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 45000u);
 }
 
 TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
@@ -108,7 +108,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillOnce(::testing::Return(false));
 
-    EXPECT_EQ(engine.getMaxMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 0u);
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 0u);
 }
 
 TEST(TestMiopenEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
@@ -292,9 +292,13 @@ TEST(TestMiopenEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuild
     EXPECT_CALL(*mockPlanBuilder1,
                 initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
-    EXPECT_CALL(*mockPlanBuilder1, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(1);
+    EXPECT_CALL(*mockPlanBuilder1,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(1);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_)).Times(0);
-    EXPECT_CALL(*mockPlanBuilder2, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*mockPlanBuilder2,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
 
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
@@ -450,14 +454,18 @@ TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
         .Times(2)
         .WillRepeatedly(::testing::Return(false));
-    EXPECT_CALL(*mockPlanBuilder1, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*mockPlanBuilder1,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
         .Times(2)
         .WillRepeatedly(::testing::Return(true));
     EXPECT_CALL(*mockPlanBuilder2,
                 initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
-    EXPECT_CALL(*mockPlanBuilder2, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(1);
+    EXPECT_CALL(*mockPlanBuilder2,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(1);
 
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
@@ -480,11 +488,15 @@ TEST(TestMiopenEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplica
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
         .Times(2)
         .WillRepeatedly(::testing::Return(false));
-    EXPECT_CALL(*mockPlanBuilder1, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*mockPlanBuilder1,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
         .Times(2)
         .WillRepeatedly(::testing::Return(false));
-    EXPECT_CALL(*mockPlanBuilder2, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*mockPlanBuilder2,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
 
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));

@@ -99,7 +99,7 @@ const std::optional<MiopenTensor>& BatchnormFwdInferenceWithVarianceParams::acti
 
 BatchnormFwdInferenceWithVariancePlan::BatchnormFwdInferenceWithVariancePlan(
     BatchnormFwdInferenceWithVarianceParams&& inferenceParams,
-    const MiopenExecutionSettings& executionSettings)
+    const HipdnnEngineSpecificSettings& executionSettings)
     : _inferenceParams(std::move(inferenceParams))
     , _executionSettings(executionSettings)
 {

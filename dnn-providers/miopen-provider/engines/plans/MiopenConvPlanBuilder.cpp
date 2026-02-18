@@ -310,7 +310,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
 
 size_t getMaxWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                              const MiopenExecutionSettings& executionSettings,
+                              const HipdnnEngineSpecificSettings& executionSettings,
                               bool deterministicEnabled)
 {
     if(executionSettings.workspaceSizeLimit().has_value())
@@ -334,7 +334,7 @@ size_t getMaxWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
 
 size_t getMaxWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                              const MiopenExecutionSettings& executionSettings,
+                              const HipdnnEngineSpecificSettings& executionSettings,
                               bool deterministicEnabled)
 {
     if(executionSettings.workspaceSizeLimit().has_value())
@@ -360,7 +360,7 @@ size_t getMaxWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
 
 size_t getMaxWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                              const MiopenExecutionSettings& executionSettings,
+                              const HipdnnEngineSpecificSettings& executionSettings,
                               bool deterministicEnabled)
 {
     if(executionSettings.workspaceSizeLimit().has_value())
@@ -503,7 +503,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange MiopenConvPlanBuilder::getWorkspaceSiz
 size_t MiopenConvPlanBuilder::getMaxWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const MiopenExecutionSettings& executionSettings) const
+    const HipdnnEngineSpecificSettings& executionSettings) const
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -535,7 +535,7 @@ void MiopenConvPlanBuilder::initializeExecutionSettings(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    MiopenExecutionSettings& executionSettings) const
+    HipdnnEngineSpecificSettings& executionSettings) const
 {
     // Read workspace size limit knob setting
     if(engineConfig.isValid()
@@ -577,9 +577,11 @@ void MiopenConvPlanBuilder::initializeExecutionSettings(
     }
 }
 
-void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
-                                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                                      HipdnnEnginePluginExecutionContext& executionContext) const
+void MiopenConvPlanBuilder::buildPlan(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() != 1)
     {

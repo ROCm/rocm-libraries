@@ -5,10 +5,15 @@
 
 #include <optional>
 
-namespace miopen_plugin
-{
+/**
+ * @file HipdnnEngineSpecificSettings.hpp
+ * @brief MIOpen plugin's implementation of HipdnnEngineSpecificSettings.
+ *
+ * This type is forward-declared in the plugin SDK's IPlanBuilder interface.
+ * Each plugin must define this structure to hold plugin-specific execution settings.
+ */
 
-struct MiopenExecutionSettings
+struct HipdnnEngineSpecificSettings
 {
     void setBenchmarkingEnabled(bool enabled)
     {
@@ -50,5 +55,3 @@ private:
     bool _benchmarkingEnabled = false;
     std::optional<size_t> _workspaceSizeLimit;
 };
-
-} // namespace miopen_plugin

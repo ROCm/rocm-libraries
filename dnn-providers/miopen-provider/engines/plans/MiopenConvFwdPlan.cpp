@@ -68,7 +68,7 @@ bool ConvFwdParams::validTensors() const
 
 ConvFwdPlan::ConvFwdPlan(const HipdnnEnginePluginHandle& handle,
                          ConvFwdParams&& params,
-                         const MiopenExecutionSettings& executionSettings)
+                         const HipdnnEngineSpecificSettings& executionSettings)
     : _params(std::move(params))
     , _executionSettings(executionSettings)
 {

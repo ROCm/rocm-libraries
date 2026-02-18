@@ -8,6 +8,7 @@
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnEngineSpecificSettings.hpp"
 
 namespace miopen_plugin
 {
@@ -26,19 +27,22 @@ public:
     bool isApplicable(const HipdnnEnginePluginHandle& handle,
                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
-    size_t getMaxMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                                  const MiopenExecutionSettings& executionSettings) const override;
+    size_t
+        getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+                            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                            const HipdnnEngineSpecificSettings& executionSettings) const override;
 
     void initializeExecutionSettings(
         const HipdnnEnginePluginHandle& handle,
         const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
         const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-        MiopenExecutionSettings& executionSettings) const override;
+        HipdnnEngineSpecificSettings& executionSettings) const override;
 
-    void buildPlan(const HipdnnEnginePluginHandle& handle,
-                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                   HipdnnEnginePluginExecutionContext& executionContext) const override;
+    void buildPlan(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        HipdnnEnginePluginExecutionContext& executionContext) const override;
 
     std::vector<hipdnn_data_sdk::data_objects::KnobT>
         getCustomKnobs(const HipdnnEnginePluginHandle& handle,

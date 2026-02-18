@@ -6,7 +6,7 @@
 #include <memory>
 #include <optional>
 
-#include "MiopenExecutionSettings.hpp"
+#include "HipdnnEngineSpecificSettings.hpp"
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
@@ -42,17 +42,17 @@ public:
         return *_plan;
     }
 
-    void setExecutionSettings(const miopen_plugin::MiopenExecutionSettings& executionSettings)
+    void setExecutionSettings(const HipdnnEngineSpecificSettings& executionSettings)
     {
         _executionSettings = executionSettings;
     }
 
-    const miopen_plugin::MiopenExecutionSettings& executionSettings() const
+    const HipdnnEngineSpecificSettings& executionSettings() const
     {
         return _executionSettings;
     }
 
 private:
     std::unique_ptr<hipdnn_plugin_sdk::IPlan> _plan;
-    miopen_plugin::MiopenExecutionSettings _executionSettings;
+    HipdnnEngineSpecificSettings _executionSettings;
 };

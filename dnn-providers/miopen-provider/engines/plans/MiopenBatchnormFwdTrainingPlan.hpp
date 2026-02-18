@@ -5,7 +5,7 @@
 
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
-#include "MiopenExecutionSettings.hpp"
+#include "HipdnnEngineSpecificSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -82,7 +82,7 @@ class BatchnormFwdTrainingPlan : public hipdnn_plugin_sdk::IPlan
 {
 public:
     BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,
-                             const MiopenExecutionSettings& executionSettings);
+                             const HipdnnEngineSpecificSettings& executionSettings);
 
     BatchnormFwdTrainingPlan(const BatchnormFwdTrainingPlan&) = delete;
     BatchnormFwdTrainingPlan& operator=(const BatchnormFwdTrainingPlan&) = delete;
@@ -99,7 +99,7 @@ public:
 
 private:
     BatchnormFwdTrainingParams _trainingParams;
-    MiopenExecutionSettings _executionSettings;
+    HipdnnEngineSpecificSettings _executionSettings;
 };
 
 }

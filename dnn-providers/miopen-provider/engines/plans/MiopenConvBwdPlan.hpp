@@ -12,8 +12,8 @@
 
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
+#include "HipdnnEngineSpecificSettings.hpp"
 #include "MiopenConvDescriptor.hpp"
-#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 
 namespace miopen_plugin
@@ -55,7 +55,7 @@ class ConvBwdPlan : public hipdnn_plugin_sdk::IPlan
 public:
     ConvBwdPlan(const HipdnnEnginePluginHandle& handle,
                 ConvBwdParams&& params,
-                const MiopenExecutionSettings& executionSettings);
+                const HipdnnEngineSpecificSettings& executionSettings);
     ~ConvBwdPlan() override = default;
 
     ConvBwdPlan(const ConvBwdPlan&) = delete;
@@ -76,7 +76,7 @@ private:
     mutable std::mutex _algorithmMutex;
     mutable std::optional<miopenConvBwdDataAlgorithm_t> _algorithm;
     mutable size_t _workspaceSize = 0;
-    MiopenExecutionSettings _executionSettings;
+    HipdnnEngineSpecificSettings _executionSettings;
 };
 
 } // namespace miopen_plugin

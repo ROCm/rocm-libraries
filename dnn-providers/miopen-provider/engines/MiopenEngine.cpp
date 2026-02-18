@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "MiopenEngine.hpp"
+#include "HipdnnEngineSpecificSettings.hpp"
 #include "plans/MiopenBatchnormPlanBuilder.hpp"
 
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
@@ -25,7 +26,7 @@ auto createBenchmarkingKnob(flatbuffers::FlatBufferBuilder& builder)
 }
 
 void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
-                                   MiopenExecutionSettings& executionSettings)
+                                   HipdnnEngineSpecificSettings& executionSettings)
 {
     if(!engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
     {
@@ -48,9 +49,9 @@ void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engin
     executionSettings.setBenchmarkingEnabled(value != 0);
 }
 
-void initializeMiopenExecutionSettings(
+void initializeHipdnnEngineSpecificSettings(
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    MiopenExecutionSettings& executionSettings)
+    HipdnnEngineSpecificSettings& executionSettings)
 {
     if(engineConfig.isValid())
     {
@@ -137,8 +138,8 @@ size_t MiopenEngine::getMaxWorkspaceSize(
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
-    MiopenExecutionSettings baseExecutionSettings;
-    initializeMiopenExecutionSettings(engineConfig, baseExecutionSettings);
+    HipdnnEngineSpecificSettings baseExecutionSettings;
+    initializeHipdnnEngineSpecificSettings(engineConfig, baseExecutionSettings);
 
     size_t workspaceSize = 0;
 
@@ -146,7 +147,7 @@ size_t MiopenEngine::getMaxWorkspaceSize(
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            MiopenExecutionSettings executionSettings = baseExecutionSettings;
+            HipdnnEngineSpecificSettings executionSettings = baseExecutionSettings;
             planBuilder->initializeExecutionSettings(
                 handle, opGraph, engineConfig, executionSettings);
             workspaceSize
@@ -164,8 +165,8 @@ void MiopenEngine::initializeExecutionContext(
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
-    MiopenExecutionSettings executionSettings;
-    initializeMiopenExecutionSettings(engineConfig, executionSettings);
+    HipdnnEngineSpecificSettings executionSettings;
+    initializeHipdnnEngineSpecificSettings(engineConfig, executionSettings);
 
     for(const auto& planBuilder : _planBuilders)
     {
@@ -183,7 +184,7 @@ void MiopenEngine::initializeExecutionContext(
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            planBuilder->buildPlan(handle, opGraph, executionContext);
+            planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
             break;
         }
     }

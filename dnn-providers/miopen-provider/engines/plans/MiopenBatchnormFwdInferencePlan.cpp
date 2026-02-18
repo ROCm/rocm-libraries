@@ -86,7 +86,8 @@ const std::optional<MiopenTensor>& BatchnormFwdInferenceParams::activationOut() 
 }
 
 BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(
-    BatchnormFwdInferenceParams&& inferenceParams, const MiopenExecutionSettings& executionSettings)
+    BatchnormFwdInferenceParams&& inferenceParams,
+    const HipdnnEngineSpecificSettings& executionSettings)
     : _inferenceParams(std::move(inferenceParams))
     , _executionSettings(executionSettings)
 {
