@@ -396,9 +396,9 @@ staggerU_t select_staggerU(const problem_t& problem,
 
   // Early Exit: Non-temporal cases
   if (nta > 3)
-    return staggerU_t{1, max_staggerU, out_staggerUStrideShift};
-  if (ntb > 3)
     return staggerU_t{0, max_staggerU, out_staggerUStrideShift};
+  if (ntb > 3)
+    return staggerU_t{1, max_staggerU, out_staggerUStrideShift};
 
   // Find WGM
   size_t abs_wgm = std::abs(wgm);
@@ -437,11 +437,10 @@ staggerU_t select_staggerU(const problem_t& problem,
   // Compute L2 optimal direction.
   // Row-major WGM: consecutive WGs share A (row-mates). Their temporal overlap
   // amplifies A contention → the consecutive dimension (N) gets squared.
-  // Column-major WGM: consecutive WGs share B (column-mates) → M gets squared.
+  // Column-major WGM: consecutive WGs share B (column-mates): M gets squared.
   size_t A_contention, B_contention;
-  if (wgm > 1) {
+  if (wgm > 0) {
     // Positive WGM (row-major): N is the consecutive dimension
-    // Note: WGM = 1 is column-major
     A_contention = L2Tile_N * L2Tile_N * MT_M * bpe_a;
     B_contention = L2Tile_M * MT_N * bpe_b;
   } else {
@@ -493,16 +492,17 @@ staggerU_t select_staggerU(const problem_t& problem,
     out_staggerUMapping = L2_mapping;
     out_staggerU = max_staggerU;
   } else {
-    if(std::max(L2Tile_M, L2Tile_N) < 2 * std::min(L2Tile_M, L2Tile_N)) {
-      // Not willing to sacrifice L2 for MALL
-      out_staggerUMapping = L2_mapping;
-      out_staggerU = L2_value;
-    } else if (numWGsPerL2Tile > numCUsPerXCD / 2) { // very few tiles in L2
-      // Willing to sacrifice L2 for MALL
+    // L2 and MALL disagree. Only switch when BOTH conditions hold:
+    // 1. Contention is close (ratio < 2×)
+    // 2. L2 tile is asymmetric (ratio > 2)
+    size_t L2_winner = std::max(A_contention, B_contention);
+    size_t L2_loser  = std::min(A_contention, B_contention);
+    bool contention_close = (L2_winner < 2 * L2_loser);
+    bool tile_asymmetric  = (std::max(L2Tile_M, L2Tile_N) > 2 * std::min(L2Tile_M, L2Tile_N));
+    if (contention_close && tile_asymmetric) {
       out_staggerUMapping = Mall_mapping;
       out_staggerU = max_staggerU;
     } else {
-      // Not willing to sacrifice L2 for MALL
       out_staggerUMapping = L2_mapping;
       out_staggerU = L2_value;
     }
