@@ -156,7 +156,7 @@ size_t hardware_t::get_mi_latency(size_t MI_M,
   if (it != instruction_map.end()) {
     return it->second / parallel_mi_cu;
   } else {
-    if (origami::runtime_options().get().debug_enabled)
+    if (origami::runtime_options::get().debug_enabled)
       std::cerr << "Warning: Latency not found for MI_M=" << MI_M << ", MI_N=" << MI_N
                 << ", MI_K=" << MI_K << ", mi_input_type=" << datatype_to_string(mi_input_type)
                 << ". Returning latency value of 32 (really slow).\n";
@@ -172,6 +172,9 @@ bool hardware_t::has_MALL() const {
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
     case architecture_t::gfx1151: return true;
+    case architecture_t::gfx1150:
+    case architecture_t::gfx1152:
+    case architecture_t::gfx1153: return false;
     case architecture_t::Count:
       // Count is not a valid architecture, this is to silence compiler warning
       return false;
