@@ -4015,6 +4015,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     syncs = SyncSchedule()
     syncCode = []   
     gr_inc_step = 1
+    disable_validation = False
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
@@ -4058,6 +4059,54 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         syncs.add(                                                                                 76, dscnt=0, comment="wait for LRBs before the packing them")
         pack_b1 =[                                                                                 i+77 for i in offset] # last at 93
 
+    elif isNN(kernel) and TLDS==1:
+        print("BBBBBBBBBBBBBBBBBBBBBBBBBBB")
+        disable_validation = True
+
+        kernel["UseMFMAF32XEmulation"] = True
+        kernel["UseDot2F32XEmulation"] = False
+        kernel["UsePLRPack"] = True
+
+        offset=[0,0,1,1, 8,8,  9, 9,10,10, 
+                2,2,3,3, 8,8, 11,11,12,12,
+                4,4,5,5, 8,8, 13,13,14,14, 
+                6,6,7,7, 8,8, 15,15,16,16]
+        
+        lra0   = [ 0,1,2,3,4,5,6,7]
+        lrb0   = [   8,9,10,11,12,13,14,15]
+        #                wait then read
+        syncs.add(       10, dscnt=6, comment="wait for the first 2 LRAs before packing")
+        syncs.add(       14, dscnt=6, comment="wait for the rest of LRAs before packing them")
+        pack_a0 =[          11]*12# swap instructions
+        pack_a0+=[          i+11 for i in offset] # last at 27
+        # because of GR starting at 22, we need barrier at 21, will use that for sync too.
+        syncs.add(                          21, dscnt=0, comment="wait for LRBs before the packing them",
+                                            barrier=True, barrier_comment="barrier before GR")
+        pack_b0= [                                i+28 for i in offset] # last at 44
+
+        grinca = [0,0,1,1,2,2,3,3,4]
+        grincb = [5,5,6,6,7,7,8,8,9]
+        lrsa   = [45]
+        lrsb   = [45]
+        lwsa   = [72]
+        lwsb   = [72]        
+        
+        gra    = [                            22,25,29,33, 37,41,45,49] # one index for two instructions
+        grb    = [                                                    53,57,61, 64,69,75,79,84] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+
+        syncs.add(                                                 48, vlcnt=7, barrier=True, comment="wait for the previous GRs")
+
+        lra1   = [                                                 48,49,50,51,52,53,54,55]
+        lrb1   = [                                                    56,57,  59,60,61,62,63,64]
+        syncs.add(                                                          58, dscnt=6, comment="wait for the first two LRAs before packing")
+        syncs.add(                                                          63, dscnt=6, comment="wait for the rest of LRAs before packing them")
+        pack_a1 =[                                                            59]*12# swap instructions
+        pack_a1+= [                                                           i+59 for i in offset] # last at 75
+        syncs.add(                                                                                 76, dscnt=0, comment="wait for LRBs before the packing them")
+        pack_b1 =[                                                                                 i+77 for i in offset] # last at 93
+
+
     else:
         return False, None  
     
@@ -4091,6 +4140,8 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     kernel["UseMFMAF32XEmulation"] = True
     kernel["UsePLRPack"] = True
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
+    if disable_validation:
+        opt1.disableValidation()
     return True, opt1
 
 
