@@ -13,9 +13,6 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
-// Forward declaration - must be defined by plugin implementation
-struct HipdnnEngineSpecificSettings;
-
 namespace hipdnn_plugin_sdk
 {
 
@@ -31,9 +28,14 @@ namespace hipdnn_plugin_sdk
  * Plan builders are typically owned by an engine and have the same lifecycle
  * as the engine that contains them.
  *
+ * @tparam THandle The plugin-specific handle type (e.g., HipdnnMiopenHandle).
+ * @tparam TSettings The plugin-specific settings type (e.g., HipdnnMiopenSettings).
+ * @tparam TContext The plugin-specific context type (e.g., HipdnnMiopenContext).
+ *
  * @note Implementations should be stateless or thread-safe, as plan builders
  *       may be accessed from multiple threads concurrently.
  */
+template <typename THandle, typename TSettings, typename TContext>
 class IPlanBuilder
 {
 public:
@@ -46,7 +48,8 @@ public:
      * @param opGraph The operation graph to check.
      * @return true if this plan builder can handle the graph, false otherwise.
      */
-    virtual bool isApplicable(const HipdnnEnginePluginHandle& handle,
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual bool isApplicable(const THandle& handle,
                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
@@ -55,18 +58,29 @@ public:
      *
      * @param handle The engine plugin handle.
      * @param opGraph The operation graph.
+     * @param executionSettings The plugin-specific execution settings.
      * @return The maximum workspace size in bytes.
      */
-    virtual size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual size_t getMaxWorkspaceSize(const THandle& handle,
                                        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                                       const HipdnnEngineSpecificSettings& executionSettings) const
+                                       const TSettings& executionSettings) const
         = 0;
 
+    /**
+     * @brief Initializes execution settings from an engine configuration.
+     *
+     * @param handle The engine plugin handle.
+     * @param opGraph The operation graph.
+     * @param engineConfig The engine configuration containing knob settings.
+     * @param executionSettings The settings to initialize.
+     */
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void initializeExecutionSettings(
-        const HipdnnEnginePluginHandle& handle,
+        const THandle& handle,
         const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
         const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-        HipdnnEngineSpecificSettings& executionSettings) const
+        TSettings& executionSettings) const
         = 0;
 
     /**
@@ -82,11 +96,12 @@ public:
      * @param executionContext The execution context to store the plan on.
      * @throws HipdnnPluginException if the plan cannot be built.
      */
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void buildPlan(
-        const HipdnnEnginePluginHandle& handle,
+        const THandle& handle,
         const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
         [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-        HipdnnEnginePluginExecutionContext& executionContext) const
+        TContext& executionContext) const
         = 0;
 
     /**
@@ -100,7 +115,8 @@ public:
      * @return A vector of KnobT objects representing the custom knobs.
      */
     virtual std::vector<hipdnn_data_sdk::data_objects::KnobT>
-        getCustomKnobs(const HipdnnEnginePluginHandle& handle,
+        // NOLINTNEXTLINE(portability-template-virtual-member-function)
+        getCustomKnobs(const THandle& handle,
                        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 };

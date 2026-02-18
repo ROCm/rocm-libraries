@@ -7,52 +7,103 @@
 #include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_test_sdk/utilities/MockEngine.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
-#include <hipdnn_test_sdk/utilities/MockPlan.hpp>
 
 using namespace hipdnn_plugin_sdk;
 using namespace hipdnn_test_sdk::utilities;
-using ::testing::_;
 using ::testing::NiceMock;
 using ::testing::Return;
 
-// Define test handle and execution context structs for testing
-struct HipdnnEnginePluginHandle
+// Define test handle, settings, and execution context structs for testing
+struct TestHandle
 {
 };
 
-struct HipdnnEnginePluginExecutionContext
+struct TestSettings
+{
+};
+
+struct TestContext
 {
 };
 
 namespace
 {
 
-std::unique_ptr<NiceMock<MockEngine>>
-    createMockEngine(int64_t engineId, bool applicable, size_t workspaceSize = 1024)
+// Test engine that inherits from IEngine with configurable behavior
+class TestEngine : public IEngine<TestHandle, TestSettings, TestContext>
 {
-    auto engine = std::make_unique<NiceMock<MockEngine>>();
-    ON_CALL(*engine, id()).WillByDefault(Return(engineId));
-    ON_CALL(*engine, isApplicable(_, _)).WillByDefault(Return(applicable));
-    ON_CALL(*engine, getMaxWorkspaceSize(_, _, _)).WillByDefault(Return(workspaceSize));
-    return engine;
+public:
+    TestEngine(int64_t engineId, bool applicable, size_t workspaceSize = 1024)
+        : _id(engineId)
+        , _applicable(applicable)
+        , _workspaceSize(workspaceSize)
+    {
+    }
+
+    int64_t id() const override
+    {
+        return _id;
+    }
+
+    bool isApplicable(
+        TestHandle& /*handle*/,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const override
+    {
+        return _applicable;
+    }
+
+    void getDetails(TestHandle& /*handle*/,
+                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+                    hipdnnPluginConstData_t& /*detailsOut*/) const override
+    {
+    }
+
+    size_t getMaxWorkspaceSize(
+        const TestHandle& /*handle*/,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/) const override
+    {
+        return _workspaceSize;
+    }
+
+    void initializeExecutionContext(
+        const TestHandle& /*handle*/,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
+        TestContext& /*executionContext*/) const override
+    {
+    }
+
+private:
+    int64_t _id;
+    bool _applicable;
+    size_t _workspaceSize;
+};
+
+// Define type alias for readability
+using TestEngineManager = EngineManager<TestHandle, TestSettings, TestContext>;
+
+std::unique_ptr<TestEngine>
+    createTestEngine(int64_t engineId, bool applicable, size_t workspaceSize = 1024)
+{
+    return std::make_unique<TestEngine>(engineId, applicable, workspaceSize);
 }
 
 } // namespace
 
 TEST(TestEngineManager, InitiallyHasNoEngines)
 {
-    EngineManager manager;
+    TestEngineManager manager;
     auto engineIds = manager.getAllEngineIds();
     EXPECT_TRUE(engineIds.empty());
 }
 
 TEST(TestEngineManager, AddEngineRegistersEngine)
 {
-    EngineManager manager;
-    manager.addEngine(createMockEngine(1, true));
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true));
 
     auto engineIds = manager.getAllEngineIds();
     ASSERT_EQ(engineIds.size(), 1u);
@@ -61,10 +112,10 @@ TEST(TestEngineManager, AddEngineRegistersEngine)
 
 TEST(TestEngineManager, AddMultipleEngines)
 {
-    EngineManager manager;
-    manager.addEngine(createMockEngine(1, true));
-    manager.addEngine(createMockEngine(2, false));
-    manager.addEngine(createMockEngine(3, true));
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true));
+    manager.addEngine(createTestEngine(2, false));
+    manager.addEngine(createTestEngine(3, true));
 
     auto engineIds = manager.getAllEngineIds();
     EXPECT_EQ(engineIds.size(), 3u);
@@ -72,12 +123,12 @@ TEST(TestEngineManager, AddMultipleEngines)
 
 TEST(TestEngineManager, GetApplicableEngineIdsFiltersCorrectly)
 {
-    EngineManager manager;
-    manager.addEngine(createMockEngine(1, true));
-    manager.addEngine(createMockEngine(2, false));
-    manager.addEngine(createMockEngine(3, true));
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true));
+    manager.addEngine(createTestEngine(2, false));
+    manager.addEngine(createTestEngine(3, true));
 
-    HipdnnEnginePluginHandle handle;
+    TestHandle handle;
     NiceMock<MockGraph> mockGraph;
     auto applicableIds = manager.getApplicableEngineIds(handle, mockGraph);
 
@@ -89,10 +140,10 @@ TEST(TestEngineManager, GetApplicableEngineIdsFiltersCorrectly)
 
 TEST(TestEngineManager, GetWorkspaceSizeReturnsEngineWorkspace)
 {
-    EngineManager manager;
-    manager.addEngine(createMockEngine(1, true, 2048));
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true, 2048));
 
-    HipdnnEnginePluginHandle handle;
+    TestHandle handle;
     NiceMock<MockGraph> mockGraph;
     NiceMock<MockEngineConfig> mockConfig;
     ON_CALL(mockConfig, engineId()).WillByDefault(Return(1));
@@ -103,10 +154,10 @@ TEST(TestEngineManager, GetWorkspaceSizeReturnsEngineWorkspace)
 
 TEST(TestEngineManager, GetWorkspaceSizeThrowsForUnknownEngine)
 {
-    EngineManager manager;
-    manager.addEngine(createMockEngine(1, true));
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true));
 
-    HipdnnEnginePluginHandle handle;
+    TestHandle handle;
     NiceMock<MockGraph> mockGraph;
     NiceMock<MockEngineConfig> mockConfig;
     ON_CALL(mockConfig, engineId()).WillByDefault(Return(999));

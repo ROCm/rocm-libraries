@@ -29,9 +29,14 @@ namespace hipdnn_plugin_sdk
  * - Calculating workspace requirements
  * - Creating executable plans via their plan builders
  *
+ * @tparam THandle The plugin-specific handle type (e.g., HipdnnMiopenHandle).
+ * @tparam TSettings The plugin-specific settings type (e.g., HipdnnMiopenSettings).
+ * @tparam TContext The plugin-specific context type (e.g., HipdnnMiopenContext).
+ *
  * @note Engines should be stateless. Any state required for execution should be stored on
  *  an execution context.
  */
+template <typename THandle, typename TSettings, typename TContext>
 class IEngine
 {
 public:
@@ -42,6 +47,7 @@ public:
      *
      * @return The engine's unique ID.
      */
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual int64_t id() const = 0;
 
     /**
@@ -54,7 +60,10 @@ public:
      * @return true if this engine can handle the graph, false otherwise.
      *
      */
-    virtual bool isApplicable(HipdnnEnginePluginHandle& handle, const IGraph& opGraph) const = 0;
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual bool isApplicable(THandle& handle,
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+        = 0;
 
     /**
      * @brief Gets the details of this engine.
@@ -69,8 +78,9 @@ public:
      * @param detailsOut Output parameter for the engine details data.
      *                   The caller is responsible for freeing this data.
      */
-    virtual void getDetails(HipdnnEnginePluginHandle& handle,
-                            const IGraph& opGraph,
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual void getDetails(THandle& handle,
+                            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                             hipdnnPluginConstData_t& detailsOut) const
         = 0;
 
@@ -82,12 +92,15 @@ public:
      *
      * @param handle The engine plugin handle.
      * @param opGraph The operation graph.
+     * @param engineConfig The engine configuration.
      * @return The maximum workspace size in bytes.
      */
-    virtual size_t getMaxWorkspaceSize(
-        const HipdnnEnginePluginHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
+    virtual size_t
+        // NOLINTNEXTLINE(portability-template-virtual-member-function)
+        getMaxWorkspaceSize(
+            const THandle& handle,
+            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+            const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
         = 0;
 
     /**
@@ -104,11 +117,12 @@ public:
      * @throws HipdnnPluginException if no applicable plan builder is found or
      *         if plan creation fails.
      */
-    virtual void
-        initializeExecutionContext(const HipdnnEnginePluginHandle& handle,
-                                   const IGraph& opGraph,
-                                   const IEngineConfig& engineConfig,
-                                   HipdnnEnginePluginExecutionContext& executionContext) const
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual void initializeExecutionContext(
+        const THandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        TContext& executionContext) const
         = 0;
 };
 

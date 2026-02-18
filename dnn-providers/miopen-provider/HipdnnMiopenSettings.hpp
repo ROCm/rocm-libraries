@@ -6,14 +6,12 @@
 #include <optional>
 
 /**
- * @file HipdnnEngineSpecificSettings.hpp
- * @brief MIOpen plugin's implementation of HipdnnEngineSpecificSettings.
+ * @brief MIOpen plugin-specific execution settings.
  *
- * This type is forward-declared in the plugin SDK's IPlanBuilder interface.
- * Each plugin must define this structure to hold plugin-specific execution settings.
+ * This structure holds settings that control MIOpen execution behavior,
+ * such as benchmarking mode and workspace size limits.
  */
-
-struct HipdnnEngineSpecificSettings
+struct HipdnnMiopenSettings
 {
     void setBenchmarkingEnabled(bool enabled)
     {
@@ -30,8 +28,7 @@ struct HipdnnEngineSpecificSettings
      *
      * Constrains GPU workspace memory (in bytes) used by MIOpen convolution algorithms.
      *
-     * @param limit Maximum workspace size in bytes. Must be within the range returned by
-     *              MiopenConvPlanBuilder::getWorkspaceSizeRange() for the specific operation.
+     * @param limit Maximum workspace size in bytes.
      *
      * @note If not set (std::nullopt), uses MIOpen's default workspace size.
      *       Smaller limits may reduce performance but save GPU memory.

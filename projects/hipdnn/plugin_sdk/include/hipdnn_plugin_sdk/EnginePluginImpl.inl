@@ -14,29 +14,32 @@
  * - HIPDNN_PLUGIN_NAME: String literal for the plugin name (e.g., "my_plugin")
  * - HIPDNN_PLUGIN_VERSION: String literal for the plugin version (e.g., "1.0.0")
  * - HIPDNN_PLUGIN_CONTAINER_TYPE: The container class type
- * - HIPDNN_PLUGIN_HANDLE_TYPE: The handle struct type (must have `container` member)
+ * - HIPDNN_PLUGIN_HANDLE_TYPE: The handle struct type (inherits from HipdnnEnginePluginHandle)
+ * - HIPDNN_PLUGIN_CONTEXT_TYPE: The context struct type (inherits from HipdnnEnginePluginExecutionContext)
  *
  * ## Required Types (define before including this file)
  *
  * 1. Handle type (HIPDNN_PLUGIN_HANDLE_TYPE):
+ *    - Must inherit from: HipdnnEnginePluginHandle
  *    - Must have: std::shared_ptr<HIPDNN_PLUGIN_CONTAINER_TYPE> container
  *    - Must have: void setStream(hipStream_t)
- *    - Must have: EngineManager& getEngineManager()
+ *    - Must have: EngineManager<...>& getEngineManager()
  *    - Must have: void removeEngineDetailsDetachedBuffer(const void*)
  *
- * 2. HipdnnEnginePluginExecutionContext struct:
- *    - Must have: IPlan& plan()
+ * 2. Context type (HIPDNN_PLUGIN_CONTEXT_TYPE):
+ *    - Must inherit from: HipdnnEnginePluginExecutionContext
+ *    - Must inherit from: ExecutionContextBase<THandle, TSettings>
+ *    - Must have: IPlan<THandle>& plan()
  *
  * 3. Container type (HIPDNN_PLUGIN_CONTAINER_TYPE):
- *    - Must have: EngineManager& getEngineManager()
+ *    - Must have: EngineManager<...>& getEngineManager()
  *    - Must have: static uint32_t copyEngineIds(int64_t*, uint32_t, uint32_t&)
  *
  * ## Usage Example
  *
  * ```cpp
  * // MiopenPluginPublic.cpp
- * #include "HipdnnEnginePluginExecutionContext.hpp"
- * #include "HipdnnEnginePluginHandle.hpp"
+ * #include "HipdnnMiopenTypes.hpp"
  * #include "MiopenContainer.hpp"
  *
  * using namespace miopen_plugin;
@@ -44,7 +47,8 @@
  * #define HIPDNN_PLUGIN_NAME "miopen_provider_plugin"
  * #define HIPDNN_PLUGIN_VERSION "1.0.0"
  * #define HIPDNN_PLUGIN_CONTAINER_TYPE MiopenContainer
- * #define HIPDNN_PLUGIN_HANDLE_TYPE HipdnnEnginePluginHandle
+ * #define HIPDNN_PLUGIN_HANDLE_TYPE HipdnnMiopenHandle
+ * #define HIPDNN_PLUGIN_CONTEXT_TYPE HipdnnMiopenContext
  *
  * #include <hipdnn_plugin_sdk/EnginePluginImpl.inl>
  * ```
@@ -64,6 +68,10 @@
 
 #ifndef HIPDNN_PLUGIN_HANDLE_TYPE
 #error "HIPDNN_PLUGIN_HANDLE_TYPE must be defined before including EnginePluginImpl.inl"
+#endif
+
+#ifndef HIPDNN_PLUGIN_CONTEXT_TYPE
+#error "HIPDNN_PLUGIN_CONTEXT_TYPE must be defined before including EnginePluginImpl.inl"
 #endif
 
 #include <memory>
@@ -215,7 +223,7 @@ extern "C"
 
             auto* newHandle      = new HIPDNN_PLUGIN_HANDLE_TYPE();
             newHandle->container = containerManager.getOrCreate();
-            *handle              = newHandle;
+            *handle              = static_cast<hipdnnEnginePluginHandle_t>(newHandle);
 
             LOG_API_SUCCESS(apiName, "createdHandle=" << static_cast<void*>(*handle));
         });
@@ -228,8 +236,8 @@ extern "C"
         return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
             hipdnn_plugin_sdk::throwIfNull(handle);
 
-            delete handle;
-            handle = nullptr;
+            auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
+            delete typedHandle;
 
             LOG_API_SUCCESS(apiName, "");
         });
@@ -244,7 +252,8 @@ extern "C"
         return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
             hipdnn_plugin_sdk::throwIfNull(handle);
 
-            handle->setStream(stream);
+            auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
+            typedHandle->setStream(stream);
 
             LOG_API_SUCCESS(apiName, "");
         });
@@ -272,11 +281,12 @@ extern "C"
             }
             hipdnn_plugin_sdk::throwIfNull(numEngines);
 
-            auto& engineManager = handle->getEngineManager();
+            auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
+            auto& engineManager = typedHandle->getEngineManager();
             hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                                opGraph->size);
 
-            auto applicableEngines = engineManager.getApplicableEngineIds(*handle, opGraphWrapper);
+            auto applicableEngines = engineManager.getApplicableEngineIds(*typedHandle, opGraphWrapper);
 
             *numEngines = 0;
             for(auto& engineId : applicableEngines)
@@ -313,11 +323,12 @@ extern "C"
             hipdnn_plugin_sdk::throwIfNull(opGraph);
             hipdnn_plugin_sdk::throwIfNull(engineDetails);
 
-            auto& engineManager = handle->getEngineManager();
+            auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
+            auto& engineManager = typedHandle->getEngineManager();
             hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                                opGraph->size);
 
-            engineManager.getEngineDetails(*handle, opGraphWrapper, engineId, *engineDetails);
+            engineManager.getEngineDetails(*typedHandle, opGraphWrapper, engineId, *engineDetails);
 
             LOG_API_SUCCESS(apiName, "engineDetails->ptr=" << engineDetails->ptr);
         });
@@ -335,7 +346,8 @@ extern "C"
             hipdnn_plugin_sdk::throwIfNull(engineDetails);
             hipdnn_plugin_sdk::throwIfNull(engineDetails->ptr);
 
-            handle->removeEngineDetailsDetachedBuffer(engineDetails->ptr);
+            auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
+            typedHandle->removeEngineDetailsDetachedBuffer(engineDetails->ptr);
 
             LOG_API_SUCCESS(apiName, "engineDetails->ptr=" << engineDetails->ptr);
         });
@@ -358,14 +370,15 @@ extern "C"
             hipdnn_plugin_sdk::throwIfNull(opGraph);
             hipdnn_plugin_sdk::throwIfNull(workspaceSize);
 
-            auto& engineManager = handle->getEngineManager();
+            auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
+            auto& engineManager = typedHandle->getEngineManager();
 
             hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
                 engineConfig->ptr, engineConfig->size);
             hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                                opGraph->size);
             *workspaceSize = engineManager.getMaxWorkspaceSize(
-                *handle, opGraphWrapper, engineConfigWrapper);
+                *typedHandle, opGraphWrapper, engineConfigWrapper);
 
             LOG_API_SUCCESS(apiName, "workspaceSize=" << *workspaceSize);
         });
@@ -388,19 +401,21 @@ extern "C"
             hipdnn_plugin_sdk::throwIfNull(opGraph);
             hipdnn_plugin_sdk::throwIfNull(executionContext);
 
+            auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
+
             hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                                opGraph->size);
             hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
                 engineConfig->ptr, engineConfig->size);
 
-            auto& engineManager = handle->getEngineManager();
+            auto& engineManager = typedHandle->getEngineManager();
 
-            auto context = new HipdnnEnginePluginExecutionContext;
+            auto* context = new HIPDNN_PLUGIN_CONTEXT_TYPE;
 
             try
             {
                 engineManager.initializeExecutionContext(
-                    *handle, opGraphWrapper, engineConfigWrapper, *context);
+                    *typedHandle, opGraphWrapper, engineConfigWrapper, *context);
             }
             catch(...)
             {
@@ -408,7 +423,7 @@ extern "C"
                 throw;
             }
 
-            *executionContext = context;
+            *executionContext = static_cast<hipdnnEnginePluginExecutionContext_t>(context);
 
             LOG_API_SUCCESS(apiName,
                             "created_execution_context=" << static_cast<void*>(*executionContext));
@@ -426,7 +441,8 @@ extern "C"
             hipdnn_plugin_sdk::throwIfNull(handle);
             hipdnn_plugin_sdk::throwIfNull(executionContext);
 
-            delete executionContext;
+            auto* typedContext = static_cast<HIPDNN_PLUGIN_CONTEXT_TYPE*>(executionContext);
+            delete typedContext;
 
             LOG_API_SUCCESS(apiName, "destroyed executionContext");
         });
@@ -447,7 +463,9 @@ extern "C"
             hipdnn_plugin_sdk::throwIfNull(executionContext);
             hipdnn_plugin_sdk::throwIfNull(workspaceSize);
 
-            *workspaceSize = executionContext->plan().getWorkspaceSize(*handle);
+            auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
+            auto* typedContext = static_cast<HIPDNN_PLUGIN_CONTEXT_TYPE*>(executionContext);
+            *workspaceSize = typedContext->plan().getWorkspaceSize(*typedHandle);
 
             LOG_API_SUCCESS(apiName, "workspaceSize=" << *workspaceSize);
         });
@@ -471,7 +489,9 @@ extern "C"
             hipdnn_plugin_sdk::throwIfNull(executionContext);
             hipdnn_plugin_sdk::throwIfNull(deviceBuffers);
 
-            executionContext->plan().execute(*handle, deviceBuffers, numDeviceBuffers, workspace);
+            auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
+            auto* typedContext = static_cast<HIPDNN_PLUGIN_CONTEXT_TYPE*>(executionContext);
+            typedContext->plan().execute(*typedHandle, deviceBuffers, numDeviceBuffers, workspace);
 
             LOG_API_SUCCESS(apiName, "executed graph");
         });

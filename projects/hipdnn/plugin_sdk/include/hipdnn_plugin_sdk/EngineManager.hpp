@@ -28,12 +28,21 @@ namespace hipdnn_plugin_sdk
  * This class is typically owned by an EnginePluginContainer and shares
  * its lifespan with it.
  *
+ * @tparam THandle The plugin-specific handle type (e.g., HipdnnMiopenHandle).
+ * @tparam TSettings The plugin-specific settings type (e.g., HipdnnMiopenSettings).
+ * @tparam TContext The plugin-specific context type (e.g., HipdnnMiopenContext).
+ *
  * @note Implementations should be stateless or thread-safe, as the engine
  *       manager may be accessed from multiple threads concurrently.
  */
+template <typename THandle, typename TSettings, typename TContext>
 class EngineManager
 {
 public:
+    using Engine = IEngine<THandle, TSettings, TContext>;
+    using IGraph = hipdnn_data_sdk::flatbuffer_utilities::IGraph;
+    using IEngineConfig = hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig;
+
     EngineManager() = default;
     virtual ~EngineManager() = default;
 
@@ -50,7 +59,7 @@ public:
      *
      * @param engine The engine to add. Ownership is transferred.
      */
-    void addEngine(std::unique_ptr<IEngine> engine)
+    void addEngine(std::unique_ptr<Engine> engine)
     {
         auto id = engine->id();
         _engines.emplace(id, std::move(engine));
@@ -79,8 +88,7 @@ public:
      * @param opGraph The operation graph to check.
      * @return Vector of applicable engine IDs.
      */
-    std::vector<int64_t> getApplicableEngineIds(HipdnnEnginePluginHandle& handle,
-                                                const IGraph& opGraph)
+    std::vector<int64_t> getApplicableEngineIds(THandle& handle, const IGraph& opGraph)
     {
         std::vector<int64_t> applicable;
         for(const auto& [id, engine] : _engines)
@@ -101,7 +109,7 @@ public:
      * @param engineId The ID of the engine.
      * @param engineDetailsOut Output parameter for the engine details.
      */
-    void getEngineDetails(HipdnnEnginePluginHandle& handle,
+    void getEngineDetails(THandle& handle,
                           const IGraph& opGraph,
                           int64_t engineId,
                           hipdnnPluginConstData_t& engineDetailsOut)
@@ -114,14 +122,13 @@ public:
      * @brief Gets the workspace size for a specific engine and graph.
      *
      * @param handle The engine plugin handle.
-     * @param engineId The ID of the engine.
      * @param opGraph The operation graph.
+     * @param engineConfig The engine configuration.
      * @return The required workspace size in bytes.
      */
-    size_t getMaxWorkspaceSize(
-        const HipdnnEnginePluginHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
+    size_t getMaxWorkspaceSize(const THandle& handle,
+                               const IGraph& opGraph,
+                               const IEngineConfig& engineConfig) const
     {
         auto& engine = getEngine(engineConfig.engineId());
         return engine.getMaxWorkspaceSize(handle, opGraph, engineConfig);
@@ -138,10 +145,10 @@ public:
      * @param engineConfig The engine configuration.
      * @param executionContext The execution context to initialize.
      */
-    void initializeExecutionContext(const HipdnnEnginePluginHandle& handle,
+    void initializeExecutionContext(const THandle& handle,
                                     const IGraph& opGraph,
                                     const IEngineConfig& engineConfig,
-                                    HipdnnEnginePluginExecutionContext& executionContext) const
+                                    TContext& executionContext) const
     {
         auto& engine = getEngine(engineConfig.engineId());
         engine.initializeExecutionContext(handle, opGraph, engineConfig, executionContext);
@@ -155,7 +162,7 @@ protected:
      * @return Reference to the engine.
      * @throws HipdnnPluginException if the engine is not found.
      */
-    IEngine& getEngine(int64_t engineId) const
+    Engine& getEngine(int64_t engineId) const
     {
         auto it = _engines.find(engineId);
         if(it == _engines.end())
@@ -168,7 +175,7 @@ protected:
     }
 
 private:
-    std::unordered_map<int64_t, std::unique_ptr<IEngine>> _engines;
+    std::unordered_map<int64_t, std::unique_ptr<Engine>> _engines;
 };
 
 } // namespace hipdnn_plugin_sdk

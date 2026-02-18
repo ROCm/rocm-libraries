@@ -7,11 +7,7 @@
 #include <memory>
 #include <vector>
 
-namespace hipdnn_plugin_sdk
-{
-class IEngine;
-class EngineManager;
-}
+#include "HipdnnMiopenHandle.hpp"
 
 namespace miopen_plugin
 {
@@ -37,18 +33,25 @@ public:
     // Returns: Total number of available engines (regardless of maxEngines value).
     static uint32_t copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines);
 
-    hipdnn_plugin_sdk::EngineManager& getEngineManager();
+    hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>&
+        getEngineManager();
 
 private:
     struct EngineDefinition
     {
         int64_t id; // Set id using EngineNames.hpp.
-        std::function<std::unique_ptr<hipdnn_plugin_sdk::IEngine>()> createEngine;
+        std::function<std::unique_ptr<hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle,
+                                                                 HipdnnMiopenSettings,
+                                                                 HipdnnMiopenContext>>()>
+            createEngine;
     };
 
     static const std::vector<EngineDefinition>& getEngineDefinitions();
 
-    std::unique_ptr<hipdnn_plugin_sdk::EngineManager> _engineManager;
+    std::unique_ptr<hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle,
+                                                     HipdnnMiopenSettings,
+                                                     HipdnnMiopenContext>>
+        _engineManager;
 };
 
 }

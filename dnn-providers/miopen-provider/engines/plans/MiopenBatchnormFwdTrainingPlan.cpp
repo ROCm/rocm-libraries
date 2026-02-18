@@ -5,8 +5,6 @@
 #include "MiopenUtils.hpp"
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 
-#include "HipdnnEnginePluginHandle.hpp"
-
 namespace miopen_plugin
 {
 
@@ -205,22 +203,21 @@ const std::optional<MiopenTensor>& BatchnormFwdTrainingParams::activationOut() c
     return _activationOut;
 }
 
-BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(
-    BatchnormFwdTrainingParams&& trainingParams,
-    const HipdnnEngineSpecificSettings& executionSettings)
+BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,
+                                                   const HipdnnMiopenSettings& executionSettings)
     : _trainingParams(std::move(trainingParams))
     , _executionSettings(executionSettings)
 {
 }
 
 size_t BatchnormFwdTrainingPlan::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+    [[maybe_unused]] const HipdnnMiopenHandle& handle) const
 {
     // No workspace needed for batchnorm training
     return 0;
 }
 
-void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
+void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
                                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                        uint32_t numDeviceBuffers,
                                        [[maybe_unused]] void* workspace) const

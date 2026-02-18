@@ -6,8 +6,6 @@
 
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 
-#include "HipdnnEnginePluginHandle.hpp"
-
 namespace miopen_plugin
 {
 
@@ -85,22 +83,21 @@ const std::optional<MiopenTensor>& BatchnormFwdInferenceParams::activationOut() 
     return _activationOut;
 }
 
-BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(
-    BatchnormFwdInferenceParams&& inferenceParams,
-    const HipdnnEngineSpecificSettings& executionSettings)
+BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams,
+                                                     const HipdnnMiopenSettings& executionSettings)
     : _inferenceParams(std::move(inferenceParams))
     , _executionSettings(executionSettings)
 {
 }
 
 size_t BatchnormFwdInferencePlan::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+    [[maybe_unused]] const HipdnnMiopenHandle& handle) const
 {
     // No workspace needed for batchnorm inference
     return 0;
 }
 
-void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
+void BatchnormFwdInferencePlan::execute(const HipdnnMiopenHandle& handle,
                                         const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                         uint32_t numDeviceBuffers,
                                         [[maybe_unused]] void* workspace) const

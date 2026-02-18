@@ -15,12 +15,28 @@ using namespace hipdnn_plugin_sdk;
 namespace
 {
 
+// Define test handle, settings, and execution context structs for testing
+struct TestHandle
+{
+};
+
+struct TestSettings
+{
+};
+
+struct TestContext
+{
+};
+
+// Define type alias for readability
+using TestEngineManager = EngineManager<TestHandle, TestSettings, TestContext>;
+
 // Test container that tracks initialization and meets requirements
 class TestContainer
 {
 public:
     TestContainer()
-        : _engineManager(std::make_unique<EngineManager>())
+        : _engineManager(std::make_unique<TestEngineManager>())
     {
         instanceCount++;
     }
@@ -37,7 +53,7 @@ public:
         return 0;
     }
 
-    EngineManager& getEngineManager()
+    TestEngineManager& getEngineManager()
     {
         return *_engineManager;
     }
@@ -45,7 +61,7 @@ public:
     static int instanceCount;
 
 private:
-    std::unique_ptr<EngineManager> _engineManager;
+    std::unique_ptr<TestEngineManager> _engineManager;
 };
 
 int TestContainer::instanceCount = 0;
@@ -142,13 +158,13 @@ namespace
 {
 
 // Test handle that meets all requirements for validateHandleType
-struct TestHandle
+struct TestValidHandle
 {
     std::shared_ptr<TestContainer> container;
 
     void setStream(hipStream_t /*stream*/) {}
 
-    EngineManager& getEngineManager()
+    TestEngineManager& getEngineManager()
     {
         return container->getEngineManager();
     }
@@ -161,26 +177,26 @@ struct TestHandle
 TEST(TestEnginePluginContainer, ValidHandlePassesCompileTimeValidation)
 {
     // Test that the compile-time validation works for handles meeting requirements
-    constexpr bool K_VALID = (validateHandleType<TestHandle, TestContainer>(), true);
+    constexpr bool K_VALID = (validateHandleType<TestValidHandle, TestContainer>(), true);
     EXPECT_TRUE(K_VALID);
 }
 
 TEST(TestEnginePluginContainer, HandleTypeTraitsDetectContainerMember)
 {
-    EXPECT_TRUE((HasContainerMember<TestHandle, TestContainer>::value));
+    EXPECT_TRUE((HasContainerMember<TestValidHandle, TestContainer>::value));
 }
 
 TEST(TestEnginePluginContainer, HandleTypeTraitsDetectSetStream)
 {
-    EXPECT_TRUE((HasSetStream<TestHandle>::value));
+    EXPECT_TRUE((HasSetStream<TestValidHandle>::value));
 }
 
 TEST(TestEnginePluginContainer, HandleTypeTraitsDetectGetEngineManager)
 {
-    EXPECT_TRUE((HasGetEngineManager<TestHandle>::value));
+    EXPECT_TRUE((HasGetEngineManager<TestValidHandle>::value));
 }
 
 TEST(TestEnginePluginContainer, HandleTypeTraitsDetectRemoveEngineDetailsDetachedBuffer)
 {
-    EXPECT_TRUE((HasRemoveEngineDetailsDetachedBuffer<TestHandle>::value));
+    EXPECT_TRUE((HasRemoveEngineDetailsDetachedBuffer<TestValidHandle>::value));
 }

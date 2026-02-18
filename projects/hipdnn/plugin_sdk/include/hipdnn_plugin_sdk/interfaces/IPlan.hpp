@@ -21,9 +21,12 @@ namespace hipdnn_plugin_sdk
  * Plans should be immutable after creation - their lifecycle and execution can be
  * safely handled by the EnginePluginContainer.
  *
+ * @tparam THandle The plugin-specific handle type (e.g., HipdnnMiopenHandle).
+ *
  * @note Implementations should be thread-safe as plans may be executed from multiple
  *       threads concurrently with different device buffers.
  */
+template <typename THandle>
 class IPlan
 {
 public:
@@ -35,7 +38,8 @@ public:
      * @param handle The engine plugin handle.
      * @return The workspace size in bytes required for execution.
      */
-    virtual size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const = 0;
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual size_t getWorkspaceSize(const THandle& handle) const = 0;
 
     /**
      * @brief Executes the plan with the provided device buffers.
@@ -45,7 +49,8 @@ public:
      * @param numDeviceBuffers Number of device buffers in the array.
      * @param workspace Optional workspace memory. May be nullptr if no workspace is required.
      */
-    virtual void execute(const HipdnnEnginePluginHandle& handle,
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual void execute(const THandle& handle,
                          const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                          uint32_t numDeviceBuffers,
                          void* workspace = nullptr) const

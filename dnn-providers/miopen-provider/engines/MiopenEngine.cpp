@@ -1,8 +1,7 @@
-﻿// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
 #include "MiopenEngine.hpp"
-#include "HipdnnEngineSpecificSettings.hpp"
 #include "plans/MiopenBatchnormPlanBuilder.hpp"
 
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
@@ -26,7 +25,7 @@ auto createBenchmarkingKnob(flatbuffers::FlatBufferBuilder& builder)
 }
 
 void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
-                                   HipdnnEngineSpecificSettings& executionSettings)
+                                   HipdnnMiopenSettings& executionSettings)
 {
     if(!engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
     {
@@ -49,9 +48,9 @@ void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engin
     executionSettings.setBenchmarkingEnabled(value != 0);
 }
 
-void initializeHipdnnEngineSpecificSettings(
+void initializeMiopenSettings(
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    HipdnnEngineSpecificSettings& executionSettings)
+    HipdnnMiopenSettings& executionSettings)
 {
     if(engineConfig.isValid())
     {
@@ -75,7 +74,7 @@ int64_t MiopenEngine::id() const
     return _id;
 }
 
-bool MiopenEngine::isApplicable(HipdnnEnginePluginHandle& handle,
+bool MiopenEngine::isApplicable(HipdnnMiopenHandle& handle,
                                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     // This is wrong if we ever have more than 1 plan builder thats applicable.
@@ -90,7 +89,7 @@ bool MiopenEngine::isApplicable(HipdnnEnginePluginHandle& handle,
     return false;
 }
 
-void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
+void MiopenEngine::getDetails(HipdnnMiopenHandle& handle,
                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                               hipdnnPluginConstData_t& detailsOut) const
 {
@@ -134,12 +133,12 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
 }
 
 size_t MiopenEngine::getMaxWorkspaceSize(
-    const HipdnnEnginePluginHandle& handle,
+    const HipdnnMiopenHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
-    HipdnnEngineSpecificSettings baseExecutionSettings;
-    initializeHipdnnEngineSpecificSettings(engineConfig, baseExecutionSettings);
+    HipdnnMiopenSettings baseExecutionSettings;
+    initializeMiopenSettings(engineConfig, baseExecutionSettings);
 
     size_t workspaceSize = 0;
 
@@ -147,7 +146,7 @@ size_t MiopenEngine::getMaxWorkspaceSize(
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            HipdnnEngineSpecificSettings executionSettings = baseExecutionSettings;
+            HipdnnMiopenSettings executionSettings = baseExecutionSettings;
             planBuilder->initializeExecutionSettings(
                 handle, opGraph, engineConfig, executionSettings);
             workspaceSize
@@ -160,13 +159,13 @@ size_t MiopenEngine::getMaxWorkspaceSize(
 }
 
 void MiopenEngine::initializeExecutionContext(
-    const HipdnnEnginePluginHandle& handle,
+    const HipdnnMiopenHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    HipdnnEnginePluginExecutionContext& executionContext) const
+    HipdnnMiopenContext& executionContext) const
 {
-    HipdnnEngineSpecificSettings executionSettings;
-    initializeHipdnnEngineSpecificSettings(engineConfig, executionSettings);
+    HipdnnMiopenSettings executionSettings;
+    initializeMiopenSettings(engineConfig, executionSettings);
 
     for(const auto& planBuilder : _planBuilders)
     {
@@ -190,7 +189,10 @@ void MiopenEngine::initializeExecutionContext(
     }
 }
 
-void MiopenEngine::addPlanBuilder(std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder> planBuilder)
+void MiopenEngine::addPlanBuilder(
+    std::unique_ptr<hipdnn_plugin_sdk::
+                        IPlanBuilder<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>>
+        planBuilder)
 {
     _planBuilders.push_back(std::move(planBuilder));
 }
