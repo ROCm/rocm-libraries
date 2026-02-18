@@ -9,14 +9,20 @@
 
 namespace ck {
 
-// Shared helper class hierarchy for threadwise tensor slice transfer variants.
-//
-// ThreadwiseTransferHelper_Base         -- generic coordinate/descriptor utilities
-//   ThreadwiseTransferHelper_Serpentine -- serpentine (snake/zigzag) traversal
-//   ThreadwiseTransferHelper_SFC        -- SpaceFillingCurve traversal
+/**
+ * @file threadwise_tensor_slice_transfer_util.hpp
+ * @brief Shared helper class hierarchy for threadwise tensor slice transfer variants.
+ *
+ * Provides a three-tier inheritance structure:
+ *
+ * - @ref ThreadwiseTransferHelper_Base — generic coordinate/descriptor utilities
+ *   - @ref ThreadwiseTransferHelper_Serpentine — serpentine (snake/zigzag) traversal
+ *   - @ref ThreadwiseTransferHelper_SFC — SpaceFillingCurve traversal
+ */
 
 namespace detail {
 
+/** @brief Functor returning ScalarPerVector for dimension VectorDim, 1 otherwise. */
 template <index_t VectorDim, index_t ScalarPerVector>
 struct lambda_scalar_per_access
 {
@@ -26,6 +32,7 @@ struct lambda_scalar_per_access
     }
 };
 
+/** @brief Functor returning 1 for dimension VectorDim, 0 otherwise. */
 template <index_t VectorDim>
 struct lambda_scalar_step_in_vector
 {
@@ -35,6 +42,10 @@ struct lambda_scalar_step_in_vector
     }
 };
 
+/**
+ * @brief Functor computing scalar-per-access for combined src/dst vector dimensions.
+ * Returns lcm when both src and dst share the same vector dimension.
+ */
 template <index_t SrcVectorDim,
           index_t SrcScalarPerVector,
           index_t DstVectorDim,
@@ -64,13 +75,19 @@ struct lambda_scalar_per_access_for_src_and_dst
 
 } // namespace detail
 
-// =====================================================================
-// Base helper with methods shared by all threadwise transfer variants.
-// Both serpentine and SpaceFillingCurve helpers inherit from this.
-// =====================================================================
+/**
+ * @brief Base helper with methods shared by all threadwise transfer variants.
+ *
+ * Both ThreadwiseTransferHelper_Serpentine and ThreadwiseTransferHelper_SFC
+ * inherit from this class. Contains generic coordinate stepping, thread scratch
+ * descriptor construction, and compile-time index constants.
+ */
 struct ThreadwiseTransferHelper_Base
 {
-    // Compile-time index constants
+    /**
+     * @name Compile-time index constants
+     * @{
+     */
     static constexpr auto I0  = Number<0>{};
     static constexpr auto I1  = Number<1>{};
     static constexpr auto I2  = Number<2>{};
@@ -85,8 +102,20 @@ struct ThreadwiseTransferHelper_Base
     static constexpr auto I13 = Number<13>{};
     static constexpr auto I14 = Number<14>{};
     static constexpr auto I16 = Number<16>{};
+    /** @} */
 
-    // Move slice window with optional coordinate reset fusion.
+    /**
+     * @brief Move the slice window by a step, optionally fusing coordinate reset.
+     *
+     * If the coordinate was not reset after RunRead/RunWrite, the reset step is
+     * added to the movement step to avoid a separate coordinate adjustment.
+     *
+     * @tparam ResetCoordinateAfterRun  Whether the coordinate was already reset.
+     * @param desc                      Tensor descriptor.
+     * @param coord                     Tensor coordinate to move (modified in place).
+     * @param slice_origin_step_idx     Step index for the slice window movement.
+     * @param get_reset_step            Callable returning the coordinate reset step.
+     */
     template <typename Desc,
               typename Coord,
               bool ResetCoordinateAfterRun,
@@ -106,7 +135,19 @@ struct ThreadwiseTransferHelper_Base
         move_tensor_coordinate(desc, coord, adjusted_step);
     }
 
-    // Compute thread scratch descriptor for a given vector dimension and scalar per vector.
+    /**
+     * @brief Build the thread-local scratch tensor descriptor.
+     *
+     * Creates a transformed tensor descriptor where the vector dimension is merged
+     * with an additional dimension of size ScalarPerVector, enabling vector-typed
+     * access to the scratch buffer.
+     *
+     * @tparam nDim              Number of tensor dimensions.
+     * @tparam SliceLengths      Compile-time sequence of per-dimension slice lengths.
+     * @tparam VectorDim         Which dimension is vectorized.
+     * @tparam ScalarPerVector_  Number of scalars per vector load/store.
+     * @return Transformed tensor descriptor for the thread scratch buffer.
+     */
     template <index_t nDim, typename SliceLengths, index_t VectorDim, index_t ScalarPerVector_>
     __host__ __device__ static constexpr auto ComputeThreadScratchDescriptor()
     {
@@ -155,7 +196,16 @@ struct ThreadwiseTransferHelper_Base
         return transform_tensor_descriptor(desc0, transforms, low_dim_idss, up_dim_idss);
     }
 
-    // Compute forward coordinate steps for each dimension.
+    /**
+     * @brief Compute forward (+1) coordinate steps for each dimension.
+     *
+     * Returns a tuple of nDim coordinate steps, where step[i] moves by
+     * +scalar_per_access[i] in dimension i and 0 in all other dimensions.
+     *
+     * @tparam nDim  Number of tensor dimensions.
+     * @param desc   Tensor descriptor.
+     * @param scalar_per_access  Per-dimension access widths (Sequence type).
+     */
     template <index_t nDim, typename Desc, typename ScalarPerAccess>
     __host__ __device__ static constexpr auto
     ComputeForwardSteps(const Desc& desc, const ScalarPerAccess& scalar_per_access)
@@ -172,7 +222,15 @@ struct ThreadwiseTransferHelper_Base
             Number<nDim>{});
     }
 
-    // Compute backward coordinate steps for each dimension.
+    /**
+     * @brief Compute backward (-1) coordinate steps for each dimension.
+     *
+     * Same as ComputeForwardSteps but with negated step values.
+     *
+     * @tparam nDim  Number of tensor dimensions.
+     * @param desc   Tensor descriptor.
+     * @param scalar_per_access  Per-dimension access widths (Sequence type).
+     */
     template <index_t nDim, typename Desc, typename ScalarPerAccess>
     __host__ __device__ static constexpr auto
     ComputeBackwardSteps(const Desc& desc, const ScalarPerAccess& scalar_per_access)
@@ -190,7 +248,13 @@ struct ThreadwiseTransferHelper_Base
             Number<nDim>{});
     }
 
-    // Generate a tuple of vector types from a data type tuple.
+    /**
+     * @brief Create a tuple of default-constructed vector containers, one per data type.
+     *
+     * @tparam DataTypes       Tuple of data types (e.g., Tuple<fp16_t, fp16_t>).
+     * @tparam ScalarPerVector Number of scalars per vector.
+     * @return Tuple of vector_type_maker_t<DataType, ScalarPerVector> instances.
+     */
     template <typename DataTypes, index_t ScalarPerVector>
     __host__ __device__ static auto MakeVectorContainerTuple()
     {
@@ -208,15 +272,21 @@ struct ThreadwiseTransferHelper_Base
     }
 };
 
-// =====================================================================
-// Serpentine (snake/zigzag) traversal helper.
-// Used by: v3r1, v3r2, v3r1_gather, v3r1_dequant
-// =====================================================================
+/**
+ * @brief Serpentine (snake/zigzag) traversal helper.
+ *
+ * Provides methods for computing serpentine sweep directions, dimension movement
+ * decisions, and coordinate reset steps used by the v3r1 family of transfer classes.
+ *
+ * Used by: ThreadwiseTensorSliceTransfer_v3r1, v3r2, v3r1_gather, v3r1_dequant.
+ */
 struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
 {
-    // Binary decomposition of vector widths 0-16 into power-of-2 sub-load sizes.
-    // Index N gives the sequence of sub-load widths whose sum equals N.
-    // E.g. index 7 -> Sequence<I4, I2, I1> means loads of width 4, 2, 1.
+    /**
+     * @brief Binary decomposition of vector widths 0-16 into power-of-2 sub-load sizes.
+     * Index N gives the sequence of sub-load widths whose sum equals N.
+     * E.g. index 7 -> Sequence<I4, I2, I1> means loads of width 4, 2, 1.
+     */
     using VectorSizeLookupTable = Tuple<Sequence<>,
                                         Sequence<I1>,
                                         Sequence<I2>,
@@ -235,8 +305,10 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
                                         Sequence<I8, I4, I2, I1>,
                                         Sequence<I16>>;
 
-    // Starting offsets for each sub-load in VectorSizeLookupTable.
-    // E.g. index 7 -> Sequence<I0, I4, I6> means offsets 0, 4, 6.
+    /**
+     * @brief Starting offsets for each sub-load in VectorSizeLookupTable.
+     * E.g. index 7 -> Sequence<I0, I4, I6> means offsets 0, 4, 6.
+     */
     using VectorOffsetsLookupTable = Tuple<Sequence<>,
                                            Sequence<I0>,
                                            Sequence<I0>,
@@ -255,7 +327,18 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
                                            Sequence<I0, I8, I12, I14>,
                                            Sequence<I0>>;
 
-    // Compute serpentine (snake/zigzag) sweep direction for each dimension.
+    /**
+     * @brief Compute serpentine sweep direction for each dimension.
+     *
+     * Determines whether each dimension should be traversed forward or backward
+     * based on the current position in the ordered access grid, implementing
+     * a zigzag (serpentine) traversal pattern.
+     *
+     * @tparam nDim  Number of tensor dimensions.
+     * @param ordered_access_idx      Current position in the ordered access grid.
+     * @param ordered_access_lengths  Size of the ordered access grid per dimension.
+     * @return Array of booleans: true = forward, false = backward.
+     */
     template <index_t nDim, typename OrderedAccessIdx, typename OrderedAccessLengths>
     __host__ __device__ static constexpr auto
     ComputeForwardSweep(const OrderedAccessIdx& ordered_access_idx,
@@ -277,7 +360,17 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
         return forward_sweep_;
     }
 
-    // Compute which dimensions need coordinate movement at a given iteration point.
+    /**
+     * @brief Determine which dimensions need coordinate movement at a given iteration.
+     *
+     * A dimension moves when it hasn't reached its end and all higher-priority
+     * (faster-varying) dimensions have completed their ranges.
+     *
+     * @tparam nDim  Number of tensor dimensions.
+     * @param ordered_access_idx      Current position in the ordered access grid.
+     * @param ordered_access_lengths  Size of the ordered access grid per dimension.
+     * @return Array of booleans: true = move coordinate on this dimension.
+     */
     template <index_t nDim, typename OrderedAccessIdx, typename OrderedAccessLengths>
     __host__ __device__ static constexpr auto
     ComputeMoveOnDim(const OrderedAccessIdx& ordered_access_idx,
@@ -296,7 +389,17 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
         return move_on_dim_;
     }
 
-    // Compute data index from ordered access index, converting back to natural dimension order.
+    /**
+     * @brief Convert ordered access index to natural dimension order and apply scaling.
+     *
+     * @tparam nDim  Number of tensor dimensions.
+     * @param ordered_access_idx      Current position in the ordered access grid.
+     * @param ordered_access_lengths  Size of the ordered access grid per dimension.
+     * @param forward_sweep           Per-dimension sweep direction.
+     * @param dim_access_order        Mapping from ordered to natural dimension indices.
+     * @param scalar_per_access       Per-dimension access widths.
+     * @return MultiIndex in natural dimension order, scaled by scalar_per_access.
+     */
     template <index_t nDim,
               typename OrderedAccessIdx,
               typename OrderedAccessLengths,
@@ -321,7 +424,19 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
         return container_reorder_given_old2new(ordered_idx, dim_access_order) * scalar_per_access;
     }
 
-    // Compute coordinate reset step (to return to origin after serpentine traversal).
+    /**
+     * @brief Compute the coordinate step needed to return to the origin after traversal.
+     *
+     * Determines where the coordinate ends up after a full serpentine traversal,
+     * then returns the negated position as the reset step.
+     *
+     * @tparam nDim              Number of tensor dimensions.
+     * @tparam SliceLengths      Compile-time sequence of per-dimension slice lengths.
+     * @tparam VectorDim         Which dimension is vectorized.
+     * @tparam ScalarPerVector_  Number of scalars per vector load/store.
+     * @tparam DimAccessOrder    Compile-time sequence mapping ordered to natural dims.
+     * @return MultiIndex representing the step to reset the coordinate to the origin.
+     */
     template <index_t nDim,
               typename SliceLengths,
               index_t VectorDim,
@@ -339,13 +454,11 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
         constexpr auto ordered_access_lengths =
             container_reorder_given_new2old(access_lengths, dim_access_order);
 
-        // Compute forward sweep at the last iteration position
         constexpr auto ordered_access_lengths_minus_1 = generate_tuple(
             [&](auto i) { return Number<ordered_access_lengths.At(i) - 1>{}; }, Number<nDim>{});
         constexpr auto forward_sweep =
             ComputeForwardSweep<nDim>(ordered_access_lengths_minus_1, ordered_access_lengths);
 
-        // Compute data index after last iteration and negate to get reset step
         constexpr auto reset_step = [&]() {
             MultiIndex<nDim> ordered_idx;
             static_for<0, nDim, 1>{}([&](auto i) {
@@ -364,13 +477,25 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
     }
 };
 
-// =====================================================================
-// SpaceFillingCurve traversal helper.
-// Used by: v6r1, v6r1r2, v6r2, v6r3, v7r2, v7r3, v7r3_scatter
-// =====================================================================
+/**
+ * @brief SpaceFillingCurve traversal helper.
+ *
+ * Provides coordinate reset computation using SpaceFillingCurve's GetStepBetween
+ * method, which computes the step from the last access position back to the origin.
+ *
+ * Used by: ThreadwiseTensorSliceTransfer v6r1, v6r1r2, v6r2, v6r3, v7r2, v7r3,
+ *          v7r3_scatter.
+ */
 struct ThreadwiseTransferHelper_SFC : ThreadwiseTransferHelper_Base
 {
-    // Compute coordinate reset step using SpaceFillingCurve traversal.
+    /**
+     * @brief Compute the coordinate reset step using SpaceFillingCurve traversal.
+     *
+     * @tparam SliceLengths     Compile-time sequence of per-dimension slice lengths.
+     * @tparam DimAccessOrder   Compile-time sequence defining dimension access order.
+     * @tparam ScalarPerAccess  Compile-time sequence of per-dimension access widths.
+     * @return MultiIndex representing the step from last access position to origin.
+     */
     template <typename SliceLengths, typename DimAccessOrder, typename ScalarPerAccess>
     __host__ __device__ static constexpr auto ComputeSFCCoordinateResetStep()
     {
