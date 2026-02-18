@@ -260,7 +260,6 @@ class FFTKernel(BaseNode):
         f += ', ' + str(self.function.meta.pp_current_dim)
         f += ', ' + str(self.function.meta.pp_off_dim)
         f += ', ' + str(self.function.meta.pp_threads_per_transform)
-        f += ', ' + str(self.function.meta.pp_threads_per_transform)
         pp_factors_curr = getattr(self.function.meta, 'pp_factors_curr', None)
         if pp_factors_curr is not None:
             f += ', {' + cjoin(pp_factors_curr) + '}'
