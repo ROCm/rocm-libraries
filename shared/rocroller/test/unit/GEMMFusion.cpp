@@ -59,7 +59,11 @@ namespace GEMMDriverTest
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
-    struct GEMMFusionGPU : public CurrentGPUContextFixture
+    // ========================================================================
+    // GEMMFusionTestSuite
+    // ========================================================================
+
+    struct GEMMFusionTestSuite : public CurrentGPUContextFixture
     {
         template <typename T>
         void basicGEMMRelu(ContextPtr&        m_context,
@@ -451,7 +455,7 @@ namespace GEMMDriverTest
         }
     };
 
-    TEST_F(GEMMFusionGPU, GPU_GEMMRelu)
+    TEST_F(GEMMFusionTestSuite, GPU_GEMM_Fusion_Relu)
     {
         GEMMProblem gemm;
         basicGEMMRelu<float>(m_context, gemm);
