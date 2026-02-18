@@ -357,3 +357,33 @@ rocm_install(
   DESTINATION "${CMAKE_INSTALL_BINDIR}"
   COMPONENT clients
 )
+
+# On Windows custom builds, install vcpkg DLLs required by clients
+if(CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
+  # Find vcpkg installation directory via VCPKG_ROOT environment variable
+  set(VCPKG_INSTALLED_DIR "")  # Initialize to avoid undefined variable
+  if(DEFINED ENV{VCPKG_ROOT} AND EXISTS "$ENV{VCPKG_ROOT}/installed/x64-windows/bin")
+    set(VCPKG_INSTALLED_DIR "$ENV{VCPKG_ROOT}/installed/x64-windows/bin")
+  endif()
+
+  if(VCPKG_INSTALLED_DIR)
+    # Install GTest DLLs (required by rocblas-test)
+    if(EXISTS "${VCPKG_INSTALLED_DIR}/gtest.dll")
+      install(FILES "${VCPKG_INSTALLED_DIR}/gtest.dll"
+              DESTINATION "${CMAKE_INSTALL_BINDIR}"
+              COMPONENT clients)
+    endif()
+    if(EXISTS "${VCPKG_INSTALLED_DIR}/gtest_main.dll")
+      install(FILES "${VCPKG_INSTALLED_DIR}/gtest_main.dll"
+              DESTINATION "${CMAKE_INSTALL_BINDIR}"
+              COMPONENT clients)
+    endif()
+
+    # Install OpenBLAS DLL only when using OpenBLAS as reference BLAS (not AOCL)
+    if(NOT LINK_BLIS AND EXISTS "${VCPKG_INSTALLED_DIR}/openblas.dll")
+      install(FILES "${VCPKG_INSTALLED_DIR}/openblas.dll"
+              DESTINATION "${CMAKE_INSTALL_BINDIR}"
+              COMPONENT clients)
+    endif()
+  endif()
+endif()
