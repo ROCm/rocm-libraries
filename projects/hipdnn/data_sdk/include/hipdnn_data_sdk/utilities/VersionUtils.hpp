@@ -35,8 +35,13 @@ struct Version
         {
             throw std::invalid_argument("Version string does not match required format. String = "
                                         + std::string(versionStr)
-                                        + " Required format: \"MAJOR.MINOR.TWEAK\"");
+                                        + " Required format: \"MAJOR.MINOR.PATCH\"");
         }
+    }
+
+    std::string str() const
+    {
+        return std::to_string(major) + "." + std::to_string(minor) + "." + std::to_string(patch);
     }
 };
 
