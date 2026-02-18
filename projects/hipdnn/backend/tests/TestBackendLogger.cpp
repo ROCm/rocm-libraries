@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "gtest/internal/gtest-port.h"
+#include <atomic>
 #include <fcntl.h>
 #include <fstream>
 #include <gmock/gmock.h>
@@ -255,4 +256,143 @@ TEST_F(TestBackendLogger, ParamsAreNotExpandedIfLogLevelIsDisabled)
     EXPECT_FALSE(wasCalledForWarn);
     EXPECT_TRUE(wasCalledForError);
     EXPECT_TRUE(wasCalledForFatal);
+}
+
+TEST_F(TestBackendLogger, ShutdownThenReinitializeConcurrently)
+{
+    _logFile = "concurrent_logging_test.log";
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", _logFile.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
+
+    constexpr int NUM_LOGGER_THREADS = 8;
+    constexpr int NUM_SHUTDOWN_THREADS = 2;
+    constexpr int SHUTDOWN_ITERATIONS = 30;
+
+    std::atomic<bool> startFlag{false};
+    std::atomic<bool> stopFlag{false};
+    std::vector<std::thread> threads;
+    threads.reserve(NUM_LOGGER_THREADS + NUM_SHUTDOWN_THREADS);
+
+    // Threads that continuously log (triggering lazy init if shutdown occurred)
+    for(int i = 0; i < NUM_LOGGER_THREADS; ++i)
+    {
+        threads.emplace_back([&, threadId = i]() {
+            while(!startFlag.load())
+            {
+                std::this_thread::yield();
+            }
+
+            int msgCount = 0;
+            while(!stopFlag.load())
+            {
+                HIPDNN_BACKEND_LOG_INFO("Logger thread {} message {}", threadId, msgCount++);
+                // Small yield to allow interleaving
+                if(msgCount % 10 == 0)
+                {
+                    std::this_thread::yield();
+                }
+            }
+        });
+    }
+
+    // Threads that periodically call shutdown
+    for(int i = 0; i < NUM_SHUTDOWN_THREADS; ++i)
+    {
+        threads.emplace_back([&]() {
+            while(!startFlag.load())
+            {
+                std::this_thread::yield();
+            }
+
+            for(int j = 0; j < SHUTDOWN_ITERATIONS && !stopFlag.load(); ++j)
+            {
+                hipdnn_backend::logging::loggerShutdown();
+                // Small delay between shutdowns
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
+            }
+        });
+    }
+
+    // Start all threads simultaneously
+    startFlag.store(true);
+
+    // Let them race for a bit
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    // Signal stop
+    stopFlag.store(true);
+
+    // Join all threads
+    for(auto& t : threads)
+    {
+        t.join();
+    }
+
+    // Consume captured stderr to clean up for the fixture
+    testing::internal::GetCapturedStderr();
+
+    // If we get here without crashing or deadlocking, the test passes
+}
+
+TEST_F(TestBackendLogger, ConcurrentLoggingToFile)
+{
+    _logFile = "concurrent_logging_test.log";
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", _logFile.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
+
+    constexpr int NUM_THREADS = 4;
+    constexpr int LOGS_PER_THREAD = 100;
+    std::atomic<bool> startFlag{false};
+    std::vector<std::thread> threads;
+    threads.reserve(NUM_THREADS);
+
+    // Create logging threads
+    for(int i = 0; i < NUM_THREADS; ++i)
+    {
+        threads.emplace_back([&, threadId = i]() {
+            // Wait for start signal
+            while(!startFlag.load())
+            {
+                std::this_thread::yield();
+            }
+
+            for(int j = 0; j < LOGS_PER_THREAD; ++j)
+            {
+                HIPDNN_BACKEND_LOG_INFO("Thread {} message {}", threadId, j);
+            }
+        });
+    }
+
+    // Start all threads simultaneously
+    startFlag.store(true);
+
+    // Join all threads
+    for(auto& t : threads)
+    {
+        t.join();
+    }
+
+    // Flush and shutdown to ensure all messages are written to file
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    hipdnn_backend::logging::loggerShutdown();
+
+    // Read and verify the log file
+    std::string logContent;
+    std::ifstream logFileStream(_logFile);
+    ASSERT_TRUE(logFileStream.is_open()) << std::string("Log file was not created: ") << _logFile;
+
+    logContent.assign((std::istreambuf_iterator<char>(logFileStream)),
+                      std::istreambuf_iterator<char>());
+    logFileStream.close();
+
+    // Verify that messages from all threads appear in the log file
+    for(int threadId = 0; threadId < NUM_THREADS; ++threadId)
+    {
+        std::string expectedMarker = "Thread " + std::to_string(threadId) + " message";
+        EXPECT_NE(logContent.find(expectedMarker), std::string::npos)
+            << "Expected to find messages from thread " << threadId << " in log file";
+    }
+
+    // Consume captured stderr to clean up for the fixture
+    testing::internal::GetCapturedStderr();
 }

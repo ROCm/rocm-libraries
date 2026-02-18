@@ -2,11 +2,14 @@
 // SPDX-License-Identifier:  MIT
 
 #include "hipdnn_backend.h"
+#include <atomic>
 #include <chrono>
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -18,6 +21,7 @@ using namespace hipdnn_test_sdk::utilities;
 class IntegrationBackendGlobalLoggingApis : public ::testing::Test
 {
 protected:
+    std::string _logFile;
     std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logLevelGuard;
     std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logFileGuard;
     void SetUp() override
@@ -40,6 +44,12 @@ protected:
 
         _logLevelGuard.reset();
         _logFileGuard.reset();
+
+        // Clean up any test log file
+        if(!_logFile.empty())
+        {
+            std::remove(_logFile.c_str());
+        }
     }
 };
 
@@ -85,6 +95,45 @@ TEST_F(IntegrationBackendGlobalLoggingApis, GlobalCallbackReceivesLogs)
     EXPECT_TRUE(recorder.hasLogContaining("API success: [hipdnnCreate]"));
 
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
+}
+
+// Test: Log pattern format is correct for global callback
+TEST_F(IntegrationBackendGlobalLoggingApis, LogPatternFormatIsCorrect)
+{
+    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    // Register test recording callback
+    hipdnnBackendSetGlobalLoggingCallback_ext(IsolatedLogRecorder::getIsoaltedRecordingCallback(),
+                                              false);
+    ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
+
+    // Trigger backend logging by creating a handle
+    hipdnnHandle_t handle = nullptr;
+    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
+
+    // Get one of the captured log messages
+    auto logs = recorder.getRecordedLogs();
+    ASSERT_GT(logs.size(), 0) << "Expected at least one log message";
+
+    // [timestamp format] [thread id] [log level] [hipdnn_backend] message
+    // Example: [2026-02-18 09:15:30.123] [tid 12345] [info] [hipdnn_backend] API success: [hipdnnCreate]
+    std::regex patternRegex(
+        R"(\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] \[tid \d+\] \[(info|warn|error|critical)\] \[hipdnn_backend\] .+)");
+
+    bool foundMatchingLog = false;
+    for(const auto& log : logs)
+    {
+        if(std::regex_search(log.message, patternRegex))
+        {
+            foundMatchingLog = true;
+            break;
+        }
+    }
+
+    EXPECT_TRUE(foundMatchingLog)
+        << "Expected at least one log message to match the pattern format.\n"
+        << "First log message: " << (logs.empty() ? "(empty)" : logs[0].message);
 }
 
 // Test: Callback respects log level filtering
@@ -260,6 +309,93 @@ TEST_F(IntegrationBackendGlobalLoggingApis, SetClearSetCallback)
     EXPECT_GT(recorder.getRecordedLogCount(), logsAfter); // Should capture again
 
     ASSERT_EQ(hipdnnDestroy(handle2), HIPDNN_STATUS_SUCCESS);
+}
+
+// Test: Concurrent logging with callback toggle between enabled and nullptr
+// Disabled for now due to lengthy test time.
+TEST_F(IntegrationBackendGlobalLoggingApis, DISABLED_ConcurrentLoggingWithCallbackToggle)
+{
+    // Redirect default logging to file to avoid console spam when callback is disabled
+    _logFile = "concurrent_callback_toggle_test.log";
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", _logFile.c_str());
+
+    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    constexpr int NUM_LOGGER_THREADS = 4;
+    std::atomic<bool> startFlag{false};
+    std::atomic<bool> stopFlag{false};
+    std::vector<std::thread> threads;
+    threads.reserve(NUM_LOGGER_THREADS);
+
+    // Register the callback and set log level
+    hipdnnBackendSetGlobalLoggingCallback_ext(IsolatedLogRecorder::getIsoaltedRecordingCallback(),
+                                              false);
+    ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
+
+    // Create threads that generate logs by repeated create/destroy of hipDNN handles
+    for(int i = 0; i < NUM_LOGGER_THREADS; ++i)
+    {
+        threads.emplace_back([&]() {
+            while(!startFlag.load())
+            {
+                std::this_thread::yield();
+            }
+
+            while(!stopFlag.load())
+            {
+                hipdnnHandle_t handle = nullptr;
+                hipdnnCreate(&handle);
+                if(handle != nullptr)
+                {
+                    hipdnnDestroy(handle);
+                }
+                std::this_thread::yield();
+            }
+        });
+    }
+
+    // Start all logger threads
+    startFlag.store(true);
+
+    // Control thread behavior: toggle callback on and off
+    constexpr int NUM_CYCLES = 4;
+    for(int cycle = 0; cycle < NUM_CYCLES; ++cycle)
+    {
+        // Use async=true for even cycles, async=false for odd cycles
+        bool useAsync = (cycle % 2 == 0);
+
+        // With callback registered - logs should be captured
+        hipdnnBackendSetGlobalLoggingCallback_ext(
+            IsolatedLogRecorder::getIsoaltedRecordingCallback(), useAsync);
+
+        size_t countBefore = recorder.getRecordedLogCount();
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        size_t countAfterEnabled = recorder.getRecordedLogCount();
+
+        EXPECT_GT(countAfterEnabled, countBefore)
+            << "Log count should increase when callback is registered (cycle " << cycle
+            << ", async=" << useAsync << ")";
+
+        // With callback set to nullptr - logs should NOT be captured
+        hipdnnBackendSetGlobalLoggingCallback_ext(nullptr, false);
+
+        size_t countBeforeDisabled = recorder.getRecordedLogCount();
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        size_t countAfterDisabled = recorder.getRecordedLogCount();
+
+        EXPECT_EQ(countAfterDisabled, countBeforeDisabled)
+            << "Log count should NOT increase when callback is nullptr (cycle " << cycle << ")";
+    }
+
+    // Stop all threads
+    stopFlag.store(true);
+    for(auto& t : threads)
+    {
+        t.join();
+    }
+
+    // Final verification - total logs should be > 0
+    EXPECT_GT(recorder.getRecordedLogCount(), 0);
 }
 
 // Test: Setting invalid log level returns error

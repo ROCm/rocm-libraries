@@ -47,10 +47,6 @@ protected:
         spdlog::memory_buf_t formatted;
         formatter_->format(msg, formatted);
         std::string message(formatted.data(), formatted.size());
-        if(!message.empty() && message.back() == '\n')
-        {
-            message.pop_back();
-        }
 
         // Convert spdlog level to hipdnnSeverity_t
         hipdnnSeverity_t severity = fromSpdlogLevel(msg.level);
@@ -58,7 +54,7 @@ protected:
         // Call backend log output callback (catch exceptions to prevent crashes)
         try
         {
-            _callback(severity, message.c_str());
+            _callback(severity, hipdnn_data_sdk::utilities::removeNewlines(message).c_str());
         }
         catch(const std::exception& e)
         {

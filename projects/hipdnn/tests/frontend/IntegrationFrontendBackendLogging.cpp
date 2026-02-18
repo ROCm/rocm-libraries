@@ -11,10 +11,16 @@ using namespace hipdnn_test_sdk::utilities;
 class IntegrationFrontendBackendLogging : public ::testing::Test
 {
 protected:
+    hipdnnSeverity_t _originalLogLevel = HIPDNN_SEV_OFF;
+
     void SetUp() override
     {
         // Clear any previous callback
         auto error = setGlobalLoggingCallback(nullptr, false);
+        ASSERT_EQ(error.code, ErrorCode::OK);
+
+        // Save original log level.
+        error = getGlobalLogLevel(_originalLogLevel);
         ASSERT_EQ(error.code, ErrorCode::OK);
 
         // Reset log level
@@ -25,6 +31,10 @@ protected:
     void TearDown() override
     {
         auto error = setGlobalLoggingCallback(nullptr, false);
+        ASSERT_EQ(error.code, ErrorCode::OK);
+
+        // Restore original log level.
+        error = setGlobalLogLevel(_originalLogLevel);
         ASSERT_EQ(error.code, ErrorCode::OK);
     }
 };

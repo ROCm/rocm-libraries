@@ -92,7 +92,7 @@ export HIPDNN_GLOBAL_TEST_SEED=RANDOM
 
 ### Global Log Callback
 
-A callback function can be registered to receive log messages from the hipDNN library. Once a callback function is registered, all logs will be output to the registered logging callback insteasd of the console or file specified by the `HIPDNN_LOG_FILE` environment variable. Setting the logging callback to `nullptr` will re-enable logging to the console or log file.
+A callback function can be registered to receive log messages from the hipDNN library. Once a callback function is registered, all logs will be redirected to the registered logging callback instead of the console or file specified by the `HIPDNN_LOG_FILE` environment variable. Setting the logging callback to `nullptr` will re-enable logging to the console or log file.
 
 The logging callback is registered using the following frontend API function:
 ```
@@ -100,7 +100,7 @@ Error setGlobalLoggingCallback(hipdnnBackendLogOutputCallback_t callback, bool a
 ```
 This function registers the logging callback with hipDNN. If `async` is true then logs will be output using a separate thread so that the hipDNN library is not blocked while the callback function is running. Setting `callback` to `nullptr` will disable the logging callback.
 
-Logs output using the callback function are filtered by the leve set by the `HIPDNN_LOG_LEVEL` environment variable described above, or programatically using the `getGlobalLogLevel()` API function described below.
+Logs output using the callback function are filtered by the level set by the `HIPDNN_LOG_LEVEL` environment variable described above, or programatically using the `getGlobalLogLevel()` API function described below.
 
 ### Log Level APIs
 
