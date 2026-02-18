@@ -27,7 +27,6 @@ RUN apt-get update && apt-get install -y --allow-unauthenticated \
     bison \
     build-essential \
     ca-certificates \
-    clang-format-18 \
     cmake \
     curl \
     doxygen \
@@ -226,16 +225,6 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
         cmake --build . -j$BUILD_JOBS; \
     fi && \
     cmake --install .
-# # ================================================================================
-# # Build debs for reuse
-# # ================================================================================
-# WORKDIR /TheRock/build_tools/packaging/linux/
-
-# RUN apt update && apt install -y jq debhelper llvm && \
-#     pip install -r requirements.txt 
-
-# RUN  export ROCM_VERSION=$(jq -r '.["rocm-version"]' /TheRock/version.json) && \
-#     ./build_package.py --artifacts-dir /TheRock/build/artifacts --target multiarch  --dest-dir /TheRock/build/artifacts/deb/  --pkg-name [amdrocm-blas amdrocm-llvm amdrocm-sysdeps amdrocm-amdsmi amdrocm-runtime amdrocm-base amdrocm-profiler-base amdrocm-profiler amdrocm-rand amdrocm-developer-tools ] --rocm-version ${ROCM_VERSION} --version-suffix ci  --pkg-type deb
 
 # # ================================================================================
 # # Build and install other deps and CK
@@ -306,7 +295,6 @@ RUN set -x && \
     stunnel redis-cli.conf && \
     export PATH=$PATH:${SCCACHE_INSTALL_LOCATION} && \
     ./sccache_wrapper.sh --enforce_redis; \
-    pwd; \
     fi &&\
     # Clear the ROCM_PATH TheRock causes HIP errors
     unset ROCM_PATH && \
@@ -315,8 +303,8 @@ RUN set -x && \
     #Get the number of threads and RAM available
     num_threads=$(nproc) && \
     ram_gb=$(free -g | awk '/^Mem:/{print $2}') && \
-    # ram per thread is ~ 4 GB, so limit the number of threads 
-    # based on the RAM
+    # CK's ram req per thread is ~4 GB,
+    # so limit the number of threads accordingly
     if [ "$num_threads" -le 0 ]; then \
         num_threads=1; \
     fi && \
@@ -354,32 +342,20 @@ FROM base AS miopen
 COPY --from=miopen_deps /opt/rocm /opt/rocm
 COPY --from=miopen_deps /usr/local /usr/local
 
+# Install explicit version of tools that are supported for miopen development
+# (clang-format, clang-tidy)
+RUN apt-get update && apt-get install -y \
+    clang-format-18 \
+    clang-tidy-20 \
+    clang-tools-20 \
+    llvm-20 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Use update-alternatives to set default versions
+RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
+RUN update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
+
 ENV HIP_PLATFORM=amd
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
 
-# # ================================================================================
-# # Keep the output as slim as possible as this will be a base for the final image
-# # ================================================================================
-# FROM scratch AS therock_base
-
-# COPY --from=build_therock /opt/rocm /opt/rocm
-# COPY --from=build_therock /usr/local /usr/local
-
-# # ================================================================================
-# # Build debs for reuse
-# # ================================================================================
-# WORKDIR /TheRock/build_tools/packaging/linux/
-
-# RUN apt update && apt install -y jq debhelper llvm && \
-#     pip install -r requirements.txt 
-
-# RUN  export ROCM_VERSION=$(jq -r '.["rocm-version"]' /TheRock/version.json) && \
-#     ./build_package.py --artifacts-dir /TheRock/build/artifacts --target multiarch  --dest-dir /TheRock/build/artifacts/deb/  --pkg-name [amdrocm-blas amdrocm-llvm amdrocm-sysdeps amdrocm-amdsmi amdrocm-runtime amdrocm-base amdrocm-profiler-base amdrocm-profiler amdrocm-rand amdrocm-developer-tools ] --rocm-version ${ROCM_VERSION} --version-suffix ci  --pkg-type deb
-
-# # # ================================================================================
-# # # Keep the output as slim as possible as this will be a base for the final image
-# # # ================================================================================
-# # FROM scratch AS therock_base
-
-# # COPY --from=build_therock /opt/rocm /opt/rocm
-# # COPY --from=build_therock /usr/local /usr/local
+WORKDIR /workspace
