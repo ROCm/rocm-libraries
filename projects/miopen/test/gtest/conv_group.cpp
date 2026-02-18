@@ -111,8 +111,10 @@ auto GetDataset()
                                                                     input.do_backward_data  = true;
                                                                     input.do_backward_weights =
                                                                         true;
-                                                                    if(miopen::test::conv::IsValidCtestStyleConfig(input))
-                                                                    cases.push_back(input);
+                                                                    if(miopen::test::conv::
+                                                                           IsValidCtestStyleConfig(
+                                                                               input))
+                                                                        cases.push_back(input);
                                                                 }
     return cases;
 }

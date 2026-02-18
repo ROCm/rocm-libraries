@@ -1849,7 +1849,8 @@ inline bool IsValidCtestStyleConfig(const conv_test_input& input)
         return false;
     }
 
-    // Mirror ctest run-time skip rules: non-positive stride/dilation and non-positive output extents.
+    // Mirror ctest run-time skip rules: non-positive stride/dilation and non-positive output
+    // extents.
     for(std::size_t i = 0; i < spatial_dim; ++i)
     {
         const auto stride = static_cast<long long>(input.pads_strides_dilations[spatial_dim + i]);
