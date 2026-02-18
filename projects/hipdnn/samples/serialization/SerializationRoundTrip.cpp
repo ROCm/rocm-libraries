@@ -1,8 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -94,6 +92,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         originalGraph, handle, xAttrOrig, wAttrOrig, yAttrOrig, xTensor, wTensor, yOriginal);
     std::cout << "Original graph execution complete.\n";
 
+    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator<InputType>();
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
     // ==================== JSON SERIALIZATION & DESERIALIZATION ====================
     std::cout << "\n--- Testing JSON serialization/deserialization ---\n";
 
@@ -123,9 +124,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         jsonGraph, handle, xAttrJson, wAttrJson, yAttrJson, xTensor, wTensor, yJson);
     std::cout << "JSON-deserialized graph execution complete.\n";
 
-    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator<InputType>();
     bool jsonMatch = validator->allClose(yOriginal, yJson);
     std::cout << "JSON round-trip result: " << (jsonMatch ? "PASSED" : "FAILED") << "\n";
+#else
+    std::cout << "\n--- Skipping JSON serialization test (JSON support disabled) ---\n";
+    bool jsonMatch = true; // Skip JSON test when JSON is disabled
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
     // ==================== BINARY SERIALIZATION ====================
     std::cout << "\n--- Testing binary serialization/deserialization ---\n";
@@ -185,5 +189,3 @@ int main(int argc, char* argv[])
         return 1;
     }
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB

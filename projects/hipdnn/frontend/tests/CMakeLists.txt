@@ -33,6 +33,7 @@ add_executable(
     TestError.cpp
     TestGraph.cpp
     TestGraphAttributes.cpp
+    TestGraphSerialization.cpp
     TestGraphGenerated.cpp
     TestINode.cpp
     TestKnob.cpp
@@ -49,11 +50,6 @@ add_executable(
     TestTopologicalSortingUtils.cpp
     TestSdkLogging.cpp
 )
-
-# Add JSON-specific tests only when JSON is enabled
-if(HIPDNN_ENABLE_JSON)
-    target_sources(hipdnn_frontend_tests PRIVATE TestGraphSerialization.cpp)
-endif()
 
 target_compile_options(hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
