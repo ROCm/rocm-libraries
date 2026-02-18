@@ -25,11 +25,11 @@ target_include_directories(
 if(CMAKE_CXX_FLAGS MATCHES "HIPDNN_FRONTEND_SKIP_JSON_LIB")
     message(WARNING
         "HIPDNN_FRONTEND_SKIP_JSON_LIB should not be manually defined. "
-        "Use -DHIPDNN_ENABLE_JSON=OFF instead to fully disable JSON support.")
+        "Use -DHIPDNN_FRONTEND_ENABLE_JSON=OFF instead to disable JSON support.")
 endif()
 
 # Automatically define HIPDNN_FRONTEND_SKIP_JSON_LIB when JSON is disabled
-if(NOT HIPDNN_ENABLE_JSON)
+if(NOT HIPDNN_FRONTEND_ENABLE_JSON)
     target_compile_definitions(hipdnn_frontend INTERFACE HIPDNN_FRONTEND_SKIP_JSON_LIB)
 endif()
 

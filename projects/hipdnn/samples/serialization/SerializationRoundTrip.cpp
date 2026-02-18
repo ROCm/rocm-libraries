@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -183,3 +185,5 @@ int main(int argc, char* argv[])
         return 1;
     }
 }
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB

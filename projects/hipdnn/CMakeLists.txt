@@ -10,8 +10,32 @@ set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json
 set(HIPDNN_FMTLIB_VERSION "11.1.3" CACHE STRING "Version of fmtlib to use")
 set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
 
-# Optional features
-option(HIPDNN_ENABLE_JSON "Enable JSON serialization support (requires nlohmann_json)" ON)
+# Optional features - modular per-component JSON support
+option(HIPDNN_ENABLE_JSON "Enable JSON serialization support in all components (convenience option)" ON)
+
+# Component-specific JSON options
+option(HIPDNN_DATA_SDK_ENABLE_JSON "Enable JSON support in hipDNN Data SDK" ${HIPDNN_ENABLE_JSON})
+option(HIPDNN_FRONTEND_ENABLE_JSON "Enable JSON support in hipDNN Frontend" ${HIPDNN_ENABLE_JSON})
+
+# Validate dependencies: Frontend JSON requires SDK JSON
+if(HIPDNN_FRONTEND_ENABLE_JSON AND NOT HIPDNN_DATA_SDK_ENABLE_JSON)
+    message(FATAL_ERROR
+        "Frontend JSON requires SDK JSON. "
+        "Either enable HIPDNN_DATA_SDK_ENABLE_JSON or disable HIPDNN_FRONTEND_ENABLE_JSON")
+endif()
+
+# Status messages
+if(HIPDNN_DATA_SDK_ENABLE_JSON)
+    message(STATUS "hipDNN Data SDK: JSON serialization enabled (requires nlohmann_json)")
+else()
+    message(STATUS "hipDNN Data SDK: JSON serialization disabled")
+endif()
+
+if(HIPDNN_FRONTEND_ENABLE_JSON)
+    message(STATUS "hipDNN Frontend: JSON serialization enabled")
+else()
+    message(STATUS "hipDNN Frontend: JSON serialization disabled")
+endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 

@@ -11,7 +11,7 @@ set(HIP_DNN_DATA_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
 
-if(HIPDNN_ENABLE_JSON)
+if(HIPDNN_DATA_SDK_ENABLE_JSON)
     hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 endif()
 
@@ -85,7 +85,7 @@ if(TARGET FlatBuffers)
 endif()
 
 # Process nlohmann_json dependency
-if(HIPDNN_ENABLE_JSON)
+if(HIPDNN_DATA_SDK_ENABLE_JSON)
     _hipdnn_data_sdk_process_dependency(
         nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
     )
@@ -98,8 +98,13 @@ hipdnn_generate_version_header(hipdnn_data_sdk)
 
 # Add includes from dependency targets
 hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
-if(HIPDNN_ENABLE_JSON)
+if(HIPDNN_DATA_SDK_ENABLE_JSON)
     hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
+endif()
+
+# Define preprocessor macro when JSON is disabled
+if(NOT HIPDNN_DATA_SDK_ENABLE_JSON)
+    target_compile_definitions(hipdnn_data_sdk INTERFACE HIPDNN_DATA_SDK_SKIP_JSON_LIB)
 endif()
 
 target_include_directories(
