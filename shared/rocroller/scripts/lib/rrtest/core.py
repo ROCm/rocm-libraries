@@ -9,7 +9,6 @@ import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Set
 
 import yaml
 
@@ -122,7 +121,7 @@ class Test:
     framework: str
 
 
-def parse_gtest_xml(xml_file: Path) -> Set[Test]:
+def parse_gtest_xml(xml_file: Path) -> set[Test]:
     """
     Parse GTest XML output to extract test names.
 
@@ -152,7 +151,7 @@ def parse_gtest_xml(xml_file: Path) -> Set[Test]:
     return tests
 
 
-def parse_catch2_xml(xml_file: Path) -> Set[Test]:
+def parse_catch2_xml(xml_file: Path) -> set[Test]:
     """
     Parse Catch2 XML output to extract test names.
 
@@ -178,7 +177,7 @@ def parse_catch2_xml(xml_file: Path) -> Set[Test]:
     return tests
 
 
-def parse_ctest_json(json_file: Path) -> Set[Test]:
+def parse_ctest_json(json_file: Path) -> set[Test]:
     """
     Parse CTest JSON output to extract test names.
 
@@ -209,7 +208,7 @@ def discover_gtest_tests(
     include: list[str] = None,
     exclude: list[str] = None,
     build_dir: Path | None = None,
-) -> Set[Test]:
+) -> set[Test]:
     """
     Discover GTest tests by running the executable.
 
@@ -258,7 +257,7 @@ def discover_catch2_tests(
     include: list[str] = None,
     exclude: list[str] = None,
     build_dir: Path | None = None,
-) -> Set[Test]:
+) -> set[Test]:
     """
     Discover Catch2 tests by running the executable.
 
@@ -314,7 +313,7 @@ def discover_ctest_tests(
     include: list[str] = None,
     exclude: list[str] = None,
     build_dir: Path | None = None,
-) -> Set[Test]:
+) -> set[Test]:
     """
     Discover CTest tests by running ctest.
 
@@ -360,7 +359,7 @@ def discover_ctest_tests(
 
 def list_tests_for_executable(
     executable: str, profile: str, build_dir: Path | None = None
-) -> Set[Test]:
+) -> set[Test]:
     """
     List tests for a given executable and profile.
 
@@ -419,7 +418,7 @@ def list_tests_for_executable(
         raise ValueError(f"Unknown framework: {framework}")
 
 
-def list_tests(profile: str, build_dir: Path | None = None) -> Set[Test]:
+def list_tests(profile: str, build_dir: Path | None = None) -> set[Test]:
     """
     List all tests for a given profile (across all executables).
 
