@@ -67,8 +67,8 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
     {
     case 0:
         // Initialize A, B, and scales to random values
-        ck_tile::FillUniformDistribution<ADataType>{-1.f, 1.f, seed++}(a_host);
-        ck_tile::FillUniformDistribution<BDataType>{-1.f, 1.f, seed++}(b_host);
+        ck_tile::FillUniformDistribution<ADataType>{-2.f, 2.f, seed++}(a_host);
+        ck_tile::FillUniformDistribution<BDataType>{-2.f, 2.f, seed++}(b_host);
         ck_tile::FillUniformDistribution<ScaleType>{0.001f, 10.f, seed++}(scale_a_host);
         ck_tile::FillUniformDistribution<ScaleType>{0.001f, 10.f, seed++}(scale_b_host);
         break;
@@ -81,10 +81,10 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
         break;
     case 2:
         // Initialize A and B with random values but with constant 1.0 scales
-        ck_tile::FillUniformDistribution<ADataType>{-1.f, 1.f, seed++}(a_host);
-        ck_tile::FillUniformDistribution<BDataType>{-1.f, 1.f, seed++}(b_host);
-        ck_tile::FillConstant<ScaleType>{ScaleType(1.f)}(scale_a_host);
-        ck_tile::FillConstant<ScaleType>{ScaleType(1.f)}(scale_b_host);
+        ck_tile::FillUniformDistribution<ADataType>{-2.f, 2.f, seed++}(a_host);
+        ck_tile::FillUniformDistribution<BDataType>{-2.f, 2.f, seed++}(b_host);
+        ck_tile::FillConstant<ScaleType>{ScaleType(0.1f)}(scale_a_host);
+        ck_tile::FillConstant<ScaleType>{ScaleType(0.1f)}(scale_b_host);
         break;
     }
 
