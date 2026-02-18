@@ -94,7 +94,7 @@ namespace rocRoller
 
             CommandArgumentValue operator()(AssemblyKernelArgumentPtr const& expr)
             {
-                return call(expr->expression);
+                return call(expr->getExpression());
             }
 
             CommandArgumentValue operator()(DataFlowTag const& expr)
