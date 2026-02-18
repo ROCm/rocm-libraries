@@ -68,10 +68,10 @@ flowchart TD
     M -->|ctest -L category -LE ex_gpu| N[Run without gpu exclusions]
     M -->|ctest -L category -L ex_gpu_gfx1150| O[Run on Specific GPU with exclusions]
 
-    style A fill:#e1f5ff
-    style E fill:#fff4e1
-    style J fill:#e8f5e9
-    style M fill:#f3e5f5
+    style A fill:#e1f5ff,color:#000
+    style E fill:#fff4e1,color:#000
+    style J fill:#e8f5e9,color:#000
+    style M fill:#f3e5f5,color:#000
 ```
 
 ##  YAML Configuration Format
