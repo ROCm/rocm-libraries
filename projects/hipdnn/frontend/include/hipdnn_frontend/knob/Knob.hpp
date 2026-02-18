@@ -215,14 +215,16 @@ inline std::pair<Error, Knob> Knob::tryFromFlatbuffer(hipdnnBackendFlatbufferDat
     {
         auto* c = knobT->constraint.AsStringConstraint();
         std::unordered_set<std::string> validValues(c->valid_values.begin(), c->valid_values.end());
-        knob._constraint = std::make_unique<StringConstraint>(c->max_length, std::move(validValues));
+        knob._constraint
+            = std::make_unique<StringConstraint>(c->max_length, std::move(validValues));
         break;
     }
     case hipdnn_data_sdk::data_objects::KnobConstraint::NONE:
         knob._constraint = std::make_unique<EmptyConstraint>();
         break;
     default:
-        return {{ErrorCode::INVALID_VALUE, "Knob '" + knobId + "' has unknown constraint type"}, {}};
+        return {{ErrorCode::INVALID_VALUE, "Knob '" + knobId + "' has unknown constraint type"},
+                {}};
     }
 
     // Validate that the default_value satisfies the constraint

@@ -122,7 +122,6 @@ TEST(TestKnob, CreateIntKnob)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     EXPECT_EQ(knob.knobId(), "test_int_knob");
     EXPECT_EQ(knob.description(), "Test integer knob");
@@ -141,7 +140,6 @@ TEST(TestKnob, CreateFloatKnob)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     EXPECT_EQ(knob.description(), "Test float knob");
     EXPECT_EQ(knob.valueType(), KnobValueType::FLOAT64);
@@ -158,7 +156,6 @@ TEST(TestKnob, CreateStringKnob)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     EXPECT_EQ(knob.knobId(), "test_string_knob");
     EXPECT_EQ(knob.description(), "Test string knob");
@@ -269,7 +266,6 @@ TEST(TestKnobIntConstraint, ConstraintWithValidValues)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     auto constraint = knob.constraint();
     ASSERT_NE(constraint, nullptr);
@@ -301,7 +297,6 @@ TEST(TestKnobFloatConstraint, ConstraintFromFlatbuffer)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     auto constraint = knob.constraint();
     ASSERT_NE(constraint, nullptr);
@@ -331,7 +326,6 @@ TEST(TestKnobStringConstraint, ConstraintWithValidValues)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     auto constraint = knob.constraint();
     ASSERT_NE(constraint, nullptr);
@@ -361,7 +355,6 @@ TEST(TestKnob, ValidateIntKnobInRange)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     // Valid value
     KnobSetting setting1(knob.knobId(), 50);
@@ -391,7 +384,6 @@ TEST(TestKnob, ValidateIntKnobOutOfRange)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     // Value below min
     KnobSetting setting1(knob.knobId(), -1);
@@ -418,7 +410,6 @@ TEST(TestKnob, ValidateIntKnobWithStep)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     // Valid step values
     EXPECT_EQ(knob.validate(KnobSetting(knob.knobId(), 0)).code, ErrorCode::OK);
@@ -445,7 +436,6 @@ TEST(TestKnob, ValidateIntKnobWithValidValues)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     // Valid values
     for(auto validVal : {1, 2, 4, 8, 16})
@@ -472,7 +462,6 @@ TEST(TestKnob, ValidateFloatKnobInRange)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     // Valid value
     EXPECT_EQ(knob.validate(KnobSetting(knob.knobId(), 0.5)).code, ErrorCode::OK);
@@ -493,7 +482,6 @@ TEST(TestKnob, ValidateFloatKnobOutOfRange)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     // Value below min
     KnobSetting setting1(knob.knobId(), -0.1);
@@ -518,7 +506,6 @@ TEST(TestKnob, ValidateStringKnobWithValidValues)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     // Valid values
     for(const auto& validVal : {"option1", "option2", "option3"})
@@ -545,7 +532,6 @@ TEST(TestKnob, ValidateStringKnobMaxLength)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     // Valid length
     EXPECT_EQ(knob.validate(KnobSetting(knob.knobId(), std::string("short"))).code, ErrorCode::OK);
@@ -572,7 +558,6 @@ TEST(TestKnob, ToStringIntKnob)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     std::string str = knob.toString();
 
@@ -589,7 +574,6 @@ TEST(TestKnob, ToStringFloatKnob)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     std::string str = knob.toString();
 
@@ -603,7 +587,6 @@ TEST(TestKnob, ToStringStringKnob)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     std::string str = knob.toString();
 
@@ -645,7 +628,6 @@ TEST(TestKnob, ToStringDeprecatedKnob)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     std::string str = knob.toString();
 
@@ -664,7 +646,6 @@ TEST(TestKnob, ToStringWithConstraint)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     std::string str = knob.toString();
 
@@ -679,7 +660,6 @@ TEST(TestKnob, GetDefaultValueWrongType)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     // Try to get default value as wrong type
     auto wrongDefault = std::get_if<double>(&knob.defaultValue());
@@ -904,7 +884,7 @@ TEST(TestKnob, InvalidDefaultValueReturnsError)
 
     // Should return error because default_value violates constraint
     EXPECT_NE(error.code, ErrorCode::OK);
-    
+
     EXPECT_NE(error.err_msg.find("violates"), std::string::npos);
     EXPECT_NE(error.err_msg.find("bad_default_knob"), std::string::npos);
 }
@@ -1125,7 +1105,6 @@ TEST(TestKnob, NoneConstraintCreatesEmptyConstraint)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     // Constraint should NOT be nullptr - should be EmptyConstraint
     ASSERT_NE(knob.constraint(), nullptr);
@@ -1145,7 +1124,6 @@ TEST(TestKnob, EmptyConstraintInToString)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     std::string str = knob.toString();
     EXPECT_NE(str.find("EmptyConstraint"), std::string::npos);
@@ -1159,7 +1137,6 @@ TEST(TestKnob, UnconstrainedKnobValidatesAnyValue)
     auto [error, knob] = hipdnn_frontend::Knob::tryFromFlatbuffer(bufferData);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
-    
 
     // Any int value should be valid for an unconstrained knob
     EXPECT_EQ(knob.validate(KnobSetting("test", static_cast<int64_t>(-999999))).code,
