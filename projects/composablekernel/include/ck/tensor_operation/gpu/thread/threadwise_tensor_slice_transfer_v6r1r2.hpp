@@ -8,6 +8,8 @@
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
 #include "ck/tensor_description/tensor_space_filling_curve.hpp"
 
+#include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer_util.hpp"
+
 namespace ck {
 
 // Do following things to avoid "alloca" in LLVM-IR, which would cause scratch memory
@@ -38,6 +40,8 @@ struct ThreadwiseTensorSliceTransfer_v6r1r2
     static constexpr index_t nDim = SliceLengths::Size();
 
     using Index = MultiIndex<nDim>;
+
+    using SFCHelper = ThreadwiseTransferHelper_SFC;
 
     using SrcCoord = decltype(make_tensor_coordinate(SrcDesc{}, Index{}));
     using DstCoord = decltype(make_tensor_coordinate(DstDesc{}, Index{}));
@@ -156,52 +160,25 @@ struct ThreadwiseTensorSliceTransfer_v6r1r2
         constexpr auto scalar_per_access = generate_sequence(
             detail::lambda_scalar_per_access<VectorDim, ScalarPerVector>{}, Number<nDim>{});
 
-        using SpaceFillingCurve = SpaceFillingCurve<SliceLengths,
-                                                    DimAccessOrder,
-                                                    remove_cv_t<decltype(scalar_per_access)>>;
-
-        constexpr auto num_access = SpaceFillingCurve::GetNumOfAccess();
-        if constexpr(num_access == 0)
-        {
-            return typename SpaceFillingCurve::Index{};
-        }
-        else
-        {
-            constexpr auto reset_step =
-                SpaceFillingCurve::GetStepBetween(Number<num_access - 1>{}, Number<0>{});
-
-            return reset_step;
-        }
+        return SFCHelper::ComputeSFCCoordinateResetStep<SliceLengths,
+                                                        DimAccessOrder,
+                                                        decltype(scalar_per_access)>();
     }
 
     // src_slice_origin_step_idx need to be known at compile-time, for performance reason
     __device__ void MoveSrcSliceWindow(const SrcDesc& src_desc,
                                        const Index& src_slice_origin_step_idx)
     {
-        // if src coord was not reset by RunRead(), then need to adjust the step here
-        const auto adjusted_step_idx = SrcResetCoordinateAfterRun
-                                           ? src_slice_origin_step_idx
-                                           : src_slice_origin_step_idx + GetCoordinateResetStep();
-
-        // is it OK to construct a new step every time?
-        const auto adjusted_step = make_tensor_coordinate_step(src_desc, adjusted_step_idx);
-
-        move_tensor_coordinate(src_desc, src_coord_, adjusted_step);
+        SFCHelper::MoveSliceWindow<SrcDesc, SrcCoord, SrcResetCoordinateAfterRun>(
+            src_desc, src_coord_, src_slice_origin_step_idx, GetCoordinateResetStep);
     }
 
     // dst_slice_origin_step_idx need to be known at compile-time, for performance reason
     __device__ void MoveDstSliceWindow(const DstDesc& dst_desc,
                                        const Index& dst_slice_origin_step_idx)
     {
-        // if dst coord was not reset by Run(), then need to adjust the step here
-        const auto adjusted_step_idx = DstResetCoordinateAfterRun
-                                           ? dst_slice_origin_step_idx
-                                           : dst_slice_origin_step_idx + GetCoordinateResetStep();
-
-        // is it OK to construct a new step every time?
-        const auto adjusted_step = make_tensor_coordinate_step(dst_desc, adjusted_step_idx);
-
-        move_tensor_coordinate(dst_desc, dst_coord_, adjusted_step);
+        SFCHelper::MoveSliceWindow<DstDesc, DstCoord, DstResetCoordinateAfterRun>(
+            dst_desc, dst_coord_, dst_slice_origin_step_idx, GetCoordinateResetStep);
     }
 
     private:
