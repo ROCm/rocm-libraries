@@ -35,7 +35,6 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Dict
 
 import rrperf
 from rrperf.problems import GEMMRun
@@ -51,7 +50,7 @@ def run_omniperf(
     output: Path,
     omniperf_workload_dir: Path = "profiling",
     cwd: Path = ".",
-    env: Dict[str, str] = None,
+    env: dict[str, str] = None,
 ):
     cmd = [
         "omniperf",
@@ -107,7 +106,7 @@ def profile_tensile(config: Path, output_dir: Path, tensile_repo: Path):
 
 
 def profile_rr(
-    problem: GEMMRun, name: str, output_dir: Path, build_dir: Path, env: Dict[str, str]
+    problem: GEMMRun, name: str, output_dir: Path, build_dir: Path, env: dict[str, str]
 ):
     i = 0
     output = output_dir / f"results_{name}.txt"

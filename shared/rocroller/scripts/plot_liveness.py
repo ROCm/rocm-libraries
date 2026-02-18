@@ -28,7 +28,7 @@
 import argparse
 import re
 import string
-from typing import Dict, Tuple
+from typing import Tuple
 
 import dash
 import dash_bootstrap_components as dbc
@@ -184,7 +184,7 @@ class RegisterHistory:
 
 def read_liveness(
     filename: str,
-) -> Tuple[Dict[str, RegisterHistory], list[list[Instruction]], list[int]]:
+) -> Tuple[dict[str, RegisterHistory], list[list[Instruction]], list[int]]:
     accvgprs = RegisterHistory()
     vgprs = RegisterHistory()
     sgprs = RegisterHistory()
