@@ -1209,10 +1209,17 @@ private:
 
         int device_id;
         PRIMBENCH_HIP_CHECK(hipGetDevice(&device_id));
+
         hipDeviceProp_t dev_prop;
         PRIMBENCH_HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
+
         ss << ",\"gpu_name\":\"" << dev_prop.name << "\"";
         ss << ",\"gpu_arch\":\"" << get_arch_name(dev_prop.gcnArchName) << "\"";
+
+        char pci_bus_id_str[32];
+        PRIMBENCH_HIP_CHECK(
+            hipDeviceGetPCIBusId(pci_bus_id_str, sizeof(pci_bus_id_str), device_id));
+        ss << ",\"gpu_pci_bus_id\":\"" << pci_bus_id_str << "\"";
 
 #if defined(NDEBUG)
         const char build_type[] = "release";
