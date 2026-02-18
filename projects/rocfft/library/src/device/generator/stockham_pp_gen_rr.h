@@ -640,9 +640,10 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         stmts += LineBreak{};
         stmts += CommentLines{"partial-pass offsets"};
-        stmts += Declaration{stride_lds_pp, length};
+        stmts += Declaration{stride_lds_pp, (length + get_lds_padding())};
         stmts += Declaration{offset_lds_pp,
-                             Parens(block_id * transforms_per_block + thread_id) % length};
+                             Parens(block_id * transforms_per_block + thread_id)
+                                 % (length + get_lds_padding())};
 
         auto pre_post_lds_tmpl = device_lds_reg_inout_pp_step_1_2_device_call_templates();
         auto pre_post_lds_args = device_lds_reg_inout_pp_device_call_arguments();
