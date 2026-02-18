@@ -9,7 +9,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Set
+from typing import Set
 
 import yaml
 
@@ -208,7 +208,7 @@ def discover_gtest_tests(
     executable: str,
     include: list[str] = None,
     exclude: list[str] = None,
-    build_dir: Optional[Path] = None,
+    build_dir: Path | None = None,
 ) -> Set[Test]:
     """
     Discover GTest tests by running the executable.
@@ -257,7 +257,7 @@ def discover_catch2_tests(
     executable: str,
     include: list[str] = None,
     exclude: list[str] = None,
-    build_dir: Optional[Path] = None,
+    build_dir: Path | None = None,
 ) -> Set[Test]:
     """
     Discover Catch2 tests by running the executable.
@@ -313,7 +313,7 @@ def discover_ctest_tests(
     executable: str,
     include: list[str] = None,
     exclude: list[str] = None,
-    build_dir: Optional[Path] = None,
+    build_dir: Path | None = None,
 ) -> Set[Test]:
     """
     Discover CTest tests by running ctest.
@@ -359,7 +359,7 @@ def discover_ctest_tests(
 
 
 def list_tests_for_executable(
-    executable: str, profile: str, build_dir: Optional[Path] = None
+    executable: str, profile: str, build_dir: Path | None = None
 ) -> Set[Test]:
     """
     List tests for a given executable and profile.
@@ -419,7 +419,7 @@ def list_tests_for_executable(
         raise ValueError(f"Unknown framework: {framework}")
 
 
-def list_tests(profile: str, build_dir: Optional[Path] = None) -> Set[Test]:
+def list_tests(profile: str, build_dir: Path | None = None) -> Set[Test]:
     """
     List all tests for a given profile (across all executables).
 
@@ -465,7 +465,7 @@ def list_tests(profile: str, build_dir: Optional[Path] = None) -> Set[Test]:
     return all_tests
 
 
-def get_test_commands(profile_name: str, config_file: Optional[Path] = None) -> dict:
+def get_test_commands(profile_name: str, config_file: Path | None = None) -> dict:
     """
     Get command lines for all executables in a profile, organized by framework.
 

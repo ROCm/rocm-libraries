@@ -18,7 +18,6 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from rrtest import get_test_commands
 
@@ -35,7 +34,7 @@ class TestResult:
     success: bool
 
 
-def run_test_command(command: list[str], cwd: Optional[Path] = None) -> TestResult:
+def run_test_command(command: list[str], cwd: Path | None = None) -> TestResult:
     """
     Run a test command and capture timing and results.
 

@@ -25,7 +25,7 @@
 
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from rrperf.utils import get_dataclass_id
@@ -129,7 +129,7 @@ class TypeParameters:
     scaleBlockSize: int = -1
     scaleSkipPermlane: bool = False
 
-    def __init__(self, typeParams: Optional[Any] = None, **kwargs):
+    def __init__(self, typeParams: Any | None = None, **kwargs):
         if isinstance(typeParams, TypeParameters):
             for f in fields(self):
                 setattr(self, f.name, getattr(typeParams, f.name))
