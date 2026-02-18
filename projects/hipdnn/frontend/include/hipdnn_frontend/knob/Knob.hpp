@@ -34,8 +34,8 @@ class Knob
 {
 public:
     // Factory function to create from flatbuffer
-    // Returns Error indicating success/failure. On success, 'out' is populated with the Knob.
-    static Error tryFromFlatbuffer(hipdnnBackendFlatbufferData_t fbData, Knob& out);
+    // Returns {Error, Knob}. On error, the Knob is default-constructed (should be ignored).
+    static std::pair<Error, Knob> tryFromFlatbuffer(hipdnnBackendFlatbufferData_t fbData);
 
     // Accessors
     const std::string& knobId() const
@@ -143,18 +143,18 @@ private:
 };
 
 // Factory method implementation
-inline Error Knob::tryFromFlatbuffer(hipdnnBackendFlatbufferData_t fbData, Knob& out)
+inline std::pair<Error, Knob> Knob::tryFromFlatbuffer(hipdnnBackendFlatbufferData_t fbData)
 {
     if(fbData.ptr == nullptr || fbData.size == 0)
     {
-        return {ErrorCode::INVALID_VALUE, "Flatbuffer data is nullptr or has zero size"};
+        return {{ErrorCode::INVALID_VALUE, "Flatbuffer data is nullptr or has zero size"}, {}};
     }
 
     hipdnn_data_sdk::flatbuffer_utilities::KnobWrapper knobWrapper(fbData.ptr, fbData.size);
 
     if(!knobWrapper.isValid())
     {
-        return {ErrorCode::INVALID_VALUE, "Knob flatbuffer failed verification"};
+        return {{ErrorCode::INVALID_VALUE, "Knob flatbuffer failed verification"}, {}};
     }
 
     auto fbKnob = &knobWrapper.getKnob();
@@ -180,17 +180,19 @@ inline Error Knob::tryFromFlatbuffer(hipdnnBackendFlatbufferData_t fbData, Knob&
         break;
     case hipdnn_data_sdk::data_objects::KnobValue::NONE:
         // NONE default_value is invalid - knobs must have a default value
-        return {ErrorCode::INVALID_VALUE,
-                "Knob '" + knobId + "' has NONE default_value - knobs must have a default value"};
+        return {{ErrorCode::INVALID_VALUE,
+                 "Knob '" + knobId + "' has NONE default_value - knobs must have a default value"},
+                {}};
     default:
-        return {ErrorCode::INVALID_VALUE, "Knob '" + knobId + "' has unknown default_value type"};
+        return {{ErrorCode::INVALID_VALUE, "Knob '" + knobId + "' has unknown default_value type"},
+                {}};
     }
 
-    // Populate the out parameter - use move semantics to populate fields
-    out._knobId = std::move(knobT->knob_id);
-    out._description = std::move(knobT->description);
-    out._defaultValue = std::move(defaultValue);
-    out._deprecated = knobT->deprecated;
+    // Create the knob - strings are already std::string in KnobT
+    Knob knob(std::move(knobT->knob_id),
+              std::move(knobT->description),
+              std::move(defaultValue),
+              knobT->deprecated);
 
     // Handle constraints using the native union types
     switch(knobT->constraint.type)
@@ -199,44 +201,45 @@ inline Error Knob::tryFromFlatbuffer(hipdnnBackendFlatbufferData_t fbData, Knob&
     {
         auto* c = knobT->constraint.AsIntConstraint();
         std::unordered_set<int64_t> validValues(c->valid_values.begin(), c->valid_values.end());
-        out._constraint = std::make_unique<IntConstraint>(
+        knob._constraint = std::make_unique<IntConstraint>(
             c->min_value, c->max_value, c->step, std::move(validValues));
         break;
     }
     case hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint:
     {
         auto* c = knobT->constraint.AsFloatConstraint();
-        out._constraint = std::make_unique<FloatConstraint>(c->min_value, c->max_value);
+        knob._constraint = std::make_unique<FloatConstraint>(c->min_value, c->max_value);
         break;
     }
     case hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint:
     {
         auto* c = knobT->constraint.AsStringConstraint();
         std::unordered_set<std::string> validValues(c->valid_values.begin(), c->valid_values.end());
-        out._constraint = std::make_unique<StringConstraint>(c->max_length, std::move(validValues));
+        knob._constraint = std::make_unique<StringConstraint>(c->max_length, std::move(validValues));
         break;
     }
     case hipdnn_data_sdk::data_objects::KnobConstraint::NONE:
-        out._constraint = std::make_unique<EmptyConstraint>();
+        knob._constraint = std::make_unique<EmptyConstraint>();
         break;
     default:
-        return {ErrorCode::INVALID_VALUE, "Knob '" + knobId + "' has unknown constraint type"};
+        return {{ErrorCode::INVALID_VALUE, "Knob '" + knobId + "' has unknown constraint type"}, {}};
     }
 
     // Validate that the default_value satisfies the constraint
-    if(out._constraint)
+    if(knob._constraint)
     {
-        KnobSetting defaultSetting(knobId, out._defaultValue);
-        auto validationError = out._constraint->validateKnobSetting(defaultSetting);
+        KnobSetting defaultSetting(knob._knobId, knob._defaultValue);
+        auto validationError = knob._constraint->validateKnobSetting(defaultSetting);
         if(validationError.code != ErrorCode::OK)
         {
-            return {ErrorCode::INVALID_VALUE,
-                    "Knob '" + knobId + "' has default_value that violates its constraint: "
-                        + validationError.err_msg};
+            return {{ErrorCode::INVALID_VALUE,
+                     "Knob '" + knob._knobId + "' has default_value that violates its constraint: "
+                         + validationError.err_msg},
+                    {}};
         }
     }
 
-    return {ErrorCode::OK, ""};
+    return {{ErrorCode::OK, ""}, knob};
 }
 
 namespace detail
@@ -285,8 +288,7 @@ inline Error getKnobsForEngine(std::vector<Knob>& knobs, hipdnnBackendDescriptor
 
     for(size_t i = 0; i < static_cast<size_t>(actualCount); ++i)
     {
-        Knob knob;
-        auto error = Knob::tryFromFlatbuffer(flatbufferDataArray[i], knob);
+        auto [error, knob] = Knob::tryFromFlatbuffer(flatbufferDataArray[i]);
 
         if(error.code != ErrorCode::OK)
         {
