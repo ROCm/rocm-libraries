@@ -17,7 +17,7 @@
 #include <spdlog/spdlog.h>
 
 #include <hip/hip_runtime.h>
-#include <shared_mutex>
+#include <mutex>
 
 namespace hipdnn_backend
 {
@@ -38,7 +38,9 @@ constexpr const char* BACKEND_LOGGER_PATTERN = "[%Y-%m-%d %H:%M:%S.%e] [tid %t] 
 // Global backend log output callback state
 struct BackendLogState
 {
-    std::shared_mutex loggerInitMutex;
+    // Single recursive mutex protects all logger state. Recursive is needed because
+    // sync callback logging may re-enter through globalCallbackWrapper() on the same thread.
+    std::recursive_mutex loggerStateMutex;
     bool loggerInitialized = false;
     bool programIsExiting = false;
     // The loggers, once created, are retained until the hipdnn library is shutdown.
@@ -51,10 +53,6 @@ struct BackendLogState
     std::shared_ptr<spdlog::logger> callbackAsyncLogger; // Async global callback logger.
     std::shared_ptr<spdlog::details::thread_pool> sharedThreadPool;
 
-    std::shared_mutex callbackFnStateMutex;
-    // A unique_lock for both loggerInitMutex and callbackFnStateMutex must be taken
-    // (in that order) before modifying callbackFn, but callbackFn can be read while
-    // holding only one of either mutex.
     hipdnnBackendLogOutputCallback_t callbackFn = nullptr;
     bool async = false; // tracks which mode is currently active
 };
@@ -68,7 +66,7 @@ struct ProgramIsExitingSentinel
         {
             // System is shutting down -- prevent lazy init from re-initializing the logger.
             auto& state = getBackendLogState();
-            std::unique_lock loggerInitLock(state.loggerInitMutex);
+            std::lock_guard<std::recursive_mutex> lock(state.loggerStateMutex);
             state.programIsExiting = true;
         }
 
@@ -83,9 +81,8 @@ BackendLogState& getBackendLogState()
     static auto s_state = new BackendLogState();
     // ProgramIsExitingSentinel s_sentinel is used to notify BackendLogState when
     // static objects are being cleaned-up -- the program is exiting. This
-    // allows the logger to put itself into a quiescent so as not to interfere
-    // while appllication threads which may still attempt to use the logger
-    // are being closed.
+    // allows the logger to put itself into a quiescent state so as not to interfere
+    // with appllication threads that attempt to use the logger while being closed.
     static ProgramIsExitingSentinel s_sentinel;
     return *s_state;
 }
@@ -94,9 +91,7 @@ BackendLogState& getBackendLogState()
 void globalCallbackWrapper(hipdnnSeverity_t severity, const char* message)
 {
     auto& state = getBackendLogState();
-    // Only take callbackFnStateMutex here as loggerInitMutex may already be taken
-    // by loggerShutdown() or hipdnnLoggingCallback().
-    std::shared_lock loggerAvailableLock(state.callbackFnStateMutex);
+    std::lock_guard<std::recursive_mutex> lock(state.loggerStateMutex);
     if(state.callbackFn != nullptr)
     {
         state.callbackFn(severity, message);
@@ -139,25 +134,12 @@ void logHipDeviceInfo(hipStream_t stream)
 void initialize()
 {
     {
-        // Try first with read lock to see if alrelady initialized.
         auto& state = getBackendLogState();
-        std::shared_lock loggerInitLock(state.loggerInitMutex);
+        std::lock_guard<std::recursive_mutex> lock(state.loggerStateMutex);
         if(state.loggerInitialized || state.programIsExiting)
         {
             return;
         }
-    }
-
-    {
-        // Potentially not initialized, check again with unique lock and init if needed.
-        auto& state = getBackendLogState();
-        std::unique_lock loggerInitLock(state.loggerInitMutex);
-        if(state.loggerInitialized || state.programIsExiting)
-        {
-            return;
-        }
-        // Unique lock sequence is loggerInitMutex then callbackFnStateMutex
-        std::unique_lock loggerAvailableLock(state.callbackFnStateMutex);
 
         // Register the backend logging callback with the backend's data SDK based logger.
         hipdnn_data_sdk::logging::registerLoggingCallback(hipdnnLoggingCallback);
@@ -240,14 +222,9 @@ void initialize()
 void loggerShutdown()
 {
     auto& state = getBackendLogState();
-    std::unique_lock loggerInitLock(state.loggerInitMutex);
+    std::lock_guard<std::recursive_mutex> lock(state.loggerStateMutex);
 
-    {
-        // Unique lock order is loggerInitMutex then callbackFnStateMutex
-        std::unique_lock loggerAvailableLock(state.callbackFnStateMutex);
-        state.callbackFn = nullptr;
-    }
-
+    state.callbackFn = nullptr;
     state.consoleFileLogger.reset();
     state.callbackSyncLogger.reset();
     state.callbackAsyncLogger.reset();
@@ -293,10 +270,7 @@ void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg)
     }
 
     auto& state = getBackendLogState();
-    // Only take the loggerInitMutex read lock here as the callbackWrapper() will take
-    // the callbackFnStateMutex read lock, which may occur in the same thread if using the
-    // global callback in sync mode.
-    std::shared_lock loggerInitLock(state.loggerInitMutex);
+    std::lock_guard<std::recursive_mutex> lock(state.loggerStateMutex);
     if(state.programIsExiting)
     {
         // For now, the policy is to drop logs that are generated while the program is exiting.
@@ -331,14 +305,11 @@ hipdnnStatus_t initializeGlobalOutputCallbackLogger(hipdnnBackendLogOutputCallba
     }
 
     auto& state = getBackendLogState();
-    std::unique_lock loggerInitLock(state.loggerInitMutex);
+    std::lock_guard<std::recursive_mutex> lock(state.loggerStateMutex);
     if(callback != nullptr && (!state.loggerInitialized || state.programIsExiting))
     {
         return HIPDNN_STATUS_NOT_INITIALIZED;
     }
-
-    // Unique lock order is loggerInitMutex then callbackFnStateMutex.
-    std::unique_lock loggerAvailableLock(state.callbackFnStateMutex);
 
     // Update callback pointer and current mode
     state.callbackFn = callback;
