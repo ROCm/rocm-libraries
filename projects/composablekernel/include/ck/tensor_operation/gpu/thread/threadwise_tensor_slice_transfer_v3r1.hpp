@@ -14,9 +14,6 @@
 
 namespace ck {
 
-// Legacy alias -- prefer ThreadwiseTransferHelper_Serpentine directly.
-using ThreadwiseTransferHelper_v3r1 = ThreadwiseTransferHelper_Serpentine;
-
 // Assume:
 //   1. src_desc and dst_desc are not known at compile-time
 //   2. SrcBuffer and DstBuffer are DynamicBuffer

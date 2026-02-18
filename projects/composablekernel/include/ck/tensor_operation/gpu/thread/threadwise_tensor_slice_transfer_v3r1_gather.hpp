@@ -11,7 +11,6 @@
 #include "ck/utility/is_detected.hpp"
 
 #include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer_util.hpp"
-#include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer_util.hpp"
 
 namespace ck {
 
