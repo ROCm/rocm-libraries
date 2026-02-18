@@ -1036,6 +1036,7 @@ def bf16bf16gemm_32x32x4():
         types=bf16_bf16,
     )
 
+
 def fp4_small():
     yield GEMMRun(
         M=256,
@@ -1092,6 +1093,7 @@ def fp4_small():
         numWarmUp=1000,
         numInner=1000,
     )
+
 
 def fp4_small_k():
     yield GEMMRun(
@@ -1150,7 +1152,8 @@ def fp4_small_k():
         numInner=1000,
     )
 
-def mxfp4_target():
+
+def fp4_target():
     yield GEMMRun(
         M=4096,
         N=4096,
