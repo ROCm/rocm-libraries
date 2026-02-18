@@ -1714,7 +1714,7 @@ class Solution(collections.abc.Mapping):
 
       state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeA), 2)))
 
-      def calcLdsPad(lrvw: int, isaInfoMap: Dict[str, IsaInfo]) -> int:
+      def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> int:
         lrvwA = state["LocalReadVectorWidthA"]
         lrvwB = state["LocalReadVectorWidthB"]
         ldsPadA = state["LdsPadA"]
@@ -2019,11 +2019,11 @@ class Solution(collections.abc.Mapping):
           wlrB = max(state["LocalReadVectorWidthB"] // state["MIInputPerThread"], 1)
 
           if (wlrA > 1) or (wlrB > 1):
-            padA, padB, padM = calcLdsPad()
+            padA, padB, padM = calcLdsPad(isaInfoMap)
             ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPad()
             ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, \
               ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
-            if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > globalParameters["MaxLDS"]:
+            if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > state["MaxLDS"]:
               if wlrA > 1:
                 state["LocalReadVectorWidthA"] //= 2
               if wlrB > 1:
@@ -3081,7 +3081,7 @@ class Solution(collections.abc.Mapping):
         state["NoLdsWriteCode"] = False
 
     # calculate ldsPad
-    state["LdsPadA"], state["LdsPadB"], state["LdsPadMetadata"] = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
+    state["LdsPadA"], state["LdsPadB"], state["LdsPadMetadata"] = calcLdsPad(isaInfoMap)
 
     if state["GlobalReadVectorWidthA"] * state["ProblemType"]["MacDataTypeA"].numBytes() == 32 and state["LdsPadA"] == 16 // state["ProblemType"]["MacDataTypeA"].numBytes():
       if auto_LdsBlockSizePerPadA_for_mix:
