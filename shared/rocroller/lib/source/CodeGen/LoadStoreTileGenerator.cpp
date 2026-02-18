@@ -223,17 +223,17 @@ namespace rocRoller
         {
             auto offsetTag
                 = m_graph->mapper.get<Offset>(info.tag, isStorePartOfGlobalToLDS ? 2 : 0);
-            rocRoller::Log::getLogger()->info("KernelGraph::LoadStoreTileGenerator::getOffset(tag:"
-                                              " {}, offsetTag: {})",
-                                              info.tag,
-                                              offsetTag);
+            rocRoller::Log::getLogger()->debug("KernelGraph::LoadStoreTileGenerator::getOffset(tag:"
+                                               " {}, offsetTag: {})",
+                                               info.tag,
+                                               offsetTag);
 
             AssertFatal(offsetTag >= 0, "No Offset found");
 
             ExpressionPtr rowOffsetExpr;
 
-            Log::info("has offset register? {}",
-                      m_context->registerTagManager()->hasRegister(offsetTag));
+            Log::debug("has offset register? {}",
+                       m_context->registerTagManager()->hasRegister(offsetTag));
 
             if(m_context->registerTagManager()->hasRegister(offsetTag))
             {

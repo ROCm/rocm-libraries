@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <rocRoller/CodeGen/LoadStoreTileGenerator.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
 namespace rocRoller
@@ -44,11 +45,20 @@ namespace rocRoller
             std::string name() const override;
 
         private:
+            enum class LDSDirection
+            {
+                Load,
+                Store
+            };
+
             Generator<size_t>
-                getLoadLDSAddresses(KernelGraph& graph, int tag, ControlGraph::LoadLDSTile const& op);
-            Generator<size_t> getStoreLDSAddresses(KernelGraph&               graph,
-                                                   int                        tag,
-                                                   ControlGraph::StoreLDSTile const& op);
+                getLDSAddressesImpl(KernelGraph&                                     graph,
+                                    int                                              tag,
+                                    LoadStoreTileGenerator::LoadStoreTileInfo const& info,
+                                    LDSDirection                                     direction);
+
+            template <typename Op>
+            Generator<size_t> getLDSAddresses(KernelGraph& graph, int tag, Op const& op);
             void              setup();
             void              setWorkgroup(uint offset, uint value);
             void              setWorkitem(uint offset, uint value);
