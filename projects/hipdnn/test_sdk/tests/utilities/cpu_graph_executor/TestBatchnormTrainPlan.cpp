@@ -12,9 +12,10 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormTrainPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormTrainPlan.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_test_sdk::detail;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::flatbuffer_utilities;

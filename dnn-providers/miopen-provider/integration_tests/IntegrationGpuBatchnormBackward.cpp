@@ -15,6 +15,7 @@
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_plugin::test_utilities;
@@ -57,7 +58,7 @@ protected:
         }
     }
 
-    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
+    void runGraphTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         const BatchnormTestCase& testCase = this->GetParam();
 
@@ -73,18 +74,18 @@ protected:
         graphObj.set_intermediate_data_type(intermediateDataType);
         graphObj.set_io_data_type(dataType);
 
-        auto xAttr = graph::makeTensorAttributes(
+        auto xAttr = makeTensorAttributes(
             "x", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         xAttr.set_uid(BatchnormBwdTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto dyAttr = graph::makeTensorAttributes(
+        auto dyAttr = makeTensorAttributes(
             "dy", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         dyAttr.set_uid(BatchnormBwdTensorIds::DY_UID);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
         // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
-        auto scaleAttr = graph::makeTensorAttributes(
+        auto scaleAttr = makeTensorAttributes(
             "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
         scaleAttr.set_uid(BatchnormBwdTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
@@ -93,12 +94,12 @@ protected:
 
         if(!CalcStats)
         {
-            auto meanAttr = graph::makeTensorAttributes(
+            auto meanAttr = makeTensorAttributes(
                 "mean", intermediateDataType, derivedDims, generateStrides(derivedDims));
             meanAttr.set_uid(BatchnormBwdTensorIds::MEAN_UID);
             auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
-            auto invVarianceAttr = graph::makeTensorAttributes(
+            auto invVarianceAttr = makeTensorAttributes(
                 "inv_variance", intermediateDataType, derivedDims, generateStrides(derivedDims));
             invVarianceAttr.set_uid(BatchnormBwdTensorIds::INV_VARIANCE_UID);
             auto invVarianceTensorAttr
@@ -133,53 +134,49 @@ protected:
 
 using IntegrationGpuBatchnormBackwardNchwFp32 = BatchnormBackward<float, float>;
 
-using IntegrationGpuBatchnormBackwardNchwBfp16 = BatchnormBackward<hip_bfloat16, float>;
+using IntegrationGpuBatchnormBackwardNchwBfp16 = BatchnormBackward<bfloat16, float>;
 
 using IntegrationGpuBatchnormBackwardNchwFp16 = BatchnormBackward<half, float>;
 
 using IntegrationGpuBatchnormBackwardNhwcFp32 = BatchnormBackward<float, float>;
 
-using IntegrationGpuBatchnormBackwardNhwcBfp16 = BatchnormBackward<hip_bfloat16, float>;
+using IntegrationGpuBatchnormBackwardNhwcBfp16 = BatchnormBackward<bfloat16, float>;
 
 using IntegrationGpuBatchnormBackwardNhwcFp16 = BatchnormBackward<half, float>;
 
 using IntegrationGpuBatchnormBackwardNcdhwFp32 = BatchnormBackward<float, float>;
 
-using IntegrationGpuBatchnormBackwardNcdhwBfp16 = BatchnormBackward<hip_bfloat16, float>;
+using IntegrationGpuBatchnormBackwardNcdhwBfp16 = BatchnormBackward<bfloat16, float>;
 
 using IntegrationGpuBatchnormBackwardNcdhwFp16 = BatchnormBackward<half, float>;
 
 using IntegrationGpuBatchnormBackwardNdhwcFp32 = BatchnormBackward<float, float>;
 
-using IntegrationGpuBatchnormBackwardNdhwcBfp16 = BatchnormBackward<hip_bfloat16, float>;
+using IntegrationGpuBatchnormBackwardNdhwcBfp16 = BatchnormBackward<bfloat16, float>;
 
 using IntegrationGpuBatchnormBackwardNdhwcFp16 = BatchnormBackward<half, float>;
 
 using IntegrationGpuBatchnormBackwardCalcStatsNchwFp32 = BatchnormBackward<float, float, true>;
 
-using IntegrationGpuBatchnormBackwardCalcStatsNchwBfp16
-    = BatchnormBackward<hip_bfloat16, float, true>;
+using IntegrationGpuBatchnormBackwardCalcStatsNchwBfp16 = BatchnormBackward<bfloat16, float, true>;
 
 using IntegrationGpuBatchnormBackwardCalcStatsNchwFp16 = BatchnormBackward<half, float, true>;
 
 using IntegrationGpuBatchnormBackwardCalcStatsNhwcFp32 = BatchnormBackward<float, float, true>;
 
-using IntegrationGpuBatchnormBackwardCalcStatsNhwcBfp16
-    = BatchnormBackward<hip_bfloat16, float, true>;
+using IntegrationGpuBatchnormBackwardCalcStatsNhwcBfp16 = BatchnormBackward<bfloat16, float, true>;
 
 using IntegrationGpuBatchnormBackwardCalcStatsNhwcFp16 = BatchnormBackward<half, float, true>;
 
 using IntegrationGpuBatchnormBackwardCalcStatsNcdhwFp32 = BatchnormBackward<float, float, true>;
 
-using IntegrationGpuBatchnormBackwardCalcStatsNcdhwBfp16
-    = BatchnormBackward<hip_bfloat16, float, true>;
+using IntegrationGpuBatchnormBackwardCalcStatsNcdhwBfp16 = BatchnormBackward<bfloat16, float, true>;
 
 using IntegrationGpuBatchnormBackwardCalcStatsNcdhwFp16 = BatchnormBackward<half, float, true>;
 
 using IntegrationGpuBatchnormBackwardCalcStatsNdhwcFp32 = BatchnormBackward<float, float, true>;
 
-using IntegrationGpuBatchnormBackwardCalcStatsNdhwcBfp16
-    = BatchnormBackward<hip_bfloat16, float, true>;
+using IntegrationGpuBatchnormBackwardCalcStatsNdhwcBfp16 = BatchnormBackward<bfloat16, float, true>;
 
 using IntegrationGpuBatchnormBackwardCalcStatsNdhwcFp16 = BatchnormBackward<half, float, true>;
 
@@ -200,7 +197,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 TEST_P(IntegrationGpuBatchnormBackwardNchwBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCHW);
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -239,7 +236,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 TEST_P(IntegrationGpuBatchnormBackwardNhwcBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NHWC);
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -274,7 +271,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 TEST_P(IntegrationGpuBatchnormBackwardNcdhwBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCDHW);
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -301,7 +298,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 TEST_P(IntegrationGpuBatchnormBackwardNdhwcBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NDHWC);
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -328,7 +325,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 TEST_P(IntegrationGpuBatchnormBackwardCalcStatsNchwBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCHW);
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -355,7 +352,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 TEST_P(IntegrationGpuBatchnormBackwardCalcStatsNhwcBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NHWC);
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -382,7 +379,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 TEST_P(IntegrationGpuBatchnormBackwardCalcStatsNcdhwBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCDHW);
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -409,7 +406,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 TEST_P(IntegrationGpuBatchnormBackwardCalcStatsNdhwcBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NDHWC);
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,

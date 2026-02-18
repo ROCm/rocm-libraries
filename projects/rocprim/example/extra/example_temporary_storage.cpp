@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -355,11 +355,11 @@ int main()
     HIP_CHECK(hipGetDeviceProperties(&device_properties, 0));
 
     // Show device info
-    printf("Selected device:         %s  \n", device_properties.name);
-    printf("Available global memory: %lu \n", device_properties.totalGlobalMem);
-    printf("Shared memory per block: %lu \n", device_properties.sharedMemPerBlock);
-    printf("Warp size:               %d  \n", device_properties.warpSize);
-    printf("Max threads per block:   %d  \n", device_properties.maxThreadsPerBlock);
+    std::cout << "Selected device:         " << device_properties.name << std::endl;
+    std::cout << "Available global memory: " << device_properties.totalGlobalMem << std::endl;
+    std::cout << "Shared memory per block: " << device_properties.sharedMemPerBlock << std::endl;
+    std::cout << "Warp size:               " << device_properties.warpSize << std::endl;
+    std::cout << "Max threads per block:   " << device_properties.maxThreadsPerBlock << std::endl;
 
     // Running kernels
     run_example_global_memory_storage<int>(1024);

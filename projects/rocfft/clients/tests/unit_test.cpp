@@ -20,6 +20,7 @@
 
 #include "rocfft/rocfft.h"
 
+#include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
 #include "../../shared/environment.h"
 #include "../../shared/gpubuf.h"
@@ -67,47 +68,66 @@ TEST(rocfft_UnitTest, plan_description)
         GTEST_SKIP();
     }
 
-    rocfft_plan_description desc = nullptr;
-    ASSERT_TRUE(rocfft_status_success == rocfft_plan_description_create(&desc));
+    try
+    {
+        rocfft_plan_description desc = nullptr;
+        ASSERT_TRUE(rocfft_status_success == rocfft_plan_description_create(&desc));
 
-    rocfft_array_type in_array_type  = rocfft_array_type_complex_interleaved;
-    rocfft_array_type out_array_type = rocfft_array_type_complex_interleaved;
+        rocfft_array_type in_array_type  = rocfft_array_type_complex_interleaved;
+        rocfft_array_type out_array_type = rocfft_array_type_complex_interleaved;
 
-    size_t rank = 1;
+        size_t rank = 1;
 
-    size_t i_strides[3] = {1, 1, 1};
-    size_t o_strides[3] = {1, 1, 1};
+        size_t i_strides[3] = {1, 1, 1};
+        size_t o_strides[3] = {1, 1, 1};
 
-    size_t idist = 0;
-    size_t odist = 0;
+        size_t idist = 0;
+        size_t odist = 0;
 
-    rocfft_plan plan   = NULL;
-    size_t      length = 8;
+        rocfft_plan plan   = NULL;
+        size_t      length = 8;
 
-    ASSERT_TRUE(rocfft_status_success
-                == rocfft_plan_description_set_data_layout(desc,
-                                                           in_array_type,
-                                                           out_array_type,
-                                                           0,
-                                                           0,
-                                                           rank,
-                                                           i_strides,
-                                                           idist,
-                                                           rank,
-                                                           o_strides,
-                                                           odist));
-    ASSERT_TRUE(rocfft_status_success
-                == rocfft_plan_create(&plan,
-                                      rocfft_placement_inplace,
-                                      rocfft_transform_type_complex_forward,
-                                      rocfft_precision_single,
-                                      rank,
-                                      &length,
-                                      1,
-                                      desc));
+        ASSERT_TRUE(rocfft_status_success
+                    == rocfft_plan_description_set_data_layout(desc,
+                                                               in_array_type,
+                                                               out_array_type,
+                                                               0,
+                                                               0,
+                                                               rank,
+                                                               i_strides,
+                                                               idist,
+                                                               rank,
+                                                               o_strides,
+                                                               odist));
+        ASSERT_TRUE(rocfft_status_success
+                    == rocfft_plan_create(&plan,
+                                          rocfft_placement_inplace,
+                                          rocfft_transform_type_complex_forward,
+                                          rocfft_precision_single,
+                                          rank,
+                                          &length,
+                                          1,
+                                          desc));
 
-    ASSERT_TRUE(rocfft_status_success == rocfft_plan_description_destroy(desc));
-    ASSERT_TRUE(rocfft_status_success == rocfft_plan_destroy(plan));
+        ASSERT_TRUE(rocfft_status_success == rocfft_plan_description_destroy(desc));
+        ASSERT_TRUE(rocfft_status_success == rocfft_plan_destroy(plan));
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 TEST(rocfft_UnitTest, plan_description_reuse)
@@ -121,89 +141,108 @@ TEST(rocfft_UnitTest, plan_description_reuse)
         GTEST_SKIP();
     }
 
-    // allocate plan description once
-    rocfft_plan_description desc = nullptr;
-    ASSERT_EQ(rocfft_plan_description_create(&desc), rocfft_status_success);
-
-    std::vector<rocfft_complex<float>> output;
-
-    // do length-8 FFTs with different strides.  first one is
-    // stride-1 and we use that as our baseline to know what output
-    // to expect for the rest
-    const size_t length = 8;
-    for(const size_t stride : {1, 2, 4})
+    try
     {
-        // set layout for this stride
-        ASSERT_EQ(rocfft_plan_description_set_data_layout(desc,
-                                                          rocfft_array_type_complex_interleaved,
-                                                          rocfft_array_type_complex_interleaved,
-                                                          nullptr,
-                                                          nullptr,
-                                                          1,
-                                                          &stride,
-                                                          length * stride,
-                                                          1,
-                                                          &stride,
-                                                          length * stride),
-                  rocfft_status_success);
+        // allocate plan description once
+        rocfft_plan_description desc = nullptr;
+        ASSERT_EQ(rocfft_plan_description_create(&desc), rocfft_status_success);
 
-        static const rocfft_complex<float> input[8]{{-0.100, 0.380},
-                                                    {0.0166, 0.439},
-                                                    {-0.475, 0.212},
-                                                    {0.440, -0.432},
-                                                    {0.445, 0.0589},
-                                                    {0.296, 0.164},
-                                                    {-0.084, 0.077},
-                                                    {0.320, 0.087}};
+        std::vector<rocfft_complex<float>> output;
 
-        // allocate host buffer.  initialize the whole thing to zero
-        // but set a known input along the strides we want
-        std::vector<rocfft_complex<float>> data_host(length * stride, {0.0, 0.0});
-        for(size_t i = 0; i < length; ++i)
+        // do length-8 FFTs with different strides.  first one is
+        // stride-1 and we use that as our baseline to know what output
+        // to expect for the rest
+        const size_t length = 8;
+        for(const size_t stride : {1, 2, 4})
         {
-            data_host[i * stride] = input[i];
-        }
+            // set layout for this stride
+            ASSERT_EQ(rocfft_plan_description_set_data_layout(desc,
+                                                              rocfft_array_type_complex_interleaved,
+                                                              rocfft_array_type_complex_interleaved,
+                                                              nullptr,
+                                                              nullptr,
+                                                              1,
+                                                              &stride,
+                                                              length * stride,
+                                                              1,
+                                                              &stride,
+                                                              length * stride),
+                      rocfft_status_success);
 
-        // copy to device
-        const size_t data_bytes = data_host.size() * sizeof(rocfft_complex<float>);
-        gpubuf_t<rocfft_complex<float>> data_dev;
-        ASSERT_EQ(data_dev.alloc(data_bytes), hipSuccess);
-        void* data_dev_ptr = data_dev.data();
-        ASSERT_EQ(hipMemcpy(data_dev_ptr, data_host.data(), data_bytes, hipMemcpyHostToDevice),
-                  hipSuccess);
+            static const rocfft_complex<float> input[8]{{-0.100, 0.380},
+                                                        {0.0166, 0.439},
+                                                        {-0.475, 0.212},
+                                                        {0.440, -0.432},
+                                                        {0.445, 0.0589},
+                                                        {0.296, 0.164},
+                                                        {-0.084, 0.077},
+                                                        {0.320, 0.087}};
 
-        // do the transform
-        rocfft_plan plan = nullptr;
-        ASSERT_EQ(rocfft_plan_create(&plan,
-                                     rocfft_placement_inplace,
-                                     rocfft_transform_type_complex_forward,
-                                     rocfft_precision_single,
-                                     1,
-                                     &length,
-                                     1,
-                                     desc),
-                  rocfft_status_success);
-        ASSERT_EQ(rocfft_execute(plan, &data_dev_ptr, nullptr, nullptr), rocfft_status_success);
-        ASSERT_EQ(hipMemcpy(data_host.data(), data_dev_ptr, data_bytes, hipMemcpyDeviceToHost),
-                  hipSuccess);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-        // save output for reference on first run
-        if(output.empty())
-        {
-            output = data_host;
-        }
-        else
-        {
-            // check that the output matches output from the first
-            // (stride-1) run.
+            // allocate host buffer.  initialize the whole thing to zero
+            // but set a known input along the strides we want
+            std::vector<rocfft_complex<float>> data_host(length * stride, {0.0, 0.0});
             for(size_t i = 0; i < length; ++i)
-                ASSERT_EQ(data_host[i * stride], output[i]);
-        }
-        ASSERT_EQ(rocfft_plan_destroy(plan), rocfft_status_success);
-    }
+            {
+                data_host[i * stride] = input[i];
+            }
 
-    ASSERT_EQ(rocfft_plan_description_destroy(desc), rocfft_status_success);
+            // copy to device
+            const size_t data_bytes = data_host.size() * sizeof(rocfft_complex<float>);
+            gpubuf_t<rocfft_complex<float>> data_dev;
+            ASSERT_EQ(data_dev.alloc(data_bytes), hipSuccess);
+            void* data_dev_ptr = data_dev.data();
+            ASSERT_EQ(hipMemcpy(data_dev_ptr, data_host.data(), data_bytes, hipMemcpyHostToDevice),
+                      hipSuccess);
+
+            // do the transform
+            rocfft_plan plan = nullptr;
+            ASSERT_EQ(rocfft_plan_create(&plan,
+                                         rocfft_placement_inplace,
+                                         rocfft_transform_type_complex_forward,
+                                         rocfft_precision_single,
+                                         1,
+                                         &length,
+                                         1,
+                                         desc),
+                      rocfft_status_success);
+            ASSERT_EQ(rocfft_execute(plan, &data_dev_ptr, nullptr, nullptr), rocfft_status_success);
+            ASSERT_EQ(hipMemcpy(data_host.data(), data_dev_ptr, data_bytes, hipMemcpyDeviceToHost),
+                      hipSuccess);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+            // save output for reference on first run
+            if(output.empty())
+            {
+                output = data_host;
+            }
+            else
+            {
+                // check that the output matches output from the first
+                // (stride-1) run.
+                for(size_t i = 0; i < length; ++i)
+                    ASSERT_EQ(data_host[i * stride], output[i]);
+            }
+            ASSERT_EQ(rocfft_plan_destroy(plan), rocfft_status_success);
+        }
+
+        ASSERT_EQ(rocfft_plan_description_destroy(desc), rocfft_status_success);
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 struct LocalCleanup
@@ -229,70 +268,94 @@ TEST(rocfft_UnitTest, log_levels)
         GTEST_SKIP();
     }
 
-    // clean up environment and temporary file when we exit
-    LocalCleanup cleanup([]() {
-        rocfft_cleanup();
-        // re-init logs with default logging
-        rocfft_setup();
-    });
-    rocfft_cleanup();
-
-    // enumerate all known log levels and direct all of the logs to nowhere
-    EnvironmentSetTemp layer("ROCFFT_LAYER", std::to_string(0xffffffff).c_str());
-#ifdef WIN32
-    static const char* log_output = "NUL";
-#else
-    static const char* log_output   = "/dev/null";
-#endif
-    EnvironmentSetTemp log_trace_path("ROCFFT_LOG_TRACE_PATH", log_output);
-    EnvironmentSetTemp log_bench_path("ROCFFT_LOG_BENCH_PATH", log_output);
-    EnvironmentSetTemp log_profile_path("ROCFFT_LOG_PROFILE_PATH", log_output);
-    EnvironmentSetTemp log_plan_path("ROCFFT_LOG_PLAN_PATH", log_output);
-    EnvironmentSetTemp log_kernelio_path("ROCFFT_LOG_KERNELIO_PATH", log_output);
-    EnvironmentSetTemp log_rtc_path("ROCFFT_LOG_RTC_PATH", log_output);
-    EnvironmentSetTemp log_tuning_path("ROCFFT_LOG_TUNING_PATH", log_output);
-    EnvironmentSetTemp log_graph_path("ROCFFT_LOG_GRAPH_PATH", log_output);
-
-    rocfft_setup();
-
-    // Test single-kernel Bluestein and a multi-kernel plan
-    //
-    // TODO: add fused L1D Bluestein case like 8191, as that does weird
-    // things with buffers
-    for(const size_t length : {
-            37,
-            64,
-            32768,
-        })
+    try
     {
-        for(const auto type : {rocfft_transform_type_complex_forward,
-                               rocfft_transform_type_real_forward,
-                               rocfft_transform_type_real_inverse})
+        // clean up environment and temporary file when we exit
+        LocalCleanup cleanup([]() {
+            rocfft_cleanup();
+            // re-init logs with default logging
+            rocfft_setup();
+        });
+        rocfft_cleanup();
+
+        // enumerate all known log levels and direct all of the logs to nowhere
+        EnvironmentSetTemp layer("ROCFFT_LAYER", std::to_string(0xffffffff).c_str());
+#ifdef WIN32
+        static const char* log_output = "NUL";
+#else
+        static const char* log_output   = "/dev/null";
+#endif
+        EnvironmentSetTemp log_trace_path("ROCFFT_LOG_TRACE_PATH", log_output);
+        EnvironmentSetTemp log_bench_path("ROCFFT_LOG_BENCH_PATH", log_output);
+        EnvironmentSetTemp log_profile_path("ROCFFT_LOG_PROFILE_PATH", log_output);
+        EnvironmentSetTemp log_plan_path("ROCFFT_LOG_PLAN_PATH", log_output);
+        EnvironmentSetTemp log_kernelio_path("ROCFFT_LOG_KERNELIO_PATH", log_output);
+        EnvironmentSetTemp log_rtc_path("ROCFFT_LOG_RTC_PATH", log_output);
+        EnvironmentSetTemp log_tuning_path("ROCFFT_LOG_TUNING_PATH", log_output);
+        EnvironmentSetTemp log_graph_path("ROCFFT_LOG_GRAPH_PATH", log_output);
+
+        rocfft_setup();
+
+        // Test single-kernel Bluestein and a multi-kernel plan
+        //
+        // TODO: add fused L1D Bluestein case like 8191, as that does weird
+        // things with buffers
+        for(const size_t length : {
+                37,
+                64,
+                32768,
+            })
         {
-            for(const auto precision :
-                {rocfft_precision_single, rocfft_precision_double, rocfft_precision_half})
+            for(const auto type : {rocfft_transform_type_complex_forward,
+                                   rocfft_transform_type_real_forward,
+                                   rocfft_transform_type_real_inverse})
             {
-                rocfft_plan plan = nullptr;
-                ASSERT_EQ(
-                    rocfft_plan_create(
-                        &plan, rocfft_placement_inplace, type, precision, 1, &length, 1, nullptr),
-                    rocfft_status_success);
+                for(const auto precision :
+                    {rocfft_precision_single, rocfft_precision_double, rocfft_precision_half})
+                {
+                    rocfft_plan plan = nullptr;
+                    ASSERT_EQ(rocfft_plan_create(&plan,
+                                                 rocfft_placement_inplace,
+                                                 type,
+                                                 precision,
+                                                 1,
+                                                 &length,
+                                                 1,
+                                                 nullptr),
+                              rocfft_status_success);
 
-                // assume transform uses complex, will overallocate for real
-                // transforms but we only care about logging
-                gpubuf data_dev;
-                ASSERT_EQ(
-                    data_dev.alloc(element_size(precision, rocfft_array_type_complex_interleaved)
-                                   * length),
-                    hipSuccess);
+                    // assume transform uses complex, will overallocate for real
+                    // transforms but we only care about logging
+                    gpubuf data_dev;
+                    ASSERT_EQ(data_dev.alloc(
+                                  element_size(precision, rocfft_array_type_complex_interleaved)
+                                  * length),
+                              hipSuccess);
 
-                void* data_dev_ptr = data_dev.data();
-                ASSERT_EQ(rocfft_execute(plan, &data_dev_ptr, nullptr, nullptr),
-                          rocfft_status_success);
+                    void* data_dev_ptr = data_dev.data();
+                    ASSERT_EQ(rocfft_execute(plan, &data_dev_ptr, nullptr, nullptr),
+                              rocfft_status_success);
 
-                rocfft_plan_destroy(plan);
+                    rocfft_plan_destroy(plan);
+                }
             }
         }
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
 }
 
@@ -305,57 +368,76 @@ TEST(rocfft_UnitTest, log_multithreading)
         GTEST_SKIP();
     }
 
-    static const int   NUM_THREADS          = 10;
-    static const int   NUM_ITERS_PER_THREAD = 50;
-    static const char* TRACE_FILE           = "trace.log";
-
-    // clean up environment and temporary file when we exit
-    LocalCleanup cleanup([=]() {
-        rocfft_cleanup();
-        remove(TRACE_FILE);
-        // re-init logs with default logging
-        rocfft_setup();
-    });
-
-    // ask for trace logging, since that's the easiest to trigger
-    rocfft_cleanup();
-    EnvironmentSetTemp layer("ROCFFT_LAYER", "1");
-    EnvironmentSetTemp tracepath("ROCFFT_LOG_TRACE_PATH", TRACE_FILE);
-
-    rocfft_setup();
-
-    // run a whole bunch of threads in parallel, each one doing
-    // something small that will write to the trace log
-    std::vector<std::thread> threads;
-    threads.reserve(NUM_THREADS);
-    for(int i = 0; i < NUM_THREADS; ++i)
+    try
     {
-        threads.emplace_back([]() {
-            for(int j = 0; j < NUM_ITERS_PER_THREAD; ++j)
-            {
-                rocfft_plan_description desc;
-                rocfft_plan_description_create(&desc);
-                rocfft_plan_description_destroy(desc);
-            }
+        static const int   NUM_THREADS          = 10;
+        static const int   NUM_ITERS_PER_THREAD = 50;
+        static const char* TRACE_FILE           = "trace.log";
+
+        // clean up environment and temporary file when we exit
+        LocalCleanup cleanup([=]() {
+            rocfft_cleanup();
+            remove(TRACE_FILE);
+            // re-init logs with default logging
+            rocfft_setup();
         });
+
+        // ask for trace logging, since that's the easiest to trigger
+        rocfft_cleanup();
+        EnvironmentSetTemp layer("ROCFFT_LAYER", "1");
+        EnvironmentSetTemp tracepath("ROCFFT_LOG_TRACE_PATH", TRACE_FILE);
+
+        rocfft_setup();
+
+        // run a whole bunch of threads in parallel, each one doing
+        // something small that will write to the trace log
+        std::vector<std::thread> threads;
+        threads.reserve(NUM_THREADS);
+        for(int i = 0; i < NUM_THREADS; ++i)
+        {
+            threads.emplace_back([]() {
+                for(int j = 0; j < NUM_ITERS_PER_THREAD; ++j)
+                {
+                    rocfft_plan_description desc;
+                    rocfft_plan_description_create(&desc);
+                    rocfft_plan_description_destroy(desc);
+                }
+            });
+        }
+
+        for(auto& t : threads)
+        {
+            t.join();
+        }
+
+        rocfft_cleanup();
+
+        // now verify that the trace log has one message per line, with nothing garbled
+        std::ifstream trace_log(TRACE_FILE);
+        std::string   line;
+        std::regex    validator("^rocfft_(setup,[0-9]+.[0-9]+.[0-9]+.([0-9a-fA-F]+)?|cleanup|plan_"
+                             "description_(create|destroy),description,[x0-9a-fA-F]+)$");
+        while(std::getline(trace_log, line))
+        {
+            bool res = std::regex_match(line, validator);
+            ASSERT_TRUE(res) << "line contains invalid content: " << line;
+        }
     }
-
-    for(auto& t : threads)
+    catch(const std::bad_alloc&)
     {
-        t.join();
+        GTEST_SKIP() << "host memory allocation failure";
     }
-
-    rocfft_cleanup();
-
-    // now verify that the trace log has one message per line, with nothing garbled
-    std::ifstream trace_log(TRACE_FILE);
-    std::string   line;
-    std::regex    validator("^rocfft_(setup,[0-9]+.[0-9]+.[0-9]+.([0-9a-fA-F]+)?|cleanup|plan_"
-                         "description_(create|destroy),description,[x0-9a-fA-F]+)$");
-    while(std::getline(trace_log, line))
+    catch(const ROCFFT_SKIP& e)
     {
-        bool res = std::regex_match(line, validator);
-        ASSERT_TRUE(res) << "line contains invalid content: " << line;
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
 }
 
@@ -437,7 +519,26 @@ TEST(rocfft_UnitTest, workmem_missing)
         GTEST_SKIP();
     }
 
-    workmem_test([](size_t) { return 0; }, rocfft_status_success);
+    try
+    {
+        workmem_test([](size_t) { return 0; }, rocfft_status_success);
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 // check what happens if work memory is required but not enough is provided
@@ -449,7 +550,27 @@ TEST(rocfft_UnitTest, workmem_small)
         GTEST_SKIP();
     }
 
-    workmem_test([](size_t requested) { return requested / 2; }, rocfft_status_invalid_work_buffer);
+    try
+    {
+        workmem_test([](size_t requested) { return requested / 2; },
+                     rocfft_status_invalid_work_buffer);
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 // hard to imagine this being a problem, but try giving too much as well
@@ -461,7 +582,26 @@ TEST(rocfft_UnitTest, workmem_big)
         GTEST_SKIP();
     }
 
-    workmem_test([](size_t requested) { return requested * 2; }, rocfft_status_success);
+    try
+    {
+        workmem_test([](size_t requested) { return requested * 2; }, rocfft_status_success);
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 // check if a user explicitly gives a null pointer - set work buffer
@@ -475,7 +615,26 @@ TEST(rocfft_UnitTest, workmem_null)
         GTEST_SKIP();
     }
 
-    workmem_test([](size_t requested) { return requested; }, rocfft_status_success, true);
+    try
+    {
+        workmem_test([](size_t requested) { return requested; }, rocfft_status_success, true);
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 static const size_t RTC_PROBLEM_SIZE = 2304;
@@ -637,12 +796,50 @@ void rtc_cache_main()
 // problems with thread reuse between iterations
 TEST(rocfft_UnitTest, rtc_cache_iter_1)
 {
-    rtc_cache_main();
+    try
+    {
+        rtc_cache_main();
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 TEST(rocfft_UnitTest, rtc_cache_iter_2)
 {
-    rtc_cache_main();
+    try
+    {
+        rtc_cache_main();
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 // make sure cache API functions tolerate null pointers without crashing
@@ -654,13 +851,32 @@ TEST(rocfft_UnitTest, rtc_cache_null)
         GTEST_SKIP();
     }
 
-    void*  buf     = nullptr;
-    size_t buf_len = 0;
-    ASSERT_EQ(rocfft_cache_serialize(nullptr, &buf_len), rocfft_status_invalid_arg_value);
-    ASSERT_EQ(rocfft_cache_serialize(&buf, nullptr), rocfft_status_invalid_arg_value);
-    ASSERT_EQ(rocfft_cache_buffer_free(nullptr), rocfft_status_success);
-    ASSERT_EQ(rocfft_cache_deserialize(nullptr, 12345), rocfft_status_invalid_arg_value);
-    ASSERT_EQ(rocfft_cache_deserialize(&buf_len, 0), rocfft_status_invalid_arg_value);
+    try
+    {
+        void*  buf     = nullptr;
+        size_t buf_len = 0;
+        ASSERT_EQ(rocfft_cache_serialize(nullptr, &buf_len), rocfft_status_invalid_arg_value);
+        ASSERT_EQ(rocfft_cache_serialize(&buf, nullptr), rocfft_status_invalid_arg_value);
+        ASSERT_EQ(rocfft_cache_buffer_free(nullptr), rocfft_status_success);
+        ASSERT_EQ(rocfft_cache_deserialize(nullptr, 12345), rocfft_status_invalid_arg_value);
+        ASSERT_EQ(rocfft_cache_deserialize(&buf_len, 0), rocfft_status_invalid_arg_value);
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 // make sure RTC gracefully handles a helper process that crashes
@@ -672,67 +888,86 @@ TEST(rocfft_UnitTest, rtc_helper_crash)
         GTEST_SKIP();
     }
 
+    try
+    {
 #ifdef WIN32
-    char filename[MAX_PATH];
-    GetModuleFileNameA(NULL, filename, MAX_PATH);
-    fs::path test_exe    = filename;
-    fs::path crasher_exe = test_exe.replace_filename("rtc_helper_crash.exe");
+        char filename[MAX_PATH];
+        GetModuleFileNameA(NULL, filename, MAX_PATH);
+        fs::path test_exe    = filename;
+        fs::path crasher_exe = test_exe.replace_filename("rtc_helper_crash.exe");
 #else
-    fs::path           test_exe     = program_invocation_name;
-    fs::path           crasher_exe  = test_exe.replace_filename("rtc_helper_crash");
+        fs::path           test_exe     = program_invocation_name;
+        fs::path           crasher_exe  = test_exe.replace_filename("rtc_helper_crash");
 #endif
 
-    // use the crashing helper
-    EnvironmentSetTemp env_helper("ROCFFT_RTC_PROCESS_HELPER", crasher_exe.string().c_str());
-    // don't touch the cache, to force compilation
-    EnvironmentSetTemp env_read("ROCFFT_RTC_CACHE_READ_DISABLE", "1");
-    EnvironmentSetTemp env_write("ROCFFT_RTC_CACHE_WRITE_DISABLE", "1");
-    // force out-of-process compile
-    EnvironmentSetTemp env_process("ROCFFT_RTC_PROCESS", "2");
+        // use the crashing helper
+        EnvironmentSetTemp env_helper("ROCFFT_RTC_PROCESS_HELPER", crasher_exe.string().c_str());
+        // don't touch the cache, to force compilation
+        EnvironmentSetTemp env_read("ROCFFT_RTC_CACHE_READ_DISABLE", "1");
+        EnvironmentSetTemp env_write("ROCFFT_RTC_CACHE_WRITE_DISABLE", "1");
+        // force out-of-process compile
+        EnvironmentSetTemp env_process("ROCFFT_RTC_PROCESS", "2");
 
-    rocfft_plan plan = nullptr;
-    ASSERT_TRUE(rocfft_status_success
-                == rocfft_plan_create(&plan,
-                                      rocfft_placement_inplace,
-                                      rocfft_transform_type_complex_forward,
-                                      rocfft_precision_single,
-                                      1,
-                                      &RTC_PROBLEM_SIZE,
-                                      1,
-                                      nullptr));
+        rocfft_plan plan = nullptr;
+        ASSERT_TRUE(rocfft_status_success
+                    == rocfft_plan_create(&plan,
+                                          rocfft_placement_inplace,
+                                          rocfft_transform_type_complex_forward,
+                                          rocfft_precision_single,
+                                          1,
+                                          &RTC_PROBLEM_SIZE,
+                                          1,
+                                          nullptr));
 
-    // alloc a complex buffer
-    gpubuf_t<rocfft_complex<float>> data;
-    ASSERT_EQ(data.alloc(RTC_PROBLEM_SIZE * sizeof(rocfft_complex<float>)), hipSuccess);
+        // alloc a complex buffer
+        gpubuf_t<rocfft_complex<float>> data;
+        ASSERT_EQ(data.alloc(RTC_PROBLEM_SIZE * sizeof(rocfft_complex<float>)), hipSuccess);
 
-    std::vector<void*> ibuffers(1, static_cast<void*>(data.data()));
+        std::vector<void*> ibuffers(1, static_cast<void*>(data.data()));
 
-    ASSERT_EQ(rocfft_execute(plan, ibuffers.data(), nullptr, nullptr), rocfft_status_success);
+        ASSERT_EQ(rocfft_execute(plan, ibuffers.data(), nullptr, nullptr), rocfft_status_success);
 
-    rocfft_plan_destroy(plan);
-    plan = nullptr;
+        rocfft_plan_destroy(plan);
+        plan = nullptr;
 
-    rocfft_cleanup();
-    rocfft_setup();
+        rocfft_cleanup();
+        rocfft_setup();
 
-    // also try with forcing use of the subprocess, which is a
-    // different code path from the default "try in-process, then
-    // fall back to out-of-process"
-    EnvironmentSetTemp env_force("ROCFFT_RTC_PROCESS", "1");
+        // also try with forcing use of the subprocess, which is a
+        // different code path from the default "try in-process, then
+        // fall back to out-of-process"
+        EnvironmentSetTemp env_force("ROCFFT_RTC_PROCESS", "1");
 
-    ASSERT_TRUE(rocfft_status_success
-                == rocfft_plan_create(&plan,
-                                      rocfft_placement_inplace,
-                                      rocfft_transform_type_complex_forward,
-                                      rocfft_precision_single,
-                                      1,
-                                      &RTC_PROBLEM_SIZE,
-                                      1,
-                                      nullptr));
-    ASSERT_EQ(rocfft_execute(plan, ibuffers.data(), nullptr, nullptr), rocfft_status_success);
+        ASSERT_TRUE(rocfft_status_success
+                    == rocfft_plan_create(&plan,
+                                          rocfft_placement_inplace,
+                                          rocfft_transform_type_complex_forward,
+                                          rocfft_precision_single,
+                                          1,
+                                          &RTC_PROBLEM_SIZE,
+                                          1,
+                                          nullptr));
+        ASSERT_EQ(rocfft_execute(plan, ibuffers.data(), nullptr, nullptr), rocfft_status_success);
 
-    rocfft_plan_destroy(plan);
-    plan = nullptr;
+        rocfft_plan_destroy(plan);
+        plan = nullptr;
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 TEST(rocfft_UnitTest, rtc_test_harness)
@@ -743,146 +978,170 @@ TEST(rocfft_UnitTest, rtc_test_harness)
         GTEST_SKIP();
     }
 
-    // check that hipcc is available since this test requires it
-    //
-    // NOTE: using system() for launching subprocesses for simplicity
-    // and portability
-#ifdef WIN32
-    static const char* test_command = "amdclang++ --version > NUL";
-#else
-    static const char* test_command = "amdclang++ --version > /dev/null";
-#endif
-    if(std::system(test_command) != 0)
-        GTEST_SKIP();
-
-    rocfft_cleanup();
-
-    LocalCleanup cleanup([]() {
-        // reinit rocFFT so caching goes back to normal
-        rocfft_cleanup();
-        rocfft_setup();
-    });
-
-    // extra scope to control lifetime of env vars
+    try
     {
-        // create a temporary directory to hold all of the temp files
-        // that get created
-        const fs::path tmp_path = std::tmpnam(nullptr);
-        try
+        // check that hipcc is available since this test requires it
+        //
+        // NOTE: using system() for launching subprocesses for simplicity
+        // and portability
+#ifdef WIN32
+        static const char* test_command = "amdclang++ --version > NUL";
+#else
+        static const char* test_command = "amdclang++ --version > /dev/null";
+#endif
+        if(std::system(test_command) != 0)
+            GTEST_SKIP();
+
+        rocfft_cleanup();
+
+        LocalCleanup cleanup([]() {
+            // reinit rocFFT so caching goes back to normal
+            rocfft_cleanup();
+            rocfft_setup();
+        });
+
+        // extra scope to control lifetime of env vars
         {
-            fs::create_directory(tmp_path);
-        }
-        catch(fs::filesystem_error& e)
-        {
-            GTEST_SKIP() << "unable to create temp dir for test harnesses: " << e.what();
-        }
+            // create a temporary directory to hold all of the temp files
+            // that get created
+            const fs::path tmp_path = std::tmpnam(nullptr);
+            try
+            {
+                fs::create_directory(tmp_path);
+            }
+            catch(fs::filesystem_error& e)
+            {
+                GTEST_SKIP() << "unable to create temp dir for test harnesses: " << e.what();
+            }
 
-        // activate writing of rtc test harnesses
-        EnvironmentSetTemp env_harness("ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS", "1");
+            // activate writing of rtc test harnesses
+            EnvironmentSetTemp env_harness("ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS", "1");
 
-        // set path for writing rtc test harnesses source files
-        EnvironmentSetTemp env_harness_path("ROCFFT_DEBUG_KERNEL_HARNESS_PATH",
-                                            tmp_path.string().c_str());
+            // set path for writing rtc test harnesses source files
+            EnvironmentSetTemp env_harness_path("ROCFFT_DEBUG_KERNEL_HARNESS_PATH",
+                                                tmp_path.string().c_str());
 
-        // ensure every kernel gets compiled once
-        EnvironmentSetTemp env_cache("ROCFFT_RTC_CACHE_PATH", ":memory:");
-        EnvironmentSetTemp env_sys_cache("ROCFFT_RTC_SYS_CACHE_PATH", ":memory:");
+            // ensure every kernel gets compiled once
+            EnvironmentSetTemp env_cache("ROCFFT_RTC_CACHE_PATH", ":memory:");
+            EnvironmentSetTemp env_sys_cache("ROCFFT_RTC_SYS_CACHE_PATH", ":memory:");
 
-        rocfft_setup();
+            rocfft_setup();
 
-        // construct a few different types of plans to try to get all
-        // different kernels compiled
+            // construct a few different types of plans to try to get all
+            // different kernels compiled
 
-        auto create_destroy_plan
-            = [](rocfft_transform_type type, const size_t dim, const size_t* lengths) -> void {
-            rocfft_plan plan = nullptr;
-            ASSERT_EQ(rocfft_plan_create(&plan,
-                                         rocfft_placement_inplace,
-                                         type,
-                                         rocfft_precision_single,
-                                         dim,
-                                         lengths,
-                                         1,
-                                         nullptr),
-                      rocfft_status_success);
-            ASSERT_EQ(rocfft_plan_destroy(plan), rocfft_status_success);
-            plan = nullptr;
-        };
-        // large 1D R2C + C2R
-        const size_t L1D_PROBLEM_SIZE[1] = {16384};
-        create_destroy_plan(rocfft_transform_type_real_forward, 1, L1D_PROBLEM_SIZE);
-        create_destroy_plan(rocfft_transform_type_real_inverse, 1, L1D_PROBLEM_SIZE);
+            auto create_destroy_plan
+                = [](rocfft_transform_type type, const size_t dim, const size_t* lengths) -> void {
+                rocfft_plan plan = nullptr;
+                ASSERT_EQ(rocfft_plan_create(&plan,
+                                             rocfft_placement_inplace,
+                                             type,
+                                             rocfft_precision_single,
+                                             dim,
+                                             lengths,
+                                             1,
+                                             nullptr),
+                          rocfft_status_success);
+                ASSERT_EQ(rocfft_plan_destroy(plan), rocfft_status_success);
+                plan = nullptr;
+            };
+            // large 1D R2C + C2R
+            const size_t L1D_PROBLEM_SIZE[1] = {16384};
+            create_destroy_plan(rocfft_transform_type_real_forward, 1, L1D_PROBLEM_SIZE);
+            create_destroy_plan(rocfft_transform_type_real_inverse, 1, L1D_PROBLEM_SIZE);
 
-        // small bluestein R2C + C2R (also covers odd length)
-        const size_t SMALL_BLUESTEIN_PROBLEM_SIZE[1] = {37};
-        create_destroy_plan(rocfft_transform_type_real_forward, 1, SMALL_BLUESTEIN_PROBLEM_SIZE);
-        create_destroy_plan(rocfft_transform_type_real_inverse, 1, SMALL_BLUESTEIN_PROBLEM_SIZE);
+            // small bluestein R2C + C2R (also covers odd length)
+            const size_t SMALL_BLUESTEIN_PROBLEM_SIZE[1] = {37};
+            create_destroy_plan(
+                rocfft_transform_type_real_forward, 1, SMALL_BLUESTEIN_PROBLEM_SIZE);
+            create_destroy_plan(
+                rocfft_transform_type_real_inverse, 1, SMALL_BLUESTEIN_PROBLEM_SIZE);
 
-        // large bluestein C2C
-        const size_t LARGE_BLUESTEIN_PROBLEM_SIZE[1] = {8191};
-        create_destroy_plan(rocfft_transform_type_complex_forward, 1, LARGE_BLUESTEIN_PROBLEM_SIZE);
+            // large bluestein C2C
+            const size_t LARGE_BLUESTEIN_PROBLEM_SIZE[1] = {8191};
+            create_destroy_plan(
+                rocfft_transform_type_complex_forward, 1, LARGE_BLUESTEIN_PROBLEM_SIZE);
 
-        // L1D_TRTRT
-        const size_t L1D_TRTRT_PROBLEM_SIZE[1] = {680};
-        create_destroy_plan(rocfft_transform_type_complex_forward, 1, L1D_TRTRT_PROBLEM_SIZE);
+            // L1D_TRTRT
+            const size_t L1D_TRTRT_PROBLEM_SIZE[1] = {680};
+            create_destroy_plan(rocfft_transform_type_complex_forward, 1, L1D_TRTRT_PROBLEM_SIZE);
 
-        // small 3D (exercises 2D_SINGLE)
-        const size_t SMALL_3D_PROBLEM_SIZE[3] = {25, 25, 25};
-        create_destroy_plan(rocfft_transform_type_complex_forward, 3, SMALL_3D_PROBLEM_SIZE);
+            // small 3D (exercises 2D_SINGLE)
+            const size_t SMALL_3D_PROBLEM_SIZE[3] = {25, 25, 25};
+            create_destroy_plan(rocfft_transform_type_complex_forward, 3, SMALL_3D_PROBLEM_SIZE);
 
-        // larger 3D
-        const size_t LARGE_3D_PROBLEM_SIZE[3] = {200, 200, 200};
-        create_destroy_plan(rocfft_transform_type_complex_forward, 3, LARGE_3D_PROBLEM_SIZE);
+            // larger 3D
+            const size_t LARGE_3D_PROBLEM_SIZE[3] = {200, 200, 200};
+            create_destroy_plan(rocfft_transform_type_complex_forward, 3, LARGE_3D_PROBLEM_SIZE);
 
-        // now try to compile each file - they'd need hand-editing to test
-        // something useful, but we can at least ensure they build.
+            // now try to compile each file - they'd need hand-editing to test
+            // something useful, but we can at least ensure they build.
 
-        // enumerate all the files
-        std::vector<std::pair<std::string, int>> files;
-        size_t                                   i = 0;
-        for(;; ++i)
-        {
-            // construct name of main file
-            fs::path main_file = tmp_path / ("rocfft_kernel_harness_" + std::to_string(i) + ".cpp");
+            // enumerate all the files
+            std::vector<std::pair<std::string, int>> files;
+            size_t                                   i = 0;
+            for(;; ++i)
+            {
+                // construct name of main file
+                fs::path main_file
+                    = tmp_path / ("rocfft_kernel_harness_" + std::to_string(i) + ".cpp");
 
-            if(!fs::exists(main_file))
-                break;
+                if(!fs::exists(main_file))
+                    break;
 
-            files.emplace_back(main_file.string(), -1);
-        }
+                files.emplace_back(main_file.string(), -1);
+            }
 
-        // we should have generated at least a few kernels
-        ASSERT_FALSE(files.empty());
+            // we should have generated at least a few kernels
+            ASSERT_FALSE(files.empty());
 
 #ifdef _OPENMP
 #pragma omp parallel for num_threads(rocfft_concurrency())
 #endif
-        for(i = 0; i < files.size(); ++i)
-        {
+            for(i = 0; i < files.size(); ++i)
+            {
 #ifdef WIN32
-            const std::string command = "amdclang++ -x hip -c -std=c++20 -o NUL " + files[i].first;
+                const std::string command
+                    = "amdclang++ -x hip -c -std=c++20 -o NUL " + files[i].first;
 #else
-            const std::string command
-                = "amdclang++ -x hip -c -std=c++20 -o /dev/null " + files[i].first;
+                const std::string command
+                    = "amdclang++ -x hip -c -std=c++20 -o /dev/null " + files[i].first;
 #endif
-            files[i].second = std::system(command.c_str());
-        }
+                files[i].second = std::system(command.c_str());
+            }
 
-        // check that all compiles succeeded
-        for(const auto& file : files)
-        {
-            ASSERT_EQ(file.second, 0);
-        }
+            // check that all compiles succeeded
+            for(const auto& file : files)
+            {
+                ASSERT_EQ(file.second, 0);
+            }
 
-        // clean up temporary files
-        try
-        {
-            fs::remove_all(tmp_path);
+            // clean up temporary files
+            try
+            {
+                fs::remove_all(tmp_path);
+            }
+            catch(fs::filesystem_error&)
+            {
+                // this should work, but ignore errors as the build
+                // status is what matters for this test
+            }
         }
-        catch(fs::filesystem_error&)
-        {
-            // this should work, but ignore errors as the build
-            // status is what matters for this test
-        }
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
 }

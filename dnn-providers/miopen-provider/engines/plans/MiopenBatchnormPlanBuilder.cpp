@@ -590,19 +590,28 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     {
         HIPDNN_PLUGIN_LOG_INFO(
             "Batchnorm plan builder is applicable only for 1, 2 or 3 node graphs. "
-            "Graph has {} nodes",
-            opGraph.nodeCount());
+            "Graph has "
+            << opGraph.nodeCount() << " nodes");
         return false;
     }
     }
 }
 
-size_t MiopenBatchnormPlanBuilder::getWorkspaceSize(
+size_t MiopenBatchnormPlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const MiopenExecutionSettings& executionSettings) const
 {
     //batchnorm plan builder does not require workspace size
     return 0u;
+}
+
+void MiopenBatchnormPlanBuilder::initializeExecutionSettings(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] MiopenExecutionSettings& executionSettings) const
+{
 }
 
 namespace
@@ -619,7 +628,7 @@ void buildPlanInferenceSingleNode(
 
     BatchnormFwdInferenceParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params),
-                                                            executionContext.benchmarkingEnabled());
+                                                            executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -634,7 +643,7 @@ void buildPlanInferenceWithVarianceSingleNode(
 
     BatchnormFwdInferenceWithVarianceParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferenceWithVariancePlan>(
-        std::move(params), executionContext.benchmarkingEnabled());
+        std::move(params), executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -649,7 +658,7 @@ void buildPlanFwdTrainingSingleNode(
 
     BatchnormFwdTrainingParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params),
-                                                           executionContext.benchmarkingEnabled());
+                                                           executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -663,7 +672,7 @@ void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& han
 
     BatchnormBwdParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormBwdPlan>(std::move(params),
-                                                   executionContext.benchmarkingEnabled());
+                                                   executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -676,7 +685,7 @@ void buildPlanFusedBackwardsActivation([[maybe_unused]] const HipdnnEnginePlugin
 
     BatchnormBwdParams params(bnBwdAttr, actAttr, bnInfAttr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormBwdPlan>(std::move(params),
-                                                   executionContext.benchmarkingEnabled());
+                                                   executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -695,7 +704,7 @@ void buildPlanFusedFwdInferenceActivation(
 
     BatchnormFwdInferenceParams params(fwdInference, activation, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params),
-                                                            executionContext.benchmarkingEnabled());
+                                                            executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -715,7 +724,7 @@ void buildPlanFusedFwdInferenceWithVarianceActivation(
     BatchnormFwdInferenceWithVarianceParams params(
         fwdInference, activation, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferenceWithVariancePlan>(
-        std::move(params), executionContext.benchmarkingEnabled());
+        std::move(params), executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -724,7 +733,6 @@ void buildPlanFusedFwdInferenceWithVarianceActivation(
 void MiopenBatchnormPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() == 2)
@@ -760,20 +768,20 @@ void MiopenBatchnormPlanBuilder::buildPlan(
     switch(nodeWrapper.attributesType())
     {
     case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
-        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd inference plan for node: {}", nodeName);
+        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd inference plan for node: " << nodeName);
         buildPlanInferenceSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
-        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd inference with variance plan for node: {}",
-                               nodeName);
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Building batchnorm fwd inference with variance plan for node: " << nodeName);
         buildPlanInferenceWithVarianceSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd training plan for node: {}", nodeName);
+        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd training plan for node: " << nodeName);
         buildPlanFwdTrainingSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
-        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm backward plan for node: {}", nodeName);
+        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm backward plan for node: " << nodeName);
         buildPlanBwdSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
     default:
@@ -792,4 +800,4 @@ std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenBatchnormPlanBuilder::ge
     return {};
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin
