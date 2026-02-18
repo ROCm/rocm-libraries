@@ -274,20 +274,15 @@ namespace rocRoller
             }
         }
 
-        auto launchTimeOnly = m_kernel->launchTimeOnlyArguments();
-
         if(Log::getLogger()->should_log(LogLevel::Debug))
         {
             Log::debug("Splitting regs:");
             for(int i = 0; i < indices.size(); i++)
             {
                 auto        argIdx = argIndices[i];
-                std::string ltOnly
-                    = launchTimeOnly.contains(args.at(argIdx).getName()) ? " (LT only)" : "";
-                Log::debug("{} ({}){}: {}",
+                Log::debug("{} ({}): {}",
                            argIdx,
                            args.at(argIdx).getName(),
-                           ltOnly,
                            fmt::join(indices[i], ", "));
             }
         }

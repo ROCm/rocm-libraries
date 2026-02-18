@@ -189,13 +189,6 @@ namespace rocRoller
          */
         void clearIndexRegisters();
 
-        /**
-         * Arguments that are only needed at kernel launch time (for expression evaluation)
-         * and don't need to be loaded into SGPRs during kernel execution.
-         */
-        void                         setLaunchTimeOnlyArguments(std::set<std::string> args);
-        std::set<std::string> const& launchTimeOnlyArguments() const;
-
     private:
         template <typename T1, typename T2, typename T3>
         friend struct rocRoller::Serialization::MappingTraits;
@@ -232,8 +225,6 @@ namespace rocRoller
         std::vector<AssemblyKernelArgument>     m_arguments;
         std::unordered_map<std::string, size_t> m_argumentNames;
         int                                     m_argumentSize = 0;
-
-        std::set<std::string> m_launchTimeOnlyArguments;
 
         int m_wavefrontSize = 64;
 
