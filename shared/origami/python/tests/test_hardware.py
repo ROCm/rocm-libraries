@@ -86,35 +86,103 @@ def enumerate_tiles_half_lds(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("arch_name", ["gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201"])
-def test_hardware_for_arch(arch_name: str):
-    """Test creating hardware object using get_hardware_for_arch."""
-    from test_utils import SUPPORTED_ARCHITECTURES, create_hardware
-    
-    params = SUPPORTED_ARCHITECTURES[arch_name]
-    hardware = create_hardware(arch_name)
-    
-    # Verify basic properties match configuration
-    assert hardware.N_CU == params["N_CU"]
-    assert hardware.lds_capacity == params["lds_capacity"]
-    assert hardware.L2_capacity == params["L2_capacity"]
-    assert hardware.compute_clock_ghz == pytest.approx(
-        params["compute_clock_khz"] / 1_000_000, rel=1e-6
+def test_hardware_for_arch_gfx950():
+    """Test creating hardware object for gfx950 using get_hardware_for_arch."""
+    hardware = origami.get_hardware_for_arch(
+        arch=origami.architecture_t.gfx950,
+        N_CU=304,
+        lds_capacity=64 * 1024,
+        L2_capacity=32 * 1024 * 1024,
+        compute_clock_khz=2100000
     )
     
+    # Verify basic properties
+    assert hardware.N_CU == 304
+    assert hardware.lds_capacity == 64 * 1024
+    assert hardware.L2_capacity == 32 * 1024 * 1024
+    assert hardware.compute_clock_ghz == pytest.approx(2.1, rel=1e-6)
+    
     # Verify architecture-specific constants were applied
-    assert hardware.NUM_XCD >= 1
-    assert hardware.parallel_mi_cu >= 1
+    assert hardware.NUM_XCD == 8
+    assert hardware.parallel_mi_cu == 4
+    # mem1_perf_ratio is calculated based on clock speeds, not a direct constant
     assert hardware.mem1_perf_ratio > 0
+    
+
+
+@pytest.mark.integration
+def test_hardware_for_arch_gfx942():
+    """Test creating hardware object for gfx942 using get_hardware_for_arch."""
+    hardware = origami.get_hardware_for_arch(
+        arch=origami.architecture_t.gfx942,
+        N_CU=228,
+        lds_capacity=64 * 1024,
+        L2_capacity=24 * 1024 * 1024,
+        compute_clock_khz=1700000
+    )
+    
+    # Verify basic properties
+    assert hardware.N_CU == 228
+    assert hardware.lds_capacity == 64 * 1024
+    assert hardware.L2_capacity == 24 * 1024 * 1024
+    assert hardware.compute_clock_ghz == pytest.approx(1.7, rel=1e-6)
+    
+    # Verify architecture-specific constants
+    assert hardware.NUM_XCD == 8
+    assert hardware.parallel_mi_cu == 4
+
+
+@pytest.mark.integration
+def test_hardware_for_arch_gfx90a():
+    """Test creating hardware object for gfx90a using get_hardware_for_arch."""
+    hardware = origami.get_hardware_for_arch(
+        arch=origami.architecture_t.gfx90a,
+        N_CU=110,
+        lds_capacity=64 * 1024,
+        L2_capacity=8 * 1024 * 1024,
+        compute_clock_khz=1700000
+    )
+    
+    # Verify basic properties
+    assert hardware.N_CU == 110
+    assert hardware.lds_capacity == 64 * 1024
+    
+    # Verify architecture-specific constants
+    assert hardware.NUM_XCD == 1
+    assert hardware.parallel_mi_cu == 4
+
+
+@pytest.mark.integration
+def test_hardware_for_arch_gfx1201():
+    """Test creating hardware object for gfx1201 using get_hardware_for_arch."""
+    hardware = origami.get_hardware_for_arch(
+        arch=origami.architecture_t.gfx1201,
+        N_CU=60,
+        lds_capacity=128 * 1024,
+        L2_capacity=6 * 1024 * 1024,
+        compute_clock_khz=2500000
+    )
+    
+    # Verify basic properties
+    assert hardware.N_CU == 60
+    assert hardware.lds_capacity == 128 * 1024
+    
+    # Verify architecture-specific constants
+    assert hardware.NUM_XCD == 1
+    assert hardware.parallel_mi_cu == 2
 
 
 @pytest.mark.integration
 def test_enumerate_tiles_with_hardware():
     """Test tile enumeration using hardware_t LDS capacity."""
-    from test_utils import create_hardware
-    
-    # Create gfx950 hardware configuration
-    hardware = create_hardware("gfx950")
+    # Create MI350 hardware configuration
+    hardware = origami.get_hardware_for_arch(
+        arch=origami.architecture_t.gfx950,
+        N_CU=304,
+        lds_capacity=64 * 1024,
+        L2_capacity=32 * 1024 * 1024,
+        compute_clock_khz=2100000
+    )
     
     # MI350 typical bf16/fp16 inst
     mi = MI(m=16, n=16, k=32)
@@ -139,16 +207,13 @@ def test_enumerate_tiles_with_hardware():
 @pytest.mark.integration
 def test_enumerate_tiles_mi350_example():
     """Test the example from the task description."""
-    from test_utils import SUPPORTED_ARCHITECTURES
-    
     # MI350 typical bf16/fp16 inst
     mi = MI(m=16, n=16, k=32)
-    lds_bytes = SUPPORTED_ARCHITECTURES["gfx950"]["lds_capacity"]
-    tiles = enumerate_tiles_half_lds(mi, datatype_size=2, lds_bytes=lds_bytes)
+    tiles = enumerate_tiles_half_lds(mi, datatype_size=2, lds_bytes=64 * 1024)
     
     # Verify results
     assert len(tiles) > 0
-    print(f"{len(tiles)} tiles under half LDS ({lds_bytes//2} bytes)")
+    print(f"{len(tiles)} tiles under half LDS ({(64*1024)//2} bytes)")
     
     # Check some properties of the generated tiles
     for tile in tiles:
@@ -157,7 +222,7 @@ def test_enumerate_tiles_mi350_example():
         assert tile.bytes_ab == expected_bytes
         
         # Verify it fits in budget
-        assert tile.bytes_ab <= lds_bytes
+        assert tile.bytes_ab <= 64 * 1024
         
         # Verify dimensions are multiples of MI
         assert tile.MT_M % 16 == 0
