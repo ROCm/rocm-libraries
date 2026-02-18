@@ -72,6 +72,21 @@ protected:
         }
     }
 
+    template <class F>
+    bool tryAssignSymbol(F& functionPtr, const char* symbolName)
+    {
+        try
+        {
+            functionPtr = _lib.getSymbol<F>(symbolName);
+            return true;
+        }
+        catch(const HipdnnException&)
+        {
+            functionPtr = nullptr;
+            return false;
+        }
+    }
+
     SharedLibrary _lib;
 
 private:

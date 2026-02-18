@@ -28,22 +28,16 @@ void PluginBase::resolveSymbols()
 {
     _funcGetName = _lib.getSymbol<decltype(_funcGetName)>("hipdnnPluginGetName");
     _funcGetVersion = _lib.getSymbol<decltype(_funcGetVersion)>("hipdnnPluginGetVersion");
-    _funcGetApiVersion = _lib.getSymbol<decltype(_funcGetApiVersion)>("hipdnnPluginGetApiVersion");
     _funcGetType = _lib.getSymbol<decltype(_funcGetType)>("hipdnnPluginGetType");
     _funcGetLastErrorStr
         = _lib.getSymbol<decltype(_funcGetLastErrorStr)>("hipdnnPluginGetLastErrorString");
 
-    // Logging callback is optional
-    try
+    if(tryAssignSymbol(_funcGetApiVersion, "hipdnnPluginGetApiVersion"))
     {
-        _funcSetLoggingCallback
-            = _lib.getSymbol<decltype(_funcSetLoggingCallback)>("hipdnnPluginSetLoggingCallback");
+        HIPDNN_BACKEND_LOG_INFO("Plugin does not support returning plugin API version");
     }
-    catch(const HipdnnException&)
+    if(!tryAssignSymbol(_funcSetLoggingCallback, "hipdnnPluginSetLoggingCallback"))
     {
-        _funcSetLoggingCallback = nullptr;
-
-        // Add name of plugin if ever possible
         HIPDNN_BACKEND_LOG_INFO("Plugin does not support logging callback");
     }
 
@@ -72,7 +66,11 @@ std::string_view PluginBase::apiVersion() const
 {
     assert(_initialized);
     const char* version;
-    invokePluginFunction("get plugin version", _funcGetApiVersion, &version);
+    if(_funcGetApiVersion == nullptr)
+    {
+        return "0.0.0";
+    }
+    invokePluginFunction("get plugin api version", _funcGetApiVersion, &version);
     return version;
 }
 

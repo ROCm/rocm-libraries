@@ -4,9 +4,9 @@
 #pragma once
 
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
-// #include <hipdnn_frontend/backend/IncompatibleBackend.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
+#include <hipdnn_frontend/detail/IncompatibleBackend.hpp>
 
 namespace hipdnn_frontend::detail
 {
@@ -126,12 +126,11 @@ inline static std::shared_ptr<IHipdnnBackend> hipdnnBackend()
         auto instance = std::make_shared<HipdnnBackendWrapper>();
         const char* version;
         auto status = instance->versionExt(&version);
-        if(status
-           != hipdnnStatus_t::HIPDNN_STATUS_SUCCESS /* or TODO: if major version different */)
+        // TODO: Also check for major version once frontend has versioning
+        if(status != hipdnnStatus_t::HIPDNN_STATUS_SUCCESS)
         {
-            // HIPDNN_FE_LOG_ERROR(
-            //     std::string{"Failed to get hipdnn version. Hipdnn backend cannot be loaded"});
-            //     //IHipdnnBackend::setInstance(std::make_shared<detail::IncompatibleBackendWrapper>());
+            HIPDNN_FE_LOG_ERROR("Failed to get hipdnn version. Hipdnn backend cannot be loaded");
+            IHipdnnBackend::setInstance(std::make_shared<detail::IncompatibleBackendWrapper>());
         }
         else
         {
