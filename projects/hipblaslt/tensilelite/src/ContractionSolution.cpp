@@ -1076,16 +1076,16 @@ namespace TensileLite
         AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
         hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
 
-        // Default WGM
-        size_t defaultStaggerUMapping;
-        size_t defaultStaggerU;
-        size_t defaultStaggerUStrideShift;
+        // Default StaggerU
+        size_t defaultStaggerUMapping     = 0;
+        size_t defaultStaggerU            = 0;
+        size_t defaultStaggerUStrideShift = 0;
 
         // Dynamically pick the values
         if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
            && sizeMapping.workGroupMappingXCC == -1)
         {
-            // Try to find cached StaggerU and StaggerUStrideShift
+            // Try to find cached StaggerUMapping, StaggerU and StaggerUStrideShift
             auto cachedStaggerUParams = staggerUParamsCache.find(problem);
 
             if(cachedStaggerUParams == std::make_tuple(SIZE_MAX, SIZE_MAX, SIZE_MAX))
@@ -1151,11 +1151,8 @@ namespace TensileLite
         assert(defaultStaggerUMapping < 4);
         // StaggerU should be power of 2 and less than 65: [0, 2, 4, 8, 16, 32, 64]
         assert(defaultStaggerU & (defaultStaggerU - 1) == 0 && defaultStaggerU < 65);
-        // StaggerUStride should be in this range: [-1, 0, 16, 32, 64, 128, 256, 512, 1024, 2048]
-        // StaggerUStrideShift = (math.ceil(math.log(StaggerUStride / DepthU * bpeAB), 2)))
-        // Given StaggerUStrideShift, StaggerUStride can be calculated as: StaggerUStride = 2^StaggerUStrideShift * DepthU * bpeAB
-        // auto StaggerUStride = std::pow(2, defaultStaggerUStrideShift) * sizeMapping.depthU * sizeMapping.bpeAB;
-        // assert(StaggerUStride & (StaggerUStride - 1) == 0 && StaggerUStride < 4096 && StaggerUStride > 8);
+        // StaggerUStrideShift should be in [0, 5] (shift of 5 = stride multiplier of 32)
+        assert(defaultStaggerUStrideShift <= 5);
 
         return std::make_tuple(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
     }
