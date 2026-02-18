@@ -61,6 +61,18 @@ namespace rocRoller::KernelGraph
         return {tag, expr.rhs};
     }
 
+    template <Graph::Direction Direction, typename EdgeType>
+    std::optional<int> GetEdgeTag(KernelGraph const& graph, int tag)
+    {
+        for(auto elem : graph.coordinates.getNeighbours<Direction>(tag))
+        {
+            auto maybeEdge = graph.coordinates.get<EdgeType>(elem);
+            if(maybeEdge)
+                return elem;
+        }
+        return {};
+    }
+
     template <std::ranges::forward_range Range>
     void purgeNodes(KernelGraph& kgraph, Range nodes)
     {

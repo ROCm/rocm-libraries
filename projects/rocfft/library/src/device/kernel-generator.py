@@ -48,7 +48,7 @@ from operator import mul
 
 from generator import (ArgumentList, BaseNode, Call, CommentBlock, Function,
                        Include, LineBreak, Map, StatementList, Variable,
-                       Assign, name_args, write, ForwardDeclaration)
+                       Assign, name_args, write, ForwardDeclaration, Declaration)
 
 from collections import namedtuple
 
@@ -260,6 +260,7 @@ class FFTKernel(BaseNode):
         f += ', ' + str(self.function.meta.pp_current_dim)
         f += ', ' + str(self.function.meta.pp_off_dim)
         f += ', ' + str(self.function.meta.pp_threads_per_transform)
+        f += ', ' + str(self.function.meta.pp_threads_per_transform)
         pp_factors_curr = getattr(self.function.meta, 'pp_factors_curr', None)
         if pp_factors_curr is not None:
             f += ', {' + cjoin(pp_factors_curr) + '}'
@@ -288,6 +289,7 @@ def generate_cpu_function_pool_main(num_files):
         call_list += Call(name=f'function_pool_init_{i}', arguments=call_args)
     return StatementList(
         Include('"../include/function_pool.h"'), fwd_declarations,
+        Declaration(type='std::vector<FMKey>', name='EmptyFMKeyVec'),
         Function(name='function_pool_data::function_pool_data',
                  value=False,
                  arguments=ArgumentList(),

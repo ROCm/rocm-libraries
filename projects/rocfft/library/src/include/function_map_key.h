@@ -402,7 +402,7 @@ struct FMKey : public FMKeyBase
     }
 };
 
-static std::vector<FMKey> EmptyFMKeyVec = {};
+extern std::vector<FMKey> EmptyFMKeyVec;
 
 // add an alternative kernel with different kernel config from base FMKey
 static FMKey get_alternative_FMKey(const FMKey& base_FMKey, const KernelConfig& alt_config)

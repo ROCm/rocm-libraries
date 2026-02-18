@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/env.hpp>
 #include <miopen/softmax/solvers.hpp>
@@ -67,7 +44,9 @@ bool Softmax::IsApplicable(
     [[maybe_unused]] const ExecutionContext& context,
     [[maybe_unused]] const miopen::softmax::ProblemDescription& problem) const
 {
-    if(!(problem.GetYDesc().GetType() == miopenFloat || problem.GetYDesc().GetType() == miopenHalf))
+    if(!(problem.GetYDesc().GetType() == miopenFloat ||
+         problem.GetYDesc().GetType() == miopenHalf ||
+         problem.GetYDesc().GetType() == miopenBFloat16))
     {
         return false;
     }
@@ -115,13 +94,12 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
-    auto lengths      = problem.GetXDesc().GetLengths();
-    auto strides      = problem.GetXDesc().GetStrides();
-    auto dtype        = problem.GetXDesc().GetType();
-    auto input_dtype  = miopen::GetDataType(problem.GetXDesc().GetType());
-    auto output_dtype = miopen::GetDataType(problem.GetYDesc().GetType());
-    auto algorithm    = problem.GetAlgorithm();
-    auto mode         = problem.GetMode();
+    auto lengths    = problem.GetXDesc().GetLengths();
+    auto strides    = problem.GetXDesc().GetStrides();
+    auto dtype      = problem.GetXDesc().GetType();
+    auto data_dtype = miopen::GetDataType(problem.GetXDesc().GetType());
+    auto algorithm  = problem.GetAlgorithm();
+    auto mode       = problem.GetMode();
 
     auto grid_size =
         mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? lengths[0] : lengths[0] * lengths[2] * lengths[3];
@@ -150,8 +128,8 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
     const auto build_params =
         KernelBuildParameters{{"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
                               {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
-                              {"INPUT_TYPE", input_dtype},
-                              {"OUTPUT_TYPE", output_dtype},
+                              {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
+                              {"DATA_TYPE", data_dtype == "bfloat16" ? "ushort" : data_dtype},
                               {"USE_SOFTMAX_FAST", algorithm == MIOPEN_SOFTMAX_FAST},
                               {"USE_SOFTMAX_ACCURATE", algorithm == MIOPEN_SOFTMAX_ACCURATE},
                               {"USE_SOFTMAX_LOG", algorithm == MIOPEN_SOFTMAX_LOG},
@@ -171,10 +149,10 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
                               {"NUM_BATCH", num_batch},
                               {"BATCH_SIZE", batch_size},
                               {"U_BATCH_SIZE", u_batch_size},
-                              {"IS_INPUT_PACKED", problem.GetXDesc().IsPacked()},
-                              {"IS_OUTPUT_PACKED", problem.GetYDesc().IsPacked()},
-                              {"IS_DINPUT_PACKED", problem.GetdXDesc().IsPacked()},
-                              {"IS_DOUTPUT_PACKED", problem.GetdYDesc().IsPacked()}};
+                              {"IS_INPUT_CONTIGUOUS", problem.GetXDesc().IsContiguous()},
+                              {"IS_OUTPUT_CONTIGUOUS", problem.GetYDesc().IsContiguous()},
+                              {"IS_DINPUT_CONTIGUOUS", problem.GetdXDesc().IsContiguous()},
+                              {"IS_DOUTPUT_CONTIGUOUS", problem.GetdYDesc().IsContiguous()}};
 
     kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 

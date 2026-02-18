@@ -107,7 +107,7 @@ inline miopen::HipEventPtr make_hip_fast_event()
     hipEventCreateWithFlags(&result, hipEventDisableTiming);
     return miopen::HipEventPtr{result};
 }
-#endif //#if MIOPEN_BACKEND_HIP
+#endif // #if MIOPEN_BACKEND_HIP
 
 void LSTMForwardHiddenStateUpdate(const Handle& handle,
                                   miopenDataType_t rnn_data_type,
@@ -119,8 +119,6 @@ void LSTMForwardHiddenStateUpdate(const Handle& handle,
                                   int use_batch,
                                   int hy_h,
                                   int hy_stride,
-                                  int wei_len,
-                                  int wei_stride,
                                   ConstData_t cx,
                                   std::size_t cx_offset,
                                   Data_t reserve_space,
@@ -144,8 +142,6 @@ void LSTMBackwardHiddenStateUpdate(const Handle& handle,
                                    int use_batch2,
                                    int hy_h,
                                    int hy_stride,
-                                   int wei_len,
-                                   int wei_stride,
                                    ConstData_t cx,
                                    std::size_t cx_offset,
                                    Data_t reserve_space,

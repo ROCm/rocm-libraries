@@ -28,7 +28,7 @@
 
 // Generic GCN arch name for configuration entries that
 // do not report a specific name in kernel_generator.py
-static const std::string generic_gcn_arch_name("gfx_generic");
+static const char* generic_gcn_arch_name = "gfx_generic";
 
 // get device properties
 static hipDeviceProp_t get_curr_device_prop()

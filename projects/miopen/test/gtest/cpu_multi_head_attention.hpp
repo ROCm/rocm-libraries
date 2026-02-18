@@ -267,9 +267,9 @@ protected:
                                                cpu_mha_test_case.sequence_length,
                                                cpu_mha_test_case.sequence_length};
         softmax           = tensor<InputType>{cpu_mha_test_case.batch_size,
-                                    cpu_mha_test_case.num_heads,
-                                    cpu_mha_test_case.sequence_length,
-                                    cpu_mha_test_case.sequence_length};
+                                              cpu_mha_test_case.num_heads,
+                                              cpu_mha_test_case.sequence_length,
+                                              cpu_mha_test_case.sequence_length};
         // reduce row max
         attn_max = tensor<InputType>{cpu_mha_test_case.batch_size,
                                      cpu_mha_test_case.num_heads,

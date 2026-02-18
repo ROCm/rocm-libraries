@@ -300,6 +300,64 @@ public:
             nextRunningVariance ? flatbuffers::Optional<int64_t>(nextRunningVariance->get_uid())
                                 : flatbuffers::nullopt);
     }
+
+    static BatchnormAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::BatchnormAttributes* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    {
+        BatchnormAttributes attr;
+
+        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
+        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
+        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
+        attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
+
+        std::vector<std::shared_ptr<TensorAttributes>> peerStats;
+        if(fb->peer_stats_tensor_uid() != nullptr)
+        {
+            for(auto uid : *fb->peer_stats_tensor_uid())
+            {
+                peerStats.push_back(tensorMap.at(uid));
+            }
+        }
+        attr.set_peer_stats(peerStats);
+
+        if(fb->prev_running_mean_tensor_uid().has_value())
+        {
+            attr.set_prev_running_mean(tensorMap.at(fb->prev_running_mean_tensor_uid().value()));
+        }
+        if(fb->prev_running_variance_tensor_uid().has_value())
+        {
+            attr.set_prev_running_variance(
+                tensorMap.at(fb->prev_running_variance_tensor_uid().value()));
+        }
+        if(fb->momentum_tensor_uid().has_value())
+        {
+            attr.set_momentum(tensorMap.at(fb->momentum_tensor_uid().value()));
+        }
+
+        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
+
+        if(fb->mean_tensor_uid().has_value())
+        {
+            attr.set_mean(tensorMap.at(fb->mean_tensor_uid().value()));
+        }
+        if(fb->inv_variance_tensor_uid().has_value())
+        {
+            attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid().value()));
+        }
+        if(fb->next_running_mean_tensor_uid().has_value())
+        {
+            attr.set_next_running_mean(tensorMap.at(fb->next_running_mean_tensor_uid().value()));
+        }
+        if(fb->next_running_variance_tensor_uid().has_value())
+        {
+            attr.set_next_running_variance(
+                tensorMap.at(fb->next_running_variance_tensor_uid().value()));
+        }
+
+        return attr;
+    }
 };
 
 typedef BatchnormAttributes Batchnorm_attributes;

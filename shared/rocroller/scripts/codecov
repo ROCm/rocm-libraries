@@ -42,7 +42,6 @@ help() {
     echo "-b              Absolute path to build directory"
     echo "-g              GPU Identifier (for output file names)"
     echo "-u              Comparison archive URL"
-    echo "-R              Regular expression to filter tests."
     echo "-h              Print this help message"
     echo
 }
@@ -50,10 +49,8 @@ help() {
 skip_diff=false
 skip_zip=false
 skip_codecov=false
-ctest_re_flag=
-ctest_re=
 
-while getopts R:g:b:u:h:-: flag; do
+while getopts g:b:u:h:-: flag; do
     case "${flag}" in
     -)
       case "${OPTARG}" in
@@ -72,10 +69,6 @@ while getopts R:g:b:u:h:-: flag; do
           exit 1
           ;;
       esac
-      ;;
-    R)
-      ctest_re=${OPTARG}
-      ctest_re_flag="-R"
       ;;
     g) gpu=${OPTARG} ;;
     b) build_path=${OPTARG} ;; # Absolute path required
@@ -125,14 +118,15 @@ else
 
     # The `%m` creates a different prof file for each object file. So one for
     # rocroller.so and one for rocroller-tests.
-    # Also had to switch to using ctest so seg faults can be handled gracefully.
+    # Using sharded test runner with codecov profile for better parallelization
+    # and centralized test filtering configuration.
+    #
+    # The codecov profile excludes slow/exhaustive tests to reduce execution time
+    # while maintaining good coverage validation (basic tests still run).
 
-    echo Using $(nproc) threads for code coverage tests.
-    OMP_NUM_THREADS=8 LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw ctest \
-        -j $(nproc) \
-        --test-dir ${build_path} \
-        --output-on-failure \
-        ${ctest_re_flag} "${ctest_re}"
+    echo Using sharded test runner with codecov profile.
+    LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw \
+        ${script_path}/run-tests-sharded codecov-mci ${build_path}
 
     # this combines them back together.
     /opt/rocm/lib/llvm/bin/llvm-profdata merge \

@@ -37,6 +37,7 @@ The build options are:
 * ``BUILD_HIPSTDPAR_TEST``. Set this to ``ON`` to enable HIPSTDPAR tests. Default is ``OFF``.
 * ``BUILD_BENCHMARK``. Set this to ``ON`` to build rocThrust benchmarks. Default is ``OFF``.
 * ``BUILD_EXAMPLE``. Set this to ``ON`` to build the rocThrust examples. Default is ``OFF``.
+* ``BUILD_OFFLOAD_COMPRESS``. Set this to ``OFF`` to prevent the ``--offload-compress`` switch from being passed to the compiler and compressing the binary. On by default.
 * ``USE_SYSTEM_LIB``. Set this to ``ON`` to use the installed ``ROCm`` libraries when building the tests. For this option to take effect, ``BUILD_TEST`` must be set to ``ON``. Default is ``OFF``.
 * ``RNG_SEED_COUNT``. Set this to the non-repeatable random dataset count. Default is 0.
 * ``PRNG_SEEDS``. Set this to the RNG seeds. The seeds must be passed as a semicolon-delimited array of 32-bit unsigned integers. To avoid command line parsing errors, enclose the entire option in quotation marks. For example, ``cmake "-DPRNG_SEEDS=1;2;3;4"``. ``-DPRNG_SEEDS=1`` is used by default.

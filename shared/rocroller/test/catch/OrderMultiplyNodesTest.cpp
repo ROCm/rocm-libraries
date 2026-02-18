@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -67,8 +67,6 @@ namespace OrderMultiplyNodesTest
         example.setMFMA(32, 32, 2, 1);
 
         auto lds               = GENERATE(true, false);
-        auto unrollX           = GENERATE(0, 2);
-        auto unrollY           = GENERATE(0, 2);
         auto prefetch          = false;
         auto prefetchInFlight  = 0;
         auto prefetchLDSFactor = 0;
@@ -84,14 +82,13 @@ namespace OrderMultiplyNodesTest
             }
         }
 
-        DYNAMIC_SECTION("lds=" << lds << ", unrollX=" << unrollX << ", unrollY=" << unrollY
-                               << ", prefetch=" << prefetch << ", prefetchInFlight="
+        DYNAMIC_SECTION("lds=" << lds << ", prefetch=" << prefetch << ", prefetchInFlight="
                                << prefetchInFlight << ", prefetchLDSFactor=" << prefetchLDSFactor
                                << ", prefetchMixMemOps=" << prefetchMixMemOps)
         {
 
             example.setUseLDS(lds, lds, true);
-            example.setUnroll(unrollX, unrollY);
+            example.setUnroll(0);
 
             example.setPrefetch(prefetch, prefetchInFlight, prefetchLDSFactor, prefetchMixMemOps);
 

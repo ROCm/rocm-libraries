@@ -163,6 +163,24 @@ namespace TensileLite
 
         int nonTemporalA = 0;
         int nonTemporalB = 0;
+
+        int customMainLoopScheduling = 0;
+
+        int NonTemporalD = 0;
+        int WaveSeparateGlobalReadA = 0;
+        int WaveSeparateGlobalReadB = 0;
+        int UnrollLoopSwapGlobalReadOrder = 0;
+        bool DirectToVgprA = false;
+        bool DirectToVgprB = false;
+        int NumLoadsCoalescedA = 0;
+        int NumLoadsCoalescedB = 0;
+        int VectorWidthA = 1;
+        int VectorWidthB = 1;
+        int LocalSplitU = 1;
+        bool DirectToLdsA = false;
+        bool DirectToLdsB = false;
+
+        std::array<int, 2> waveGroup;
     };
 
     struct StreamKSettings
@@ -184,7 +202,7 @@ namespace TensileLite
         using Problem       = ContractionProblemGemm;
         using Inputs        = ContractionInputs;
         using GroupedInputs = ContractionGroupedInputs;
-        using ParamsCache  = CacheMap<std::pair<int32_t, int32_t>, Problem>;
+        using ParamsCache   = CacheMap<std::tuple<int32_t, uint32_t, uint32_t>, Problem>;
 
         /**
          * Indicate a solution's matching type
@@ -405,8 +423,9 @@ namespace TensileLite
                         uint32_t                            numWorkGroups,
                         Hardware const*                     hardware,
                         const ContractionProblemParameters& param,
-                        int32_t                             defaultWGM,
-                        uint32_t                            defaultWGMXCC,
+                        int32_t                             autoWGM,
+                        uint32_t                            autoWGMXCC,
+                        uint32_t                            autoWGMXCCCHUNK,
                         uint32_t                            autoGsuVal) const;
 
         template <typename KA>
@@ -556,7 +575,7 @@ namespace TensileLite
         bool                         debugKernel     = false;
         bool                         kernelArgsLog   = false;
         mutable int                  isFallbackCUSol = -1; // -1:unset, 0:false, 1:true
-        mutable ParamsCache paramsCache = ParamsCache(std::make_pair(0,0));
+        mutable ParamsCache paramsCache = ParamsCache(std::make_tuple(0, 0, 0));
 
         std::shared_ptr<Predicates::Predicate<Task>> taskPredicate
             = std::make_shared<Predicates::True<Task>>();
@@ -586,10 +605,16 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
-        std::pair<int32_t, int32_t> calculateAutoWGM(Problem const&  problem,
-                                                     Hardware const* hardware,
-                                                     uint32_t        skgrid) const;
+        std::tuple<int32_t, uint32_t, uint32_t> calculateAutoWGM(Problem const&  problem, 
+                                                                Hardware const* hardware, 
+                                                                uint32_t        skgrid) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
+
+        double calculateDimensionM(Problem const&  problem) const;
+        double calculateDimensionN(Problem const&  problem) const;
+        double calculateNumBatches(Problem const&  problem) const;
+        SizeMapping getSizeMapping(void) const {return sizeMapping;};
+        origami::data_type_t getOrigamiDatatype(Problem const&  problem) const;
     };
 
     template <typename TAct>

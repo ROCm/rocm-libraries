@@ -5,8 +5,10 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/types.hpp>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace hipdnn_data_sdk::utilities
@@ -80,6 +82,20 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& te
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
             return static_cast<TargetType>(val->value());
+        }
+        break;
+    case data_objects::DataType::FP8_E4M3:
+        if(auto val = tensorAttr.value.AsFloat8Value())
+        {
+            auto fp8 = types::fp8_e4m3::from_bits(val->value());
+            return static_cast<TargetType>(static_cast<float>(fp8));
+        }
+        break;
+    case data_objects::DataType::FP8_E5M2:
+        if(auto val = tensorAttr.value.AsFloat8Value())
+        {
+            auto bfp8 = types::fp8_e5m2::from_bits(val->value());
+            return static_cast<TargetType>(static_cast<float>(bfp8));
         }
         break;
     case data_objects::DataType::UNSET:

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
 #include "PlanBuilderInterface.hpp"
@@ -10,7 +11,7 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <optional>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class BatchnormFwdTrainingParams
@@ -80,7 +81,8 @@ private:
 class BatchnormFwdTrainingPlan : public IPlan
 {
 public:
-    BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams);
+    BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,
+                             const MiopenExecutionSettings& executionSettings);
 
     BatchnormFwdTrainingPlan(const BatchnormFwdTrainingPlan&) = delete;
     BatchnormFwdTrainingPlan& operator=(const BatchnormFwdTrainingPlan&) = delete;
@@ -97,6 +99,7 @@ public:
 
 private:
     BatchnormFwdTrainingParams _trainingParams;
+    MiopenExecutionSettings _executionSettings;
 };
 
 }

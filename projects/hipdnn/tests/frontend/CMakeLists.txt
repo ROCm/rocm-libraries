@@ -14,6 +14,7 @@ add_executable(
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
     IntegrationGraphEngineFiltering.cpp
+    IntegrationGraphKnobsApi.cpp
 )
 
 target_compile_options(public_hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -39,6 +40,8 @@ target_compile_definitions(
             TEST_DUPLICATE_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_ID_B_PLUGIN_NAME}"
             TEST_INCOMPLETE_API_PLUGIN_NAME="${TEST_INCOMPLETE_API_PLUGIN_NAME}"
             TEST_GOOD_DEFAULT_PLUGIN_NAME="${TEST_GOOD_DEFAULT_PLUGIN_NAME}"
+            TEST_KNOBS_PLUGIN_NAME="${TEST_KNOBS_PLUGIN_NAME}"
+            TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME="${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}"
 )
 
 # Ensure test plugins are built before tests
@@ -51,6 +54,8 @@ add_dependencies(
     test_duplicate_id_a_plugin
     test_duplicate_id_b_plugin
     test_incomplete_api_plugin
+    test_knobs_plugin
+    test_knob_constraint_validation_plugin
 )
 
 clang_tidy_check(public_hipdnn_frontend_tests)

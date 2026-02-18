@@ -4,7 +4,7 @@
 #
 # MIT License
 #
-# Copyright 2024-2025 AMD ROCm(TM) Software
+# Copyright 2024-2026 AMD ROCm(TM) Software
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,12 +32,12 @@ import functools
 import itertools
 import os
 import pathlib
+import shutil
 import subprocess
 from dataclasses import dataclass
 
 import pytest
-import yaml 
-import shutil
+import yaml
 
 SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
 
@@ -246,11 +246,11 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
-storeLDS_D: true
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
+store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -276,10 +276,8 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
-matchMemoryAccess: true
+tailLoops: true
+streamK: None
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -311,11 +309,11 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
-storeLDS_D: true
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
+store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -323,7 +321,7 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
-matchMemoryAccess: true
+tailLoops: true
 types:
   trans_A: N
   trans_B: N
@@ -351,9 +349,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
@@ -375,11 +371,11 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
-storeLDS_D: true
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
+store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -387,7 +383,7 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
-matchMemoryAccess: true
+tailLoops: true
 types:
   trans_A: N
   trans_B: N
@@ -415,9 +411,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
@@ -476,7 +470,7 @@ def build_solution_params():
         # data-parallel gemm, float, params from config file
         ["--config", DP_GEMM],
         # streamk gemm, float, params from command line
-        ["--streamk"],
+        ["--streamK", "Standard"],
     ]
 
     for type, prefetch, scaleA, scaleB in itertools.product(
@@ -685,14 +679,14 @@ def test_gemm_options(tmp_path):
     )
     assert post["load_A"] == "BufferToLDSViaVGPR"
     assert post["load_B"] == "BufferToLDSViaVGPR"
-    assert not post["storeLDS_D"]
+    assert post["store"] == "VGPRToGlobalMemoryWithBuffer"
 
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--lds=BD"]
     )
     assert post["load_A"] == "BufferToVGPR"
     assert post["load_B"] == "BufferToLDSViaVGPR"
-    assert post["storeLDS_D"]
+    assert post["store"] == "VGPRToGlobalMemoryViaLDSWithBuffer"
 
     # setting d2l options
     post = run_and_load_example_yaml(
@@ -706,6 +700,19 @@ def test_gemm_options(tmp_path):
     )
     assert post["load_A"] == "BufferToLDS"
     assert post["load_B"] == "BufferToVGPR"
+
+    post = run_and_load_example_yaml(
+        [
+            gemm,
+            "example",
+            example,
+            "--arch=gfx950",
+            "--padLDS_A=22,33",
+            "--padLDS_B=44,55",
+        ]
+    )
+    assert post["padLDS_A"] == [22, 33]
+    assert post["padLDS_B"] == [44, 55]
 
     # setting mxlds options
     post = run_and_load_example_yaml(
@@ -919,6 +926,7 @@ def test_gemm_wgm(tmp_path, solution_params, problem_params):
 
     gemm_validate_single_stage(tmp_path, solution_params, problem_params)
 
+
 def test_kernel_graph_dot_truncation(tmp_path):
     """Validate Graphviz DOT rendering succeeds when node labels are truncated.
     - With truncation enabled (small max label length), kgraph.py should succeed and produce non-empty outputs.
@@ -977,7 +985,7 @@ def test_kernel_graph_dot_truncation(tmp_path):
         combined = (p.stdout or "") + "\n" + (p.stderr or "")
         return p, combined
 
-    #Case 1 : truncation enabled(should succeed)
+    # Case 1 : truncation enabled(should succeed)
     asm_trunc = tmp_path / "workgroupmapping_truncated5.s"
     pdf_trunc = tmp_path / "workgroupmapping_truncated5.pdf"
 
@@ -1001,9 +1009,7 @@ def test_kernel_graph_dot_truncation(tmp_path):
     assert_non_empty(pdf_trunc)
     assert_non_empty(norm_trunc)
 
-
-
-    #Case 2 : truncation disabled(should error in kgraph parse)
+    # Case 2 : truncation disabled(should error in kgraph parse)
     asm_untrunc = tmp_path / "workgroupmapping_untruncated.s"
     pdf_untrunc = tmp_path / "workgroupmapping_untruncated.pdf"
 
@@ -1029,8 +1035,14 @@ def test_kernel_graph_dot_truncation(tmp_path):
 
     dot_untrunc = pdf_untrunc.with_suffix(".dot")
     assert_non_empty(dot_untrunc)
-    max_line2 = max(len(line) for line in dot_untrunc.read_text(errors="ignore").splitlines() or [""])
-    assert max_line2 >= 16384, f"Expected an extremely long DOT line without truncation, got max {max_line2}"
+    max_line2 = max(
+        len(line)
+        for line in dot_untrunc.read_text(errors="ignore").splitlines() or [""]
+    )
+    assert (
+        max_line2 >= 16384
+    ), f"Expected an extremely long DOT line without truncation, got max {max_line2}"
+
 
 if __name__ == "__main__":
     print("Solution params")

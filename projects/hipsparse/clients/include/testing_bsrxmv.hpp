@@ -25,6 +25,9 @@
 #ifndef TESTING_BSRXMV_HPP
 #define TESTING_BSRXMV_HPP
 
+#include "display.hpp"
+#include "flops.hpp"
+#include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
@@ -33,13 +36,13 @@
 
 #include <cmath>
 #include <hipsparse.h>
-#include <string>
+#include <random>
 
 using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_bsrxmv_bad_arg(void)
+void testing_bsrxmv_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
 
@@ -387,77 +390,15 @@ template <typename T>
 void testing_bsrxmv(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
-    hipsparseDirection_t dir          = HIPSPARSE_DIRECTION_COLUMN;
-    hipsparseOperation_t trans        = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-    static constexpr int size_of_mask = 1;
-    static constexpr int mb           = 2;
-    static constexpr int nb           = 3;
-    static constexpr int nnzb         = 5;
-    static constexpr int block_dim    = 2;
-
-    T h_alpha = make_DataType<T>(2.0);
-    T h_beta  = make_DataType<T>(1.0);
-    // clang-format off
-    std::vector<T> hbsr_val
-        = {make_DataType<T>(1.0),  make_DataType<T>(2.0),  make_DataType<T>(3.0),
-           make_DataType<T>(4.0),  make_DataType<T>(5.0),  make_DataType<T>(6.0),
-           make_DataType<T>(7.0),  make_DataType<T>(8.0),  make_DataType<T>(9.0),
-           make_DataType<T>(10.0), make_DataType<T>(11.0), make_DataType<T>(12.0),
-           make_DataType<T>(13.0), make_DataType<T>(14.0), make_DataType<T>(15.0),
-           make_DataType<T>(16.0), make_DataType<T>(17.0), make_DataType<T>(18.0),
-           make_DataType<T>(19.0), make_DataType<T>(20.0)};
-
-    std::vector<int> hbsr_mask_ptr = {2};
-    std::vector<int> hbsr_row_ptr  = {1, 4};
-    std::vector<int> hbsr_end_ptr  = {1, 5};
-    std::vector<int> hbsr_col_ind  = {1, 2, 1, 2, 3};
-    std::vector<T>   hx            = {make_DataType<T>(1.0),
-                                      make_DataType<T>(1.0),
-                                      make_DataType<T>(1.0),
-                                      make_DataType<T>(1.0),
-                                      make_DataType<T>(1.0),
-                                      make_DataType<T>(1.0)};
-    std::vector<T>   hy            = {
-                     make_DataType<T>(2.0), make_DataType<T>(2.0), make_DataType<T>(2.0), make_DataType<T>(2.0)};
-    std::vector<T> hyref = {make_DataType<T>(2.0),
-                            make_DataType<T>(2.0),
-                            make_DataType<T>(58.0),
-                            make_DataType<T>(62.0)};
-    // clang-format on
-
-    auto dbsr_val_managed = hipsparse_unique_ptr{
-        device_malloc(sizeof(T) * block_dim * block_dim * nnzb), device_free};
-    auto dbsr_mask_ptr_managed
-        = hipsparse_unique_ptr{device_malloc(sizeof(int) * size_of_mask), device_free};
-    auto dbsr_row_ptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * mb), device_free};
-    auto dbsr_end_ptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * mb), device_free};
-    auto dbsr_col_ind_managed
-        = hipsparse_unique_ptr{device_malloc(sizeof(int) * nnzb), device_free};
-    auto dx_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * block_dim * nb), device_free};
-    auto dy_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * block_dim * mb), device_free};
-
-    T*   dbsr_val      = (T*)dbsr_val_managed.get();
-    int* dbsr_mask_ptr = (int*)dbsr_mask_ptr_managed.get();
-    int* dbsr_row_ptr  = (int*)dbsr_row_ptr_managed.get();
-    int* dbsr_end_ptr  = (int*)dbsr_end_ptr_managed.get();
-    int* dbsr_col_ind  = (int*)dbsr_col_ind_managed.get();
-    T*   dx            = (T*)dx_managed.get();
-    T*   dy            = (T*)dy_managed.get();
-
-    CHECK_HIP_ERROR(hipMemcpy(dbsr_val,
-                              hbsr_val.data(),
-                              sizeof(T) * nnzb * block_dim * block_dim,
-                              hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(
-        dbsr_mask_ptr, hbsr_mask_ptr.data(), sizeof(int) * size_of_mask, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(
-        hipMemcpy(dbsr_row_ptr, hbsr_row_ptr.data(), sizeof(int) * mb, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(
-        hipMemcpy(dbsr_end_ptr, hbsr_end_ptr.data(), sizeof(int) * mb, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(
-        hipMemcpy(dbsr_col_ind, hbsr_col_ind.data(), sizeof(int) * nnzb, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(T) * nb * block_dim, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy, hy.data(), sizeof(T) * mb * block_dim, hipMemcpyHostToDevice));
+    int                  m         = argus.M;
+    int                  n         = argus.N;
+    int                  block_dim = argus.block_dim;
+    T                    h_alpha   = make_DataType<T>(argus.alpha);
+    T                    h_beta    = make_DataType<T>(argus.beta);
+    hipsparseOperation_t trans     = argus.transA;
+    hipsparseIndexBase_t idx_base  = argus.baseA;
+    hipsparseDirection_t dir       = argus.dirA;
+    std::string          filename  = argus.filename;
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
@@ -465,33 +406,325 @@ void testing_bsrxmv(Arguments argus)
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
 
-    hipsparseIndexBase_t idx_base = HIPSPARSE_INDEX_BASE_ONE;
+    // Set matrix index base
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idx_base));
 
-    CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-    hipsparseStatus_t status = hipsparseXbsrxmv(handle,
-                                                dir,
-                                                trans,
-                                                size_of_mask,
-                                                mb,
-                                                nb,
-                                                nnzb,
-                                                &h_alpha,
-                                                descr,
-                                                dbsr_val,
-                                                dbsr_mask_ptr,
-                                                dbsr_row_ptr,
-                                                dbsr_end_ptr,
-                                                dbsr_col_ind,
-                                                block_dim,
-                                                dx,
-                                                &h_beta,
-                                                dy);
-    verify_hipsparse_status_success(status, "bsrxmv failed.");
+    int mb = (m + block_dim - 1) / block_dim;
+    int nb = (n + block_dim - 1) / block_dim;
 
-    CHECK_HIP_ERROR(hipMemcpy(hy.data(), dy, sizeof(T) * mb * block_dim, hipMemcpyDeviceToHost));
+    srand(12345ULL);
 
-    unit_check_near(1, mb * block_dim, 1, hyref.data(), hy.data());
+    // Host structures
+    std::vector<int> hcsr_row_ptr;
+    std::vector<int> hcsr_col_ind;
+    std::vector<T>   hcsr_val;
+
+    // Read or construct CSR matrix
+    int nnz = 0;
+    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
+    {
+        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
+        return;
+    }
+
+    mb = (m + block_dim - 1) / block_dim;
+    nb = (n + block_dim - 1) / block_dim;
+
+    std::vector<T> hx(nb * block_dim);
+    std::vector<T> hy_1(mb * block_dim);
+    std::vector<T> hy_2(mb * block_dim);
+    std::vector<T> hy_gold(mb * block_dim);
+
+    hipsparseInit<T>(hx, 1, nb * block_dim);
+    hipsparseInit<T>(hy_1, 1, mb * block_dim);
+
+    // copy vector is easy in STL; hy_gold = hx: save a copy in hy_gold which will be output of CPU
+    hy_2    = hy_1;
+    hy_gold = hy_1;
+
+    // allocate memory on device
+    auto dcsr_row_ptr_managed
+        = hipsparse_unique_ptr{device_malloc(sizeof(int) * (m + 1)), device_free};
+    auto dcsr_col_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * nnz), device_free};
+    auto dcsr_val_managed     = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz), device_free};
+    auto dbsr_row_ptr_managed
+        = hipsparse_unique_ptr{device_malloc(sizeof(int) * (mb + 1)), device_free};
+    auto dx_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * nb * block_dim), device_free};
+    auto dy_1_managed
+        = hipsparse_unique_ptr{device_malloc(sizeof(T) * mb * block_dim), device_free};
+    auto dy_2_managed
+        = hipsparse_unique_ptr{device_malloc(sizeof(T) * mb * block_dim), device_free};
+    auto d_alpha_managed = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
+    auto d_beta_managed  = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
+
+    int* dcsr_row_ptr = (int*)dcsr_row_ptr_managed.get();
+    int* dcsr_col_ind = (int*)dcsr_col_ind_managed.get();
+    T*   dcsr_val     = (T*)dcsr_val_managed.get();
+    int* dbsr_row_ptr = (int*)dbsr_row_ptr_managed.get();
+    T*   dx           = (T*)dx_managed.get();
+    T*   dy_1         = (T*)dy_1_managed.get();
+    T*   dy_2         = (T*)dy_2_managed.get();
+    T*   d_alpha      = (T*)d_alpha_managed.get();
+    T*   d_beta       = (T*)d_beta_managed.get();
+
+    // copy data from CPU to device
+    CHECK_HIP_ERROR(
+        hipMemcpy(dcsr_row_ptr, hcsr_row_ptr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(T) * nb * block_dim, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(dy_1, hy_1.data(), sizeof(T) * mb * block_dim, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(dy_2, hy_2.data(), sizeof(T) * mb * block_dim, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
+
+    // Convert to BSR
+    int nnzb;
+    CHECK_HIPSPARSE_ERROR(hipsparseXcsr2bsrNnz(handle,
+                                               dir,
+                                               m,
+                                               n,
+                                               descr,
+                                               dcsr_row_ptr,
+                                               dcsr_col_ind,
+                                               block_dim,
+                                               descr,
+                                               dbsr_row_ptr,
+                                               &nnzb));
+
+    auto dbsr_col_ind_managed
+        = hipsparse_unique_ptr{device_malloc(sizeof(int) * nnzb), device_free};
+    auto dbsr_val_managed = hipsparse_unique_ptr{
+        device_malloc(sizeof(T) * nnzb * block_dim * block_dim), device_free};
+
+    int* dbsr_col_ind = (int*)dbsr_col_ind_managed.get();
+    T*   dbsr_val     = (T*)dbsr_val_managed.get();
+
+    CHECK_HIPSPARSE_ERROR(hipsparseXcsr2bsr(handle,
+                                            dir,
+                                            m,
+                                            n,
+                                            descr,
+                                            dcsr_val,
+                                            dcsr_row_ptr,
+                                            dcsr_col_ind,
+                                            block_dim,
+                                            descr,
+                                            dbsr_val,
+                                            dbsr_row_ptr,
+                                            dbsr_col_ind));
+
+    std::vector<int> hbsr_row_ptr(mb + 1);
+    std::vector<int> hbsr_col_ind(nnzb);
+    std::vector<T>   hbsr_val(nnzb * block_dim * block_dim);
+
+    CHECK_HIP_ERROR(hipMemcpy(
+        hbsr_row_ptr.data(), dbsr_row_ptr, sizeof(int) * (mb + 1), hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(
+        hipMemcpy(hbsr_col_ind.data(), dbsr_col_ind, sizeof(int) * nnzb, hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(hipMemcpy(hbsr_val.data(),
+                              dbsr_val,
+                              sizeof(T) * nnzb * block_dim * block_dim,
+                              hipMemcpyDeviceToHost));
+
+    int size_of_mask = 0;
+
+    // 1. Setup the random number engine
+    std::mt19937 gen(123456789); // Mersenne Twister engine
+
+    // 2. Define the distribution (0.5 means 50% chance for 1)
+    std::bernoulli_distribution d(0.5);
+
+    // 3. Create and fill the vector
+    std::vector<int> marker(mb);
+
+    for(int i = 0; i < mb; ++i)
+    {
+        marker[i] = d(gen); // Generates true (1) or false (0)
+        if(marker[i] == 1)
+        {
+            size_of_mask++;
+        }
+    }
+
+    // Initialization of the mask.
+    std::vector<int> hbsr_mask_ptr(size_of_mask);
+    int              count = 0;
+    for(int i = 0; i < mb; ++i)
+    {
+        if(marker[i] == 1)
+        {
+            hbsr_mask_ptr[count++] = i + idx_base;
+        }
+    }
+
+    auto dbsr_mask_ptr_managed
+        = hipsparse_unique_ptr{device_malloc(sizeof(int) * size_of_mask), device_free};
+    int* dbsr_mask_ptr = (int*)dbsr_mask_ptr_managed.get();
+
+    CHECK_HIP_ERROR(hipMemcpy(
+        dbsr_mask_ptr, hbsr_mask_ptr.data(), sizeof(int) * size_of_mask, hipMemcpyHostToDevice));
+
+    if(argus.unit_check)
+    {
+        // HIPSPARSE pointer mode host
+        CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
+        CHECK_HIPSPARSE_ERROR(hipsparseXbsrxmv(handle,
+                                               dir,
+                                               trans,
+                                               size_of_mask,
+                                               mb,
+                                               nb,
+                                               nnzb,
+                                               &h_alpha,
+                                               descr,
+                                               dbsr_val,
+                                               dbsr_mask_ptr,
+                                               dbsr_row_ptr,
+                                               dbsr_row_ptr + 1,
+                                               dbsr_col_ind,
+                                               block_dim,
+                                               dx,
+                                               &h_beta,
+                                               dy_1));
+
+        // HIPSPARSE pointer mode device
+        CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
+        CHECK_HIPSPARSE_ERROR(hipsparseXbsrxmv(handle,
+                                               dir,
+                                               trans,
+                                               size_of_mask,
+                                               mb,
+                                               nb,
+                                               nnzb,
+                                               d_alpha,
+                                               descr,
+                                               dbsr_val,
+                                               dbsr_mask_ptr,
+                                               dbsr_row_ptr,
+                                               dbsr_row_ptr + 1,
+                                               dbsr_col_ind,
+                                               block_dim,
+                                               dx,
+                                               d_beta,
+                                               dy_2));
+
+        // copy output from device to CPU
+        CHECK_HIP_ERROR(
+            hipMemcpy(hy_1.data(), dy_1, sizeof(T) * mb * block_dim, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(
+            hipMemcpy(hy_2.data(), dy_2, sizeof(T) * mb * block_dim, hipMemcpyDeviceToHost));
+
+        // Host bsrmv
+        host_bsrxmv(dir,
+                    trans,
+                    size_of_mask,
+                    mb,
+                    nb,
+                    nnzb,
+                    h_alpha,
+                    hbsr_mask_ptr.data(),
+                    hbsr_row_ptr.data(),
+                    hbsr_row_ptr.data() + 1,
+                    hbsr_col_ind.data(),
+                    hbsr_val.data(),
+                    block_dim,
+                    hx.data(),
+                    h_beta,
+                    hy_gold.data(),
+                    idx_base);
+
+        unit_check_near(1, mb * block_dim, 1, hy_gold.data(), hy_1.data());
+        unit_check_near(1, mb * block_dim, 1, hy_gold.data(), hy_2.data());
+    }
+
+    if(argus.timing)
+    {
+        int number_cold_calls = 2;
+        int number_hot_calls  = argus.iters;
+
+        CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
+
+        // Warm up
+        for(int iter = 0; iter < number_cold_calls; ++iter)
+        {
+            CHECK_HIPSPARSE_ERROR(hipsparseXbsrxmv(handle,
+                                                   dir,
+                                                   trans,
+                                                   size_of_mask,
+                                                   mb,
+                                                   nb,
+                                                   nnzb,
+                                                   &h_alpha,
+                                                   descr,
+                                                   dbsr_val,
+                                                   dbsr_mask_ptr,
+                                                   dbsr_row_ptr,
+                                                   dbsr_row_ptr + 1,
+                                                   dbsr_col_ind,
+                                                   block_dim,
+                                                   dx,
+                                                   &h_beta,
+                                                   dy_1));
+        }
+
+        double gpu_time_used = get_time_us();
+
+        // Performance run
+        for(int iter = 0; iter < number_hot_calls; ++iter)
+        {
+            CHECK_HIPSPARSE_ERROR(hipsparseXbsrxmv(handle,
+                                                   dir,
+                                                   trans,
+                                                   size_of_mask,
+                                                   mb,
+                                                   nb,
+                                                   nnzb,
+                                                   &h_alpha,
+                                                   descr,
+                                                   dbsr_val,
+                                                   dbsr_mask_ptr,
+                                                   dbsr_row_ptr,
+                                                   dbsr_row_ptr + 1,
+                                                   dbsr_col_ind,
+                                                   block_dim,
+                                                   dx,
+                                                   &h_beta,
+                                                   dy_1));
+        }
+
+        gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
+
+        double gflop_count
+            = spmv_gflop_count(m, nnzb * block_dim * block_dim, h_beta != make_DataType<T>(0.0));
+        double gbyte_count = bsrmv_gbyte_count<T>(
+            size_of_mask, nb, nnzb, block_dim, h_beta != make_DataType<T>(0.0));
+
+        double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
+        double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
+
+        display_timing_info(display_key_t::M,
+                            m,
+                            display_key_t::N,
+                            n,
+                            display_key_t::block_dim,
+                            block_dim,
+                            display_key_t::direction,
+                            hipsparse_direction2string(dir),
+                            display_key_t::alpha,
+                            h_alpha,
+                            display_key_t::beta,
+                            h_beta,
+                            display_key_t::gflops,
+                            gpu_gflops,
+                            display_key_t::bandwidth,
+                            gpu_gbyte,
+                            display_key_t::time_ms,
+                            get_gpu_time_msec(gpu_time_used));
+    }
 #endif
 }
 

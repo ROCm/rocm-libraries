@@ -50,6 +50,7 @@ struct GeneratedLauncher
                       const std::string&               scheme,
                       const std::string&               pp_child_scheme,
                       const unsigned int&              pp_threads_per_transform,
+                      const unsigned int&              pp_threads_per_transform,
                       const std::vector<unsigned int>& pp_factors_curr,
                       const std::vector<unsigned int>& pp_factors_other,
                       const unsigned int&              pp_current_dim,

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,6 +37,7 @@
 #include "common/auxiliary/testing_bdsvdx.hpp"
 #include "common/auxiliary/testing_labrd.hpp"
 #include "common/auxiliary/testing_lacgv.hpp"
+#include "common/auxiliary/testing_lange.hpp"
 #include "common/auxiliary/testing_larf.hpp"
 #include "common/auxiliary/testing_larfb.hpp"
 #include "common/auxiliary/testing_larfg.hpp"
@@ -138,6 +139,8 @@ class rocsolver_dispatcher
         static const func_map map = {
             // auxiliaries
             {"laswp", testing_laswp<T>},
+            {"lange", testing_lange<T, rocblas_int>},
+            {"lange_64", testing_lange<T, int64_t>},
             {"larfg", testing_larfg<T, rocblas_int>},
             {"larfg_64", testing_larfg<T, int64_t>},
             {"larf", testing_larf<T, rocblas_int>},

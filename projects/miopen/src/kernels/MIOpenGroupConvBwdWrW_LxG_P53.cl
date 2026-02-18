@@ -547,7 +547,7 @@ MIOpenCvBwdWrW(const __global _FLOAT* __restrict top_df,
 
         } // for (; sc < MLO_OUT_HEIGHT - MLO_FILTER_PAD1 + 2; ++sc, gbl_out_scan_off +=
           // MLO_OUT_CHANNEL_STRIDE, gbl_in_scan_off += MLO_IN_CHANNEL_STRIDE)
-    }     // 	for (int b = 0;
+    } // 	for (int b = 0;
 
     // final summation over all output maps and each filter row
     // this coudl be done with log but it negligeble anyway
@@ -633,7 +633,7 @@ MIOpenCvBwdWrW_rdc(const __global _FLOAT* __restrict weight_df_tmp,
     uint wei_idx     = iMod(wei_idx0, wei_blk_idx, MLO_WEI_CHANNEL_STRIDE);
 #else
     uint wei_blk_idx = wei_idx0 / MLO_WEI_CHANNEL_STRIDE;
-    uint wei_idx = wei_idx0 & (MLO_WEI_CHANNEL_STRIDE - 1);
+    uint wei_idx     = wei_idx0 & (MLO_WEI_CHANNEL_STRIDE - 1);
 #endif
 
     _FLOAT_ACCUM pvt_accum_wei[MLO_UT_READ_UNIT] = {0};

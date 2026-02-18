@@ -105,6 +105,30 @@ inline std::vector<size_t> preSwizzleSizeForScale(hipblaslt_scaling_format s)
     }
 }
 
+inline std::vector<size_t> preTileSizeForScaleA(hipblaslt_scaling_format s)
+{
+    // Returns preTile for scale A: {tileM, tileK}
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+        return {32, 8};
+    default:
+        return {};
+    }
+}
+
+inline std::vector<size_t> preTileSizeForScaleB(hipblaslt_scaling_format s)
+{
+    // Returns preTile for scale B: {tileK, tileN}
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+        return {8, 32};
+    default:
+        return {};
+    }
+}
+
 inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
                                               hipblaslt_activation_type   act)
 {

@@ -4,17 +4,18 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 
 #include <hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
+#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "PlanInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class ConvWrwParams
@@ -23,7 +24,8 @@ public:
     ConvWrwParams(
         const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes& attributes,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-            tensorMap);
+            tensorMap,
+        bool deterministicEnabled = false);
 
     ConvWrwParams(const ConvWrwParams&) = delete;
     ConvWrwParams& operator=(const ConvWrwParams&) = delete;
@@ -50,14 +52,16 @@ private:
 class ConvWrwPlan : public IPlan
 {
 public:
-    ConvWrwPlan(const HipdnnEnginePluginHandle& handle, ConvWrwParams&& params);
+    ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
+                ConvWrwParams&& params,
+                const MiopenExecutionSettings& executionSettings);
     ~ConvWrwPlan() override = default;
 
     ConvWrwPlan(const ConvWrwPlan&) = delete;
     ConvWrwPlan& operator=(const ConvWrwPlan&) = delete;
 
-    ConvWrwPlan(ConvWrwPlan&& other) = default;
-    ConvWrwPlan& operator=(ConvWrwPlan&& other) = default;
+    ConvWrwPlan(ConvWrwPlan&& other) = delete;
+    ConvWrwPlan& operator=(ConvWrwPlan&& other) = delete;
 
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
 
@@ -68,8 +72,10 @@ public:
 
 private:
     ConvWrwParams _params;
-    hipdnn_data_sdk::utilities::ScopedResource<miopenSolution_t> _solution;
-    size_t _workspaceSize = 0;
+    mutable std::mutex _algorithmMutex;
+    mutable std::optional<miopenConvBwdWeightsAlgorithm_t> _algorithm;
+    mutable size_t _workspaceSize = 0;
+    MiopenExecutionSettings _executionSettings;
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

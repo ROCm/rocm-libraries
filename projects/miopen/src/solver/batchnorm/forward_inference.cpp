@@ -108,13 +108,24 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             ylocalsize = max_localsize;
             ygridsize  = AlignUp(size_t{in_cstride / vectorsize}, ylocalsize);
         }
-        zlocalsize = 1;
-        zgridsize  = 1;
 
         // HIP runtime does not support non-uniform blocks
         // Adjust the global worker sizes accordingly
         xgridsize = AlignUp(xgridsize, xlocalsize);
         ygridsize = AlignUp(ygridsize, ylocalsize);
+
+        zlocalsize                = 1;
+        size_t active_threads_xy  = xgridsize * ygridsize;
+        size_t max_active_threads = handle.GetMaxComputeUnits() * 32 *
+                                    handle.GetWavefrontWidth(); // considering max 32 waves per CU
+        if(active_threads_xy < max_active_threads)
+        {
+            zgridsize = std::min(size_t{(max_active_threads / active_threads_xy)}, size_t{n});
+        }
+        else
+        {
+            zgridsize = 1;
+        }
 
         auto kernel = KernelInfo{};
 
@@ -122,7 +133,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         kernel.kernel_name = "MIOpenBatchNormFwdInfer";
         if(problem.GetMode() == miopenBNSpatial)
         { // SPATIAL kernels
-            kernel.kernel_file += "SpatialHIP.cpp";
+            kernel.kernel_file += "Spatial.cpp";
             kernel.kernel_name += "SpatialEst";
             if(problem.isInverseVariance())
             {
@@ -131,7 +142,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         }
         else
         { // PER ACTIVATION
-            kernel.kernel_file += "PerActHIP.cpp";
+            kernel.kernel_file += "PerAct.cpp";
             kernel.kernel_name += "PerActivationEst";
             if(problem.isInverseVariance())
             {

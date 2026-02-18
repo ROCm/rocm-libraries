@@ -132,6 +132,7 @@ set( kgen_embed_files
      ${CMAKE_SOURCE_DIR}/shared/device_properties.h
      ${CMAKE_SOURCE_DIR}/shared/rocfft_hip.h
      ${CMAKE_SOURCE_DIR}/shared/gpubuf.h
+     ${CMAKE_SOURCE_DIR}/shared/hip_object_wrapper.h
      ${CMAKE_SOURCE_DIR}/library/src/include/rtc_kernel.h
      ${CMAKE_SOURCE_DIR}/library/src/rtc_kernel.cpp
      ${CMAKE_SOURCE_DIR}/library/src/rtc_test_harness_helper.cpp
@@ -554,6 +555,7 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx941 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1101 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1102 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx1150 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1151 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )

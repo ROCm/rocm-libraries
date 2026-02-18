@@ -559,8 +559,8 @@ namespace TensileLite
         TensorDescriptor const& compressed = problem.compressed();
         TensorDescriptor const& metadata   = problem.metadata();
 
-        auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, hardware, sk.grid);
-        uint32_t autoGsuVal        = calculateAutoGSU(problem, hardware);
+        auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problem, hardware, sk.grid);
+        uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
 
         {
@@ -790,6 +790,7 @@ namespace TensileLite
                                           problem.getParams(),
                                           autoWGM,
                                           autoWGMXCC,
+                                          autoWGMXCCCHUNK,
                                           autoGsuVal);
 
         if(!problemType.useScaleAB.empty()) //kernel input data
@@ -955,10 +956,11 @@ namespace TensileLite
         return (double)(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount)
                / std::ceil(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount);
     }
-
-    std::pair<int32_t, int32_t> ContractionSolution::calculateAutoWGM(Problem const&  problem,
-                                                                      Hardware const* hardware,
-                                                                      uint32_t const  skgrid) const
+    
+    std::tuple<int32_t, uint32_t, uint32_t> ContractionSolution::calculateAutoWGM(
+        Problem const&  problem,
+        Hardware const* hardware,
+        uint32_t const  skgrid) const
     {
         // Hardware
         AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
@@ -966,21 +968,21 @@ namespace TensileLite
 
         // Default WGM
         int32_t defaultWGM;
-        int32_t defaultWGMXCC;
+        uint32_t defaultWGMXCC;
+        uint32_t defaultWGMXCCCHUNK;
 
         // Dynamically pick the values
         if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
-           && sizeMapping.workGroupMappingXCC == -1
-           && sizeMapping.nonTemporalA < 4 /* Exclude NTs for now till we fix libs */
-           && sizeMapping.nonTemporalB < 4 /* Exclude NTs for now till we fix libs */)
+           && sizeMapping.workGroupMappingXCC == -1)
         {
-            int32_t c_wgm    = 0;
-            int32_t c_wgmxcc = 0;
-            // Try to find cached WGM and WGMXCC
-            std::tie(c_wgm, c_wgmxcc) = paramsCache.find(problem);
+            int32_t c_wgm = 0;
+            uint32_t c_wgmxcc = 0;
+            uint32_t c_wgmxccchunk = 0;
+            // Try to find cached WGM and WGMXCC and WGMXCCCHUNK
+            std::tie(c_wgm, c_wgmxcc, c_wgmxccchunk) = paramsCache.find(problem);
 
-            if(!c_wgm && !c_wgmxcc)
-            {
+            if(!c_wgm && !c_wgmxcc && !c_wgmxccchunk)
+            { 
                 auto sizes = problem.problemSizes();
                 if(sizes.size() >= 4)
                 {
@@ -995,20 +997,30 @@ namespace TensileLite
                         .cache_hints_a = sizeMapping.nonTemporalA,
                         .cache_hints_b = sizeMapping.nonTemporalB,
                     };
-                    std::tie(defaultWGMXCC, defaultWGM) = origami::select_workgroup_mapping(
-                        origami_problem, *(hipAMDGPU->analyticalHardware), origami_config, skgrid);
+                    
+                    origami::workgroup_mapping_t prediction_results = 
+                        origami::select_workgroup_mapping(origami_problem, 
+                                                          *(hipAMDGPU->analyticalHardware), 
+                                                          origami_config, 
+                                                          skgrid);
+                    
+                    defaultWGM         = prediction_results.wgm;
+                    defaultWGMXCC      = prediction_results.wgmxcc;
+                    defaultWGMXCCCHUNK = prediction_results.wgmxccchunk;
 
                     // Add to cache only if dynamically calculated.
-                    paramsCache.add(std::make_pair(defaultWGM, defaultWGMXCC), problem);
+                    paramsCache.add(std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK), problem);
                     if(Debug::Instance().printPropertyEvaluation())
-                        std::cout << "Dynamic WGM " << defaultWGM << ", WGMXCC " << defaultWGMXCC
-                                  << std::endl;
+                        std::cout << "Dynamic WGM "<< defaultWGM 
+                                  << ", WGMXCC " << defaultWGMXCC
+                                  << ", WGMXCCCHUNK " << defaultWGMXCCCHUNK << std::endl;
                 }
             }
             else
             {
                 defaultWGM    = c_wgm;
                 defaultWGMXCC = c_wgmxcc;
+                defaultWGMXCCCHUNK = c_wgmxccchunk;
             }
         }
         else
@@ -1031,6 +1043,9 @@ namespace TensileLite
             }
             else
                 defaultWGMXCC = sizeMapping.workGroupMappingXCC;
+
+            // Default WGMXCCCHUNK
+            defaultWGMXCCCHUNK = 0;
         }
 
         // If WGM and WGMXCC are explicitly specified at runtime, they override default and predictions
@@ -1038,17 +1053,29 @@ namespace TensileLite
         {
             defaultWGM = pAMDGPU->fixedWGM;
         }
-        if(pAMDGPU->fixedWGMXCC != std::numeric_limits<int>::max())
+        if(pAMDGPU->fixedWGMXCC != std::numeric_limits<size_t>::max())
         {
             defaultWGMXCC = pAMDGPU->fixedWGMXCC;
         }
+        if(pAMDGPU->fixedWGMXCCCHUNK != std::numeric_limits<size_t>::max())
+        {
+            defaultWGMXCCCHUNK = pAMDGPU->fixedWGMXCCCHUNK;
+        }
 
-        // WGM should be in this range: [-1023, -1022, ..., -1, 0, 1, ..., 1023]
-        assert(std::fabs(defaultWGM) < 1024);
-        // WGMXCC should be in this range: [1, 2, 3, ..., 63]
-        assert(defaultWGMXCC > 0 && defaultWGMXCC < 64);
-
-        return std::make_pair(defaultWGM, defaultWGMXCC);
+        // These range assertions only apply when SpaceFillingCurve (SFC) is not used.
+        // When SFC is enabled, workGroupMapping contains a packed 32-bit encoding of
+        // grid dimensions (SFCWGM) which can exceed the normal WGM range.
+        if(!internalArgsSupport.useSFC)
+        {
+            // WGM should be in this range: [-1023, -1022, ..., -1, 0, 1, ..., 1023]
+            assert(std::fabs(defaultWGM) < 1024);
+            // WGMXCC should be in this range: [0, 1, 2, 3, ..., 63]
+            assert(defaultWGMXCC >= 0 && defaultWGMXCC < 64);
+            // WGMXCCCHUNK should be in this range: [0, 1, 2, 3, ..., 1023]
+            assert(defaultWGMXCCCHUNK >= 0 && defaultWGMXCCCHUNK < 1024);
+        }
+        
+        return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK);
     }
 
     uint32_t ContractionSolution::calculateAutoGSU(Problem const&  problem,
@@ -1127,6 +1154,7 @@ namespace TensileLite
                                          const ContractionProblemParameters& param,
                                          int32_t                             autoWGM,
                                          uint32_t                            autoWGMXCC,
+                                         uint32_t                            autoWGMXCCCHUNK,
                                          uint32_t                            autoGsuVal) const
     {
         if constexpr(!Legacy)
@@ -1142,6 +1170,7 @@ namespace TensileLite
         bool           gsuwgmrr     = false; // initialized false
         int32_t        wgm          = param.wgm() != 0 ? param.wgm() : autoWGM;
         uint32_t       wgmxcc       = param.wgmxcc() != 0 ? param.wgmxcc() : autoWGMXCC;
+        uint32_t       wgmxccchunk  = autoWGMXCCCHUNK;
         int32_t        wgmxccg      = -1;
         const uint32_t mask16       = 0xFFFF;
         const uint32_t mask14       = 0x3FFF;
@@ -1177,6 +1206,10 @@ namespace TensileLite
                     AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
                     assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
                     wgmxccg = pAMDGPU->computeUnitCount;
+                }
+                if(sizeMapping.workGroupMappingXCC == -1)
+                {
+                    wgmxccg = wgmxccchunk;
                 }
                 internalArg1 = internalArg1 | (wgmxccg << 22) | (wgmxcc << 16) | (mask16 & wgm);
             }
@@ -1325,21 +1358,15 @@ namespace TensileLite
 
         if(internalArgsSupport.useUniversalArgs)
         {
-            auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, &hardware, sk.grid);
+            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problem, &hardware, sk.grid);
             if(T_Debug)
             {
                 std::cout << "AutoWGM: " << autoWGM << std::endl;
                 std::cout << "AutoWGMXCC: " << autoWGMXCC << std::endl;
+                std::cout << "AutoWGMXCCCHUNK: " << autoWGMXCCCHUNK << std::endl;
             }
-            kernelArgs<T_Debug, false>(1,
-                                       0,
-                                       rv.args,
-                                       getNumWorkGroups(rv),
-                                       &hardware,
-                                       problem.getParams(),
-                                       autoWGM,
-                                       autoWGMXCC,
-                                       autoGsuVal);
+            kernelArgs<T_Debug, false>(
+                1, 0, rv.args, getNumWorkGroups(rv), &hardware, problem.getParams(), autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoGsuVal);
         }
         singleCallArgs<T_Debug, true>(
             problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args, sk);
@@ -1504,7 +1531,7 @@ namespace TensileLite
 
         if constexpr(!std::is_same<KA, KernelArgumentsCounter>::value)
         {
-            auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problems[0], &hardware, 0);
+            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problems[0], &hardware, 0);
 
             if(internalArgsSupport.useUniversalArgs)
             {
@@ -1521,6 +1548,7 @@ namespace TensileLite
                                            problems[0].getParams(),
                                            autoWGM,
                                            autoWGMXCC,
+                                           autoWGMXCCCHUNK,
                                            autoGsuVal);
                 // For user input
                 if(argType == KERNELARGTYPE::USERARGS)
@@ -1549,6 +1577,7 @@ namespace TensileLite
                                           problems[0].getParams(),
                                           autoWGM,
                                           autoWGMXCC,
+                                          autoWGMXCCCHUNK,
                                           autoGsuVal);
             }
 
@@ -1961,7 +1990,9 @@ namespace TensileLite
                && DataTypeInfo::Get(problemType.aType).elementSize
                       < DataTypeInfo::Get(rocisa::DataType::Double).elementSize)
                 vw = 4;
-            else if(problem.freeSizeA(0) % 2 == 0)
+            else if(problem.freeSizeA(0) % 2 == 0
+                && DataTypeInfo::Get(problemType.aType).elementSize
+                      < DataTypeInfo::Get(rocisa::DataType::ComplexDouble).elementSize)
                 vw = 2;
         }
 
@@ -2515,7 +2546,8 @@ namespace TensileLite
     {
         calculateAutoGSU(problem, &hardware);
         if(Debug::Instance().printWinningKernelName())
-            std::cout << "Running kernel: " << this->KernelName() << std::endl;
+            std::cout << "Running kernel: " << this->KernelName()
+                      << " [MatchingTag: " << this->matchingTag() << "]" << std::endl;
 
         // retreive alpha/beta type set via setAlpha/BetaType()
         auto alphaType = problem.alphaType();
@@ -2665,7 +2697,8 @@ namespace TensileLite
         hipStream_t                                      stream) const
     {
         if(Debug::Instance().printWinningKernelName())
-            std::cout << "Running kernel: " << this->KernelName() << std::endl;
+            std::cout << "Running kernel: " << this->KernelName()
+                      << " [MatchingTag: " << this->matchingTag() << "]" << std::endl;
 
         // retreive alpha/beta type set via setAlpha/BetaType()
         auto alphaType = problems[0].alphaType();
@@ -3462,6 +3495,54 @@ namespace TensileLite
         pp.CUs         = NumCUs;
 
         return pp;
+    }
+
+    double ContractionSolution::calculateDimensionM(Problem const&  problem) const
+    {
+        double M = 1.0;
+        if(problem.freeIndicesA().size() > 1 || sizeMapping.packBatchDims & 0x1)
+        {
+            std::vector<size_t> packedIndices
+                = generatePackedIndicesA(problem, sizeMapping.packBatchDims);
+            for(auto pi = packedIndices.begin(); pi != packedIndices.end(); pi++)
+                M *= problem.a().sizes()[*pi];
+        }
+        else
+        {
+            M = problem.freeSizeA(0);
+        }
+        return M;
+    }
+
+    double ContractionSolution::calculateDimensionN(Problem const&  problem) const
+    {
+        double N = 1.0;
+        if(problem.freeIndicesB().size() > 1 || sizeMapping.packBatchDims & 0x2)
+        {
+            std::vector<size_t> packedIndices
+                = generatePackedIndicesB(problem, sizeMapping.packBatchDims);
+            for(auto pi = packedIndices.begin(); pi != packedIndices.end(); pi++)
+                N *= problem.b().sizes()[*pi];
+        }
+        else
+            N = problem.freeSizeB(0);
+        return N;
+    }
+
+    double ContractionSolution::calculateNumBatches(Problem const&  problem) const
+    {
+        double NumBatches = 1;
+        if(sizeMapping.packBatchDims == 0)
+        {
+            for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                NumBatches *= problem.batchSize(i);
+        }
+        return NumBatches;
+    }
+
+    origami::data_type_t ContractionSolution::getOrigamiDatatype(Problem const&  problem) const
+    {
+        return datatypeToAnalyticalDatatype(problem.computeInputType());
     }
 
     std::ostream& operator<<(std::ostream&                                      stream,

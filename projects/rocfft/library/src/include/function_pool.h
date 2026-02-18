@@ -67,11 +67,13 @@ struct PartialPassParams
                       const unsigned int&              current_dim,
                       const unsigned int&              off_dim,
                       const unsigned int&              pp_tpt,
+                      const unsigned int&              pp_tpt,
                       const std::vector<unsigned int>& pp_factors_curr,
                       const std::vector<unsigned int>& pp_factors_other)
         : scheme(scheme)
         , current_dim(current_dim)
         , off_dim(off_dim)
+        , pp_tpt(pp_tpt)
         , pp_tpt(pp_tpt)
         , pp_factors_curr(pp_factors_curr)
         , pp_factors_other(pp_factors_other)

@@ -1,28 +1,5 @@
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include "solution_selection.hpp"
 #include "analytical_utils.hpp"
@@ -44,21 +21,22 @@ const int USE_WORKGROUP_MAPPING_K_SIZE = 4096;
  * compile-time known.
  */
 
-constexpr size_t possibleTileSizesCount = 34;
+constexpr size_t possibleTileSizesCount = 35;
 
 constexpr std::array<WorkGroupTileSize, possibleTileSizesCount> possibleTileSizes
-    = {{{256, 256, 128}, {256, 192, 128}, {256, 128, 128}, {256, 64, 128}, {256, 32, 128},
-        {256, 16, 128},  {192, 256, 128}, {192, 128, 128}, {192, 64, 128}, {192, 32, 128},
-        {128, 256, 128}, {128, 192, 128}, {128, 128, 128}, {128, 64, 128}, {128, 32, 128},
-        {64, 256, 128},  {64, 192, 128},  {64, 128, 128},  {64, 64, 128},  {64, 32, 128},
-        {32, 256, 128},  {32, 192, 128},  {32, 128, 128},  {32, 64, 128},  {32, 32, 128},
-        {32, 32, 64},    {16, 256, 128},  {64, 16, 128},   {16, 64, 128},  {32, 16, 128},
-        {16, 32, 128},   {16, 16, 128},   {16, 16, 256},   {16, 64, 256}}};
+    = {{{256, 256, 256}, {256, 256, 128}, {256, 192, 128}, {256, 128, 128}, {256, 64, 128},
+        {256, 32, 128},  {256, 16, 128},  {192, 256, 128}, {192, 128, 128}, {192, 64, 128},
+        {192, 32, 128},  {128, 256, 128}, {128, 192, 128}, {128, 128, 128}, {128, 64, 128},
+        {128, 32, 128},  {64, 256, 128},  {64, 192, 128},  {64, 128, 128},  {64, 64, 128},
+        {64, 32, 128},   {32, 256, 128},  {32, 192, 128},  {32, 128, 128},  {32, 64, 128},
+        {32, 32, 128},   {32, 32, 64},    {16, 256, 128},  {64, 16, 128},   {16, 64, 128},
+        {32, 16, 128},   {16, 32, 128},   {16, 16, 128},   {16, 16, 256},   {16, 64, 256}}};
 
 template <rocRoller::DataType typeA, rocRoller::DataType typeB>
-auto generateTileList()
+std::vector<origami::config_t> generateTileList(bool hasPreSwizzle, bool hasPreTile)
 {
-    std::array<origami::config_t, possibleTileSizesCount> tileList{};
+    std::vector<origami::config_t> tileList;
+    tileList.reserve(possibleTileSizesCount);
 
     for(size_t i = 0; i < possibleTileSizesCount; ++i)
     {
@@ -72,7 +50,12 @@ auto generateTileList()
             wgtk = 32;
         }
 
-        int unroll = preferredUnrolling(typeA, typeB, wgt);
+        if (hasPreSwizzle && hasPreTile)
+        {
+            wgtk = 256;
+        }
+
+        int unroll = preferredUnrolling(typeA, typeB, wgt, hasPreSwizzle, hasPreTile);
 
         origami::config_t origami_config = {
             .mt = {static_cast<size_t>(wgt.m),
@@ -84,19 +67,18 @@ auto generateTileList()
             .cache_hints_b = 0,
         };
 
-        tileList[i] = origami_config;
+        tileList.push_back(origami_config);
     }
 
     return tileList;
 }
 
-using TileListGeneratorFn = std::vector<origami::config_t> (*)();
+using TileListGeneratorFn = std::vector<origami::config_t> (*)(bool, bool);
 
 template <rocRoller::DataType A, rocRoller::DataType B>
-std::vector<origami::config_t> generateTileListWrapper()
+std::vector<origami::config_t> generateTileListWrapper(bool hasPreSwizzle, bool hasPreTile)
 {
-    auto arr = generateTileList<A, B>();
-    return {arr.begin(), arr.end()};
+    return generateTileList<A, B>(hasPreSwizzle, hasPreTile);
 }
 
 #define INSTANTIATE_TILE_LIST(A, B)                                                  \
@@ -121,12 +103,19 @@ const std::map<std::pair<rocRoller::DataType, rocRoller::DataType>, TileListGene
                           INSTANTIATE_TILE_LIST_FOR(BF6),
                           INSTANTIATE_TILE_LIST_FOR(FP6)};
 
-std::vector<origami::config_t> getTileListForKernelType(KernelType kernelType)
+std::vector<origami::config_t> getTileListForKernelType(const KernelType& kernelType)
 {
     auto key = std::make_pair(kernelType.typeA, kernelType.typeB);
     auto it  = tileListGenerators.find(key);
     if(it != tileListGenerators.end())
-        return it->second();
+    {
+        // Compute hasPreSwizzle and hasPreTile from ScaleType
+        bool hasPreSwizzle = (kernelType.scaleTypeA.preSwizzleTile.size() == 3
+                              && kernelType.scaleTypeB.preSwizzleTile.size() == 3);
+        bool hasPreTile = (kernelType.scaleTypeA.preTile.size() == 2
+                           && kernelType.scaleTypeB.preTile.size() == 2);
+        return it->second(hasPreSwizzle, hasPreTile);
+    }
     throw std::runtime_error("Unsupported DataType combination");
 }
 
@@ -176,13 +165,18 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     auto prediction_result
         = origami::rank_configs(origami_problem, analytical_hardware, origami_config_list);
 
+
     for(auto const& result : prediction_result)
     {
         auto              mt_m = static_cast<int>(result.config.mt.m);
         auto              mt_n = static_cast<int>(result.config.mt.n);
         auto              mt_k = static_cast<int>(result.config.mt.k);
         WorkGroupTileSize wgt{mt_m, mt_n, mt_k};
-        int unrollAmount = preferredUnrolling(kernelType.typeA, kernelType.typeB, wgt);
+        auto hasPreSwizzle = (kernelType.scaleTypeA.preSwizzleTile.size() == 3
+                              && kernelType.scaleTypeB.preSwizzleTile.size() == 3);
+        auto hasPreTile = (kernelType.scaleTypeA.preTile.size() == 2
+                           && kernelType.scaleTypeB.preTile.size() == 2);
+        int unrollAmount = preferredUnrolling(kernelType.typeA, kernelType.typeB, wgt, hasPreSwizzle, hasPreTile);
         wgt.k /= unrollAmount;
 
         if((requestedAlgoCount == -1)
@@ -193,7 +187,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                 || kernelType.typeA == rocRoller::DataType::BF8
                 || kernelType.typeB == rocRoller::DataType::FP8
                 || kernelType.typeB == rocRoller::DataType::BF8)
-               && wgt.m + wgt.n > 256)
+               && (wgt.m == 192 || wgt.n == 192))
                 continue;
 
             // 6bit datatypes only work with power of 2 tile sizes
@@ -205,36 +199,68 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                    || !std::has_single_bit(static_cast<uint>(wgt.n))))
                 continue;
 
-            // Pre-swizzled scald data requires the wgt.m >= 128 and wgt.n >= 128 to be able to turn on SwizzleScale
-            if(kernelType.scaleTypeA.preSwizzleTile.size() == 3 && (wgt.m < 128))
-                continue;
-            if(kernelType.scaleTypeB.preSwizzleTile.size() == 3 && (wgt.n < 128))
-                continue;
+            // check if this size is valid for pre-swizzled data
+            if (hasPreSwizzle)
+            {
+                if (kernelType.typeA != rocRoller::DataType::FP4 ||
+                    kernelType.typeB != rocRoller::DataType::FP4 ||
+                    kernelType.typeD != rocRoller::DataType::BFloat16)
+                    continue;
+                if (wgt.m != 256 || wgt.n != 256 || wgt.k != 256)
+                    continue;
+                if (wgt.m % 32 != 0 || wgt.n % 32 != 0)
+                    continue;
+                if (wgt.m == 96 || wgt.n == 96)
+                    continue;
+            }
+
             // wgt.k has to be at least 256 when scale data is pre-swizzled
             if(kernelType.scaleTypeA.preSwizzleTile.size() == 3
                && kernelType.scaleTypeB.preSwizzleTile.size() == 3 && wgt.k < 256)
                 continue;
 
-            // Prevent selecting {256, 256, 256} as workgroup tile size due to VGPR register pressure
-            if(wgt.m == 256 && wgt.n == 256 && wgt.k == 256)
+            // {256, 256, 256} tile size is only supported for FP4 data types with preSwizzled and preTiled scale data
+            bool isFP4 = (kernelType.typeA == rocRoller::DataType::FP4
+                          && kernelType.typeB == rocRoller::DataType::FP4);
+
+            bool is256Tile = (wgt.m == 256 && wgt.n == 256 && wgt.k == 256);
+
+            // Only allow 256x256x256 for FP4 with preSwizzled and preTiled scale data
+            if(is256Tile && !(isFP4))
                 continue;
 
-            params.push_back({wgt, true, false});
+            bool useTailLoops = true;
+
+            params.push_back({wgt, true, false, useTailLoops});
+
 
             if(prob.k < USE_WORKGROUP_MAPPING_K_SIZE)
             {
                 params.back().workgroupMapping = false;
             }
 
-            // Enable StreamK when number of output tiles < number of CUs and not f6 data type
-            size_t numTilesM = prob.m / wgt.m;
-            size_t numTilesN = prob.n / wgt.n;
-            size_t numTiles  = numTilesM * numTilesN * prob.batch_count;
-            auto   isF6      = (kernelType.typeA == rocRoller::DataType::FP6
+            // Enable StreamK when:
+            // 1. Number of output tiles < number of CUs
+            // 2. There are enough K iterations per tile (itersPerTile >= 16) to
+            //    amortize StreamK overhead. Threshold is derived from origami's
+            //    MinItersPerCU (8) applied to the smallest useful split factor (2).
+            // 3. Data type is not f6 (unsupported) or large f8 (register pressure).
+            // 4. Not the 256x256x256 FP4 pre-swizzled tile.
+            size_t numTilesM    = prob.m / wgt.m;
+            size_t numTilesN    = prob.n / wgt.n;
+            size_t numTiles     = numTilesM * numTilesN * prob.batch_count;
+            size_t itersPerTile = prob.k / wgt.k;
+            auto   isF6         = (kernelType.typeA == rocRoller::DataType::FP6
                          || kernelType.typeA == rocRoller::DataType::BF6
                          || kernelType.typeB == rocRoller::DataType::FP6
                          || kernelType.typeB == rocRoller::DataType::BF6);
-            if(numTiles < analytical_hardware.N_CU && !isF6)
+            auto isLargeF8 = ((kernelType.typeA == rocRoller::DataType::FP8
+                || kernelType.typeA == rocRoller::DataType::BF8
+                || kernelType.typeB == rocRoller::DataType::FP8
+                || kernelType.typeB == rocRoller::DataType::BF8)
+               && wgt.m + wgt.n > 256);
+            if(numTiles < analytical_hardware.N_CU && itersPerTile >= 16
+               && !isF6 && !isLargeF8 && !is256Tile)
             {
                 params.back().streamK = true;
             }
@@ -258,6 +284,8 @@ int parametersToIndex(const SolutionIndexParameters& params)
     result |= ((params.workgroupMapping ? 1 : 0) << pos);
     pos += 1;
     result |= ((params.streamK ? 1 : 0) << pos);
+    pos += 1;
+    result |= ((params.tailLoops ? 1 : 0) << pos);
 
     // Set top bit indicating it is a rocRoller index
     result |= (1 << 31);
@@ -289,6 +317,8 @@ SolutionIndexParameters indexToParameters(int index)
     result.workgroupMapping = (index >> pos) & 1;
     pos += 1;
     result.streamK = (index >> pos) & 1;
+    pos += 1;
+    result.tailLoops = (index >> pos) & 1;
 
     return result;
 }

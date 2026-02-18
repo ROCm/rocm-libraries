@@ -43,24 +43,25 @@ namespace rocwmma
 
         // Enabler for all of gfx11
         template <uint32_t TargetId, bool Cond = true>
-        using enable_gfx11_t
-            = enable_if_t<contains_number_v<uint32_t,
-                                            TargetId,
-                                            Constants::AMDGCN_ARCH_ID_GFX1100,
-                                            Constants::AMDGCN_ARCH_ID_GFX1101,
-                                            Constants::AMDGCN_ARCH_ID_GFX1102,
-                                            Constants::AMDGCN_ARCH_ID_GFX1150,
-                                            Constants::AMDGCN_ARCH_ID_GFX1151,
-                                            Constants::AMDGCN_ARCH_ID_GFX1152,
-                                            Constants::AMDGCN_ARCH_ID_GFX1153> && Cond>;
+        using enable_gfx11_t = enable_if_t<contains_number_v<uint32_t,
+                                                             TargetId,
+                                                             Constants::AMDGCN_ARCH_ID_GFX1100,
+                                                             Constants::AMDGCN_ARCH_ID_GFX1101,
+                                                             Constants::AMDGCN_ARCH_ID_GFX1102,
+                                                             Constants::AMDGCN_ARCH_ID_GFX1103,
+                                                             Constants::AMDGCN_ARCH_ID_GFX1150,
+                                                             Constants::AMDGCN_ARCH_ID_GFX1151,
+                                                             Constants::AMDGCN_ARCH_ID_GFX1152,
+                                                             Constants::AMDGCN_ARCH_ID_GFX1153>
+                                           && Cond>;
 
         // Enabler for all of gfx12
         template <uint32_t TargetId, bool Cond = true>
-        using enable_gfx12_t
-            = enable_if_t<contains_number_v<uint32_t,
-                                            TargetId,
-                                            Constants::AMDGCN_ARCH_ID_GFX1200,
-                                            Constants::AMDGCN_ARCH_ID_GFX1201> && Cond>;
+        using enable_gfx12_t = enable_if_t<contains_number_v<uint32_t,
+                                                             TargetId,
+                                                             Constants::AMDGCN_ARCH_ID_GFX1200,
+                                                             Constants::AMDGCN_ARCH_ID_GFX1201>
+                                           && Cond>;
 
         // Enabler for all of gfx11 and gfx12
         template <uint32_t TargetId, bool Cond = true>
@@ -70,12 +71,14 @@ namespace rocwmma
                                             Constants::AMDGCN_ARCH_ID_GFX1100,
                                             Constants::AMDGCN_ARCH_ID_GFX1101,
                                             Constants::AMDGCN_ARCH_ID_GFX1102,
+                                            Constants::AMDGCN_ARCH_ID_GFX1103,
                                             Constants::AMDGCN_ARCH_ID_GFX1150,
                                             Constants::AMDGCN_ARCH_ID_GFX1151,
                                             Constants::AMDGCN_ARCH_ID_GFX1152,
                                             Constants::AMDGCN_ARCH_ID_GFX1153,
                                             Constants::AMDGCN_ARCH_ID_GFX1200,
-                                            Constants::AMDGCN_ARCH_ID_GFX1201> && Cond>;
+                                            Constants::AMDGCN_ARCH_ID_GFX1201>
+                          && Cond>;
 
         /*! \class amdgcn_wmma
         *  \brief  Builtin wrapper for wmma instructions
@@ -218,9 +221,19 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto
                 exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
             {
+                // Built-in expects vector of float16.
+                using TypeIn = VecT<float16_t, 16>;
+
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+
                 DRegsT result;
                 to_native_vector(result) = {__builtin_amdgcn_wmma_f32_16x16x16_f16_w32(
-                    to_native_vector(regsA), to_native_vector(regsB), to_native_vector(regsC))};
+                    to_native_vector(reinterpret_cast<TypeIn const&>(regsA)),
+                    to_native_vector(reinterpret_cast<TypeIn const&>(regsB)),
+                    to_native_vector(regsC))};
                 return result;
             }
         };
@@ -308,12 +321,26 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto
                 exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
             {
+                // Built-in expects vector of float16.
+                using TypeIn  = VecT<float16_t, 16>;
+                using TypeOut = VecT<float16_t, 16>;
+
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsC)>),
+                              "Inconsistent data formats"); // some other thing
+                static_assert(sizeof(TypeOut) == sizeof(decay_t<DRegsT>),
+                              "Inconsistent data formats"); // some thing
+
                 DRegsT result;
-                to_native_vector(result)
-                    = {__builtin_amdgcn_wmma_f16_16x16x16_f16_w32(to_native_vector(regsA),
-                                                                  to_native_vector(regsB),
-                                                                  to_native_vector(regsC),
-                                                                  (bool)AccumBits)};
+                to_native_vector(reinterpret_cast<TypeOut&>(result))
+                    = {__builtin_amdgcn_wmma_f16_16x16x16_f16_w32(
+                        to_native_vector(reinterpret_cast<TypeIn const&>(regsA)),
+                        to_native_vector(reinterpret_cast<TypeIn const&>(regsB)),
+                        to_native_vector(reinterpret_cast<TypeIn const&>(regsC)),
+                        (bool)AccumBits)};
                 return result;
             }
         };
@@ -401,9 +428,19 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto
                 exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
             {
+                // Built-in expects vector of short.
+                using TypeIn = VecT<short, 16>;
+
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+
                 DRegsT result;
                 to_native_vector(result) = {__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(
-                    to_native_vector(regsA), to_native_vector(regsB), to_native_vector(regsC))};
+                    to_native_vector(reinterpret_cast<TypeIn const&>(regsA)),
+                    to_native_vector(reinterpret_cast<TypeIn const&>(regsB)),
+                    to_native_vector(regsC))};
                 return result;
             }
         };
@@ -491,12 +528,26 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto
                 exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
             {
+                // Built-in expects vector of short.
+                using TypeIn  = VecT<short, 16>;
+                using TypeOut = VecT<short, 16>;
+
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsC)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeOut) == sizeof(decay_t<DRegsT>),
+                              "Inconsistent data formats");
+
                 DRegsT result;
-                to_native_vector(result)
-                    = {__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32(to_native_vector(regsA),
-                                                                    to_native_vector(regsB),
-                                                                    to_native_vector(regsC),
-                                                                    (bool)AccumBits)};
+                to_native_vector(reinterpret_cast<TypeOut&>(result))
+                    = {__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32(
+                        to_native_vector(reinterpret_cast<TypeIn const&>(regsA)),
+                        to_native_vector(reinterpret_cast<TypeIn const&>(regsB)),
+                        to_native_vector(reinterpret_cast<TypeIn const&>(regsC)),
+                        (bool)AccumBits)};
                 return result;
             }
         };
@@ -650,9 +701,19 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto
                 exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
             {
+                // Built-in expects vector of float16_t.
+                using TypeIn = VecT<float16_t, 8>;
+
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+
                 DRegsT result;
                 to_native_vector(result) = {__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(
-                    to_native_vector(regsA), to_native_vector(regsB), to_native_vector(regsC))};
+                    to_native_vector(reinterpret_cast<TypeIn const&>(regsA)),
+                    to_native_vector(reinterpret_cast<TypeIn const&>(regsB)),
+                    to_native_vector(regsC))};
                 return result;
             }
         };
@@ -740,9 +801,25 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto
                 exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
             {
+                // Built-in expects vector of float16_t.
+                using TypeIn  = VecT<float16_t, 8>;
+                using TypeOut = VecT<float16_t, 8>;
+
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsC)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeOut) == sizeof(decay_t<DRegsT>),
+                              "Inconsistent data formats");
+
                 DRegsT result;
-                to_native_vector(result) = {__builtin_amdgcn_wmma_f16_16x16x16_f16_w32_gfx12(
-                    to_native_vector(regsA), to_native_vector(regsB), to_native_vector(regsC))};
+                to_native_vector(reinterpret_cast<TypeIn&>(result))
+                    = {__builtin_amdgcn_wmma_f16_16x16x16_f16_w32_gfx12(
+                        to_native_vector(reinterpret_cast<TypeIn const&>(regsA)),
+                        to_native_vector(reinterpret_cast<TypeIn const&>(regsB)),
+                        to_native_vector(reinterpret_cast<TypeIn const&>(regsC)))};
                 return result;
             }
         };
@@ -830,9 +907,19 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto
                 exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
             {
+                // Built-in expects vector of short.
+                using TypeIn = VecT<short, 8>;
+
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+
                 DRegsT result;
                 to_native_vector(result) = {__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
-                    to_native_vector(regsA), to_native_vector(regsB), to_native_vector(regsC))};
+                    to_native_vector(reinterpret_cast<TypeIn const&>(regsA)),
+                    to_native_vector(reinterpret_cast<TypeIn const&>(regsB)),
+                    to_native_vector(regsC))};
                 return result;
             }
         };
@@ -920,9 +1007,25 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto
                 exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
             {
+                // Built-in expects vector of short.
+                using TypeIn  = VecT<short, 8>;
+                using TypeOut = VecT<short, 8>;
+
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsC)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeOut) == sizeof(decay_t<DRegsT>),
+                              "Inconsistent data formats");
+
                 DRegsT result;
-                to_native_vector(result) = {__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32_gfx12(
-                    to_native_vector(regsA), to_native_vector(regsB), to_native_vector(regsC))};
+                to_native_vector(reinterpret_cast<TypeOut&>(result))
+                    = {__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32_gfx12(
+                        to_native_vector(reinterpret_cast<TypeIn const&>(regsA)),
+                        to_native_vector(reinterpret_cast<TypeIn const&>(regsB)),
+                        to_native_vector(reinterpret_cast<TypeIn const&>(regsC)))};
                 return result;
             }
         };

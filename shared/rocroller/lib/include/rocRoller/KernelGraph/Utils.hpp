@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -62,6 +62,9 @@ namespace rocRoller
 
             bool operator()(int a, int b) const
             {
+                if(a == b)
+                    return false;
+
                 return m_graph->control.compareNodes(rocRoller::UpdateCache, a, b)
                        == ControlGraph::NodeOrdering::LeftFirst;
             }
@@ -177,6 +180,12 @@ namespace rocRoller
         template <Expression::CBinary T>
         std::tuple<int, Expression::ExpressionPtr> getBinaryRHS(KernelGraph const& kgraph,
                                                                 int                assign);
+
+        /**
+         * @brief Return the edge tag of type EdgeType connected to tag in direction Direction.
+         */
+        template <Graph::Direction Direction, typename EdgeType>
+        std::optional<int> GetEdgeTag(KernelGraph const& graph, int tag);
 
         /**
          * @brief Create a range-based for loop.
@@ -569,7 +578,7 @@ namespace rocRoller
                                   int                                iMacY,
                                   std::array<unsigned int, 3> const& workgroupSizes,
                                   std::vector<unsigned int> const&   jammedTiles,
-                                  bool                               useSwappedAccess,
+                                  bool                               rightmostFastest,
                                   bool                               isGlobalToLDS = false);
 
         /**
@@ -650,7 +659,7 @@ namespace rocRoller
          *   - The row index of a thread tile is fast wrt the VGPR
          *     index.
          *
-         * When `useSwappedAccess` is true, both of these orders are
+         * When `rightmostFastest` is true, both of these orders are
          * reversed.
          *
          * Required (deferred) connections are appended to
@@ -663,7 +672,7 @@ namespace rocRoller
                                  int                                iMacY,
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::vector<unsigned int> const&   jammedTiles,
-                                 bool                               useSwappedAccess,
+                                 bool                               rightmostFastest,
                                  bool                               isGlobalToLDS = false);
 
         /**
@@ -788,6 +797,11 @@ namespace rocRoller
         std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
                                                      int                tag,
                                                      bool isStorePartOfGlobalToLDSOp = false);
+
+        /**
+         * @brief Get the number of LDS elements for a given LDS tag.
+         */
+        int GetNumLDSElements(KernelGraph const& graph, int ldsTag);
 
         /**
          * @brief Get the first and last nodes from a set of nodes that are totally ordered
