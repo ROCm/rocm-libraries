@@ -54,6 +54,7 @@ auto GetDataset()
     auto pads_strides_dilations = generate_data_limited(
         miopen::test::conv::get_2d_pads_strides_dilations(), 2, std::vector<int>{1, 1, 1, 1, 1, 1});
     auto trans_output_pads = generate_data(miopen::test::conv::get_2d_trans_output_pads());
+    auto pad_modes         = generate_data(std::vector<std::string>{"default", "same", "valid"});
     auto in_layouts        = generate_data(std::vector<std::string>{"NCHW"});
     auto fil_layouts       = generate_data(std::vector<std::string>{"NCHW"});
     auto out_layouts       = generate_data(std::vector<std::string>{"NCHW"});
@@ -69,7 +70,8 @@ auto GetDataset()
                 for(auto s : spatial_dim_elements)
                     for(auto f : filter_dims)
                         for(auto p : pads_strides_dilations)
-                            for(auto tp : trans_output_pads)
+                            for(auto pm : pad_modes)
+                                for(auto tp : trans_output_pads)
                                 for(auto il : in_layouts)
                                     for(auto fl : fil_layouts)
                                         for(auto ol : out_layouts)
@@ -91,6 +93,7 @@ auto GetDataset()
                                                                 input.in_layout              = il;
                                                                 input.fil_layout             = fl;
                                                                 input.out_layout             = ol;
+                                                                input.pad_mode               = pm;
                                                                 input.deterministic          = d;
                                                                 input.tensor_vect            = tv;
                                                                 input.vector_length          = vl;

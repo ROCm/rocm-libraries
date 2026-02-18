@@ -1849,6 +1849,8 @@ inline bool IsValidCtestStyleConfig(const conv_test_input& input)
         return false;
     }
 
+    const auto pad_mode_upper = miopen::ToUpper(input.pad_mode);
+
     // Mirror ctest run-time skip rules: non-positive stride/dilation and non-positive output
     // extents.
     for(std::size_t i = 0; i < spatial_dim; ++i)
@@ -1863,10 +1865,25 @@ inline bool IsValidCtestStyleConfig(const conv_test_input& input)
 
         const auto in_size     = static_cast<long long>(input.spatial_dim_elements[i]);
         const auto filter_size = static_cast<long long>(input.filter_dims[i]);
-        const auto pad         = static_cast<long long>(input.pads_strides_dilations[i]);
-        const auto numerator =
-            in_size + (2 * pad) - (dilation * (filter_size - 1)) - 1; // conv output formula
-        const auto out_size = (numerator / stride) + 1;
+        long long out_size     = 0;
+        if(pad_mode_upper == "SAME")
+        {
+            // ctest path: out = ceil(in/stride)
+            out_size = (in_size + stride - 1) / stride;
+        }
+        else if(pad_mode_upper == "VALID")
+        {
+            // ctest path: out = ceil((in - filter + 1)/stride)
+            const auto numerator = in_size - filter_size + 1;
+            out_size             = (numerator + stride - 1) / stride;
+        }
+        else
+        {
+            // DEFAULT mode uses explicit pads from configuration.
+            const auto pad       = static_cast<long long>(input.pads_strides_dilations[i]);
+            const auto numerator = in_size + (2 * pad) - (dilation * (filter_size - 1)) - 1;
+            out_size             = (numerator / stride) + 1;
+        }
         if(out_size <= 0)
         {
             return false;
