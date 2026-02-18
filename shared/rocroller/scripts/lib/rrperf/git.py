@@ -27,7 +27,6 @@
 
 import subprocess
 from pathlib import Path
-from typing import Union
 
 
 def top(loc: str = None) -> Path:
@@ -42,7 +41,7 @@ def top(loc: str = None) -> Path:
     return Path(p.stdout.strip()).resolve()
 
 
-def clone(remote: Union[str, Path], repo: Path) -> None:
+def clone(remote: str | Path, repo: Path) -> None:
     subprocess.run(
         [
             "git",
