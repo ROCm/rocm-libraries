@@ -43,13 +43,13 @@ void EngineManager::getEngineDetails(HipdnnEnginePluginHandle& handle,
     engine.getDetails(handle, opGraph, engineDetailsOut);
 }
 
-size_t EngineManager::getWorkspaceSize(
+size_t EngineManager::getMaxWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
-    int64_t engineId,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
-    auto& engine = getEngine(engineId);
-    return engine.getWorkspaceSize(handle, opGraph);
+    auto& engine = getEngine(engineConfig.engineId());
+    return engine.getMaxWorkspaceSize(handle, opGraph, engineConfig);
 }
 
 void EngineManager::initializeExecutionContext(
