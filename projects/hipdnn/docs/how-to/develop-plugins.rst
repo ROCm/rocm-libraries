@@ -4,9 +4,9 @@
 
 .. _develop-plugins:
 
-*************************************
-Develop plugins for hipDNN (Advanced)
-*************************************
+**************************
+Develop plugins for hipDNN
+**************************
 
 hipDNN supports a plugin architecture that allows for modular extensions to the framework. Plugins are designed to be separate projects that extend hipDNN's capabilities without being part of the core repository. 
 The backend discovers and manages these plugins, leveraging them for different aspects of deep learning routines. This architecture provides flexibility in implementation choices and enables optimizations for specific hardware or use cases.
@@ -114,8 +114,7 @@ To add your engine name to the official registry:
    - Use ``UPPER_CASE`` with underscores.
    - Make the name match the value.
 
-.. link in this sentence is missing in the repo
-2. Add it to the registry. Submit a PR to add your engine name to ``plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp``:
+2. Add it to the registry. Submit a PR to add your engine name to `plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp>`_:
    
    .. code:: cpp
 

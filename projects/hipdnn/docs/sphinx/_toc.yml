@@ -27,8 +27,12 @@ subtrees:
 
 - caption: How to
   entries:
+  - file: how-to/get-set-engine-knob.rst
+    title: Migrate cuDNN to hipDNN
   - file: how-to/build-execute-hipdnn.rst
     title: Build and execute operation graphs
+  - file: how-to/get-set-engine-knob.rst
+    title: Get/set engine knob configurations in hipDNN
   - file: how-to/extend-hipdnn.rst
     title: Extend hipDNN functionality (Advanced)
   - file: how-to/develop-plugins.rst
@@ -47,3 +51,6 @@ subtrees:
   entries:
   - file: license.rst
     title: License
+
+
+

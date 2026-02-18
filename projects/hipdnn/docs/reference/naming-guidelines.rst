@@ -27,20 +27,20 @@ Naming summary
      - I + PascalCase
      - ``ITensorView``
    * - Function
-     - camelCase
+     - ``camelCase``
      - ``buildGraph()``
    * - Variable (local / parameter)
-     - camelCase
+     - ``camelCase``
      - ``workspaceSize``
    * - Private Member variable
-     - _camelCase
+     - ``_camelCase``
      - ``_cachedPlan``
    * - Static variable
-     - s_camelCase
+     - ``s_camelCase``
      - ``s_engineCount``
    * - Global variable
-     - g_camel_case 
-     - ``g_global_state``
+     - ``g_camelCase`` 
+     - ``g_globalState``
    * - Constant / Macro 
      - UPPER_CASE
      - ``MAX_WORKSPACE_BYTES``
@@ -48,7 +48,7 @@ Naming summary
      - PascalCase
      - ``EngineMode``
    * - Enum Value 
-     - UPPER_SNAKE
+     - ``UPPER_SNAKE``
      - ``ENGINE_MODE_DEFAULT``
 
 File and class naming

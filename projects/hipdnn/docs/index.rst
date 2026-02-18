@@ -1,14 +1,14 @@
 .. meta::
-  :description: hipDNN is a plugin-based deep learning library that provides graph-based operation support through backend plugins
+  :description: hipDNN (Deep Neural Network) is a graph-based deep learning library that enables multi-operation fusion for improved performance on AMD GPUs. 
   :keywords: hipDNN, ROCm, documentation,
 
 ********************
 hipDNN documentation
 ********************
 
-hipDNN (Deep Neural Network) is a plugin-based deep learning library that provides graph-based operation support through backend plugins. 
+hipDNN (Deep Neural Network) is a graph-based deep learning library that enables multi-operation fusion for improved performance on AMD GPUs.
 Each plugin implements specific operations with support for different datatypes, layouts, and features.
-hipDNN allows developers to run deep learning workloads on ROCm and AMD GPUs while maintaining compatibility with NVIDIA's cuDNN API.
+hipDNN allows developers to run deep learning workloads on AMD GPUS by providing an interface modeled after NVIDIA's cuDNN frontend API.
 
 The component public repository is located at `https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn>`_.
 
@@ -19,7 +19,7 @@ The component public repository is located at `https://github.com/ROCm/rocm-libr
 
     * :doc:`hipDNN prerequisites <./install/hipdnn-prerequisites>`
     * :doc:`hipDNN installation (Linux) <./install/hipdnn-install>`
-    * :doc:`ipDNN installation (Windows) <./install/hipdnn-install-windows>`
+    * :doc:`hipDNN installation (Windows) <./install/hipdnn-install-windows>`
 
 .. grid:: 2
   :gutter: 3

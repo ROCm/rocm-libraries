@@ -26,7 +26,7 @@ Components
 - **Frontend**: A header-only C++ library that provides the industry standard API for interacting with hipDNN. The frontend wraps the backend C API to provide a more user-friendly C++ interface.
 - **Backend**: A shared library which provides a C API for hipDNN. The backend is the core component of hipDNN which acts as a plugin loader and manager, connecting problems to plugins that can solve them.
 - **SDKs**: Header-only libraries that provide shared utilities and interfaces. hipDNN provides three SDKs: Data SDK (graph schemas and data structures), Plugin SDK (plugin API and utilities), and Test SDK (testing utilities and CPU reference implementations).
-- **MIOpen Provider Plugin**: A plugin that wraps MIOpen and provides access to the existing API through hipDNN. In the future, the MIOpen Provider Plugin will be its own separate project from hipDNN.
+- **MIOpen Provider Plugin**: A plugin that wraps MIOpen and provides access to the existing API through hipDNN. The :ref:`miopen` is its own separate project from hipDNN.
 - **Other Plugins**: Plugins will be added over time to provide additional operational support, or performance improvements. Plugins should be external projects to hipDNN.
 
 Frontend
@@ -106,7 +106,8 @@ hipDNN provides three header-only SDK libraries that serve as the foundation for
 Data SDK (``data_sdk``)
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-The Data SDK contains ``FlatBuffers`` schemas and data structures for graph representation.
+The Data SDK contains ``FlatBuffers`` schemas and data structures for graph representation. 
+The serialized structures allow data to be marshalled and passed between the frontend, backend, and plugins in a type-safe and highly version-compatible fashion.
 
 - **Dependencies**: ``FlatBuffers`` and ``spdlog``.
 - **Purpose**: Provides data structures and serialization for graphs, tensors, and configurations.

@@ -4,9 +4,9 @@
 
 .. _extend:
 
-**************************************
-Extend hipDNN functionality (Advanced)
-**************************************
+***************************
+Extend hipDNN functionality
+***************************
 
 This section covers how to extend hipDNN with new functionality.
 

@@ -8,10 +8,10 @@
 What is hipDNN?
 ******************
 
-hipDNN is a graph-based deep learning library that enables multi-operation fusion for improved performance on AMD GPUs. 
+hipDNN (Deep Neural Network) is a graph-based deep learning library that enables multi-operation fusion for improved performance on AMD GPUs. 
 It uses operation graphs as an intermediate representation to describe computations, allowing different backend engines to optimize and execute these graphs efficiently.
 
-hipDNN allows developers to run deep learning workloads on AMD GPUs while maintaing compatibility with NVIDIA's cuDNN API.
+hipDNN allows developers to run deep learning workloads on AMD GPUS by providing an interface modeled after NVIDIA's cuDNN frontend API.
 
 hipDNN has a plugin-based architecture which allows advanced users to extend hipDNN without modifying the core library.
 
@@ -45,7 +45,7 @@ Features
 ========
 
 - **Graph-based API**: Operations are expressed as computational graphs rather than individual function calls, enabling optimization opportunities.
-- **Plugin architecture**: Backend kernel engines and heuristics are implemented through plugins, allowing extensibility without modifying the core library.
+- **Plugin architecture**: Backend kernel engines are implemented through plugins, allowing extensibility without modifying the core library.
 - **Performance through fusion**: Multiple operations can be fused into single kernels for better performance.
 - **Engine selection**: Heuristics will be implemented as plugins, allowing extensibility without modifying the core library, and benchmarking will be implemented as an extensible frontend API allowing customized engine selection logic.
 - **Industry standard API**: Provides a familiar interface that matches established deep learning library conventions.
@@ -54,7 +54,7 @@ Components
 ==========
 
 - **Frontend**: A header-only C++ library that provides the industry standard API for interacting with hipDNN. The frontend wraps the backend C API to provide a more user-friendly C++ interface.
-- **Backend**: A shared library which provides a C API for hipDNN. The backend is the core component of hipDNN which acts as a plugin loader and manager, connecting problems to plugins that can solve them.
+- **Backend**: A shared library which provides a C API for hipDNN. The backend is the core component of hipDNN which acts as a plugin loader and manager, connecting problems to engines (provided via plugins) that can solve them.
 - **SDKs**: Header-only libraries that provide shared utilities and interfaces. hipDNN provides three SDKs: Data SDK (graph schemas and data structures), Plugin SDK (plugin API and utilities), and Test SDK (testing utilities and CPU reference implementations).
 - **Plugins**: Plugins provide additional operational support or performance improvements.
 

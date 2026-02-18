@@ -236,7 +236,7 @@ Clone the repository and build hipDNN
       git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
       cd rocm-libraries
       git sparse-checkout init --cone
-      git sparse-checkout set projects/hipdnn
+      git sparse-checkout set projects/hipdnn dnn-providers/miopen-provider
       git checkout develop # or the branch you are starting from
 
 2. Build hipDNN:
