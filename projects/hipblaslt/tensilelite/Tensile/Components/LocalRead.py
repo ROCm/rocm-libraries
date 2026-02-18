@@ -475,14 +475,16 @@ class LocalReadMFMA(LocalRead):
 
         if tc == 'A':
             abmatrixinfo = writer.states.a
-        elif tc == 'MXSA':
-            abmatrixinfo = writer.states.mxsa
         elif tc == 'B':
             abmatrixinfo = writer.states.b
+        elif tc == 'MXSA':
+            abmatrixinfo = writer.states.a  # MXSA uses matrix A state
         elif tc == 'MXSB':
-            abmatrixinfo = writer.states.mxsb
+            abmatrixinfo = writer.states.b  # MXSB uses matrix B state
+        elif tc == 'Metadata':
+            abmatrixinfo = writer.states.a if tP["tensorIdx"] == 0 else writer.states.b
         else:
-            raise Exception(f"unsupport tc %s{tc}")
+            raise Exception(f"unsupport tc {tc}")
         perpStride   = abmatrixinfo.gNLCPerpStride
 
         # pack register

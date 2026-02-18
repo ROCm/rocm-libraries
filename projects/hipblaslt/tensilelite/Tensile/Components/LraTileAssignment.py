@@ -205,15 +205,17 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                                                                         maxKId=maxKId)
         #abmatrixinfo = writer.states.a if tc == 'A' else writer.states.b
         if tc == 'A':
-           abmatrixinfo = writer.states.a
+            abmatrixinfo = writer.states.a
         elif tc == 'B':
-           abmatrixinfo = writer.states.b
+            abmatrixinfo = writer.states.b
         elif tc == 'MXSA':
-           abmatrixinfo = writer.states.a  # MXSA uses matrix A state
+            abmatrixinfo = writer.states.a  # MXSA uses matrix A state
         elif tc == 'MXSB':
-           abmatrixinfo = writer.states.b  # MXSB uses matrix B state
+            abmatrixinfo = writer.states.b  # MXSB uses matrix B state
+        elif tc == 'Metadata':
+            abmatrixinfo = writer.states.a if tP["tensorIdx"] == 0 else writer.states.b
         else:
-           raise Exception(f"unsupport tc {tc}")
+            raise Exception(f"unsupport tc {tc}")
         perpStride = abmatrixinfo.gNLCPerpStride
         permBlock  = abmatrixinfo.gNLCPermBlock
 
