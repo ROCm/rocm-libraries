@@ -1,12 +1,11 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include <cmath>
 #include <cstdint>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <limits>
 #include <type_traits>
@@ -14,85 +13,104 @@
 namespace hipdnn_test_sdk::utilities::pointwise
 {
 
-template <typename ComputeType = float>
+// Unary operations with explicit ComputeType and OutputType
+// ComputeType: The type used for intermediate calculations
+// OutputType: The type returned from the operation
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
 struct ReluForward
 {
     ComputeType lowerClip;
     ComputeType upperClip;
     ComputeType lowerSlope;
 
-    ReluForward(ComputeType lowerClip = ComputeType{0},
-                ComputeType upperClip = std::numeric_limits<ComputeType>::max(),
-                ComputeType lowerSlope = ComputeType{0})
-        : lowerClip(lowerClip)
-        , upperClip(upperClip)
-        , lowerSlope(lowerSlope)
+    ReluForward(ComputeType lowerClipVal = ComputeType{0},
+                ComputeType upperClipVal = std::numeric_limits<ComputeType>::max(),
+                ComputeType lowerSlopeVal = ComputeType{0})
+        : lowerClip(lowerClipVal)
+        , upperClip(upperClipVal)
+        , lowerSlope(lowerSlopeVal)
     {
     }
 
     template <typename X>
-    auto operator()(const X& x) const -> ComputeType
+    OutputType operator()(const X& x) const
     {
         auto xCompute = static_cast<ComputeType>(x);
 
+        ComputeType result;
         if(xCompute <= lowerClip)
         {
-            return (lowerSlope * (xCompute - lowerClip)) + lowerClip;
+            result = (lowerSlope * (xCompute - lowerClip)) + lowerClip;
         }
-        if(xCompute >= upperClip)
+        else if(xCompute >= upperClip)
         {
-            return upperClip;
+            result = upperClip;
         }
-        return xCompute;
+        else
+        {
+            result = xCompute;
+        }
+        return static_cast<OutputType>(result);
     }
 };
 
-template <typename ComputeType = float>
+template <typename ComputeType = float, typename OutputType = ComputeType>
 struct SigmoidForward
 {
     template <typename X>
-    auto operator()(const X& x) const -> ComputeType
+    OutputType operator()(const X& x) const
     {
+        using hipdnn_data_sdk::types::exp;
         auto xCompute = static_cast<ComputeType>(x);
-        return ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
+        auto result = ComputeType{1} / (ComputeType{1} + exp(-xCompute));
+        return static_cast<OutputType>(result);
     }
 };
 
-template <typename ComputeType = float>
+template <typename ComputeType = float, typename OutputType = ComputeType>
 struct TanhForward
 {
     template <typename X>
-    auto operator()(const X& x) const -> ComputeType
+    OutputType operator()(const X& x) const
     {
+        using hipdnn_data_sdk::types::tanh;
         auto xCompute = static_cast<ComputeType>(x);
-        return std::tanh(xCompute);
+        auto result = tanh(xCompute);
+        return static_cast<OutputType>(result);
     }
 };
 
+template <typename ComputeType = float, typename OutputType = ComputeType>
 struct Identity
 {
     template <typename X>
-    auto operator()(const X& x) const -> X
+    OutputType operator()(const X& x) const
     {
-        return x;
+        return static_cast<OutputType>(static_cast<ComputeType>(x));
     }
 };
 
+template <typename ComputeType = float, typename OutputType = ComputeType>
 struct AbsoluteValue
 {
     template <typename X>
-    auto operator()(const X& x) const -> X
+    OutputType operator()(const X& x) const
     {
-        return static_cast<X>(std::abs(x));
+        using hipdnn_data_sdk::types::abs;
+        auto result = abs(static_cast<ComputeType>(x));
+        return static_cast<OutputType>(result);
     }
 };
 
+template <typename ComputeType = float, typename OutputType = ComputeType>
 struct Negation
 {
     template <typename X>
-    auto operator()(const X& x) const -> X
+    OutputType operator()(const X& x) const
     {
-        return static_cast<X>(-x);
+        auto result = -static_cast<ComputeType>(x);
+        return static_cast<OutputType>(result);
     }
 };
 

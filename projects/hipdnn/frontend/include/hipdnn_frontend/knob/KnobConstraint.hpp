@@ -321,4 +321,21 @@ private:
     std::unordered_set<std::string> _validValues; ///< Explicit allowed values
 };
 
+// Empty constraint implementation - represents an unconstrained knob
+class EmptyConstraint : public IConstraint
+{
+public:
+    EmptyConstraint() = default;
+
+    Error validateKnobSetting(const KnobSetting& /*setting*/) const override
+    {
+        // Always valid - no constraints apply
+        return {ErrorCode::OK, ""};
+    }
+
+    std::string toString() const override
+    {
+        return "EmptyConstraint{}";
+    }
+};
 } // namespace hipdnn_frontend

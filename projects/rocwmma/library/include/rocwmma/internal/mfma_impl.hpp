@@ -135,7 +135,10 @@ namespace rocwmma
                            BlockN,
                            BlockK,
                            GfxTargetId,
-                           enable_gfx9_t<GfxTargetId, (sizeof(ComputeT) < 4u)>>
+                           enable_gfx9_t<GfxTargetId,
+                                         (sizeof(ComputeT) < 4u) && !is_same_v<InputTA, hfloat16_t>
+                                             && !is_same_v<InputTB, hfloat16_t>
+                                             && !is_same_v<ComputeT, hfloat16_t>>>
             : public amdgcn_mfma<InputTA,
                                  InputTB,
                                  typename PackTraits<ComputeT>::PackedT,
