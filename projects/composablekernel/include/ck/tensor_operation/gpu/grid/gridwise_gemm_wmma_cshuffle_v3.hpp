@@ -623,13 +623,9 @@ struct GridwiseGemm_wmma_cshuffle_v3
     __host__ static bool CheckValidity(const Argument& karg, bool allow_short_v3_pipe = false)
     {
         const auto availableVgprCount = []() {
-            if(ck::is_gfx125_supported())
+            if(ck::is_gfx12_supported())
             {
-                return get_max_vgpr_count(gfx125_t{});
-            }
-            else if(ck::is_gfx120_supported())
-            {
-                return get_max_vgpr_count(gfx120_t{});
+                return get_max_vgpr_count(gfx12_t{});
             }
             else if(ck::is_gfx11_supported())
             {
