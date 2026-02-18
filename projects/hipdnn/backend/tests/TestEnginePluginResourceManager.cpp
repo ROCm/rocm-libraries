@@ -1299,6 +1299,7 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosSinglePlugin)
         .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
     EXPECT_CALL(*mockPlugin, getAllEngineIds())
         .WillRepeatedly(::testing::Return(std::vector<int64_t>{100, 101}));
+    EXPECT_CALL(*mockPlugin, name()).WillRepeatedly(::testing::Return("test-plugin"));
     EXPECT_CALL(*mockPlugin, version()).WillRepeatedly(::testing::Return("1.0"));
     EXPECT_CALL(*mockPlugin, type()).WillRepeatedly(::testing::Return(HIPDNN_PLUGIN_TYPE_ENGINE));
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
@@ -1310,15 +1311,17 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosSinglePlugin)
 
         ASSERT_EQ(infos.size(), 2);
 
-        // Results are sorted by name. formatEngineIdHex(100) = "0x0000000000000064",
+        // Results are sorted by engineName. formatEngineIdHex(100) = "0x0000000000000064",
         // formatEngineIdHex(101) = "0x0000000000000065"
         EXPECT_EQ(infos[0].engineId, 100);
-        EXPECT_EQ(infos[0].name, "0x0000000000000064");
+        EXPECT_EQ(infos[0].engineName, "0x0000000000000064");
+        EXPECT_EQ(infos[0].pluginName, "test-plugin");
         EXPECT_EQ(infos[0].version, "1.0");
         EXPECT_EQ(infos[0].type, "HIPDNN_PLUGIN_TYPE_ENGINE");
 
         EXPECT_EQ(infos[1].engineId, 101);
-        EXPECT_EQ(infos[1].name, "0x0000000000000065");
+        EXPECT_EQ(infos[1].engineName, "0x0000000000000065");
+        EXPECT_EQ(infos[1].pluginName, "test-plugin");
         EXPECT_EQ(infos[1].version, "1.0");
         EXPECT_EQ(infos[1].type, "HIPDNN_PLUGIN_TYPE_ENGINE");
     }
@@ -1338,6 +1341,7 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosMultiplePlugins)
         .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
     EXPECT_CALL(*mockPlugin1, getAllEngineIds())
         .WillRepeatedly(::testing::Return(std::vector<int64_t>{200}));
+    EXPECT_CALL(*mockPlugin1, name()).WillRepeatedly(::testing::Return("plugin-alpha"));
     EXPECT_CALL(*mockPlugin1, version()).WillRepeatedly(::testing::Return("2.0"));
     EXPECT_CALL(*mockPlugin1, type()).WillRepeatedly(::testing::Return(HIPDNN_PLUGIN_TYPE_ENGINE));
     EXPECT_CALL(*mockPlugin1, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
@@ -1346,6 +1350,7 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosMultiplePlugins)
         .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xcafebabe)));
     EXPECT_CALL(*mockPlugin2, getAllEngineIds())
         .WillRepeatedly(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin2, name()).WillRepeatedly(::testing::Return("plugin-beta"));
     EXPECT_CALL(*mockPlugin2, version()).WillRepeatedly(::testing::Return("3.0"));
     EXPECT_CALL(*mockPlugin2, type())
         .WillRepeatedly(::testing::Return(HIPDNN_PLUGIN_TYPE_UNSPECIFIED));
@@ -1358,14 +1363,16 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosMultiplePlugins)
 
         ASSERT_EQ(infos.size(), 2);
 
-        // Sorted by name: "0x0000000000000064" (100) < "0x00000000000000C8" (200)
+        // Sorted by engineName: "0x0000000000000064" (100) < "0x00000000000000C8" (200)
         EXPECT_EQ(infos[0].engineId, 100);
-        EXPECT_EQ(infos[0].name, "0x0000000000000064");
+        EXPECT_EQ(infos[0].engineName, "0x0000000000000064");
+        EXPECT_EQ(infos[0].pluginName, "plugin-beta");
         EXPECT_EQ(infos[0].version, "3.0");
         EXPECT_EQ(infos[0].type, "HIPDNN_PLUGIN_TYPE_UNSPECIFIED");
 
         EXPECT_EQ(infos[1].engineId, 200);
-        EXPECT_EQ(infos[1].name, "0x00000000000000C8");
+        EXPECT_EQ(infos[1].engineName, "0x00000000000000C8");
+        EXPECT_EQ(infos[1].pluginName, "plugin-alpha");
         EXPECT_EQ(infos[1].version, "2.0");
         EXPECT_EQ(infos[1].type, "HIPDNN_PLUGIN_TYPE_ENGINE");
     }

@@ -366,8 +366,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext(hipdnnHandle_t han
         throwIfNull(handle);
         throwIfNull(numEngines);
 
-        auto infos = handle->getEngineInfos();
-        *numEngines = infos.size();
+        *numEngines = handle->getEngineCount();
 
         LOG_API_SUCCESS(apiName, "retrieved_numEngines={}", *numEngines);
     });
@@ -376,25 +375,29 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext(hipdnnHandle_t han
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t handle,
                                                              size_t engineIndex,
                                                              int64_t* engineId,
-                                                             char* name,
-                                                             size_t* nameLen,
+                                                             char* engineName,
+                                                             size_t* engineNameLen,
+                                                             char* pluginName,
+                                                             size_t* pluginNameLen,
                                                              char* version,
                                                              size_t* versionLen,
                                                              char* type,
                                                              size_t* typeLen)
 {
-    LOG_API_ENTRY("handle={:p}, engineIndex={}, engineId_ptr={:p}, name_ptr={:p}, "
-                  "version_ptr={:p}, type_ptr={:p}",
+    LOG_API_ENTRY("handle={:p}, engineIndex={}, engineId_ptr={:p}, engineName_ptr={:p}, "
+                  "pluginName_ptr={:p}, version_ptr={:p}, type_ptr={:p}",
                   static_cast<void*>(handle),
                   engineIndex,
                   static_cast<void*>(engineId),
-                  static_cast<void*>(name),
+                  static_cast<void*>(engineName),
+                  static_cast<void*>(pluginName),
                   static_cast<void*>(version),
                   static_cast<void*>(type));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__] {
         throwIfNull(handle);
-        throwIfNull(nameLen);
+        throwIfNull(engineNameLen);
+        throwIfNull(pluginNameLen);
         throwIfNull(versionLen);
         throwIfNull(typeLen);
 
@@ -413,36 +416,43 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
             *engineId = info.engineId;
         }
 
-        size_t requiredNameLen = info.name.size() + 1;
-        size_t requiredVersionLen = info.version.size() + 1;
-        size_t requiredTypeLen = info.type.size() + 1;
+        size_t requiredEngineNameLen = info.engineName.size() + 1;
+        size_t requiredPluginNameLen = info.pluginName.size() + 1;
+        size_t requiredVersionLen    = info.version.size() + 1;
+        size_t requiredTypeLen       = info.type.size() + 1;
 
-        if(name == nullptr || version == nullptr || type == nullptr)
+        if(engineName == nullptr || pluginName == nullptr || version == nullptr
+           || type == nullptr)
         {
-            *nameLen = requiredNameLen;
-            *versionLen = requiredVersionLen;
-            *typeLen = requiredTypeLen;
+            *engineNameLen = requiredEngineNameLen;
+            *pluginNameLen = requiredPluginNameLen;
+            *versionLen    = requiredVersionLen;
+            *typeLen       = requiredTypeLen;
             return;
         }
 
-        if(*nameLen < requiredNameLen || *versionLen < requiredVersionLen
-           || *typeLen < requiredTypeLen)
+        if(*engineNameLen < requiredEngineNameLen || *pluginNameLen < requiredPluginNameLen
+           || *versionLen < requiredVersionLen || *typeLen < requiredTypeLen)
         {
             throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Insufficient buffer space provided.");
         }
 
         hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
-            name, info.name.c_str(), *nameLen);
+            engineName, info.engineName.c_str(), *engineNameLen);
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            pluginName, info.pluginName.c_str(), *pluginNameLen);
         hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
             version, info.version.c_str(), *versionLen);
         hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
             type, info.type.c_str(), *typeLen);
 
         LOG_API_SUCCESS(apiName,
-                        "engine[{}]: engineId={}, name={}, version={}, type={}",
+                        "engine[{}]: engineId={}, engineName={}, pluginName={}, version={}, "
+                        "type={}",
                         engineIndex,
                         info.engineId,
-                        info.name,
+                        info.engineName,
+                        info.pluginName,
                         info.version,
                         info.type);
     });

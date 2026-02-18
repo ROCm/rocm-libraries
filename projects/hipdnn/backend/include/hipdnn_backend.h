@@ -379,26 +379,28 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext(hipdnnHandle_t han
 /**
  * @brief Gets information about a loaded engine by index.
  *
- * Retrieves the id, name, version, and type of the engine at the given index.
+ * Retrieves the id, name, version, type, and plugin name of the engine at the given index.
  * Valid indices are 0 to numEngines-1 as returned by hipdnnGetEngineCount_ext.
  * Engines are sorted alphabetically by name.
  *
- * This function must be called twice per engine:
- * 1. First call: Pass string buffers as `nullptr` to query required sizes.
- *    - Sets `nameLen`, `versionLen`, and `typeLen` to the required buffer sizes
- *      (including null terminator).
+ * This function uses a two-call pattern for string fields:
+ * 1. First call: Pass all string buffers as `nullptr` to query required sizes.
+ *    - Sets `nameLen`, `versionLen`, `typeLen`, and `pluginNameLen` to the required buffer sizes
+ *      (including null terminator). Note: if any string buffer is null, all sizes are updated.
  *
- * 2. Second call: Pass allocated buffers to retrieve the actual strings.
+ * 2. Second call: Pass allocated buffers with sizes set from the first call.
  *
- * @param[in]     handle       A valid hipDNN handle.
- * @param[in]     engineIndex  Zero-based index of the engine to query.
- * @param[out]    engineId     Pointer where the engine ID will be stored, or `nullptr` to skip.
- * @param[out]    name         Buffer for the engine name, or `nullptr` to query size.
- * @param[in,out] nameLen      Pointer to buffer size; updated with required size.
- * @param[out]    version      Buffer for the engine version, or `nullptr` to query size.
- * @param[in,out] versionLen   Pointer to buffer size; updated with required size.
- * @param[out]    type         Buffer for the engine type string, or `nullptr` to query size.
- * @param[in,out] typeLen      Pointer to buffer size; updated with required size.
+ * @param[in]     handle           A valid hipDNN handle.
+ * @param[in]     engineIndex      Zero-based index of the engine to query.
+ * @param[out]    engineId         Pointer where the engine ID will be stored, or `nullptr` to skip.
+ * @param[out]    engineName       Buffer for the engine name, or `nullptr` to query size.
+ * @param[in,out] engineNameLen    Pointer to buffer size; updated with required size.
+ * @param[out]    pluginName       Buffer for the plugin name, or `nullptr` to query size.
+ * @param[in,out] pluginNameLen    Pointer to buffer size; updated with required size.
+ * @param[out]    version          Buffer for the engine version, or `nullptr` to query size.
+ * @param[in,out] versionLen       Pointer to buffer size; updated with required size.
+ * @param[out]    type             Buffer for the engine type string, or `nullptr` to query size.
+ * @param[in,out] typeLen          Pointer to buffer size; updated with required size.
  *
  * @retval HIPDNN_STATUS_SUCCESS           Success.
  * @retval HIPDNN_STATUS_BAD_PARAM         Invalid handle, null pointers, or out-of-range index.
@@ -407,8 +409,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext(hipdnnHandle_t han
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t handle,
                                                              size_t engineIndex,
                                                              int64_t* engineId,
-                                                             char* name,
-                                                             size_t* nameLen,
+                                                             char* engineName,
+                                                             size_t* engineNameLen,
+                                                             char* pluginName,
+                                                             size_t* pluginNameLen,
                                                              char* version,
                                                              size_t* versionLen,
                                                              char* type,

@@ -19,34 +19,68 @@ void printHelp(const char* programName)
               << "  --help, -h           Show this help message\n";
 }
 
-void printEngineInfo(hipdnnHandle_t handle, size_t engineIndex)
+bool printEngineInfo(hipdnnHandle_t handle, size_t engineIndex)
 {
     // Query required buffer sizes and engine ID
-    int64_t engineId = 0;
-    size_t nameLen = 0;
-    size_t versionLen = 0;
-    size_t typeLen = 0;
-    hipdnnGetEngineInfo_ext(
-        handle, engineIndex, &engineId, nullptr, &nameLen, nullptr, &versionLen, nullptr, &typeLen);
+    int64_t engineId      = 0;
+    size_t engineNameLen  = 0;
+    size_t pluginNameLen  = 0;
+    size_t versionLen     = 0;
+    size_t typeLen        = 0;
+    auto status = hipdnnGetEngineInfo_ext(handle,
+                                          engineIndex,
+                                          &engineId,
+                                          nullptr,
+                                          &engineNameLen,
+                                          nullptr,
+                                          &pluginNameLen,
+                                          nullptr,
+                                          &versionLen,
+                                          nullptr,
+                                          &typeLen);
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        std::cerr << "Error querying engine info sizes for index " << engineIndex << ": "
+                  << hipdnnGetErrorString(status) << "\n";
+        return false;
+    }
+
+    if(engineNameLen == 0 || pluginNameLen == 0 || versionLen == 0 || typeLen == 0)
+    {
+        std::cerr << "Warning: invalid buffer size returned for engine index " << engineIndex
+                  << "\n";
+        return false;
+    }
 
     // Retrieve engine info strings
-    std::vector<char> name(nameLen);
+    std::vector<char> engineName(engineNameLen);
+    std::vector<char> pluginName(pluginNameLen);
     std::vector<char> version(versionLen);
     std::vector<char> type(typeLen);
-    hipdnnGetEngineInfo_ext(handle,
-                            engineIndex,
-                            nullptr,
-                            name.data(),
-                            &nameLen,
-                            version.data(),
-                            &versionLen,
-                            type.data(),
-                            &typeLen);
+    status = hipdnnGetEngineInfo_ext(handle,
+                                     engineIndex,
+                                     nullptr,
+                                     engineName.data(),
+                                     &engineNameLen,
+                                     pluginName.data(),
+                                     &pluginNameLen,
+                                     version.data(),
+                                     &versionLen,
+                                     type.data(),
+                                     &typeLen);
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        std::cerr << "Error retrieving engine info for index " << engineIndex << ": "
+                  << hipdnnGetErrorString(status) << "\n";
+        return false;
+    }
 
-    std::cout << "  " << name.data() << " (0x" << std::hex << std::uppercase << std::setw(16)
-              << std::setfill('0') << engineId << std::dec << ")\n"
+    std::cout << "  " << engineName.data() << " (0x" << std::hex << std::uppercase
+              << std::setw(16) << std::setfill('0') << engineId << std::dec << ")\n"
+              << "    Plugin:  " << pluginName.data() << "\n"
               << "    Version: " << version.data() << "\n"
               << "    Type:    " << type.data() << "\n";
+    return true;
 }
 
 } // anonymous namespace
@@ -107,7 +141,12 @@ int main(int argc, char* argv[])
     }
 
     size_t numEngines = 0;
-    hipdnnGetEngineCount_ext(handle, &numEngines);
+    if(hipdnnGetEngineCount_ext(handle, &numEngines) != HIPDNN_STATUS_SUCCESS)
+    {
+        std::cerr << "Error: failed to query engine count\n";
+        hipdnnDestroy(handle);
+        return 1;
+    }
 
     if(numEngines == 0)
     {

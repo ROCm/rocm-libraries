@@ -20,6 +20,7 @@ public:
     virtual hipStream_t getStream() const;
     virtual std::shared_ptr<hipdnn_backend::plugin::EnginePluginResourceManager>
         getPluginResourceManager() const;
+    virtual size_t getEngineCount() const;
     virtual std::vector<hipdnn_backend::plugin::EngineInfo> getEngineInfos() const;
     virtual std::string toString() const;
 
