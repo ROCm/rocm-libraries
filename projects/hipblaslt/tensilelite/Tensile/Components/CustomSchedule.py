@@ -4072,20 +4072,22 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
                 4,4,5,5, 8,8, 13,13,14,14, 
                 6,6,7,7, 8,8, 15,15,16,16]
         
-        lra0   = [ 0,1,2,3,4,5,6,7]
-        lrb0   = [   8,9,10,11,12,13,14,15]
+        lra0   = [ 0,0,2,2,4,4,6,6]
+        lrb0   = [                     11,11,13,13,15,15,17,17]
         #                wait then read
-        syncs.add(       10, dscnt=6, comment="wait for the first 2 LRAs before packing")
-        syncs.add(       14, dscnt=6, comment="wait for the rest of LRAs before packing them")
-        pack_a0 =[          11]*12# swap instructions
-        pack_a0+=[          i+11 for i in offset] # last at 27
+        syncs.add(             6, dscnt=2, comment="wait for the first 4 LRAs before swapping/packing")
+        syncs.add(                 9, dscnt=2, comment="wait for the rest of LRAs before swapping/packing them")
+        swap_a0= [              7,7,7, 9,9,9, 8,8, 10,10, 8, 10]
+        # pack_a0 =[          11]*12# swap instructions
+        pack_a0 = swap_a0
+        pack_a0+=[                    i+11 for i in offset] # last at 27
         # because of GR starting at 22, we need barrier at 21, will use that for sync too.
         syncs.add(                          21, dscnt=0, comment="wait for LRBs before the packing them",
                                             barrier=True, barrier_comment="barrier before GR")
         pack_b0= [                                i+28 for i in offset] # last at 44
 
-        grinca = [0,0,1,1,2,2,3,3,4]
-        grincb = [5,5,6,6,7,7,8,8,9]
+        grinca = [0,1,1,1,2,3,3,3,4]
+        grincb = [5,5,5,7,8,9,10,19,19]
         lrsa   = [45]
         lrsb   = [45]
         lwsa   = [72]
@@ -4116,8 +4118,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         'GRIncB': [grincb],
         'LRA0':   [lra0],
         'LRB0':   [lrb0],
-        'PackA0': [pack_a0],
-        'PackB0': [pack_b0],
         'GRA':    [duplicate_list_items(gra,                2, gr_inc_step),
                    duplicate_list_items([i+1 for i in gra], 2, gr_inc_step)],
         'GRB':    [duplicate_list_items(grb,                2, gr_inc_step),
@@ -4126,6 +4126,8 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         'LRSB':   [lrsb],
         'LWSA':   [lwsa],
         'LWSB':   [lwsb],
+        'PackA0': [pack_a0],
+        'PackB0': [pack_b0],
         'LRA1':   [lra1],
         'LRB1':   [lrb1],
         'PackB1': [pack_b1],
