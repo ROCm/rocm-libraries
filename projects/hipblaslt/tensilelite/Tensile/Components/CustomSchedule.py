@@ -3919,7 +3919,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         lwsa   = [                                                                          20] # use delay before mfma4x4x4
         lwsb   = [                                                                          20]
         
-    elif isNN(kernel) and TLDS==1:
+    elif isNN(kernel) and TLDS==1  and kernel["VectorWidthA"] == 2:
         disable_validation = True # swap instructions included in pack are not supported yet
 
         lra0   = [0,0,0,0,
@@ -3968,14 +3968,22 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     else:
         return False, None  
     
+    final_gra = [duplicate_list_items(gra, 2, gr_inc_step)]
+    if num_code_paths == 2:
+        final_gra += [duplicate_list_items(gra2, 2, gr_inc_step)]
+    
+    final_grb = [duplicate_list_items(grb, 2, gr_inc_step)]
+    if num_code_paths == 2:
+        final_grb += [duplicate_list_items(grb2, 2, gr_inc_step)]
+
     optSchedule = {
         'SYNC':   [syncs.get_indicies()],
         'GRIncA': [grinca],
         'GRIncB': [grincb],
         'LRA0':   [lra0],
         'LRB0':   [lrb0],
-        'GRA':    [duplicate_list_items(gra, 2, gr_inc_step), duplicate_list_items(gra2, 2, gr_inc_step)],
-        'GRB':    [duplicate_list_items(grb, 2, gr_inc_step), duplicate_list_items(grb2, 2, gr_inc_step)],
+        'GRA':    final_gra,
+        'GRB':    final_grb,
         'LRSA':   [lrsa],
         'LRSB':   [lrsb],
         'LWSA':   [lwsa],
@@ -4059,8 +4067,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         syncs.add(                                                                                 76, dscnt=0, comment="wait for LRBs before the packing them")
         pack_b1 =[                                                                                 i+77 for i in offset] # last at 93
 
-    elif isNN(kernel) and TLDS==1:
-        print("BBBBBBBBBBBBBBBBBBBBBBBBBBB")
+    elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 4:
         disable_validation = True
 
         kernel["UseMFMAF32XEmulation"] = True
