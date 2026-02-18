@@ -33,7 +33,6 @@ import subprocess
 from dataclasses import fields
 from itertools import chain
 from pathlib import Path
-from typing import Tuple
 
 import pandas as pd
 import rrperf
@@ -251,7 +250,7 @@ def run_cli(  # noqa: C901
     recast: bool = False,
     l2: bool = False,
     **kwargs,
-) -> Tuple[bool, Path]:
+) -> tuple[bool, Path]:
     """Run benchmarks!
 
     Implements the CLI 'run' subcommand.

@@ -54,7 +54,6 @@ import random
 import subprocess
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Tuple
 
 import numpy as np
 import rrperf
@@ -75,7 +74,7 @@ def instantiate_gpus(idxs: list[int]):
         mp_pool = None
 
 
-def acquire_lock() -> Tuple[int, multiprocessing.Lock]:
+def acquire_lock() -> tuple[int, multiprocessing.Lock]:
     global gpus  # noqa: disable=unused-variable
     for i in range(100):
         for id, lock in gpus.items():
@@ -349,7 +348,7 @@ def sanity_check(results: list[Result]):
 prev_results = {}
 
 
-def split_old_new_results(weights) -> Tuple[list[Weights], list[Weights]]:
+def split_old_new_results(weights) -> tuple[list[Weights], list[Weights]]:
     global prev_results  # noqa: disable=F824
 
     already_ran = []
