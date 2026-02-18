@@ -489,14 +489,14 @@ hipError_t topk(void*                    temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::topk(
+/// rocprim::topk_pairs(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input_keys, output_keys, input_vals, output_vals, input_size, k
 /// );
 /// // allocate temporary storage
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
-/// // perform topk
-/// rocprim::topk(
+/// // perform topk_pairs
+/// rocprim::topk_pairs(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input_keys, output_keys, input_vals, output_vals, input_size, k
 /// );
