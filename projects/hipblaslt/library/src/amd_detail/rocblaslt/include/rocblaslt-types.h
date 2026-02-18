@@ -33,6 +33,9 @@
 #define _ROCBLASLT_TYPES_H_
 
 #include <hip/hip_bfloat16.h>
+#ifdef __cplusplus
+#include <array>
+#endif
 #ifndef LEGACY_HIPBLAS_DIRECT
 #include <hipblas-common/hipblas-common.h>
 #else
@@ -483,6 +486,12 @@ struct RocblasltContractionProblem
     size_t k;
 
     const void* alpha;
+    // When certain features (e.g., scaleAlphaVec) require overriding alpha to a constant 1.0,
+    // we must ensure the backing storage outlives the scope that constructs the problem.
+    // ASAN caught a stack-use-after-return where alpha pointed to a stack-local buffer.
+    // This owned buffer is used to hold such overridden alpha values.
+    // NOTE: sized to 16 bytes to hold any supported scalar type representation.
+    std::array<int8_t, 16> alpha_owned = {0};
 
     hipDataType        a_type;
     const void*        A;
