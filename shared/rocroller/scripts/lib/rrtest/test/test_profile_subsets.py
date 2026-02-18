@@ -6,9 +6,9 @@ These tests ensure that profile hierarchies are maintained:
 - codecov <= precheckin (codecov tests are a subset of precheckin)
 """
 
-import pytest
 from pathlib import Path
 
+import pytest
 from rrtest import list_tests
 
 

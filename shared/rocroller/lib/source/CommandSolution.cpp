@@ -29,8 +29,6 @@ namespace rocRoller
         msg << ShowValue(transposeMemoryAccess);
         msg << ShowValue(packMultipleElementsInto1VGPR);
 
-        msg << ShowValue(unrollX);
-        msg << ShowValue(unrollY);
         msg << ShowValue(unrollK);
         msg << ShowValue(fuseLoops);
         msg << ShowValue(tailLoops);
@@ -175,21 +173,21 @@ namespace rocRoller
 
         for(auto& arg : argStructs)
         {
-            auto value = Expression::evaluate(arg.expression, args);
+            auto value = Expression::evaluate(arg.getExpression(), args);
 
-            if(variableType(value) != arg.variableType)
+            if(variableType(value) != arg.getVariableType())
             {
                 throw std::runtime_error(concatenate("Evaluated argument type ",
                                                      variableType(value),
                                                      " doesn't match expected type ",
-                                                     arg.variableType,
+                                                     arg.getVariableType(),
                                                      ", Expression: ",
-                                                     toString(arg.expression),
+                                                     toString(arg.getExpression()),
                                                      ", name: ",
-                                                     arg.name));
+                                                     arg.getName()));
             }
 
-            rv.append(arg.name, value);
+            rv.append(arg.getName(), value);
         }
 
         return rv;
@@ -320,6 +318,10 @@ namespace rocRoller
 
         std::vector<KernelGraph::GraphTransformPtr> transforms;
 
+        bool applyScheduleMultiplyAndLDS = m_commandParameters->prefetch
+                                           && m_commandParameters->prefetchMixMemOps
+                                           && m_commandParameters->prefetchLDSFactor == 1;
+
         transforms.push_back(std::make_shared<KernelGraph::IdentifyParallelDimensions>());
 
         transforms.push_back(std::make_shared<KernelGraph::OrderMemory>(
@@ -398,6 +400,7 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AddF6LDSPadding>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::AddDirect2LDS>(m_context, m_commandParameters));
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::AddPRNG>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::UpdateWavefrontParameters>(m_commandParameters));
@@ -417,9 +420,16 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::NopExtraScopes>());
         transforms.push_back(std::make_shared<KernelGraph::InlineInits>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
+        if(applyScheduleMultiplyAndLDS)
+            transforms.push_back(std::make_shared<KernelGraph::RemoveImplicitScheduling>());
         transforms.push_back(std::make_shared<KernelGraph::OrderMultiplyNodes>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        if(applyScheduleMultiplyAndLDS)
+            transforms.push_back(std::make_shared<KernelGraph::ScheduleMultiplyAndLDS>());
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        transforms.push_back(std::make_shared<KernelGraph::OrderExchangeNodes>());
         transforms.push_back(std::make_shared<KernelGraph::AliasDataFlowTags>());
+        transforms.push_back(std::make_shared<KernelGraph::AddLDSBarriers>());
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context, m_command));
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocateArguments>(m_context));

@@ -283,11 +283,9 @@ if __name__ == "__main__":
         className="p-5",
         children=[
             html.H1(children="Register Liveliness"),
-            html.Div(
-                children="""
+            html.Div(children="""
             A RocRoller tool
-        """
-            ),
+        """),
             dcc.Graph(id="v reg", figure=fig_vgpr, style={"height": "75vh"}),
             html.Div(
                 [

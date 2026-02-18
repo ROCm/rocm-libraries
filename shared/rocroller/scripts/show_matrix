@@ -6,6 +6,7 @@
 """
 Render a matrix stored in a msgpack file as an image.
 """
+
 import argparse
 import os
 import pathlib
@@ -28,7 +29,7 @@ if __name__ == "__main__":
     if len(args.output) == 0:
 
         def makeOutput(inFile):
-            (base, _) = os.path.splitext(inFile)
+            base, _ = os.path.splitext(inFile)
             return base + ".png"
 
         args.output = list(map(makeOutput, args.input))

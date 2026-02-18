@@ -33,9 +33,7 @@ markdown = """## Results Summary
 {}
 </details>
 
-""".format(
-    types_count.to_markdown(index=False), df.to_markdown(index=False)
-)
+""".format(types_count.to_markdown(index=False), df.to_markdown(index=False))
 
 with open("codeql/build/types_count.md", "w") as file:
     print(file.name)
