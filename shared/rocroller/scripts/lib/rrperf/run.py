@@ -147,6 +147,8 @@ def generate_missing_attr_value(run, attr):
             wgm_dim = getattr(run, "workgroupMappingDim")
             wgm_value = getattr(run, "workgroupMappingValue")
             return (wgm_dim, wgm_value)
+        case "matchMemoryAccess":
+            return True
         case "unroll_x" | "unroll_y":
             return 0
         case "storeLDS_D":
