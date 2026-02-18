@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -2188,7 +2188,9 @@ private:
                      m_iteration_info_out);
     }
 
-    void apply_settings(benchmark::internal::Benchmark* b)
+    // Temporary fix
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
+    void apply_settings(::benchmark::internal::Benchmark* b)
     {
         b->UseManualTime();
         b->Unit(benchmark::kMillisecond);
@@ -2199,6 +2201,7 @@ private:
             b->Iterations(m_trials);
         }
     }
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
     // Register a subset of all benchmarks for the current parallel instance.
     void register_sorted_subset(int parallel_instance_index, int parallel_instance_count)
