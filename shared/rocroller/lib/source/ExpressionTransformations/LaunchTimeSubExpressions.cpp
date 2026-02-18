@@ -62,8 +62,7 @@ namespace rocRoller
                            toString(varType),
                            toString(expr));
 
-                return kernel->addArgument(
-                    {.name = argName, .variableType = varType, .expression = expr});
+                return kernel->addArgument({argName, varType, DataDirection::ReadOnly, expr});
             }
 
             ExpressionPtr maybeLaunchEval(ExpressionPtr expr, bool ignoreComplexity)
@@ -83,10 +82,6 @@ namespace rocRoller
 
                 if(!m_allowNewArgs)
                     return nullptr;
-
-                LaunchTimeExpressionVisitor sub(m_context, false);
-                auto                        ex2    = sub.call(expr);
-                auto                        myComp = complexity(ex2);
 
                 if(ignoreComplexity || !evalTimes[EvaluationTime::KernelExecute]
                    || complexity(expr) >= m_minComplexity)

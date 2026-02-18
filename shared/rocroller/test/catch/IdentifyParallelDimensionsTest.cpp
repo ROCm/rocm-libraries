@@ -71,7 +71,7 @@ struct HasKernelArgMatcher : Catch::Matchers::MatcherGenericBase
     {
         for(auto const& arg : kargs)
         {
-            if(arg.name.starts_with(name))
+            if(arg.getName().starts_with(name))
                 return true;
         }
 

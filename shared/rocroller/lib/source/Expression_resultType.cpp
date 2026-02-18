@@ -362,7 +362,7 @@ namespace rocRoller
                 if(expr == nullptr)
                     return {Register::Type::Count, DataType::Count};
 
-                return {Register::Type::Scalar, expr->variableType};
+                return {Register::Type::Scalar, expr->getVariableType()};
             }
 
             ResultType operator()(CommandArgumentValue const& expr)

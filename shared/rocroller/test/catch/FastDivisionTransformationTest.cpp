@@ -139,7 +139,7 @@ namespace FastDivisionTest
         auto expr_fast = fastDivision(expr, context.get());
 
         {
-            auto [mul, shift, sign] = getMagicMultipleShiftAndSign(b_signed, context.get());
+            auto [mul, shift, sign, _] = getMagicDivisionParams(b_signed, context.get());
 
             auto mulPlusA = a + multiplyHigh(a, mul);
 
@@ -159,13 +159,15 @@ namespace FastDivisionTest
         expr_fast = fastDivision(expr, context.get());
 
         {
-            auto [mul, shift, sign] = getMagicMultipleShiftAndSign(b_unsigned, context.get());
+            auto [mul, shift, sign, shiftMSB] = getMagicDivisionParams(b_unsigned, context.get());
 
             auto mulHigh = multiplyHigh(a_unsigned, mul);
 
-            CHECK_THAT(
-                expr_fast,
-                EquivalentTo((((a_unsigned - mulHigh) >> Ex::literal(1u)) + mulHigh) >> shift));
+            auto t = ((a_unsigned - mulHigh >> Ex::literal(1u)) + mulHigh) >> shift;
+
+            auto result = Ex::conditional(shiftMSB == Ex::literal(0u), t, a_unsigned);
+
+            CHECK_THAT(expr_fast, EquivalentTo(result));
         }
     }
 
@@ -189,8 +191,7 @@ namespace FastDivisionTest
                          {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value)
                      ->expression();
 
-        a = context->kernel()->addArgument(
-            {.name = "arg", .variableType = DataType::Int32, .expression = a});
+        a = context->kernel()->addArgument({"arg", DataType::Int32, DataDirection::ReadOnly, a});
 
         auto argsBefore = context->kernel()->arguments();
 

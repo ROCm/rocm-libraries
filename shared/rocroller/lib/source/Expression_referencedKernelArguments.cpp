@@ -59,7 +59,7 @@ namespace rocRoller
 
             void operator()(AssemblyKernelArgumentPtr const& expr)
             {
-                m_referencedArgs.insert(expr->name);
+                m_referencedArgs.insert(expr->getName());
             }
 
             void operator()(DataFlowTag const& expr)

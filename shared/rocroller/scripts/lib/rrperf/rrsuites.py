@@ -1430,7 +1430,7 @@ def fp4_mt32x32x256_d2lds_mi16x16x128_st32x8_pf2x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToLDS",
         loadScale_B="BufferToLDS",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=1,

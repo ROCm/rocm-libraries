@@ -36,9 +36,9 @@ namespace rocRollerTest
 
         for(auto& arg : m_context->kernel()->arguments())
         {
-            auto value = Expression::evaluate(arg.expression);
-            EXPECT_EQ(arg.variableType, variableType(value));
-            argsActual.append(arg.name, value);
+            auto value = Expression::evaluate(arg.getExpression());
+            EXPECT_EQ(arg.getVariableType(), variableType(value));
+            argsActual.append(arg.getName(), value);
         }
 
         KernelArguments argsExpected;

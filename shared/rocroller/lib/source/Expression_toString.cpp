@@ -141,7 +141,7 @@ namespace rocRoller
             {
                 // The call() function appends the result type, so add ":" to separate the
                 // value from the type.
-                return expr->name + ":";
+                return expr->getName() + ":";
             }
 
             std::string operator()(WaveTilePtr const& expr) const

@@ -105,14 +105,14 @@ namespace ExpressionTest
         {
             auto k = m_context->kernel();
 
-            k->addArgument({.name          = "result",
-                            .variableType  = {m_resultDataType, PointerType::PointerGlobal},
-                            .dataDirection = DataDirection::WriteOnly});
+            k->addArgument({"result",
+                            {m_resultDataType, PointerType::PointerGlobal},
+                            DataDirection::WriteOnly});
             for(int i = 0; i < m_operandNumber; ++i)
             {
-                k->addArgument({.name          = "operand" + std::to_string(i),
-                                .variableType  = {m_operandDataTypes[i], PointerType::Value},
-                                .dataDirection = DataDirection::ReadOnly});
+                k->addArgument({"operand" + std::to_string(i),
+                                {m_operandDataTypes[i], PointerType::Value},
+                                DataDirection::ReadOnly});
             }
 
             m_context->schedule(k->preamble());

@@ -118,9 +118,9 @@ namespace ArgumentTracerTest
             auto aPtrArg = findKernarg(findPtrComArg(command, kgraph, example.aTag));
             REQUIRE(aPtrArg != nullptr);
 
-            auto aDim = findDimForKernarg(kgraph, aPtrArg->name);
+            auto aDim = findDimForKernarg(kgraph, aPtrArg->getName());
             REQUIRE(aDim != std::nullopt);
-            auto aPtrDeallocate = findDeallocate(kgraph, aPtrArg->name);
+            auto aPtrDeallocate = findDeallocate(kgraph, aPtrArg->getName());
             REQUIRE(aPtrDeallocate != std::nullopt);
 
             auto aLoad = kgraph.control.getNodes<CG::LoadVGPR>()
@@ -136,9 +136,9 @@ namespace ArgumentTracerTest
             auto bPtrArg = findKernarg(findPtrComArg(command, kgraph, example.bTag));
             REQUIRE(bPtrArg != nullptr);
 
-            auto bDim = findDimForKernarg(kgraph, bPtrArg->name);
+            auto bDim = findDimForKernarg(kgraph, bPtrArg->getName());
             REQUIRE(bDim != std::nullopt);
-            auto bPtrDeallocate = findDeallocate(kgraph, bPtrArg->name);
+            auto bPtrDeallocate = findDeallocate(kgraph, bPtrArg->getName());
             REQUIRE(bPtrDeallocate != std::nullopt);
 
             auto bLoad = kgraph.control.getNodes<CG::LoadVGPR>()
@@ -154,9 +154,9 @@ namespace ArgumentTracerTest
             auto dPtrArg = findKernarg(findPtrComArg(command, kgraph, example.resultTag));
             REQUIRE(dPtrArg != nullptr);
 
-            auto dDim = findDimForKernarg(kgraph, dPtrArg->name);
+            auto dDim = findDimForKernarg(kgraph, dPtrArg->getName());
             REQUIRE(dDim != std::nullopt);
-            auto dPtrDeallocate = findDeallocate(kgraph, dPtrArg->name);
+            auto dPtrDeallocate = findDeallocate(kgraph, dPtrArg->getName());
             REQUIRE(dPtrDeallocate != std::nullopt);
 
             auto dLoad = kgraph.control.getNodes<CG::StoreVGPR>()

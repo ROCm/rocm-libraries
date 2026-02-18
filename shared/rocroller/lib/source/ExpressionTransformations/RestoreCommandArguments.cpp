@@ -60,8 +60,8 @@ namespace rocRoller
 
             ExpressionPtr operator()(AssemblyKernelArgumentPtr const& expr) const
             {
-                if(expr->expression)
-                    return call(expr->expression);
+                if(expr->getExpression())
+                    return call(expr->getExpression());
 
                 return std::make_shared<Expression>(expr);
             }
