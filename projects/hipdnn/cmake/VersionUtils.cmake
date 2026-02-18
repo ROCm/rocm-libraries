@@ -75,7 +75,6 @@ function(hipdnn_get_component_version COMPONENT_NAME OUTPUT_VAR)
     # This makes it resilient to where the macro is called from
     hipdnn_version_file_dir(${COMPONENT_NAME} _version_dir)
 
-
     if(EXISTS "${_version_dir}/version.json")
         file(READ "${_version_dir}/version.json" _${COMPONENT_NAME}_version_json)
         string(JSON _version_value GET ${_${COMPONENT_NAME}_version_json} "${COMPONENT_NAME}_version")
@@ -85,7 +84,6 @@ function(hipdnn_get_component_version COMPONENT_NAME OUTPUT_VAR)
         message(FATAL_ERROR "Could not find ${COMPONENT_NAME} version file at ${_${COMPONENT_NAME}_version_file}")
     endif()
 endfunction()
-
 
 # Function to read data_sdk version for minimum requirement
 function(hipdnn_get_data_sdk_version OUTPUT_VAR)
