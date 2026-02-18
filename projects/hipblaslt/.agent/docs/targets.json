@@ -1,0 +1,5 @@
+{
+	"targets": [
+		"projects/hipblaslt/tensilelite/Tensile"
+	]
+}
