@@ -786,7 +786,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceNode)
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
-TEST_F(TestBatchnormPlanBuilder, DISABLED_BuildPlanSetsPlanForSupportedInferenceWithVarianceNode)
+TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceWithVarianceNode)
 {
     // Use a real flatbuffer graph with a valid batchnorm variance node
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
@@ -1835,7 +1835,7 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsFalseForTwoNodeFusionWhenInf
 // Variance Extension Fusion Tests
 // ============================================================================
 
-TEST_F(TestBatchnormPlanBuilder, DISABLED_IsApplicableReturnsTrueForFusedTwoNodeGraphWithVariance)
+TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForFusedTwoNodeGraphWithVariance)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>

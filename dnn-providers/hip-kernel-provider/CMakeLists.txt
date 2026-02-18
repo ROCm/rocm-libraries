@@ -119,6 +119,7 @@ add_library(
     ${KERNEL_GENERATED_SOURCES}
     engines/plans/BatchnormPlanBuilder.cpp
     engines/plans/BatchnormFwdInferencePlan.cpp
+    engines/plans/BatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/BatchnormApplicabilityChecks.cpp
 )
 target_compile_definitions(

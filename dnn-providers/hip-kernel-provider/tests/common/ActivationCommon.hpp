@@ -100,7 +100,7 @@ inline std::vector<ActivTestCase> createFwdActivationSmokeCases()
 
     std::vector<ActivTestCase> cases;
 
-    // RELU_FWD (standard ReLU) - Only activation supported by MIOpen fusion
+    // RELU_FWD (standard ReLU) - Only activation supported by fusion ops
     cases.emplace_back(PM::RELU_FWD,
                        std::nullopt, // reluLowerClip
                        std::nullopt, // reluUpperClip
