@@ -105,7 +105,6 @@ struct ThreadwiseTensorSliceTransfer_v3r1_dequant
           scale_coord_(make_tensor_coordinate(scale_desc, scale_slice_origin)),
           dst_coord_(make_tensor_coordinate(dst_desc, dst_slice_origin)),
           src_element_op_(src_element_op),
-          scale_element_op_(scale_element_op),
           dst_element_op_(dst_element_op)
     {
     }
@@ -628,7 +627,6 @@ struct ThreadwiseTensorSliceTransfer_v3r1_dequant
     ScaleCoord scale_coord_;
     DstCoord dst_coord_;
     const SrcElementwiseOperation src_element_op_;
-    const ScaleElementwiseOperation scale_element_op_;
     const DstElementwiseOperation dst_element_op_;
 };
 
