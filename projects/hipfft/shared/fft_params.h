@@ -161,7 +161,7 @@ inline void set_input(std::vector<gpubuf>&       input,
 #ifndef USE_HIPRAND
     if(igen == fft_input_random_generator_device)
         throw std::runtime_error(
-            "Device input generation is not available, as hipRAND support is not enabled");
+            "Device random input generation is not available, as hipRAND support is not enabled");
 #endif // USE_HIPRAND
 
     if(igen == fft_input_generator_host || igen == fft_input_random_generator_host)
@@ -311,7 +311,7 @@ inline void set_input(std::vector<hostbuf>&      input,
                       const size_t               field_contig_dist)
 {
     if(igen == fft_input_generator_device || igen == fft_input_random_generator_device)
-        throw std::runtime_error("Device input generation is not available for host buffers");
+        throw std::runtime_error("Device random input generation is not available for host buffers");
 
     switch(itype)
     {
