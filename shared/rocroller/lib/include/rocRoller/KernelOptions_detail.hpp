@@ -44,7 +44,7 @@ namespace rocRoller
          * SGPRs by the GPU at the beginning of the kernel. If it is set to -1, this is
          * unlimited and we will use the maximum defined by the architecture.
          */
-        int  systemPreloadedKernelArguments = -1;
+        int systemPreloadedKernelArguments = -1;
 
         /**
          * If enabled, kernel arguments that are not preloaded by the system will be lazily

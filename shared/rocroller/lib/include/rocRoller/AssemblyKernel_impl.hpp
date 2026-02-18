@@ -65,7 +65,7 @@ namespace rocRoller
     }
 
     inline AssemblyKernel& AssemblyKernel::operator=(AssemblyKernel const& rhs) = default;
-    inline AssemblyKernel& AssemblyKernel::operator=(AssemblyKernel&& rhs)      = default;
+    inline AssemblyKernel& AssemblyKernel::operator=(AssemblyKernel&& rhs) = default;
 
     inline std::string AssemblyKernel::kernelName() const
     {

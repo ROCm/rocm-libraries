@@ -55,7 +55,8 @@ public:
     template <typename... Args>
     void operator()(rocRoller::KernelInvocation const& invocation, Args const&... args);
 
-    void operator()(rocRoller::KernelInvocation const& invocation, rocRoller::KernelArguments const& args);
+    void operator()(rocRoller::KernelInvocation const& invocation,
+                    rocRoller::KernelArguments const&  args);
 
     /**
      * Get the assembled code object as bytes.

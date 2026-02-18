@@ -59,7 +59,9 @@ namespace rocRoller
                   int                    expcnt);
         WaitCount(GPUArchitecture const& arch, GPUWaitQueue, int count);
 
-        WaitCount(GPUArchitecture const& arch, EnumBitset<GPUWaitQueueType> queuesToEmpty, std::string const& message = "");
+        WaitCount(GPUArchitecture const&       arch,
+                  EnumBitset<GPUWaitQueueType> queuesToEmpty,
+                  std::string const&           message = "");
 
         ~WaitCount() = default;
 
@@ -93,11 +95,15 @@ namespace rocRoller
         /**
          * This means to empty the specified queue, i.e. include a waitcount of 0 if that queue is not empty.
          */
-        static WaitCount EmptyQueue( GPUArchitecture const& arch, GPUWaitQueueType queue, std::string const& message = "");
+        static WaitCount EmptyQueue(GPUArchitecture const& arch,
+                                    GPUWaitQueueType       queue,
+                                    std::string const&     message = "");
         /**
          * This means to empty the specified queues, i.e. include a waitcount of 0 if any of the specified queues are not empty.
          */
-        static WaitCount EmptyQueue( GPUArchitecture const& arch, EnumBitset<GPUWaitQueueType> queues, std::string const& message = "");
+        static WaitCount EmptyQueue(GPUArchitecture const&       arch,
+                                    EnumBitset<GPUWaitQueueType> queues,
+                                    std::string const&           message = "");
 
         std::string toString(LogLevel level) const;
         void        toStream(std::ostream& os, LogLevel level) const;

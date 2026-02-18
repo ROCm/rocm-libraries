@@ -57,7 +57,7 @@ namespace rocRoller
                 if(pair.second.size() > 0)
                 {
                     auto wqType = m_typeInQueue.at(pair.first);
-                    auto idx = static_cast<size_t>(wqType);
+                    auto idx    = static_cast<size_t>(wqType);
 
                     AssertFatal(idx < rv.waitLengths.size(),
                                 ShowValue(static_cast<size_t>(wqType)),
@@ -87,9 +87,8 @@ namespace rocRoller
             for(auto qt : whichQueues)
             {
                 auto idx = static_cast<size_t>(qt);
-                AssertFatal(idx < rv.waitLengths.size(),
-                            ShowValue(qt),
-                            ShowValue(rv.waitLengths.size()));
+                AssertFatal(
+                    idx < rv.waitLengths.size(), ShowValue(qt), ShowValue(rv.waitLengths.size()));
                 auto waitCount = info.getWaitCount();
                 rv.waitLengths.at(idx) += waitCount == 0 ? 1 : waitCount;
             }

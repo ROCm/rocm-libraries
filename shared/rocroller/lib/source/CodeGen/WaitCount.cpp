@@ -101,9 +101,9 @@ namespace rocRoller
         }
     }
 
-    WaitCount::WaitCount(GPUArchitecture const&   arch,
+    WaitCount::WaitCount(GPUArchitecture const&       arch,
                          EnumBitset<GPUWaitQueueType> queuesToEmpty,
-                         std::string const&       message)
+                         std::string const&           message)
         : m_queuesToEmpty(queuesToEmpty)
         , m_comments({message})
     {
@@ -204,15 +204,15 @@ namespace rocRoller
     }
 
     WaitCount WaitCount::EmptyQueue(GPUArchitecture const& arch,
-                                    GPUWaitQueueType           queue,
+                                    GPUWaitQueueType       queue,
                                     std::string const&     message)
     {
         return EmptyQueue(arch, EnumBitset<GPUWaitQueueType>{queue}, message);
     }
 
-    WaitCount WaitCount::EmptyQueue(GPUArchitecture const&   arch,
+    WaitCount WaitCount::EmptyQueue(GPUArchitecture const&       arch,
                                     EnumBitset<GPUWaitQueueType> queues,
-                                    std::string const&       message)
+                                    std::string const&           message)
     {
         return WaitCount(arch, queues, message);
     }

@@ -65,59 +65,58 @@ namespace rocRoller
         return "";
     }
 
-        constexpr inline GPUWaitQueue fromWaitQueueType(GPUWaitQueueType input)
+    constexpr inline GPUWaitQueue fromWaitQueueType(GPUWaitQueueType input)
+    {
+        switch(input)
         {
-            switch(input)
-            {
-            case GPUWaitQueueType::LoadQueue:
-                return GPUWaitQueue::LoadQueue;
+        case GPUWaitQueueType::LoadQueue:
+            return GPUWaitQueue::LoadQueue;
 
-            case GPUWaitQueueType::StoreQueue:
-                return GPUWaitQueue::StoreQueue;
+        case GPUWaitQueueType::StoreQueue:
+            return GPUWaitQueue::StoreQueue;
 
-            case GPUWaitQueueType::DSQueue:
-                return GPUWaitQueue::DSQueue;
+        case GPUWaitQueueType::DSQueue:
+            return GPUWaitQueue::DSQueue;
 
-            case GPUWaitQueueType::SendMsgQueue:
-            case GPUWaitQueueType::SMemQueue:
-                return GPUWaitQueue::KMQueue;
+        case GPUWaitQueueType::SendMsgQueue:
+        case GPUWaitQueueType::SMemQueue:
+            return GPUWaitQueue::KMQueue;
 
-            case GPUWaitQueueType::EXPQueue:
-                return GPUWaitQueue::EXPQueue;
+        case GPUWaitQueueType::EXPQueue:
+            return GPUWaitQueue::EXPQueue;
 
-            case GPUWaitQueueType::VSQueue:
-                return GPUWaitQueue::VSQueue;
+        case GPUWaitQueueType::VSQueue:
+            return GPUWaitQueue::VSQueue;
 
+        case GPUWaitQueueType::FinalInstruction:
+        case GPUWaitQueueType::None:
+            return GPUWaitQueue::None;
 
-            case GPUWaitQueueType::FinalInstruction:
-            case GPUWaitQueueType::None:
-                return GPUWaitQueue::None;
-            
-                case GPUWaitQueueType::Count:
-                    return GPUWaitQueue::Count;
-            }
+        case GPUWaitQueueType::Count:
+            return GPUWaitQueue::Count;
         }
+    }
 
     inline std::string toString(GPUWaitQueue input)
     {
         switch(input)
         {
-            case GPUWaitQueue::LoadQueue:
-                return "LoadQueue";
-            case GPUWaitQueue::StoreQueue:
-                return "StoreQueue";
-            case GPUWaitQueue::KMQueue:
-                return "KMQueue";
-            case GPUWaitQueue::DSQueue:
-                return "DSQueue";
-            case GPUWaitQueue::EXPQueue:
-                return "EXPQueue";
-            case GPUWaitQueue::VSQueue:
-                return "VSQueue";
-            case GPUWaitQueue::Count:
-                return "Count";
-            case GPUWaitQueue::None:
-                return "None";
+        case GPUWaitQueue::LoadQueue:
+            return "LoadQueue";
+        case GPUWaitQueue::StoreQueue:
+            return "StoreQueue";
+        case GPUWaitQueue::KMQueue:
+            return "KMQueue";
+        case GPUWaitQueue::DSQueue:
+            return "DSQueue";
+        case GPUWaitQueue::EXPQueue:
+            return "EXPQueue";
+        case GPUWaitQueue::VSQueue:
+            return "VSQueue";
+        case GPUWaitQueue::Count:
+            return "Count";
+        case GPUWaitQueue::None:
+            return "None";
         }
     }
 

@@ -565,87 +565,88 @@ namespace ArgumentLoaderGPUTest
         m_context->schedule(k->amdgpu_metadata());
     }
 
-        ArgumentLoaderExprKernel::ExpectedKernelStatistics ArgumentLoaderExprKernel::kernelStatistics() const
+    ArgumentLoaderExprKernel::ExpectedKernelStatistics
+        ArgumentLoaderExprKernel::kernelStatistics() const
+    {
+        ExpectedKernelStatistics stats;
+
+        const auto widths = {16, 8, 4, 2, 1};
+
+        for(auto width : widths)
+            stats.scalarLoadsByDWordCount[width] = 0;
+
+        auto lazyLoad = m_context->kernelOptions()->lazyLoadKernelArguments;
+        Log::debug("LazyLoad: {}", lazyLoad);
+
+        int eagerBegin = 0, eagerEnd = 0;
+
+        for(auto const& karg : m_context->kernel()->arguments())
         {
-            ExpectedKernelStatistics stats;
+            if(karg.getPreloaded())
+                eagerBegin = karg.getOffset() + karg.getSize();
 
-            const auto widths = {16, 8, 4, 2, 1};
+            if(!karg.getPreloaded() && !lazyLoad)
+                eagerEnd = karg.getOffset() + karg.getSize();
 
-            for(auto width : widths)
-                stats.scalarLoadsByDWordCount[width] = 0;
-
-            auto lazyLoad = m_context->kernelOptions()->lazyLoadKernelArguments;
-            Log::debug("LazyLoad: {}", lazyLoad);
-
-            int eagerBegin = 0, eagerEnd = 0;
-
-            for(auto const& karg : m_context->kernel()->arguments())
+            if(lazyLoad && !karg.getPreloaded())
             {
-                if(karg.getPreloaded())
-                    eagerBegin = karg.getOffset() + karg.getSize();
-
-                if(!karg.getPreloaded() && !lazyLoad)
-                    eagerEnd = karg.getOffset() + karg.getSize();
-
-                if(lazyLoad && !karg.getPreloaded())
+                stats.numWaits++;
+                if(karg.getSize() == 4)
                 {
-                    stats.numWaits++;
-                    if(karg.getSize() == 4)
-                    {
-                        stats.scalarLoadsByDWordCount[1]++;
-                    }
-                    else if(karg.getSize() == 8)
-                    {
-                        stats.scalarLoadsByDWordCount[2]++;
-                    }
-                    else
-                    {
-                        FAIL("Unsupported argument size: " + std::to_string(karg.getSize()));
-                    }
+                    stats.scalarLoadsByDWordCount[1]++;
+                }
+                else if(karg.getSize() == 8)
+                {
+                    stats.scalarLoadsByDWordCount[2]++;
+                }
+                else
+                {
+                    FAIL("Unsupported argument size: " + std::to_string(karg.getSize()));
                 }
             }
-
-            if(lazyLoad && stats.numWaits > 0)
-                stats.numWaits = CeilDivide(stats.numWaits, 2);
-
-            if(!lazyLoad)
-            {
-                ExpectedKernelStatistics eagerStats;
-
-                int numEagerBytes = eagerEnd - eagerBegin;
-
-                Log::debug("numEagerBytes: {}", numEagerBytes);
-                if(numEagerBytes > 0)
-                    eagerStats.numWaits++;
-
-                int numLoadedBytes = 0;
-
-                for(auto widthIter = widths.begin();
-                    numEagerBytes > numLoadedBytes && widthIter != widths.end();
-                    ++widthIter)
-                {
-                    auto widthBytes      = *widthIter * 4;
-                    auto numInstructions = (numEagerBytes - numLoadedBytes) / widthBytes;
-
-                    eagerStats.scalarLoadsByDWordCount[*widthIter] += numInstructions;
-
-                    numLoadedBytes += numInstructions * widthBytes;
-                }
-
-                if(numEagerBytes > numLoadedBytes)
-                {
-                    eagerStats.scalarLoadsByDWordCount[1]++;
-                }
-
-                Log::debug("numEagerBytes={}, numLoadedBytes={}, eagerBegin={}, eagerEnd={}",
-                           numEagerBytes,
-                           numLoadedBytes,
-                           eagerBegin,
-                           eagerEnd);
-                stats.combine(eagerStats);
-            }
-
-            return stats;
         }
+
+        if(lazyLoad && stats.numWaits > 0)
+            stats.numWaits = CeilDivide(stats.numWaits, 2);
+
+        if(!lazyLoad)
+        {
+            ExpectedKernelStatistics eagerStats;
+
+            int numEagerBytes = eagerEnd - eagerBegin;
+
+            Log::debug("numEagerBytes: {}", numEagerBytes);
+            if(numEagerBytes > 0)
+                eagerStats.numWaits++;
+
+            int numLoadedBytes = 0;
+
+            for(auto widthIter = widths.begin();
+                numEagerBytes > numLoadedBytes && widthIter != widths.end();
+                ++widthIter)
+            {
+                auto widthBytes      = *widthIter * 4;
+                auto numInstructions = (numEagerBytes - numLoadedBytes) / widthBytes;
+
+                eagerStats.scalarLoadsByDWordCount[*widthIter] += numInstructions;
+
+                numLoadedBytes += numInstructions * widthBytes;
+            }
+
+            if(numEagerBytes > numLoadedBytes)
+            {
+                eagerStats.scalarLoadsByDWordCount[1]++;
+            }
+
+            Log::debug("numEagerBytes={}, numLoadedBytes={}, eagerBegin={}, eagerEnd={}",
+                       numEagerBytes,
+                       numLoadedBytes,
+                       eagerBegin,
+                       eagerEnd);
+            stats.combine(eagerStats);
+        }
+
+        return stats;
+    }
 
 }

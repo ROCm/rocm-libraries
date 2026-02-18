@@ -305,7 +305,6 @@ namespace rocRoller::KernelGraph
                     m_directlyReferencedArgs.insert(arg);
                 }
             }
-
         }
 
         // Arguments directly used in control flow (before propagation)

@@ -1098,8 +1098,10 @@ namespace rocRoller
 
             if(m_options.alignment <= 0)
             {
-                m_options.alignment = m_variableType.registerAlignment(
-                    m_regType, m_options.contiguousChunkWidth, m_context.lock()->targetArchitecture());
+                m_options.alignment
+                    = m_variableType.registerAlignment(m_regType,
+                                                       m_options.contiguousChunkWidth,
+                                                       m_context.lock()->targetArchitecture());
             }
 
             if(m_options.contiguousChunkWidth != Register::MANUAL)

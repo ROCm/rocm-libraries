@@ -462,7 +462,7 @@ namespace rocRoller
 
             int               registerCount() const;
             AllocationOptions options() const;
-            void setOptions(AllocationOptions options = {});
+            void              setOptions(AllocationOptions options = {});
 
             std::vector<int> const& registerIndices() const;
 

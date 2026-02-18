@@ -69,7 +69,7 @@ rocRoller::ContextPtr AssemblyTestKernel::getContext() const
 }
 
 void AssemblyTestKernel::operator()(rocRoller::KernelInvocation const& invocation,
-                                    rocRoller::KernelArguments const& args)
+                                    rocRoller::KernelArguments const&  args)
 {
     REQUIRE_TEST_TAG("gpu");
 

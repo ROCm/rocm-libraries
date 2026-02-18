@@ -123,10 +123,9 @@ namespace rocRoller
 
         std::unordered_map<std::string, Register::ValuePtr> m_loadedValues;
 
-
         Register::ValuePtr m_preloadedBlock;
         Register::ValuePtr m_manuallyLoadedBlock;
-        int m_manuallyLoadedOffset = 0;
+        int                m_manuallyLoadedOffset = 0;
 
         void populateAnyArgumentsFlags() const;
 

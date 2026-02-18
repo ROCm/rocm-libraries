@@ -112,11 +112,8 @@ namespace rocRoller
             auto options = Register::AllocationOptions::FullyContiguous();
             if(sizeBytes > 8)
                 options.alignment = 4;
-            value = Register::Value::Placeholder(m_context.lock(),
-                                                 Register::Type::Scalar,
-                                                 DataType::Raw32,
-                                                 totalRegisters,
-                                                 options);
+            value = Register::Value::Placeholder(
+                m_context.lock(), Register::Type::Scalar, DataType::Raw32, totalRegisters, options);
             value->setName(
                 fmt::format("Manually loaded argument block for range {}-{}", offset, endOffset));
         }
@@ -252,7 +249,7 @@ namespace rocRoller
         int endOffset = beginOffset + (rawRegs->registerCount() * 4);
 
         std::vector<std::vector<int>> indices;
-        std::vector<int> argIndices;
+        std::vector<int>              argIndices;
 
         for(int i = 0; i < args.size(); i++)
         {
@@ -279,11 +276,9 @@ namespace rocRoller
             Log::debug("Splitting regs:");
             for(int i = 0; i < indices.size(); i++)
             {
-                auto        argIdx = argIndices[i];
-                Log::debug("{} ({}): {}",
-                           argIdx,
-                           args.at(argIdx).getName(),
-                           fmt::join(indices[i], ", "));
+                auto argIdx = argIndices[i];
+                Log::debug(
+                    "{} ({}): {}", argIdx, args.at(argIdx).getName(), fmt::join(indices[i], ", "));
             }
         }
 

@@ -79,7 +79,8 @@ namespace rocRoller::KernelGraph
             visitor.walk();
 
             std::ranges::stable_sort(arguments, [&](auto const& a, auto const& b) {
-                return visitor.argumentFirstUse(a.getName()) < visitor.argumentFirstUse(b.getName());
+                return visitor.argumentFirstUse(a.getName())
+                       < visitor.argumentFirstUse(b.getName());
             });
         }
     }

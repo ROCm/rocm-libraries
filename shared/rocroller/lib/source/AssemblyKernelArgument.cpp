@@ -76,8 +76,7 @@ namespace rocRoller
                && m_dataDirection == rhs.m_dataDirection //
                && equivalent(m_expression, rhs.m_expression) //
                && m_offset == rhs.m_offset //
-               && m_size == rhs.m_size
-               && m_preloaded == rhs.m_preloaded;
+               && m_size == rhs.m_size && m_preloaded == rhs.m_preloaded;
     }
 
     std::string AssemblyKernelArgument::toString() const

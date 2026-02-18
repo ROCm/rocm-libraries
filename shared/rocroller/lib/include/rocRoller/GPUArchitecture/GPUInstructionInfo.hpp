@@ -36,42 +36,40 @@ namespace rocRoller
     /**
      * These represent the individual wait queues that exist on a GPU.
      */
-    enum class GPUWaitQueueType: int
+    enum class GPUWaitQueueType : int
     {
-            LoadQueue = 0,
-            StoreQueue,
-            SendMsgQueue,
-            SMemQueue,
-            DSQueue,
-            EXPQueue,
-            VSQueue,
-            FinalInstruction,
-            None,
-            Count,
-        };
+        LoadQueue = 0,
+        StoreQueue,
+        SendMsgQueue,
+        SMemQueue,
+        DSQueue,
+        EXPQueue,
+        VSQueue,
+        FinalInstruction,
+        None,
+        Count,
+    };
 
     std::string toString(GPUWaitQueueType);
 
     /**
      * These represent an individual register that a s_waitcnt instruction can target.
      */
-    enum class GPUWaitQueue: int
+    enum class GPUWaitQueue : int
     {
-            LoadQueue = 0,
-            StoreQueue,
-            KMQueue,
-            DSQueue,
-            EXPQueue,
-            VSQueue,
-            None,
-            Count,
-        };
+        LoadQueue = 0,
+        StoreQueue,
+        KMQueue,
+        DSQueue,
+        EXPQueue,
+        VSQueue,
+        None,
+        Count,
+    };
 
+    constexpr GPUWaitQueue fromWaitQueueType(GPUWaitQueueType input);
 
-        constexpr GPUWaitQueue fromWaitQueueType(GPUWaitQueueType input);
-
-        std::string toString(GPUWaitQueue input);
-
+    std::string toString(GPUWaitQueue input);
 
     enum class CoexecCategory : int
     {

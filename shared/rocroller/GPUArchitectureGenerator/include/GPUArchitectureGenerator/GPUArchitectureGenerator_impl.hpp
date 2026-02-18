@@ -368,9 +368,7 @@ namespace GPUArchitectureGenerator
                     }
                 }
 
-                {
-                    AddCapability(isaVersion, rocRoller::GPUCapability::MaxPreloadedKernargs, minVal);
-                }
+                AddCapability(isaVersion, rocRoller::GPUCapability::MaxPreloadedKernargs, minVal);
             }
 
             for(auto const& info : InstructionInfos)
