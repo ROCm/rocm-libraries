@@ -110,8 +110,11 @@ namespace rocRoller
         if(value == nullptr || value->registerCount() < totalRegisters)
         {
             auto options = Register::AllocationOptions::FullyContiguous();
-            if(sizeBytes > 8)
+            if(totalRegisters > 4)
                 options.alignment = 4;
+            else if(totalRegisters > 2)
+                options.alignment = 2;
+
             value = Register::Value::Placeholder(
                 m_context.lock(), Register::Type::Scalar, DataType::Raw32, totalRegisters, options);
             value->setName(
