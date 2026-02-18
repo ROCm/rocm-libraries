@@ -8,7 +8,7 @@ namespace {
 template <typename T>
 std::vector<T> generate_data_limited(const std::vector<T>& dims, int limit_multiplier, T single)
 {
-    const bool full_set = true; 
+    const bool full_set = true;
     const int limit_set = 2;
 
     if(full_set)
@@ -41,23 +41,30 @@ auto GetDataset()
 {
     std::vector<miopen::test::conv::conv_test_input> cases{};
 
-    auto batch_sizes            = generate_data_limited(miopen::test::conv::get_batch_sizes(), 1, std::size_t{1});
-    auto input_channels         = generate_data_limited(miopen::test::conv::get_input_channels(), 1, std::size_t{32});
-    auto output_channels        = generate_data_limited(miopen::test::conv::get_output_channels(), 1, std::size_t{64});
-    auto spatial_dim_elements   = generate_data_limited(miopen::test::conv::get_2d_spatial_dims(), 1, std::vector<std::size_t>{28, 28});
-    auto filter_dims            = generate_data_limited(miopen::test::conv::get_2d_filter_dims(), 2, std::vector<std::size_t>{3, 3});
-    auto pads_strides_dilations = generate_data_limited(miopen::test::conv::get_2d_pads_strides_dilations(), 2, std::vector<int>{1, 1, 1, 1, 1, 1});
-    auto trans_output_pads      = generate_data(miopen::test::conv::get_2d_trans_output_pads());
-    auto in_layouts             = generate_data(std::vector<std::string>{"NCHW"});
-    auto fil_layouts            = generate_data(std::vector<std::string>{"NCHW"});
-    auto out_layouts            = generate_data(std::vector<std::string>{"NCHW"});
-    auto deterministics         = generate_data(std::vector<bool>{false});
-    auto tensor_vects           = generate_data(std::vector<std::size_t>{0});
-    auto vector_lengths         = generate_data(std::vector<std::size_t>{1});
+    auto batch_sizes =
+        generate_data_limited(miopen::test::conv::get_batch_sizes(), 1, std::size_t{1});
+    auto input_channels =
+        generate_data_limited(miopen::test::conv::get_input_channels(), 1, std::size_t{32});
+    auto output_channels =
+        generate_data_limited(miopen::test::conv::get_output_channels(), 1, std::size_t{64});
+    auto spatial_dim_elements = generate_data_limited(
+        miopen::test::conv::get_2d_spatial_dims(), 1, std::vector<std::size_t>{28, 28});
+    auto filter_dims = generate_data_limited(
+        miopen::test::conv::get_2d_filter_dims(), 2, std::vector<std::size_t>{3, 3});
+    auto pads_strides_dilations = generate_data_limited(
+        miopen::test::conv::get_2d_pads_strides_dilations(), 2, std::vector<int>{1, 1, 1, 1, 1, 1});
+    auto trans_output_pads = generate_data(miopen::test::conv::get_2d_trans_output_pads());
+    auto in_layouts        = generate_data(std::vector<std::string>{"NCHW"});
+    auto fil_layouts       = generate_data(std::vector<std::string>{"NCHW"});
+    auto out_layouts       = generate_data(std::vector<std::string>{"NCHW"});
+    auto deterministics    = generate_data(std::vector<bool>{false});
+    auto tensor_vects      = generate_data(std::vector<std::size_t>{0});
+    auto vector_lengths    = generate_data(std::vector<std::size_t>{1});
     // Only valid for int8 input and weights
-    auto output_types           = generate_data(std::vector<std::string>{"int32"});
-    auto int8_vectorizes        = generate_data(std::vector<bool>{false});
-    auto group_counts           = generate_data(std::vector<int>{2, 4, 8}); // Standard group counts for test_conv_group
+    auto output_types    = generate_data(std::vector<std::string>{"int32"});
+    auto int8_vectorizes = generate_data(std::vector<bool>{false});
+    auto group_counts =
+        generate_data(std::vector<int>{2, 4, 8}); // Standard group counts for test_conv_group
 
     for(auto b : batch_sizes)
         for(auto ic : input_channels)
@@ -76,30 +83,34 @@ auto GetDataset()
                                                             for(auto iv : int8_vectorizes)
                                                                 for(auto gc : group_counts)
                                                                 {
-                                                                    // Group count must divide input and output channels
+                                                                    // Group count must divide input
+                                                                    // and output channels
                                                                     if(ic % gc != 0 || oc % gc != 0)
                                                                         continue;
 
-                                                                    miopen::test::conv::conv_test_input input{};
-                                                                    input.batch_size             = b;
-                                                                    input.input_channels         = ic;
-                                                                    input.output_channels        = oc;
-                                                                    input.spatial_dim_elements   = s;
-                                                                    input.filter_dims            = f;
-                                                                    input.pads_strides_dilations = p;
-                                                                    input.trans_output_pads      = tp;
-                                                                    input.in_layout              = il;
-                                                                    input.fil_layout             = fl;
-                                                                    input.out_layout             = ol;
-                                                                    input.deterministic          = d;
-                                                                    input.tensor_vect            = tv;
-                                                                    input.vector_length          = vl;
-                                                                    input.output_type            = ot;
-                                                                    input.int8_vectorize         = iv;
-                                                                    input.groupCount             = gc;
-                                                                    input.do_forward             = true;
-                                                                    input.do_backward_data       = true;
-                                                                    input.do_backward_weights    = true;
+                                                                    miopen::test::conv::
+                                                                        conv_test_input input{};
+                                                                    input.batch_size           = b;
+                                                                    input.input_channels       = ic;
+                                                                    input.output_channels      = oc;
+                                                                    input.spatial_dim_elements = s;
+                                                                    input.filter_dims          = f;
+                                                                    input.pads_strides_dilations =
+                                                                        p;
+                                                                    input.trans_output_pads = tp;
+                                                                    input.in_layout         = il;
+                                                                    input.fil_layout        = fl;
+                                                                    input.out_layout        = ol;
+                                                                    input.deterministic     = d;
+                                                                    input.tensor_vect       = tv;
+                                                                    input.vector_length     = vl;
+                                                                    input.output_type       = ot;
+                                                                    input.int8_vectorize    = iv;
+                                                                    input.groupCount        = gc;
+                                                                    input.do_forward        = true;
+                                                                    input.do_backward_data  = true;
+                                                                    input.do_backward_weights =
+                                                                        true;
                                                                     cases.push_back(input);
                                                                 }
     return cases;

@@ -39,9 +39,9 @@
 
 namespace test_helpers {
 template <typename T>
-constexpr bool
-    is_floating_point_tensor = (std::is_same_v<typename T::value_type, half_float::half> ||
-                                std::is_floating_point_v<typename T::value_type>);
+constexpr bool is_floating_point_tensor =
+    (std::is_same_v<typename T::value_type, half_float::half> ||
+     std::is_floating_point_v<typename T::value_type>);
 
 template <class... Ts>
 constexpr bool any_float_tensors()
@@ -123,7 +123,7 @@ auto CompareResults(VerifyT&& verifier, double tolerance = 80.f)
     return std::make_pair(cpu_result, gpu_result);
 }
 
-template<class VerifyT, class OnFailFunc>
+template <class VerifyT, class OnFailFunc>
 auto CompareResults(VerifyT&& verifier, OnFailFunc&& on_fail, double tolerance = 80.f)
     -> std::pair<decltype(verifier.cpu()), decltype(verifier.gpu())>
 {
