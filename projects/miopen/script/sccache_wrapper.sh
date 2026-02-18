@@ -36,10 +36,13 @@ setup_rocm_compilers_hash_file() {
     # Hence, this should be a viable alternative to using the binary checksum itself.
     CLANG_VERSION="$("${ROCM_PATH}/llvm/bin/clang" --version | head -n 1)"
     CLANG_OFFLOAD_BUNDLER_VERSION="$("${ROCM_PATH}/llvm/bin/clang-offload-bundler" --version | head -n 1)"
-    printf '%s: %s\n' 'clang version' "${CLANG_VERSION}" | tee -a "$SCCACHE_EXTRAFILES"
-    printf '%s: %s\n' 'clang-offload-bundler version' "${CLANG_OFFLOAD_BUNDLER_VERSION}" | tee -a "$SCCACHE_EXTRAFILES"
-    printf '%s: %s\n' 'hipcc md5sum' "${HIPCC_HASH_VALUE}" | tee -a "$SCCACHE_EXTRAFILES"
-    printf '%s: %s\n' 'devicelibs bitcode md5sum' "${DEVICELIBS_BITCODES_HASH_VALUE}" | tee -a "$SCCACHE_EXTRAFILES"
+    # Note: Removing the commit hash from the version string which will change on each build of TheRock.
+    # commenting out hipcc as it is not used as the default compiler
+    # and the hash value of the bitcode files too (TODO: Need to confirm if the bitcode hash is even requried)
+    printf '%s: %s\n' 'clang version' "${CLANG_VERSION}" | sed 's/ (.*)//' | tee -a "$SCCACHE_EXTRAFILES"
+    printf '%s: %s\n' 'clang-offload-bundler version' "${CLANG_OFFLOAD_BUNDLER_VERSION}" | sed 's/ (.*)//' | tee -a "$SCCACHE_EXTRAFILES"
+    # printf '%s: %s\n' 'hipcc md5sum' "${HIPCC_HASH_VALUE}" | tee -a "$SCCACHE_EXTRAFILES"
+    # printf '%s: %s\n' 'devicelibs bitcode md5sum' "${DEVICELIBS_BITCODES_HASH_VALUE}" | tee -a "$SCCACHE_EXTRAFILES"
     echo "sccache-wrapper: compilers hash file set up at ${SCCACHE_EXTRAFILES}"
     cat "$SCCACHE_EXTRAFILES"
 }
