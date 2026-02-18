@@ -51,7 +51,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 5028da50db14c24801a7695e754256016d5068db # 2026-02-10 commit
+          ref: f944d3f69a1c9eb77c13732a0483906dc8026702 # users/sareeder/miopen-plugin-move
 
       - name: Install python deps
         run: |
