@@ -52,10 +52,10 @@ struct amdgcn_mma<fp16_t,
     static constexpr index_t kBNBlock    = 1;
     static constexpr index_t kAMLane     = 16;
     static constexpr index_t kBNLane     = 16;
-    static constexpr index_t kABKLane    = 8;
+    static constexpr index_t kABKLane    = 2;
     static constexpr index_t kABKPerLane = 8;
     static constexpr index_t kCMLane     = 2;
-    static constexpr index_t kCNLane     = 2;
+    static constexpr index_t kCNLane     = 16;
     static constexpr index_t kCM0PerLane = 4;
     static constexpr index_t kCM1PerLane = 1;
 
