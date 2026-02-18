@@ -145,6 +145,12 @@ namespace rocRoller
             co_yield Instruction::Comment("Pad to make room for arg loading preamble.");
             for(int i = 0; i < 64; i++)
                 co_yield Instruction::Nop();
+
+            auto afterPaddingLabel = m_kernelStartLabel->getLabel() + "_exec_begin";
+            co_yield Instruction::Label(
+                afterPaddingLabel,
+                "Kernel execution starts here. Use this label instead of the "
+                "kernel name when setting a breakpoint.");
         }
     }
 
