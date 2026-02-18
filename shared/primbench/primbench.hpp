@@ -1171,7 +1171,7 @@ private:
         std::ostringstream ss;
         ss << "{";
 
-        ss << "\"results_version\":\"1.0.0\"";
+        ss << "\"results_version\":\"2.0.0\"";
         ss << ",\"general\":" << serialize_general(algorithm, specialization_count, amdsmi);
         ss << ",\"settings\":" << serialize_settings(settings);
 
