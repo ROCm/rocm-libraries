@@ -45,10 +45,10 @@ install(
     DESTINATION ${HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR}
     COMPONENT Development
     FILES_MATCHING
+    PATTERN "*.inl"
     PATTERN "*.hpp"
     PATTERN "*.h"
-    PATTERN "*.h.in"
-    PATTERN "*.inl" EXCLUDE
+    PATTERN "*.h.in" EXCLUDE
 )
 
 # Install generated version header
