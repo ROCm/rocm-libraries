@@ -338,9 +338,6 @@ staggerU_t select_staggerU(const problem_t& problem,
   size_t numCUs                     = hardware.N_CU;
   size_t numXCD                     = hardware.NUM_XCD;
   size_t numCUsPerXCD               = numCUs / numXCD;
-  size_t defaultStaggerUMapping     = 0;
-  size_t defaultStaggerU            = 0;
-  size_t defaultStaggerUStrideShift = 0;
 
   // Number of output MTs per split and batch
   size_t numMT_M = math::safe_ceil_div(M, MT_M);
@@ -486,8 +483,8 @@ staggerU_t select_staggerU(const problem_t& problem,
   // If they agree, use that direction. If they disagree, check how many intra-XCD
   // offsets survive switching to MALL direction. Otherwise the L2 loss is too 
   // severe, keep L2 direction.
-  size_t out_staggerUMapping;
-  size_t out_staggerU;
+  size_t out_staggerUMapping = 0;
+  size_t out_staggerU = 0;
   if (L2_mapping == Mall_mapping) {
     out_staggerUMapping = L2_mapping;
     out_staggerU = max_staggerU;
