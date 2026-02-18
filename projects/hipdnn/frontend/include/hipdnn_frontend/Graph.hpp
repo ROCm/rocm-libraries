@@ -1,5 +1,5 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 /**
  * @file Graph.hpp
@@ -1758,6 +1758,25 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Create a new tensor with similar properties to an existing tensor
+     * @param tensor The tensor to copy properties from
+     * @param name Optional name for the new tensor
+     * @return Shared pointer to the newly created TensorAttributes
+     *
+     * Creates a new TensorAttributes object by copying properties from the provided
+     * tensor, but clears the UID and optionally assigns a new name. This is useful
+     * for creating tensors with similar dimensions and data types but representing
+     * different data.
+     *
+     * @code{.cpp}
+     * // Create a tensor similar to x but with a different UID
+     * auto y = Graph::tensor_like(x, "output");
+     * y->set_uid(2);
+     * @endcode
+     *
+     * @see tensor() for creating a tensor with all properties preserved
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     static std::shared_ptr<TensorAttributes>
         tensor_like(const std::shared_ptr<TensorAttributes>& tensor, const std::string& name = "")
@@ -1771,6 +1790,26 @@ public:
         return newTensor;
     }
 
+    /**
+     * @brief Create a new tensor from existing tensor attributes
+     * @param tensor The tensor attributes to copy
+     * @return Shared pointer to the newly created TensorAttributes
+     *
+     * Creates a new TensorAttributes object as a copy of the provided tensor,
+     * preserving all properties including UID. This is the standard way to
+     * create a tensor for use in graph operations.
+     *
+     * @code{.cpp}
+     * // Create a tensor from attributes
+     * auto x = Graph::tensor(TensorAttributes()
+     *              .set_dim({1, 64, 28, 28})
+     *              .set_stride({50176, 784, 28, 1})
+     *              .set_data_type(DataType::HALF)
+     *              .set_uid(0));
+     * @endcode
+     *
+     * @see tensor_like() for creating a tensor with cleared UID and custom name
+     */
     static std::shared_ptr<TensorAttributes> tensor(const TensorAttributes& tensor)
     {
         auto newTensor = std::make_shared<TensorAttributes>(tensor);
