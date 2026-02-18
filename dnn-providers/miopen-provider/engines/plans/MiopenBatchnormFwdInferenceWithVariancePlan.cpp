@@ -96,9 +96,10 @@ const std::optional<MiopenTensor>& BatchnormFwdInferenceWithVarianceParams::acti
 }
 
 BatchnormFwdInferenceWithVariancePlan::BatchnormFwdInferenceWithVariancePlan(
-    BatchnormFwdInferenceWithVarianceParams&& inferenceParams, bool benchmarkingEnabled)
+    BatchnormFwdInferenceWithVarianceParams&& inferenceParams,
+    const MiopenExecutionSettings& executionSettings)
     : _inferenceParams(std::move(inferenceParams))
-    , _benchmarkingEnabled(benchmarkingEnabled)
+    , _executionSettings(executionSettings)
 {
 }
 
@@ -115,7 +116,7 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHand
                                                     [[maybe_unused]] void* workspace) const
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
 
     // Hardcoded values from bn_driver in miopen
     auto alpha = static_cast<float>(1);
