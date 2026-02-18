@@ -295,7 +295,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
  * @param hardware Hardware characteristics
  * @param config Kernel configuration.
  * @param skGrid SK grid.
- * @param autoWGM Auto-selected WGM.
+ * @param wgm WGM.
  * @return A staggerU_t struct: best predicted (staggerUMapping, staggerU, staggerUStrideShift).
  */
 staggerU_t select_staggerU(const problem_t& problem,
