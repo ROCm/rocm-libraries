@@ -203,4 +203,7 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
 
     return {graphBuilder.Release(), std::move(tensorMap), outputTensorUids};
 }
+
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 }
