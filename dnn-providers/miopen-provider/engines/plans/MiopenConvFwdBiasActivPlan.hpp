@@ -13,6 +13,7 @@
 #include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
+#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
 #include "PlanInterface.hpp"
@@ -58,9 +59,9 @@ class ConvFwdBiasActivPlan : public IPlan
 public:
     ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle,
                          ConvFwdBiasActivParams&& params,
+                         const MiopenExecutionSettings& executionSettings,
                          bool compile = true,
-                         bool getWsSize = true,
-                         bool benchmarkingEnabled = false);
+                         bool getWsSize = true);
     ~ConvFwdBiasActivPlan() override = default;
 
     ConvFwdBiasActivPlan(const ConvFwdBiasActivPlan&) = delete;
@@ -80,7 +81,7 @@ private:
     ConvFwdBiasActivParams _params;
     hipdnn_data_sdk::utilities::ScopedResource<miopenFusionPlanDescriptor_t> _fusePlanDesc;
     size_t _workspaceSize = 0;
-    bool _benchmarkingEnabled;
+    MiopenExecutionSettings _executionSettings;
 };
 
 } // namespace miopen_plugin
