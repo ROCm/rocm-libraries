@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -134,27 +134,114 @@ inline float to_host(__half x)
     return static_cast<float>(x);
 }
 
+// Helper function for implementing ASSERT_VEC_EQ.
+// This function stops on the first mismatching element,
+// printing its index and value.
 template<typename T>
-void assert_eq(const std::vector<T>& a, const std::vector<T>& b)
+testing::AssertionResult verify_vec_eq(const char*           a_str,
+                                       const char*           b_str,
+                                       const std::vector<T>& a,
+                                       const std::vector<T>& b)
 {
-    ASSERT_EQ(a.size(), b.size());
+    if(a.size() != b.size())
+    {
+        return testing::AssertionFailure() << "Expected equality of these values:\n"
+                                           << "  " << a_str << ".size()\n"
+                                           << "    Which is: " << a.size() << "\n"
+                                           << "  " << b_str << ".size()\n"
+                                           << "    Which is: " << b.size();
+    }
+
     for(size_t i = 0; i < a.size(); ++i)
     {
-        ASSERT_EQ(to_host(a[i]), to_host(b[i])) << "where i = " << i;
+        auto a_val = to_host(a[i]);
+        auto b_val = to_host(b[i]);
+        if(a_val != b_val)
+        {
+            return testing::AssertionFailure()
+                   << "Expected equality of these values:"
+                   << "\n  " << a_str << "[" << i << "]"
+                   << "\n    Which is: " << a_val << "\n  " << b_str << "[" << i << "]"
+                   << "\n    Which is: " << b_val;
+        }
     }
+
+    return testing::AssertionSuccess();
+}
+
+#define ASSERT_VEC_EQ(a, b) ASSERT_PRED_FORMAT2(verify_vec_eq, a, b)
+
+// Helper function for implementing ASSERT_VEC_NEAR.
+// This function is based on Google Test's DoubleNearPredFormat function.
+// This function stops on the first mismatching element,
+// printing its index and value in decimal and hexadecimal.
+testing::AssertionResult verify_near_element(
+    const char* a_str, const char* b_str, double a, double b, double abs_error, size_t index)
+{
+    double diff = std::fabs(a - b);
+    if(diff <= abs_error)
+        return testing::AssertionSuccess();
+
+    std::ostringstream a_hex, b_hex;
+    a_hex << std::hexfloat << a;
+    b_hex << std::hexfloat << b;
+
+    const double min_abs = std::min(std::fabs(a), std::fabs(b));
+    const double epsilon
+        = std::nextafter(min_abs, std::numeric_limits<double>::infinity()) - min_abs;
+    if(!(std::isnan)(a) && !(std::isnan)(b) && abs_error > 0 && abs_error < epsilon)
+    {
+        return testing::AssertionFailure()
+               << "Expected " << a_str << "[" << index << "] and " << b_str << "[" << index
+               << "] to be within epsilon " << abs_error << ", but difference is " << diff << ".\n"
+               << "  This epsilon is smaller than the minimum representable spacing at this "
+                  "magnitude,\n"
+               << "  making this check nearly equivalent to an equality check.\n"
+               << "  " << a_str << "[" << index << "]\n"
+               << "    Which is: " << a << " (" << a_hex.str() << ")\n"
+               << "  " << b_str << "[" << index << "]\n"
+               << "    Which is: " << b << " (" << b_hex.str() << ")";
+    }
+
+    return testing::AssertionFailure()
+           << "Expected " << a_str << "[" << index << "] and " << b_str << "[" << index
+           << "] to be within epsilon " << abs_error << ", but difference is " << diff << ":"
+           << "\n  " << a_str << "[" << index << "]"
+           << "\n    Which is: " << a << " (" << a_hex.str() << ")"
+           << "\n  " << b_str << "[" << index << "]"
+           << "\n    Which is: " << b << " (" << b_hex.str() << ")";
 }
 
 template<typename T>
-void assert_near(const std::vector<T>& a, const std::vector<T>& b, double eps)
+testing::AssertionResult verify_vec_near(const char*           a_str,
+                                         const char*           b_str,
+                                         const char*           abs_error_str,
+                                         const std::vector<T>& a,
+                                         const std::vector<T>& b,
+                                         double                abs_error)
 {
-    ASSERT_EQ(a.size(), b.size());
+    (void)abs_error_str;
+
+    if(a.size() != b.size())
+    {
+        return testing::AssertionFailure() << "Expected equality of these values:\n"
+                                           << "  " << a_str << ".size()\n"
+                                           << "    Which is: " << a.size() << "\n"
+                                           << "  " << b_str << ".size()\n"
+                                           << "    Which is: " << b.size();
+    }
+
     for(size_t i = 0; i < a.size(); ++i)
     {
-        ASSERT_NEAR(to_host(a[i]), to_host(b[i]), eps)
-            << "where i = " << i << ", a[i] = " << std::hexfloat << to_host(a[i])
-            << ", b[i] = " << to_host(b[i]);
+        auto result = verify_near_element(a_str, b_str, to_host(a[i]), to_host(b[i]), abs_error, i);
+        if(!result)
+            return result;
     }
+
+    return testing::AssertionSuccess();
 }
+
+#define ASSERT_VEC_NEAR(a, b, abs_error) ASSERT_PRED_FORMAT3(verify_vec_near, a, b, abs_error)
 
 template<typename T>
 double get_mean(const std::vector<T>& values)
