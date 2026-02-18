@@ -65,12 +65,10 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3;
 
 } // namespace ck::tensor_operation::device
 
-namespace ck_tile {
-namespace reflect {
+
+namespace ck_tile::reflect {
 /// @brief Tag type for DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle_V3 device kernel
-struct DeviceGroupedConvBwdData_multiple_d_Wmma_CShuffle_V3_Tag
-{
-};
+struct DeviceGroupedConvBwdData_multiple_d_Wmma_CShuffle_V3_Tag;
 
 template <index_t NDimSpatial,
           typename OutLayout_,   // output image
@@ -281,7 +279,7 @@ struct InstanceTraits<
         std::ostringstream oss;
 
         // Kernel type name
-        oss << "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3";
+        oss << kTensorOpName;
 
         // Template parameters in exact order
         oss << "<" << kSpatialDim;                      // 1. NDimSpatial
@@ -350,5 +348,4 @@ struct InstanceTraits<
     }
 };
 
-} // namespace reflect
-} // namespace ck_tile
+} // namespace ck_tile::reflect

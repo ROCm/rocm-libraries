@@ -552,7 +552,6 @@ inline std::string to_string<ConvAlgorithm_DeviceGroupedConvBwdDataMultipleD_Wmm
     oss << to_string(static_cast<ThreadBlock_>(t)) << "," << to_string(static_cast<WmmaGemm_>(t))
         << "," << to_string(static_cast<Transfer_<>>(t));
     return oss.str();
-    return oss.str();
 }
 
 template <>
@@ -563,7 +562,6 @@ inline std::string to_string<ConvAlgorithm_DeviceGroupedConvBwdDataMultipleD_Wmm
     oss << to_string(static_cast<ThreadBlock_>(t)) << ","
         << to_string(static_cast<WmmaGemmABK1_>(t)) << ","
         << to_string(static_cast<Transfer_<>>(t));
-    return oss.str();
     return oss.str();
 }
 

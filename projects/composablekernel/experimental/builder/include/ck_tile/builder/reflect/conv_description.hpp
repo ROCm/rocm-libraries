@@ -226,7 +226,7 @@ class ConvDescription : public Description
         else
             f.writeLine(
                 2,
-                "Struct does not contain optional max_transpose_dst_scalar_per_vector parameter");
+                "Struct does not contain optional max_transpose_transfer_dst_scalar_per_vector parameter");
         if(traits_.num_groups_to_merge)
             f.writeLast(2, "Num groups to merge: ", traits_.num_groups_to_merge.value_or(0));
         else

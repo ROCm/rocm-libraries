@@ -25,7 +25,7 @@ template <ConvSignatureDescriptor auto SIGNATURE,
     requires ConvDirectionIsBackwardData<SIGNATURE>
 struct ConvBwdDataMultiDWmmaV3Factory
 {
-    static constexpr size_t SPATIAL_DIM = SIGNATURE.spatial_dim;
+    static constexpr int SPATIAL_DIM = SIGNATURE.spatial_dim;
     using Layouts                       = internal::ConvTensorLayouts<SIGNATURE>;
     using Types                         = internal::ConvTensorDataTypes<SIGNATURE>;
     using Ops                           = internal::ConvElementwiseOps<SIGNATURE>;
