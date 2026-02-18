@@ -107,14 +107,14 @@ const MiopenTensor& ConvFwdBiasActivParams::y() const
 
 ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle,
                                            ConvFwdBiasActivParams&& params,
+                                           const MiopenExecutionSettings& executionSettings,
                                            bool compile,
-                                           bool getWsSize,
-                                           bool benchmarkingEnabled)
+                                           bool getWsSize)
     : _params(std::move(params))
-    , _benchmarkingEnabled(benchmarkingEnabled)
+    , _executionSettings(executionSettings)
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
 
     miopenFusionPlanDescriptor_t fusePlanDesc;
     THROW_ON_MIOPEN_FAILURE(miopenCreateFusionPlan(

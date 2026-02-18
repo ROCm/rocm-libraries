@@ -67,6 +67,7 @@ jobs:
           repository: "ROCm/TheRock"
           ref: f944d3f69a1c9eb77c13732a0483906dc8026702 # users/sareeder/miopen-plugin-move
 
+
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
         with:
