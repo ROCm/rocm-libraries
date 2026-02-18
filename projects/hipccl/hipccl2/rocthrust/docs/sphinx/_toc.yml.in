@@ -24,8 +24,6 @@ subtrees:
     title: Add rocThrust to a CMake project
   - file: how-to/run-rocThrust-tests-on-multiple-gpus
     title: Run tests on multiple GPUs
-  - file: how-to/rocThrust-build-backends.rst
-    title: Build on different backends
   - file: how-to/rocThrust-hipstdpar
     title: Use HIPSTDPAR
 
