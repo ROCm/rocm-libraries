@@ -119,9 +119,9 @@ protected:
 
     static hipdnnHandle_t setupEnvironmentWithPlugin(const std::string& pluginPath)
     {
-        ASSERT_EQ(hipInit(0), hipSuccess);
+        EXPECT_EQ(hipInit(0), hipSuccess);
         int deviceId = 0;
-        ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
+        EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
 
         // Load specific plugin
         const std::array<const char*, 1> paths = {pluginPath.c_str()};

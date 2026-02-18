@@ -1636,7 +1636,6 @@ TEST(PartitionTests, TestPartitionCopyDevice)
 //                                  0,
 //                                  size,
 //                                  thrust::raw_pointer_cast(&d_data[0]));
-HIP_CHECK(hipGetLastError());
 //
 //               ASSERT_EQ(h_data, d_data);
 //           }
