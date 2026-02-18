@@ -194,9 +194,10 @@ namespace rocRoller::KernelGraph
         if(maybeParentLDS)
             ldsTag = *maybeParentLDS;
 
-        if(tile.memoryType == MemoryType::WAVE)
+        if(tile.memoryType == MemoryType::VGPR)
         {
-            auto [vgprTag, vgpr] = graph.getDimension<VGPR>(tag);
+            auto [elemXTag, elemX] = graph.getDimension<ElementNumber>(tag, 0);
+            auto [elemYTag, elemY] = graph.getDimension<ElementNumber>(tag, 1);
 
             auto                   graphPtr = std::make_shared<KernelGraph>(graph);
             LoadStoreTileGenerator tileGenerator(
@@ -214,9 +215,10 @@ namespace rocRoller::KernelGraph
             auto numBytes = (numBits * numElements + 7u) / 8u;
 
             auto coords = graph.buildTransformer(tag);
-            coords.setCoordinate(vgprTag, Expression::literal(0));
+            coords.setCoordinate(elemXTag, Expression::literal(0));
+            coords.setCoordinate(elemYTag, Expression::literal(0));
             coords.fillExecutionCoordinates(nullptr, kernelWorkgroupIndexes, kernelWorkitemIndexes);
-            auto index = coords.reverse({ldsTag})[0];
+            auto index = coords.forward({ldsTag})[0];
 
             Log::debug("StoreLDSTile: tag {}, numBits {}, numElements {}, numBytes {}",
                        tag,

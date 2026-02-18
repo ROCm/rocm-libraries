@@ -1036,8 +1036,18 @@ namespace rocRoller
                                                    tag);
                 co_yield Instruction::Comment("GEN: StoreLDSTile");
 
-                co_yield m_loadStoreTileGenerator.genStoreLDSTile(
-                    tag, store, m_graph->buildTransformer(tag));
+                for(auto instr : m_loadStoreTileGenerator.genStoreLDSTile(
+                        tag, store, m_graph->buildTransformer(tag)))
+                {
+                    if(GPUInstructionInfo::isLDS(instr.getOpCode())
+                       && m_graph->modelledAddresses.contains(tag))
+                    {
+                        const auto addresses = m_graph->modelledAddresses.at(tag);
+                        instr.setModelledAddresses(addresses);
+                        instr.addComment(fmt::format("addresses {}", addresses));
+                    }
+                    co_yield std::move(instr);
+                }
             }
 
             Generator<Instruction> operator()(int tag, LoadTileDirect2LDS const& load)

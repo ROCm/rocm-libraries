@@ -223,14 +223,17 @@ namespace rocRoller
         {
             auto offsetTag
                 = m_graph->mapper.get<Offset>(info.tag, isStorePartOfGlobalToLDS ? 2 : 0);
-            rocRoller::Log::getLogger()->debug("KernelGraph::LoadStoreTileGenerator::getOffset(tag:"
-                                               " {}, offsetTag: {})",
-                                               info.tag,
-                                               offsetTag);
+            rocRoller::Log::getLogger()->info("KernelGraph::LoadStoreTileGenerator::getOffset(tag:"
+                                              " {}, offsetTag: {})",
+                                              info.tag,
+                                              offsetTag);
 
             AssertFatal(offsetTag >= 0, "No Offset found");
 
             ExpressionPtr rowOffsetExpr;
+
+            Log::info("has offset register? {}",
+                      m_context->registerTagManager()->hasRegister(offsetTag));
 
             if(m_context->registerTagManager()->hasRegister(offsetTag))
             {
@@ -1093,12 +1096,8 @@ namespace rocRoller
                                                waveTileTag);
 
             LoadStoreTileInfo result;
-            result.comment = concatenate("GEN: loadMacroTileWAVELDS OP ",
-                                         tag,
-                                         " LDS ",
-                                         ldsTag,
-                                         " WaveTile ",
-                                         waveTileTag);
+            result.comment = concatenate(
+                "GEN: loadMacroTileWAVELDS OP ", tag, " LDS ", ldsTag, " WaveTile ", waveTileTag);
 
             ldsTag = only(m_graph->coordinates.getOutputNodeIndices(ldsTag, CT::isEdge<View>))
                          .value_or(ldsTag);
@@ -1322,10 +1321,8 @@ namespace rocRoller
             co_yield loadMacroTileDirect2LDS(tag, load, coords);
         }
 
-        LoadStoreTileGenerator::LoadStoreTileInfo
-            LoadStoreTileGenerator::getStoreLDSTileInfo(int                  tag,
-                                                        StoreLDSTile const&  store,
-                                                        std::vector<std::string>& comments)
+        LoadStoreTileGenerator::LoadStoreTileInfo LoadStoreTileGenerator::getStoreLDSTileInfo(
+            int tag, StoreLDSTile const& store, std::vector<std::string>& comments)
         {
             auto [macTileTag, macTile] = m_graph->getDimension<MacroTile>(tag);
             (void)macTileTag;
@@ -1351,10 +1348,8 @@ namespace rocRoller
             }
         }
 
-        LoadStoreTileGenerator::LoadStoreTileInfo
-            LoadStoreTileGenerator::storeMacroTileLDSInfo(int                  tag,
-                                                          StoreLDSTile const&  store,
-                                                          std::vector<std::string>& comments)
+        LoadStoreTileGenerator::LoadStoreTileInfo LoadStoreTileGenerator::storeMacroTileLDSInfo(
+            int tag, StoreLDSTile const& store, std::vector<std::string>& comments)
         {
             auto [ldsTag, lds]   = m_graph->getDimension<LDS>(tag);
             auto [tileTag, tile] = m_graph->getDimension<MacroTile>(tag);
@@ -1377,7 +1372,6 @@ namespace rocRoller
 
             // Temporary register(s) that is used to copy the data from global memory to
             // local memory.
-            auto vgpr    = m_context->registerTagManager()->getRegister(tileTag);
             auto varType = store.varType;
 
             auto paddingBytes = tile.paddingBytes();
@@ -1406,11 +1400,14 @@ namespace rocRoller
             AssertFatal(n % packing == 0, ShowValue(n), ShowValue(packing));
             n /= packing;
 
-            LoadStoreTileInfo info{.tag              = tag,
-                                   .kind             = MemoryInstructions::MemoryKind::Local,
-                                   .m                = m,
-                                   .n                = n,
-                                   .data             = vgpr,
+            LoadStoreTileInfo info{.tag  = tag,
+                                   .kind = MemoryInstructions::MemoryKind::Local,
+                                   .m    = m,
+                                   .n    = n,
+                                   .data
+                                   = m_context->registerTagManager()->hasRegister(tileTag)
+                                         ? m_context->registerTagManager()->getRegister(tileTag)
+                                         : nullptr,
                                    .varType          = varType,
                                    .offset           = ldsOffset,
                                    .isTransposedTile = false,
@@ -1460,10 +1457,8 @@ namespace rocRoller
             co_yield moveTile<MemoryInstructions::MemoryDirection::Store>(info, coords);
         }
 
-        LoadStoreTileGenerator::LoadStoreTileInfo
-            LoadStoreTileGenerator::storeMacroTileWAVELDSInfo(int                  tag,
-                                                              StoreLDSTile const&  store,
-                                                              std::vector<std::string>& comments)
+        LoadStoreTileGenerator::LoadStoreTileInfo LoadStoreTileGenerator::storeMacroTileWAVELDSInfo(
+            int tag, StoreLDSTile const& store, std::vector<std::string>& comments)
         {
             auto [ldsTag, lds]           = m_graph->getDimension<LDS>(tag);
             auto [macTileTag, macTile]   = m_graph->getDimension<MacroTile>(tag);
