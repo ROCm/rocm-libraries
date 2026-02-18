@@ -193,7 +193,7 @@ struct ThreadwiseTransferHelper_Base
 
     // Generate a tuple of vector types from a data type tuple.
     template <typename DataTypes, index_t ScalarPerVector>
-    __host__ __device__ static auto GenerateVectors()
+    __host__ __device__ static auto MakeVectorContainerTuple()
     {
         auto data_types = DataTypes{};
 

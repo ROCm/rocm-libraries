@@ -131,7 +131,7 @@ struct ThreadwiseTensorSliceTransfer_v7r3
     template <typename DataTypes, index_t ScalarPerVector>
     __device__ static auto generate_vectors()
     {
-        return SFCHelper::GenerateVectors<DataTypes, ScalarPerVector>();
+        return SFCHelper::MakeVectorContainerTuple<DataTypes, ScalarPerVector>();
     }
 
     // SrcDescs: Tuple<const SrcDesc0&, const SrcDesc1&, ...>
