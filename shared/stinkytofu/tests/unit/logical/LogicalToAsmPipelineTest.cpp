@@ -27,10 +27,10 @@
 #include "stinkytofu/ir/logical/LogicalToFunctionConverter.hpp"
 #include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
 #include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
-#include "stinkytofu/core/PyLogicalModule.hpp"
+#include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include <gtest/gtest.h>
 #include <memory>
 #include <sstream>
@@ -62,26 +62,21 @@ protected:
 
 TEST_F(IRToAsmPipelineTest, SimpleVectorALU)
 {
-    // Step 1: Create PassManager and Function
-    PassManager pm;
-    Function&   func = pm.getPassContext().getFunction();
+    Function func("kernel");
+    BasicBlock* entryBB = func.createBasicBlock("entry");
 
-    // Step 2: Create instructions directly using factory functions (raw pointers)
-    // These instructions are now owned by the Function/IRList
     LogicalInstruction* vadd = VAddF32(v0, v1, v2, std::nullopt, std::nullopt, "add two floats");
     LogicalInstruction* vmul = VMulF32(v0, v0, v3, std::nullopt, std::nullopt, "multiply result");
+    entryBB->appendIR(static_cast<IRBase*>(vadd));
+    entryBB->appendIR(static_cast<IRBase*>(vmul));
 
-    // Create a basic block and add instructions
-    BasicBlock* entryBB = func.createBasicBlock("entry");
-    func.setEntryBlock(entryBB);
-    entryBB->getIR().push_back(static_cast<IRBase*>(vadd));
-    entryBB->getIR().push_back(static_cast<IRBase*>(vmul));
+    PassManager pm;
 
     // Verify initial setup
     size_t instCount = 0;
     for(BasicBlock& bb : func)
     {
-        instCount += bb.getIR().size();
+        instCount += bb.size();
     }
     EXPECT_EQ(instCount, 2) << "Should have 2 logical instructions in IRList";
 
@@ -103,14 +98,14 @@ TEST_F(IRToAsmPipelineTest, SimpleVectorALU)
     // Lower LogicalInstruction -> StinkyInstruction
     pm.addPass(createToStinkyAsmPass());
 
-    pm.run();
+    pm.run(func);
 
     // Verify lowering (all instructions should now be StinkyInstruction)
     instCount           = 0;
     size_t asmInstCount = 0;
     for(BasicBlock& bb : func)
     {
-        for(IRBase& ir : bb.getIR())
+        for(IRBase& ir : bb)
         {
             instCount++;
             if(ir.getType() == IRBase::IRType::StinkyTofu)

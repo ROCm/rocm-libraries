@@ -21,7 +21,7 @@
  *
  * ************************************************************************ */
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
-#include "stinkytofu/core/StinkyAsmModule.hpp"
+#include "stinkytofu/bindings/python/Module.hpp"
 
 #include <cmath>
 #include <iomanip>

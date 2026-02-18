@@ -59,9 +59,12 @@ configure_file(include/stinkytofu/Config.h.in include/stinkytofu/Config/Config.h
 # => clang/gcc: -fno-rtti -fno-exceptions
 # => MSVC: /GR- /EHs-c-
 set(STINKYTOFU_SOURCE_FILES
-    core/stinkytofu.cpp
-    core/PyLogicalModule.cpp
-    core/StinkyAsmModule.cpp
+    core/IRBase.cpp
+    core/BasicBlock.cpp
+    core/Function.cpp
+    core/PassManager.cpp
+    bindings/python/LogicalModule.cpp
+    bindings/python/Module.cpp
     ir/logical/LogicalToFunctionConverter.cpp
     ir/logical/LogicalOpcode.cpp
     serialization/logical/IRSerializer.cpp
@@ -89,6 +92,7 @@ set(STINKYTOFU_SOURCE_FILES
     ir/asm/StinkySignature.cpp
     serialization/asm/IRLexer.cpp
     serialization/asm/IRParser.cpp
+    serialization/asm/IRConverter.cpp
     serialization/asm/PatternParser.cpp
     analysis/asm/AsmVerifierPass.cpp
     analysis/logical/IRVerifierPass.cpp
@@ -194,7 +198,6 @@ install(DIRECTORY include/
     FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
     PATTERN "ir/python" EXCLUDE
 )
-
 # Install generated header files
 install(FILES
     ${PROJECT_BINARY_DIR}/stinkytofu/ir/logical/LogicalInstructions_generated.hpp

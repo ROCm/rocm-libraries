@@ -74,6 +74,8 @@ namespace stinkytofu
      */
     struct AsmDirective : public IRBase
     {
+        friend class IRBase;
+
         AsmDirectiveKind kind;
         std::string      name; // ".set", ".if", etc.
         std::string      comment;
@@ -88,6 +90,7 @@ namespace stinkytofu
         std::string filename; // For .include
         int64_t     intValue; // For .align, .skip, etc.
 
+    private:
         AsmDirective()
             : IRBase(IRType::StinkyAsmDirective)
             , kind(AsmDirectiveKind::SET)
@@ -95,6 +98,9 @@ namespace stinkytofu
         {
         }
 
+        ~AsmDirective() = default;
+
+    public:
         // Implement IRBase::dump()
         void dump(std::ostream& out) const override
         {
@@ -109,7 +115,6 @@ namespace stinkytofu
                 out << "  // " << comment;
         }
 
-    public:
         static bool classof(const IRBase* ir)
         {
             return ir->getType() == IRType::StinkyAsmDirective;

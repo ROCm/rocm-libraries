@@ -22,10 +22,11 @@
  * ************************************************************************ */
 #pragma once
 
-#include <ostream>
+#include <iosfwd>
 #include <string>
 
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace stinkytofu
 {
@@ -57,24 +58,21 @@ namespace stinkytofu
         int commentAlignColumn = 51;
     };
 
-    /// StinkyAsmEmitter - Converts StinkyTofu IR to actual assembly code.
-    ///
-    /// This class takes MLIR-style StinkyTofu IR and emits actual GPU assembly
-    /// code that can be assembled by the GPU assembler.
+    /// StinkyAsmEmitter - Converts StinkyTofu IR to actual GPU assembly code.
     ///
     /// Example usage:
     /// \code
-    /// IRList irlist;
-    /// // ... populate irlist ...
+    /// Function func("my_kernel");
+    /// ... populate Function ...
     ///
     /// AsmEmitterOptions options;
     /// options.emitComments = true;
     /// options.emitCycleInfo = true;
     ///
     /// StinkyAsmEmitter emitter(options);
-    /// std::string assembly = emitter.emit(irlist);
-    /// // or
-    /// emitter.emit(irlist, std::cout);
+    /// std::string assembly = emitter.emit(func);
+    ///
+    /// (or) emitter.emit(func, std::cout);
     /// \endcode
     class StinkyAsmEmitter
     {
@@ -89,17 +87,13 @@ namespace stinkytofu
         {
         }
 
-        /// Emit assembly code for a single instruction to a stream.
+        /// Emit assembly for a single instruction or an entire Function,
+        /// either to a stream or as a string.
         void emit(std::ostream& os, const StinkyInstruction& inst);
+        void emit(std::ostream& os, const Function& function);
 
-        /// Emit assembly code for an entire IRList to a stream.
-        void emit(std::ostream& os, const IRList& irlist);
-
-        /// Emit assembly code for a single instruction as a string.
         std::string emit(const StinkyInstruction& inst);
-
-        /// Emit assembly code for an entire IRList as a string.
-        std::string emit(const IRList& irlist);
+        std::string emit(const Function& function);
 
         const AsmEmitterOptions& getOptions() const
         {
@@ -115,12 +109,12 @@ namespace stinkytofu
         AsmEmitterOptions options;
     };
 
-    /// Utility function to convert IRList to assembly code string.
-    inline std::string toAssembly(const IRList&            irlist,
+    /// Utility function to convert Function to assembly code string.
+    inline std::string toAssembly(const Function&          function,
                                   const AsmEmitterOptions& options = AsmEmitterOptions())
     {
         StinkyAsmEmitter emitter(options);
-        return emitter.emit(irlist);
+        return emitter.emit(function);
     }
 
     /// Utility function to convert a single instruction to assembly code string.

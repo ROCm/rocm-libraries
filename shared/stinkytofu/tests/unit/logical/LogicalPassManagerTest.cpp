@@ -22,7 +22,7 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 
 using namespace stinkytofu;
 
@@ -100,8 +100,7 @@ Pass::ID InvalidateAnalysisPass::ID = &InvalidateAnalysisPass::ID;
 class PassManagerFlowTest : public ::testing::Test, public stinkytofu::PassManager
 {
 protected:
-    PassManagerFlowTest()           = default;
-    ~PassManagerFlowTest() override = default;
+    stinkytofu::Function func{"kernel"};
 
     void SetUp() override {}
 
@@ -111,25 +110,25 @@ protected:
 TEST_F(PassManagerFlowTest, AnalysisLazilyComputedAndCached)
 {
     registerAnalysisPass(std::make_unique<DummyAnalysis>());
-    run();
+    run(func);
 
-    auto& mgr = passCtx.getAnalysisManager();
-    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
+    auto& mgr = getPassContext().getAnalysisManager();
+    auto& a1  = mgr.getResult<DummyAnalysis>(func, getPassContext());
     EXPECT_EQ(a1.runCount, 1);
-    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
+    auto& a2 = mgr.getResult<DummyAnalysis>(func, getPassContext());
     EXPECT_EQ(a2.runCount, 1);
 }
 
 TEST_F(PassManagerFlowTest, ManualInvalidationRecomputesOnDemand)
 {
     registerAnalysisPass(std::make_unique<DummyAnalysis>());
-    run();
+    run(func);
 
-    auto& mgr = passCtx.getAnalysisManager();
-    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
+    auto& mgr = getPassContext().getAnalysisManager();
+    auto& a1  = mgr.getResult<DummyAnalysis>(func, getPassContext());
     ASSERT_EQ(a1.runCount, 1);
     mgr.invalidate(DummyAnalysis::ID);
-    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
+    auto& a2 = mgr.getResult<DummyAnalysis>(func, getPassContext());
     EXPECT_EQ(a2.runCount, 2);
 }
 
@@ -137,15 +136,15 @@ TEST_F(PassManagerFlowTest, NoOpPassDoesNotInvalidateAnalysis)
 {
     registerAnalysisPass(std::make_unique<DummyAnalysis>());
     addPass(std::make_unique<NoOpPass>());
-    run();
+    run(func);
 
-    auto& mgr = passCtx.getAnalysisManager();
-    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
+    auto& mgr = getPassContext().getAnalysisManager();
+    auto& a1  = mgr.getResult<DummyAnalysis>(func, getPassContext());
     ASSERT_EQ(a1.runCount, 1);
     addPass(std::make_unique<NoOpPass>());
 
-    run();
-    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
+    run(func);
+    auto& a2 = mgr.getResult<DummyAnalysis>(func, getPassContext());
     EXPECT_EQ(a2.runCount, 1);
 }
 
@@ -153,13 +152,13 @@ TEST_F(PassManagerFlowTest, InvalidatingPassTriggersRecomputeOnNextQuery)
 {
     registerAnalysisPass(std::make_unique<DummyAnalysis>());
     addPass(std::make_unique<InvalidateAnalysisPass>());
-    run();
-    auto& mgr = passCtx.getAnalysisManager();
-    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
+    run(func);
+    auto& mgr = getPassContext().getAnalysisManager();
+    auto& a1  = mgr.getResult<DummyAnalysis>(func, getPassContext());
     EXPECT_EQ(a1.runCount, 1);
     addPass(std::make_unique<InvalidateAnalysisPass>());
-    run();
-    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
+    run(func);
+    auto& a2 = mgr.getResult<DummyAnalysis>(func, getPassContext());
     EXPECT_EQ(a2.runCount, 2);
 }
 
@@ -167,16 +166,16 @@ TEST_F(PassManagerFlowTest, MixedPassSequenceMinimizesRecomputations)
 {
     registerAnalysisPass(std::make_unique<DummyAnalysis>());
     addPass(std::make_unique<NoOpPass>());
-    run();
-    auto& mgr = passCtx.getAnalysisManager();
-    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
+    run(func);
+    auto& mgr = getPassContext().getAnalysisManager();
+    auto& a1  = mgr.getResult<DummyAnalysis>(func, getPassContext());
     EXPECT_EQ(a1.runCount, 1);
     addPass(std::make_unique<NoOpPass>());
-    run();
-    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
+    run(func);
+    auto& a2 = mgr.getResult<DummyAnalysis>(func, getPassContext());
     EXPECT_EQ(a2.runCount, 1);
     addPass(std::make_unique<InvalidateAnalysisPass>());
-    run();
-    auto& a3 = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
+    run(func);
+    auto& a3 = mgr.getResult<DummyAnalysis>(func, getPassContext());
     EXPECT_EQ(a3.runCount, 2);
 }

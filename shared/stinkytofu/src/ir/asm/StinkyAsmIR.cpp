@@ -67,29 +67,16 @@ namespace stinkytofu
     }
 
     //----------------------------------------------------------------------
-    // StinkyInstIRBuilder implementation
+    // AsmIRBuilder implementation
     //----------------------------------------------------------------------
-    IRBuilder::ID StinkyInstIRBuilder::ID = &StinkyInstIRBuilder::ID;
-
-    StinkyInstruction* StinkyInstIRBuilder::createStinkyLabel(IRList::iterator   pos,
-                                                              const std::string& label)
+    StinkyInstruction* AsmIRBuilder::createLabel(const std::string& label)
     {
         static const HwInstDesc labelMCID{
             GFX::LABEL, GFX::LABEL, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
-        StinkyInstruction* labelInst = createStinkyInstBefore(pos, &labelMCID);
+        StinkyInstruction* labelInst = create(&labelMCID);
         labelInst->addModifier<LabelData>(LabelData{Modifier::Type::LABEL_NAME, label});
         return labelInst;
-    }
-
-    void StinkyInstIRBuilder::erase(StinkyInstruction* stinkyInst)
-    {
-        // Clean up use-def chains before deletion
-        stinkyInst->unlinkFromSources();
-        stinkyInst->unlinkFromUsers();
-
-        irlist->remove(stinkyInst);
-        delete stinkyInst;
     }
 
     //----------------------------------------------------------------------

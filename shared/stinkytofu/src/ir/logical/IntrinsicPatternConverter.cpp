@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/logical/IntrinsicPatternConverter.hpp"
 #include <cassert>
 #include <iostream>
@@ -114,12 +115,16 @@ namespace stinkytofu
         irModule.comment       = pattern.comment;
         irModule.pythonBinding = pattern.pythonBinding;
 
-        // Convert each text instruction to GenericIRInstruction
+        // Convert each text instruction to GenericIRInstruction (use createIR + custom deleter)
         for(const auto& inst : pattern.body)
         {
-            auto irInst = std::make_shared<GenericIRInstruction>(
+            auto* raw = IRBase::createIR<GenericIRInstruction>(
                 inst.destReg, inst.operation, inst.operands);
-            irModule.instructions.push_back(irInst);
+            irModule.instructions.push_back(
+                std::shared_ptr<LogicalInstruction>(raw, [](LogicalInstruction* p) {
+                    if(p)
+                        p->safeErase();
+                }));
         }
 
         return irModule;

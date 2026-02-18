@@ -29,9 +29,13 @@
 #include <optional>
 #include <vector>
 
-#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/core/BasicBlock.hpp"
+#include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/core/IRBase.hpp"
+#include "stinkytofu/core/IRBuilder.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu
@@ -459,6 +463,8 @@ namespace stinkytofu
     // Represents a single assembly instruction.
     struct StinkyInstruction : public IRBase
     {
+        friend class IRBase;
+
         // Instructions that use this instruction's output.
         std::vector<StinkyInstruction*> users;
         std::vector<StinkyInstruction*> sources;
@@ -482,7 +488,6 @@ namespace stinkytofu
         std::vector<StinkyRegister> destRegs;
         std::vector<StinkyRegister> srcRegs;
 
-    public:
         StinkyInstruction(const HwInstDesc* mcid)
             : IRBase(IRType::StinkyTofu)
             , hwInstDesc(mcid)
@@ -508,6 +513,7 @@ namespace stinkytofu
             }
         }
 
+    public:
         void addSrcReg(const StinkyRegister& srcReg)
         {
             srcRegs.push_back(srcReg);
@@ -635,7 +641,8 @@ namespace stinkytofu
         // not on the builder.
         //
         // Usage:
-        //   auto* inst = builder.createStinkyInstBefore(pos, mcid);
+        //   builder.setInsertionPoint(bb);  // or construct with desired block
+        //   auto* inst = builder.create(mcid);
         //   inst->setSrcRegs({v1, v2});   // Automatically links to v1/v2 definitions
         //   inst->setDestRegs({v0});      // Automatically tracks v0 users
         //
@@ -698,9 +705,9 @@ namespace stinkytofu
          *
          * @return New instruction (caller owns the pointer)
          */
-        StinkyInstruction* clone() const
+        StinkyInstruction* clone() const override
         {
-            StinkyInstruction* cloned = new StinkyInstruction(hwInstDesc);
+            StinkyInstruction* cloned = IRBase::createIR<StinkyInstruction>(hwInstDesc);
 
             // Copy register lists
             cloned->destRegs = destRegs;
@@ -883,55 +890,31 @@ namespace stinkytofu
         }
     };
 
-    // Builder for StinkyTofu IR (LLVM-style).
-    //
-    // Following LLVM/MLIR design principles:
-    // - Builder is for CREATION and DELETION only
-    // - Mutation methods (setSrcRegs, setDestRegs) are on StinkyInstruction itself
-    //
-    // All creation and deletion of StinkyTofu IR in **Passes** should be
-    // handled **exclusively** through this class.
-    //
-    // Note that PassContext owns the IRList, PassContext will delete IRBase
-    // when PassContext is destructed.
-    //
-    // Usage:
-    //   auto builder = StinkyInstIRBuilder(bb.getIR(), arch);
-    //   auto* inst = builder.createStinkyInstBefore(pos, mcid);
-    //   inst->setSrcRegs({v1, v2});   // Mutation is on the instruction
-    //   inst->setDestRegs({v0});
-    //   ...
-    //   builder.erase(inst);  // Deletion through builder
-    class StinkyInstIRBuilder : public IRBuilder
+    /// Builder for assembly-level IR. Use for creation only; mutation and
+    /// deletion are on the instruction (setSrcRegs, setDestRegs, erase).
+    /// In passes, create StinkyInstruction only through this builder.
+    class AsmIRBuilder : public IRBuilder
     {
     public:
-        static IRBuilder::ID ID;
-
         const GfxArchID arch;
 
-        StinkyInstruction* createStinkyInstBefore(IRList::iterator pos, const HwInstDesc* mcid)
+        StinkyInstruction* create(const HwInstDesc* mcid, IRBase* insertBefore = nullptr)
         {
-            assert(irlist != nullptr && "StinkyInstIRBuilder not initialized");
             assert(mcid != nullptr
                    && "Cannot create instruction with null descriptor - instruction not supported "
                       "on this architecture");
 
-            StinkyInstruction* stinkyInst = new StinkyInstruction(mcid);
-            irlist->insert(pos, stinkyInst);
-            return stinkyInst;
+            if(insertBefore == nullptr)
+                return createIR<StinkyInstruction>(mcid);
+
+            return createIR<StinkyInstruction>(insertBefore, mcid);
         }
 
-        // Create a StinkyInstruction with GFX::LABEL opcode.
-        // Note this is a temporary workaround for the fact that stinkytofu
-        // doesn't support basicblocks concept.
-        //
-        // TODO: Remove this once basicblocks concept is supported.
-        StinkyInstruction* createStinkyLabel(IRList::iterator pos, const std::string& label);
+        /// Creates a LABEL instruction. TODO: remove when basic-block labels are supported.
+        StinkyInstruction* createLabel(const std::string& label);
 
-        void erase(StinkyInstruction* stinkyInst);
-
-        StinkyInstIRBuilder(IRList& irlist, const GfxArchID& arch)
-            : IRBuilder(irlist)
+        AsmIRBuilder(BasicBlock& bb, const GfxArchID& arch)
+            : IRBuilder(bb)
             , arch(arch)
         {
         }
@@ -954,21 +937,6 @@ namespace stinkytofu
     inline StinkyInstruction& getStinkyInst(IRList::reverse_iterator it)
     {
         return *cast<StinkyInstruction>(it.getNodePtr());
-    }
-
-    // Helper function to get the IR list from a Function's entry BasicBlock.
-    // This is useful for passes that work on flat IR lists.
-    // Note: Assumes the Function has at least one BasicBlock.
-    inline IRList& getEntryIR(Function& func)
-    {
-        assert(func.getEntryBlock() && "Function must have an entry BasicBlock");
-        return func.getEntryBlock()->getIR();
-    }
-
-    inline const IRList& getEntryIR(const Function& func)
-    {
-        assert(func.getEntryBlock() && "Function must have an entry BasicBlock");
-        return func.getEntryBlock()->getIR();
     }
 
     //----------------------------------------------------------------------

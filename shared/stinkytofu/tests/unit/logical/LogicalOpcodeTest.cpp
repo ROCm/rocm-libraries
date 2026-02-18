@@ -41,19 +41,19 @@ TEST_F(IROpcodeTest, InstructionOpcodes)
     StinkyRegister v2 = vgpr(2);
 
     // Create some IR instructions and check their opcodes
-    auto add = std::shared_ptr<LogicalInstruction>(VAddF32(v0, v1, v2));
+    auto add = makeLogicalInstructionShared(VAddF32(v0, v1, v2));
     EXPECT_EQ(add->getOpcode(), logical::VAddF32);
 
-    auto mul = std::shared_ptr<LogicalInstruction>(VMulF32(v0, v1, v2));
+    auto mul = makeLogicalInstructionShared(VMulF32(v0, v1, v2));
     EXPECT_EQ(mul->getOpcode(), logical::VMulF32);
 
-    auto fma = std::shared_ptr<LogicalInstruction>(VFmaF32(v0, v1, v2, v0));
+    auto fma = makeLogicalInstructionShared(VFmaF32(v0, v1, v2, v0));
     EXPECT_EQ(fma->getOpcode(), logical::VFmaF32);
 
-    auto max = std::shared_ptr<LogicalInstruction>(VMaxF32(v0, v1, v2));
+    auto max = makeLogicalInstructionShared(VMaxF32(v0, v1, v2));
     EXPECT_EQ(max->getOpcode(), logical::VMaxF32);
 
-    auto mov = std::shared_ptr<LogicalInstruction>(VMovB32(v0, v1));
+    auto mov = makeLogicalInstructionShared(VMovB32(v0, v1));
     EXPECT_EQ(mov->getOpcode(), logical::VMovB32);
 }
 
@@ -86,12 +86,12 @@ TEST_F(IROpcodeTest, F16Variants)
     StinkyRegister v1 = vgpr(1);
     StinkyRegister v2 = vgpr(2);
 
-    auto add = std::shared_ptr<LogicalInstruction>(VAddF16(v0, v1, v2));
+    auto add = makeLogicalInstructionShared(VAddF16(v0, v1, v2));
     EXPECT_EQ(add->getOpcode(), logical::VAddF16);
     EXPECT_STREQ(logical::getOpcodeName(logical::VAddF16), "VAddF16");
     EXPECT_STREQ(logical::getOpcodeMnemonic(logical::VAddF16), "v_add_f16");
 
-    auto mul = std::shared_ptr<LogicalInstruction>(VMulF16(v0, v1, v2));
+    auto mul = makeLogicalInstructionShared(VMulF16(v0, v1, v2));
     EXPECT_EQ(mul->getOpcode(), logical::VMulF16);
     EXPECT_STREQ(logical::getOpcodeName(logical::VMulF16), "VMulF16");
     EXPECT_STREQ(logical::getOpcodeMnemonic(logical::VMulF16), "v_mul_f16");
@@ -104,7 +104,7 @@ TEST_F(IROpcodeTest, LogicalNameBackwardCompatibility)
     StinkyRegister v1 = vgpr(1);
     StinkyRegister v2 = vgpr(2);
 
-    auto add = std::shared_ptr<LogicalInstruction>(VAddF32(v0, v1, v2));
+    auto add = makeLogicalInstructionShared(VAddF32(v0, v1, v2));
     EXPECT_STREQ(add->getLogicalName(), "VAddF32");
 
     // Logical name should match the opcode name

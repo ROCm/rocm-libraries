@@ -270,7 +270,6 @@ Final: min(1, IGNORE) = 1  <- Optimal! [x]
 '''cpp
 TEST_F(ConfigurableWaitCntPassTest, ScratchLoadBasic) {
     BasicBlock* bb = func->createBasicBlock("test");
-    func->setEntryBlock(bb);
 
     createScratchLoad(bb, arch, 0);
     createVAddF32(bb, arch, 1, 0, 2);  // Uses v0

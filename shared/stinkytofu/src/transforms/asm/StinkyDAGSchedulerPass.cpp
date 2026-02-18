@@ -210,26 +210,26 @@ namespace
     // This will split the instructions into regions based on side-effect instructions
     // and schedule each region in a DAG.
     //
-    // In the end, the instructions will be reordered in the IRList
+    // In the end, the instructions will be reordered in the block
     // to reflect the scheduling order.
-    static void scheduleInDAG(IRList& insts, ReadyQueue& readyQueue)
+    static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue)
     {
         PASS_DEBUG(std::cerr << "*** Scheduling Instructions in DAG: ***\n");
 
-        if(insts.empty())
+        if(bb.empty())
             return;
 
         std::vector<StinkyInstruction*> scheduled;
-        scheduled.reserve(insts.size());
+        scheduled.reserve(bb.size());
 
-        IntrusiveListIterator<IRBase> beginIt = insts.begin();
-        IntrusiveListIterator<IRBase> endIt   = insts.end();
+        BasicBlock::iterator beginIt = bb.begin();
+        BasicBlock::iterator endIt   = bb.end();
 
         readyQueue.onInit(beginIt, endIt);
 
-        IRList::iterator regionStart = beginIt;
+        BasicBlock::iterator regionStart = beginIt;
 
-        for(IRList::iterator it = beginIt; it != endIt; ++it)
+        for(BasicBlock::iterator it = beginIt; it != endIt; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
             // Only break regions on non-movable side effects
@@ -250,14 +250,15 @@ namespace
         // Flush the last region if it has not been flushed yet.
         scheduleRegionWithMovableSideEffects(regionStart, endIt, scheduled, readyQueue);
 
-        assert(scheduled.size() == insts.size()
+        assert(scheduled.size() == bb.size()
                && "Scheduled instructions size must match original instructions size");
 
         // Now we have a scheduled list of instructions.
-        // Modify the original insts list to reflect the scheduling.
+        // Reorder the block to reflect the scheduling (move each to end in order).
         for(StinkyInstruction* inst : scheduled)
         {
-            insts.moveBefore(IRList::iterator(inst), insts.end());
+            bb.removeIR(inst);
+            bb.appendIR(inst);
         }
     }
 
@@ -297,15 +298,13 @@ namespace
 
         void runOnBasicBlock(BasicBlock& bb, PassContext& passCtx)
         {
-            IRList& irlist = bb.getIR();
-
             // Use-def chains are already built by OptimizationPipeline
             // inst->sources and inst->users are ready to use
 
-            PASS_DEBUG(dumpUseDefChain(irlist));
+            PASS_DEBUG(dumpUseDefChain(bb));
 
             std::unique_ptr<ReadyQueue> readyQueue = chooseReadyQueue(passCtx);
-            scheduleInDAG(irlist, *readyQueue);
+            scheduleInDAG(bb, *readyQueue);
         }
 
         void run(Function& func, PassContext& passCtx) override

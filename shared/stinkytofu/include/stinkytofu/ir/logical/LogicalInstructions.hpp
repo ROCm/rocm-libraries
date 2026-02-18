@@ -22,11 +22,11 @@
  * ************************************************************************ */
 #pragma once
 
+#include "stinkytofu/core/IRBase.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp" // For StinkyRegister definition
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructionData.hpp"
 #include "stinkytofu/ir/logical/LogicalOpcode.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
 #include <iostream>
 #include <optional>
 #include <string>
@@ -56,11 +56,37 @@ namespace stinkytofu
     class LogicalInstruction : public IRBase
     {
     private:
+        friend class IRBase;
+
         logical::Opcode opcode_; ///< Opcode identifying the instruction type
         void*           specialData_; ///< Special data for MFMA/Label/IntrinsicCall (owned)
         InstFlagSet     flags_; ///< Instruction flags (matches Assembly IR flags)
 
+    protected:
+        /// Protected so subclasses (IntrinsicCall, GenericIRInstruction) can delegate; use createIR for creation.
+        explicit LogicalInstruction(logical::Opcode opcode)
+            : IRBase(IRType::LogicalIR)
+            , opcode_(opcode)
+            , specialData_(nullptr)
+        {
+        }
+
+        LogicalInstruction()
+            : IRBase(IRType::LogicalIR)
+            , opcode_(logical::UNKNOWN)
+            , specialData_(nullptr)
+        {
+        }
+
+        ~LogicalInstruction() override
+        {
+            freeSpecialData();
+        }
+
     public:
+        /// When true, this instruction is owned externally (e.g. by Python); safeErase() will only remove, not delete.
+        bool ownedExternally = false;
+
         std::vector<StinkyRegister> dests; ///< Destination registers
         std::vector<StinkyRegister> srcs; ///< Source registers
         std::string                 comment; ///< Optional comment
@@ -69,27 +95,6 @@ namespace stinkytofu
         std::optional<DPPModifiers>  dpp; ///< Data parallel processing modifier
         std::optional<SDWAModifiers> sdwa; ///< Sub-dword addressing modifier
         std::optional<DSModifiers>   ds; ///< LDS/GDS modifier
-
-        // Constructor taking opcode
-        explicit LogicalInstruction(logical::Opcode opcode)
-            : IRBase(IRType::LogicalIR)
-            , opcode_(opcode)
-            , specialData_(nullptr)
-        {
-        }
-
-        // Default constructor (for backward compatibility during migration)
-        LogicalInstruction()
-            : IRBase(IRType::LogicalIR)
-            , opcode_(logical::UNKNOWN)
-            , specialData_(nullptr)
-        {
-        }
-
-        virtual ~LogicalInstruction()
-        {
-            freeSpecialData();
-        }
 
         /// LLVM-style casting support
         static bool classof(const IRBase* ir)
@@ -148,6 +153,19 @@ namespace stinkytofu
         void setFlags(const InstFlagSet& flags)
         {
             flags_ = flags;
+        }
+
+        /**
+         * @brief Remove this logical instruction from its parent block; delete only if not ownedExternally.
+         * When ownedExternally is true (e.g. Python-owned), only remove() is called so the external
+         * owner retains the object. Otherwise behaves like erase().
+         */
+        void safeErase()
+        {
+            if(ownedExternally)
+                remove();
+            else
+                erase();
         }
 
         /**
@@ -365,6 +383,16 @@ namespace stinkytofu
             specialData_ = nullptr;
         }
     };
+
+    inline std::shared_ptr<LogicalInstruction> makeLogicalInstructionShared(LogicalInstruction* p)
+    {
+        p->ownedExternally = true;
+        return std::shared_ptr<LogicalInstruction>(p, [](LogicalInstruction* x) {
+            // Don't use safeErase() here; we want to delete the instruction because shared_ptr is the only owner.
+            if(x)
+                x->erase();
+        });
+    }
 
 } // namespace stinkytofu
 

@@ -30,11 +30,12 @@ namespace
 {
     using namespace stinkytofu;
 
-    static int
-        getLRDistance(IRList& insts, IRList::iterator regStart, std::vector<StinkyRegister>& lrDst)
+    static int getLRDistance(BasicBlock::iterator regStart,
+                            BasicBlock::iterator end,
+                            std::vector<StinkyRegister>& lrDst)
     {
         int cycles = 0;
-        for(IRList::iterator it = regStart; it != insts.end(); ++it)
+        for(BasicBlock::iterator it = regStart; it != end; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
             for(const StinkyRegister& reg : inst.getSrcRegs())
@@ -59,30 +60,30 @@ namespace
         }
         return cycles;
     }
-    // Schedule the First Group of PGRs in the given IRList.
+    // Schedule the First Group of PGRs in the given BasicBlock.
     // This will Move the PGR instructions to the suitable position to hide the latency.
     //
-    // In the end, the instructions will be reordered in the IRList
+    // In the end, the instructions will be reordered in the block
     // to reflect the scheduling order.
-    void scheduleFirstLocalReadWithLatency(IRList& insts, PassContext& passCtx)
+    void scheduleFirstLocalReadWithLatency(BasicBlock& bb, PassContext& passCtx)
     {
-        if(insts.empty())
+        if(bb.empty())
             return;
 
         std::vector<StinkyInstruction*> scheduled;
-        scheduled.reserve(insts.size());
+        scheduled.reserve(bb.size());
 
-        IntrusiveListIterator<IRBase> beginIt = insts.begin();
-        IntrusiveListIterator<IRBase> endIt   = insts.end();
+        BasicBlock::iterator beginIt = bb.begin();
+        BasicBlock::iterator endIt   = bb.end();
 
-        IRList::iterator regionEnd = beginIt;
+        BasicBlock::iterator regionEnd = beginIt;
 
         // 1. Find the first barrier
         // Count the number of MFMAs and LRs.
         auto                           numMFMA = 0;
         auto                           numLR   = 0;
         std::queue<StinkyInstruction*> scheLR;
-        for(IRList::iterator it = beginIt; it != endIt; ++it)
+        for(BasicBlock::iterator it = beginIt; it != endIt; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
             if(isBarrier(inst))
@@ -120,7 +121,7 @@ namespace
                 scheLR.pop();
             }
         }
-        for(IRList::iterator it = beginIt; it != regionEnd; ++it)
+        for(BasicBlock::iterator it = beginIt; it != regionEnd; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
             if(isDSRead(inst))
@@ -155,20 +156,21 @@ namespace
             scheLR.pop();
         }
 
-        for(IRList::iterator it = regionEnd; it != insts.end(); ++it)
+        for(BasicBlock::iterator it = regionEnd; it != bb.end(); ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
             scheduled.push_back(&inst);
         }
 
-        assert(scheduled.size() == insts.size()
+        assert(scheduled.size() == bb.size()
                && "Scheduled instructions size must match original instructions size");
 
         // Now we have a scheduled list of instructions.
-        // Modify the original insts list to reflect the scheduling.
+        // Reorder the block to reflect the scheduling (move each to end in order).
         for(StinkyInstruction* inst : scheduled)
         {
-            insts.moveBefore(IRList::iterator(inst), insts.end());
+            bb.removeIR(inst);
+            bb.appendIR(inst);
         }
     }
 
@@ -189,8 +191,7 @@ namespace
 
         void runOnBasicBlock(BasicBlock& bb, PassContext& passCtx)
         {
-            IRList& irlist = bb.getIR();
-            scheduleFirstLocalReadWithLatency(irlist, passCtx);
+            scheduleFirstLocalReadWithLatency(bb, passCtx);
         }
 
         void run(Function& func, PassContext& passCtx) override

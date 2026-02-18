@@ -41,6 +41,8 @@ namespace stinkytofu
      */
     struct MacroInstruction : public IRBase
     {
+        friend class IRBase;
+
         std::string name;
         std::string comment;
 
@@ -57,6 +59,7 @@ namespace stinkytofu
         uint32_t    value; // For DSInit
         std::string label; // For branch macros
 
+    private:
         MacroInstruction()
             : IRBase(IRType::StinkyTofu)
             , divisor(0)
@@ -66,6 +69,9 @@ namespace stinkytofu
         {
         }
 
+        ~MacroInstruction() = default;
+
+    public:
         // Implement IRBase::dump()
         void dump(std::ostream& out) const override
         {

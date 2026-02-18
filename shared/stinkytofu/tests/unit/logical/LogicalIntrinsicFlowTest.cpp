@@ -117,14 +117,14 @@ TEST_F(IntrinsicFlowTest, CreateIntrinsicCall)
 
     // Create IntrinsicCall
     std::vector<StinkyRegister> args = {v0, v1};
-    IntrinsicCall*              call = new IntrinsicCall("ReluF32", args);
+    IntrinsicCall*              call = IRBase::createIR<IntrinsicCall>("ReluF32", args);
 
     EXPECT_EQ(call->getFunctionName(), "ReluF32");
     EXPECT_TRUE(call->isComposite());
     EXPECT_EQ(strcmp(call->getLogicalName(), "IntrinsicCall"), 0);
     EXPECT_EQ(call->dests.size(), 2);
 
-    delete call;
+    call->safeErase();
 }
 
 TEST_F(IntrinsicFlowTest, IntrinsicUsageExample_ReluF32)

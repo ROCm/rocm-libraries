@@ -133,10 +133,9 @@ namespace
             // Only applies to specific instruction types (v_mov_b32, s_mov_b32, etc.)
 
             std::vector<StinkyInstruction*> blockInstructions;
-            IRList&                         irList = bb.getIR();
 
             // Collect all instructions
-            for(IRBase& irNode : irList)
+            for(IRBase& irNode : bb)
             {
                 if(irNode.getType() == IRBase::IRType::StinkyTofu)
                 {
@@ -203,9 +202,7 @@ namespace
                 // Clean up use-def chains before deletion
                 inst->unlinkFromSources();
                 inst->unlinkFromUsers();
-
-                irList.remove(inst);
-                delete inst;
+                inst->erase();
             }
 
             return toRemove.size();

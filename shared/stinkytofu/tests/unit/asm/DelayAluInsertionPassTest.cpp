@@ -24,7 +24,7 @@
 #include "stinkytofu/ir/asm/DefUseChain.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 #include <gtest/gtest.h>
@@ -46,7 +46,6 @@ protected:
         // Create function
         func = std::make_unique<Function>("test_delay_alu");
         bb   = func->createBasicBlock("entry");
-        func->setEntryBlock(bb);
 
         // Create pass
         pass = createDelayAluInsertionPass();
@@ -68,10 +67,9 @@ protected:
     // Uses automatic use-def chain maintenance (LLVM-style: methods on instruction)
     StinkyInstruction* createMulF32(int destReg, int src1Reg, int src2Reg)
     {
-        auto     builder   = StinkyInstIRBuilder(bb->getIR(), arch);
+        auto     builder   = AsmIRBuilder(*bb, arch);
         uint16_t isaOpcode = getMnemonicToIsaOpcode("v_mul_f32", arch);
-        auto*    inst      = builder.createStinkyInstBefore(
-            bb->getIR().end(), getMCIDByIsaOp(static_cast<IsaOpcode>(isaOpcode), arch));
+        auto*    inst      = builder.create(getMCIDByIsaOp(static_cast<IsaOpcode>(isaOpcode), arch));
 
         // Use instruction methods to automatically maintain use-def chains (LLVM-style)
         inst->setDestRegs({StinkyRegister("v", destReg, 1)});
@@ -83,10 +81,9 @@ protected:
     // Uses automatic use-def chain maintenance (LLVM-style: methods on instruction)
     StinkyInstruction* createAddF32(int destReg, int src1Reg, int src2Reg)
     {
-        auto     builder   = StinkyInstIRBuilder(bb->getIR(), arch);
+        auto     builder   = AsmIRBuilder(*bb, arch);
         uint16_t isaOpcode = getMnemonicToIsaOpcode("v_add_f32", arch);
-        auto*    inst      = builder.createStinkyInstBefore(
-            bb->getIR().end(), getMCIDByIsaOp(static_cast<IsaOpcode>(isaOpcode), arch));
+        auto*    inst      = builder.create(getMCIDByIsaOp(static_cast<IsaOpcode>(isaOpcode), arch));
 
         // Use instruction methods to automatically maintain use-def chains (LLVM-style)
         inst->setDestRegs({StinkyRegister("v", destReg, 1)});
@@ -98,7 +95,7 @@ protected:
     int countDelayAluInstructions()
     {
         int count = 0;
-        for(IRBase& irNode : bb->getIR())
+        for(IRBase& irNode : *bb)
         {
             if(irNode.getType() == IRBase::IRType::StinkyTofu)
             {
@@ -117,7 +114,7 @@ protected:
     int countInstructions()
     {
         int count = 0;
-        for(IRBase& irNode : bb->getIR())
+        for(IRBase& irNode : *bb)
         {
             if(irNode.getType() == IRBase::IRType::StinkyTofu)
             {

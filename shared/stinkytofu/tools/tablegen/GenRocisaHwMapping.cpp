@@ -73,7 +73,7 @@ namespace
         EmitMacroGuard emitMacro(os, "GET_ROCISA_TO_HW_CONVERSION_TABLE");
 
         // The callback function type:
-        //   std::vector<StinkyInstruction*> (convertFn*)(StinkyInstIRBuilder&, IRList&)
+        //   std::vector<StinkyInstruction*> (convertFn*)(rocisa::Instruction&, AsmIRBuilder&)
 
         os << "using namespace rocisa;\n";
         os << "static const std::unordered_map<std::type_index, ConvertRocisaToHwInstFunc>\n";

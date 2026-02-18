@@ -383,6 +383,7 @@ namespace stinkytofu
             {"VReadfirstlaneB32", "v_readfirstlane_b32"},
             {"VRndneF32", "v_rndne_f32"},
             {"VPermB32", "v_perm_b32"},
+            {"VPrngB32", "v_prng_b32"},
         };
         registry.setRocisaToArchMap(std::move(rocisaToArchMap));
     }

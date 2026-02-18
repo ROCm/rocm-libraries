@@ -23,9 +23,10 @@
 #include <gtest/gtest.h>
 
 #include "stinkytofu/pipeline/OptimizationPipeline.hpp"
+#include "stinkytofu/serialization/asm/IRConverter.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
 
 #include <sstream>
 #include <string>
@@ -66,7 +67,7 @@ protected:
         int count = 0;
         for(BasicBlock& bb : func)
         {
-            for(IRBase& ir : bb.getIR())
+            for(IRBase& ir : bb)
             {
                 if(ir.getType() == IRBase::IRType::StinkyTofu)
                     count++;

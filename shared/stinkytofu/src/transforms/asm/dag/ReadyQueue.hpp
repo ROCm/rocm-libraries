@@ -26,6 +26,7 @@
 #include <iostream> // TODO: don't use iostream.
 #include <queue>
 
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/DefUseChain.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
@@ -61,10 +62,10 @@ namespace
 
     using DAGNodeList = std::vector<DAGNode>;
 
-    static void dumpUseDefChain(const IRList& insts)
+    static void dumpUseDefChain(const BasicBlock& bb)
     {
         std::cerr << "*** Use-Def Chain Dump: ***\n";
-        for(const IRBase& ir : insts)
+        for(const IRBase& ir : bb)
         {
             const StinkyInstruction& inst = *cast<StinkyInstruction>(&ir);
 

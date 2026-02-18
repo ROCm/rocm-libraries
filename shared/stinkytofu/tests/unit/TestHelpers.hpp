@@ -31,36 +31,38 @@ namespace stinkytofu
     {
 
         /**
-     * @brief Add a vector of instructions to an IRList
+     * @brief Add a vector of instructions to a BasicBlock
      *
      * Helper function for tests using StinkyTofu builder, which returns
      * std::vector<StinkyInstruction*> to support composite instructions.
      *
-     * @param irList The IRList to append instructions to
+     * @param bb The BasicBlock to append instructions to
      * @param insts Vector of instructions from StinkyTofu builder
      * @return The first instruction, or nullptr if vector is empty
      *
-     * Usage:
+     * Usage (prefer BasicBlock's begin/end for iteration):
      * @code
      *   StinkyTofu builder({9, 4, 2});
-     *   IRList& irList = bb->getIR();
      *
      *   // Add single instruction
-     *   auto* add = addToIRList(irList, builder.VAddF32(vgpr(0), vgpr(1), vgpr(2)));
+     *   auto* add = addToIRList(*bb, builder.VAddF32(vgpr(0), vgpr(1), vgpr(2)));
      *
      *   // Add composite instruction (might be multiple instructions)
-     *   auto* pk = addToIRList(irList, builder.VAddPKF32(...));
+     *   auto* pk = addToIRList(*bb, builder.VAddPKF32(...));
+     *
+     *   // Iterate instructions using BasicBlock's begin/end
+     *   for (auto it = bb->begin(); it != bb->end(); ++it) { ... }
      * @endcode
      */
-        inline StinkyInstruction* addToIRList(IRList&                           irList,
-                                              std::vector<StinkyInstruction*>&& insts)
+        inline StinkyInstruction* addToIRList(BasicBlock&                        bb,
+                                            std::vector<StinkyInstruction*>&& insts)
         {
             if(insts.empty())
                 return nullptr;
 
             for(auto* inst : insts)
             {
-                irList.push_back(inst);
+                bb.appendIR(inst);
             }
             return insts[0];
         }

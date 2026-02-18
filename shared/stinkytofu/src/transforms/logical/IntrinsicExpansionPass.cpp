@@ -22,11 +22,11 @@
  * ************************************************************************ */
 
 #include "stinkytofu/transforms/logical/IntrinsicExpansionPass.hpp"
-#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/ir/logical/IntrinsicCall.hpp"
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/ir/logical/LogicalOpcode.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include <cstring>
 #include <iostream>
 
@@ -50,7 +50,7 @@ namespace stinkytofu
         }
 
         // Process all basic blocks
-        for(auto& bb : func.getBasicBlocks())
+        for(auto& bb : func)
         {
             // Skip filtered basic blocks
             if(!passCtx.shouldProcessBasicBlock(bb))
@@ -62,12 +62,10 @@ namespace stinkytofu
 
     void IntrinsicExpansionPass::expandIntrinsicsInBlock(BasicBlock& bb)
     {
-        IRList& irlist = bb.getIR();
-
         // Find all IntrinsicCall instructions first (to avoid iterator invalidation)
-        std::vector<IRList::iterator> intrinsicCalls;
+        std::vector<BasicBlock::iterator> intrinsicCalls;
 
-        for(auto it = irlist.begin(); it != irlist.end(); ++it)
+        for(auto it = bb.begin(); it != bb.end(); ++it)
         {
             IRBase* irNode = &(*it);
             if(irNode->getType() == IRBase::IRType::LogicalIR)
@@ -91,18 +89,9 @@ namespace stinkytofu
                 // Insert expanded instructions before the IntrinsicCall
                 for(auto* inst : expanded)
                 {
-                    irlist.insert(it, inst);
+                    bb.insertIR(it, inst);
                 }
-
-                // Remove and delete the IntrinsicCall
-                auto toRemove = it;
-                irlist.remove(&(*toRemove));
-
-                // Only delete if NOT externally owned (e.g., by shared_ptr)
-                if(!call->isExternallyOwned())
-                {
-                    delete call;
-                }
+                call->safeErase();
             }
         }
     }
@@ -164,7 +153,7 @@ namespace stinkytofu
                 // Clean up and return empty
                 for(auto* i : expanded)
                 {
-                    delete i;
+                    i->safeErase();
                 }
                 return {};
             }
@@ -191,7 +180,7 @@ namespace stinkytofu
         }
 
         // Create instruction directly (no factory needed!)
-        auto* inst = new LogicalInstruction(opcode);
+        auto* inst = IRBase::createIR<LogicalInstruction>(opcode);
 
         // Resolve and set destination register
         StinkyRegister dest;
@@ -199,7 +188,7 @@ namespace stinkytofu
         {
             std::cerr << "[IntrinsicExpansionPass] Error: Destination must be a register: "
                       << instDef.destReg << "\n";
-            delete inst;
+            inst->safeErase();
             return nullptr;
         }
         inst->dests.push_back(dest);
@@ -214,7 +203,7 @@ namespace stinkytofu
                 {
                     std::cerr << "[IntrinsicExpansionPass] Error: Unknown register: "
                               << srcDef.registerName << "\n";
-                    delete inst;
+                    inst->safeErase();
                     return nullptr;
                 }
                 inst->srcs.push_back(srcReg);

@@ -143,7 +143,7 @@ namespace stinkytofu
         out << "        bool neg = false,\n";
         out << "        const std::string& comment = \"\")\n";
         out << "    {\n";
-        out << "        auto* inst = new LogicalInstruction(logical::MFMA);\n";
+        out << "        auto* inst = IRBase::createIR<LogicalInstruction>(logical::MFMA);\n";
         out << "        \n";
         out << "        // Populate registers\n";
         out << "        inst->dests.push_back(acc);\n";
@@ -187,7 +187,7 @@ namespace stinkytofu
         out << "        bool reuseB = false,\n";
         out << "        const std::string& comment = \"\")\n";
         out << "    {\n";
-        out << "        auto* inst = new LogicalInstruction(logical::MXMFMA);\n";
+        out << "        auto* inst = IRBase::createIR<LogicalInstruction>(logical::MXMFMA);\n";
         out << "        \n";
         out << "        // Populate registers\n";
         out << "        inst->dests.push_back(acc);\n";
@@ -229,7 +229,7 @@ namespace stinkytofu
         out << "        bool neg = false,\n";
         out << "        const std::string& comment = \"\")\n";
         out << "    {\n";
-        out << "        auto* inst = new LogicalInstruction(logical::SMFMA);\n";
+        out << "        auto* inst = IRBase::createIR<LogicalInstruction>(logical::SMFMA);\n";
         out << "        \n";
         out << "        // Populate registers\n";
         out << "        inst->dests.push_back(acc);\n";
@@ -262,7 +262,7 @@ namespace stinkytofu
         out << "     */\n";
         out << "    inline LogicalInstruction* Label(const std::string& labelName)\n";
         out << "    {\n";
-        out << "        auto* inst = new LogicalInstruction(logical::Label);\n";
+        out << "        auto* inst = IRBase::createIR<LogicalInstruction>(logical::Label);\n";
         out << "        \n";
         out << "        // Labels have no operands\n";
         out << "        \n";
@@ -543,8 +543,8 @@ namespace stinkytofu
             out << "    {\n";
 
             // Function body: create LogicalInstruction with opcode
-            out << "        auto* inst = new LogicalInstruction(logical::" << inst.className
-                << ");\n";
+            out << "        auto* inst = IRBase::createIR<LogicalInstruction>(logical::"
+                << inst.className << ");\n";
 
             // Set destinations
             if(inst.hasDest)
@@ -747,8 +747,8 @@ namespace stinkytofu
             }
             out << ") {\n";
 
-            // Return factory function wrapped in shared_ptr
-            out << "        return std::shared_ptr<LogicalInstruction>(" << className << "(";
+            // Return factory function wrapped in shared_ptr (Python-owned: set ownedExternally)
+            out << "        return makeLogicalInstructionShared(" << className << "(";
 
             // Pass parameters, converting optional sources to pointers
             size_t srcIdx = 0;

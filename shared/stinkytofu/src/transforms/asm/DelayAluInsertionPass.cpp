@@ -21,12 +21,12 @@
  *
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/DelayAluInsertionPass.hpp"
-#include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/DefUseChain.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
-#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 #include <iostream>
 #include <map>
@@ -164,7 +164,7 @@ namespace
 
             // Collect all instructions in this basic block
             std::vector<StinkyInstruction*> instructions;
-            for(IRBase& irNode : bb.getIR())
+            for(IRBase& irNode : bb)
             {
                 if(irNode.getType() == IRBase::IRType::StinkyTofu)
                 {
@@ -236,12 +236,11 @@ namespace
             }
 
             // Create IRBuilder for this basic block
-            auto irBuilder = passCtx.getIRBuilder<StinkyInstIRBuilder>(bb.getIR(), arch);
+            auto irBuilder = AsmIRBuilder(bb, arch);
 
             // Insert s_delay_alu instructions (traverse forwards to get iterators)
-            int     insertCount = 0;
-            IRList& irlist      = bb.getIR();
-            for(auto it = irlist.begin(); it != irlist.end(); ++it)
+            int insertCount = 0;
+            for(BasicBlock::iterator it = bb.begin(); it != bb.end(); ++it)
             {
                 if(it->getType() != IRBase::IRType::StinkyTofu)
                     continue;
@@ -252,7 +251,7 @@ namespace
                     continue;
 
                 // Create s_delay_alu instruction before this instruction
-                if(!createDelayAluInst(delayIt->second, irBuilder, it, arch))
+                if(!createDelayAluInst(delayIt->second, irBuilder, inst, arch))
                     continue;
 
                 insertCount++;
@@ -262,8 +261,8 @@ namespace
         }
 
         bool createDelayAluInst(const PendingDelayAlu& delay,
-                                StinkyInstIRBuilder&   irBuilder,
-                                IRList::iterator       insertPoint,
+                                AsmIRBuilder&          irBuilder,
+                                StinkyInstruction*     insertPoint,
                                 GfxArchID              arch)
         {
             // Architecture check already done in run() - we only reach here for RDNA3
@@ -271,7 +270,7 @@ namespace
             uint16_t          isaOpcode = getMnemonicToIsaOpcode("s_delay_alu", arch);
             const HwInstDesc* desc      = getMCIDByIsaOp(static_cast<IsaOpcode>(isaOpcode), arch);
 
-            StinkyInstruction* inst = irBuilder.createStinkyInstBefore(insertPoint, desc);
+            StinkyInstruction* inst = irBuilder.create(desc, insertPoint);
 
             // Convert DelayAluType to SDelayAluData::InstType and create modifier
             SDelayAluData::InstType instType;

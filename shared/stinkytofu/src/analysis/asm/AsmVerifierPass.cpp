@@ -129,7 +129,7 @@ namespace stinkytofu
         {
             totalBlocks++;
 
-            for(IRBase& ir : bb.getIR())
+            for(IRBase& ir : bb)
             {
                 if(ir.getType() == IRBase::IRType::LogicalIR)
                 {

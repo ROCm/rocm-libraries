@@ -22,7 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include <memory>
 #include <string>
 
@@ -251,21 +251,7 @@ namespace stinkytofu
     class OptimizationPipeline
     {
     public:
-        /// Run pipeline with PassManager's internal Function (for use with custom passes)
-        ///
-        /// This version creates a PassManager with an empty Function. Custom passes
-        /// added via config (e.g., RocisaToStinkyAsmPass) populate and consume the Function.
-        ///
-        /// @param config Pipeline configuration (includes GEMM config, pass features, etc.)
-        /// @param bbFilter Basic block filter to apply
-        static void run(const PipelineConfig&        config,
-                        stinkytofu::BasicBlockFilter bbFilter
-                        = stinkytofu::BasicBlockFilterBuilder::all());
-
         /// Run pipeline on an external Function (for standalone optimization)
-        ///
-        /// This version transfers an external Function into PassManager, runs passes,
-        /// and transfers the results back. Used when you have an existing Function to optimize.
         ///
         /// @param func Function to process (modified in-place)
         /// @param config Pipeline configuration (includes GEMM config, pass features, etc.)
@@ -279,7 +265,9 @@ namespace stinkytofu
 
     private:
         /// Shared implementation for both run() overloads
-        static void runPipelineInternal(PassManager& passManager, const PipelineConfig& config);
+        static void runPipelineInternal(PassManager&          passManager,
+                                        Function&             func,
+                                        const PipelineConfig& config);
 
         /// Run optimization passes iteratively using PassManager
         static void runOptimizationPasses(PassManager& passManager, const PipelineConfig& config);

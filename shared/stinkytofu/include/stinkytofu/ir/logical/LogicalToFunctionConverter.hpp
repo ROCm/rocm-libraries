@@ -1,7 +1,8 @@
 #pragma once
 
-#include "stinkytofu/core/PyLogicalModule.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/bindings/python/LogicalModule.hpp"
+#include "stinkytofu/hardware/GfxIsa.hpp"
 #include <unordered_map>
 
 namespace stinkytofu
@@ -31,15 +32,15 @@ namespace stinkytofu
      * @code
      *   // Python creates PyLogicalModule
      *   auto module = std::make_shared<PyLogicalModule>("kernel");
-     *   module->add(std::make_shared<VAddF32>(...));
+     *   module->add(makeLogicalInstructionShared(VAddF32(...)));
      *
-     *   // C++ converts to Function for optimization
+     *   // C++ converts to Function; PyLogicalFunction wraps it and detaches Python-owned IRs on destroy
      *   Function func("kernel");
-     *   PassContext ctx;
+     *   PyLogicalFunction pyFunc(&func);
      *   LogicalToFunctionConverter converter(GfxArchID::Gfx942);
-     *   converter.convert(module.get(), func, ctx);
+     *   converter.convert(module.get(), pyFunc);
      *
-     *   // Now run optimization pipeline
+     *   // Now run optimization pipeline on func
      *   OptimizationPipeline::run(func, config);
      * @endcode
      */
@@ -53,20 +54,18 @@ namespace stinkytofu
         explicit LogicalToFunctionConverter(GfxArchID arch);
 
         /**
-         * @brief Convert PyLogicalModule to Function
+         * @brief Convert PyLogicalModule to PyLogicalFunction
          *
          * This performs the following steps:
          * 1. Extract raw pointers from shared_ptr<LogicalInstruction>
          * 2. Add LogicalInstruction* directly to IRList (NO lowering)
-         * 3. Transfer ownership: shared_ptr remains in Python, IRList holds raw pointers
-         *
-         * Note: LogicalInstruction* and StinkyInstruction* both inherit from IRBase*,
-         * so IRList can hold both. Lowering happens later as an optimization pass.
+         * 3. On destruction, PyLogicalFunction detaches
+         *    ownedExternally IRs so the list does not delete them.
          *
          * @param module Source PyLogicalModule (Python-side IR)
-         * @param func Destination Function (C++-side IR)
+         * @param pyFunc Destination PyLogicalFunction
          */
-        void convert(PyLogicalModule* module, Function& func);
+        void convert(PyLogicalModule* module, PyLogicalFunction& pyFunc);
 
         /**
          * @brief Convert with automatic label detection and block splitting
@@ -77,12 +76,12 @@ namespace stinkytofu
          * - Adds LogicalInstruction* directly to IRList (NO lowering)
          *
          * @param module Source PyLogicalModule
-         * @param func Destination Function
+         * @param pyFunc Destination PyLogicalFunction
          * @param autoSplitBlocks If true, split on labels (default: true)
          */
-        void convertWithAutoBlocks(PyLogicalModule* module,
-                                   Function&        func,
-                                   bool             autoSplitBlocks = true);
+        void convertWithAutoBlocks(PyLogicalModule*   module,
+                                   PyLogicalFunction& pyFunc,
+                                   bool               autoSplitBlocks = true);
 
     private:
         GfxArchID arch;

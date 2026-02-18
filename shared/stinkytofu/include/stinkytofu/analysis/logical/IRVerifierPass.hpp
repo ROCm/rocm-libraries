@@ -23,7 +23,8 @@
 
 #pragma once
 
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include <memory>
 #include <string>
 

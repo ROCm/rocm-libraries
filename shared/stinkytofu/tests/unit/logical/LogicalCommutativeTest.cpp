@@ -40,38 +40,38 @@ TEST(CommutativeTest, VectorArithmeticCommutative)
     {
         auto* add = VAddF32(dst, src0, src1);
         EXPECT_TRUE(add->isCommutative()) << "VAddF32 should be commutative";
-        delete add;
+        add->safeErase();
     }
 
     {
         auto* add = VAddF16(dst, src0, src1);
         EXPECT_TRUE(add->isCommutative()) << "VAddF16 should be commutative";
-        delete add;
+        add->safeErase();
     }
 
     {
         auto* add = VAddU32(dst, src0, src1);
         EXPECT_TRUE(add->isCommutative()) << "VAddU32 should be commutative";
-        delete add;
+        add->safeErase();
     }
 
     {
         auto* add = VAddI32(dst, src0, src1);
         EXPECT_TRUE(add->isCommutative()) << "VAddI32 should be commutative";
-        delete add;
+        add->safeErase();
     }
 
     // Test vector mul operations (should be commutative)
     {
         auto* mul = VMulF32(dst, src0, src1);
         EXPECT_TRUE(mul->isCommutative()) << "VMulF32 should be commutative";
-        delete mul;
+        mul->safeErase();
     }
 
     {
         auto* mul = VMulF16(dst, src0, src1);
         EXPECT_TRUE(mul->isCommutative()) << "VMulF16 should be commutative";
-        delete mul;
+        mul->safeErase();
     }
 }
 
@@ -88,26 +88,26 @@ TEST(CommutativeTest, VectorMinMaxCommutative)
     {
         auto* min = VMinF32(dst, src0, src1);
         EXPECT_TRUE(min->isCommutative()) << "VMinF32 should be commutative";
-        delete min;
+        min->safeErase();
     }
 
     {
         auto* min = VMinF16(dst, src0, src1);
         EXPECT_TRUE(min->isCommutative()) << "VMinF16 should be commutative";
-        delete min;
+        min->safeErase();
     }
 
     // Test vector max operations (should be commutative)
     {
         auto* max = VMaxF32(dst, src0, src1);
         EXPECT_TRUE(max->isCommutative()) << "VMaxF32 should be commutative";
-        delete max;
+        max->safeErase();
     }
 
     {
         auto* max = VMaxF16(dst, src0, src1);
         EXPECT_TRUE(max->isCommutative()) << "VMaxF16 should be commutative";
-        delete max;
+        max->safeErase();
     }
 }
 
@@ -226,6 +226,6 @@ TEST(CommutativeTest, NonCommutativeOperations)
     {
         auto* mov = VMovB32(dst, src0);
         EXPECT_FALSE(mov->isCommutative()) << "VMovB32 should NOT be commutative";
-        delete mov;
+        mov->safeErase();
     }
 }

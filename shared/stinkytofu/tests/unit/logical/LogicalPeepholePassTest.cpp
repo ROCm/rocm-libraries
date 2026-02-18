@@ -24,7 +24,7 @@
 #include "stinkytofu/transforms/logical/LogicalPeepholePass.hpp"
 #include "TestHelpers.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include <gtest/gtest.h>
 
 using namespace stinkytofu;
@@ -35,14 +35,10 @@ class LogicalPeepholePassTest : public ::testing::Test
 protected:
     void SetUp() override
     {
-        // Create pass context (automatically creates Function)
         passCtx = std::make_unique<PassContext>();
         arch    = GfxArchID::Gfx942;
 
-        // Create a basic block in the function
-        Function& func = passCtx->getFunction();
-        bb             = func.createBasicBlock("entry");
-        func.setEntryBlock(bb);
+        bb = func.createBasicBlock("entry");
     }
 
     void TearDown() override
@@ -50,13 +46,13 @@ protected:
         passCtx.reset();
     }
 
-    // Helper to run the pass
     void runPass()
     {
         auto pass = createLogicalPeepholePass();
-        pass->run(passCtx->getFunction(), *passCtx);
+        pass->run(func, *passCtx);
     }
 
+    Function                    func{"kernel"};
     std::unique_ptr<PassContext> passCtx;
     BasicBlock*                  bb;
     GfxArchID                    arch;
@@ -77,8 +73,7 @@ TEST_F(LogicalPeepholePassTest, EmptyModule)
     runPass();
 
     // Verify the function is still valid and empty
-    IRList& irlist = bb->getIR();
-    EXPECT_TRUE(irlist.empty());
+    EXPECT_TRUE(bb->empty());
 }
 
 // Test: Pass runs successfully on module with simple instructions
@@ -89,24 +84,22 @@ TEST_F(LogicalPeepholePassTest, SimpleInstructions)
     StinkyRegister v1 = vgpr(1);
     StinkyRegister v2 = vgpr(2);
 
-    IRList& irlist = bb->getIR();
-
     // v1 = v_add_f32(v0, v0) - use factory function
-    irlist.push_back(static_cast<IRBase*>(VAddF32(v1, v0, v0, std::nullopt, std::nullopt, "")));
+    bb->appendIR(static_cast<IRBase*>(VAddF32(v1, v0, v0, std::nullopt, std::nullopt, "")));
 
     // v2 = v_mul_f32(v1, 2.0)
-    irlist.push_back(
+    bb->appendIR(
         static_cast<IRBase*>(VMulF32(v2, v1, vgpr(2), std::nullopt, std::nullopt, "")));
 
     // Run pass - should not crash
     runPass();
 
     // Verify instructions are still there (no optimizations expected for this pattern)
-    EXPECT_FALSE(irlist.empty());
+    EXPECT_FALSE(bb->empty());
 
     // Count instructions
     size_t count = 0;
-    for(auto& ir : irlist)
+    for(auto& ir : *bb)
     {
         (void)ir;
         count++;
@@ -120,15 +113,14 @@ TEST_F(LogicalPeepholePassTest, MultipleRuns)
     StinkyRegister v0 = vgpr(0);
     StinkyRegister v1 = vgpr(1);
 
-    IRList& irlist = bb->getIR();
-    irlist.push_back(static_cast<IRBase*>(VAddF32(v1, v0, v0, std::nullopt, std::nullopt, "")));
+    bb->appendIR(static_cast<IRBase*>(VAddF32(v1, v0, v0, std::nullopt, std::nullopt, "")));
 
     // Run pass multiple times - should not crash and produce same results
     runPass();
 
     // Count instructions after first run
     size_t count1 = 0;
-    for(auto& ir : irlist)
+    for(auto& ir : *bb)
     {
         (void)ir;
         count1++;
@@ -138,7 +130,7 @@ TEST_F(LogicalPeepholePassTest, MultipleRuns)
 
     // Count instructions after second run - should be the same
     size_t count2 = 0;
-    for(auto& ir : irlist)
+    for(auto& ir : *bb)
     {
         (void)ir;
         count2++;
@@ -155,19 +147,17 @@ TEST_F(LogicalPeepholePassTest, MulMulFusion)
     StinkyRegister v1 = vgpr(1);
     StinkyRegister v2 = vgpr(2);
 
-    IRList& irlist = bb->getIR();
-
     // v1 = v_mul_f32(v0, 2.0)
-    irlist.push_back(
+    bb->appendIR(
         static_cast<IRBase*>(VMulF32(v1, v0, vgpr(10), std::nullopt, std::nullopt, "")));
 
     // v2 = v_mul_f32(v1, 3.0)
-    irlist.push_back(
+    bb->appendIR(
         static_cast<IRBase*>(VMulF32(v2, v1, vgpr(11), std::nullopt, std::nullopt, "")));
 
     // Verify we start with 2 instructions
     size_t countBefore = 0;
-    for(auto& ir : irlist)
+    for(auto& ir : *bb)
     {
         (void)ir;
         countBefore++;
@@ -179,7 +169,7 @@ TEST_F(LogicalPeepholePassTest, MulMulFusion)
 
     // Verify instructions after pass
     size_t countAfter = 0;
-    for(auto& ir : irlist)
+    for(auto& ir : *bb)
     {
         (void)ir;
         countAfter++;
@@ -201,17 +191,15 @@ TEST_F(LogicalPeepholePassTest, AddFMAFusion)
     StinkyRegister v2 = vgpr(2);
     StinkyRegister v3 = vgpr(3);
 
-    IRList& irlist = bb->getIR();
-
     // v2 = v_mul_f32(v0, v1)
-    irlist.push_back(static_cast<IRBase*>(VMulF32(v2, v0, v1, std::nullopt, std::nullopt, "")));
+    bb->appendIR(static_cast<IRBase*>(VMulF32(v2, v0, v1, std::nullopt, std::nullopt, "")));
 
     // v3 = v_add_f32(v2, v0)
-    irlist.push_back(static_cast<IRBase*>(VAddF32(v3, v2, v0, std::nullopt, std::nullopt, "")));
+    bb->appendIR(static_cast<IRBase*>(VAddF32(v3, v2, v0, std::nullopt, std::nullopt, "")));
 
     // Verify we start with 2 instructions
     size_t countBefore = 0;
-    for(auto& ir : irlist)
+    for(auto& ir : *bb)
     {
         (void)ir;
         countBefore++;
@@ -223,7 +211,7 @@ TEST_F(LogicalPeepholePassTest, AddFMAFusion)
 
     // Verify instructions after pass
     size_t countAfter = 0;
-    for(auto& ir : irlist)
+    for(auto& ir : *bb)
     {
         (void)ir;
         countAfter++;

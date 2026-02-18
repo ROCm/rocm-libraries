@@ -7,7 +7,7 @@
 #include "stinkytofu/ir/logical/LogicalOpcode.hpp"
 #include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
 #include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include <gtest/gtest.h>
 #include <map>
 #include <set>
@@ -639,7 +639,7 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures)
 
         if(inst != nullptr)
         {
-            delete inst; // Clean up
+            inst->safeErase(); // Clean up
         }
     }
 
@@ -737,13 +737,10 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures)
             if(!inst)
                 continue;
 
-            // Fresh PassManager for each test
-            PassManager pm;
-            Function&   func = pm.getPassContext().getFunction();
-            BasicBlock* bb   = func.createBasicBlock("test");
-            func.setEntryBlock(bb);
+            Function    func("kernel");
+            BasicBlock* bb = func.createBasicBlock("test");
 
-            // Configure architecture
+            PassManager pm;
             GemmTileConfig config;
             config.arch     = {arch.major, arch.minor, arch.stepping};
             config.TileA0   = 16;
@@ -755,19 +752,17 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures)
             config.NumWaves = 1;
             pm.setGemmTileConfig(config);
 
-            // Add instruction
-            bb->getIR().push_back(static_cast<IRBase*>(inst));
+            bb->appendIR(static_cast<IRBase*>(inst));
 
-            // Run composite lowering + to-asm lowering
             pm.addPass(createCompositeInstructionLoweringPass());
             pm.addPass(createToStinkyAsmPass());
-            pm.run();
+            pm.run(func);
 
             // Verify lowering produced StinkyTofu instructions
             size_t stinkyInsts = 0;
             for(BasicBlock& block : func)
             {
-                for(IRBase& ir : block.getIR())
+                for(IRBase& ir : block)
                 {
                     if(ir.getType() == IRBase::IRType::StinkyTofu)
                         stinkyInsts++;
@@ -819,12 +814,10 @@ TEST(LogicalToAsmComprehensive, Gfx1250SpecificInstructions)
             continue;
         }
 
-        PassManager pm;
-        Function&   func = pm.getPassContext().getFunction();
-        BasicBlock* bb   = func.createBasicBlock("test");
-        func.setEntryBlock(bb);
+        Function    func("kernel");
+        BasicBlock* bb = func.createBasicBlock("test");
 
-        // Configure gfx1250 architecture
+        PassManager pm;
         GemmTileConfig config;
         config.arch     = {12, 5, 0};
         config.TileA0   = 16;
@@ -836,13 +829,11 @@ TEST(LogicalToAsmComprehensive, Gfx1250SpecificInstructions)
         config.NumWaves = 1;
         pm.setGemmTileConfig(config);
 
-        // Add instruction
-        bb->getIR().push_back(static_cast<IRBase*>(inst));
+        bb->appendIR(static_cast<IRBase*>(inst));
 
-        // Run lowering passes
         pm.addPass(createCompositeInstructionLoweringPass());
         pm.addPass(createToStinkyAsmPass());
-        pm.run();
+        pm.run(func);
 
         // Verify lowering succeeded
         size_t      stinkyInsts = 0;
@@ -850,7 +841,7 @@ TEST(LogicalToAsmComprehensive, Gfx1250SpecificInstructions)
 
         for(BasicBlock& block : func)
         {
-            for(IRBase& ir : block.getIR())
+            for(IRBase& ir : block)
             {
                 if(ir.getType() == IRBase::IRType::StinkyTofu)
                 {
@@ -887,12 +878,10 @@ TEST(LogicalToAsmComprehensive, Gfx1250SpecificInstructions)
     {
         std::cout << "\n=== TensorLoadToLds Optional Sources Test ===\n";
 
-        // Test with 4 sources (2 required + 2 optional)
-        PassManager pm;
-        Function&   func = pm.getPassContext().getFunction();
-        BasicBlock* bb   = func.createBasicBlock("test");
-        func.setEntryBlock(bb);
+        Function    func("kernel");
+        BasicBlock* bb = func.createBasicBlock("test");
 
+        PassManager pm;
         GemmTileConfig config;
         config.arch     = {12, 5, 0};
         config.TileA0   = 16;
@@ -904,22 +893,20 @@ TEST(LogicalToAsmComprehensive, Gfx1250SpecificInstructions)
         config.NumWaves = 1;
         pm.setGemmTileConfig(config);
 
-        // Create registers for optional parameters
         StinkyRegister s2 = sgpr(2);
         StinkyRegister s3 = sgpr(3);
 
-        // Add instruction with all 4 sources
-        bb->getIR().push_back(static_cast<IRBase*>(TensorLoadToLds(sgpr(0), sgpr(1), &s2, &s3)));
+        bb->appendIR(static_cast<IRBase*>(TensorLoadToLds(sgpr(0), sgpr(1), &s2, &s3)));
 
         pm.addPass(createCompositeInstructionLoweringPass());
         pm.addPass(createToStinkyAsmPass());
-        pm.run();
+        pm.run(func);
 
         // Verify 4-source configuration
         size_t numSrcs = 0;
         for(BasicBlock& block : func)
         {
-            for(IRBase& ir : block.getIR())
+            for(IRBase& ir : block)
             {
                 if(ir.getType() == IRBase::IRType::StinkyTofu)
                 {
@@ -1106,18 +1093,14 @@ TEST(LogicalToAsmComprehensive, MfmaInstructionLowering)
             std::cout << "Testing MFMA " << testCase.instType << "_" << testCase.m << "x"
                       << testCase.n << "x" << testCase.k << "...\n";
 
-            // Create fresh PassManager and function for each test
-            PassManager pm;
-            Function&   func = pm.getPassContext().getFunction();
-            BasicBlock* bb   = func.createBasicBlock("test");
-            func.setEntryBlock(bb);
+            Function    func("kernel");
+            BasicBlock* bb = func.createBasicBlock("test");
 
-            // Configure architecture
+            PassManager pm;
             GemmTileConfig config;
             config.arch = {archTest.major, archTest.minor, archTest.stepping};
             pm.setGemmTileConfig(config);
 
-            // Create MFMA instruction (will be lowered to v_mfma on CDNA, v_wmma on RDNA)
             LogicalInstruction* mfmaInst = MFMA(testCase.instType,
                                                 testCase.accType,
                                                 testCase.m,
@@ -1129,12 +1112,11 @@ TEST(LogicalToAsmComprehensive, MfmaInstructionLowering)
                                                 vgpr(4), // a
                                                 vgpr(8)); // b
 
-            bb->getIR().push_back(static_cast<IRBase*>(mfmaInst));
+            bb->appendIR(static_cast<IRBase*>(mfmaInst));
 
-            // Run lowering passes
             pm.addPass(createCompositeInstructionLoweringPass());
             pm.addPass(createToStinkyAsmPass());
-            pm.run();
+            pm.run(func);
 
             // Verify lowering result
             bool        found          = false;
@@ -1142,7 +1124,7 @@ TEST(LogicalToAsmComprehensive, MfmaInstructionLowering)
 
             for(BasicBlock& block : func)
             {
-                for(IRBase& ir : block.getIR())
+                for(IRBase& ir : block)
                 {
                     if(ir.getType() == IRBase::IRType::StinkyTofu)
                     {
@@ -1255,18 +1237,14 @@ TEST(LogicalToAsmComprehensive, SmfmaInstructionLowering)
             std::cout << "Testing SMFMA " << testCase.instType << "_" << testCase.m << "x"
                       << testCase.n << "x" << testCase.k << "...\n";
 
-            // Create fresh PassManager and function for each test
-            PassManager pm;
-            Function&   func = pm.getPassContext().getFunction();
-            BasicBlock* bb   = func.createBasicBlock("test");
-            func.setEntryBlock(bb);
+            Function    func("kernel");
+            BasicBlock* bb = func.createBasicBlock("test");
 
-            // Configure architecture
+            PassManager pm;
             GemmTileConfig config;
             config.arch = {archTest.major, archTest.minor, archTest.stepping};
             pm.setGemmTileConfig(config);
 
-            // Create SMFMA instruction (requires metadata register)
             LogicalInstruction* smfmaInst = SMFMA(testCase.instType,
                                                   testCase.accType,
                                                   testCase.m,
@@ -1279,12 +1257,11 @@ TEST(LogicalToAsmComprehensive, SmfmaInstructionLowering)
                                                   vgpr(8), // b
                                                   vgpr(12)); // metadata (required for sparse)
 
-            bb->getIR().push_back(static_cast<IRBase*>(smfmaInst));
+            bb->appendIR(static_cast<IRBase*>(smfmaInst));
 
-            // Run lowering passes
             pm.addPass(createCompositeInstructionLoweringPass());
             pm.addPass(createToStinkyAsmPass());
-            pm.run();
+            pm.run(func);
 
             // Verify lowering result
             bool        found          = false;
@@ -1292,7 +1269,7 @@ TEST(LogicalToAsmComprehensive, SmfmaInstructionLowering)
 
             for(BasicBlock& block : func)
             {
-                for(IRBase& ir : block.getIR())
+                for(IRBase& ir : block)
                 {
                     if(ir.getType() == IRBase::IRType::StinkyTofu)
                     {

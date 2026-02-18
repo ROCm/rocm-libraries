@@ -48,6 +48,13 @@ public:
     }
 };
 
+// Test list traits: do not delete nodes (test owns them via unique_ptr).
+struct TestListTraits : IntrusiveListNoAllocTraits<TestNode>,
+                        IntrusiveListCallbackTraits<TestNode>
+{
+};
+using TestList = IntrusiveList<TestNode, void, TestListTraits>;
+
 class IntrusiveListTest : public ::testing::Test
 {
 protected:
@@ -68,7 +75,7 @@ protected:
     std::vector<std::unique_ptr<TestNode>> nodes;
 
     // Helper to get node values as vector
-    std::vector<int> getListValues(const IntrusiveList<TestNode>& list)
+    std::vector<int> getListValues(const TestList& list)
     {
         std::vector<int> values;
         for(const auto& node : list)
@@ -93,7 +100,7 @@ TEST_F(IntrusiveListTest, NodeConstructor)
 
 TEST_F(IntrusiveListTest, NodeIsInList)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     TestNode*               node = nodes[0].get();
 
     EXPECT_FALSE(node->isInList());
@@ -103,7 +110,7 @@ TEST_F(IntrusiveListTest, NodeIsInList)
 
 TEST_F(IntrusiveListTest, NodeGetNextPrev)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     TestNode*               n1 = nodes[0].get();
     TestNode*               n2 = nodes[1].get();
     TestNode*               n3 = nodes[2].get();
@@ -122,7 +129,7 @@ TEST_F(IntrusiveListTest, NodeGetNextPrev)
 
 TEST_F(IntrusiveListTest, NodeRemoveFromList)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     TestNode*               n1 = nodes[0].get();
     TestNode*               n2 = nodes[1].get();
     TestNode*               n3 = nodes[2].get();
@@ -152,7 +159,7 @@ TEST_F(IntrusiveListTest, IteratorConstruction)
 
 TEST_F(IntrusiveListTest, IteratorDereference)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     list.push_back(nodes[0].get());
 
     auto iter = list.begin();
@@ -162,7 +169,7 @@ TEST_F(IntrusiveListTest, IteratorDereference)
 
 TEST_F(IntrusiveListTest, IteratorIncrement)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     list.push_back(nodes[0].get());
     list.push_back(nodes[1].get());
 
@@ -178,7 +185,7 @@ TEST_F(IntrusiveListTest, IteratorIncrement)
 
 TEST_F(IntrusiveListTest, IteratorDecrement)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     list.push_back(nodes[0].get());
     list.push_back(nodes[1].get());
 
@@ -196,7 +203,7 @@ TEST_F(IntrusiveListTest, IteratorDecrement)
 
 TEST_F(IntrusiveListTest, IteratorComparison)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     list.push_back(nodes[0].get());
 
     auto iter1 = list.begin();
@@ -212,7 +219,7 @@ TEST_F(IntrusiveListTest, IteratorComparison)
 
 TEST_F(IntrusiveListTest, ListConstruction)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     EXPECT_EQ(list.size(), 0);
     EXPECT_TRUE(list.empty());
     EXPECT_EQ(list.begin(), list.end());
@@ -220,7 +227,7 @@ TEST_F(IntrusiveListTest, ListConstruction)
 
 TEST_F(IntrusiveListTest, ListPushBack)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
 
     list.push_back(nodes[0].get());
     EXPECT_EQ(list.size(), 1);
@@ -235,7 +242,7 @@ TEST_F(IntrusiveListTest, ListPushBack)
 
 TEST_F(IntrusiveListTest, ListPushFront)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
 
     list.push_front(nodes[0].get());
     EXPECT_EQ(list.size(), 1);
@@ -248,7 +255,7 @@ TEST_F(IntrusiveListTest, ListPushFront)
 
 TEST_F(IntrusiveListTest, ListInsert)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     list.push_back(nodes[0].get());
     list.push_back(nodes[2].get());
 
@@ -266,7 +273,7 @@ TEST_F(IntrusiveListTest, ListInsert)
 
 TEST_F(IntrusiveListTest, ListErase)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     list.push_back(nodes[0].get());
     list.push_back(nodes[1].get());
     list.push_back(nodes[2].get());
@@ -285,7 +292,7 @@ TEST_F(IntrusiveListTest, ListErase)
 
 TEST_F(IntrusiveListTest, ListRemove)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     list.push_back(nodes[0].get());
     list.push_back(nodes[1].get());
     list.push_back(nodes[2].get());
@@ -299,7 +306,7 @@ TEST_F(IntrusiveListTest, ListRemove)
 
 TEST_F(IntrusiveListTest, ListClear)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     for(int i = 0; i < 5; ++i)
     {
         list.push_back(nodes[i].get());
@@ -317,7 +324,7 @@ TEST_F(IntrusiveListTest, ListClear)
 
 TEST_F(IntrusiveListTest, ListMoveBefore)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     for(int i = 0; i < 4; ++i)
     {
         list.push_back(nodes[i].get());
@@ -337,7 +344,7 @@ TEST_F(IntrusiveListTest, ListMoveBefore)
 
 TEST_F(IntrusiveListTest, ListMoveAfter)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     for(int i = 0; i < 4; ++i)
     {
         list.push_back(nodes[i].get());
@@ -356,7 +363,7 @@ TEST_F(IntrusiveListTest, ListMoveAfter)
 
 TEST_F(IntrusiveListTest, ListMoveToFront)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     for(int i = 0; i < 3; ++i)
     {
         list.push_back(nodes[i].get());
@@ -374,7 +381,7 @@ TEST_F(IntrusiveListTest, ListMoveToFront)
 
 TEST_F(IntrusiveListTest, ListMoveToBack)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     for(int i = 0; i < 3; ++i)
     {
         list.push_back(nodes[i].get());
@@ -394,7 +401,7 @@ TEST_F(IntrusiveListTest, ListMoveToBack)
 
 TEST_F(IntrusiveListTest, NullptrHandling)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
 
     list.push_back(nullptr);
     EXPECT_EQ(list.size(), 0);
@@ -408,7 +415,7 @@ TEST_F(IntrusiveListTest, NullptrHandling)
 
 TEST_F(IntrusiveListTest, EmptyListOperations)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
 
     EXPECT_EQ(list.begin(), list.end());
 
@@ -418,7 +425,7 @@ TEST_F(IntrusiveListTest, EmptyListOperations)
 
 TEST_F(IntrusiveListTest, SingleNodeOperations)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     TestNode*               node = nodes[0].get();
 
     list.push_back(node);
@@ -438,7 +445,7 @@ TEST_F(IntrusiveListTest, DestructorBehavior)
     }
 
     {
-        IntrusiveList<TestNode> list;
+        TestList list;
         for(auto* node : testNodes)
         {
             list.push_back(node);
@@ -455,7 +462,7 @@ TEST_F(IntrusiveListTest, DestructorBehavior)
 
 TEST_F(IntrusiveListTest, NodeMoveBetweenLists)
 {
-    IntrusiveList<TestNode> list1, list2;
+    TestList list1, list2;
     TestNode*               node = nodes[0].get();
 
     list1.push_back(node);
@@ -469,7 +476,7 @@ TEST_F(IntrusiveListTest, NodeMoveBetweenLists)
 
 TEST_F(IntrusiveListTest, ComplexScenario)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
 
     // Build list
     for(int i = 0; i < 5; ++i)
@@ -507,7 +514,7 @@ TEST_F(IntrusiveListTest, ComplexScenario)
 
 TEST_F(IntrusiveListTest, IteratorRangeBasedLoop)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     for(int i = 0; i < 5; ++i)
     {
         list.push_back(nodes[i].get());
@@ -523,7 +530,7 @@ TEST_F(IntrusiveListTest, IteratorRangeBasedLoop)
 
 TEST_F(IntrusiveListTest, IteratorArithmeticSequence)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     for(int i = 0; i < 3; ++i)
     {
         list.push_back(nodes[i].get());
@@ -558,7 +565,7 @@ TEST_F(IntrusiveListTest, IteratorArithmeticSequence)
 
 TEST_F(IntrusiveListTest, IteratorBoundaryBehavior)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     list.push_back(nodes[0].get());
 
     auto iter = list.begin();
@@ -580,7 +587,7 @@ TEST_F(IntrusiveListTest, IteratorBoundaryBehavior)
 
 TEST_F(IntrusiveListTest, ReverseIteratorBasic)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     for(int i = 0; i < 5; ++i)
     {
         list.push_back(nodes[i].get());
@@ -608,7 +615,7 @@ TEST_F(IntrusiveListTest, ReverseIteratorBasic)
 
 TEST_F(IntrusiveListTest, ReverseIteratorRangeBasedLoop)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     for(int i = 0; i < 5; ++i)
     {
         list.push_back(nodes[i].get());
@@ -626,13 +633,13 @@ TEST_F(IntrusiveListTest, ReverseIteratorRangeBasedLoop)
 
 TEST_F(IntrusiveListTest, ReverseIteratorConstness)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     for(int i = 0; i < 3; ++i)
     {
         list.push_back(nodes[i].get());
     }
 
-    const IntrusiveList<TestNode>& constList = list;
+    const TestList& constList = list;
 
     auto criter = constList.rbegin();
     EXPECT_EQ(criter->value, 2);
@@ -649,7 +656,7 @@ TEST_F(IntrusiveListTest, ReverseIteratorConstness)
 
 TEST_F(IntrusiveListTest, ReverseIteratorEmptyList)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
 
     EXPECT_EQ(list.rbegin(), list.rend());
 
@@ -662,7 +669,7 @@ TEST_F(IntrusiveListTest, ReverseIteratorEmptyList)
 
 TEST_F(IntrusiveListTest, ReverseIteratorSingleElement)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     list.push_back(nodes[0].get());
 
     auto riter = list.rbegin();
@@ -674,7 +681,7 @@ TEST_F(IntrusiveListTest, ReverseIteratorSingleElement)
 
 TEST_F(IntrusiveListTest, ReverseIteratorBidirectional)
 {
-    IntrusiveList<TestNode> list;
+    TestList list;
     for(int i = 0; i < 3; ++i)
     {
         list.push_back(nodes[i].get());

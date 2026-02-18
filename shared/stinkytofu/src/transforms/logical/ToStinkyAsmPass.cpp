@@ -22,12 +22,12 @@
  * ************************************************************************ */
 
 #include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
-#include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
-#include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 // Per-arch logical name -> ASM mnemonic (same data as Rocisa LogicalToArchMap; gives correct ds_read vs ds_load etc.)
 #include "stinkytofu/ir/LogicalToAsmMappings_generated.inc"
@@ -201,7 +201,7 @@ namespace
         }
 
         // Create the assembly instruction
-        StinkyInstruction* asmInst = new StinkyInstruction(desc);
+        StinkyInstruction* asmInst = IRBase::createIR<StinkyInstruction>(desc);
 
         // Copy operands from IR to assembly
         if(!irInst->dests.empty())
@@ -261,11 +261,9 @@ namespace
     private:
         void lowerToAsm(BasicBlock& bb, GfxArchID arch)
         {
-            IRList& irlist = bb.getIR();
-
             // Use iterators to allow insertion/removal during traversal
-            auto it = irlist.begin();
-            while(it != irlist.end())
+            auto it = bb.begin();
+            while(it != bb.end())
             {
                 IRBase* irNode = &(*it);
 
@@ -279,18 +277,14 @@ namespace
                     if(asmInst)
                     {
                         // Insert assembly instruction before the logical instruction
-                        irlist.insert(it, static_cast<IRBase*>(asmInst));
+                        bb.insertIR(it, asmInst);
 
                         // Remove the logical instruction from IRList
                         auto toRemove = it;
                         ++it; // Move to next before removing
-                        irlist.remove(&(*toRemove));
+                        bb.removeIR(&(*toRemove));
 
-                        // Only delete if NOT externally owned (e.g., by shared_ptr)
-                        if(!logicalInst->isExternallyOwned())
-                        {
-                            delete logicalInst;
-                        }
+                        logicalInst->safeErase();
                         continue;
                     }
                 }

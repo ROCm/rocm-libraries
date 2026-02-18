@@ -58,19 +58,6 @@ def Intrinsic(name, **kwargs):
     if extra:
         raise ValueError(f"'{name}' unexpected: {sorted(extra)} (expected: {expected})")
 
-    # Convert arguments to StinkyRegister, handling literals
-    args = []
-    for arg in expected:
-        val = kwargs[arg]
-        if isinstance(val, Register):  # Already a register
-            args.append(val)
-        elif isinstance(val, int):
-            args.append(Register(val))
-        elif isinstance(val, float):
-            args.append(Register(val))
-        elif isinstance(val, str):
-            args.append(Register(val))
-        else:
-            args.append(val)  # Hope for the best
-
-    return _cpp.IntrinsicCall(name, args)
+    # Build kwargs in signature order (C++ Intrinsic iterates dict order)
+    ordered_kwargs = {arg: kwargs[arg] for arg in expected}
+    return _cpp.Intrinsic(name, **ordered_kwargs)

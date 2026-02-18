@@ -41,13 +41,13 @@ namespace stinkytofu
     /// Time Complexity: O(n) where n is the number of instructions
     ///
     /// Usage:
-    ///   buildUseDefChain(basicBlock.getIR());
+    ///   buildUseDefChain(basicBlock);
     ///   for(auto* src : inst->sources) { /* use source */ }
     ///   for(auto* user : inst->users) { /* use user */ }
     ///
     /// Note: This function assumes instructions are in top-down order.
     ///       It handles multiple consecutive registers (e.g., regIdx 0,1,2,3).
-    inline void buildUseDefChain(IRList& insts)
+    inline void buildUseDefChain(BasicBlock& bb)
     {
         struct RegisterKey
         {
@@ -73,7 +73,7 @@ namespace stinkytofu
         std::unordered_map<RegisterKey, StinkyInstruction*, RegisterKeyHash> lastDef;
 
         // Clear existing chains
-        for(IRBase& ir : insts)
+        for(IRBase& ir : bb)
         {
             if(ir.getType() == IRBase::IRType::StinkyTofu)
             {
@@ -84,7 +84,7 @@ namespace stinkytofu
         }
 
         // Build use-def chains for each instruction in top-down order
-        for(IRBase& ir : insts)
+        for(IRBase& ir : bb)
         {
             if(ir.getType() != IRBase::IRType::StinkyTofu)
                 continue;
@@ -129,18 +129,12 @@ namespace stinkytofu
         }
     }
 
-    /// Builds use-def chain for a single BasicBlock
-    inline void buildUseDefChain(BasicBlock& bb)
-    {
-        buildUseDefChain(bb.getIR());
-    }
-
     /// Builds use-def chain for all BasicBlocks in a Function
     inline void buildUseDefChain(Function& func)
     {
         for(BasicBlock& bb : func)
         {
-            buildUseDefChain(bb.getIR());
+            buildUseDefChain(bb);
         }
     }
 

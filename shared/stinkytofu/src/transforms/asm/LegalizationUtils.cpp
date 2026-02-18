@@ -24,16 +24,16 @@
 #include <limits>
 #include <regex>
 
-#include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
 namespace stinkytofu
 {
     Legalized
-        legalizeVNop(StinkyInstruction* inst, StinkyInstIRBuilder& irBuilder, GfxArchID archId)
+        legalizeVNop(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId)
     {
         assert(inst->getUnifiedOpcode() == GFX::v_nop && "Invalid v_nop instruction");
         // Check if this is a v_nop with count > 1
@@ -42,7 +42,7 @@ namespace stinkytofu
         int count = inst->getSrcReg(0).literalInt;
         if(count <= 1)
         {
-            irBuilder.erase(inst);
+            inst->erase();
             return {nullptr, nullptr};
         }
 
@@ -50,16 +50,13 @@ namespace stinkytofu
         const HwInstDesc*  desc    = inst->getHwInstDesc();
         const CommentData* comment = inst->getModifier<CommentData>();
 
-        // Get insertion point (before the original instruction)
-        IRList::iterator insertPoint = IRList::iterator(inst);
-
         StinkyInstruction* firstInst = nullptr;
         StinkyInstruction* lastInst  = nullptr;
 
-        // Create 'count' separate nop instructions
+        // Create 'count' separate nop instructions before inst
         for(int i = 0; i < count; ++i)
         {
-            StinkyInstruction* newInst = irBuilder.createStinkyInstBefore(insertPoint, desc);
+            StinkyInstruction* newInst = irBuilder.create(desc, inst);
 
             // v_nop has no operands - just add comment if present
             if(comment)
@@ -73,13 +70,13 @@ namespace stinkytofu
         }
 
         // Remove the original instruction
-        irBuilder.erase(inst);
+        inst->erase();
 
         return {firstInst, lastInst};
     }
 
     Legalized legalizeVCmpX(StinkyInstruction*                inst,
-                            StinkyInstIRBuilder&              irBuilder,
+                            AsmIRBuilder&              irBuilder,
                             GfxArchID                         archId,
                             const std::map<std::string, int>& asmCaps)
     {
@@ -109,9 +106,6 @@ namespace stinkytofu
         // Get wavefront size
         int wavefrontSize = getWaveFrontSize(archId);
 
-        // Get insertion point
-        IRList::iterator insertPoint = IRList::iterator(inst);
-
         // Replace v_cmpx with v_cmp
         mnemonic.replace(pos, 6, "_cmp_");
 
@@ -120,8 +114,7 @@ namespace stinkytofu
 
         assert(cmpDesc != nullptr && "v_cmp_* is not supported on this architecture");
 
-        // Create new v_cmp instruction
-        StinkyInstruction* cmpInst = irBuilder.createStinkyInstBefore(insertPoint, cmpDesc);
+        StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, inst);
 
         // Replace EXEC destination with VCC
         StinkyRegister destReg = destRegs[0];
@@ -168,7 +161,7 @@ namespace stinkytofu
         assert(movDesc != nullptr
                && "s_mov_b32 or s_mov_b64 is not supported on this architecture");
 
-        StinkyInstruction* movInst = irBuilder.createStinkyInstBefore(insertPoint, movDesc);
+        StinkyInstruction* movInst = irBuilder.create(movDesc, inst);
         movInst->addDestReg(execReg);
         movInst->addSrcReg(destReg);
         if(comment)
@@ -177,13 +170,13 @@ namespace stinkytofu
         }
 
         // Remove the original v_cmpx instruction
-        irBuilder.erase(inst);
+        inst->erase();
 
         return {cmpInst, movInst};
     }
 
     Legalized
-        legalizeWaitCnt(StinkyInstruction* inst, StinkyInstIRBuilder& irBuilder, GfxArchID archId)
+        legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId)
     {
         // Only legalize on gfx1250
         if(archId != GfxArchID::Gfx1250)
@@ -222,16 +215,13 @@ namespace stinkytofu
 
         bool hasCombinedDs = (combinedDscnt != -1);
 
-        // Get insertion point
-        IRList::iterator insertPoint = IRList::iterator(inst);
-
         StinkyInstruction* firstInst = nullptr;
         StinkyInstruction* lastInst  = nullptr;
 
-        // Helper to create single wait instruction
+        // Helper to create single wait instruction before inst
         auto createSingleWait = [&](GFX opcode, int8_t count) -> StinkyInstruction* {
             const HwInstDesc*  desc     = getMCIDByUOp(opcode, archId);
-            StinkyInstruction* waitInst = irBuilder.createStinkyInstBefore(insertPoint, desc);
+            StinkyInstruction* waitInst = irBuilder.create(desc, inst);
             waitInst->addSrcReg(StinkyRegister(static_cast<int>(count)));
             if(!comment.empty())
             {
@@ -240,11 +230,11 @@ namespace stinkytofu
             return waitInst;
         };
 
-        // Helper to create combined wait instruction
+        // Helper to create combined wait instruction before inst
         auto createCombinedWait
             = [&](GFX opcode, int8_t count1, int8_t count2) -> StinkyInstruction* {
-            const HwInstDesc*  desc          = getMCIDByUOp(opcode, archId);
-            StinkyInstruction* waitInst      = irBuilder.createStinkyInstBefore(insertPoint, desc);
+            const HwInstDesc*  desc     = getMCIDByUOp(opcode, archId);
+            StinkyInstruction* waitInst = irBuilder.create(desc, inst);
             uint16_t           combinedCount = ((count1 & 0xFF) << 8) | (count2 & 0xFF);
             waitInst->addSrcReg(StinkyRegister(static_cast<int>(combinedCount)));
             if(!comment.empty())
@@ -303,15 +293,13 @@ namespace stinkytofu
 
         // Remove the original s_waitcnt instruction
         if(firstInst)
-        {
-            irBuilder.erase(inst);
-        }
+            inst->erase();
 
         return {firstInst, lastInst};
     }
 
     Legalized
-        legalizeBarrier(StinkyInstruction* inst, StinkyInstIRBuilder& irBuilder, GfxArchID archId)
+        legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId)
     {
         // Only legalize on gfx1250
         if(archId != GfxArchID::Gfx1250)
@@ -321,17 +309,14 @@ namespace stinkytofu
         const CommentData* commentMod = inst->getModifier<CommentData>();
         std::string        comment    = commentMod ? commentMod->comment : "";
 
-        // Get insertion point
-        IRList::iterator insertPoint = IRList::iterator(inst);
-
         // Create s_barrier_signal -1 (signal global barrier)
         const HwInstDesc*  signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
-        StinkyInstruction* signalInst = irBuilder.createStinkyInstBefore(insertPoint, signalDesc);
+        StinkyInstruction* signalInst = irBuilder.create(signalDesc, inst);
         signalInst->addSrcReg(StinkyRegister(-1)); // -1 = global barrier
 
         // Create s_barrier_wait -1 (wait on global barrier)
         const HwInstDesc*  waitDesc = getMCIDByUOp(GFX::s_barrier_wait, archId);
-        StinkyInstruction* waitInst = irBuilder.createStinkyInstBefore(insertPoint, waitDesc);
+        StinkyInstruction* waitInst = irBuilder.create(waitDesc, inst);
         waitInst->addSrcReg(StinkyRegister(-1)); // -1 = global barrier
         if(!comment.empty())
         {
@@ -339,7 +324,7 @@ namespace stinkytofu
         }
 
         // Remove the original s_barrier instruction
-        irBuilder.erase(inst);
+        inst->erase();
 
         return {signalInst, waitInst};
     }
@@ -378,7 +363,7 @@ namespace stinkytofu
     }
 
     Legalized legalizeDSLoadB192(StinkyInstruction*   inst,
-                                 StinkyInstIRBuilder& irBuilder,
+                                 AsmIRBuilder& irBuilder,
                                  GfxArchID            archId,
                                  bool                 hasVgprMsb)
     {
@@ -402,12 +387,9 @@ namespace stinkytofu
         const CommentData* commentMod = inst->getModifier<CommentData>();
         std::string        comment    = commentMod ? commentMod->comment : "";
 
-        // Get insertion point
-        IRList::iterator insertPoint = IRList::iterator(inst);
-
         // Create ds_load_b128 v[a:a+3], v[b] offset:X
         const HwInstDesc*  desc1 = getMCIDByUOp(GFX::ds_load_b128, archId);
-        StinkyInstruction* load1 = irBuilder.createStinkyInstBefore(insertPoint, desc1);
+        StinkyInstruction* load1 = irBuilder.create(desc1, inst);
 
         StinkyRegister dstData1{origDst.reg.type,
                                 origDst.reg.idx,
@@ -436,15 +418,16 @@ namespace stinkytofu
 
         // Create ds_load_b64 v[a+4:a+5], v[b] offset:X+16
         const HwInstDesc*  desc2 = getMCIDByUOp(GFX::ds_load_b64, archId);
-        StinkyInstruction* load2 = irBuilder.createStinkyInstBefore(insertPoint, desc2);
+        StinkyInstruction* load2 = irBuilder.create(desc2, inst);
 
         assert(origDst.reg.idx + 4 < std::numeric_limits<uint16_t>::max()
                && "Invalid destination register index");
 
-        uint32_t dstData2Idx  = static_cast<uint16_t>(origDst.reg.idx + 4);
-        int16_t  dstData2Offs = (hasVgprMsb && origDst.reg.type == RegType::V)
-                                   ? getVgprMsbOffsetForIdx(origDst.reg.type, dstData2Idx, hasVgprMsb)
-                                   : origDst.reg.offset;
+        uint32_t dstData2Idx = static_cast<uint16_t>(origDst.reg.idx + 4);
+        int16_t  dstData2Offs
+            = (hasVgprMsb && origDst.reg.type == RegType::V)
+                  ? getVgprMsbOffsetForIdx(origDst.reg.type, dstData2Idx, hasVgprMsb)
+                  : origDst.reg.offset;
 
         StinkyRegister dstData2{origDst.reg.type, dstData2Idx, 2, dstData2Offs};
 
@@ -473,13 +456,13 @@ namespace stinkytofu
         }
 
         // Remove the original ds_load_b192 instruction
-        irBuilder.erase(inst);
+        inst->erase();
 
         return {load1, load2};
     }
 
     Legalized legalizeDSStoreB192(StinkyInstruction*   inst,
-                                  StinkyInstIRBuilder& irBuilder,
+                                  AsmIRBuilder& irBuilder,
                                   GfxArchID            archId,
                                   bool                 hasVgprMsb)
     {
@@ -503,12 +486,9 @@ namespace stinkytofu
         const CommentData* commentMod = inst->getModifier<CommentData>();
         std::string        comment    = commentMod ? commentMod->comment : "";
 
-        // Get insertion point
-        IRList::iterator insertPoint = IRList::iterator(inst);
-
         // Create ds_store_b128 v[a], v[b:b+3] offset:X
         const HwInstDesc*  desc1  = getMCIDByUOp(GFX::ds_store_b128, archId);
-        StinkyInstruction* store1 = irBuilder.createStinkyInstBefore(insertPoint, desc1);
+        StinkyInstruction* store1 = irBuilder.create(desc1, inst);
 
         store1->addSrcReg(origDstAddr);
 
@@ -538,17 +518,18 @@ namespace stinkytofu
 
         // Create ds_store_b64 v[a], v[b+4:b+5] offset:X+16
         const HwInstDesc*  desc2  = getMCIDByUOp(GFX::ds_store_b64, archId);
-        StinkyInstruction* store2 = irBuilder.createStinkyInstBefore(insertPoint, desc2);
+        StinkyInstruction* store2 = irBuilder.create(desc2, inst);
 
         store2->addSrcReg(origDstAddr);
 
         assert(origSrcData.reg.idx + 4 < std::numeric_limits<uint16_t>::max()
                && "Invalid source register index");
 
-        uint32_t srcData2Idx  = static_cast<uint16_t>(origSrcData.reg.idx + 4);
-        int16_t  srcData2Offs = (hasVgprMsb && origSrcData.reg.type == RegType::V)
-                                   ? getVgprMsbOffsetForIdx(origSrcData.reg.type, srcData2Idx, hasVgprMsb)
-                                   : origSrcData.reg.offset;
+        uint32_t srcData2Idx = static_cast<uint16_t>(origSrcData.reg.idx + 4);
+        int16_t  srcData2Offs
+            = (hasVgprMsb && origSrcData.reg.type == RegType::V)
+                  ? getVgprMsbOffsetForIdx(origSrcData.reg.type, srcData2Idx, hasVgprMsb)
+                  : origSrcData.reg.offset;
 
         StinkyRegister srcData2{origSrcData.reg.type, srcData2Idx, 2, srcData2Offs};
 
@@ -576,7 +557,7 @@ namespace stinkytofu
         }
 
         // Remove the original ds_store_b192 instruction
-        irBuilder.erase(inst);
+        inst->erase();
 
         return {store1, store2};
     }

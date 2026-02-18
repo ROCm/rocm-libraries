@@ -57,7 +57,7 @@ namespace
 
             // If the function is empty or has no entry block, nothing to do
             BasicBlock* flatBB = func.getEntryBlock();
-            if(!flatBB || flatBB->getIR().empty())
+            if(!flatBB || flatBB->empty())
                 return;
 
             // Check if we need to split - look for label instructions
@@ -75,8 +75,7 @@ namespace
         bool needsSplitting(BasicBlock* bb)
         {
             // Check if there are any label instructions (GFX::LABEL opcode)
-            IRList& irList = bb->getIR();
-            for(IRBase& irNode : irList)
+            for(IRBase& irNode : *bb)
                 if(cast<StinkyInstruction>(&irNode)->getUnifiedOpcode() == GFX::LABEL)
                     return true;
             return false;
@@ -84,11 +83,9 @@ namespace
 
         void splitAtLabels(Function& func, BasicBlock* flatBB)
         {
-            IRList& insts = flatBB->getIR();
-
             // Find all label positions
-            std::vector<IRList::iterator> labelPositions;
-            for(auto it = insts.begin(); it != insts.end(); ++it)
+            std::vector<BasicBlock::iterator> labelPositions;
+            for(auto it = flatBB->begin(); it != flatBB->end(); ++it)
                 if(cast<StinkyInstruction>(it.getNodePtr())->getUnifiedOpcode() == GFX::LABEL)
                     labelPositions.push_back(it);
 
@@ -109,30 +106,26 @@ namespace
 
                 // Determine the range of IR to move
                 auto startIt = labelIt;
-                auto endIt = (i + 1 < labelPositions.size()) ? labelPositions[i + 1] : insts.end();
+                auto endIt
+                    = (i + 1 < labelPositions.size()) ? labelPositions[i + 1] : flatBB->end();
 
                 // Move IR from startIt to endIt to the new BasicBlock
-                IRList& newInsts = newBB->getIR();
-                auto    it       = startIt;
+                auto it = startIt;
                 while(it != endIt)
                 {
                     IRBase* instNode = it.getNodePtr();
                     auto    nextIt   = std::next(it);
-                    insts.remove(instNode);
-                    newInsts.push_back(instNode);
+                    flatBB->removeIR(instNode);
+                    newBB->appendIR(instNode);
                     it = nextIt;
                 }
             }
 
             // If there is IR before the first label, keep them in flatBB
             // Otherwise, remove the now-empty flatBB
-            if(flatBB->getIR().empty())
+            if(flatBB->empty())
             {
-                // Update entry block to the first created block
-                if(func.size() > 1)
-                {
-                    func.setEntryBlock(&(*func.begin()));
-                }
+                // Entry block remains basicBlocks.front() (flatBB)
                 // Don't remove flatBB yet as it might still be referenced
                 // The user can clean it up if needed
             }

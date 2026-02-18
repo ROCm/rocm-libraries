@@ -22,14 +22,13 @@
  * ************************************************************************ */
 #pragma once
 
-#include <ostream>
+#include <iosfwd>
 #include <sstream>
 #include <string>
 
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyMacro.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
 
 namespace stinkytofu
 {
@@ -116,8 +115,8 @@ namespace stinkytofu
         // Print a single StinkyInstruction
         void print(const StinkyInstruction& inst);
 
-        // Print an entire IRList
-        void print(const IRList& irlist);
+        // Print an entire Function
+        void print(const Function& function);
 
     private:
         RegisterPrinter regPrinter;
@@ -141,19 +140,19 @@ namespace stinkytofu
         return oss.str();
     }
 
-    inline std::string toString(const IRList&            irlist,
+    inline std::string toString(const Function&          function,
                                 const AsmPrinterOptions& options = AsmPrinterOptions())
     {
         std::ostringstream oss;
         AsmPrinter         printer(oss, options);
-        printer.print(irlist);
+        printer.print(function);
         return oss.str();
     }
 
-    inline std::ostream& operator<<(std::ostream& os, const IRList& irlist)
+    inline std::ostream& operator<<(std::ostream& os, const Function& function)
     {
         AsmPrinter printer(os, AsmPrinterOptions());
-        printer.print(irlist);
+        printer.print(function);
         return os;
     }
 
