@@ -133,7 +133,7 @@ TEST_CASE("Register::Value class string rendering works", "[codegen][register]")
         a->allocateNow();
 
         auto r = **a;
-        CHECK(r->toString() == "[a1, a0]");
+        CHECK(r->toString() == "a[0:1]");
     }
 }
 

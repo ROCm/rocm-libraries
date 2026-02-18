@@ -427,7 +427,8 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
                                       std::get<2>(nodeAttrs.value()),
                                       opGraph.getTensorMap(),
                                       _deterministic);
-        ConvFwdBiasActivPlan plan(handle, std::move(params), true, false, false);
+        MiopenExecutionSettings executionSettings;
+        ConvFwdBiasActivPlan plan(handle, std::move(params), executionSettings, true, false);
         return true;
     }
     catch(const std::exception& e)
@@ -437,23 +438,31 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
     }
 }
 
-size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(
+size_t MiopenConvFwdBiasActivPlanBuilder::getMaxWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const MiopenExecutionSettings& executionSettings) const
 {
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 
     ConvFwdBiasActivParams params(
         convAttr, biasAttr, activAttr, opGraph.getTensorMap(), _deterministic);
-    ConvFwdBiasActivPlan plan(handle, std::move(params), false, true, false);
+    ConvFwdBiasActivPlan plan(handle, std::move(params), executionSettings, false, true);
     return plan.getWorkspaceSize(handle);
+}
+
+void MiopenConvFwdBiasActivPlanBuilder::initializeExecutionSettings(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] MiopenExecutionSettings& executionSettings) const
+{
 }
 
 void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
@@ -462,7 +471,7 @@ void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
     ConvFwdBiasActivParams params(
         convAttr, biasAttr, activAttr, opGraph.getTensorMap(), _deterministic);
     auto plan = std::make_unique<ConvFwdBiasActivPlan>(
-        handle, std::move(params), true, true, executionContext.benchmarkingEnabled());
+        handle, std::move(params), executionContext.executionSettings(), true, true);
     executionContext.setPlan(std::move(plan));
 }
 
