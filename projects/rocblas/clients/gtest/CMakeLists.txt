@@ -20,6 +20,9 @@
 #
 # ########################################################################
 
+# CTest test categorization (shared/ctest) - YAML-based categories and labels
+include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
+
 #enable_testing()
 find_package( GTest REQUIRED )
 
@@ -198,6 +201,21 @@ add_custom_command( OUTPUT "${ROCBLAS_CLIENTS_RTEST_XML}"
 add_custom_target( rocblas-test-files DEPENDS "${ROCBLAS_SMOKE}" "${ROCBLAS_EXTRAS}" "${ROCBLAS_CLIENTS_RTEST}" "${ROCBLAS_CLIENTS_RTEST_XML}" )
 
 add_dependencies( rocblas-test rocblas-test-data rocblas-test-files rocblas-common )
+
+# YAML-based test categories for CTest (smoke/quick, standard, comprehensive)
+# Working dir: staging (test binary and rocblas_gtest.data live there)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+  enable_testing()
+  message(STATUS "rocBLAS: YAML-based test categorization")
+  file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
+  apply_test_category_labels(
+    rocblas-test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+    "${PROJECT_BINARY_DIR}/staging"
+  )
+else()
+  message(STATUS "rocBLAS: No test_categories.yaml (CTest categories not used)")
+endif()
 
 rocm_install(TARGETS rocblas-test COMPONENT tests)
 

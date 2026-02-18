@@ -1,0 +1,59 @@
+# rocBLAS Test Categories Configuration
+# Time-based test organization for CI/CD pipeline efficiency
+# Mirrors the Test Filter Standardization POC (see shared/ctest/README.md).
+# Patterns use gtest filter syntax (SuiteName.* or *TestName*).
+
+test_categories:
+  quick:
+    description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
+    test_patterns:
+      - "half_operators.*"
+      - "helper_utilities.*"
+      - "set_get_pointer_mode.*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Core functionality - Run on every PR (target: < 30 min)"
+    test_patterns:
+      - "auxiliary.*"
+      - "blas1.*"
+      - "blas1_ex.*"
+      - "blas2.*"
+      - "blas3.*"
+      - "blas3_tensile.*"
+      - "blas_ex.*"
+    exclude:
+      - "*known_bug*"
+      # Add slower or flaky tests here as needed
+    labels:
+      - "standard"
+      - "pr"
+
+  comprehensive:
+    description: "Extended testing - Run nightly (target: < 2 hours)"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "comprehensive"
+      - "nightly"
+
+# GPU-specific exclusions can be added here when needed (see shared/ctest/README.md).
+# exclude_gpu:
+#   exclude_gpu_gfxXXXX:
+#     test_patterns: [...]
+#     labels: ["quick", "standard", "comprehensive", "ex_gpu_gfxXXXX"]
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300
+    standard: 1800
+    comprehensive: 7200

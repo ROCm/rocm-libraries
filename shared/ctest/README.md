@@ -273,6 +273,7 @@ ctest -L quick -L ex_gpu_gfx1150 -V
 ctest -N
 ```
 
-## Integrations for miopen
+## Integrations
 
 - **miopen** - [test_categories.yaml](../../projects/miopen/test/gtest/test_categories.yaml) | [CMakeLists.txt](../../projects/miopen/test/gtest/CMakeLists.txt)
+- **rocblas** - [test_categories.yaml](../../projects/rocblas/clients/gtest/test_categories.yaml) | [CMakeLists.txt](../../projects/rocblas/clients/gtest/CMakeLists.txt)
