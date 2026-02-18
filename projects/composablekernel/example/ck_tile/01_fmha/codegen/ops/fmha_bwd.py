@@ -468,7 +468,7 @@ class KernelComponentFactoryGfx11(KernelComponentFactoryBase):
             return [
                 #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
                 FmhaBwdDQDKDVTileSize( 32,  64,  32,  32,  32,  32,  64,   32,   32,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 16,  16, 16, 16, -1),
-                FmhaBwdDQDKDVTileSize( 32,  64,  64,  32,  64,  32,  32,   64,   64,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16, -1),
+                FmhaBwdDQDKDVTileSize( 32,  64,  64,  32,  64,  32,  32,   64,   64,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 16,  16, 16, 16, -1),
                 FmhaBwdDQDKDVTileSize( 16,  64, 128,  16, 128,  16,  32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16, -1),
                 FmhaBwdDQDKDVTileSize( 16,  64, 256,  16, 256,  16,  32,  256,  256,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16, -1),
             ]  # fmt: skip
