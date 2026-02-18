@@ -289,7 +289,7 @@ void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg)
         logger = state.consoleFileLogger;
     }
 
-    if(logger)
+    if(logger) // This check is technically not needed but kept for safety.
     {
         logger->log(toSpdlogLevel(severity), msg);
     }
