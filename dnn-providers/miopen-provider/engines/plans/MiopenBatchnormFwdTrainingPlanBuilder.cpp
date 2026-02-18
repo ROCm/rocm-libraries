@@ -307,18 +307,26 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
     }
 }
 
-size_t MiopenBatchnormFwdTrainingPlanBuilder::getWorkspaceSize(
+size_t MiopenBatchnormFwdTrainingPlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const MiopenExecutionSettings& executionSettings) const
 {
     // No workspace needed for batchnorm forward training
     return 0;
 }
 
+void MiopenBatchnormFwdTrainingPlanBuilder::initializeExecutionSettings(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] MiopenExecutionSettings& executionSettings) const
+{
+}
+
 void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() == 1)
@@ -330,7 +338,7 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
 
         BatchnormFwdTrainingParams params(bnAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
-            std::move(params), executionContext.benchmarkingEnabled());
+            std::move(params), executionContext.executionSettings());
         executionContext.setPlan(std::move(plan));
     }
     else if(opGraph.nodeCount() == 2)
@@ -345,7 +353,7 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
 
         BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
-            std::move(params), executionContext.benchmarkingEnabled());
+            std::move(params), executionContext.executionSettings());
         executionContext.setPlan(std::move(plan));
     }
     else

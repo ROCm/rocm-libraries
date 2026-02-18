@@ -116,9 +116,10 @@ const std::optional<MiopenTensor>& BatchnormBwdParams::optBias() const
     return _optBias;
 }
 
-BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params, bool benchmarkingEnabled)
+BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params,
+                                   const MiopenExecutionSettings& executionSettings)
     : _params(std::move(params))
-    , _benchmarkingEnabled(benchmarkingEnabled)
+    , _executionSettings(executionSettings)
 {
 }
 
@@ -135,7 +136,7 @@ void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
                                [[maybe_unused]] void* workspace) const
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
 
     float alphaDataDiff = 1.0f;
     float betaDataDiff = 0.0f;
