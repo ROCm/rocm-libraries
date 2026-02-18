@@ -387,6 +387,7 @@ bool rocsparse_parse_data(int& argc, char** argv, const std::string& default_fil
     if(filename != "")
     {
         RocSPARSE_TestData::set_filename(filename, yaml);
+        RocSPARSE_TestData::set_yaml_filter_active(yaml);
         return true;
     }
 

@@ -47,6 +47,13 @@ class RocSPARSE_TestData
         return filename;
     }
 
+    // Flag to track if a user-specified yaml file was provided via --yaml
+    static auto& yaml_filter_active()
+    {
+        static bool active = false;
+        return active;
+    }
+
     // filter iterator
     class iterator : public std::istream_iterator<Arguments>
     {
@@ -100,6 +107,16 @@ public:
             {
             }
         }
+    }
+
+    static void set_yaml_filter_active(bool active)
+    {
+        yaml_filter_active() = active;
+    }
+
+    static bool is_yaml_filter_active()
+    {
+        return yaml_filter_active();
     }
 
     // begin() iterator which accepts an optional filter.
