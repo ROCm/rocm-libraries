@@ -4,13 +4,14 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 
 #include <hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
+#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "PlanInterface.hpp"
 
@@ -53,14 +54,14 @@ class ConvBwdPlan : public IPlan
 public:
     ConvBwdPlan(const HipdnnEnginePluginHandle& handle,
                 ConvBwdParams&& params,
-                bool benchmarkingEnabled = false);
+                const MiopenExecutionSettings& executionSettings);
     ~ConvBwdPlan() override = default;
 
     ConvBwdPlan(const ConvBwdPlan&) = delete;
     ConvBwdPlan& operator=(const ConvBwdPlan&) = delete;
 
-    ConvBwdPlan(ConvBwdPlan&& other) = default;
-    ConvBwdPlan& operator=(ConvBwdPlan&& other) = default;
+    ConvBwdPlan(ConvBwdPlan&& other) = delete;
+    ConvBwdPlan& operator=(ConvBwdPlan&& other) = delete;
 
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
 
@@ -71,9 +72,10 @@ public:
 
 private:
     ConvBwdParams _params;
-    hipdnn_data_sdk::utilities::ScopedResource<miopenSolution_t> _solution;
-    size_t _workspaceSize = 0;
-    bool _benchmarkingEnabled;
+    mutable std::mutex _algorithmMutex;
+    mutable std::optional<miopenConvBwdDataAlgorithm_t> _algorithm;
+    mutable size_t _workspaceSize = 0;
+    MiopenExecutionSettings _executionSettings;
 };
 
 } // namespace miopen_plugin
