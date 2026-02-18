@@ -281,6 +281,15 @@
 
 /************************** potf2/potrf ***************************************
 *******************************************************************************/
+/*! \brief Determines the maximum size at which rocSOLVER can use POTF2
+    \details
+    POTF2 will attempt to factorize a small symmetric matrix that can fit entirely
+    within the LDS share memory using compact storage.
+    The amount of LDS shared memory is assumed to be at least (64 * 1024) bytes. */
+#ifndef POTF2_MAX_SMALL_SIZE
+#define POTF2_MAX_SMALL_SIZE(T) ((sizeof(T) == 16) ? 128 : 256)
+#endif
+
 /*! \brief Determines the size at which rocSOLVER switches from
     the unblocked to the blocked algorithm when executing POTRF. It also applies to the
     corresponding batched and strided-batched routines.
@@ -289,16 +298,7 @@
     the rest of the matrix has no more than POTRF_POTF2_SWITCHSIZE columns; at this point the last block,
     if any, will be factorized with the unblocked algorithm (POTF2).*/
 #ifndef POTRF_POTF2_SWITCHSIZE
-#define POTRF_POTF2_SWITCHSIZE(T) 64
-#endif
-
-/*! \brief Determines the maximum size at which rocSOLVER can use POTF2
-    \details
-    POTF2 will attempt to factorize a small symmetric matrix that can fit entirely
-    within the LDS share memory using compact storage.
-    The amount of LDS shared memory is assumed to be at least (64 * 1024) bytes. */
-#ifndef POTF2_MAX_SMALL_SIZE
-#define POTF2_MAX_SMALL_SIZE(T) ((sizeof(T) == 16) ? 128 : 256)
+#define POTRF_POTF2_SWITCHSIZE(T) ((sizeof(T) == 4) ? 256 : 128)
 #endif
 
 /************************** syevj/heevj ***************************************

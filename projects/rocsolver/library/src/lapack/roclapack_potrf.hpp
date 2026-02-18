@@ -80,16 +80,11 @@ I potrf_get_block_size(const I n)
 {
     if constexpr(sizeof(T) == 4)
     {
-        if(n <= 4096)
-            return 64;
-        else
-            return 256;
+        return 256;
     }
     else if constexpr(sizeof(T) == 8)
     {
-        if(n <= 3200)
-            return 64;
-        else if(n <= 5120)
+        if(n <= 6400)
             return 128;
         else
             return 256;
