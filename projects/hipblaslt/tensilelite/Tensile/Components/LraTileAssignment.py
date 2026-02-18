@@ -242,6 +242,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # FIXME SPARSE
         if kernel["ProblemType"]["Sparse"] != 0:
             if kernel["MIInputPerThread"] * kernel["ProblemType"]["MacDataTypeA"].numBytes() > 16:
+              inputPerThread = kernel["MIInputPerThread"]
               isSparseTrack = (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or tP["isM"]
               strideK      = (inputPerThread if umlds else (mt + LdsPad) * inputPerThread) * (2 if isSparseTrack and kernel["MIInputPerThread%s"%tc] >  inputPerThread else 1)
         ##special case for new F8 MFMA -TODO:
