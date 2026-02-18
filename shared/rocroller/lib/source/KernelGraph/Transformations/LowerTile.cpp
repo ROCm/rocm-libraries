@@ -1,5 +1,33 @@
+<<<<<<< HEAD
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+=======
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright 2024-2026 AMD ROCm(TM) Software
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+>>>>>>> develop
 
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
@@ -787,7 +815,7 @@ namespace rocRoller
          *   - The row index of a thread tile is fast wrt the VGPR
          *     index.
          *
-         * When `useSwappedAccess` is true, both of these orders are
+         * When `rightmostFastest` is true, both of these orders are
          * reversed.
          *
          * Required (deferred) connections are appended to
@@ -800,7 +828,7 @@ namespace rocRoller
                                  int                                iMacY,
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::vector<unsigned int> const&   jammedTiles,
-                                 bool                               useSwappedAccess,
+                                 bool                               rightmostFastest,
                                  bool                               isGlobalToLDS)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
@@ -820,7 +848,7 @@ namespace rocRoller
             auto workitemX
                 = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
 
-            if(useSwappedAccess)
+            if(rightmostFastest)
             {
                 elementNumberX
                     = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
@@ -881,14 +909,14 @@ namespace rocRoller
                 auto jammedWavetileX = graph.coordinates.addElement(
                     JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
-                if(useSwappedAccess && isGlobalToLDS)
+                if(rightmostFastest && isGlobalToLDS)
                     graph.coordinates.addElement(Tile(), {iMacX}, {jammedWavetileX, iThrX, nThrX});
                 else
                     graph.coordinates.addElement(Tile(), {iMacX}, {jammedWavetileX, nThrX, iThrX});
             }
             else
             {
-                if(useSwappedAccess && isGlobalToLDS)
+                if(rightmostFastest && isGlobalToLDS)
                     graph.coordinates.addElement(Tile(), {iMacX}, {iThrX, nThrX});
                 else
                     graph.coordinates.addElement(Tile(), {iMacX}, {nThrX, iThrX});
@@ -901,7 +929,7 @@ namespace rocRoller
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
                 if(isGlobalToLDS)
                 {
-                    if(useSwappedAccess)
+                    if(rightmostFastest)
                         graph.coordinates.addElement(
                             Tile(), {iMacY}, {jammedWavetileY, nThrY, iThrY});
                     else
@@ -915,7 +943,7 @@ namespace rocRoller
             {
                 if(isGlobalToLDS)
                 {
-                    if(useSwappedAccess)
+                    if(rightmostFastest)
                         graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, iThrY});
                     else
                         graph.coordinates.addElement(Tile(), {iMacY}, {iThrY, nThrY});
@@ -1247,7 +1275,7 @@ namespace rocRoller
                                   int                                iMacY,
                                   std::array<unsigned int, 3> const& workgroupSizes,
                                   std::vector<unsigned int> const&   jammedTiles,
-                                  bool                               useSwappedAccess,
+                                  bool                               rightmostFastest,
                                   bool                               isGlobalToLDS)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
@@ -1268,7 +1296,7 @@ namespace rocRoller
 
             int elementNumberX, elementNumberY;
 
-            if(useSwappedAccess)
+            if(rightmostFastest)
             {
                 elementNumberX
                     = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
@@ -1332,7 +1360,7 @@ namespace rocRoller
                 auto jammedWavetileX = graph.coordinates.addElement(
                     JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
-                if(useSwappedAccess && isGlobalToLDS)
+                if(rightmostFastest && isGlobalToLDS)
                     graph.coordinates.addElement(
                         Flatten(), {jammedWavetileX, iThrX, nThrX}, {iMacX});
                 else
@@ -1341,7 +1369,7 @@ namespace rocRoller
             }
             else
             {
-                if(useSwappedAccess && isGlobalToLDS)
+                if(rightmostFastest && isGlobalToLDS)
                     graph.coordinates.addElement(Flatten(), {iThrX, nThrX}, {iMacX});
                 else
                     graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
@@ -1354,7 +1382,7 @@ namespace rocRoller
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
                 if(isGlobalToLDS)
                 {
-                    if(useSwappedAccess)
+                    if(rightmostFastest)
                         graph.coordinates.addElement(
                             Flatten(), {jammedWavetileY, nThrY, iThrY}, {iMacY});
                     else
@@ -1369,7 +1397,7 @@ namespace rocRoller
             {
                 if(isGlobalToLDS)
                 {
-                    if(useSwappedAccess)
+                    if(rightmostFastest)
                         graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
                     else
                         graph.coordinates.addElement(Flatten(), {iThrY, nThrY}, {iMacY});
@@ -1426,9 +1454,9 @@ namespace rocRoller
             auto thrTileM               = numElementsPerWorkitem;
             auto thrTileN               = 1;
 
-            auto useSwappedAccess = params->transposeMemoryAccess[macTile.layoutType];
+            auto rightmostFastest = params->transposeMemoryAccess[macTile.layoutType];
             if(splitStore)
-                useSwappedAccess = false;
+                rightmostFastest = false;
 
             // Load multiple smaller-precision (< 32-bit) elements into contiguous VGPRs
             bool packed     = false;
@@ -1465,7 +1493,7 @@ namespace rocRoller
                 auto macTileM            = macTile.sizes[0];
                 auto macTileN            = macTile.sizes[1];
 
-                auto macTileFastMovingDimSize = !useSwappedAccess ? macTileM : macTileN;
+                auto macTileFastMovingDimSize = !rightmostFastest ? macTileM : macTileN;
 
                 auto avoidDWordX2 = direct2LDS;
                 updateThreadTileForLongDwords(thrTileM,
@@ -1476,7 +1504,7 @@ namespace rocRoller
                                               avoidDWordX2);
             }
 
-            if(!useSwappedAccess)
+            if(!rightmostFastest)
                 std::swap(thrTileM, thrTileN);
 
             auto memoryType{MemoryType::VGPR};
@@ -1525,7 +1553,7 @@ namespace rocRoller
                 = addLoadMacroTileCT(graph, connections, macTileTag, sdim);
 
             auto macTile          = *graph.coordinates.get<MacroTile>(macTileTag);
-            auto useSwappedAccess = params->transposeMemoryAccess[macTile.layoutType];
+            auto rightmostFastest = params->transposeMemoryAccess[macTile.layoutType];
 
             addLoadThreadTileCT(graph,
                                 connections,
@@ -1534,7 +1562,7 @@ namespace rocRoller
                                 iMacY,
                                 workgroupSizes,
                                 jammedTiles,
-                                useSwappedAccess,
+                                rightmostFastest,
                                 isGlobalToLDS);
 
             graph.coordinates.addElement(DataFlow(), {userTag}, {macTileTag});
@@ -1633,7 +1661,7 @@ namespace rocRoller
             auto workgroupSizes = context->kernel()->workgroupSize();
             auto macTile        = *graph.coordinates.get<MacroTile>(macTileTag);
 
-            auto useSwappedAccess = params->transposeMemoryAccess[macTile.layoutType];
+            auto rightmostFastest = params->transposeMemoryAccess[macTile.layoutType];
 
             auto [nMacX, iMacX, nMacY, iMacY]
                 = addStoreMacroTileCT(graph, connections, macTileTag, sdim, jammedTiles);
@@ -1645,7 +1673,7 @@ namespace rocRoller
                                  iMacY,
                                  workgroupSizes,
                                  jammedTiles,
-                                 useSwappedAccess);
+                                 rightmostFastest);
 
             graph.coordinates.addElement(DataFlow(), {macTileTag}, {userTag});
         }
@@ -1983,10 +2011,10 @@ namespace rocRoller
                 auto workgroupSizes        = m_context->kernel()->workgroupSize();
                 auto wavefrontSize         = m_context->kernel()->wavefront_size();
                 auto wavetilesPerWavefront = m_params->getWaveTilesPerWavefront();
-                bool useSwappedAccess      = m_params->transposeMemoryAccess[tile.layoutType];
+                bool rightmostFastest      = m_params->transposeMemoryAccess[tile.layoutType];
 
                 logger->debug("  LDS({}), MacroTile({}), MacroTile size: {}x{}, SubTile size: "
-                              "{}x{}, MemoryType {}, LayoutType {}, useSwappedAccess {}",
+                              "{}x{}, MemoryType {}, LayoutType {}, rightmostFastest {}",
                               ldsTag,
                               tileTag,
                               tile.sizes[0],
@@ -1995,7 +2023,7 @@ namespace rocRoller
                               tile.subTileSizes[1],
                               toString(tile.memoryType),
                               toString(tile.layoutType),
-                              useSwappedAccess);
+                              rightmostFastest);
 
                 std::vector<DeferredConnection> connections;
 
@@ -2023,7 +2051,7 @@ namespace rocRoller
                 }
                 else if(tile.memoryType == MemoryType::WAVE_SPLIT)
                 {
-                    useSwappedAccess = false;
+                    rightmostFastest = false;
                     addLoadAccumulatorTileCT(
                         graph, connections, tileTag, iMacX, iMacY, wavefrontSize, workgroupSizes);
                 }
@@ -2040,7 +2068,7 @@ namespace rocRoller
                                         false);
                 }
 
-                if(useSwappedAccess)
+                if(rightmostFastest)
                     graph.coordinates.addElement(Tile(), {ldsTag}, {iMacX, iMacY});
                 else
                     graph.coordinates.addElement(Tile(), {ldsTag}, {iMacY, iMacX});
@@ -2170,10 +2198,10 @@ namespace rocRoller
                 auto wavetilesPerWavefront = m_params->getWaveTilesPerWavefront();
                 auto useWaveAccess         = tile.memoryType == MemoryType::WAVE
                                      || tile.memoryType == MemoryType::WAVE_LDS;
-                bool useSwappedAccess = m_params->transposeMemoryAccess[tile.layoutType];
+                bool rightmostFastest = m_params->transposeMemoryAccess[tile.layoutType];
                 // XXX debug
                 logger->debug("  LDS({}), MacroTile({}), MacroTile size: {}x{}, SubTile size: "
-                              "{}x{}, MemoryType {}, LayoutType {}, useSwappedAccess {}",
+                              "{}x{}, MemoryType {}, LayoutType {}, rightmostFastest {}",
                               ldsTag,
                               tileTag,
                               tile.sizes[0],
@@ -2182,7 +2210,7 @@ namespace rocRoller
                               tile.subTileSizes[1],
                               toString(tile.memoryType),
                               toString(tile.layoutType),
-                              useSwappedAccess);
+                              rightmostFastest);
 
                 std::vector<DeferredConnection> connections;
 
@@ -2200,7 +2228,7 @@ namespace rocRoller
                                          iMacY,
                                          workgroupSizes,
                                          jammedTiles,
-                                         useSwappedAccess);
+                                         rightmostFastest);
                 }
                 else if(tile.memoryType == MemoryType::WAVE_Direct2LDS)
                 {
@@ -2213,7 +2241,7 @@ namespace rocRoller
                                          iMacY,
                                          workgroupSizes,
                                          jammedTiles,
-                                         useSwappedAccess,
+                                         rightmostFastest,
                                          /*isGlobalToLDS=*/true);
                 }
                 else
@@ -2232,7 +2260,7 @@ namespace rocRoller
                                        m_params);
                 }
 
-                if(useSwappedAccess)
+                if(rightmostFastest)
                     graph.coordinates.addElement(Flatten(), {iMacX, iMacY}, {ldsTag});
                 else
                     graph.coordinates.addElement(Flatten(), {iMacY, iMacX}, {ldsTag});

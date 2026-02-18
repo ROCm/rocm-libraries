@@ -162,6 +162,7 @@ namespace rocRoller
     };
 
     std::string   toString(LayoutType l);
+    std::string   abbrev(LayoutType t);
     std::ostream& operator<<(std::ostream& stream, LayoutType l);
 
     enum class NaryArgument : int

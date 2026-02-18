@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -334,7 +334,10 @@ add_rocprim_cpp_standard_test(20 OFF "_cpp20" "rocprim.type_traits_interface" te
 add_rocprim_cpp_standard_test(20 ON "_gnupp20" "rocprim.type_traits_interface" test_type_traits_interface.cpp)
 add_rocprim_test("rocprim.no_half_operators" test_no_half_operators.cpp)
 add_rocprim_test("rocprim.intrinsics" test_intrinsics.cpp)
+# Tests internal function, 128-bit atomic that currently is not yet supported with SPIR-V.
+if(NOT "amdgcnspirv" IN_LIST GPU_TARGETS)
 add_rocprim_test("rocprim.intrinsics_atomic" test_intrinsics_atomic.cpp)
+endif()
 add_rocprim_test("rocprim.invoke_result" test_invoke_result.cpp)
 add_rocprim_test("rocprim.warp_exchange" test_warp_exchange.cpp)
 add_rocprim_test("rocprim.warp_load" test_warp_load.cpp)

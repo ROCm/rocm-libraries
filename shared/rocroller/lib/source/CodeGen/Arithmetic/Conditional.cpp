@@ -66,7 +66,7 @@ namespace rocRoller
             }
             else
             {
-                AssertFatal(false, "Unsupported scalar size ", ShowValue(elementSize));
+                Throw<FatalError>("Unsupported scalar size ", ShowValue(elementSize));
             }
 
             if(!cond->isSCC())
@@ -99,7 +99,7 @@ namespace rocRoller
             }
             else
             {
-                AssertFatal(false, "Unsupported size ", ShowValue(elementSize));
+                Throw<FatalError>("Unsupported size ", ShowValue(elementSize));
             }
         }
     }

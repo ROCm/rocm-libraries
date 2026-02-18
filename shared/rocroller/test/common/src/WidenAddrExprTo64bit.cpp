@@ -1,5 +1,33 @@
+<<<<<<< HEAD
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+=======
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright 2025-2026 AMD ROCm(TM) Software
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+>>>>>>> develop
 
 #include <common/WidenAddrExprTo64bit.hpp>
 #include <rocRoller/AssemblyKernelArgument.hpp>
@@ -38,8 +66,8 @@ namespace rocRollerTest
                     return convert(expr.destinationType, cpy.arg);
                 else
                 {
-                    AssertFatal(false,
-                                "Expected Destination type for a convert is either (u)int{32,64}");
+                    Throw<FatalError>(
+                        "Expected Destination type for a convert is either (u)int{32,64}");
                     return nullptr;
                 }
             }
@@ -62,7 +90,7 @@ namespace rocRollerTest
         Expression::ExpressionPtr operator()(Expr const& expr) const
         {
             // Only Expression::Convert and perhaps negates are expected.
-            AssertFatal(false, "Unexpected Unary expression", ShowValue(expr));
+            Throw<FatalError>("Unexpected Unary expression", ShowValue(expr));
             return nullptr;
         }
 
@@ -114,13 +142,13 @@ namespace rocRollerTest
         {
             if constexpr(std::same_as<Expr, Expression::Subtract>)
             {
-                AssertFatal(false, "Subtracts are not expected");
+                Throw<FatalError>("Subtracts are not expected");
                 return nullptr;
             }
 
             if constexpr(Expression::CLogical<Expr>)
             {
-                AssertFatal(false, "logicals are not expected");
+                Throw<FatalError>("logicals are not expected");
                 return nullptr;
             }
 
@@ -139,7 +167,7 @@ namespace rocRollerTest
         requires(Expression::CBinary<Expr>) Expression::ExpressionPtr
             operator()(Expr const& expr) const
         {
-            AssertFatal(false, "Not expected expr : ", ShowValue(expr));
+            Throw<FatalError>("Not expected expr : ", ShowValue(expr));
             return nullptr;
         }
 
@@ -162,7 +190,7 @@ namespace rocRollerTest
         requires(Expression::CTernary<Expr>) Expression::ExpressionPtr
             operator()(Expr const& expr) const
         {
-            AssertFatal(false, "Not expected expr : ", ShowValue(expr));
+            Throw<FatalError>("Not expected expr : ", ShowValue(expr));
             return nullptr;
         }
 
@@ -209,9 +237,9 @@ namespace rocRollerTest
         {
             Log::debug("AssemblyKernelArgumentPtr {} its expression is {}",
                        Expression::toString(expr),
-                       Expression::toString(expr->expression));
+                       Expression::toString(expr->getExpression()));
 
-            auto varType = expr->variableType;
+            auto varType = expr->getVariableType();
 
             assertIfNotExpectedType(varType.dataType, Expression::toString(expr));
 
@@ -230,7 +258,7 @@ namespace rocRollerTest
 
         Expression::ExpressionPtr operator()(Expression::Expression const& expr) const
         {
-            AssertFatal(false, "No expectation to meet this type of Expression: ", ShowValue(expr));
+            Throw<FatalError>("No expectation to meet this type of Expression: ", ShowValue(expr));
             return nullptr;
         }
 

@@ -12,7 +12,7 @@ namespace rocRoller
         {
             auto const& architecture = m_context.lock()->targetArchitecture();
             int         passes = architecture.GetInstructionInfo(inst.getOpCode()).getLatency();
-            bool        is950  = architecture.target().isCDNA35GPU();
+            bool        is950  = architecture.target().isCDNA4GPU();
 
             AssertFatal(m_latencyAndNops.contains(passes),
                         "Unexpected number of passes",
@@ -86,7 +86,7 @@ namespace rocRoller
                     {
                         auto const& architecture = m_context.lock()->targetArchitecture();
                         int passes = architecture.GetInstructionInfo(inst.getOpCode()).getLatency();
-                        bool is950 = architecture.target().isCDNA35GPU();
+                        bool is950 = architecture.target().isCDNA4GPU();
 
                         if(mismatched)
                         {

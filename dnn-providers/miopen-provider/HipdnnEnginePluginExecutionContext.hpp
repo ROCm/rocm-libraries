@@ -4,15 +4,17 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#include "MiopenExecutionSettings.hpp"
 #include "engines/plans/PlanInterface.hpp"
 
 struct HipdnnEnginePluginExecutionContext
@@ -25,12 +27,12 @@ public:
         return _plan != nullptr;
     }
 
-    void setPlan(std::unique_ptr<miopen_legacy_plugin::IPlan> plan)
+    void setPlan(std::unique_ptr<miopen_plugin::IPlan> plan)
     {
         _plan = std::move(plan);
     }
 
-    virtual miopen_legacy_plugin::IPlan& plan() const
+    virtual miopen_plugin::IPlan& plan() const
     {
         if(!hasValidPlan())
         {
@@ -41,17 +43,17 @@ public:
         return *_plan;
     }
 
-    void setBenchmarkingEnabled(bool enabled)
+    void setExecutionSettings(const miopen_plugin::MiopenExecutionSettings& executionSettings)
     {
-        _benchmarkingEnabled = enabled;
+        _executionSettings = executionSettings;
     }
 
-    bool benchmarkingEnabled() const
+    const miopen_plugin::MiopenExecutionSettings& executionSettings() const
     {
-        return _benchmarkingEnabled;
+        return _executionSettings;
     }
 
 private:
-    std::unique_ptr<miopen_legacy_plugin::IPlan> _plan;
-    bool _benchmarkingEnabled = false;
+    std::unique_ptr<miopen_plugin::IPlan> _plan;
+    miopen_plugin::MiopenExecutionSettings _executionSettings;
 };

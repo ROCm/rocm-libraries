@@ -23,6 +23,7 @@
 #include "fft_params.h"
 
 #include "CLI11.hpp"
+#include "fft_enums.h"
 #include "gpubuf.h"
 #include "hostbuf.h"
 #include "ptrdiff.h"
@@ -31,6 +32,8 @@
 #include "test_callbacks.h"
 #include <chrono>
 #include <mpi.h>
+#include <optional>
+#include <stdexcept>
 
 static MPI_Datatype get_mpi_type(size_t elem_size)
 {
@@ -364,30 +367,53 @@ static void gather_field(MPI_Comm                                  mpi_comm,
 // Allocate device buffer(s) to hold all of the bricks for this rank.
 // A rank can have N bricks on it but this will allocate one
 // contiguous buffer per device and return pointers to each of the N bricks.
-static void alloc_local_bricks(int                                       mpi_rank,
-                               const std::vector<fft_params::fft_brick>& bricks,
-                               size_t                                    elem_size,
-                               std::map<int, gpubuf>&                    buffers,
-                               std::vector<void*>&                       buffer_ptrs)
+static void
+    alloc_local_bricks(int                                       mpi_rank,
+                       const std::vector<fft_params::fft_brick>& bricks,
+                       size_t                                    elem_size,
+                       std::map<int, gpubuf>&                    buffers,
+                       std::vector<void*>&                       buffer_ptrs,
+                       const std::vector<fft_params::fft_brick>* corresponding_in_place_bricks
+                       = nullptr,
+                       size_t corresponding_in_place_elem_size = 0)
 {
     // Get bricks that are local to this rank
     auto local_range = std::equal_range(bricks.begin(), bricks.end(), mpi_rank, match_rank());
+    if(corresponding_in_place_bricks)
+    {
+        if(corresponding_in_place_elem_size == 0)
+            throw std::invalid_argument("Invalid element size for corresponding in-place I/O data");
+
+        for(auto brick = local_range.first; brick != local_range.second; ++brick)
+        {
+            const size_t brick_idx = std::distance(bricks.begin(), brick);
+            if(brick_idx >= corresponding_in_place_bricks->size()
+               || corresponding_in_place_bricks->at(brick_idx).rank != mpi_rank
+               || corresponding_in_place_bricks->at(brick_idx).device != brick->device)
+                throw std::invalid_argument("Invalid configuration for in-place operations");
+        }
+    }
 
     // Do one pass over these bricks to work out how big of a buffer
     // we need to allocate on each device
-    std::map<int, size_t> buffer_sizes;
+    std::map<int, size_t> buffer_byte_sizes;
     for(auto brick = local_range.first; brick != local_range.second; ++brick)
     {
-        buffer_sizes.insert({brick->device, static_cast<size_t>(0)}).first->second
-            += compute_ptrdiff(brick->length(), brick->stride);
+        const size_t brick_idx = std::distance(bricks.begin(), brick);
+        buffer_byte_sizes.insert({brick->device, static_cast<size_t>(0)}).first->second
+            += std::max(compute_ptrdiff(brick->length(), brick->stride) * elem_size,
+                        corresponding_in_place_bricks
+                            ? compute_ptrdiff(corresponding_in_place_bricks->at(brick_idx).length(),
+                                              corresponding_in_place_bricks->at(brick_idx).stride)
+                                  * corresponding_in_place_elem_size
+                            : 0);
     }
 
     // Alloc buffers for each device
-    for(const auto buffer_size : buffer_sizes)
+    for(const auto buffer_size : buffer_byte_sizes)
     {
         rocfft_scoped_device dev(buffer_size.first);
-        if(buffers.emplace(buffer_size.first, gpubuf{})
-               .first->second.alloc(buffer_size.second * elem_size)
+        if(buffers.emplace(buffer_size.first, gpubuf{}).first->second.alloc(buffer_size.second)
            != hipSuccess)
         {
             throw std::runtime_error("Failed to allocate buffer on device "
@@ -398,14 +424,20 @@ static void alloc_local_bricks(int                                       mpi_ran
     // Return pointers for each brick
     for(auto brick = local_range.first; brick != local_range.second; ++brick)
     {
-        auto& buf = buffers[brick->device];
+        const size_t brick_idx = std::distance(bricks.begin(), brick);
+        auto&        buf       = buffers[brick->device];
 
-        // Use buffer_sizes to count down bricks for each device
-        auto& remaining_size = buffer_sizes[brick->device];
-        auto  offset_elems   = (buf.size() / elem_size) - remaining_size;
-        remaining_size -= compute_ptrdiff(brick->length(), brick->stride);
-
-        buffer_ptrs.push_back(buf.data_offset(offset_elems * elem_size));
+        // Use buffer_byte_sizes to count down bricks for each device
+        auto& remaining_byte_size = buffer_byte_sizes[brick->device];
+        auto  offset_bytes        = buf.size() - remaining_byte_size;
+        remaining_byte_size
+            -= std::max(compute_ptrdiff(brick->length(), brick->stride) * elem_size,
+                        corresponding_in_place_bricks
+                            ? compute_ptrdiff(corresponding_in_place_bricks->at(brick_idx).length(),
+                                              corresponding_in_place_bricks->at(brick_idx).stride)
+                                  * corresponding_in_place_elem_size
+                            : 0);
+        buffer_ptrs.push_back(buf.data_offset(offset_bytes));
     }
 }
 
@@ -516,8 +548,14 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
     const auto  out_elem_size = var_size<size_t>(params.precision, params.otype);
 
     // allocate and initialize input buffers
-    alloc_local_bricks(
-        mpi_rank, params.ifields.back().bricks, in_elem_size, local_inputs, local_input_ptrs);
+    alloc_local_bricks(mpi_rank,
+                       params.ifields.back().bricks,
+                       in_elem_size,
+                       local_inputs,
+                       local_input_ptrs,
+                       params.placement == fft_placement_inplace ? &params.ofields.back().bricks
+                                                                 : nullptr,
+                       out_elem_size);
 
     init_local_input<decltype(params), gpubuf>(
         mpi_rank, params, params.ifields.back().bricks, in_elem_size, local_input_ptrs);
@@ -974,8 +1012,8 @@ int mpi_worker_main(const char*                                               de
         // each node, GPUs are indexed 0,1,...,N
 
         // distribute input and output among the available number of ranks and GPUs per rank
-        params.distribute_input(ngpus, input_grid, mp_size);
-        params.distribute_output(ngpus, output_grid, mp_size);
+        params.distribute_field<fft_io::fft_io_in>(ngpus, input_grid, mp_size);
+        params.distribute_field<fft_io::fft_io_out>(ngpus, output_grid, mp_size);
 
         params.validate();
         token = params.token();

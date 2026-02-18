@@ -33,8 +33,6 @@
 #include <hip/hip_runtime.h>
 #include <limits>
 
-static const unsigned int DATA_GEN_GRID_Y_MAX = 64;
-
 template <typename Tcomplex>
 __device__ static void conjugate(const size_t pos, const size_t cpos, Tcomplex* x)
 {
@@ -444,7 +442,68 @@ __global__ static void impose_hermitian_symmetry_planar_3D_kernel(Tfloat*      x
     }
 }
 
+static dim3 generate_blockDim(const std::vector<size_t>& length, const size_t blockSize)
+{
+    dim3 blockDim;
+
+    switch(length.size())
+    {
+    case 1:
+        blockDim = dim3(blockSize);
+        break;
+    case 2:
+        blockDim = dim3(blockSize, blockSize);
+        break;
+    case 3:
+        blockDim = dim3(blockSize, blockSize, blockSize);
+        break;
+    default:
+        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
+    }
+
+    return blockDim;
+}
+
+// get grid dimensions for hermitian symmetrizer kernel
+static dim3 generate_hermitian_gridDim(const std::vector<size_t>& length,
+                                       const size_t               batch,
+                                       const size_t               blockSize)
+{
+    dim3 gridDim;
+
+    if(!length.empty() && std::count(length.begin(), length.end() - 1, static_cast<size_t>(0)) > 0)
+        throw std::runtime_error("Invalid zero length for impose_hermitian_symmetry");
+
+    if(batch == 0)
+        throw std::runtime_error("Invalid zero batch for impose_hermitian_symmetry");
+
+    const auto x_total = (length[0] + 1) / 2 - 1;
+    const auto y_total = length[1] - 1;
+
+    switch(length.size())
+    {
+    case 1:
+        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize));
+        break;
+    case 2:
+        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
+                       DivRoundingUp<size_t>(x_total == 0 ? 1 : x_total, blockSize));
+        break;
+    case 3:
+        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
+                       DivRoundingUp<size_t>(x_total == 0 ? 1 : x_total, blockSize),
+                       DivRoundingUp<size_t>((y_total == 0 ? 1 : y_total), blockSize));
+        break;
+    default:
+        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
+    }
+
+    return gridDim;
+}
+
 #ifdef USE_HIPRAND
+
+static const unsigned int DATA_GEN_GRID_Y_MAX = 64;
 
 #include <hiprand/hiprand.h>
 #include <hiprand/hiprand_kernel.h>
@@ -853,65 +912,6 @@ static dim3 generate_data_gridDim(const size_t isize)
     auto gridDim_y = std::min<unsigned int>(DATA_GEN_GRID_Y_MAX, numBlocks_setup);
     auto gridDim_x = DivRoundingUp<unsigned int>(numBlocks_setup, DATA_GEN_GRID_Y_MAX);
     return {gridDim_x, gridDim_y};
-}
-
-// get grid dimensions for hermitian symmetrizer kernel
-static dim3 generate_hermitian_gridDim(const std::vector<size_t>& length,
-                                       const size_t               batch,
-                                       const size_t               blockSize)
-{
-    dim3 gridDim;
-
-    if(!length.empty() && std::count(length.begin(), length.end() - 1, static_cast<size_t>(0)) > 0)
-        throw std::runtime_error("Invalid zero length for impose_hermitian_symmetry");
-
-    if(batch == 0)
-        throw std::runtime_error("Invalid zero batch for impose_hermitian_symmetry");
-
-    const auto x_total = (length[0] + 1) / 2 - 1;
-    const auto y_total = length[1] - 1;
-
-    switch(length.size())
-    {
-    case 1:
-        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize));
-        break;
-    case 2:
-        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
-                       DivRoundingUp<size_t>(x_total == 0 ? 1 : x_total, blockSize));
-        break;
-    case 3:
-        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
-                       DivRoundingUp<size_t>(x_total == 0 ? 1 : x_total, blockSize),
-                       DivRoundingUp<size_t>((y_total == 0 ? 1 : y_total), blockSize));
-        break;
-    default:
-        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
-    }
-
-    return gridDim;
-}
-
-static dim3 generate_blockDim(const std::vector<size_t>& length, const size_t blockSize)
-{
-    dim3 blockDim;
-
-    switch(length.size())
-    {
-    case 1:
-        blockDim = dim3(blockSize);
-        break;
-    case 2:
-        blockDim = dim3(blockSize, blockSize);
-        break;
-    case 3:
-        blockDim = dim3(blockSize, blockSize, blockSize);
-        break;
-    default:
-        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
-    }
-
-    return blockDim;
 }
 
 template <typename Tint, typename Treal>

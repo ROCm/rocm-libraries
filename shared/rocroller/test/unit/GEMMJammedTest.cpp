@@ -13,11 +13,15 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
-    class GEMMJammedTestGPU : public BaseGEMMContextFixture<>
+    // ========================================================================
+    // GEMMJammedTestSuite
+    // ========================================================================
+
+    class GEMMJammedTestSuite : public BaseGEMMContextFixture<>
     {
     };
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2X2)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_2x2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -36,13 +40,13 @@ namespace GEMMTests
         gemm.workgroupSizeY = 4;
 
         gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.fuseLoops = false;
 
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2X1)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_2x1)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -74,7 +78,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2X1UnrollK)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_2x1_UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -106,7 +110,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed1X2)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_1x2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -135,7 +139,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed1X2UnrollK)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_1x2_UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -166,7 +170,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed1x8)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_1x8)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -184,12 +188,12 @@ namespace GEMMTests
         gemm.workgroupSizeX = 4 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 1;
 
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed1x8UnrollK)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_1x8_UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -209,11 +213,11 @@ namespace GEMMTests
         gemm.workgroupSizeX = 4 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 1;
 
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         basicGEMM<Half>(gemm);
     }
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2x4)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_2x4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -231,7 +235,7 @@ namespace GEMMTests
         gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 2;
 
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         basicGEMM<Half>(gemm);
 
@@ -241,7 +245,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "v_pack_b32_f16"), 152);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2x4UnrollK)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_2x4_UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -265,7 +269,7 @@ namespace GEMMTests
         gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 2;
 
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         basicGEMM<Half>(gemm);
 
@@ -274,7 +278,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 9);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed4x2)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_4x2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -292,7 +296,7 @@ namespace GEMMTests
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         gemm.transB = "N";
 
@@ -303,7 +307,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 3);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed4x2UnrollK)
+    TEST_P(GEMMJammedTestSuite, GPU_GEMM_Jammed_4x2_UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -323,7 +327,7 @@ namespace GEMMTests
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
 
         gemm.transB = "N";
 
@@ -334,6 +338,6 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 15);
     }
 
-    INSTANTIATE_TEST_SUITE_P(GEMMJammedTest, GEMMJammedTestGPU, currentGPUISA());
+    INSTANTIATE_TEST_SUITE_P(GEMMJammedTest, GEMMJammedTestSuite, currentGPUISA());
 
 } // namespace GEMMTests

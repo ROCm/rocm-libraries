@@ -309,7 +309,7 @@ namespace HazardObserverTest
                         "v_mul_f32", {v[0]}, {Register::Value::Literal(0x4f7ffffe), v[0]}, {}, ""),
                     Instruction("s_endpgm", {}, {}, {}, "")};
 
-                if(arch.isCDNA3GPU() || arch.isCDNA35GPU())
+                if(arch.isCDNA3GPU() || arch.isCDNA4GPU())
                 {
                     peekAndSchedule(context, insts[0]);
                     peekAndSchedule(context, insts[1], 1);
@@ -401,7 +401,7 @@ namespace HazardObserverTest
                            "v_readlane_b32", {s[1]}, {v[0], Register::Value::Literal(0)}, {}, ""),
                        Instruction("s_endpgm", {}, {}, {}, "")};
 
-                if(arch.isCDNA3GPU() || arch.isCDNA35GPU())
+                if(arch.isCDNA3GPU() || arch.isCDNA4GPU())
                 {
                     peekAndSchedule(context, insts[0]);
                     peekAndSchedule(context, insts[1], 1);
@@ -616,7 +616,7 @@ namespace HazardObserverTest
                    Instruction("v_mov_b32", {v[0]}, {v[1]}, {}, ""),
                    Instruction("s_endpgm", {}, {}, {}, "")};
 
-            if(arch.isCDNA3GPU() || arch.isCDNA35GPU())
+            if(arch.isCDNA3GPU() || arch.isCDNA4GPU())
             {
                 peekAndSchedule(context, insts[0]);
                 peekAndSchedule(context, insts[1], 1);

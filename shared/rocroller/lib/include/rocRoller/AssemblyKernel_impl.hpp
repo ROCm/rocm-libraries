@@ -122,7 +122,7 @@ namespace rocRoller
             return 0;
 
         auto const& lastArg = m_arguments.back();
-        return lastArg.offset + lastArg.size;
+        return lastArg.getOffset() + lastArg.getSize();
     }
 
     inline int AssemblyKernel::group_segment_fixed_size() const
@@ -145,7 +145,7 @@ namespace rocRoller
     {
         size_t rv = 8;
         for(auto const& arg : m_arguments)
-            rv = std::max(rv, DataTypeInfo::Get(arg.variableType).alignment);
+            rv = std::max(rv, DataTypeInfo::Get(arg.getVariableType()).alignment);
 
         return rv;
     }

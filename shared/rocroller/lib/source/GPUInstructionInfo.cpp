@@ -242,7 +242,7 @@ namespace rocRoller
         }
         else
         {
-            AssertFatal(false, "Unknown category for ", ShowValue(opCode));
+            Throw<FatalError>("Unknown category for ", ShowValue(opCode));
         }
 
         return CoexecCategory::Count;

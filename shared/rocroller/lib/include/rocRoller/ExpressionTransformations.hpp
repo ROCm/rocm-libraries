@@ -50,12 +50,12 @@ namespace rocRoller
         /**
          * Gets expressions which can be used to compute magic division of denominator.
          *
-         * Returns [magicMultiple, magicShift, magicSign]
+         * Returns [magicMultiple, magicShift, magicSign, magicShiftMSB]
          *
          * If denominator is unsigned, magicSign will be nullptr.
          */
-        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr>
-            getMagicMultipleShiftAndSign(ExpressionPtr denominator, ContextPtr context);
+        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr, ExpressionPtr>
+            getMagicDivisionParams(ExpressionPtr denominator, ContextPtr context);
 
         /**
          * @brief Attempt to replace multiplication operations found within an expression with faster operations.

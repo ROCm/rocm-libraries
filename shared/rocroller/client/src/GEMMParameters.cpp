@@ -99,13 +99,10 @@ namespace rocRoller
                 fullName << "_LA" << loadPathA;
                 fullName << "_LB" << loadPathB;
 
-                fullName << "_SD" << storeLDSD;
+                fullName << "_SD" << storePath;
 
                 fullName << "_LSA" << loadPathAScale;
                 fullName << "_LSB" << loadPathBScale;
-
-                fullName << "_UNROLL";
-                rocRoller::streamJoin(fullName, std::vector{unrollX, unrollY}, "x");
 
                 fullName << "_SwizzleScale" << swizzleScale << prefetchScale;
                 fullName << "_SwizzleTileSize" << swizzleTileSize;
@@ -124,12 +121,12 @@ namespace rocRoller
 
                 fullName << "_" << scheduler;
 
-                if(streamK)
+                if(streamK != StreamKMode::None)
                 {
                     fullName << "_SK";
-                    if(streamKTwoTileDPFirst)
+                    if(streamK == StreamKMode::TwoTileDPFirst)
                         fullName << "2TDPFirst";
-                    else if(streamKTwoTile)
+                    else if(streamK == StreamKMode::TwoTile)
                         fullName << "2T";
                 }
 
@@ -239,10 +236,9 @@ namespace rocRoller
             {
                 s << "Version:         " << x.version << std::endl;
                 s << "Arch:            " << x.architecture.toString() << std::endl;
-                if(x.streamK)
+                if(x.streamK != StreamKMode::None)
                 {
-                    s << "Algorithm:       StreamK twoTile:" << x.streamKTwoTile
-                      << "(DPFirst:" << x.streamKTwoTileDPFirst << ")" << std::endl;
+                    s << "Algorithm:       StreamK(" << x.streamK << ")" << std::endl;
                 }
                 else
                 {
@@ -258,14 +254,13 @@ namespace rocRoller
                 s << "LDS Padding A:   " << x.padLDSA << std::endl;
                 s << "Load B:          " << x.loadPathB << std::endl;
                 s << "LDS Padding B:   " << x.padLDSB << std::endl;
-                s << "Store D LDS:     " << x.storeLDSD << std::endl;
+                s << "Store D Path:    " << x.storePath << std::endl;
                 s << "Load AScale:     " << x.loadPathAScale << std::endl;
                 s << "Load BScale:     " << x.loadPathBScale << std::endl;
                 s << "Prefetch:        "
                   << "enabled:" << x.prefetch << " inflight:" << x.prefetchInFlight
                   << " LDS:" << x.prefetchLDSFactor << " mixMemOps: " << x.prefetchMixMemOps
                   << std::endl;
-                s << "Unroll:          X:" << x.unrollX << " Y:" << x.unrollY << std::endl;
                 s << "Scheduler:       " << x.scheduler << std::endl;
                 s << "WG size:         " << x.workgroupSizeX * x.workgroupSizeY << std::endl;
                 s << "WG Mapping Dim:  " << x.workgroupMappingDim << std::endl;

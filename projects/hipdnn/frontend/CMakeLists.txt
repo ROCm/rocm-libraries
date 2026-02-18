@@ -3,13 +3,14 @@
 
 include(CMakePackageConfigHelpers)
 
+# Read data_sdk version for minimum requirement
+hipdnn_get_data_sdk_version(HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION)
+
 set(HIP_DNN_FRONTEND_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 add_subdirectory(tests)
 
 add_library(hipdnn_frontend INTERFACE)
-
-target_compile_definitions(hipdnn_frontend INTERFACE COMPONENT_NAME="hipdnn_frontend")
 
 target_link_libraries(hipdnn_frontend INTERFACE hipdnn_data_sdk hipdnn_backend)
 

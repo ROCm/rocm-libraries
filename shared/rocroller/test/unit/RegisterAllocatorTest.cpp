@@ -169,7 +169,7 @@ namespace RegisterAllocatorTest
 
         allocator->allocate(alloc1);
 
-        EXPECT_EQ((std::vector{3, 2, 1}), alloc1->registerIndices());
+        EXPECT_EQ((std::vector{1, 2, 3}), alloc1->registerIndices());
         EXPECT_EQ(false, allocator->isFree(1));
         EXPECT_EQ(false, allocator->isFree(2));
         EXPECT_EQ(false, allocator->isFree(3));
@@ -192,7 +192,7 @@ namespace RegisterAllocatorTest
 
         allocator->allocate(alloc2);
 
-        EXPECT_EQ((std::vector{5, 4, 0}), alloc2->registerIndices());
+        EXPECT_EQ((std::vector{0, 4, 5}), alloc2->registerIndices());
         EXPECT_EQ(false, allocator->isFree(0));
         EXPECT_EQ(false, allocator->isFree(4));
         EXPECT_EQ(false, allocator->isFree(5));
@@ -387,7 +387,10 @@ namespace RegisterAllocatorTest
                     m_context, Register::Type::Scalar, DataType::Float, 6, opt);
                 allocator->allocate(alloc0);
 
-                EXPECT_EQ((std::vector{4, 5, 2, 3, 0, 1}), alloc0->registerIndices());
+                auto expected = scheme == Register::AllocatorScheme::PerfectFit
+                                    ? std::vector{0, 1, 2, 3, 4, 5}
+                                    : std::vector{4, 5, 2, 3, 0, 1};
+                EXPECT_EQ(expected, alloc0->registerIndices());
             }
             {
                 auto allocator
@@ -427,7 +430,10 @@ namespace RegisterAllocatorTest
                     m_context, Register::Type::Scalar, DataType::Float, 6, opt);
                 allocator->allocate(alloc0);
 
-                EXPECT_EQ((std::vector{5, 4, 3, 2, 1, 0}), alloc0->registerIndices());
+                auto expected = scheme == Register::AllocatorScheme::PerfectFit
+                                    ? std::vector{0, 1, 2, 3, 4, 5}
+                                    : std::vector{5, 4, 3, 2, 1, 0};
+                EXPECT_EQ(expected, alloc0->registerIndices());
             }
         };
 
