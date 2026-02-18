@@ -9,6 +9,7 @@
 - [Creating a Kernel Engine Plugin](#creating-a-kernel-engine-plugin)
   - [Steps Overview](#steps-overview)
   - [Implementation Details & Best Practices](#implementation-details)
+  - [Providing Knobs](#providing-knobs)
   - [Key Files Reference](#key-files-reference)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
@@ -192,6 +193,308 @@ In general, the **best practices** consist of:
 5. Profiling kernels and optimize for target hardware
 6. Validating and documenting supported operations, hardware requirements, and limitations
 7. Including unit tests and integration tests
+
+### Providing Knobs
+
+Knobs allow plugin developers to expose configurable runtime parameters to end-users. This enables performance tuning, feature toggles, and algorithmic choices without requiring code changes or recompilation.
+
+#### What are Knobs?
+
+**Knobs** are runtime-configurable parameters that:
+- Control engine behavior (e.g., enable benchmarking, select algorithms)
+- Tune performance parameters (e.g., tile sizes, workspace limits)
+- Allow users to make trade-offs (e.g., memory vs. performance)
+
+Each knob has:
+- **Unique identifier**: String-based ID following namespace conventions
+- **Type**: Integer (int64), Float (double), or String
+- **Default value**: Used when not explicitly set by the user
+- **Constraints**: Valid ranges or explicit allowed values
+- **Description**: Human-readable explanation
+
+#### Knob Naming Conventions
+
+Follow a hierarchical naming scheme to avoid conflicts:
+
+```
+<plugin_name>.<category>.<knob_name>
+```
+
+**Examples**:
+```
+miopen.conv.tile_size
+miopen.global.benchmarking
+rocblas.gemm.algorithm
+custom_plugin.matmul.block_size
+```
+
+> [!IMPORTANT]
+> The `global.*` namespace is **reserved** for standard knobs. Custom plugins must use their own namespace prefix.
+
+**Standard global knobs** available for all plugins:
+- `global.benchmarking` - Enable kernel benchmarking
+- `global.workspace_size_limit` - Maximum workspace memory (operation-specific)
+
+#### Registering Knobs
+
+Plugins expose knobs through the engine details descriptor. When hipDNN queries your engine for its capabilities, you should include knob metadata in the response.
+
+**Current Implementation Approach**:
+
+Since the Plugin SDK helper classes are not yet available, plugins should create knobs using FlatBuffer wrappers directly. The process involves:
+
+1. **Create Knob FlatBuffers** when responding to engine details queries
+2. **Include knob metadata** in the `EngineDetails` response
+3. **Validate knob settings** when building execution plans
+4. **Apply knob values** during plan execution
+
+**Example: Defining Knobs in Engine Details**
+
+```cpp
+// When hipDNN queries engine details via hipdnnEnginePluginGetEngineDetails()
+// your plugin should create knob metadata
+
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
+
+// Create a FlatBuffer with knob information
+flatbuffers::FlatBufferBuilder builder;
+
+// Define an integer knob with constraints
+auto knobIdStr = builder.CreateString("miopen.conv.tile_size");
+auto description = builder.CreateString("Convolution tile size (must be power of 2)");
+
+// Create default value
+auto defaultIntValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, 16);
+
+// Create constraints
+std::vector<int64_t> validValues = {8, 16, 32, 64, 128};
+auto validValuesVec = builder.CreateVector(validValues);
+auto constraint = hipdnn_data_sdk::data_objects::CreateIntConstraint(
+    builder,
+    8,      // min
+    128,    // max
+    8,      // step
+    validValuesVec
+);
+
+// Create the knob
+auto knob = hipdnn_data_sdk::data_objects::CreateKnob(
+    builder,
+    knobIdStr,
+    description,
+    hipdnn_data_sdk::data_objects::KnobValue_IntValue,
+    defaultIntValue.Union(),
+    hipdnn_data_sdk::data_objects::KnobConstraint_IntConstraint,
+    constraint.Union(),
+    false  // not deprecated
+);
+
+// Add to engine details...
+```
+
+#### Knob Types and Constraints
+
+**Integer Knobs** (int64_t):
+```cpp
+// Range-based constraint
+auto constraint = CreateIntConstraint(builder,
+    minValue,
+    maxValue,
+    step,
+    nullptr  // no explicit valid values
+);
+
+// Explicit valid values (e.g., {1, 4, 8, 16})
+std::vector<int64_t> validValues = {1, 4, 8, 16};
+auto validValuesVec = builder.CreateVector(validValues);
+auto constraint = CreateIntConstraint(builder,
+    1,      // min
+    16,     // max
+    1,      // step (ignored when validValues present)
+    validValuesVec
+);
+```
+
+**Float Knobs** (double):
+```cpp
+// Range-based constraint only
+auto constraint = CreateFloatConstraint(builder,
+    0.0,    // min
+    1.0     // max
+);
+```
+
+**String Knobs**:
+```cpp
+// Length-based constraint
+auto constraint = CreateStringConstraint(builder,
+    256,    // max length
+    nullptr // no explicit valid values
+);
+
+// Enum-like constraint with valid values
+std::vector<flatbuffers::Offset<flatbuffers::String>> validStrings;
+validStrings.push_back(builder.CreateString("option1"));
+validStrings.push_back(builder.CreateString("option2"));
+auto validStringsVec = builder.CreateVector(validStrings);
+
+auto constraint = CreateStringConstraint(builder,
+    32,
+    validStringsVec
+);
+```
+
+#### Accessing Knob Settings in Your Engine
+
+When a user creates an execution plan with knob settings, those settings are passed in the `EngineConfig`. Your plugin should:
+
+1. **Extract knob settings** from the EngineConfig during plan creation
+2. **Validate settings** against your knob constraints
+3. **Store settings** in your execution plan
+4. **Apply settings** during execution
+
+**Example: Reading Knob Settings**
+
+```cpp
+// In your plan builder, when receiving an EngineConfig:
+void MyPlanBuilder::buildPlan(const EngineConfig& config) {
+    // EngineConfig contains a vector of KnobSetting flatbuffers
+
+    // Iterate through settings
+    for (const auto* setting : *config.knobs()) {
+        std::string knobId = setting->knob_id_str()->str();
+
+        // Check knob value type and extract value
+        switch (setting->value_type()) {
+            case KnobValue_IntValue: {
+                int64_t value = setting->value_as_IntValue()->value();
+                if (knobId == "miopen.conv.tile_size") {
+                    // Apply tile size setting
+                    planConfig.tileSize = value;
+                }
+                break;
+            }
+            case KnobValue_FloatValue: {
+                double value = setting->value_as_FloatValue()->value();
+                // Handle float setting...
+                break;
+            }
+            case KnobValue_StringValue: {
+                std::string value = setting->value_as_StringValue()->value()->str();
+                // Handle string setting...
+                break;
+            }
+        }
+    }
+}
+```
+
+#### Validation Best Practices
+
+1. **Validate during finalization**: The frontend validates against constraints, but plugins should also validate logical combinations:
+   ```cpp
+   // Example: Knob A can only be 1 if Knob B is 0
+   if (knobA == 1 && knobB != 0) {
+       return error("Knob A requires Knob B to be 0");
+   }
+   ```
+
+2. **Provide defaults**: Always provide sensible default values so knobs are optional.
+
+3. **Document constraints**: Clearly document valid ranges and value combinations in your knob descriptions.
+
+4. **Log usage**: Log when non-default knob values are used to aid debugging.
+
+#### Custom vs. Global Knobs
+
+**Custom Knobs** (recommended for most use cases):
+- Use your plugin namespace (e.g., `miopen.*`)
+- Plugin-specific behavior
+- Full control over semantics
+
+**Global Knobs** (use existing ones when applicable):
+- `global.benchmarking`: Enable benchmarking for kernel selection
+- `global.workspace_size_limit`: Limit workspace memory (when applicable)
+
+#### Complete Example: MIOpen Benchmarking Knob
+
+The MIOpen provider exposes the `global.benchmarking` knob:
+
+**Registration** (in engine details):
+```cpp
+// Create benchmarking knob
+auto knobId = builder.CreateString("global.benchmarking");
+auto desc = builder.CreateString("Enable MIOpen solver benchmarking");
+
+auto defaultValue = CreateIntValue(builder, 0);  // Disabled by default
+auto constraint = CreateIntConstraint(builder, 0, 1, 1);  // Boolean: 0 or 1
+
+auto knob = CreateKnob(
+    builder,
+    knobId,
+    desc,
+    KnobValue_IntValue,
+    defaultValue.Union(),
+    KnobConstraint_IntConstraint,
+    constraint.Union(),
+    false
+);
+```
+
+**Usage** (in plan builder):
+```cpp
+bool benchmarkingEnabled = false;
+
+for (const auto* setting : *engineConfig.knobs()) {
+    if (setting->knob_id_str()->str() == "global.benchmarking") {
+        benchmarkingEnabled = (setting->value_as_IntValue()->value() == 1);
+    }
+}
+
+if (benchmarkingEnabled) {
+    // Enable MIOpen's find/benchmark mode
+    miopenSetTuningMode(handle, miopenTuningModeFast);
+}
+```
+
+#### Deprecating Knobs
+
+When a knob is no longer needed:
+
+1. **Mark as deprecated** rather than removing it:
+   ```cpp
+   auto knob = CreateKnob(
+       builder,
+       knobId,
+       description,
+       valueType,
+       defaultValue.Union(),
+       constraintType,
+       constraint.Union(),
+       true  // deprecated = true
+   );
+   ```
+
+2. **Update documentation** to indicate the deprecation and recommend alternatives.
+
+3. **Remove only during major version updates** to maintain backward compatibility.
+
+#### Documentation Requirements
+
+For each knob your plugin exposes, document:
+
+1. **Knob identifier and type**
+2. **Purpose and behavior**
+3. **Default value**
+4. **Valid range/values**
+5. **Performance implications**
+6. **Usage examples**
+
+See [MIOpen Provider Knobs Documentation](../../dnn-providers/miopen-provider/docs/Knobs.md) for an example.
+
+> [!TIP]
+> For comprehensive information on the knobs system design and architecture, see [RFC 0004 - Engine Configuration Knobs](./rfcs/0004_EngineConfigKnobs.md).
 
 ### Key Files Reference
 
