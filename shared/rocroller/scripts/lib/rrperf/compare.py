@@ -29,11 +29,11 @@ import argparse
 import datetime
 import io
 import os
-import pathlib
 import re
 import statistics
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, List
 
 import numpy as np
@@ -142,7 +142,7 @@ class PerformanceRun:
     def load_perf_runs(directories):
         perf_runs = list()
         for directory in directories:
-            wrkdir = pathlib.Path(directory)
+            wrkdir = Path(directory)
             results = OrderedDict()
             for path in wrkdir.glob("*.yaml"):
                 try:

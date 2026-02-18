@@ -26,7 +26,7 @@
 """Result reporting routines."""
 
 import argparse
-import pathlib
+from pathlib import Path
 from typing import List
 
 import numpy as np
@@ -36,14 +36,14 @@ from rrperf.problems import GEMMResult
 
 
 def get_args(parser: argparse.ArgumentParser):
-    parser.add_argument("directory", type=pathlib.Path)
+    parser.add_argument("directory", type=Path)
 
 
 def run(args):
     analyze(args.directory)
 
 
-def analyze(directory: pathlib.Path):
+def analyze(directory: Path):
     data = read_data(directory)
 
     infos = sorted(map(info, data), key=lambda x: x[2])
@@ -58,13 +58,13 @@ def info(res: GEMMResult):
     return (dim, value, time)
 
 
-def read_data(directory: pathlib.Path) -> List[GEMMResult]:
+def read_data(directory: Path) -> List[GEMMResult]:
     import itertools
 
     return itertools.chain(*map(rrperf.problems.load_results, directory.glob("*.yaml")))
 
 
-def read_file(file: pathlib.Path):
+def read_file(file: Path):
     with file.open("r") as f:
         GEMMResult()
         return yaml.safe_load(f)

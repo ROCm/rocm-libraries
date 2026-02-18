@@ -50,10 +50,10 @@ import itertools
 import math
 import multiprocessing
 import os
-import pathlib
 import random
 import subprocess
 from dataclasses import asdict, dataclass, field, fields
+from pathlib import Path
 from typing import List, Tuple
 
 import numpy as np
@@ -281,9 +281,7 @@ def bench_star(arg):
     return bench(*arg)
 
 
-def bench(
-    thedir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: Weights
-) -> Result:
+def bench(thedir: Path, problem: rrperf.problems.GEMMRun, weights: Weights) -> Result:
     device, lock = acquire_lock()
 
     try:
@@ -366,7 +364,7 @@ def split_old_new_results(weights) -> Tuple[List[Weights], List[Weights]]:
 
 
 def generation(
-    output_dir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: List[Weights]
+    output_dir: Path, problem: rrperf.problems.GEMMRun, weights: List[Weights]
 ) -> List[Result]:
     global prev_results  # noqa: disable=F824
 
@@ -393,7 +391,7 @@ def generation(
 
 
 def read_gen_results(resfile: str):
-    resfile = pathlib.Path(resfile)
+    resfile = Path(resfile)
     with resfile.open() as f:
         data = yaml.safe_load(f)
 
@@ -403,7 +401,7 @@ def read_gen_results(resfile: str):
         return list(map(res, data))
 
 
-def write_generation(thedir: pathlib.Path, name, results: List[Result]):
+def write_generation(thedir: Path, name, results: List[Result]):
     data = list([val.dict for val in results])
     datafile = thedir / f"results_{name}.yaml"
     with datafile.open("w") as f:
@@ -570,7 +568,7 @@ def get_args(parser: argparse.ArgumentParser):
         "--output",
         "-o",
         dest="output_dir",
-        type=pathlib.Path,
+        type=Path,
         required=True,
         help="Directory to store results.",
     )

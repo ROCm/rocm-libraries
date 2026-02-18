@@ -28,8 +28,8 @@
 
 import argparse
 import difflib
-import pathlib
 import subprocess
+from pathlib import Path
 from typing import List
 
 
@@ -100,11 +100,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     dots_in = []
     for fname in args.fnames:
-        dots_in.append(pathlib.Path(fname).read_text())
+        dots_in.append(Path(fname).read_text())
 
     dots = diff_dots(dots_in)
     for i, dot in enumerate(dots):
-        out_fname = pathlib.Path(args.output + f"_{i:04d}")
+        out_fname = Path(args.output + f"_{i:04d}")
         out_fname.with_suffix(".dot").write_text(dot)
         if not args.dot_only:
             with out_fname.with_suffix(".pdf").open("w") as out:

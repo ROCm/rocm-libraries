@@ -23,8 +23,8 @@
 #
 ################################################################################
 
-import pathlib
 from itertools import product
+from pathlib import Path
 from typing import List
 
 from rrperf.problems import (
@@ -36,7 +36,7 @@ from rrperf.problems import (
 )
 from rrperf.utils import rocm_gfx
 
-repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+repo_dir = Path(__file__).resolve().parent.parent.parent.parent
 
 fp4fp4_fp32 = TypeParameters(
     type_A="fp4",

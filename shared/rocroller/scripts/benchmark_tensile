@@ -29,7 +29,6 @@
 import argparse
 import csv
 import glob
-import pathlib
 import subprocess
 import sys
 import tempfile
@@ -38,7 +37,7 @@ from pathlib import Path
 
 import yaml
 
-repo_dir = pathlib.Path(__file__).resolve().parent.parent
+repo_dir = Path(__file__).resolve().parent.parent
 sys.path.append(str(repo_dir / "scripts" / "lib"))
 
 import rrperf.git as git  # noqa: E402
@@ -167,7 +166,7 @@ if __name__ == "__main__":
                                 gemm_args[key] = value
                         results += [problems.GEMMResult(**gemm_args)]
 
-        yamlfile = pathlib.Path(args.yaml)
+        yamlfile = Path(args.yaml)
         with yamlfile.open("w") as yfile:
             yaml_text = yaml.dump_all(
                 [asdict(x) for x in results],
