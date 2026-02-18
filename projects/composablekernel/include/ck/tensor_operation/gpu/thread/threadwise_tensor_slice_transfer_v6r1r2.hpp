@@ -46,8 +46,6 @@ struct ThreadwiseTensorSliceTransfer_v6r1r2
     using SrcCoord = decltype(make_tensor_coordinate(SrcDesc{}, Index{}));
     using DstCoord = decltype(make_tensor_coordinate(DstDesc{}, Index{}));
 
-    static constexpr auto I0 = Number<0>{};
-
     __device__ constexpr ThreadwiseTensorSliceTransfer_v6r1r2(
         const SrcDesc& src_desc,
         const Index& src_slice_origin,
@@ -124,7 +122,7 @@ struct ThreadwiseTensorSliceTransfer_v6r1r2
             dst_buf.template Update<DstInMemOp, dst_vector_t>(
                 dst_coord_.GetOffset(),
                 is_dst_valid,
-                dst_vector_container.template AsType<dst_vector_t>()[I0]);
+                dst_vector_container.template AsType<dst_vector_t>()[SFCHelper::I0]);
 
             // move coordinate
             if constexpr(idx_1d.value != num_access - 1)

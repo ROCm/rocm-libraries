@@ -91,8 +91,6 @@ struct ThreadwiseTensorSliceTransfer_v3r1_dequant
     using ScaleCoord = decltype(make_tensor_coordinate(SrcDesc{}, Index{}));
     using DstCoord   = decltype(make_tensor_coordinate(DstDesc{}, Index{}));
 
-    static constexpr auto I0 = Number<0>{};
-
     __device__ constexpr ThreadwiseTensorSliceTransfer_v3r1_dequant(
         const SrcDesc& src_desc,
         const Index& src_slice_origin,
@@ -185,7 +183,8 @@ struct ThreadwiseTensorSliceTransfer_v3r1_dequant
             // copy data from src_vector_container into src_thread_scratch_
             src_thread_scratch_tuple_(thread_scratch_id)
                 .template SetAsType<src_vector_t>(
-                    src_data_idx_seq, src_vector_container.template AsType<src_vector_t>()[I0]);
+                    src_data_idx_seq,
+                    src_vector_container.template AsType<src_vector_t>()[Helper::I0]);
 
             constexpr auto move_on_dim =
                 Helper::ComputeMoveOnDim<nDim>(ordered_src_access_idx, ordered_src_access_lengths);
@@ -274,7 +273,8 @@ struct ThreadwiseTensorSliceTransfer_v3r1_dequant
 
             // copy data from scale_vector_container into scale_thread_scratch_
             scale_thread_scratch_.template SetAsType<scale_vector_t>(
-                scale_data_idx_seq, scale_vector_container.template AsType<scale_vector_t>()[I0]);
+                scale_data_idx_seq,
+                scale_vector_container.template AsType<scale_vector_t>()[Helper::I0]);
 
             constexpr auto move_on_dim = Helper::ComputeMoveOnDim<nDim>(
                 ordered_scale_access_idx, ordered_scale_access_lengths);
@@ -406,13 +406,14 @@ struct ThreadwiseTensorSliceTransfer_v3r1_dequant
 
             src_converted_thread_scratch_.template SetAsType<src_converted_vector_t>(
                 access_idx,
-                src_converted_vector_container.template AsType<src_converted_vector_t>()[I0]);
+                src_converted_vector_container
+                    .template AsType<src_converted_vector_t>()[Helper::I0]);
         });
 
         // Element-scale operation, expect packed multiplication
         static_ford<SliceLengths>{}([&](auto idx) {
             DstData dst_v;
-            constexpr auto scale_idx = Sequence<I0, idx.At(1), I0>{};
+            constexpr auto scale_idx = Sequence<Helper::I0, idx.At(1), Helper::I0>{};
             src_element_op_(dst_v,
                             src_converted_thread_scratch_[idx] * scale_thread_scratch_[scale_idx]);
             dst_thread_scratch_(idx) = dst_v;
@@ -491,7 +492,7 @@ struct ThreadwiseTensorSliceTransfer_v3r1_dequant
             dst_buf.template Set<dst_vector_t>(
                 dst_coord_.GetOffset(),
                 is_dst_valid,
-                dst_vector_container.template AsType<dst_vector_t>()[I0]);
+                dst_vector_container.template AsType<dst_vector_t>()[Helper::I0]);
 
             constexpr auto move_on_dim =
                 Helper::ComputeMoveOnDim<nDim>(ordered_dst_access_idx, ordered_dst_access_lengths);

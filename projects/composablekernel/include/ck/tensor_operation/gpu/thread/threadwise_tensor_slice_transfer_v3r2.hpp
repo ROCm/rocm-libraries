@@ -64,8 +64,6 @@ struct ThreadwiseTensorSliceTransfer_v3r2
     using SrcCoords = decltype(MakeCoordinates(SrcDescs{}, StaticallyIndexedArray<Index, nSrc>{}));
     using DstCoords = decltype(MakeCoordinates(DstDescs{}, StaticallyIndexedArray<Index, nDst>{}));
 
-    static constexpr auto I0 = Number<0>{};
-
     __device__ constexpr ThreadwiseTensorSliceTransfer_v3r2(
         const SrcDescs& src_descs,
         const StaticallyIndexedArray<Index, nSrc>& src_slice_origins,
@@ -184,7 +182,7 @@ struct ThreadwiseTensorSliceTransfer_v3r2
                         .At(src_i)
                         .template SetAsType<src_vector_t>(
                             src_data_idx_seq,
-                            src_vector_container.template AsType<src_vector_t>()[I0]);
+                            src_vector_container.template AsType<src_vector_t>()[Helper::I0]);
 
                     constexpr auto move_on_dim = Helper::ComputeMoveOnDim<nDim>(
                         ordered_src_access_idx, ordered_src_access_lengths_tuple.At(src_i));
@@ -343,7 +341,7 @@ struct ThreadwiseTensorSliceTransfer_v3r2
                     dst_bufs.At(dst_i).template Update<DstInMemOp, dst_vector_t>(
                         dst_coords_.At(dst_i).GetOffset(),
                         is_dst_valid,
-                        dst_vector_container.template AsType<dst_vector_t>()[I0]);
+                        dst_vector_container.template AsType<dst_vector_t>()[Helper::I0]);
 
                     constexpr auto move_on_dim = Helper::ComputeMoveOnDim<nDim>(
                         ordered_dst_access_idx, ordered_dst_access_lengths_tuple.At(dst_i));
