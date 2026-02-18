@@ -1102,31 +1102,27 @@ double compute_memory_latency(const problem_t& problem,
   double dram_bw = hardware.mem3_perf_ratio * bw_limited;
   double L_mem_dram = (dram_bw > 0) ? (Ld_dram / dram_bw) : 0.0;
   L_mem_dram += heuristic.main_memory_load_latency;
+  
+  // 9) Worst-case across all memory levels
+  double L_mem = std::max({L_mem_l2   * heuristic.weight_mem_l2,
+                           L_mem_mall * heuristic.weight_mem_mall,
+                           L_mem_dram * heuristic.weight_mem_dram});
 
   if(debug)
   {
+    OLOG_DEBUG("H_mem_mall: " << H_mem_mall);
+    OLOG_DEBUG("H_mem_l2: " << H_mem_l2);
     OLOG_DEBUG("Ld_CU_bytes: " << Ld_CU_bytes);
     OLOG_DEBUG("total_Ld: " << total_Ld);
-    OLOG_DEBUG("H_mem_l2: " << H_mem_l2);
-    OLOG_DEBUG("H_mem_l2_global: " << H_mem_l2_global);
-    OLOG_DEBUG("H_mem_mall: " << H_mem_mall);
     OLOG_DEBUG("Ld_mem_dram: " << Ld_mem_dram);
     OLOG_DEBUG("Ld_mem_mall: " << Ld_mem_mall);
-    OLOG_DEBUG("bw_limited: " << bw_limited);
-    OLOG_DEBUG("L_mem_mem_mall: " << L_mem_mem_mall);
-    OLOG_DEBUG("L_mem_mem_dram: " << L_mem_mem_dram);
+    OLOG_DEBUG("L_mem_l2: " << L_mem_l2);
+    OLOG_DEBUG("L_mem_mall: " << L_mem_mall);
+    OLOG_DEBUG("L_mem_dram: " << L_mem_dram);
     OLOG_DEBUG("L_mem: " << L_mem);
-    OLOG_DEBUG("grid_m: " << int(grid_m));
-    OLOG_DEBUG("grid_n: " << int(grid_n));
-    OLOG_DEBUG("mall_m: " << int(mall_m));
-    OLOG_DEBUG("mall_n: " << int(mall_n));
-    OLOG_DEBUG("config.workgroup_mapping: " << int(config.workgroup_mapping));
   }
 
-  // 9) Worst-case across all memory levels
-  return std::max({L_mem_l2   * heuristic.weight_mem_l2,
-                   L_mem_mall * heuristic.weight_mem_mall,
-                   L_mem_dram * heuristic.weight_mem_dram});
+  return L_mem;
 }
 
 /* ---------------------------------------------------------------------------------------- */
@@ -1206,20 +1202,6 @@ double compute_tile_latency(const problem_t& problem,
   // Block 2: One compute iteration in the epilogue
   epilogue_comp.compute_iteration = L_compute * effective_tile_penalty;
 
-  if(debug)
-  {
-    OLOG_DEBUG("mem_bw_occ: " << mem_bw_occ);
-    OLOG_DEBUG("mem_bw_occ_limited: " << mem_bw_occ_limited);
-    OLOG_DEBUG("utilization: " << utilization);
-    OLOG_DEBUG("output_utilization: " << output_utilization);
-    OLOG_DEBUG("effective_tile_penalty: " << effective_tile_penalty);
-    OLOG_DEBUG("output_utilization_penalty: " << output_utilization_penalty);
-    OLOG_DEBUG("config.occupancy: " << config.occupancy);
-    OLOG_DEBUG("real_occupancy: " << real_occupancy);
-    OLOG_DEBUG("num_active_cus: " << int(num_active_cus));
-    OLOG_DEBUG("splitting_factor: " << int(splitting_factor));
-  }
-
   // Block 3: K-split reduction (if applicable)
   if (splitting_factor > 1) {
     size_t n_partials = splitting_factor - 1;
@@ -1293,9 +1275,15 @@ double compute_tile_latency(const problem_t& problem,
 
   // Apply final tile total weight
   L_tile_total *= heuristic.weight_tile_total;
-  
+
   if(debug)
   {
+    OLOG_DEBUG("utilization: " << utilization);
+    OLOG_DEBUG("output_utilization: " << output_utilization);
+    OLOG_DEBUG("effective_tile_penalty: " << effective_tile_penalty);
+    OLOG_DEBUG("config.occupancy: " << config.occupancy);
+    OLOG_DEBUG("real_occupancy: " << real_occupancy);
+
     OLOG_DEBUG("L_mem: " << L_mem);
     OLOG_DEBUG("L_compute: " << L_compute);
     OLOG_DEBUG("L_cvt: " << L_cvt);
@@ -1307,6 +1295,7 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("L_epilogue: " << L_epilogue);
     OLOG_DEBUG("L_tile_total: " << L_tile_total);
   }
+  
   return L_tile_total;
 }
 
