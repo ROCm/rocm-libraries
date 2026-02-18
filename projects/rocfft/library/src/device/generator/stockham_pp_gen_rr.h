@@ -57,7 +57,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         pp_factors_prod = product(factors_pp.begin(), factors_pp.end());
         length_off_dim  = params.parent_length[params.off_dim];
 
-        R.size = Expression{std::max(
+        R.size                   = Expression{std::max(
             nregisters, compute_nregisters(pp_factors_prod, factors_pp, threads_per_transform_pp))};
         threads_per_transform_pp = params.pp_threads_per_transform;
         transforms_per_block_pp  = workgroup_size / threads_per_transform_pp;
@@ -147,7 +147,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         const auto work_length       = pp_factors_prod;
         const auto thread_guard_cond = work_length / width;
 
-        // do thread gurad when guard_by_if or guard_by_arg
+        // do thread guard when guard_by_if or guard_by_arg
         if(guard != ThreadGuardMode::NO_GUARD)
         {
             // using ">" : no need to test "if(thread < XXX)"" if it is always true
@@ -186,7 +186,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             stmts += CommentLines{"not enough threads, some threads do extra work"};
             unsigned int dt = iheight * threads_per_transform_pp;
 
-            // always do thread gurad
+            // always do thread guard
             if(writeGuard)
                 guard_expr = Expression{write && (thread + dt < thread_guard_cond)};
             else
