@@ -81,9 +81,9 @@ protected:
 
     static hipdnnHandle_t createHandle()
     {
-        EXPECT_EQ(hipInit(0), hipSuccess);
+        ASSERT_EQ(hipInit(0), hipSuccess);
         int deviceId = 0;
-        EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
+        ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
 
         // Load both plugins once for all tests
         const std::array<const char*, 2> paths

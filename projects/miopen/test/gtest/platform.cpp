@@ -121,7 +121,7 @@ DevMem::DevMem(const Device&, size_t size)
     }
 }
 
-DevMem::~DevMem() { EXPECT_EQ(hipFree(ptr), hipSuccess); }
+DevMem::~DevMem() { ASSERT_EQ(hipFree(ptr), hipSuccess); }
 
 #endif // MIOPEN_BACKEND_HIP
 

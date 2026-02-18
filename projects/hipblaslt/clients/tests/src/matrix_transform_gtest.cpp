@@ -61,11 +61,11 @@ namespace
             const auto            res       = bufSize % alignment;
             const auto            allocSize = bufSize + (res ? (alignment - res) : 0);
             auto                  err       = hipMalloc(&this->aBase, allocSize);
-            EXPECT_EQ(err, hipSuccess);
+            ASSERT_EQ(err, hipSuccess);
             err = hipMalloc(&this->bBase, allocSize);
-            EXPECT_EQ(err, hipSuccess);
+            ASSERT_EQ(err, hipSuccess);
             err = hipMalloc(&this->cBase, allocSize);
-            EXPECT_EQ(err, hipSuccess);
+            ASSERT_EQ(err, hipSuccess);
             this->a = reinterpret_cast<DType*>(aBase + (allocSize - bufSize));
             this->b = reinterpret_cast<DType*>(bBase + (allocSize - bufSize));
             this->c = reinterpret_cast<DType*>(cBase + (allocSize - bufSize));
@@ -81,7 +81,7 @@ namespace
             aBase    = nullptr;
             bBase    = nullptr;
             cBase    = nullptr;
-            EXPECT_EQ(err, hipSuccess);
+            ASSERT_EQ(err, hipSuccess);
         }
 
         void* getBuf(size_t i) override

@@ -32,7 +32,7 @@ template <typename T>
 void checkBufferSynchronized(const T* buffer, size_t size, hipStream_t stream = nullptr, T mult = 1)
 {
     hipError_t error = hipStreamSynchronize(stream);
-    EXPECT_EQ(error, hipSuccess) << "Error synchronizing stream";
+    ASSERT_EQ(error, hipSuccess) << "Error synchronizing stream";
 
     for(size_t i = 0; i < size; ++i)
     {
@@ -138,7 +138,7 @@ TEST(TestMigratableMemory, MigrateToDeviceNonDefaultStream)
 
     hipStream_t stream;
     hipError_t error = hipStreamCreateWithFlags(&stream, hipStreamNonBlocking);
-    EXPECT_EQ(error, hipSuccess) << "Failed to create HIP stream";
+    ASSERT_EQ(error, hipSuccess) << "Failed to create HIP stream";
     ASSERT_NE(stream, nullptr) << "Failed to create HIP stream";
 
     MigratableMemory<float> memory(10, stream);
@@ -157,7 +157,7 @@ TEST(TestMigratableMemory, MigrateToDeviceNonDefaultStream)
     checkBufferSynchronized(static_cast<float*>(memory.hostData()), memory.count(), stream);
 
     error = hipStreamDestroy(stream);
-    EXPECT_EQ(error, hipSuccess) << "Failed to destroy HIP stream";
+    ASSERT_EQ(error, hipSuccess) << "Failed to destroy HIP stream";
 }
 
 TEST(TestMigratableMemory, MigrateToDeviceAsyncNonDefaultStream)
@@ -166,7 +166,7 @@ TEST(TestMigratableMemory, MigrateToDeviceAsyncNonDefaultStream)
 
     hipStream_t stream;
     hipError_t error = hipStreamCreateWithFlags(&stream, hipStreamNonBlocking);
-    EXPECT_EQ(error, hipSuccess) << "Failed to create HIP stream";
+    ASSERT_EQ(error, hipSuccess) << "Failed to create HIP stream";
     ASSERT_NE(stream, nullptr) << "Failed to create HIP stream";
 
     MigratableMemory<float> memory(10, stream);
@@ -185,7 +185,7 @@ TEST(TestMigratableMemory, MigrateToDeviceAsyncNonDefaultStream)
     checkBufferSynchronized(static_cast<float*>(memory.hostDataAsync()), memory.count(), stream);
 
     error = hipStreamDestroy(stream);
-    EXPECT_EQ(error, hipSuccess) << "Failed to destroy HIP stream";
+    ASSERT_EQ(error, hipSuccess) << "Failed to destroy HIP stream";
 }
 
 TEST(TestMigratableMemory, MigrateToHost)
@@ -208,7 +208,7 @@ TEST(TestMigratableMemory, MigrateToHost)
     initBuffer(array.data(), 10, 2.0f);
     hipError_t err = hipMemcpy(
         memory.deviceData(), array.data(), memory.count() * sizeof(float), hipMemcpyHostToDevice);
-    EXPECT_EQ(err, hipSuccess);
+    ASSERT_EQ(err, hipSuccess);
     memory.markDeviceModified();
     EXPECT_EQ(memory.location(), MemoryLocation::DEVICE);
 
@@ -222,7 +222,7 @@ TEST(TestMigratableMemory, MigrateToHostNonDefaultStream)
 
     hipStream_t stream;
     hipError_t error = hipStreamCreateWithFlags(&stream, hipStreamNonBlocking);
-    EXPECT_EQ(error, hipSuccess) << "Failed to create HIP stream";
+    ASSERT_EQ(error, hipSuccess) << "Failed to create HIP stream";
     ASSERT_NE(stream, nullptr) << "Failed to create HIP stream";
 
     MigratableMemory<float> memory(10, stream);
@@ -244,7 +244,7 @@ TEST(TestMigratableMemory, MigrateToHostNonDefaultStream)
                                          memory.count() * sizeof(float),
                                          hipMemcpyHostToDevice,
                                          stream);
-    EXPECT_EQ(err, hipSuccess);
+    ASSERT_EQ(err, hipSuccess);
     memory.markDeviceModified();
     EXPECT_EQ(memory.location(), MemoryLocation::DEVICE);
 
@@ -252,7 +252,7 @@ TEST(TestMigratableMemory, MigrateToHostNonDefaultStream)
     EXPECT_EQ(memory.location(), MemoryLocation::BOTH);
 
     error = hipStreamDestroy(stream);
-    EXPECT_EQ(error, hipSuccess) << "Failed to destroy HIP stream";
+    ASSERT_EQ(error, hipSuccess) << "Failed to destroy HIP stream";
 }
 
 TEST(TestMigratableMemory, MigrateToHostAsyncNonDefaultStream)
@@ -261,7 +261,7 @@ TEST(TestMigratableMemory, MigrateToHostAsyncNonDefaultStream)
 
     hipStream_t stream;
     hipError_t error = hipStreamCreateWithFlags(&stream, hipStreamNonBlocking);
-    EXPECT_EQ(error, hipSuccess) << "Failed to create HIP stream";
+    ASSERT_EQ(error, hipSuccess) << "Failed to create HIP stream";
     ASSERT_NE(stream, nullptr) << "Failed to create HIP stream";
 
     MigratableMemory<float> memory(10, stream);
@@ -283,7 +283,7 @@ TEST(TestMigratableMemory, MigrateToHostAsyncNonDefaultStream)
                                          memory.count() * sizeof(float),
                                          hipMemcpyHostToDevice,
                                          stream);
-    EXPECT_EQ(err, hipSuccess);
+    ASSERT_EQ(err, hipSuccess);
     memory.markDeviceModified();
     EXPECT_EQ(memory.location(), MemoryLocation::DEVICE);
 
@@ -291,7 +291,7 @@ TEST(TestMigratableMemory, MigrateToHostAsyncNonDefaultStream)
     EXPECT_EQ(memory.location(), MemoryLocation::BOTH);
 
     error = hipStreamDestroy(stream);
-    EXPECT_EQ(error, hipSuccess) << "Failed to destroy HIP stream";
+    ASSERT_EQ(error, hipSuccess) << "Failed to destroy HIP stream";
 }
 
 TEST(TestMigratableMemory, Clear)

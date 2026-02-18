@@ -178,11 +178,11 @@ TEST(TestGpuAllocators, DeviceAllocatorBasicOperations)
     }
 
     hipError_t err = hipMemcpy(ptr, hostData.data(), 100 * sizeof(float), hipMemcpyHostToDevice);
-    EXPECT_EQ(err, hipSuccess);
+    ASSERT_EQ(err, hipSuccess);
 
     std::vector<float> result(100);
     err = hipMemcpy(result.data(), ptr, 100 * sizeof(float), hipMemcpyDeviceToHost);
-    EXPECT_EQ(err, hipSuccess);
+    ASSERT_EQ(err, hipSuccess);
 
     for(size_t i = 0; i < result.size(); ++i)
     {

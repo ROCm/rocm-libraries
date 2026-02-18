@@ -37,12 +37,12 @@ public:
         auto hipExtError = hipExtGetLastError();
 
         // If there were any errors, fail the test that generated them
-        EXPECT_EQ(hipError, hipSuccess)
+        ASSERT_EQ(hipError, hipSuccess)
             << " hipGetLastError returned error code " << hipError << " after test "
             << testInfo.test_suite_name() << "." << testInfo.name()
             << ". Error string: " << hipGetErrorString(hipError);
 
-        EXPECT_EQ(hipExtError, hipSuccess)
+        ASSERT_EQ(hipExtError, hipSuccess)
             << " hipExtGetLastError returned error code " << hipExtError << " after test "
             << testInfo.test_suite_name() << "." << testInfo.name()
             << ". Error string: " << hipGetErrorString(hipExtError);

@@ -120,9 +120,9 @@ protected:
 
     static hipdnnHandle_t setupEnvironmentWithPlugin(const std::string& pluginPath)
     {
-        EXPECT_EQ(hipInit(0), hipSuccess);
+        ASSERT_EQ(hipInit(0), hipSuccess);
         int deviceId = 0;
-        EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
+        ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
 
         // Set up plugin path - load specific plugin by absolute path
         const std::array<const char*, 1> paths = {pluginPath.c_str()};

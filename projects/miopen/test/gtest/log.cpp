@@ -109,7 +109,7 @@ struct Tensor
         clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
         data = clCreateBuffer(ctx, CL_MEM_READ_WRITE, data_size, nullptr, nullptr);
 #elif MIOPEN_BACKEND_HIP
-        EXPECT_EQ(hipMalloc(&data, data_size), hipSuccess);
+        ASSERT_EQ(hipMalloc(&data, data_size), hipSuccess);
 #endif
     }
 
