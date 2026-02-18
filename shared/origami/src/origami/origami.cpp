@@ -350,7 +350,7 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   constexpr double epsilon = 1e-9;
   // variance is set through environment variable ANALYTICAL_GEMM_HEURISTICS_VARIANCE
   // Use runtime_options from first config if available, otherwise global singleton
-  const double top_N_heuristic = get_runtime_options(configs.front()).heuristics_variance;
+  const double top_N_heuristic = origami::runtime_options::get().heuristics_variance;
   for (const auto& res : results) {
     bool within_top;
     const double diff = std::abs(res.latency - best_latency);

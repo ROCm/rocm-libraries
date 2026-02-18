@@ -192,13 +192,8 @@ namespace rocRoller
                 bool prefetchMixMemOps = false;
                 bool betaInFma         = true;
 
-                // Unroll Options
-                unsigned int unrollX = 0;
-                unsigned int unrollY = 0;
-
                 std::string scheduler;
                 std::string schedulerCost;
-                bool        matchMemoryAccess;
 
                 bool tailLoops = true;
 

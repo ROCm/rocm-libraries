@@ -36,9 +36,10 @@ public:
                           int64_t engineId,
                           hipdnnPluginConstData_t& engineDetailsOut);
 
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                            int64_t engineId,
-                            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const;
+    size_t getMaxWorkspaceSize(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const;
 
     void initializeExecutionContext(
         const HipdnnEnginePluginHandle& handle,
