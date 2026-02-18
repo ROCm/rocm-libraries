@@ -58,11 +58,14 @@ struct threefry_device_engine : public BaseType
     static inline constexpr unsigned int vector_dim
         = static_cast<unsigned int>(cpp_utils::vector_size_v<vector_type>);
 
-    __forceinline__ __device__ __host__ threefry_device_engine() {}
+    __forceinline__ __device__ __host__
+    threefry_device_engine()
+    {}
 
-    __forceinline__ __device__ __host__ threefry_device_engine(const unsigned long long seed,
-                                                             const unsigned long long subsequence,
-                                                             const unsigned long long offset)
+    __forceinline__ __device__ __host__
+    threefry_device_engine(const unsigned long long seed,
+                           const unsigned long long subsequence,
+                           const unsigned long long offset)
         : base_type(seed, subsequence, offset)
     {}
 
