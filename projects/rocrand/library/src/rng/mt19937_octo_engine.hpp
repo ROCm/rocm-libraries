@@ -166,7 +166,8 @@ struct mt19937_octo_engine
     }
 
     /// Returns \p val from thread <tt>tid mod 8</tt>.
-    static __forceinline__ __device__ unsigned int shuffle(unsigned int val, unsigned int tid)
+    static __forceinline__ __device__
+    unsigned int shuffle(unsigned int val, unsigned int tid)
     {
 #if defined(__HIP_PLATFORM_AMD__)
         return __shfl(val, tid, 8);
@@ -176,7 +177,8 @@ struct mt19937_octo_engine
     }
 
     /// For thread i, returns \p val from thread <tt>(i + 1) mod 8</tt>
-    static __forceinline__ __device__ unsigned int shuffle_down(unsigned int val)
+    static __forceinline__ __device__
+    unsigned int shuffle_down(unsigned int val)
     {
 #if defined(__HIP_PLATFORM_AMD__)
         return __shfl_down(val, 1, 8);
@@ -186,7 +188,8 @@ struct mt19937_octo_engine
     }
 
     /// For thread i, returns \p val from thread <tt>(i - 1) mod 8</tt>
-    static __forceinline__ __device__ unsigned int shuffle_up(unsigned int val)
+    static __forceinline__ __device__
+    unsigned int shuffle_up(unsigned int val)
     {
 #if defined(__HIP_PLATFORM_AMD__)
         return __shfl_up(val, 1, 8);
@@ -211,10 +214,11 @@ struct mt19937_octo_engine
     /// \p idx_m is the local address of <tt>m</tt>: <tt>i + ipt * tid + m</tt>.
     /// \p last_dep_tid_7 is the value of <tt>i + ipt * (tid + 1)</tt>, which is
     /// required as it is the only value not owned by thread <tt>pid</tt>.
-    __forceinline__ __device__ void comp_vector(unsigned int tid,
-                                                unsigned int idx_i,
-                                                unsigned int idx_m,
-                                                unsigned int last_dep_tid_7)
+    __forceinline__ __device__
+    void comp_vector(unsigned int tid,
+                     unsigned int idx_i,
+                     unsigned int idx_m,
+                     unsigned int last_dep_tid_7)
     {
         // communicate the dependency for the last value
         unsigned int last_dep = shuffle_down(m_state.mt[idx_i]);
@@ -268,7 +272,8 @@ struct mt19937_octo_engine
     }
 
     /// Eights threads collaborate in computing the n next values.
-    __forceinline__ __device__ void gen_next_n()
+    __forceinline__ __device__
+    void gen_next_n()
     {
         const unsigned int tid = threadIdx.x & 7U;
 
@@ -590,7 +595,8 @@ private:
 template<unsigned int stride>
 struct mt19937_octo_engine_accessor
 {
-    __forceinline__ __device__ __host__ explicit mt19937_octo_engine_accessor(unsigned int* _engines)
+    __forceinline__ __device__ __host__
+    explicit mt19937_octo_engine_accessor(unsigned int* _engines)
         : engines(_engines)
     {}
 
