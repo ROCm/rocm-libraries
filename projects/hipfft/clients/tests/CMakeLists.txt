@@ -38,6 +38,26 @@ find_package( ROCmCMakeBuildTools REQUIRED CONFIG PATHS /opt/rocm )
 include(ROCMInstallTargets)
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake )
 
+set( hipfft-test_source
+  gtest_main.cpp
+  hipfft_accuracy_test.cpp
+  simple_test.cpp
+  accuracy_test_1D.cpp
+  accuracy_test_2D.cpp
+  accuracy_test_3D.cpp
+  accuracy_test_callback.cpp
+  hipfftw_test.cpp
+  multi_device_test.cpp
+  multi_stream_test.cpp
+  ../../shared/array_validator.cpp
+  ../../shared/test_callbacks.cpp
+  ../../shared/data_gen_device.cpp
+  )
+
+add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )
+
+set( TEST_TARGETS hipfft-test )
+
 
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user
@@ -110,26 +130,6 @@ set( BUILD_WITH_LIB "ROCM" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA
 
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
-
-set( hipfft-test_source
-  gtest_main.cpp
-  hipfft_accuracy_test.cpp
-  simple_test.cpp
-  accuracy_test_1D.cpp
-  accuracy_test_2D.cpp
-  accuracy_test_3D.cpp
-  accuracy_test_callback.cpp
-  hipfftw_test.cpp
-  multi_device_test.cpp
-  multi_stream_test.cpp
-  ../../shared/array_validator.cpp
-  ../../shared/test_callbacks.cpp
-  ../../shared/data_gen_device.cpp
-  )
-
-add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )
-
-set( TEST_TARGETS hipfft-test )
 
 # MPI worker for MPI tests
 if( HIPFFT_MPI_ENABLE )

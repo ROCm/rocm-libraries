@@ -5,12 +5,14 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/node/detail/Utilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <memory>
 #include <vector>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace hipdnn_frontend::detail;
 using namespace hipdnn_test_sdk::utilities;
 
 TEST(TestUtilities, FindCommonShapeValid)
@@ -55,8 +57,8 @@ TEST(TestUtilities, InitializeFrontendLoggingReturnsCorrectly)
 {
     ScopedEnvironmentVariableSetter guard("HIPDNN_LOG_LEVEL", "info");
 
-    EXPECT_EQ(hipdnn_frontend::initializeFrontendLogging(nullptr), -1);
-    EXPECT_EQ(hipdnn_frontend::initializeFrontendLogging(), 0);
+    EXPECT_EQ(initializeFrontendLogging(nullptr), -1);
+    EXPECT_EQ(initializeFrontendLogging(), 0);
 }
 
 // ============================================================================
@@ -573,6 +575,7 @@ TEST(TestUtilities, ValidateScalarParameterValidSingleElement1D)
 {
     auto param = std::make_shared<TensorAttributes>();
     param->set_dim({1});
+    param->set_value(1.0f);
     auto error = validateScalarParameter(param, "TestParameter");
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
@@ -581,8 +584,19 @@ TEST(TestUtilities, ValidateScalarParameterValidSingleElement4D)
 {
     auto param = std::make_shared<TensorAttributes>();
     param->set_dim({1, 1, 1, 1});
+    param->set_value(1.0f);
     auto error = validateScalarParameter(param, "TestParameter");
     EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateScalarParameterInvalidNotPassByValue)
+{
+    auto param = std::make_shared<TensorAttributes>();
+    param->set_dim({1});
+    // No value set
+    auto error = validateScalarParameter(param, "TestParameter");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("must be a pass-by-value tensor") != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateScalarParameterInvalidNonScalar)

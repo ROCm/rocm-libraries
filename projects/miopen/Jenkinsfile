@@ -269,7 +269,6 @@ pipeline {
                 }
                 stage('Clang Format') {
                     agent{ label rocmnode("nogpu") }
-                    
                     steps{
                         script {
                             withWorkingDir {
@@ -285,9 +284,6 @@ pipeline {
                 }
                 stage('Check GTest Format') {
                     agent { label rocmnode("nogpu") }
-                    when {
-                        changeset "**/test/gtest/**"
-                    }
                     steps {
                         script {
                             withWorkingDir {

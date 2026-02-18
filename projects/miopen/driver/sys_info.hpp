@@ -39,7 +39,7 @@
 #include <sys/utsname.h>
 #endif
 
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
 #endif
 
@@ -216,7 +216,7 @@ private:
     std::string GetHipVersion()
     {
         int runtime_version = 0;
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
         HIP_CHECK(hipRuntimeGetVersion(&runtime_version));
 #endif
         const int patch = runtime_version % 100000;
@@ -231,7 +231,7 @@ private:
     {
         std::string result;
         int deviceCount = 0;
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
         HIP_CHECK(hipGetDeviceCount(&deviceCount));
 #endif
         if(deviceCount < 1)
@@ -241,7 +241,7 @@ private:
         else
         {
             std::map<std::string, int> gpuList;
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
             for(int i = 0; i < deviceCount; i++)
             {
                 hipDeviceProp_t props;

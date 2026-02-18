@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,8 +45,8 @@ namespace rocRoller
          * operations.
          */
 
-        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr>
-            getMagicMultipleShiftAndSign(ExpressionPtr denominator, ContextPtr context)
+        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr, ExpressionPtr>
+            getMagicDivisionParams(ExpressionPtr denominator, ContextPtr context)
         {
             auto multiple = launchTimeSubExpressions(magicMultiple(denominator), context);
 
@@ -57,7 +57,7 @@ namespace rocRoller
             {
                 auto shifts = launchTimeSubExpressions(magicShifts(denominator), context);
 
-                return {multiple, shifts, nullptr};
+                return {multiple, shifts, nullptr, (shifts & literal(1u << 31u))};
             }
 
             auto bitfield = launchTimeSubExpressions(magicShiftAndSign(denominator), context);
@@ -75,7 +75,7 @@ namespace rocRoller
             auto sign        = (convert(resultType, bitfield) << literal((endingBit - startingBit)))
                         >> literal(endingBit);
 
-            return {multiple, shifts, sign};
+            return {multiple, shifts, sign, nullptr};
         }
 
         void enableDivideBy(ExpressionPtr expr, ContextPtr context)
@@ -102,8 +102,8 @@ namespace rocRoller
 
             AssertFatal(exprTimes[EvaluationTime::KernelLaunch], ShowValue(exprTimes));
 
-            auto const& [magicExpr, numShiftsExpr, signExpr]
-                = getMagicMultipleShiftAndSign(expr, context);
+            auto const& [magicExpr, numShiftsExpr, signExpr, numShiftsMSBExpr]
+                = getMagicDivisionParams(expr, context);
 
             auto magicTimes = evaluationTimes(magicExpr);
             auto shiftTimes = evaluationTimes(numShiftsExpr);
@@ -118,6 +118,8 @@ namespace rocRoller
 
             if(isSigned)
             {
+                AssertFatal(numShiftsMSBExpr == nullptr,
+                            "Signed case does not need the MSB of magicShift");
                 AssertFatal(signExpr != nullptr);
                 auto signTimes = evaluationTimes(signExpr);
 
@@ -153,8 +155,8 @@ namespace rocRoller
 
             auto k = context->kernel();
 
-            auto const& [magicExpr, numShiftsExpr, signExpr]
-                = getMagicMultipleShiftAndSign(denominator, context);
+            auto const& [magicExpr, numShiftsExpr, signExpr, numShiftsMSBExpr]
+                = getMagicDivisionParams(denominator, context);
 
             {
                 EvaluationTimes evalTimes
@@ -183,7 +185,10 @@ namespace rocRoller
 
                 auto t = (arithmeticShiftR(numerator - q, one)) + q;
                 setComment(t, "Magic t (unsigned)");
-                result = arithmeticShiftR(t, numShiftsExpr);
+
+                result = conditional(
+                    numShiftsMSBExpr == literal(0u), arithmeticShiftR(t, numShiftsExpr), numerator);
+
                 setComment(result, "Magic result (unsigned)");
             }
             else

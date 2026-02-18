@@ -43,7 +43,7 @@ option(HIPSPARSE_BUILD_SHARED_LIBS "Build hipSPARSE as a shared library." ON)
 set(BUILD_SHARED_LIBS ${HIPSPARSE_BUILD_SHARED_LIBS})
 option(HIPSPARSE_ENABLE_HOST "Build hipSPARSE library." ON)
 
-option(HIPSPARSE_ENABLE_CLIENT "Build hipSPARSE clients." ON)
+option(HIPSPARSE_ENABLE_CLIENT "Build hipSPARSE clients." OFF)
 if(HIPSPARSE_ENABLE_CLIENT)
     option(HIPSPARSE_ENABLE_BENCHMARKS "Build benchmark client." ON)
     option(HIPSPARSE_ENABLE_SAMPLES "Build sample programs." ON)

@@ -43,7 +43,8 @@ namespace rocRoller
         {
             class DataParallelGEMMSolution : public GEMMSolution
             {
-                Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
+                Operations::OperationTag                m_tagA, m_tagB, m_tagC, m_tagD;
+                std::optional<Operations::OperationTag> m_tagCvt;
                 Operations::OperationTag m_tagTensorA, m_tagTensorB, m_tagTensorC, m_tagScalarAlpha,
                     m_tagScalarBeta, m_tagTensorD;
 
@@ -272,7 +273,21 @@ namespace rocRoller
 
                     m_tagTensorD
                         = command->addOperation(Operations::Tensor(2, typeD, {}, {(size_t)1})); // D
-                    command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+                    // command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+                    if(solutionParams.types.typeAcc == solutionParams.types.typeD)
+                    {
+                        command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+                    }
+                    else
+                    {
+                        // If Matrix C and D are of different types, an explicit type conversion is required
+
+                        auto cvtOp = Operations::T_Execute(command->getNextTag());
+                        // (SR)Convert( alpha * (A * B) + beta * C )
+                        auto tagCvt = cvtOp.addXOp(Operations::E_Cvt(m_tagD, typeD));
+                        command->addOperation(std::move(cvtOp));
+                        command->addOperation(Operations::T_Store_Tiled(tagCvt, m_tagTensorD));
+                    }
 
                     if(solutionParams.workgroupMappingDim != -1)
                     {
@@ -292,6 +307,8 @@ namespace rocRoller
                                           SolutionParameters const& solutionParams) override
                 {
                     auto params = std::make_shared<CommandParameters>();
+
+                    params->tailLoops = solutionParams.tailLoops;
 
                     int wave_m = 0, wave_n = 0, wave_k = 0, wave_b = 0;
 
@@ -469,16 +486,36 @@ namespace rocRoller
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b});
-                    auto macTileD = KernelGraph::CoordinateGraph::MacroTile(
+
+                    // Determine if type conversion is needed
+                    bool needsConversion
+                        = (solutionParams.types.typeAcc != solutionParams.types.typeD);
+
+                    // m_tagD: If conversion is needed, use WAVE (not LDS) since it won't be stored directly
+                    auto memoryTypeD = GetMemoryType(solutionParams.storePath);
+                    auto macTileD    = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b},
-                        solutionParams.storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                        (IsLDSStore(solutionParams.storePath) && !needsConversion)
+                               ? memoryTypeD
+                               : MemoryType::WAVE);
 
                     params->setDimensionInfo(m_tagA, macTileA);
                     params->setDimensionInfo(m_tagB, macTileB);
                     params->setDimensionInfo(m_tagC, macTileC);
                     params->setDimensionInfo(m_tagD, macTileD);
+
+                    if(m_tagCvt.has_value())
+                    {
+                        // For type conversion, this is what gets stored - use LDS store path if specified
+                        auto macTileCvt = KernelGraph::CoordinateGraph::MacroTile(
+                            {solutionParams.macM, solutionParams.macN},
+                            LayoutType::MATRIX_ACCUMULATOR,
+                            {wave_m, wave_n, wave_k, wave_b},
+                            IsLDSStore(solutionParams.storePath) ? memoryTypeD : MemoryType::WAVE);
+                        params->setDimensionInfo(*m_tagCvt, macTileCvt);
+                    }
 
                     if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
                     {
@@ -527,8 +564,6 @@ namespace rocRoller
                         params->setDimensionInfo(*m_tagLoadScaleB, macTileBScale);
                     }
 
-                    params->unrollX       = solutionParams.unrollX;
-                    params->unrollY       = solutionParams.unrollY;
                     params->swizzleScale  = solutionParams.swizzleScale;
                     params->prefetchScale = solutionParams.prefetchScale;
 
@@ -545,13 +580,10 @@ namespace rocRoller
                         params->prefetch = false;
                     }
 
-                    if(solutionParams.matchMemoryAccess)
-                    {
-                        params->transposeMemoryAccess.set(
-                            LayoutType::MATRIX_A, solutionParams.types.transA == TransposeType::T);
-                        params->transposeMemoryAccess.set(
-                            LayoutType::MATRIX_B, solutionParams.types.transB == TransposeType::T);
-                    }
+                    params->transposeMemoryAccess.set(
+                        LayoutType::MATRIX_A, solutionParams.types.transA == TransposeType::T);
+                    params->transposeMemoryAccess.set(
+                        LayoutType::MATRIX_B, solutionParams.types.transB == TransposeType::T);
 
                     uint workgroup_size_x
                         = solutionParams.workgroupSizeX * solutionParams.workgroupSizeY;

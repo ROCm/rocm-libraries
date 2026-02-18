@@ -11,7 +11,7 @@
 #include <hipdnn_data_sdk/flatbuffer_utilities/KnobSettingWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
-namespace hipdnn_plugin_sdk
+namespace hipdnn_data_sdk::flatbuffer_utilities
 {
 
 class IEngineConfig
@@ -156,4 +156,13 @@ private:
     mutable bool _knobSettingsPopulated = false;
 };
 
-}
+} // namespace hipdnn_data_sdk::flatbuffer_utilities
+
+// Backward compatibility aliases - DEPRECATED
+// These aliases are deprecated and will be removed in a future release.
+// Use hipdnn_data_sdk::flatbuffer_utilities::<TypeName> instead.
+namespace hipdnn_plugin_sdk
+{
+using IEngineConfig = hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig;
+using EngineConfigWrapper = hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper;
+} // namespace hipdnn_plugin_sdk
