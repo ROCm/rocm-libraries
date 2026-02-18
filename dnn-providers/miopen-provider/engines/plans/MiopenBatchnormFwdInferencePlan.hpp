@@ -8,6 +8,7 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "MiopenActivationDescriptor.hpp"
+#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
 
@@ -60,7 +61,7 @@ class BatchnormFwdInferencePlan : public hipdnn_plugin_sdk::IPlan
 {
 public:
     BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams,
-                              bool benchmarkingEnabled = false);
+                              const MiopenExecutionSettings& executionSettings);
 
     BatchnormFwdInferencePlan(const BatchnormFwdInferencePlan&) = delete;
     BatchnormFwdInferencePlan& operator=(const BatchnormFwdInferencePlan&) = delete;
@@ -77,7 +78,7 @@ public:
 
 private:
     BatchnormFwdInferenceParams _inferenceParams;
-    bool _benchmarkingEnabled;
+    MiopenExecutionSettings _executionSettings;
 };
 
 }

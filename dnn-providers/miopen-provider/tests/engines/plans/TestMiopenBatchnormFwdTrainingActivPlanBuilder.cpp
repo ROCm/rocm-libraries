@@ -90,7 +90,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, GetWorkspaceSizeReturnsZe
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_dummyHandle, graph);
+    MiopenExecutionSettings settings;
+    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings);
 
     EXPECT_EQ(workspaceSize, 0u);
 }
@@ -101,9 +102,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, BuildPlanSetsPlanForValid
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
-    MockEngineConfig mockEngineConfig;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -156,10 +156,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
-    MockEngineConfig mockEngineConfig;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
-                 std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
@@ -259,10 +257,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
-    MockEngineConfig mockEngineConfig;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
-                 std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 

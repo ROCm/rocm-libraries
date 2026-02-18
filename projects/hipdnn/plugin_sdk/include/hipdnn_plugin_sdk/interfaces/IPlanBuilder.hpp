@@ -54,9 +54,16 @@ public:
      * @param opGraph The operation graph.
      * @return The maximum workspace size in bytes.
      */
-    virtual size_t
-        getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    virtual size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+                                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                                       const MiopenExecutionSettings& executionSettings) const
+        = 0;
+
+    virtual void initializeExecutionSettings(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        MiopenExecutionSettings& executionSettings) const
         = 0;
 
     /**

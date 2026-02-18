@@ -364,8 +364,8 @@ extern "C"
                 engineConfig->ptr, engineConfig->size);
             hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                                opGraph->size);
-            *workspaceSize = engineManager.getWorkspaceSize(
-                *handle, engineConfigWrapper.engineId(), opGraphWrapper);
+            *workspaceSize = engineManager.getMaxWorkspaceSize(
+                *handle, opGraphWrapper, engineConfigWrapper);
 
             LOG_API_SUCCESS(apiName, "workspaceSize=" << *workspaceSize);
         });

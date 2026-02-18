@@ -27,7 +27,8 @@ public:
                     hipdnnPluginConstData_t& detailsOut) const override;
     size_t getMaxWorkspaceSize(
         const HipdnnEnginePluginHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const override;
 
     void initializeExecutionContext(
         const HipdnnEnginePluginHandle& handle,

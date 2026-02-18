@@ -16,17 +16,17 @@ add_executable(
     engines/plans/TestMiopenBatchnormBwdPlan.cpp
     engines/plans/TestMiopenBatchnormFwdInferencePlan.cpp
     engines/plans/TestMiopenBatchnormFwdInferenceWithVariancePlan.cpp
-    engines/plans/TestMiopenBatchnormFwdTrainingPlan.cpp
     engines/plans/TestMiopenBatchnormFwdTrainingActivPlan.cpp
     engines/plans/TestMiopenBatchnormFwdTrainingActivPlanBuilder.cpp
+    engines/plans/TestMiopenBatchnormFwdTrainingPlan.cpp
     engines/plans/TestMiopenBatchnormFwdTrainingPlanBuilder.cpp
     engines/plans/TestMiopenBatchnormPlanBuilder.cpp
+    engines/plans/TestMiopenConvBwdPlan.cpp
     engines/plans/TestMiopenConvFwdBiasActivPlan.cpp
     engines/plans/TestMiopenConvFwdBiasActivPlanBuilder.cpp
     engines/plans/TestMiopenConvFwdPlan.cpp
-    engines/plans/TestMiopenConvBwdPlan.cpp
-    engines/plans/TestMiopenConvWrwPlan.cpp
     engines/plans/TestMiopenConvPlanBuilder.cpp
+    engines/plans/TestMiopenConvWrwPlan.cpp
     engines/TestMiopenEngine.cpp
     main.cpp
     TestMiopenActivationDescriptor.cpp

@@ -4,7 +4,9 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
+#include "MiopenExecutionSettings.hpp"
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
@@ -40,17 +42,17 @@ public:
         return *_plan;
     }
 
-    void setBenchmarkingEnabled(bool enabled)
+    void setExecutionSettings(const miopen_plugin::MiopenExecutionSettings& executionSettings)
     {
-        _benchmarkingEnabled = enabled;
+        _executionSettings = executionSettings;
     }
 
-    bool benchmarkingEnabled() const
+    const miopen_plugin::MiopenExecutionSettings& executionSettings() const
     {
-        return _benchmarkingEnabled;
+        return _executionSettings;
     }
 
 private:
     std::unique_ptr<hipdnn_plugin_sdk::IPlan> _plan;
-    bool _benchmarkingEnabled = false;
+    miopen_plugin::MiopenExecutionSettings _executionSettings;
 };

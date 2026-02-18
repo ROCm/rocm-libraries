@@ -118,12 +118,13 @@ public:
      * @param opGraph The operation graph.
      * @return The required workspace size in bytes.
      */
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                            int64_t engineId,
-                            const IGraph& opGraph) const
+    size_t getMaxWorkspaceSize(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
     {
-        auto& engine = getEngine(engineId);
-        return engine.getMaxWorkspaceSize(handle, opGraph);
+        auto& engine = getEngine(engineConfig.engineId());
+        return engine.getMaxWorkspaceSize(handle, opGraph, engineConfig);
     }
 
     /**
