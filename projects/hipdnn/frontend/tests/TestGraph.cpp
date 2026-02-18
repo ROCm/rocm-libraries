@@ -5872,7 +5872,7 @@ TEST_F(TestGraph, EngineOverrideDoesNotReplaceExplicitlySetEngineId)
 }
 
 // Test 2: EngineOverrideConfig::matchOperation identifies conv_fprop tensors
-// with the same dims that Graph::applyEngineOverride() would pass to
+// with the same dims that getPreferredIdFromOverrideConfig() would pass to
 // checkEngineOverride() at build time.
 TEST_F(TestGraph, EngineOverrideConfigMatchesConvFpropTensors)
 {
@@ -5888,14 +5888,14 @@ TEST_F(TestGraph, EngineOverrideConfigMatchesConvFpropTensors)
     // Exact rule for this shape
     OperationRule exactRule;
     exactRule.op = "conv_fprop";
-    exactRule.engine_id = 7;
-    exactRule.tensors = {TensorPattern{{1, 3, 32, 32}}, TensorPattern{{64, 3, 3, 3}}};
+    exactRule.engine_name = hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_NAME;
+    exactRule.tensors = {TensorPattern{{1, 3, 32, 32}, {}}, TensorPattern{{64, 3, 3, 3}, {}}};
 
     EngineOverrideConfig config({std::move(exactRule)});
 
     auto result = config.matchOperation("conv_fprop", {x, w});
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(*result, 7);
+    EXPECT_EQ(*result, hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
 
     // Wrong op must not match
     EXPECT_FALSE(config.matchOperation("conv_dgrad", {x, w}).has_value());
@@ -5913,13 +5913,13 @@ TEST_F(TestGraph, EngineOverrideConfigFromContentMatchesConvFpropGraph)
 {
     using namespace hipdnn_frontend::engine_override;
 
-    constexpr int64_t kEngine = 13;
+    const int64_t kEngine = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
 
     const std::string kJson = R"({
   "engine_overrides": [
     {
       "op": "conv_fprop",
-      "engine_id": 13,
+      "engine_name": "MIOPEN_ENGINE",
       "tensors": [
         { "dim": [1, 3, 32, 32] },
         { "dim": [64, 3, 3, 3] }

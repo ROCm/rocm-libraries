@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
@@ -24,12 +25,16 @@ namespace hipdnn_frontend::engine_override
 /// Dimension value meaning "match any value in this slot".
 inline constexpr int64_t WILDCARD_DIM = -1;
 
-/// Pattern for a single tensor: a list of expected dimensions, with -1 as wildcard.
+/// Pattern for a single tensor: a list of expected dimensions and optional strides,
+/// with -1 as a per-slot wildcard.
+/// When `stride` is empty no stride matching is performed.
 struct TensorPattern
 {
     std::vector<int64_t> dim;
+    std::vector<int64_t> stride; ///< Empty = do not match on stride.
 
-    /// Returns true iff tensor.get_dim() matches this pattern element-by-element.
+    /// Returns true iff tensor.get_dim() matches this pattern element-by-element,
+    /// and (when stride is non-empty) tensor.get_stride() matches stride element-by-element.
     /// Rejects immediately when rank differs; skips per-element check for WILDCARD_DIM slots.
     bool matches(const graph::TensorAttributes& tensor) const
     {
@@ -45,6 +50,19 @@ struct TensorPattern
                 return false;
             }
         }
+        if(!stride.empty())
+        {
+            const auto& tstride = tensor.get_stride();
+            // Nonmatching strides assume wildcard semantics.
+            size_t rank = std::min(stride.size(), tstride.size());
+            for(size_t i = 0; i < rank; ++i)
+            {
+                if(stride[i] != WILDCARD_DIM && stride[i] != tstride[i])
+                {
+                    return false;
+                }
+            }
+        }
         return true;
     }
 };
@@ -53,7 +71,7 @@ struct TensorPattern
 struct OperationRule
 {
     std::string op; ///< "conv_fprop" / "conv_dgrad" / "conv_wgrad"
-    int64_t engine_id; ///< Engine ID to select when this rule matches
+    std::string engine_name; ///< Engine name resolved to an ID via engineNameToId()
     std::vector<TensorPattern> tensors; ///< Ordered patterns for operation inputs
 
     /// Returns true iff every tensor in `tensors` matches the corresponding pattern.
@@ -102,10 +120,11 @@ struct DimKeyHash
 /// Rules are evaluated in declaration order; first match wins.
 ///
 /// Internally rules are split per op name (strategy 1) and further divided
-/// into exact rules — where every dimension is concrete — stored in a hash map
-/// for O(1) lookup, and wildcard rules kept in a declaration-order vector
-/// (strategy 2).  The two structures are reconciled via declaration index so
-/// that first-match semantics are preserved across the partition.
+/// into exact rules — where every dimension is concrete and no stride constraint
+/// is present — stored in a hash map for O(1) lookup, and wildcard rules kept
+/// in a declaration-order vector (strategy 2).  The two structures are reconciled
+/// via declaration index so that first-match semantics are preserved across the
+/// partition.
 class EngineOverrideConfig
 {
 public:
@@ -181,18 +200,25 @@ public:
 #endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
     }
 
-    /// Load from the environment variable named by envVar.
-    /// Returns nullopt when the variable is unset, empty, or JSON support is
-    /// compiled out.
-    static std::optional<EngineOverrideConfig> loadFromEnv(const char* envVar
-                                                           = "HIPDNN_ENGINE_OVERRIDE_FILE")
+    /// Return a pointer to the process-lifetime config loaded from
+    /// HIPDNN_ENGINE_OVERRIDE_FILE (read and cached on the first call,
+    /// thread-safe per C++11).  Returns nullptr when the variable is unset,
+    /// empty, the file cannot be opened, or JSON support is compiled out.
+    /// Leading and trailing whitespace in the path value is ignored.
+    static const EngineOverrideConfig* loadFromEnv()
     {
-        const std::string path = hipdnn_data_sdk::utilities::getEnv(envVar, "");
-        if(path.empty())
-        {
-            return std::nullopt;
-        }
-        return load(path);
+        static constexpr const char* kEnvVar = "HIPDNN_ENGINE_OVERRIDE_FILE";
+        static const std::optional<EngineOverrideConfig> cached = []() {
+            std::string path = hipdnn_data_sdk::utilities::getEnv(kEnvVar, "");
+            const auto first = path.find_first_not_of(" \t\r\n");
+            if(first == std::string::npos)
+            {
+                return std::optional<EngineOverrideConfig>{};
+            }
+            path = path.substr(first, path.find_last_not_of(" \t\r\n") - first + 1);
+            return load(path);
+        }();
+        return cached ? &*cached : nullptr;
     }
 
     /// Scan rules in declaration order; return the first matching engine_id or nullopt.
@@ -238,9 +264,9 @@ public:
                 // This wildcard has lower or equal order to any exact hit (loop
                 // would have broken otherwise), so it is the first-match winner.
                 HIPDNN_FE_LOG_INFO("EngineOverrideConfig: matched op=" << op << " engine_id="
-                                                                       << entry.rule.engine_id
+                                                                       << entry.engine_id
                                                                        << " (wildcard rule)");
-                return entry.rule.engine_id;
+                return entry.engine_id;
             }
         }
 
@@ -261,17 +287,18 @@ private:
         size_t order; ///< position in the original rule list (0 = first)
     };
 
-    /// Wildcard rule paired with its declaration index.
+    /// Wildcard rule paired with its declaration index and resolved engine ID.
     struct WildcardEntry
     {
         OperationRule rule;
+        int64_t engine_id; ///< resolved from rule.engine_name at index time
         size_t order;
     };
 
     /// Per-op rule storage partitioned into exact and wildcard buckets.
     struct OpBucket
     {
-        /// Exact rules: no WILDCARD_DIM anywhere.
+        /// Exact rules: no WILDCARD_DIM anywhere and no stride constraints.
         /// Key = rank-prefixed flattened dims of all input tensors.
         /// When two rules share a key, only the first (lowest order) is kept.
         std::unordered_map<std::vector<int64_t>, ExactEntry, DimKeyHash> exact;
@@ -287,6 +314,35 @@ private:
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
     /// Parse a nlohmann::json object into an EngineOverrideConfig.
     /// Throws nlohmann::json::exception on malformed input; callers handle it.
+    ///
+    /// Expected JSON format:
+    /// @code{.json}
+    /// {
+    ///   "engine_overrides": [
+    ///     {
+    ///       "op": "conv_fprop",
+    ///       "engine_name": "MIOPEN_ENGINE",
+    ///       "tensors": [
+    ///         { "dim": [1, 3, 224, 224], "stride": [150528, 50176, 224, 1] },
+    ///         { "dim": [64, 3, 7, 7] }
+    ///       ]
+    ///     },
+    ///     {
+    ///       "op": "conv_fprop",
+    ///       "engine_name": "HIPBLASLT_ENGINE",
+    ///       "tensors": [
+    ///         { "dim": [-1, -1, -1, -1] },
+    ///         { "dim": [-1, -1, -1, -1] }
+    ///       ]
+    ///     }
+    ///   ]
+    /// }
+    /// @endcode
+    ///
+    /// Notes:
+    /// - `engine_name` must be a registered engine name (e.g. "MIOPEN_ENGINE").
+    /// - `-1` in `dim` or `stride` is a wildcard matching any value.
+    /// - `stride` is optional per tensor; omitting it skips stride matching.
     static EngineOverrideConfig parseJson(const nlohmann::json& j)
     {
         std::vector<OperationRule> rules;
@@ -294,11 +350,15 @@ private:
         {
             OperationRule rule;
             rule.op = entry.at("op").get<std::string>();
-            rule.engine_id = entry.at("engine_id").get<int64_t>();
+            rule.engine_name = entry.at("engine_name").get<std::string>();
             for(const auto& t : entry.at("tensors"))
             {
                 TensorPattern pat;
                 pat.dim = t.at("dim").get<std::vector<int64_t>>();
+                if(t.contains("stride"))
+                {
+                    pat.stride = t.at("stride").get<std::vector<int64_t>>();
+                }
                 rule.tensors.push_back(std::move(pat));
             }
             rules.push_back(std::move(rule));
@@ -307,6 +367,9 @@ private:
     }
 #endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
+    /// Returns true if any dim slot in any pattern is WILDCARD_DIM, or if any
+    /// pattern carries a stride constraint (stride-constrained rules use the
+    /// linear wildcard scan so that TensorPattern::matches() is always called).
     static bool hasWildcard(const std::vector<TensorPattern>& patterns)
     {
         for(const auto& p : patterns)
@@ -317,6 +380,10 @@ private:
                 {
                     return true;
                 }
+            }
+            if(!p.stride.empty())
+            {
+                return true;
             }
         }
         return false;
@@ -350,18 +417,21 @@ private:
     }
 
     /// Insert one rule into the appropriate bucket of index_.
+    /// Resolves engine_name to an int64_t ID via engineNameToId().
     void indexRule(OperationRule rule, size_t order)
     {
+        const int64_t resolvedId
+            = hipdnn_data_sdk::utilities::engineNameToId(rule.engine_name);
         OpBucket& bucket = index_[rule.op]; // keyed by op (strategy 1)
         if(hasWildcard(rule.tensors))
         {
-            bucket.wildcards.push_back(WildcardEntry{std::move(rule), order});
+            bucket.wildcards.push_back(WildcardEntry{std::move(rule), resolvedId, order});
         }
         else
         {
             const auto key = buildDimKey(rule.tensors);
             // try_emplace keeps the first (lowest-order) entry for duplicate keys.
-            bucket.exact.try_emplace(key, ExactEntry{rule.engine_id, order});
+            bucket.exact.try_emplace(key, ExactEntry{resolvedId, order});
         }
     }
 
@@ -377,14 +447,21 @@ private:
     }
 };
 
-/// Process-lifetime lazy-load helper.
-/// Reads HIPDNN_ENGINE_OVERRIDE_FILE once on first call (thread-safe per C++11).
-/// Returns nullopt immediately when JSON support is compiled out.
+/// Match op/tensors against a config and return the first matching engine_id.
+/// When `config` is null the process-lifetime config loaded from
+/// HIPDNN_ENGINE_OVERRIDE_FILE is used (read once on first call, thread-safe
+/// per C++11).  Passing an explicit config bypasses the env-var lookup entirely,
+/// which is useful for testing or when the caller manages the config lifetime.
+/// Returns nullopt when no rule matches or JSON support is compiled out.
 inline std::optional<int64_t>
     checkEngineOverride(const std::string& op,
-                        const std::vector<std::shared_ptr<graph::TensorAttributes>>& tensors)
+                        const std::vector<std::shared_ptr<graph::TensorAttributes>>& tensors,
+                        const EngineOverrideConfig* config = nullptr)
 {
-    static const auto config = EngineOverrideConfig::loadFromEnv();
+    if(!config)
+    {
+        config = EngineOverrideConfig::loadFromEnv();
+    }
     if(!config)
     {
         return std::nullopt;
@@ -392,4 +469,4 @@ inline std::optional<int64_t>
     return config->matchOperation(op, tensors);
 }
 
-} // namespace hipdnn_frontend::match
+} // namespace hipdnn_frontend::engine_override

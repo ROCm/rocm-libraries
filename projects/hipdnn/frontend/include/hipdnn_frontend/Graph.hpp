@@ -17,7 +17,7 @@
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
-#include <hipdnn_frontend/detail/EngineOverrideConfig.hpp>
+#include <hipdnn_frontend/detail/EngineOverrideUtils.hpp>
 #include <hipdnn_frontend/detail/GraphDetail.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
@@ -654,39 +654,14 @@ public:
         return buildFlatbufferOperationGraphConst();
     }
 
-    /// Scan sub-nodes for the first convolution operation and probe the engine
-    /// override config.  Returns the matched engine_id, or nullopt if no rule
-    /// matches, no convolution node is present, or JSON support is compiled out.
-    std::optional<int64_t> applyEngineOverride()
-    {
-        for(const auto& node : _sub_nodes)
-        {
-            if(auto* fprop = dynamic_cast<ConvolutionFpropNode*>(node.get()))
-            {
-                return hipdnn_frontend::engine_override::checkEngineOverride(
-                    "conv_fprop", {fprop->attributes.get_x(), fprop->attributes.get_w()});
-            }
-            if(auto* dgrad = dynamic_cast<ConvolutionDgradNode*>(node.get()))
-            {
-                return hipdnn_frontend::engine_override::checkEngineOverride(
-                    "conv_dgrad", {dgrad->attributes.get_dy(), dgrad->attributes.get_w()});
-            }
-            if(auto* wgrad = dynamic_cast<ConvolutionWgradNode*>(node.get()))
-            {
-                return hipdnn_frontend::engine_override::checkEngineOverride(
-                    "conv_wgrad", {wgrad->attributes.get_x(), wgrad->attributes.get_dy()});
-            }
-        }
-        return std::nullopt;
-    }
-
     Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
     {
         HIPDNN_FE_LOG_INFO("Building operation graph " << graph_attributes.get_name());
 
         if(!_preferredEngineId.has_value())
         {
-            _preferredEngineId = applyEngineOverride();
+            _preferredEngineId
+                = hipdnn_frontend::engine_override::getPreferredIdFromOverrideConfig(*this);
         }
 
         auto serializedGraph = buildFlatbufferOperationGraph();
