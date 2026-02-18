@@ -1052,8 +1052,8 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["DirectToVgprA"]:
         # additional definition G2LA2 for swapping register sets
         moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA2", "vgprG2LA_BASE", self.states.a.numVgprG2LAllocated//2))
-    if not kernel["DirectToLdsMXSA"] or self.do["KeepDirectToLdsAlloc"]:
-      if kernel["ProblemType"]["MXBlockA"]:
+    if kernel["ProblemType"]["MXBlockA"]:
+      if not kernel["DirectToLdsMXSA"] or self.do["KeepDirectToLdsAlloc"]:
         moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LMXSA", "vgprG2LMXSA_BASE", 0))
         if kernel["DirectToVgprA"]:
           # additional definition G2LA2 for swapping register sets
@@ -1064,8 +1064,8 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["DirectToVgprB"]:
         # additional definition G2LB2 for swapping register sets
         moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LB2", "vgprG2LB_BASE", self.states.b.numVgprG2LAllocated//2))
-    if not kernel["DirectToLdsMXSB"] or self.do["KeepDirectToLdsAlloc"]:
-      if kernel["ProblemType"]["MXBlockB"]:
+    if kernel["ProblemType"]["MXBlockB"]:
+      if not kernel["DirectToLdsMXSB"] or self.do["KeepDirectToLdsAlloc"]:
         moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LMXSB", "vgprG2LMXSB_BASE", 0))
         if kernel["DirectToVgprB"]:
           # additional definition G2LB2 for swapping register sets
