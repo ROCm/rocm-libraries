@@ -1817,6 +1817,64 @@ struct conv_test_input // TODO: check all the fields if they're parameters
     bool preallocate         = false;
 };
 
+inline bool IsValidCtestStyleConfig(const conv_test_input& input)
+{
+    const auto spatial_dim = input.filter_dims.size();
+    if(spatial_dim < 2 || spatial_dim > 3)
+    {
+        return false;
+    }
+
+    if(input.spatial_dim_elements.size() != spatial_dim ||
+       input.pads_strides_dilations.size() != 3 * spatial_dim ||
+       input.trans_output_pads.size() != spatial_dim)
+    {
+        return false;
+    }
+
+    if(input.in_layout.size() != 2 + spatial_dim || input.fil_layout.size() != 2 + spatial_dim ||
+       input.out_layout.size() != 2 + spatial_dim)
+    {
+        return false;
+    }
+
+    const auto group_count = std::max(input.groupCount, 1);
+    if(input.input_channels == 0 || input.output_channels == 0 || group_count <= 0)
+    {
+        return false;
+    }
+    if(input.input_channels % static_cast<std::size_t>(group_count) != 0 ||
+       input.output_channels % static_cast<std::size_t>(group_count) != 0)
+    {
+        return false;
+    }
+
+    // Mirror ctest run-time skip rules: non-positive stride/dilation and non-positive output extents.
+    for(std::size_t i = 0; i < spatial_dim; ++i)
+    {
+        const auto stride = static_cast<long long>(input.pads_strides_dilations[spatial_dim + i]);
+        const auto dilation =
+            static_cast<long long>(input.pads_strides_dilations[2 * spatial_dim + i]);
+        if(stride <= 0 || dilation <= 0)
+        {
+            return false;
+        }
+
+        const auto in_size     = static_cast<long long>(input.spatial_dim_elements[i]);
+        const auto filter_size = static_cast<long long>(input.filter_dims[i]);
+        const auto pad         = static_cast<long long>(input.pads_strides_dilations[i]);
+        const auto numerator =
+            in_size + (2 * pad) - (dilation * (filter_size - 1)) - 1; // conv output formula
+        const auto out_size = (numerator / stride) + 1;
+        if(out_size <= 0)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 std::vector<std::size_t> get_batch_sizes() { return {1, 8, 2, 64, 30, 128, 352, 512}; }
 
 std::vector<std::vector<std::size_t>> get_2d_spatial_dims()
