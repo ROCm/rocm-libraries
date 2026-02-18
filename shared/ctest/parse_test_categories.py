@@ -23,6 +23,27 @@ def gpu_arch_matches(specific_arch, pattern_arch):
     return specific_arch.startswith(prefix)
 
 
+def load_yaml(yaml_file):
+    """Load and parse a YAML file, exiting with a descriptive error on failure."""
+    try:
+        with open(yaml_file, "r") as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"Error: YAML file not found: {yaml_file}", file=sys.stderr)
+    except PermissionError:
+        print(
+            f"Error: Permission denied reading YAML file: {yaml_file}", file=sys.stderr
+        )
+    except yaml.YAMLError as e:
+        print(f"Error: Invalid YAML syntax in {yaml_file}: {e}", file=sys.stderr)
+    except Exception as e:
+        print(
+            f"Error: Unexpected failure loading {yaml_file}: {type(e).__name__}: {e}",
+            file=sys.stderr,
+        )
+    sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Parse test_categories.yaml and generate CMake test definitions"
@@ -46,12 +67,7 @@ def main():
     working_dir = args.working_dir
     install_test_file = args.install_test_file
 
-    try:
-        with open(yaml_file, "r") as f:
-            config = yaml.safe_load(f)
-    except Exception as e:
-        print(f"Error loading YAML: {e}", file=sys.stderr)
-        sys.exit(1)
+    config = load_yaml(yaml_file)
 
     # Open install test file if provided, using context manager for automatic cleanup
     try:
@@ -60,9 +76,15 @@ def main():
             if install_test_file
             else contextlib.nullcontext()
         )
+    except OSError as e:
+        print(
+            f"Warning: I/O error opening install test file {install_test_file}: {e}",
+            file=sys.stderr,
+        )
+        install_cm = contextlib.nullcontext()
     except Exception as e:
         print(
-            f"Warning: Could not open install test file {install_test_file}: {e}",
+            f"Warning: Unexpected error opening install test file {install_test_file}: {type(e).__name__}: {e}",
             file=sys.stderr,
         )
         install_cm = contextlib.nullcontext()
@@ -164,9 +186,14 @@ def main():
                         f"set_tests_properties({target_name}-{category_name}-suite PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
                     )
                     install_file_handle.flush()
+                except OSError as e:
+                    print(
+                        f"Warning: I/O error writing category {category_name} to install test file: {e}",
+                        file=sys.stderr,
+                    )
                 except Exception as e:
                     print(
-                        f"Warning: Failed to write category {category_name} to install test file: {e}",
+                        f"Warning: Unexpected error writing category {category_name} to install test file: {type(e).__name__}: {e}",
                         file=sys.stderr,
                     )
 
@@ -289,9 +316,14 @@ def main():
                             f"set_tests_properties({target_name}-{category_name}-{gpu_arch}-suite PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
                         )
                         install_file_handle.flush()
+                    except OSError as e:
+                        print(
+                            f"Warning: I/O error writing GPU exclude {category_name}-{gpu_arch} to install test file: {e}",
+                            file=sys.stderr,
+                        )
                     except Exception as e:
                         print(
-                            f"Warning: Failed to write GPU exclude {category_name}-{gpu_arch} to install test file: {e}",
+                            f"Warning: Unexpected error writing GPU exclude {category_name}-{gpu_arch} to install test file: {type(e).__name__}: {e}",
                             file=sys.stderr,
                         )
 
