@@ -12,6 +12,24 @@ except ImportError:
     pass
 import origami
 
+from test_utils import create_hardware
+
+
+def pytest_addoption(parser):
+    """Add command line options for origami tests."""
+    parser.addoption(
+        "--generate-baseline",
+        action="store_true",
+        default=False,
+        help="Generate new baseline files for ranking regression tests",
+    )
+
+
+@pytest.fixture(scope="session")
+def generate_baseline(request):
+    """Fixture to check if we should generate baselines."""
+    return request.config.getoption("--generate-baseline")
+
 
 @pytest.fixture
 def hardware():
@@ -25,21 +43,8 @@ def hardware():
         # Try to get real hardware from device 0
         return origami.get_hardware_for_device(0)
     except RuntimeError:
-        # No ROCm device available, create mock hardware for testing
-        # Mock MI300X (gfx942) configuration
-        return origami.hardware_t(
-            origami.architecture_t.gfx942,  # architecture
-            304,                             # n_cu
-            65536,                           # lds_capacity
-            8,                               # num_xcd
-            1.0,                             # mem1_perf_ratio
-            1.0,                             # mem2_perf_ratio
-            1.0,                             # mem3_perf_ratio
-            4000000,                         # l2_capacity
-            1.0,                             # compute_clock_ghz
-            1,                               # parallel_mi_cu
-            (0.0, 0.015, 0.0)               # mem_bw_per_wg_coefficients
-        )
+        # No ROCm device available, create mock gfx942 hardware for testing
+        return create_hardware("gfx942")
 
 
 @pytest.fixture

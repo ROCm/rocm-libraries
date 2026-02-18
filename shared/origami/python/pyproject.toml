@@ -78,6 +78,7 @@ python_functions = ["test_*"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests that require hardware",
+    "regression: marks tests as ranking regression tests",
 ]
 addopts = [
     "-ra",
