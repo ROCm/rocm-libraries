@@ -285,6 +285,7 @@ set( MIOpen_Source
     solver/conv/gemm_bwd.cpp
     solver/conv/gemm_common.cpp
     solver/conv/gemm_wrw.cpp
+    solver/conv/conv_ck_grouped_conv_fwd.cpp
     solver/conv_asm_1x1u_bias_activ_fused.cpp
     solver/conv_bin_winoRxS_fused.cpp
     solver/conv_ck_igemm_grp_fwd_activ_fused.cpp
@@ -311,6 +312,8 @@ set( MIOpen_Source
     solver/pooling/forwardNd.cpp
     solver/pooling/backward2d.cpp
     solver/pooling/backwardNd.cpp
+    solver/pooling/performanceConfig2d.cpp
+    solver/pooling/performanceConfigNd.cpp
     solver/prelu/backward_prelu_multi_weights.cpp
     solver/prelu/backward_prelu_single_weight.cpp
     solver/prelu/utils.cpp
@@ -366,6 +369,22 @@ if(MIOPEN_ENABLE_SQLITE AND MIOPEN_ENABLE_SQLITE_KERN_CACHE)
 endif()
 
 if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+    include(${PROJECT_SOURCE_DIR}/cmake/CopyExternalHeader.cmake)
+    find_path(ROCRAND_INCLUDE_DIR "rocrand/rocrand_xorwow.h")
+    if(ROCRAND_INCLUDE_DIR)
+        message(STATUS "Found rocrand headers at: ${ROCRAND_INCLUDE_DIR}")
+        set(ROCRAND_XORWOW_INLINED_PATH ${PROJECT_BINARY_DIR}/kernels/rocrand_xorwow_inlined.h)
+        copy_external_header(
+            TARGET inline_rocrand_header
+            SOURCE_HEADER ${ROCRAND_INCLUDE_DIR}/rocrand/rocrand_xorwow.h
+            ROOT_INCLUDE_DIR ${ROCRAND_INCLUDE_DIR}
+            OUTPUT_PATH ${ROCRAND_XORWOW_INLINED_PATH}
+            COMMENT "Inlining rocrand_xorwow.h with all dependencies as C++ source"
+        )
+    else()
+        message(WARNING "rocrand headers not found - rocrand_xorwow.h will not be inlined")
+    endif()
+
     file(GLOB_RECURSE STATIC_COMPOSABLE_KERNEL_INCLUDE "kernels/static_composable_kernel/include/*/*.hpp")
     file(GLOB_RECURSE STATIC_COMPOSABLE_KERNEL_SOURCE "kernels/static_composable_kernel/src/*/*.cpp")
     file(GLOB_RECURSE COMPOSABLE_KERNEL_INCLUDE "legacy_composable_kernel/composable_kernel/include/*.hpp")
@@ -512,6 +531,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/miopen_limits.hpp
         kernels/miopen_math.hpp
         kernels/miopen_rocrand.hpp
+        ${ROCRAND_XORWOW_INLINED_PATH}
         kernels/miopen_type_traits.hpp
         kernels/miopen_utility.hpp
         kernels/miopen_warp_size.hpp
@@ -553,17 +573,14 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenCheckNumerics.cpp
         kernels/MIOpenBatchNormActivBwdPerAct.cpp
         kernels/MIOpenBatchNormActivBwdSpatial.cpp
-        kernels/MIOpenBatchNormActivFwdTrainPerAct.cl
-        kernels/MIOpenBatchNormActivFwdTrainSpatial.cl
+        kernels/MIOpenBatchNormActivFwdTrainPerAct.cpp
+        kernels/MIOpenBatchNormActivFwdTrainSpatial.cpp
         kernels/MIOpenBatchNormFwdTrainSpatial.cpp
-        kernels/MIOpenBatchNormFwdTrainPerAct.cl
-        kernels/MIOpenBatchNormFwdInferSpatial.cl
-        kernels/MIOpenBatchNormFwdInferSpatialHIP.cpp
-        kernels/MIOpenBatchNormFwdInferPerAct.cl
-        kernels/MIOpenBatchNormFwdInferPerActHIP.cpp
-        kernels/MIOpenBatchNormBwdSpatial.cl
-        kernels/MIOpenBatchNormBwdPerAct.cl
-        kernels/MIOpenBatchNormBwdPerActHIP.cpp
+        kernels/MIOpenBatchNormFwdTrainPerAct.cpp
+        kernels/MIOpenBatchNormFwdInferSpatial.cpp
+        kernels/MIOpenBatchNormFwdInferPerAct.cpp
+        kernels/MIOpenBatchNormBwdSpatial.cpp
+        kernels/MIOpenBatchNormBwdPerAct.cpp
         kernels/MIOpenConvDirUni.cl
         kernels/MIOpenConvDirBatchNormActiv.cl
         kernels/MIOpenConvDirGenFwd.cl
@@ -607,7 +624,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenGroupConvBwdWrWS2.cl
         kernels/MIOpenConvBwdWrW_LxG_P53.cl
         kernels/MIOpenGroupConvBwdWrW_LxG_P53.cl
-        kernels/MIOpenConvBwdWrW_LxG_5x5.cl
         kernels/MIOpenConvBwdWrW1x1_PAD_read4.cl
         kernels/MIOpenConvFwd_LxL_11.cl
         kernels/MIOpenConvFFT.cpp
@@ -627,10 +643,10 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/gcnAsmBNBwdTrainSpatial.s
         kernels/MIOpenTensorKernels.cl
         kernels/MIOpenTensorKernelsHip.cpp
-        kernels/MIOpenSubTensorOpWithScalarKernel.cl
-        kernels/MIOpenSubTensorOpWithSubTensorKernel.cl
-        kernels/MIOpenSubTensorOpWithCastTensorKernel.cl
-        kernels/MIOpenSubTensorOpWithTransformKernel.cl
+        kernels/MIOpenSubTensorOpWithScalarKernel.cpp
+        kernels/MIOpenSubTensorOpWithSubTensorKernel.cpp
+        kernels/MIOpenSubTensorOpWithCastTensorKernel.cpp
+        kernels/MIOpenSubTensorOpWithTransformKernel.cpp
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride1.s
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride2_dec.s
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride2_dil.s
@@ -678,8 +694,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride1.s
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride2.s
         kernels/MIOpenConvBwdBias.cl
-        kernels/MIOpenBatchNormActivInfer.cl
-        kernels/MIOpenBatchNormActivInferHIP.cpp
+        kernels/MIOpenBatchNormActivInfer.cpp
         kernels/MIOpenCTCLoss.cpp
         kernels/MIOpenDropoutHIP.cpp
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_fp16_fp16acc_f2x3_c16_stride1.s
@@ -888,6 +903,11 @@ else()
         )
 endif()
 
+# Add dependency on inlined rocrand header if it was created
+if(TARGET inline_rocrand_header)
+    add_dependencies(MIOpen inline_rocrand_header)
+endif()
+
 rocm_set_soversion(MIOpen ${MIOpen_SOVERSION})
 
 clang_tidy_check(MIOpen)
@@ -925,9 +945,18 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
     else()
         # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
+        
+        if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
+            add_subdirectory(kernels/ck_builder)
+            list(APPEND MIOPEN_CK_LINK_FLAGS ck_builder)
+            add_definitions(-DCK_EXPERIMENTAL_BUILDER)
+        endif()
     endif()
-    if(GPU_TARGETS MATCHES "gfx942")
+    if(GPU_TARGETS MATCHES "gfx942" OR GPU_TARGETS MATCHES "gfx950")
         target_compile_definitions(MIOpen PRIVATE CK_ENABLE_TF32)
+    endif()
+    if(GPU_TARGETS MATCHES "gfx950")
+        target_compile_definitions(MIOpen PRIVATE CK_USE_GFX95)
     endif()
 endif()
 

@@ -195,12 +195,14 @@ struct proto_config
     static_assert(NCHW >= 0, "MIO_BN_NCHW should be always >= 0");
     static_assert(MaxN >= 0, "MIO_BN_MAXN should be always >= 0");
     static_assert(C >= 0, "MIO_BN_C should be always >= 0");
+    static_assert(N >= 0, "MIO_BN_N should be always >= 0");
     static_assert(HW >= 0, "MIO_BN_HW should be always >= 0");
     static_assert(NHW >= 0, "MIO_BN_NHW should be always >= 0");
     static_assert(CHW >= 0, "MIO_BN_CHW should be always >= 0");
 
     static constexpr auto input_type_strategy = MiopenConfig::input_type_strategy;
-    using fp_type                             = typename std::conditional<
+
+    using fp_type = typename std::conditional<
         input_type_strategy == type_strategy::fp16 || input_type_strategy == type_strategy::fpmix,
         _Float16,
         typename std::conditional<input_type_strategy == type_strategy::fp32, float, ushort>::

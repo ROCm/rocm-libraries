@@ -80,16 +80,19 @@ extern "C" __global__ void Im3d2Col(data_t* const __restrict im,
                                     const unsigned dilation_w_size,
                                     data_t* __restrict col)
 {
-    unsigned col_size =
-        out_d_size * out_h_size * out_w_size * wei_d_size * wei_h_size * wei_w_size * im_c_size;
+    // Use size_t to prevent overflow for large tensors (>4GB elements)
+    size_t col_size = (size_t)out_d_size * (size_t)out_h_size * (size_t)out_w_size *
+                      (size_t)wei_d_size * (size_t)wei_h_size * (size_t)wei_w_size *
+                      (size_t)im_c_size;
 
-    unsigned int gtid        = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int global_size = blockDim.x * gridDim.x;
-    for(unsigned tid = gtid; tid < col_size; tid += global_size)
+    size_t gtid        = (size_t)blockIdx.x * (size_t)blockDim.x + (size_t)threadIdx.x;
+    size_t global_size = (size_t)blockDim.x * (size_t)gridDim.x;
+    for(size_t tid = gtid; tid < col_size; tid += global_size)
     {
         // "col" matrix row and colume id
-        unsigned col_i = tid / (out_d_size * out_h_size * out_w_size);
-        unsigned col_j = tid - col_i * (out_d_size * out_h_size * out_w_size);
+        size_t out_spatial_size = (size_t)out_d_size * (size_t)out_h_size * (size_t)out_w_size;
+        size_t col_i            = tid / out_spatial_size;
+        size_t col_j            = tid - col_i * out_spatial_size;
 
         // output tensor out_d, out_h, out_w id
         unsigned out_d = col_j / (out_h_size * out_w_size);
@@ -110,11 +113,14 @@ extern "C" __global__ void Im3d2Col(data_t* const __restrict im,
         int im_h = (int)(stride_h_size * out_h + dilation_h_size * wei_h) - (int)(pad_h_size);
         int im_w = (int)(stride_w_size * out_w + dilation_w_size * wei_w) - (int)(pad_w_size);
 
-        data_t value = (im_d >= 0 && im_d < im_d_size && im_h >= 0 && im_h < im_h_size &&
-                        im_w >= 0 && im_w < im_w_size)
-                           ? im[im_offset + wei_c * (im_d_size * im_h_size * im_w_size) +
-                                im_d * (im_h_size * im_w_size) + im_h * im_w_size + im_w]
-                           : 0;
+        data_t value =
+            (im_d >= 0 && im_d < im_d_size && im_h >= 0 && im_h < im_h_size && im_w >= 0 &&
+             im_w < im_w_size)
+                ? im[(size_t)im_offset +
+                     (size_t)wei_c * (size_t)im_d_size * (size_t)im_h_size * (size_t)im_w_size +
+                     (size_t)im_d * (size_t)im_h_size * (size_t)im_w_size +
+                     (size_t)im_h * (size_t)im_w_size + (size_t)im_w]
+                : 0;
 
         col[tid] = value;
     }

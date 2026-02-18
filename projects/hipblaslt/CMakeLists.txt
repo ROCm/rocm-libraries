@@ -20,12 +20,12 @@ include(CMakePackageConfigHelpers)
 include(GenerateExportHeader)
 include(CMakeDependentOption)
 
-include(dependencies)
+include(fetch_rocm_cmake)
 include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
-set(HIPBLASLT_PROJECT_VERSION "1.2.0" CACHE STRING "Semantic version string.")
+set(HIPBLASLT_PROJECT_VERSION "1.2.2" CACHE STRING "Semantic version string.")
 
 set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
@@ -65,8 +65,8 @@ option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile pytho
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
-    # rocm-smi is not presently available on Windows so we do not require it.
-    cmake_dependent_option(HIPBLASLT_ENABLE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
+    # amd-smi is not presently available on Windows so we do not require it.
+    cmake_dependent_option(HIPBLASLT_ENABLE_AMD_SMI "Require amd_smi." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
 endif()
 
@@ -127,13 +127,15 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_ROCM_SMI)
-    find_package(rocm_smi REQUIRED)
+if(HIPBLASLT_ENABLE_AMD_SMI)
+    find_package(amd_smi REQUIRED)
 else()
-    find_package(rocm_smi)
+    find_package(amd_smi)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
+    # NOTE: CMake should automatically detect the Fortran compiler via standard CMake search paths.
+    # Unfortunately, TheRock for Windows will not compile without an explicit set here.
     if (NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
         set(CMAKE_Fortran_COMPILER  "gfortran")
     endif()
@@ -196,10 +198,10 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
                 set(ROCROLLER_ENABLE_CLIENT OFF)
                 option(YAML_CPP_INSTALL "" ON)
                 set(BUILD_TESTING OFF)
-                set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
                 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
                 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocroller" "${CMAKE_CURRENT_BINARY_DIR}/rocroller")
             endblock()
+            target_link_options(rocroller PRIVATE "LINKER:--exclude-libs,ALL")
         endif()
     endif()
 endif()
@@ -372,7 +374,8 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_DEVICE)
+# Both the device-library contents and custom kernels in the rocroller directory should be installed if selected for
+if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
     if(WIN32)
         # Put files used at runtime adjacent to '.dll's and '.exe's in bin/.
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_BINDIR}/hipblaslt" CACHE PATH "path to tensile library")
@@ -456,7 +459,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/git_info.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/specs.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/suites.py"
-        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/performance"
         COMPONENT benchmarks
     )
 
@@ -519,6 +522,8 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
             sample_hipblaslt_gemm_ext_bgradb
             sample_hipblaslt_gemm_dgelu_bgrad
             sample_hipblaslt_gemm_dgelu_bgrad_ext
+            sample_hipblaslt_gemm_drelu_bgrad
+            sample_hipblaslt_gemm_drelu_bgrad_ext
             sample_hipblaslt_gemm_is_tuned_ext
             sample_hipblaslt_gemm_tuning_wgm_ext
             sample_hipblaslt_gemm_with_scale_a_b
