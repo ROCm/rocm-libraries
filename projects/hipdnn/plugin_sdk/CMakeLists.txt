@@ -47,7 +47,8 @@ install(
     FILES_MATCHING
     PATTERN "*.hpp"
     PATTERN "*.h"
-    PATTERN "*.h.in" EXCLUDE
+    PATTERN "*.h.in"
+    PATTERN "*.inl" EXCLUDE
 )
 
 # Install generated version header
