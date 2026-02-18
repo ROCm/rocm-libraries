@@ -52,6 +52,10 @@ class SIA3(SIA):
             numLocalWriteModPerMfma = getNumLocalWritePerMfma(writer, kernel, lwStartMfmaIndex)
         else:
             numLocalWriteModPerMfma = roundUp(kernel["LocalWritePerMfma"]*PRECISION)
+            # safe guard
+            # should not be smaller than the value calculated with lwStartMfmaIndex=0
+            numLocalWriteModPerMfmaMin = getNumLocalWritePerMfma(writer, kernel, 0)
+            numLocalWriteModPerMfma = max(numLocalWriteModPerMfma, numLocalWriteModPerMfmaMin)
 
         writer.states.numGlobalReadInsPerMfma, writer.states.numLocalWriteModPerMfma = calculateGRPMandLWPM(writer, kernel, numLocalWriteModPerMfma)
         localWriteEndIter = fixLocalWriteEndMfmaIndex(writer, kernel, tensorParametersA, tensorParametersB, \
@@ -265,12 +269,13 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
             writer.states.syncPlrMfmaIndex = writer.states.syncPlrMfmaIndex *4   # Complex
 
     numMfmaBetweenLWandBarrier = 2 if kernel["MatrixInstM"] == 32 else 3
-    writer.states.lwEndMfmaIndex = max(writer.states.syncPlrMfmaIndex - numMfmaBetweenLWandBarrier,0) if writer.states.numItersPLR else numMfmaPerIter*kernel["LoopIters"] - 1
-    if kernel["DirectToLds"] and kernel["PrefetchGlobalRead"] == 2:
-        # DirectToLds + PGR=2 case, lwEndMfmaIndex must be after the end of local read (excluding local reads for next iter)
-        lrEnd = min(writer.states.syncPlrMfmaIndex - 1, writer.states.numMfmaForNextLoopLR)
-        if writer.states.lwEndMfmaIndex < lrEnd:
-            writer.states.lwEndMfmaIndex = lrEnd
+    if kernel["NoLdsWriteCode"]:
+        # no interval needed in no ds_write case
+        numMfmaBetweenLWandBarrier = 0
+    if writer.states.scheduleGROverBarrier or writer.states.numItersPLR == 0:
+        writer.states.lwEndMfmaIndex = writer.states.numMfmaPerIter*kernel["LoopIters"] - 1
+    else:
+        writer.states.lwEndMfmaIndex = max(writer.states.syncPlrMfmaIndex - numMfmaBetweenLWandBarrier,0)
     return numMfmaBetweenLWandBarrier, latencyLeft
 
 def getLocalWriteMFMAStart(writer, kernel, tensorParametersA, tensorParametersB, latencyLeft):
@@ -280,10 +285,10 @@ def getLocalWriteMFMAStart(writer, kernel, tensorParametersA, tensorParametersB,
     #########
     # Get localWriteStart
     #########
-    if not (kernel["1LDSBuffer"] or kernel["DirectToLds"]):
+    if not writer.states.oneBufferScheduling:
         # TODO: replace here for real number of globalReadIncInst
         # numGRIncInst = 18 # Always on. Original logic: 12 if not kernel["StaggerU"] else 18
-        numGRIncInst = 12 if not writer.states.staggerU else 18
+        numGRIncInst = 12 if not writer.states.staggerUCode else 18
         numInstPerMfma = max(roundUp(writer.states.miLatencyLeft/2),1)
         numMfmaToSched = roundUp(numGRIncInst/numInstPerMfma)
         lwStartMfmaIndex = 1 + numMfmaToSched
@@ -426,23 +431,13 @@ def fixLocalWriteEndMfmaIndex(writer, kernel, tPA, tPB, globalReadIncACode, glob
     # last globalread will be scheduled at lwEndMfmaIndex,
     # and last localwrite will be scheduled at lwEndMfmaIndex - 1
     # so we offset lwEndMfmaIndex by 1 mfma
-    if kernel["PrefetchGlobalRead"] == 2 and writer.states.numLocalWriteModPerMfma % PRECISION != 0:
+    if kernel["PrefetchGlobalRead"] >= 2 and writer.states.numLocalWriteModPerMfma % PRECISION != 0 and not kernel["NoLdsWriteCode"]:
         numMfmaBetweenLWandBarrier -= 1
 
-    writer.states.lwEndMfmaIndex = max(writer.states.syncPlrMfmaIndex - numMfmaBetweenLWandBarrier,0) if writer.states.numItersPLR else numMfmaPerIter*kernel["LoopIters"] - 1
-    # adjust lwEndMfmaIndex for the following cases
-    #  1) PGR=2
-    #  2) last loop enabled case
-    # In these cases, lwEndMfmaIndex needs to be < numMfmaPerIter * (kernel["LoopIters"] - 1)
-    # to schedule global read for DTV after lwEndMfmaIndex or execute PostLoop after StoreC in NoLoadLoop
-    # kernel["LoopIters"]  has to be > 1 to make this logic work.
-    if kernel["LoopIters"] > 1 and lastLoop:
-        writer.states.lwEndMfmaIndex = min(writer.states.lwEndMfmaIndex, numMfmaPerIter * (kernel["LoopIters"] - 1) - 1)
-    if kernel["DirectToLds"] and kernel["PrefetchGlobalRead"] == 2:
-        # DirectToLds + PGR=2 case, lwEndMfmaIndex must be after the end of local read (excluding local reads for next iter)
-        lrEnd = min(writer.states.syncPlrMfmaIndex - 1, writer.states.numMfmaForLR * (kernel["LoopIters"] - writer.states.numItersPLR))
-        if writer.states.lwEndMfmaIndex < lrEnd:
-            writer.states.lwEndMfmaIndex = lrEnd
+    if writer.states.scheduleGROverBarrier or writer.states.numItersPLR == 0:
+        writer.states.lwEndMfmaIndex = numMfmaPerIter*kernel["LoopIters"] - 1
+    else:
+        writer.states.lwEndMfmaIndex = max(writer.states.syncPlrMfmaIndex - numMfmaBetweenLWandBarrier,0)
     localWriteEndIter = writer.states.lwEndMfmaIndex//numMfmaPerIter
     localWriteEndIter = min(kernel["LoopIters"] - 1, localWriteEndIter)
     assert localWriteEndIter < kernel["LoopIters"]
@@ -476,10 +471,10 @@ def prepareGRInstToSched(writer, kernel, isNGLL):
 
     # Add all loads from middle as individual schedulable items
     # when using PGR2, put global read instruction right after corresponding localWrite instruction
-    if isNGLL and kernel["UnrollLoopSwapGlobalReadOrder"] == 1:
+    if isNGLL and (kernel["UnrollLoopSwapGlobalReadOrder"] == 1 and not (kernel["DirectToLdsA"] and kernel["DirectToLdsB"])):
         itemsGRToSched =  []
         itemsGRToSchedLater = []
-    elif kernel["PrefetchGlobalRead"] == 2:
+    elif kernel["PrefetchGlobalRead"] >= 2:
         itemsGRToSched =  []
         itemsGRToSchedLater = list(writer.codes.globalReadA.middle.items()) + \
                          list(writer.codes.globalReadB.middle.items())
@@ -500,13 +495,13 @@ def prepareGRInstToSched(writer, kernel, isNGLL):
 def appendInstToSchedSIA3(writer, kernel, numEmptyGlobalReadIncCode, globalReadIncACode, globalReadIncBCode):
     itemsGRIncToSched = []
     # for SIA3, we can break GlobalReadIncCode to avoid mfma bubbles
-    if kernel["PrefetchGlobalRead"] == 2:
+    if kernel["PrefetchGlobalRead"] >= 2:
     # skip to schedule global read for PGR2 first mfma
         for i in range(numEmptyGlobalReadIncCode+1):
             imod = Module()
             itemsGRIncToSched.append(imod)
     numInst = countInstruction(globalReadIncACode) + countInstruction(globalReadIncBCode)
-    numInstPerMfma = max(roundUp(writer.states.miLatencyLeft/2),1)
+    numInstPerMfma = writer.states.numInstPerMfma
 
     globalReadIncItems = globalReadIncACode.flatitems() + globalReadIncBCode.flatitems()
     numMfmaToSched = roundUp(numInst/numInstPerMfma)
@@ -542,7 +537,7 @@ def getSchedNumForIter0SIA3(writer, kernel, itemsGRToSched, itemsGRIncToSched, n
     # but GlobalReadInc shouldn't block LocalWrite so we count them out
     # Loop in PGR2: GlobalReadInc -> LocalWrite/GlobalRead pair
     # since LocalWrite/GlobalRead pair depends on GlobalReadInc, we count in only GlobalReadInc
-    if kernel["PrefetchGlobalRead"] == 2:
+    if kernel["PrefetchGlobalRead"] >= 2:
         loadsToSched = len(itemsGRIncToSched)
     else:
         loadsToSched = len(itemsGRToSched)
@@ -551,9 +546,14 @@ def getSchedNumForIter0SIA3(writer, kernel, itemsGRToSched, itemsGRIncToSched, n
     # Better way is to use larger globalReadPerMfma.
     ## schedule more instructions at first iteration if no enough mfma to schedule globalRead
     writer.states.grEndMfmaIndex = max(0, roundUp(loadsToSched/writer.states.numGlobalReadInsPerMfma) - 1)
-    if writer.states.grEndMfmaIndex > writer.states.lwEndMfmaIndex:
-        schedNumForIter0 = numGlobalReadInsPerIter + (writer.states.grEndMfmaIndex - writer.states.lwEndMfmaIndex) * writer.states.numGlobalReadInsPerMfma
-        writer.states.grEndMfmaIndex = writer.states.lwEndMfmaIndex
+    endIndex = writer.states.lwEndMfmaIndex
+    if writer.states.scheduleGROverBarrier:
+        # scheduleGROverBarrier case, lwEnd can be after barrier sync
+        # grEnd must be before barrier sync in that case
+        endIndex = min(writer.states.lwEndMfmaIndex, writer.states.syncPlrMfmaIndex)
+    if writer.states.grEndMfmaIndex > endIndex:
+        schedNumForIter0 = numGlobalReadInsPerIter + (writer.states.grEndMfmaIndex - endIndex) * writer.states.numGlobalReadInsPerMfma
+        writer.states.grEndMfmaIndex = endIndex
     else:
         schedNumForIter0 = numGlobalReadInsPerIter
     if kernel["PrefetchGlobalRead"] == 1:
@@ -659,7 +659,7 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
     itemsLWToSched = list(writer.codes.localWriteA.items()) + list(writer.codes.localWriteB.items())
     numDummy = 0
     insertDummyTop = False
-    if kernel["PrefetchGlobalRead"] == 2:
+    if kernel["PrefetchGlobalRead"] >= 2:
         # PrefetchGlobalRead + DirectToLds/DirectToVgpr case, need to add dummy list to insert global read
         lenA = len(list(writer.codes.globalReadA.middle.items()))
         lenB = len(list(writer.codes.globalReadB.middle.items()))
@@ -702,7 +702,7 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
             else:
                 item = None
         counter += 1
-        skip = kernel["PrefetchGlobalRead"] == 2 and kernel["ProblemType"]["Sparse"] and kernel["DirectToVgprSparseMetadata"] \
+        skip = kernel["PrefetchGlobalRead"] >= 2 and kernel["ProblemType"]["Sparse"] and kernel["DirectToVgprSparseMetadata"] \
            and item.name.startswith("MetadataWrite") and countVMovB32(item)
         if not skip:
            for _ in range(PRECISION-1):
@@ -729,12 +729,8 @@ def assignLWSchedIndexSIA3(writer, kernel, numLocalWritesPerSched, localWriteEnd
     numMfmaPerIter = writer.states.numMfmaPerIter
     writer.states.lwStartMfmaIndex = writer.states.lwEndMfmaIndex - max(1,roundUp(numWritesToSched/numLocalWritesPerSched)) + 1
     if writer.states.lwStartMfmaIndex < writer.states.grEndMfmaIndex:
-        writer.states.lwStartMfmaIndex = writer.states.grEndMfmaIndex
-    # DirectToLds + PGR=2 case, lwStart must be after all local reads are done
-    if kernel["DirectToLds"] and kernel["PrefetchGlobalRead"] == 2:
-        lrEnd = min(writer.states.lwEndMfmaIndex, writer.states.numMfmaForLR * (kernel["LoopIters"] - writer.states.numItersPLR))
-        if writer.states.lwStartMfmaIndex < lrEnd:
-            writer.states.lwStartMfmaIndex = lrEnd
+          # adjust lwStartMfmaIndex for PGR1
+          writer.states.lwStartMfmaIndex = writer.states.grEndMfmaIndex
     if kernel["1LDSBuffer"] or kernel["DirectToLds"]:
         writer.states.sync1LdsMfmaIndex = max(writer.states.lwStartMfmaIndex - 1, 0)
     startIter = writer.states.lwStartMfmaIndex//numMfmaPerIter
@@ -849,11 +845,11 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                             imodNGLLList.append(SWaitCnt(vlcnt=readsToWaitNGLL, \
                                 comment="wait for global read before writing to local"))
                         # PK and StoreCUnroll is removed so you cannot find any HolderContainer in s_waitcnt
-                        if kernel["PrefetchGlobalRead"]==2:
+                        if kernel["PrefetchGlobalRead"]>=2:
                             hasHolder, wcList = hasHolderInWaitCnt(item)
                             if hasHolder:
                                 readsToWaitAdjust = readsToWait
-                                if kernel["NoLdsWriteCode"] and kernel["PrefetchGlobalRead"]!=2:
+                                if kernel["NoLdsWriteCode"]:
                                     # DirectToLds for both A and B case, use  the number of global read for both A and B as vlcnt (only for PGR=1)
                                     readsToWaitAdjust = len(list(writer.codes.globalReadA.middle.items())) + len(list(writer.codes.globalReadB.middle.items()))
                                 for wc in wcList:

@@ -637,6 +637,7 @@ hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t        
         return contractionGetWorkspaceSize(
             handle, desc, planPref, workspacePref, workspaceSizeEstimate);
     }
+    *workspaceSizeEstimate = 0u;
     return HIPTENSOR_STATUS_SUCCESS;
 }
 

@@ -155,10 +155,68 @@ double hardware_t::get_adjusted_main_loop_efficiency(transpose_t transA,
   }
 }
 
+bool hardware_t::has_MALL() const {
+  switch (arch) {
+    case architecture_t::gfx90a:
+    case architecture_t::gfx942:
+    case architecture_t::gfx950:
+    case architecture_t::gfx1201:
+    case architecture_t::gfx1100:
+    case architecture_t::gfx1151: return true;
+    case architecture_t::Count:
+      // Count is not a valid architecture, this is to silence compiler warning
+      return false;
+  }
+}
+
 std::string hardware_t::get_before_first_colon(const std::string& input) {
   size_t pos = input.find(':');
   if (pos != std::string::npos) { return input.substr(0, pos); }
   return input;  // Return the whole string if ':' is not found
+}
+
+std::vector<dim3_t> hardware_t::get_valid_matrix_instructions(data_type_t mi_input_type) const {
+  std::vector<dim3_t> result;
+  
+  const auto& instruction_map = INSTRUCTION_MAP.at(arch);
+  
+  for (const auto& kv : instruction_map) {
+    const matrix_instruction& mi = kv.first;
+    if (mi.mi_input_type == mi_input_type) {
+      result.push_back(dim3_t{mi.MI_M, mi.MI_N, mi.MI_K});
+    }
+  }
+  
+  return result;
+}
+
+dim3_t hardware_t::get_recommended_matrix_instruction(data_type_t mi_input_type) const {
+  const auto& instruction_map = INSTRUCTION_MAP.at(arch);
+  
+  dim3_t best_dim = {0, 0, 0};
+  double best_throughput = 0.0;
+  
+  for (const auto& kv : instruction_map) {
+    const matrix_instruction& mi = kv.first;
+    if (mi.mi_input_type == mi_input_type) {
+      size_t latency = kv.second / parallel_mi_cu;
+      if (latency == 0) latency = std::numeric_limits<size_t>::max();  // Avoid division by zero
+      
+      // Calculate throughput as M*N*K/latency
+      double throughput = static_cast<double>(mi.MI_M * mi.MI_N * mi.MI_K) / static_cast<double>(latency);
+      
+      // Update if throughput is better, or if equal, prefer instruction where M=16 (tiebreaker)
+      bool is_better = throughput > best_throughput;
+      bool is_tie_with_m16 = (throughput == best_throughput) && (mi.MI_M == 16) && (best_dim.m != 16);
+      
+      if (is_better || is_tie_with_m16) {
+        best_throughput = throughput;
+        best_dim = dim3_t{mi.MI_M, mi.MI_N, mi.MI_K};
+      }
+    }
+  }
+  
+  return best_dim;
 }
 
 }  // namespace origami

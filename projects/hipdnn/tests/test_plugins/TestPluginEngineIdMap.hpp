@@ -29,3 +29,5 @@ HIPDNN_MAP_TO_ID(NoApplicableEnginesBPlugin, -5);
 HIPDNN_MAP_TO_ID(ExecuteFailsPlugin, -6);
 HIPDNN_MAP_TO_ID(DuplicateIdAPlugin, -7);
 HIPDNN_MAP_TO_ID(DuplicateIdBPlugin, -7);
+HIPDNN_MAP_TO_ID(KnobsPlugin, -8);
+HIPDNN_MAP_TO_ID(KnobConstraintValidationPlugin, -9);

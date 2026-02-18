@@ -46,7 +46,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [1]
-        - PrefetchGlobalRead: [1,2]
+        - PrefetchGlobalRead: [1,2,3]
         - PrefetchLocalRead: [1]
         - GlobalReadVectorWidthA: [1, 4]
         - GlobalReadVectorWidthB: [1, 4]
@@ -72,7 +72,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [1]
-        - PrefetchGlobalRead: [1,2]
+        - PrefetchGlobalRead: [1,2,3,4,5]
         - PrefetchLocalRead: [1]
         - GlobalReadVectorWidthA: [1, 4]
         - GlobalReadVectorWidthB: [1, 4]
@@ -82,7 +82,7 @@ BenchmarkProblems:
         - StaggerU: [0]
         - TailloopInNll: [0, 1]
         - StreamK: [0,3]
-        - DirectToLds: [0, 1, 2, 3]
+        - DirectToLds: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -119,7 +119,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [1]
-        - PrefetchGlobalRead: [1,2]
+        - PrefetchGlobalRead: [1,2,3]
         - PrefetchLocalRead: [1]
         - GlobalReadVectorWidthA: [1, 4]
         - GlobalReadVectorWidthB: [1, 4]
@@ -166,7 +166,7 @@ BenchmarkProblems:
           - [16,16,1]
         - GlobalReadVectorWidthA: [4, 16]
         - GlobalReadVectorWidthB: [4, 16]
-        - PrefetchGlobalRead: [1,2]
+        - PrefetchGlobalRead: [1,2,3]
         - PrefetchLocalRead: [1,2]
         - ClusterLocalRead: [1]
         - NumElementsPerBatchStore: [0]
@@ -190,7 +190,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1, 2, 3]
+        - DirectToLds: [1]
         - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -198,7 +198,7 @@ BenchmarkProblems:
           - Range: [[19], [19], [1], [1,3,12]]
           - Range: [[31], [31], [1], [1,7,72]]
           - Range: [[127], [127], [1], [128,4,140]]
-          - Range: [[13], [17], [1], [258, 3, 384]]
+          - Range: [[13], [17], [1], [258, 9, 384]]
           - Exact: [256, 256, 1, 64]
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 320]
@@ -239,7 +239,7 @@ BenchmarkProblems:
           - [16,16,1]
         - GlobalReadVectorWidthA: [4, 16]
         - GlobalReadVectorWidthB: [4, 16]
-        - PrefetchGlobalRead: [1,2]
+        - PrefetchGlobalRead: [1,2,3]
         - PrefetchLocalRead: [1,2]
         - ClusterLocalRead: [1]
         - NumElementsPerBatchStore: [0]
@@ -263,7 +263,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1, 2]
+        - DirectToLds: [1]
         - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -271,7 +271,7 @@ BenchmarkProblems:
           - Range: [[19], [19], [1], [1,3,12]]
           - Range: [[31], [31], [1], [1,7,72]]
           - Range: [[127], [127], [1], [128,4,140]]
-          - Range: [[13], [17], [1], [258, 3, 384]]
+          - Range: [[13], [17], [1], [258, 9, 384]]
           - Exact: [256, 256, 1, 64]
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 320]
@@ -310,13 +310,18 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1, 3]
+        - DirectToLds: [1]
         - AssertFree0ElementMultiple: [1, 4]
         - AssertFree1ElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[16,1,32],[16,1,32],[1],[1,1,129]]
+          - Range: [[16,1,32],[28,1,29],[1],[1,1,64]]
+          - Range: [[16,1,32],[28,1,29],[1],[66,4,129]]
+          - Range: [[16,1,32],[28,1,29],[1],[65,4,129]]
+          - Range: [[28,1,29],[16,1,32],[1],[1,1,64]]
+          - Range: [[28,1,29],[16,1,32],[1],[66,4,129]]
+          - Range: [[28,1,29],[16,1,32],[1],[65,4,129]]
 
   ########################################
   # F8HHS TT DTL
@@ -347,7 +352,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
           - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [1, 2, 3]
         - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -400,7 +405,7 @@ BenchmarkProblems:
           - [16,16,1]
         - GlobalReadVectorWidthA: [4, 16]
         - GlobalReadVectorWidthB: [4, 16]
-        - PrefetchGlobalRead: [1,2]
+        - PrefetchGlobalRead: [1,2,3]
         - PrefetchLocalRead: [1,2]
         - ClusterLocalRead: [1]
         - NumElementsPerBatchStore: [0]
@@ -424,7 +429,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - SourceSwap: [1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1, 3]
+        - DirectToLds: [1]
         - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -464,7 +469,7 @@ BenchmarkProblems:
           - [16,16,1]
         - GlobalReadVectorWidthA: [4, 16]
         - GlobalReadVectorWidthB: [4, 16]
-        - PrefetchGlobalRead: [1,2]
+        - PrefetchGlobalRead: [1,2,3]
         - PrefetchLocalRead: [1,2]
         - ClusterLocalRead: [1]
         - NumElementsPerBatchStore: [0]
@@ -486,7 +491,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1, 2]
+        - DirectToLds: [1]
         - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -494,7 +499,7 @@ BenchmarkProblems:
           - Range: [[19], [19], [1], [1,3,12]]
           - Range: [[31], [31], [1], [1,7,72]]
           - Range: [[127], [127], [1], [128,4,140]]
-          - Range: [[13],   [17], [1], [258, 3, 384]]
+          - Range: [[13],   [17], [1], [258, 9, 384]]
           - Exact: [256, 256, 1, 64]
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 320]
@@ -529,7 +534,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
           - [16, 16, 32, 1, 1, 7, 5, 2, 2 ]
           - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [1, 2, 3]
         - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -583,7 +588,7 @@ BenchmarkProblems:
           - [16,16,1]
         - GlobalReadVectorWidthA: [4, 16]
         - GlobalReadVectorWidthB: [4, 16]
-        - PrefetchGlobalRead: [1,2]
+        - PrefetchGlobalRead: [1,2,3]
         - PrefetchLocalRead: [1,2]
         - ClusterLocalRead: [1]
         - NumElementsPerBatchStore: [0]
@@ -605,7 +610,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1, 2]
+        - DirectToLds: [1]
         - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -613,7 +618,7 @@ BenchmarkProblems:
           - Range: [[19], [19], [1], [1,3,12]]
           - Range: [[31], [31], [1], [1,7,72]]
           - Range: [[127], [127], [1], [128,4,140]]
-          - Range: [[13],   [17], [1], [258, 3, 384]]
+          - Range: [[13],   [17], [1], [258, 9, 384]]
           - Exact: [256, 256, 1, 64]
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 320]
@@ -648,7 +653,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
           - [16, 16, 32, 1, 1, 6, 5, 2, 2 ]
           - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [1, 2, 3]
         - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -683,7 +688,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [1, 2, 3]
         - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -692,13 +697,14 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1, 2]
+        - DirectToLds: [1]
         - AssertSummationElementMultiple: [1]
         - LdsPadA: [8]
         - LdsPadB: [8]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
         - SourceSwap: [1]
+        - DtlPlusLdsBuf: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -710,7 +716,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 16, 1, 1, 1, 1, 2, 2 ]
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [2, 3, 4, 5, 6]
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -761,7 +767,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
           - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [1, 2, 3]
         - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -770,7 +776,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1, 2, 3]
+        - DirectToLds: [1, 2]
         - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [-1, 0, 8]
         - LdsPadB: [-1, 0, 8]
@@ -792,7 +798,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [2,3]
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -800,7 +806,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1, 2, 3]
+        - DirectToLds: [1, 3]
         - AssertSummationElementMultiple: [1]
         - AssertFree0ElementMultiple: [2]
         - LdsPadA: [0]
@@ -810,6 +816,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - TailloopInNll: [0, 1]
         - StreamK: [0,3]
+        - DtlPlusLdsBuf: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -822,7 +829,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [1, 2, 3]
         - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -831,7 +838,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1, 2, 3]
+        - DirectToLds: [1]
         - AssertSummationElementMultiple: [1]
         - LdsPadA: [8]
         - LdsPadB: [8]
@@ -872,7 +879,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
           - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [1, 2, 3]
         - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -881,7 +888,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1, 2, 3]
+        - DirectToLds: [1, 3]
         - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [-1, 0, 8]
         - LdsPadB: [-1, 0, 8]
@@ -927,7 +934,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
           - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [1, 2, 3]
         - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -936,7 +943,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1, 2, 3]
+        - DirectToLds: [1]
         - LdsPadA: [8]
         - LdsPadB: [8]
         - 1LDSBuffer: [-1]
@@ -954,7 +961,7 @@ BenchmarkProblems:
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
           - [16, 16, 32, 1, 1, 7, 7, 2, 2 ]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [1, 2, 3]
         - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -963,13 +970,14 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1, 2, 3]
+        - DirectToLds: [1]
         - LdsPadA: [8]
         - LdsPadB: [8]
         - 1LDSBuffer: [-1]
         - SourceSwap: [1]
         - LDSTrInst: [0,1]
         - SwapGlobalReadOrder: [0, 1]
+        - DtlPlusLdsBuf: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1004,7 +1012,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
           - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [1, 2, 3]
         - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -1013,7 +1021,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1, 2, 3]
+        - DirectToLds: [1, 2]
         - DirectToVgprA: [0,1]
         - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [0, 8]
@@ -1037,7 +1045,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
           - [16, 16, 32, 1, 1, 8, 7, 2, 2 ]
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [2,3]
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -1045,7 +1053,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1, 2, 3]
+        - DirectToLds: [1, 3]
         - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [0, 8]
         - LdsPadB: [0, 8]
@@ -1066,7 +1074,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [2,3,4,5]
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -1091,7 +1099,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [1, 2, 3]
         - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
@@ -1099,7 +1107,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1, 2, 3]
+        - DirectToLds: [1]
         - AssertSummationElementMultiple: [1]
         - LdsPadA: [0]
         - LdsPadB: [0]
@@ -1107,6 +1115,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - SourceSwap: [1]
         - SwapGlobalReadOrder: [0, 1]
+        - DtlPlusLdsBuf: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1136,7 +1145,7 @@ BenchmarkProblems:
         - MatrixInstruction:
            - [16, 16, 32, 1,  1, 2, 1,  4, 1 ]
            - [16, 16, 32, 1,  1, 2, 1,  2, 1 ]
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [2,3,4,5]
         - PrefetchLocalRead: [1]
         - DepthU: [256]
         - ScheduleIterAlg: [3]
@@ -1165,6 +1174,8 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadB: [0]
         - SwapGlobalReadOrder: [0, 1]
         - TailloopInNll: [0, 1]
+        - DtlPlusLdsBuf: [0, 1]
+        - UnrollLoopSwapGlobalReadOrder: [0, 1]
         - WorkGroup:
            - [64, 4, 1]
            - [32, 4, 2]

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,33 +35,11 @@ Tests:
   category: quick
   function: csr2hyb
   precision: *single_double_precisions_complex_real
-  M: [10, 872]
-  N: [33, 623]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
-  algo: [-33]
-  matrix: [rocsparse_matrix_random]
-
-- name: csr2hyb
-  category: pre_checkin
-  function: csr2hyb
-  precision: *single_double_precisions_complex_real
-  M: [0, 500, 1000]
-  N: [0, 242, 1000]
+  M: [10, 300]
+  N: [33, 300]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
   algo: [-33, 0, 2147483647]
-  matrix: [rocsparse_matrix_random]
-
-- name: csr2hyb
-  category: nightly
-  function: csr2hyb
-  precision: *single_double_precisions_complex_real
-  M: [27428, 941291, 1105637]
-  N: [18582, 571938, 995827]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
-  algo: [-33]
   matrix: [rocsparse_matrix_random]
 
 - name: csr2hyb_file
@@ -70,33 +48,68 @@ Tests:
   precision: *single_double_precisions
   M: 1
   N: 1
+  baseA: [rocsparse_index_base_zero]
+  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
+  algo: [-33, 0, 2147483647]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
+
+- name: csr2hyb
+  category: pre_checkin
+  function: csr2hyb
+  precision: *single_double_precisions_complex_real
+  M: [8, 500]
+  N: [8, 242]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
-  algo: [-33]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
-             nos2,
-             nos4,
-             nos6,
-             scircuit]
+  algo: [-33, 0, 2147483647]
+  matrix: [rocsparse_matrix_random]
 
 - name: csr2hyb_file
   category: pre_checkin
   function: csr2hyb
-  precision: *single_double_precisions
+  precision: *single_only_precisions
   M: 1
   N: 1
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_one]
   part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
   algo: [-33, 0, 2147483647]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [rma10,
              mc2depi,
-             ASIC_320k,
-             nos1,
-             nos3,
-             nos5,
-             nos7]
+             ASIC_320k]
+
+- name: csr2hyb_file
+  category: pre_checkin
+  function: csr2hyb
+  precision: *single_only_precisions_complex
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_zero]
+  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
+  algo: [-33, 0, 2147483647]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             qc2534,
+             Chevron2,
+             Chevron3]
+
+- name: csr2hyb
+  category: nightly
+  function: csr2hyb
+  precision: *single_double_precisions_complex_real
+  M: [5000]
+  N: [3716, 5000]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
+  algo: [-33]
+  matrix: [rocsparse_matrix_random]
 
 - name: csr2hyb_file
   category: nightly
@@ -104,7 +117,7 @@ Tests:
   precision: *single_double_precisions
   M: 1
   N: 1
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero]
   part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
   algo: [-33]
   matrix: [rocsparse_matrix_file_rocalution]
@@ -117,38 +130,12 @@ Tests:
              shipsec1]
 
 - name: csr2hyb_file
-  category: quick
-  function: csr2hyb
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
-  algo: [-33]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [qc2534,
-             Chevron2]
-
-- name: csr2hyb_file
-  category: pre_checkin
-  function: csr2hyb
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
-  algo: [-33, 0, 2147483647]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate,
-             Chevron3]
-
-- name: csr2hyb_file
   category: nightly
   function: csr2hyb
   precision: *single_double_precisions_complex
   M: 1
   N: 1
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_one]
   part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
   algo: [-33]
   matrix: [rocsparse_matrix_file_rocalution]

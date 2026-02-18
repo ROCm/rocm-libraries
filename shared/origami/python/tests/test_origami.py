@@ -290,3 +290,30 @@ def test_select_workgroup_mapping(hardware):
     assert isinstance(result, tuple)
     assert len(result) == 3
 
+
+@pytest.mark.integration
+def test_gfx950_bfloat16_recommended_matrix_instruction():
+    """Test that gfx950 recommends 16x16x32 matrix instruction for bfloat16."""
+    # Create hardware object for gfx950
+    hardware = origami.hardware_t(
+        origami.architecture_t.gfx950,
+        304,    # N_CU
+        65536,  # lds_capacity
+        12,     # NUM_XCD
+        1.0,    # mem1_perf_ratio
+        1.0,    # mem2_perf_ratio
+        1.0,    # mem3_perf_ratio
+        25165824,  # L2_capacity
+        2.1,    # compute_clock_ghz
+        4,      # parallel_mi_cu
+        (1.0, 1.0, 1.0)  # mem_bw_per_wg_coefficients
+    )
+    
+    # Get recommended matrix instruction for bfloat16
+    bfloat16_dtype = origami.data_type_t.BFloat16
+    recommended_mi = hardware.get_recommended_matrix_instruction(bfloat16_dtype)
+    
+    # Verify it's 16x16x32
+    assert recommended_mi.m == 16, f"Expected m=16, got {recommended_mi.m}"
+    assert recommended_mi.n == 16, f"Expected n=16, got {recommended_mi.n}"
+    assert recommended_mi.k == 32, f"Expected k=32, got {recommended_mi.k}"

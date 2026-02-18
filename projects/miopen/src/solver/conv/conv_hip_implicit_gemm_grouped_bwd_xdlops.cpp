@@ -456,24 +456,42 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
     kernel_id = "";
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(IsModelApplicable(ctx, problem))
     {
-        if(problem.GetInDataType() == miopenFloat)
+        // Helper lambda to run AI model and enforce deterministic constraints
+        auto try_ai_model = [&](auto data_type_tag) -> bool {
+            using T = decltype(data_type_tag);
+            if(RunParameterPredictionModel<T>(ctx, problem))
+            {
+                // Enforce split_k == 1 for deterministic mode
+                if(is_deterministic && split_k != 1)
+                {
+                    MIOPEN_LOG_I("Deterministic mode: Overriding AI-predicted split_k="
+                                 << split_k << " to split_k=1");
+                    split_k = 1;
+                    if(!valid_kernels.empty())
+                        kernel_id = valid_kernels[index] + "+1";
+                }
+                return true;
+            }
+            return false;
+        };
+
+        // Try AI prediction for the appropriate data type
+        bool ai_succeeded = false;
+        switch(problem.GetInDataType())
         {
-            if(RunParameterPredictionModel<float>(ctx, problem))
-                return;
+        case miopenFloat: ai_succeeded = try_ai_model(float{}); break;
+        case miopenBFloat16: ai_succeeded = try_ai_model(ck::bhalf_t{}); break;
+        case miopenHalf: ai_succeeded = try_ai_model(ck::half_t{}); break;
+        default: break;
         }
-        else if(problem.GetInDataType() == miopenBFloat16)
-        {
-            if(RunParameterPredictionModel<ck::bhalf_t>(ctx, problem))
-                return;
-        }
-        else
-        {
-            if(RunParameterPredictionModel<ck::half_t>(ctx, problem))
-                return;
-        }
+
+        if(ai_succeeded)
+            return;
     }
 #endif
     switch(problem.GetInDataType())
@@ -488,6 +506,9 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
     case miopenBFloat8_fnuz:
     case miopenDouble: break;
     }
+
+    // Invariant: split_k must always be 1 in deterministic mode
+    assert(!is_deterministic || split_k == 1);
 #endif
 }
 
@@ -511,9 +532,26 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemD
         assert(!valid_kernels.empty());
         return true;
     }
+
+    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+
+    // Deterministic mode: only iterate over kernels (index), split_k is always 1
+    if(is_deterministic)
+    {
+        if(!NextLinear(0, valid_kernels.size() - 1, index))
+        {
+            return false; // All kernels exhausted
+        }
+        split_k   = 1;
+        kernel_id = valid_kernels[index] + "+1";
+        return true;
+    }
+
+    // General (non-deterministic) mode: iterate over both split_k and kernels
     do
     {
         bool flag = NextTwoPower<1, 128>(split_k);
+
         if(!flag)
         {
             kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
@@ -541,6 +579,34 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
     [[maybe_unused]] const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    // Database validation: Reject configurations with split_k > 1 in deterministic mode.
+    // This is necessary because the performance database may contain configurations
+    // from non-deterministic tuning runs that used split_k > 1, which are not valid
+    // for deterministic execution even though CK could technically run them.
+    if(problem.GetConv().attribute.deterministic)
+    {
+        // Extract split_k from kernel_id (format: "KernelName+split_k")
+        size_t plus_pos = kernel_id.find_last_of('+');
+        if(plus_pos != std::string::npos)
+        {
+            try
+            {
+                int split_k_from_id = std::stoi(kernel_id.substr(plus_pos + 1));
+                if(split_k_from_id != 1)
+                {
+                    MIOPEN_LOG_I("Invalid configuration for deterministic mode: split_k="
+                                 << split_k_from_id << " (must be 1)");
+                    return false;
+                }
+            }
+            catch(const std::exception&)
+            {
+                MIOPEN_LOG_E("Failed to parse split_k from kernel_id: " << kernel_id);
+                return false;
+            }
+        }
+    }
+
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
@@ -623,8 +689,6 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS))
-        return false;
-    if(problem.GetConv().attribute.deterministic)
         return false;
     if(problem.HasMixedDataTypes())
         return false;

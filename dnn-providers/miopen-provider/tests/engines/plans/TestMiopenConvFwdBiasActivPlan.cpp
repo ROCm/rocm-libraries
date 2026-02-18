@@ -10,7 +10,7 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;

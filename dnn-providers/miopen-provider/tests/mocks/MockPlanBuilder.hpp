@@ -9,7 +9,7 @@
 
 #include "engines/plans/PlanBuilderInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class MockPlanBuilder : public IPlanBuilder

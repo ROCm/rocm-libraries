@@ -115,7 +115,8 @@ bool PoolingForwardNd::IsApplicable(const ExecutionContext& context,
            && problem.GetYDesc().IsPossibleLayout4D5D("NCDHW", strict)                        //
            && problem.GetXDesc().GetType() == problem.GetYDesc().GetType()                    //
            && (problem.GetXDesc().GetType() == miopenFloat                                    //
-               || problem.GetXDesc().GetType() == miopenHalf)                                 //
+               || problem.GetXDesc().GetType() == miopenHalf                                  //
+               || problem.GetXDesc().GetType() == miopenBFloat16)                             //
            && (problem.GetPooling().GetMode() == miopenPoolingMax                             //
                || problem.GetPooling().GetMode() == miopenPoolingAverage                      //
                || problem.GetPooling().GetMode() == miopenPoolingAverageInclusive)            //

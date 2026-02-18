@@ -270,6 +270,8 @@ namespace LDSCopyTest
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
 
+        kgraph = kgraph.transform(std::make_shared<AddLDSBarriers>());
+
         auto command = std::make_shared<rocRoller::Command>();
         command->allocateArgument({DataType::UInt32, PointerType::PointerGlobal},
                                   Operations::OperationTag(0),

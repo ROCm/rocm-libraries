@@ -72,9 +72,13 @@ const auto& GetTestParams()
         {
             supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
         }
-        else if constexpr(type == TestDataType::TF32 || type == TestDataType::BF16)
+        else if constexpr(type == TestDataType::BF16)
         {
             supportedDevices = Gpu::gfx94X | Gpu::gfx950;
+        }
+        else if constexpr(type == TestDataType::TF32)
+        {
+            supportedDevices = Gpu::gfx94X;
         }
         else
         {
@@ -89,6 +93,16 @@ const auto& GetTestParams()
         return p;
     }();
     return params;
+}
+
+Gpu GetDeterministicSupportedDevices()
+{
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    return Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X | Gpu::gfx115X |
+           Gpu::gfx120X;
+#else
+    return Gpu::None;
+#endif
 }
 
 } // namespace
@@ -215,4 +229,5 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDeterministicApplicability_NONE,
-    testing::Combine(testing::Values(Gpu::None), testing::Values(GetDeterministicConvCase())));
+    testing::Combine(testing::Values(GetDeterministicSupportedDevices()),
+                     testing::Values(GetDeterministicConvCase())));

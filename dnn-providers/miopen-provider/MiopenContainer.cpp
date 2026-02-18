@@ -12,7 +12,7 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 // ============================================================================
@@ -119,4 +119,4 @@ EngineManager& MiopenContainer::getEngineManager()
     return *_engineManager;
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

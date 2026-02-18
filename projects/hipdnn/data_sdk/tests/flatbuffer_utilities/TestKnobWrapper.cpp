@@ -49,7 +49,7 @@ protected:
         }
 
         hipdnn_data_sdk::data_objects::KnobBuilder knobBuilder(builder);
-        knobBuilder.add_knob_id_str(knobIdStrOffset);
+        knobBuilder.add_knob_id(knobIdStrOffset);
         knobBuilder.add_description(descOffset);
         knobBuilder.add_deprecated(deprecated);
 
@@ -82,7 +82,7 @@ protected:
         auto floatVal = hipdnn_data_sdk::data_objects::CreateFloatValue(builder, defaultValue);
 
         hipdnn_data_sdk::data_objects::KnobBuilder knobBuilder(builder);
-        knobBuilder.add_knob_id_str(knobIdStrOffset);
+        knobBuilder.add_knob_id(knobIdStrOffset);
         knobBuilder.add_description(descOffset);
         knobBuilder.add_default_value_type(hipdnn_data_sdk::data_objects::KnobValue::FloatValue);
         knobBuilder.add_default_value(floatVal.Union());
@@ -107,7 +107,7 @@ protected:
             = hipdnn_data_sdk::data_objects::CreateFloatConstraint(builder, minValue, maxValue);
 
         hipdnn_data_sdk::data_objects::KnobBuilder knobBuilder(builder);
-        knobBuilder.add_knob_id_str(knobIdStrOffset);
+        knobBuilder.add_knob_id(knobIdStrOffset);
         knobBuilder.add_description(descOffset);
         knobBuilder.add_default_value_type(hipdnn_data_sdk::data_objects::KnobValue::FloatValue);
         knobBuilder.add_default_value(floatVal.Union());
@@ -145,7 +145,7 @@ protected:
             builder, maxLength, validValuesVector);
 
         hipdnn_data_sdk::data_objects::KnobBuilder knobBuilder(builder);
-        knobBuilder.add_knob_id_str(knobIdStrOffset);
+        knobBuilder.add_knob_id(knobIdStrOffset);
         knobBuilder.add_description(descOffset);
         knobBuilder.add_default_value_type(hipdnn_data_sdk::data_objects::KnobValue::StringValue);
         knobBuilder.add_default_value(stringValue.Union());

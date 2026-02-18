@@ -111,6 +111,10 @@ std::shared_ptr<SolutionParameters>
     bool hasPreSwizzleB = kernelType.scaleTypeB.preSwizzleTile.size() == 3;
     bool hasPreSwizzle  = hasPreSwizzleA && hasPreSwizzleB;
 
+    bool hasPreTileA = kernelType.scaleTypeA.preTile.size() == 2;
+    bool hasPreTileB = kernelType.scaleTypeB.preTile.size() == 2;
+    bool hasPreTile  = hasPreTileA && hasPreTileB;
+
     // Get preSwizzleTileMN for MI selection (0 if no pre-swizzle)
     size_t preSwizzleTileMN = 0;
     if(hasPreSwizzleA)
@@ -124,9 +128,14 @@ std::shared_ptr<SolutionParameters>
         gemm->kernelType.typeA, gemm->kernelType.typeB, gemm->workgroupTile, preSwizzleTileMN);
 
     gemm->prefetchInFlight
-        = preferredUnrolling(kernelType.typeA, kernelType.typeB, gemm->workgroupTile);
+        = preferredUnrolling(kernelType.typeA, kernelType.typeB, gemm->workgroupTile, hasPreSwizzle, hasPreTile);
     if(gemm->prefetchInFlight <= 1)
         gemm->prefetch = false;
+
+    // Check if using 256x256x256 tile
+    bool is256Tile = (solutionIndexParameters.workgroupTile.m == 256
+                      && solutionIndexParameters.workgroupTile.n == 256
+                      && solutionIndexParameters.workgroupTile.k == 256);
 
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
@@ -137,6 +146,14 @@ std::shared_ptr<SolutionParameters>
         gemm->prefetchScale  = false;
         gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
         gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
+    }
+    else if(is256Tile)
+    {
+        // For 256x256x256 tile, use BufferToLDS for scale loading to reduce register pressure
+        gemm->swizzleScale   = true;
+        gemm->prefetchScale  = true;
+        gemm->loadPathAScale = SolutionParams::LoadPath::BufferToLDS;
+        gemm->loadPathBScale = SolutionParams::LoadPath::BufferToLDS;
     }
     else if(solutionIndexParameters.workgroupTile.m >= 128
             && solutionIndexParameters.workgroupTile.n >= 128)
@@ -221,6 +238,9 @@ std::shared_ptr<SolutionParameters>
 
     // Pass StreamK flag from solution index parameters
     gemm->streamK = solutionIndexParameters.streamK;
+
+    // Pass tailLoops flag from solution index parameters
+    gemm->tailLoops = solutionIndexParameters.tailLoops;
 
     // StreamK is not currently working with workgroup mapping due to register pressure
     if(gemm->streamK)

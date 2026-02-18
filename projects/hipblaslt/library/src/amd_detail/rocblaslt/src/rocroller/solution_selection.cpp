@@ -44,21 +44,22 @@ const int USE_WORKGROUP_MAPPING_K_SIZE = 4096;
  * compile-time known.
  */
 
-constexpr size_t possibleTileSizesCount = 34;
+constexpr size_t possibleTileSizesCount = 35;
 
 constexpr std::array<WorkGroupTileSize, possibleTileSizesCount> possibleTileSizes
-    = {{{256, 256, 128}, {256, 192, 128}, {256, 128, 128}, {256, 64, 128}, {256, 32, 128},
-        {256, 16, 128},  {192, 256, 128}, {192, 128, 128}, {192, 64, 128}, {192, 32, 128},
-        {128, 256, 128}, {128, 192, 128}, {128, 128, 128}, {128, 64, 128}, {128, 32, 128},
-        {64, 256, 128},  {64, 192, 128},  {64, 128, 128},  {64, 64, 128},  {64, 32, 128},
-        {32, 256, 128},  {32, 192, 128},  {32, 128, 128},  {32, 64, 128},  {32, 32, 128},
-        {32, 32, 64},    {16, 256, 128},  {64, 16, 128},   {16, 64, 128},  {32, 16, 128},
-        {16, 32, 128},   {16, 16, 128},   {16, 16, 256},   {16, 64, 256}}};
+    = {{{256, 256, 256}, {256, 256, 128}, {256, 192, 128}, {256, 128, 128}, {256, 64, 128},
+        {256, 32, 128},  {256, 16, 128},  {192, 256, 128}, {192, 128, 128}, {192, 64, 128},
+        {192, 32, 128},  {128, 256, 128}, {128, 192, 128}, {128, 128, 128}, {128, 64, 128},
+        {128, 32, 128},  {64, 256, 128},  {64, 192, 128},  {64, 128, 128},  {64, 64, 128},
+        {64, 32, 128},   {32, 256, 128},  {32, 192, 128},  {32, 128, 128},  {32, 64, 128},
+        {32, 32, 128},   {32, 32, 64},    {16, 256, 128},  {64, 16, 128},   {16, 64, 128},
+        {32, 16, 128},   {16, 32, 128},   {16, 16, 128},   {16, 16, 256},   {16, 64, 256}}};
 
 template <rocRoller::DataType typeA, rocRoller::DataType typeB>
-auto generateTileList()
+std::vector<origami::config_t> generateTileList(bool hasPreSwizzle, bool hasPreTile)
 {
-    std::array<origami::config_t, possibleTileSizesCount> tileList{};
+    std::vector<origami::config_t> tileList;
+    tileList.reserve(possibleTileSizesCount);
 
     for(size_t i = 0; i < possibleTileSizesCount; ++i)
     {
@@ -72,7 +73,7 @@ auto generateTileList()
             wgtk = 32;
         }
 
-        int unroll = preferredUnrolling(typeA, typeB, wgt);
+        int unroll = preferredUnrolling(typeA, typeB, wgt, hasPreSwizzle, hasPreTile);
 
         origami::config_t origami_config = {
             .mt = {static_cast<size_t>(wgt.m),
@@ -84,19 +85,18 @@ auto generateTileList()
             .cache_hints_b = 0,
         };
 
-        tileList[i] = origami_config;
+        tileList.push_back(origami_config);
     }
 
     return tileList;
 }
 
-using TileListGeneratorFn = std::vector<origami::config_t> (*)();
+using TileListGeneratorFn = std::vector<origami::config_t> (*)(bool, bool);
 
 template <rocRoller::DataType A, rocRoller::DataType B>
-std::vector<origami::config_t> generateTileListWrapper()
+std::vector<origami::config_t> generateTileListWrapper(bool hasPreSwizzle, bool hasPreTile)
 {
-    auto arr = generateTileList<A, B>();
-    return {arr.begin(), arr.end()};
+    return generateTileList<A, B>(hasPreSwizzle, hasPreTile);
 }
 
 #define INSTANTIATE_TILE_LIST(A, B)                                                  \
@@ -121,12 +121,19 @@ const std::map<std::pair<rocRoller::DataType, rocRoller::DataType>, TileListGene
                           INSTANTIATE_TILE_LIST_FOR(BF6),
                           INSTANTIATE_TILE_LIST_FOR(FP6)};
 
-std::vector<origami::config_t> getTileListForKernelType(KernelType kernelType)
+std::vector<origami::config_t> getTileListForKernelType(const KernelType& kernelType)
 {
     auto key = std::make_pair(kernelType.typeA, kernelType.typeB);
     auto it  = tileListGenerators.find(key);
     if(it != tileListGenerators.end())
-        return it->second();
+    {
+        // Compute hasPreSwizzle and hasPreTile from ScaleType
+        bool hasPreSwizzle = (kernelType.scaleTypeA.preSwizzleTile.size() == 3
+                              && kernelType.scaleTypeB.preSwizzleTile.size() == 3);
+        bool hasPreTile = (kernelType.scaleTypeA.preTile.size() == 2
+                           && kernelType.scaleTypeB.preTile.size() == 2);
+        return it->second(hasPreSwizzle, hasPreTile);
+    }
     throw std::runtime_error("Unsupported DataType combination");
 }
 
@@ -182,7 +189,11 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
         auto              mt_n = static_cast<int>(result.config.mt.n);
         auto              mt_k = static_cast<int>(result.config.mt.k);
         WorkGroupTileSize wgt{mt_m, mt_n, mt_k};
-        int unrollAmount = preferredUnrolling(kernelType.typeA, kernelType.typeB, wgt);
+        auto hasPreSwizzle = (kernelType.scaleTypeA.preSwizzleTile.size() == 3
+                              && kernelType.scaleTypeB.preSwizzleTile.size() == 3);
+        auto hasPreTile = (kernelType.scaleTypeA.preTile.size() == 2
+                           && kernelType.scaleTypeB.preTile.size() == 2);
+        int unrollAmount = preferredUnrolling(kernelType.typeA, kernelType.typeB, wgt, hasPreSwizzle, hasPreTile, true);
         wgt.k /= unrollAmount;
 
         if((requestedAlgoCount == -1)
@@ -215,11 +226,21 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                && kernelType.scaleTypeB.preSwizzleTile.size() == 3 && wgt.k < 256)
                 continue;
 
-            // Prevent selecting {256, 256, 256} as workgroup tile size due to VGPR register pressure
-            if(wgt.m == 256 && wgt.n == 256 && wgt.k == 256)
+            // {256, 256, 256} tile size is only supported for FP4 data types with preSwizzled and preTiled scale data
+            bool isFP4 = (kernelType.typeA == rocRoller::DataType::FP4
+                          && kernelType.typeB == rocRoller::DataType::FP4);
+
+            bool is256Tile = (wgt.m == 256 && wgt.n == 256 && wgt.k == 256);
+
+            // Only allow 256x256x256 for FP4 with preSwizzled and preTiled scale data
+            if(is256Tile && !(isFP4))
                 continue;
 
-            params.push_back({wgt, true, false});
+            // Set tailLoops = false for {256, 256, 256} tile size
+            bool useTailLoops = true;
+
+            params.push_back({wgt, true, false, useTailLoops});
+
 
             if(prob.k < USE_WORKGROUP_MAPPING_K_SIZE)
             {
@@ -258,6 +279,8 @@ int parametersToIndex(const SolutionIndexParameters& params)
     result |= ((params.workgroupMapping ? 1 : 0) << pos);
     pos += 1;
     result |= ((params.streamK ? 1 : 0) << pos);
+    pos += 1;
+    result |= ((params.tailLoops ? 1 : 0) << pos);
 
     // Set top bit indicating it is a rocRoller index
     result |= (1 << 31);
@@ -289,6 +312,8 @@ SolutionIndexParameters indexToParameters(int index)
     result.workgroupMapping = (index >> pos) & 1;
     pos += 1;
     result.streamK = (index >> pos) & 1;
+    pos += 1;
+    result.tailLoops = (index >> pos) & 1;
 
     return result;
 }

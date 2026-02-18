@@ -12,7 +12,7 @@
 
 #include "engines/EngineInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class EngineManager

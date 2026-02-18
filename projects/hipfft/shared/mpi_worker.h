@@ -196,8 +196,7 @@ static void gather_field_v(MPI_Comm                                  mpi_comm,
                              {0},
                              {0});
 
-                size_t brick_bytes
-                    = compute_ptrdiff(brick.length(), brick.stride) * elem_size;
+                size_t brick_bytes = compute_ptrdiff(brick.length(), brick.stride) * elem_size;
                 cur_brick_offset_bytes += brick_bytes;
             }
         }

@@ -239,13 +239,27 @@ validParameters = { # we need to make sure this matches develop
     # Do another prefetch while writing data from vgpr to lds.
     #   prefetch / double-buffer reads from global memory -> vgprs --> lds.
     #                                                              |-> prefetch reads
-    "PrefetchGlobalRead": [0, 1, 2],
+    # PrefetchGlobalRead >= 3:
+    # DirectToLds only. Do PGR times prefetch global read before main loop.
+    # Need to allocate PGR+1 or PGR LDS buffer
+    # Allocating PGR+1 LDS buffer is better for instruction scheduling.
+    "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
     # So we can schedule these localReads to the front of the loop
     "ClusterLocalRead": [0, 1],
+    # Allocating PGR+1 LDS buffer if we have enough LDS memory size
+    # Only for DirectToLdsA+B + PGR>=2
+    # -1: auto (enable this for PGR>=3)
+    #  0: disable
+    #  1: enable (force to 0 if not applicable)
+    # IF LDS size exceeds maxLDS,
+    #   PGR>=3: disable (set 0) and continue
+    #   PGR==2: reject (use -1 or 0 in that case)
+    # 1LDSBuffer will be 0 if DtlPlusLdsBuf if enabled
+    "DtlPlusLdsBuf": [-1,0,1],
     # We use double LDS buffer when PrefetchGlobalRead.
     # While it reads data from LDS[0]/[1], it prefetch global data and writes to LDS[1]/[0]
     # If we can make sure all data are read from LDS to register before writing data to LDS, we can use 1 LDS buffer to save LDS memory.
@@ -309,6 +323,13 @@ validParameters = { # we need to make sure this matches develop
     # -1 will derived an optimized value internally
     # -2 will derived an optimized value and override LWPM silently (debug only, not recommended)
     "LocalWritePerMfma": [i / 100 for i in range(1, 3200)] + [-1],
+    # This is to specify minimum number of GR inc instructions per MFMA
+    # PGR>=2 and LocalWritePerMfma==-1 case, lwStart is decided by (number of GRInc) / max(roundup(miLatencyLeft/2), 1)
+    # gfx950 MI16 case, miLatencyLeft is 2 and we can schedule only 1 GRInc per MFMA.
+    # This pushes lwStart below and ends up with very less room for GR scheduling.
+    # For mid/small MT size case, we have chance to improve Global Read scheduling by putting more GRInc instructions
+    # regardless of miLatencyLeft (overhead of GR inst is often more than the latency of GR inc inst)
+    "MinGRIncPerMfma": [-1] + list(range(1,10)),
     # Interleave alpha scale calculation with beta loads and address calcs - rather
     # than as a separate block of instructions
     "InterleaveAlpha": [0, 1],
@@ -887,7 +908,13 @@ validParameters = { # we need to make sure this matches develop
     # generate TailLoop code in NoLoadLoop to take advantage of prefetch and wider globalLoad plus instruction scheduling
     # Need certain conditions to use TailloopInNll optimization
     # - NT transpose or AssertSummationElementMultiple * bpeGR is multiple of 4 (with BufferLoad + ShiftPtr)
-    "TailloopInNll": [False, True]
+    "TailloopInNll": [False, True],
+    # Schedule global read instructions over barrier sync.
+    # Only for DirectToLdsA+B + PGR>=2.
+    # -1: auto (enable this for PGR>=3)
+    #  0: disable
+    #  1: enable (force to 0 if not applicable)
+    "ScheduleGROverBarrier": [-1,0,1],
 }
 
 newMIValidParameters = {

@@ -314,7 +314,7 @@ VALID_LIBLOGIC_FILE_CONTENT = """
     UnrollMajorLDSB: 1
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: false
+    UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
     UseDotInstruction: false
@@ -433,7 +433,7 @@ BenchmarkProblems:
     - StreamKXCCMapping: [8]
     - ThreadTile: [[1, 1]]
     - TransposeLDS: [2]
-    - UseCustomMainLoopSchedule: [false]
+    - UseCustomMainLoopSchedule: [0]
     - UseSgprForGRO: [1]
     - VectorWidthA: [1]
     - VectorWidthB: [1]

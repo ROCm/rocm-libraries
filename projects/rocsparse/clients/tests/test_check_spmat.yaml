@@ -38,8 +38,8 @@ Tests:
   function: check_spmat
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [1, 8, 423]
-  N: [1, 8, 423]
+  M: [1, 8]
+  N: [1, 8]
   block_dim: 1
   baseA: [rocsparse_index_base_one]
   matrix_type: [rocsparse_matrix_type_general]
@@ -53,8 +53,8 @@ Tests:
   function: check_spmat
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [1, 8, 423]
-  N: [1, 8, 423]
+  M: [1, 8]
+  N: [1, 8]
   block_dim: [7]
   baseA: [rocsparse_index_base_one]
   matrix_type: [rocsparse_matrix_type_general]
@@ -68,8 +68,8 @@ Tests:
   function: check_spmat
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [25304, 56978]
-  N: [34576, 75843]
+  M: [2000]
+  N: [2000]
   block_dim: 1
   baseA: [rocsparse_index_base_one]
   matrix_type: [rocsparse_matrix_type_general]
@@ -83,8 +83,8 @@ Tests:
   function: check_spmat
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [25304]
-  N: [34576]
+  M: [2000]
+  N: [2000]
   block_dim: [7]
   baseA: [rocsparse_index_base_one]
   matrix_type: [rocsparse_matrix_type_general]

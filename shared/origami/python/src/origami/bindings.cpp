@@ -142,6 +142,10 @@ NB_MODULE(origami, m) {
                           size_t,  // parallel_mi_cu
                           std::tuple<double, double, double>>())  // mem_bw_per_wg_coefficients
       .def("print", &hardware_t::print)
+      .def("get_valid_matrix_instructions", &hardware_t::get_valid_matrix_instructions,
+           "Get valid matrix instruction dimensions for a given datatype")
+      .def("get_recommended_matrix_instruction", &hardware_t::get_recommended_matrix_instruction,
+           "Get recommended matrix instruction dimension (highest throughput) for a given datatype")
       .def_rw("N_CU", &hardware_t::N_CU)
       .def_rw("lds_capacity", &hardware_t::lds_capacity)
       .def_rw("mem1_perf_ratio", &hardware_t::mem1_perf_ratio)
@@ -232,4 +236,3 @@ NB_MODULE(origami, m) {
         "Compute number of output tiles");
 
 }
-

@@ -12,7 +12,7 @@
 #include "engines/plans/MiopenBatchnormApplicabilityChecks.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlan.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace
@@ -280,7 +280,7 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
 
             // Since MIOpen does not provide an API to validate batchnorm applicability, we perform the
             // checks manually.
-            checkBatchnormTensorConfigSupported(bnAttr, opGraph.getTensorMap());
+            checkBatchnormFwdTrainingTensorConfigSupported(bnAttr, opGraph.getTensorMap());
 
             HIPDNN_LOG_INFO("BatchnormFwdTraining plan builder applicable for single node "
                             "batchnorm training");
@@ -291,9 +291,8 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
         const auto& activAttr = checkActivationNode(opGraph.getNodeWrapper(1), bnAttr);
         checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
 
-        // Since MIOpen does not provide an API to validate batchnorm applicability, we perform the
-        // checks manually.
-        checkBatchnormTensorConfigSupported(bnAttr, opGraph.getTensorMap());
+        checkBatchnormFwdTrainingActivationTensorConfigSupported(
+            bnAttr, activAttr, opGraph.getTensorMap());
         checkBatchnormFwdActivationModeSupported(activAttr);
 
         HIPDNN_LOG_INFO(
@@ -355,4 +354,4 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     }
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

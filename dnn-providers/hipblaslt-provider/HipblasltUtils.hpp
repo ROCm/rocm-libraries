@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/TensorAttributesWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <string>
@@ -77,5 +78,14 @@ inline const char* hipblas_status_to_string(hipblasStatus_t status)
 }
 
 hipDataType tensorDataTypeToHipDataType(const hipdnn_data_sdk::data_objects::DataType& dataType);
+
+hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
+                                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                            uint32_t numDeviceBuffers);
+
+hipdnn_plugin_sdk::TensorAttributesWrapper findTensorAttributes(
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    int64_t uid);
 
 } // namespace hipblaslt_plugin::hipblaslt_utils

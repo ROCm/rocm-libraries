@@ -10,7 +10,7 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenConvFwdPlan.hpp"
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 
 class TestGpuConvFwdPlan : public ::testing::Test
 {

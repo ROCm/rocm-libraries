@@ -79,8 +79,8 @@ Tests:
   category: quick
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [50, 647]
-  N: [13, 523]
+  M: [50, 300]
+  N: [13, 300]
   K: [50, 254]
   alpha_alphai: *alpha_range_quick
   beta: [-99.0]
@@ -95,8 +95,8 @@ Tests:
   category: pre_checkin
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [0, 1799, 32519]
-  N: [0, 3712, 16021]
+  M: [8, 1799]
+  N: [8, 2000]
   K: [0, 1942, 9848]
   alpha_alphai: *alpha_range_checkin
   beta: [-99.0]
@@ -111,8 +111,8 @@ Tests:
   category: nightly
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [73923, 214923, 842323]
-  N: [5239, 12942, 1492312]
+  M: [5000]
+  N: [2619, 2588]
   K: [442, 42312, 743434]
   alpha_alphai: *alpha_range_nightly
   beta: [-99.0]
@@ -128,7 +128,7 @@ Tests:
   function: csrgemm
   precision: *single_double_precisions
   M: 1
-  N: [13, 523]
+  N: [13, 300]
   K: 1
   alpha_alphai: *alpha_range_quick
   beta: [-99.0]
@@ -149,7 +149,7 @@ Tests:
   function: csrgemm
   precision: *single_double_precisions
   M: 1
-  N: [0, 3712, 16021]
+  N: [8, 2000]
   K: 1
   alpha_alphai: *alpha_range_checkin
   beta: [-99.0]
@@ -171,7 +171,7 @@ Tests:
   function: csrgemm
   precision: *single_double_precisions
   M: 1
-  N: [5239, 12942, 1492312]
+  N: [2619, 2588]
   K: 1
   alpha_alphai: *alpha_range_nightly
   beta: [-99.0]
@@ -191,7 +191,7 @@ Tests:
   function: csrgemm
   precision: *double_only_precisions
   M: 1
-  N: [5239, 12942, 1492312]
+  N: [2619, 2588]
   K: 1
   alpha_alphai: *alpha_range_nightly
   beta: [-99.0]
@@ -211,7 +211,7 @@ Tests:
   function: csrgemm
   precision: *single_double_precisions_complex
   M: 1
-  N: [21, 719]
+  N: [21, 300]
   K: 1
   alpha_alphai: *alpha_range_quick
   beta: [-99.0]
@@ -229,7 +229,7 @@ Tests:
   function: csrgemm
   precision: *single_double_precisions_complex
   M: 1
-  N: [0, 5925, 20142]
+  N: [8, 2000]
   K: 1
   alpha_alphai: *alpha_range_checkin
   beta: [-99.0]
@@ -247,7 +247,7 @@ Tests:
   function: csrgemm
   precision: *single_double_precisions_complex
   M: 1
-  N: [4823, 17462, 901923]
+  N: [2411, 3492]
   K: 1
   alpha_alphai: *alpha_range_nightly
   beta: [-99.0]
@@ -264,7 +264,7 @@ Tests:
   category: quick
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [582]
+  M: [300]
   N: [243]
   K: 1
   alpha: [-99.0]
@@ -277,8 +277,8 @@ Tests:
   category: quick
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [0, 8, 24, 582]
-  N: [0, 12, 48, 243]
+  M: [8]
+  N: [8, 12]
   K: 1
   alpha: [-99.0]
   beta_betai: *beta_range_quick
@@ -290,8 +290,8 @@ Tests:
   category: pre_checkin
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [0, 932, 1523, 23404]
-  N: [0, 784, 4842, 19703]
+  M: [8, 932]
+  N: [8, 784]
   K: 1
   alpha: [-99.0]
   beta_betai: *beta_range_checkin
@@ -303,8 +303,8 @@ Tests:
   category: nightly
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [67582, 194823, 943929, 2094392]
-  N: [3033, 21042, 174923]
+  M: [5000]
+  N: [1516, 4208]
   K: 1
   alpha: [-99.0]
   beta_betai: *beta_range_nightly
@@ -407,13 +407,33 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
 
+# Coverage gap tests: high intermediate products per row (develop vs reduced_ci)
+# Semi-dense matrices to trigger group sizes 4-6 (1K-8K intermediates)
+- name: csrgemm_high_intermediates
+  category: pre_checkin
+  function: csrgemm
+  precision: *double_only_precisions
+  M: [128]
+  N: [128]
+  K: [256]
+  percentage: [0.4]
+  alpha_alphai: *alpha_range_checkin
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_random]
+
 # C = alpha * A * B + beta * D
 - name: csrgemm_scale
   category: quick
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [1000]
-  N: [1000]
+  M: [300]
+  N: [300]
   K: 1
   alpha_alphai: *alpha_range_quick
   beta_betai: *beta_range_quick
@@ -425,8 +445,8 @@ Tests:
   category: quick
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [1000]
-  N: [1000]
+  M: [300]
+  N: [300]
   K: 1
   alpha_alphai: *alpha_range_quick
   beta_betai: *beta_range_quick

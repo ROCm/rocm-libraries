@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -54,8 +55,7 @@ void testing_gemvi_bad_arg(const Arguments& argus)
     T alpha = make_DataType<T>(0.6);
     T beta  = make_DataType<T>(0.1);
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto A_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * m * n), device_free};
     auto x_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz), device_free};
@@ -172,8 +172,7 @@ void testing_gemvi(Arguments argus)
     int lda = m;
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<T>   hA(m * n);
@@ -215,26 +214,27 @@ void testing_gemvi(Arguments argus)
     int   bufferSize;
     void* externalBuffer;
 
-    CHECK_HIPSPARSE_ERROR(hipsparseXgemvi_bufferSize<T>(handle, trans, m, n, nnz, &bufferSize));
+    CHECK_HIPSPARSE_ERROR(
+        testing::hipsparseXgemvi_bufferSize<T>(handle, trans, m, n, nnz, &bufferSize));
     CHECK_HIP_ERROR(hipMalloc(&externalBuffer, bufferSize));
 
     if(argus.unit_check)
     {
         // gemvi
-        CHECK_HIPSPARSE_ERROR(hipsparseXgemvi(handle,
-                                              trans,
-                                              m,
-                                              n,
-                                              &alpha,
-                                              dA,
-                                              lda,
-                                              nnz,
-                                              dx_val,
-                                              dx_ind,
-                                              &beta,
-                                              dy,
-                                              idxBase,
-                                              externalBuffer));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseXgemvi<T>(handle,
+                                                          trans,
+                                                          m,
+                                                          n,
+                                                          &alpha,
+                                                          dA,
+                                                          lda,
+                                                          nnz,
+                                                          dx_val,
+                                                          dx_ind,
+                                                          &beta,
+                                                          dy,
+                                                          idxBase,
+                                                          externalBuffer));
 
         // CPU
         for(int i = 0; i < m; ++i)
@@ -263,20 +263,20 @@ void testing_gemvi(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseXgemvi(handle,
-                                                  trans,
-                                                  m,
-                                                  n,
-                                                  &alpha,
-                                                  dA,
-                                                  lda,
-                                                  nnz,
-                                                  dx_val,
-                                                  dx_ind,
-                                                  &beta,
-                                                  dy,
-                                                  idxBase,
-                                                  externalBuffer));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseXgemvi<T>(handle,
+                                                              trans,
+                                                              m,
+                                                              n,
+                                                              &alpha,
+                                                              dA,
+                                                              lda,
+                                                              nnz,
+                                                              dx_val,
+                                                              dx_ind,
+                                                              &beta,
+                                                              dy,
+                                                              idxBase,
+                                                              externalBuffer));
         }
 
         double gpu_time_used = get_time_us();
@@ -284,20 +284,20 @@ void testing_gemvi(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseXgemvi(handle,
-                                                  trans,
-                                                  m,
-                                                  n,
-                                                  &alpha,
-                                                  dA,
-                                                  lda,
-                                                  nnz,
-                                                  dx_val,
-                                                  dx_ind,
-                                                  &beta,
-                                                  dy,
-                                                  idxBase,
-                                                  externalBuffer));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseXgemvi<T>(handle,
+                                                              trans,
+                                                              m,
+                                                              n,
+                                                              &alpha,
+                                                              dA,
+                                                              lda,
+                                                              nnz,
+                                                              dx_val,
+                                                              dx_ind,
+                                                              &beta,
+                                                              dy,
+                                                              idxBase,
+                                                              externalBuffer));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;

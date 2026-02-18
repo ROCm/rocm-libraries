@@ -11,7 +11,7 @@
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 MiopenEngine::MiopenEngine(int64_t id)

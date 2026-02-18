@@ -1783,7 +1783,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyForward()
                 std::cout << "out_ref[" << i << "] produced a nan: " << out_ref.data[i]
                           << std::endl;
             }
-            diff   = Tref(fabs(out.GetVector()[i]) - fabs(out_ref.data[i]));
+            diff   = fabs(Tref(fabs(out.GetVector()[i]) - fabs(out_ref.data[i])));
             maxval = maxval < diff ? diff : maxval;
             if(!std::isfinite(diff) || diff > tolerance)
             {

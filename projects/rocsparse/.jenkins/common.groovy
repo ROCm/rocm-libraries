@@ -38,8 +38,8 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
     //Temporary workaround due to bug in container
     String centos7Workaround = platform.jenkinsLabel.contains('centos7') ? 'export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib64/' : ''
 
-    def hmmTestCommand= ''
-    if (platform.jenkinsLabel.contains('gfx90a'))
+    def hmmTestCommand= """GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*"""
+    if (platform.jenkinsLabel.contains('gfx90a') || platform.jenkinsLabel.contains('gfx942') || platform.jenkinsLabel.contains('gfx950'))
     {
         hmmTestCommand = """
                             HSA_XNACK=0 GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --gtest_output=xml:test_detail_hmm_xnack_off.xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*
@@ -52,7 +52,6 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
                 cd ${project.paths.project_build_prefix}/build/${dirmode}/clients/staging
                 export LD_LIBRARY_PATH=/opt/rocm/lib/
                 ${centos7Workaround}
-                GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*
                 ${hmmTestCommand}
             """
 
@@ -117,7 +116,7 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
                     cd ${project.paths.project_build_prefix}/build/${dirmode}
                     export LD_LIBRARY_PATH=/opt/rocm/lib/
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
-                    /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file lcoverage/main_coverage.info --name rocm-libraries --flags rocSPARSE --sha ${commitSha}
+                    /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage.info --name rocm-libraries --flags rocSPARSE --sha ${commitSha}
                 """
 
         platform.runCommand(this, command)

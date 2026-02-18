@@ -279,6 +279,27 @@ namespace rocRoller
         return "INVALID";
     }
 
+    std::string abbrev(LayoutType t)
+    {
+        switch(t)
+        {
+        case LayoutType::SCRATCH:
+            return "SCR";
+        case LayoutType::MATRIX_A:
+            return "A";
+        case LayoutType::MATRIX_B:
+            return "B";
+        case LayoutType::MATRIX_ACCUMULATOR:
+            return "ACC";
+        case LayoutType::None:
+            return "N/A";
+        case LayoutType::Count:
+            return "MAX";
+        }
+
+        return "";
+    }
+
     std::ostream& operator<<(std::ostream& stream, LayoutType l)
     {
         return stream << toString(l);

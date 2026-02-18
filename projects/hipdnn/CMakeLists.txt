@@ -234,8 +234,8 @@ if(HIPDNN_ENABLE_COVERAGE)
 
     if(HIPDNN_BUILD_PLUGINS)
         set(MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT
-            -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_legacy_plugin.so -object
-            ./${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin_tests
+            -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_plugin.so -object
+            ./${CMAKE_INSTALL_BINDIR}/miopen_plugin_tests
         )
     endif()
 

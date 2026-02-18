@@ -450,8 +450,7 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
     }();
 
     auto device_name = ctx.GetStream().GetDeviceName();
-    if(!(miopen::StartsWith(device_name, "gfx942") || miopen::StartsWith(device_name, "gfx950")) &&
-       conv_config.GetXDataType() == miopenFloat &&
+    if(!(miopen::StartsWith(device_name, "gfx942")) && conv_config.GetXDataType() == miopenFloat &&
        conv_config.GetConv().GetMathType() == miopenMathDefault)
     {
         GTEST_SKIP() << "TF32 test is not supported on this device";

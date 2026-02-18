@@ -289,6 +289,16 @@ namespace rocRoller::KernelGraph
         {
             return stream << toString(cs);
         }
+
+        NaryArgument getNaryArgument(Connections::ConnectionSpec const& conn)
+        {
+            auto visitor
+                = rocRoller::overloaded{[](JustNaryArgument const& arg) { return arg.argument; },
+                                        [](TypeAndNaryArgument const& arg) { return arg.argument; },
+                                        [](auto const& other) { return NaryArgument::None; }};
+
+            return std::visit(visitor, conn);
+        }
     }
 
     std::string toString(ControlToCoordinateMapper::Connection const& conn)
@@ -298,4 +308,10 @@ namespace rocRoller::KernelGraph
                            conn.coordinate,
                            toString(conn.connection));
     }
+
+    NaryArgument getNaryArgument(ControlToCoordinateMapper::Connection const& conn)
+    {
+        return getNaryArgument(conn.connection);
+    }
+
 }
