@@ -162,13 +162,12 @@ struct ThreadwiseTransferHelper_Base
     {
         return generate_tuple(
             [&](auto i) {
-                MultiIndex<nDim> forward_step_idx;
+                MultiIndex<nDim> step_idx;
 
-                static_for<0, nDim, 1>{}([&](auto j) {
-                    forward_step_idx(j) = (i.value == j.value) ? scalar_per_access[i] : 0;
-                });
+                static_for<0, nDim, 1>{}(
+                    [&](auto j) { step_idx(j) = (i.value == j.value) ? scalar_per_access[i] : 0; });
 
-                return make_tensor_coordinate_step(desc, forward_step_idx);
+                return make_tensor_coordinate_step(desc, step_idx);
             },
             Number<nDim>{});
     }
@@ -180,13 +179,13 @@ struct ThreadwiseTransferHelper_Base
     {
         return generate_tuple(
             [&](auto i) {
-                MultiIndex<nDim> backward_step_idx;
+                MultiIndex<nDim> step_idx;
 
                 static_for<0, nDim, 1>{}([&](auto j) {
-                    backward_step_idx(j) = (i.value == j.value) ? -scalar_per_access[i] : 0;
+                    step_idx(j) = (i.value == j.value) ? -scalar_per_access[i] : 0;
                 });
 
-                return make_tensor_coordinate_step(desc, backward_step_idx);
+                return make_tensor_coordinate_step(desc, step_idx);
             },
             Number<nDim>{});
     }
