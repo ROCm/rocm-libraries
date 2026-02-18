@@ -30,7 +30,6 @@ import argparse
 import difflib
 import subprocess
 from pathlib import Path
-from typing import List
 
 
 def color_node(line: str, is_addition: bool):
@@ -46,7 +45,7 @@ def color_node(line: str, is_addition: bool):
     return line
 
 
-def diff_dots(dots: List[str]) -> List[str]:
+def diff_dots(dots: list[str]) -> list[str]:
     dots_diff = []
     for i, dot in enumerate(dots):
         if i + 1 == len(dots):

@@ -25,7 +25,6 @@
 
 from itertools import product
 from pathlib import Path
-from typing import List
 
 from rrperf.problems import (
     CodeGenRun,
@@ -1134,7 +1133,7 @@ def add_wgm(mapping, suite):
         yield run
 
 
-def addSkipPermlane(suite: List[GEMMRun], value=True):
+def addSkipPermlane(suite: list[GEMMRun], value=True):
     for run in suite:
         run.types.scaleSkipPermlane = value
         yield run

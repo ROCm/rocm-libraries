@@ -54,7 +54,7 @@ import random
 import subprocess
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import List, Tuple
+from typing import Tuple
 
 import numpy as np
 import rrperf
@@ -66,7 +66,7 @@ gpus = {}
 mp_pool = None
 
 
-def instantiate_gpus(idxs: List[int]):
+def instantiate_gpus(idxs: list[int]):
     global gpus, mp_pool  # noqa: disable=F824
     for idx in idxs:
         gpus[idx] = multiprocessing.Lock()
@@ -338,7 +338,7 @@ def bench(thedir: Path, problem: rrperf.problems.GEMMRun, weights: Weights) -> R
         lock.release()
 
 
-def sanity_check(results: List[Result]):
+def sanity_check(results: list[Result]):
     rnorms = {r.rnorm for r in results if r.passed}
     print(f"RNorms: {rnorms}")
     if len(rnorms) != 1:
@@ -349,7 +349,7 @@ def sanity_check(results: List[Result]):
 prev_results = {}
 
 
-def split_old_new_results(weights) -> Tuple[List[Weights], List[Weights]]:
+def split_old_new_results(weights) -> Tuple[list[Weights], list[Weights]]:
     global prev_results  # noqa: disable=F824
 
     already_ran = []
@@ -364,8 +364,8 @@ def split_old_new_results(weights) -> Tuple[List[Weights], List[Weights]]:
 
 
 def generation(
-    output_dir: Path, problem: rrperf.problems.GEMMRun, weights: List[Weights]
-) -> List[Result]:
+    output_dir: Path, problem: rrperf.problems.GEMMRun, weights: list[Weights]
+) -> list[Result]:
     global prev_results  # noqa: disable=F824
 
     already_ran, to_run = split_old_new_results(weights)
@@ -401,7 +401,7 @@ def read_gen_results(resfile: str):
         return list(map(res, data))
 
 
-def write_generation(thedir: Path, name, results: List[Result]):
+def write_generation(thedir: Path, name, results: list[Result]):
     data = list([val.dict for val in results])
     datafile = thedir / f"results_{name}.yaml"
     with datafile.open("w") as f:
@@ -410,7 +410,7 @@ def write_generation(thedir: Path, name, results: List[Result]):
 
 
 def new_inputs(
-    all_results: List[Result], population, num_parents, num_random, mutation
+    all_results: list[Result], population, num_parents, num_random, mutation
 ):
     if len(all_results) == 0:
         rv = set()
@@ -494,7 +494,7 @@ def genetic(args):
         close_pool()
 
 
-def find_most_different_outputs(results: List[Result], n: int = 5):
+def find_most_different_outputs(results: list[Result], n: int = 5):
     n = min(n, len(results))
     if n <= 0:
         return

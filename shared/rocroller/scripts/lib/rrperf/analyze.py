@@ -27,7 +27,6 @@
 
 import argparse
 from pathlib import Path
-from typing import List
 
 import numpy as np
 import rrperf.problems
@@ -58,7 +57,7 @@ def info(res: GEMMResult):
     return (dim, value, time)
 
 
-def read_data(directory: Path) -> List[GEMMResult]:
+def read_data(directory: Path) -> list[GEMMResult]:
     import itertools
 
     return itertools.chain(*map(rrperf.problems.load_results, directory.glob("*.yaml")))

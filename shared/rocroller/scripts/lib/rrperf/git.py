@@ -27,7 +27,7 @@
 
 import subprocess
 from pathlib import Path
-from typing import List, Union
+from typing import Union
 
 
 def top(loc: str = None) -> Path:
@@ -107,7 +107,7 @@ def full_hash(repo: Path) -> str:
     return p.stdout.strip()
 
 
-def rev_list(repo: Path, old_commit: str, new_commit: str) -> List[str]:
+def rev_list(repo: Path, old_commit: str, new_commit: str) -> list[str]:
     """
     Gets a list of commits, starting with the newest commit and ending
     with the oldest commit, with every commit in between.

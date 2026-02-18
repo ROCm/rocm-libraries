@@ -9,14 +9,14 @@ import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import Optional, Set
 
 import yaml
 
 logger = logging.getLogger(__name__)
 
 
-def build_gtest_filter_args(include: List[str], exclude: List[str]) -> List[str]:
+def build_gtest_filter_args(include: list[str], exclude: list[str]) -> list[str]:
     """
     Build GTest command-line filter arguments.
 
@@ -51,7 +51,7 @@ def build_gtest_filter_args(include: List[str], exclude: List[str]) -> List[str]
     return [f"--gtest_filter={filter_string}"]
 
 
-def build_catch2_filter_args(include: List[str], exclude: List[str]) -> List[str]:
+def build_catch2_filter_args(include: list[str], exclude: list[str]) -> list[str]:
     """
     Build Catch2 command-line filter arguments.
 
@@ -85,7 +85,7 @@ def build_catch2_filter_args(include: List[str], exclude: List[str]) -> List[str
     return args
 
 
-def build_ctest_filter_args(include: List[str], exclude: List[str]) -> List[str]:
+def build_ctest_filter_args(include: list[str], exclude: list[str]) -> list[str]:
     """
     Build CTest command-line filter arguments.
 
@@ -206,8 +206,8 @@ def parse_ctest_json(json_file: Path) -> Set[Test]:
 
 def discover_gtest_tests(
     executable: str,
-    include: List[str] = None,
-    exclude: List[str] = None,
+    include: list[str] = None,
+    exclude: list[str] = None,
     build_dir: Optional[Path] = None,
 ) -> Set[Test]:
     """
@@ -255,8 +255,8 @@ def discover_gtest_tests(
 
 def discover_catch2_tests(
     executable: str,
-    include: List[str] = None,
-    exclude: List[str] = None,
+    include: list[str] = None,
+    exclude: list[str] = None,
     build_dir: Optional[Path] = None,
 ) -> Set[Test]:
     """
@@ -311,8 +311,8 @@ def discover_catch2_tests(
 
 def discover_ctest_tests(
     executable: str,
-    include: List[str] = None,
-    exclude: List[str] = None,
+    include: list[str] = None,
+    exclude: list[str] = None,
     build_dir: Optional[Path] = None,
 ) -> Set[Test]:
     """

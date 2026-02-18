@@ -35,7 +35,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 import rrperf
 from rrperf.problems import GEMMRun
@@ -47,7 +47,7 @@ def has_omniperf() -> bool:
 
 def run_omniperf(
     working_dir: Path,
-    executable: List[str],
+    executable: list[str],
     output: Path,
     omniperf_workload_dir: Path = "profiling",
     cwd: Path = ".",

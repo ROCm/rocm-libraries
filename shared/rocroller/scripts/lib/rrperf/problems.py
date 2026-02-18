@@ -25,7 +25,7 @@
 
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import yaml
 from rrperf.utils import get_dataclass_id
@@ -92,7 +92,7 @@ class RRPerfResult:
 
     kernelGenerate: int = field(repr=False, hash=False)
     kernelAssemble: int = field(repr=False, hash=False)
-    kernelExecute: List[int] = field(repr=False, hash=False)
+    kernelExecute: list[int] = field(repr=False, hash=False)
 
     device: int = field(repr=False, hash=False, compare=False, default=0)
 
@@ -144,8 +144,8 @@ class TypeParameters:
             else:
                 raise AttributeError(f"Unknown field: {key}")
 
-    def asArgs(self) -> List[str]:
-        rv: List[str] = []
+    def asArgs(self) -> list[str]:
+        rv: list[str] = []
         for f in fields(self):
             rv.append(f"--{f.name}={self.__getattribute__(f.name)}")
         return rv
@@ -159,7 +159,7 @@ class GPUArchitectureTarget:
     Xnack: bool = False
     Sramecc: bool = False
 
-    def asArgs(self) -> List[str]:
+    def asArgs(self) -> list[str]:
         if len(self.ArchString) == 0:
             return []
         arch = self.ArchString
@@ -334,7 +334,7 @@ class GEMMRun(GEMM):
 
     def command(
         self, generate_only=False, architecture=None, **extra_args
-    ) -> List[str]:
+    ) -> list[str]:
 
         specialNames = {
             "output": "yaml",
@@ -499,7 +499,7 @@ class CodeGenRun(CodeGen):
     def set_output(self, path: Path):
         self.output = path
 
-    def command(self) -> List[str]:
+    def command(self) -> list[str]:
         retval = [
             "client/rocroller-codegen-stress",
             "--inst_count=" + str(self.instCount),
@@ -534,7 +534,7 @@ class TensileRun(GEMM):
     def set_output(self, path: Path):
         self.output = path
 
-    def command(self, **extra_args) -> List[str]:
+    def command(self, **extra_args) -> list[str]:
         command = str(repo_dir / "scripts" / "benchmark_tensile")
 
         arg_dict = asdict(self)

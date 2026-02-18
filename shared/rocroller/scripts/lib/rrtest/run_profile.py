@@ -18,7 +18,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from rrtest import get_test_commands
 
@@ -27,7 +27,7 @@ from rrtest import get_test_commands
 class TestResult:
     """Results from running a test command."""
 
-    command: List[str]
+    command: list[str]
     returncode: int
     duration_seconds: float
     stdout: str
@@ -35,7 +35,7 @@ class TestResult:
     success: bool
 
 
-def run_test_command(command: List[str], cwd: Optional[Path] = None) -> TestResult:
+def run_test_command(command: list[str], cwd: Optional[Path] = None) -> TestResult:
     """
     Run a test command and capture timing and results.
 
@@ -101,7 +101,7 @@ def format_duration(seconds: float) -> str:
         return f"{minutes}m {secs:.1f}s"
 
 
-def print_summary(results: List[TestResult], sort_by: str = "order"):
+def print_summary(results: list[TestResult], sort_by: str = "order"):
     """
     Print a summary of test results.
 
