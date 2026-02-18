@@ -105,7 +105,7 @@ namespace stinkytofu
                                                      stinkytofu::BasicBlockFilterBuilder::all());
                     },
                     /* groupName */ "noLoadLoopBody");
-#endif
+#else
                 BackendRegistry::addArchPipeline(
                     /* arch */ GFX1250_ARCH,
                     /* builder */
@@ -113,6 +113,7 @@ namespace stinkytofu
                         return createNonOptPipe(module, stinkytofu::BasicBlockFilterBuilder::all());
                     },
                     /* groupName */ "");
+#endif
             }
         };
         static Gfx1250BackendRegistrar s_gfx1250BackendRegistrar;

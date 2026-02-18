@@ -23,7 +23,7 @@
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
-#include "stinkytofu/core/PyLogicalModule.hpp"
+#include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include <gtest/gtest.h>
 
 using namespace stinkytofu;
@@ -57,8 +57,8 @@ TEST(IRModuleTest, AddInstructions)
     StinkyRegister src0 = vgpr(1);
     StinkyRegister src1 = vgpr(2);
 
-    auto inst1 = std::shared_ptr<LogicalInstruction>(VAddU32(dst, src0, src1));
-    auto inst2 = std::shared_ptr<LogicalInstruction>(VMulF32(dst, src0, src1));
+    auto inst1 = makeLogicalInstructionShared(VAddU32(dst, src0, src1));
+    auto inst2 = makeLogicalInstructionShared(VMulF32(dst, src0, src1));
 
     module->add(inst1);
     module->add(inst2);

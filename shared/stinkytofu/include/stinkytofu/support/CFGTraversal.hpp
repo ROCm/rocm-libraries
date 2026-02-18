@@ -53,8 +53,8 @@ namespace stinkytofu
 
 } // namespace stinkytofu
 
-// Include stinkytofu/core/stinkytofu.hpp to get Function and BasicBlock definitions
-#include "stinkytofu/core/stinkytofu.hpp"
+// Include Function.hpp for full definition (provides Function and BasicBlock)
+#include "stinkytofu/core/Function.hpp"
 
 namespace stinkytofu
 {

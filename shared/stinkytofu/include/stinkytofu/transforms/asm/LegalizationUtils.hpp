@@ -32,7 +32,7 @@ namespace stinkytofu
 {
     // Forward declarations
     class StinkyInstruction;
-    class StinkyInstIRBuilder;
+    class AsmIRBuilder;
     enum class GfxArchID : uint32_t;
 
     // Result of instruction legalization
@@ -56,7 +56,7 @@ namespace stinkytofu
     //                        v_nop
     //                        v_nop
     Legalized
-        legalizeVNop(StinkyInstruction* inst, StinkyInstIRBuilder& irBuilder, GfxArchID archId);
+        legalizeVNop(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId);
 
     // Legalize v_cmpx instruction
     // On architectures without CMPX SGPR write support, expands into v_cmp + s_and_saveexec
@@ -65,7 +65,7 @@ namespace stinkytofu
     //      v_cmpx_lt_f32 exec_lo, v0, v1  →  v_cmp_lt_f32 vcc_lo, v0, v1
     //                                        s_mov_b32 exec_lo, vcc_lo
     Legalized legalizeVCmpX(StinkyInstruction*                inst,
-                            StinkyInstIRBuilder&              irBuilder,
+                            AsmIRBuilder&              irBuilder,
                             GfxArchID                         archId,
                             const std::map<std::string, int>& asmCaps);
 
@@ -75,7 +75,7 @@ namespace stinkytofu
     // Example:
     //      s_waitcnt vmcnt(2) lgkmcnt(0)  →  s_wait_loadcnt_dscnt 0x0200
     Legalized
-        legalizeWaitCnt(StinkyInstruction* inst, StinkyInstIRBuilder& irBuilder, GfxArchID archId);
+        legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId);
 
     // Legalize s_barrier instruction
     // On gfx1250, expands into s_barrier_signal + s_barrier_wait
@@ -84,7 +84,7 @@ namespace stinkytofu
     //      s_barrier  →  s_barrier_signal -1
     //                    s_barrier_wait -1
     Legalized
-        legalizeBarrier(StinkyInstruction* inst, StinkyInstIRBuilder& irBuilder, GfxArchID archId);
+        legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId);
 
     // Legalize ds_load_b192 instruction
     // Expands into two ds_load instructions (b128 + b64).
@@ -95,7 +95,7 @@ namespace stinkytofu
     //      ds_load_b192 v[0:5], v0 offset:0  →  ds_load_b128 v[0:3], v0 offset:0
     //                                            ds_load_b64 v[4:5], v0 offset:16
     Legalized legalizeDSLoadB192(StinkyInstruction*   inst,
-                                 StinkyInstIRBuilder& irBuilder,
+                                 AsmIRBuilder& irBuilder,
                                  GfxArchID            archId,
                                  bool                 hasVgprMsb);
 
@@ -107,7 +107,7 @@ namespace stinkytofu
     //      ds_store_b192 v[0:5], v0 offset:0  →  ds_store_b128 v[0:3], v0 offset:0
     //                                            ds_store_b64 v[4:5], v0 offset:16
     Legalized legalizeDSStoreB192(StinkyInstruction*   inst,
-                                  StinkyInstIRBuilder& irBuilder,
+                                  AsmIRBuilder& irBuilder,
                                   GfxArchID            archId,
                                   bool                 hasVgprMsb);
 

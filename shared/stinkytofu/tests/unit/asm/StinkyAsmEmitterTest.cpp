@@ -25,10 +25,10 @@
 #include <sstream>
 #include <string>
 
-#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 
 using namespace stinkytofu;
 
@@ -53,7 +53,8 @@ protected:
 
         passCtx.setGemmTileConfig(gemmConfig);
 
-        irBuilder = std::make_unique<StinkyInstIRBuilder>(insts, arch);
+        bb        = func.createBasicBlock("entry");
+        irBuilder = std::make_unique<AsmIRBuilder>(*bb, arch);
     }
 
     StinkyInstruction* createInstruction(const std::string& mnemonic)
@@ -66,14 +67,15 @@ protected:
             return nullptr;
         }
 
-        return irBuilder->createStinkyInstBefore(insts.end(), hwInstDesc);
+        return irBuilder->create(hwInstDesc);
     }
 
-    IRList                               insts;
+    Function                             func;
+    BasicBlock*                          bb = nullptr;
     PassContext                          passCtx;
     GemmTileConfig                       gemmConfig;
     GfxArchID                            arch;
-    std::unique_ptr<StinkyInstIRBuilder> irBuilder;
+    std::unique_ptr<AsmIRBuilder> irBuilder;
 };
 
 // ============================================================================
@@ -240,7 +242,7 @@ TEST_F(AsmEmitterTest, EmitLiteralInt)
 
 TEST_F(AsmEmitterTest, EmitLabel)
 {
-    StinkyInstruction* label = irBuilder->createStinkyLabel(insts.end(), "loop_start");
+    StinkyInstruction* label = irBuilder->createLabel("loop_start");
     ASSERT_NE(label, nullptr);
 
     AsmEmitterOptions options;
@@ -261,7 +263,7 @@ TEST_F(AsmEmitterTest, EmitLabel)
 TEST_F(AsmEmitterTest, EmitIRList)
 {
     // Create a label
-    irBuilder->createStinkyLabel(insts.end(), "loop_start");
+    irBuilder->createLabel("loop_start");
 
     // Create two ds_read instructions
     StinkyInstruction* inst1 = createInstruction("ds_read_b128");
@@ -274,14 +276,14 @@ TEST_F(AsmEmitterTest, EmitIRList)
     inst2->addDestReg(StinkyRegister("v", 4, 4));
     inst2->addSrcReg(StinkyRegister("v", 41, 1));
 
-    ASSERT_EQ(insts.size(), 3);
+    ASSERT_EQ(bb->size(), 3);
 
     AsmEmitterOptions options;
     options.emitComments  = true;
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(insts);
+    std::string      assembly = emitter.emit(func);
 
     std::string expected = "loop_start:\n"
                            "    ds_read_b128 v[0:3], v40\n"
@@ -301,7 +303,7 @@ TEST_F(AsmEmitterTest, EmitIRListWithoutComments)
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(insts);
+    std::string      assembly = emitter.emit(func);
 
     std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
@@ -388,7 +390,7 @@ TEST_F(AsmEmitterTest, ToAssemblyUtility)
     AsmEmitterOptions options;
     options.emitComments = false;
 
-    std::string assembly = toAssembly(insts, options);
+    std::string assembly = toAssembly(func, options);
     std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
 }
@@ -407,7 +409,7 @@ TEST_F(AsmEmitterTest, ToAssemblyUtilityWithCycleInfo)
     options.emitCycleInfo      = true;
     options.commentAlignColumn = 0; // Disable comment alignment for this test
 
-    std::string assembly = toAssembly(insts, options);
+    std::string assembly = toAssembly(func, options);
     std::string expected = "    ds_read_b128 v[0:3], v40 // issue=4 latency=52\n";
     EXPECT_EQ(assembly, expected);
 }
@@ -425,7 +427,7 @@ TEST_F(AsmEmitterTest, ToAssemblyUtilityWithOptions)
     options.emitComments  = false;
     options.emitCycleInfo = false;
 
-    std::string assembly = toAssembly(insts, options);
+    std::string assembly = toAssembly(func, options);
     std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
 }

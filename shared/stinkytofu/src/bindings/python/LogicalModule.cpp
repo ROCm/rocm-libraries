@@ -18,8 +18,10 @@
  *
  * ************************************************************************ */
 
-#include "stinkytofu/core/PyLogicalModule.hpp"
+#include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/support/Casting.hpp"
+#include <algorithm>
 #include <iostream>
 
 namespace stinkytofu
@@ -102,6 +104,39 @@ namespace stinkytofu
             out << "  [" << i << "] ";
             pImpl->instructions[i]->dump(out);
             out << "\n";
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // PyLogicalFunction
+    // -------------------------------------------------------------------------
+
+    PyLogicalFunction::PyLogicalFunction(Function* func)
+        : func(func)
+    {
+    }
+
+    PyLogicalFunction::~PyLogicalFunction()
+    {
+        detachExternallyOwnedIRs();
+    }
+
+    void PyLogicalFunction::detachExternallyOwnedIRs()
+    {
+        if(!func)
+            return;
+        for(BasicBlock& bb : *func)
+        {
+            for(auto it = bb.begin(); it != bb.end(); /* no increment */)
+            {
+                IRBase* ir = it.getNodePtr();
+                ++it;
+                if(LogicalInstruction* li = dyn_cast<LogicalInstruction>(ir))
+                {
+                    if(li->ownedExternally)
+                        li->remove();
+                }
+            }
         }
     }
 

@@ -22,11 +22,11 @@
  * ************************************************************************ */
 
 #include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
-#include "stinkytofu/support/ErrorHandling.hpp"
-#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include <string>
 #include <vector>
 
@@ -82,11 +82,9 @@ namespace
     private:
         void expandCompositeInstructions(BasicBlock& bb, GfxArchID arch)
         {
-            IRList& irlist = bb.getIR();
-
             // Use iterators to allow insertion/removal during traversal
-            auto it = irlist.begin();
-            while(it != irlist.end())
+            auto it = bb.begin();
+            while(it != bb.end())
             {
                 IRBase* irNode = &(*it);
 
@@ -104,19 +102,15 @@ namespace
                             // Insert expanded instructions before the composite
                             for(auto* expandedInst : expanded)
                             {
-                                irlist.insert(it, static_cast<IRBase*>(expandedInst));
+                                bb.insertIR(it, static_cast<IRBase*>(expandedInst));
                             }
 
-                            // Remove the composite instruction from IRList
+                            // Remove the composite instruction from the block
                             auto toRemove = it;
                             ++it; // Move to next before removing
-                            irlist.remove(&(*toRemove));
+                            bb.removeIR(&(*toRemove));
 
-                            // Only delete if NOT externally owned (e.g., by shared_ptr)
-                            if(!logicalInst->isExternallyOwned())
-                            {
-                                delete logicalInst;
-                            }
+                            logicalInst->safeErase();
                             continue;
                         }
                     }

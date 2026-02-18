@@ -23,11 +23,11 @@
 
 #pragma once
 
+#include <memory>
 #include <typeindex>
 #include <vector>
 
 #include "stinkytofu/hardware/GfxIsa.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
 
 namespace rocisa
 {
@@ -37,11 +37,11 @@ namespace rocisa
 
 namespace stinkytofu
 {
-    class StinkyInstIRBuilder;
+    class AsmIRBuilder;
     struct StinkyInstruction;
 
     using ConvertRocisaToHwInstFunc
-        = std::vector<StinkyInstruction*> (*)(rocisa::Instruction&, StinkyInstIRBuilder&, IRList&);
+        = std::vector<StinkyInstruction*> (*)(rocisa::Instruction&, AsmIRBuilder&);
 
     using ConvertHwInstToRocisaFunc = std::shared_ptr<rocisa::Item> (*)(const StinkyInstruction&);
 

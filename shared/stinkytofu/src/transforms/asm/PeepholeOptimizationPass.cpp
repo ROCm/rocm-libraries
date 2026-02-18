@@ -62,10 +62,9 @@ namespace
             // inst->sources and inst->users are ready to use
 
             // Build instruction position map for ordering queries
-            IRList& irList = bb.getIR();
-            int     pos    = 0;
+            int pos = 0;
 
-            for(IRBase& irNode : irList)
+            for(IRBase& irNode : bb)
             {
                 if(irNode.getType() != IRBase::IRType::StinkyTofu)
                     continue;
@@ -335,8 +334,7 @@ namespace
             int                             numRewrites = 0;
             std::vector<StinkyInstruction*> toRemove;
 
-            IRList& irList = bb.getIR();
-            for(IRBase& irNode : irList)
+            for(IRBase& irNode : bb)
             {
                 if(irNode.getType() != IRBase::IRType::StinkyTofu)
                     continue;
@@ -405,7 +403,7 @@ namespace
             // Remove dead instructions
             for(auto* instToRemove : toRemove)
             {
-                irList.remove(instToRemove);
+                bb.removeIR(instToRemove);
             }
 
             return numRewrites;

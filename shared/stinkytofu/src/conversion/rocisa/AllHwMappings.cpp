@@ -31,28 +31,27 @@
 #include "instruction/mem.hpp"
 #include "instruction/mfma.hpp"
 
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "AllHwMappings.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace
 {
     using namespace stinkytofu;
 
     std::vector<StinkyInstruction*>
-        lowerRocisaMFMA(rocisa::Instruction& inst, StinkyInstIRBuilder& irBuilder, IRList& insts)
+        lowerRocisaMFMA(rocisa::Instruction& inst, AsmIRBuilder& irBuilder)
     {
         std::string mnemonic = inst.preStr();
         uint16_t    opcode   = getMnemonicToIsaOpcode(mnemonic, irBuilder.arch);
 
-        StinkyInstruction* stinkyInst
-            = irBuilder.createStinkyInstBefore(insts.end(), getMCIDByIsaOp(opcode, irBuilder.arch));
+        StinkyInstruction* stinkyInst = irBuilder.create(getMCIDByIsaOp(opcode, irBuilder.arch));
 
         return {stinkyInst};
     }
 
     std::vector<StinkyInstruction*>
-        lowerRocisaWaitCnt(rocisa::Instruction& inst, StinkyInstIRBuilder& irBuilder, IRList& insts)
+        lowerRocisaWaitCnt(rocisa::Instruction& inst, AsmIRBuilder& irBuilder)
     {
         SWaitCntData waitCntData;
         if(rocisa::_SWaitCnt* waitCntInst = dynamic_cast<rocisa::_SWaitCnt*>(&inst))
@@ -84,17 +83,16 @@ namespace
             assert(false && "Internal error: WaitCntInstruction expected");
         }
 
-        StinkyInstruction* stinkyInst = irBuilder.createStinkyInstBefore(
-            insts.end(), getMCIDByUOp(GFX::s_waitcnt, irBuilder.arch));
+        StinkyInstruction* stinkyInst
+            = irBuilder.create(getMCIDByUOp(GFX::s_waitcnt, irBuilder.arch));
 
         stinkyInst->addModifier<SWaitCntData>(waitCntData);
 
         return {stinkyInst};
     }
 
-    std::vector<StinkyInstruction*> lowerRocisaWaitTensorcnt(rocisa::Instruction& inst,
-                                                             StinkyInstIRBuilder& irBuilder,
-                                                             IRList&              insts)
+    std::vector<StinkyInstruction*>
+        lowerRocisaWaitTensorcnt(rocisa::Instruction& inst, AsmIRBuilder& irBuilder)
     {
         SWaitTensorCntData waitTensorCntData;
         if(rocisa::SWaitTensorcnt* waitTensorCntInst = dynamic_cast<rocisa::SWaitTensorcnt*>(&inst))
@@ -109,17 +107,16 @@ namespace
             assert(false && "Internal error: WaitTensorCntInstruction expected");
         }
 
-        StinkyInstruction* stinkyInst = irBuilder.createStinkyInstBefore(
-            insts.end(), getMCIDByUOp(GFX::s_wait_tensorcnt, irBuilder.arch));
+        StinkyInstruction* stinkyInst
+            = irBuilder.create(getMCIDByUOp(GFX::s_wait_tensorcnt, irBuilder.arch));
 
         stinkyInst->addModifier<SWaitTensorCntData>(waitTensorCntData);
 
         return {stinkyInst};
     }
 
-    std::vector<StinkyInstruction*> lowerRocisaStoreWaitCnt(rocisa::Instruction& inst,
-                                                            StinkyInstIRBuilder& irBuilder,
-                                                            IRList&              insts)
+    std::vector<StinkyInstruction*>
+        lowerRocisaStoreWaitCnt(rocisa::Instruction& inst, AsmIRBuilder& irBuilder)
     {
         SWaitStoreCntData waitStoreCntData;
         if(rocisa::_SWaitStorecnt* waitStoreCntInst = dynamic_cast<rocisa::_SWaitStorecnt*>(&inst))
@@ -134,8 +131,8 @@ namespace
             assert(false && "Internal error: WaitStoreCntInstruction expected");
         }
 
-        StinkyInstruction* stinkyInst = irBuilder.createStinkyInstBefore(
-            insts.end(), getMCIDByUOp(GFX::s_wait_storecnt, irBuilder.arch));
+        StinkyInstruction* stinkyInst
+            = irBuilder.create(getMCIDByUOp(GFX::s_wait_storecnt, irBuilder.arch));
 
         stinkyInst->addModifier<SWaitStoreCntData>(waitStoreCntData);
 
@@ -144,7 +141,7 @@ namespace
 
     // implement lowerRocisaWaitAlu
     std::vector<StinkyInstruction*>
-        lowerRocisaWaitAlu(rocisa::Instruction& inst, StinkyInstIRBuilder& irBuilder, IRList& insts)
+        lowerRocisaWaitAlu(rocisa::Instruction& inst, AsmIRBuilder& irBuilder)
     {
         rocisa::SWaitAlu* waitAluInst = dynamic_cast<rocisa::SWaitAlu*>(&inst);
 
@@ -158,8 +155,8 @@ namespace
                                  waitAluInst->getVaVcc(),
                                  waitAluInst->getSaSdst());
 
-        StinkyInstruction* stinkyInst = irBuilder.createStinkyInstBefore(
-            insts.end(), getMCIDByUOp(GFX::s_wait_alu, irBuilder.arch));
+        StinkyInstruction* stinkyInst
+            = irBuilder.create(getMCIDByUOp(GFX::s_wait_alu, irBuilder.arch));
 
         stinkyInst->addModifier<SWaitAluData>(waitAluData);
 

@@ -28,7 +28,7 @@
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 #include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 
 using namespace stinkytofu;
 
@@ -46,7 +46,6 @@ protected:
         // Create a Function with a single BasicBlock for testing
         func = std::make_unique<Function>("test_function");
         bb   = func->createBasicBlock("entry");
-        func->setEntryBlock(bb);
     }
 
     void TearDown() override
@@ -56,25 +55,18 @@ protected:
         bb = nullptr;
     }
 
-    // Get the IRList from the BasicBlock
-    IRList& getIRList()
-    {
-        return bb->getIR();
-    }
-
     // Create IRBuilder for building test instructions
-    StinkyInstIRBuilder getIRBuilder()
+    AsmIRBuilder getIRBuilder()
     {
-        return StinkyInstIRBuilder(getIRList(), arch);
+        return AsmIRBuilder(*bb, arch);
     }
 
     // Helper to create a ds_read instruction (64-bit, 2 registers)
     StinkyInstruction* createDSRead(int destReg, int addrReg)
     {
         auto               builder = getIRBuilder();
-        IRList&            insts   = getIRList();
         StinkyInstruction* inst
-            = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::ds_load_b64, arch));
+            = builder.create(getMCIDByUOp(GFX::ds_load_b64, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 2));
         inst->addSrcReg(StinkyRegister("v", addrReg, 1));
@@ -85,9 +77,8 @@ protected:
     StinkyInstruction* createDSRead128(int destReg, int addrReg)
     {
         auto               builder = getIRBuilder();
-        IRList&            insts   = getIRList();
         StinkyInstruction* inst
-            = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::ds_load_b128, arch));
+            = builder.create(getMCIDByUOp(GFX::ds_load_b128, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 4));
         inst->addSrcReg(StinkyRegister("v", addrReg, 1));
@@ -98,9 +89,8 @@ protected:
     StinkyInstruction* createDSWrite(int addrReg, int dataReg)
     {
         auto               builder = getIRBuilder();
-        IRList&            insts   = getIRList();
         StinkyInstruction* inst
-            = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::ds_write_b64, arch));
+            = builder.create(getMCIDByUOp(GFX::ds_write_b64, arch));
 
         inst->addSrcReg(StinkyRegister("v", addrReg, 2));
         inst->addSrcReg(StinkyRegister("v", dataReg, 1));
@@ -111,9 +101,7 @@ protected:
     StinkyInstruction* createGlobalLoad(int destReg, int addrReg)
     {
         auto               builder = getIRBuilder();
-        IRList&            insts   = getIRList();
-        StinkyInstruction* inst    = builder.createStinkyInstBefore(
-            insts.end(), getMCIDByUOp(GFX::global_load_dword, arch));
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::global_load_dword, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("s", addrReg, 4));
@@ -124,9 +112,7 @@ protected:
     StinkyInstruction* createGlobalStore(int addrReg, int dataReg)
     {
         auto               builder = getIRBuilder();
-        IRList&            insts   = getIRList();
-        StinkyInstruction* inst    = builder.createStinkyInstBefore(
-            insts.end(), getMCIDByUOp(GFX::global_store_dword, arch));
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::global_store_dword, arch));
 
         inst->addSrcReg(StinkyRegister("v", addrReg, 1));
         inst->addSrcReg(StinkyRegister("s", dataReg, 4));
@@ -136,9 +122,7 @@ protected:
     StinkyInstruction* createTensorLoad(int src0Reg, int src1Reg)
     {
         auto               builder = getIRBuilder();
-        IRList&            insts   = getIRList();
-        StinkyInstruction* inst    = builder.createStinkyInstBefore(
-            insts.end(), getMCIDByUOp(GFX::tensor_load_to_lds, arch));
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::tensor_load_to_lds, arch));
 
         inst->addSrcReg(StinkyRegister("s", src0Reg, 4));
         inst->addSrcReg(StinkyRegister("s", src1Reg, 8));
@@ -149,9 +133,8 @@ protected:
     StinkyInstruction* createVAdd(int destReg, int src0Reg, int src1Reg)
     {
         auto               builder = getIRBuilder();
-        IRList&            insts   = getIRList();
         StinkyInstruction* inst
-            = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f32, arch));
+            = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
@@ -163,9 +146,8 @@ protected:
     StinkyInstruction* createVMul(int destReg, int src0Reg, int src1Reg)
     {
         auto               builder = getIRBuilder();
-        IRList&            insts   = getIRList();
         StinkyInstruction* inst
-            = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_mul_f32, arch));
+            = builder.create(getMCIDByUOp(GFX::v_mul_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
@@ -177,9 +159,8 @@ protected:
     StinkyInstruction* createBarrier()
     {
         auto               builder = getIRBuilder();
-        IRList&            insts   = getIRList();
         StinkyInstruction* inst
-            = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::s_barrier, arch));
+            = builder.create(getMCIDByUOp(GFX::s_barrier, arch));
         return inst;
     }
 
@@ -187,9 +168,7 @@ protected:
     StinkyInstruction* createWMMA(int destReg, int src0Reg, int src1Reg)
     {
         auto               builder = getIRBuilder();
-        IRList&            insts   = getIRList();
-        StinkyInstruction* inst    = builder.createStinkyInstBefore(
-            insts.end(), getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, arch));
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, arch));
 
         inst->addDestReg(StinkyRegister("a", destReg, 8));
         inst->addSrcReg(StinkyRegister("v", src0Reg, 8));
@@ -201,9 +180,8 @@ protected:
     // Helper to count waitcnt instructions
     int countWaitCnt()
     {
-        int     count = 0;
-        IRList& insts = getIRList();
-        for(auto& irBase : insts)
+        int count = 0;
+        for(auto& irBase : *bb)
         {
             StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
             if(inst.getModifier<SWaitCntData>())
@@ -217,9 +195,8 @@ protected:
     // Helper to count tensor waitcnt instructions
     int countTensorWaitCnt()
     {
-        int     count = 0;
-        IRList& insts = getIRList();
-        for(auto& irBase : insts)
+        int count = 0;
+        for(auto& irBase : *bb)
         {
             StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
             if(inst.getModifier<SWaitTensorCntData>())
@@ -265,8 +242,7 @@ protected:
     {
         std::vector<WaitCntInfo> waitcnts;
         int                      position = 0;
-        IRList&                  insts    = getIRList();
-        for(auto& irBase : insts)
+        for(auto& irBase : *bb)
         {
             StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
             if(SWaitCntData* wait = inst.getModifier<SWaitCntData>())
@@ -283,8 +259,7 @@ protected:
     {
         std::vector<TensorWaitCntInfo> tensorWaitcnts;
         int                            position = 0;
-        IRList&                        insts    = getIRList();
-        for(auto& irBase : insts)
+        for(auto& irBase : *bb)
         {
             StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
             if(SWaitTensorCntData* tensorWait = inst.getModifier<SWaitTensorCntData>())
@@ -299,9 +274,8 @@ protected:
     // Helper to find instruction position in the list
     int getInstructionPosition(StinkyInstruction* target)
     {
-        int     position = 0;
-        IRList& insts    = getIRList();
-        for(auto& irBase : insts)
+        int position = 0;
+        for(auto& irBase : *bb)
         {
             if(&static_cast<StinkyInstruction&>(irBase) == target)
             {
@@ -315,9 +289,8 @@ protected:
     // Helper to find waitcnt before a specific instruction
     SWaitCntData* findWaitCntBefore(StinkyInstruction* target)
     {
-        IRList&          insts    = getIRList();
-        IRList::iterator targetIt = insts.end();
-        for(auto it = insts.begin(); it != insts.end(); ++it)
+        BasicBlock::iterator targetIt = bb->end();
+        for(auto it = bb->begin(); it != bb->end(); ++it)
         {
             if(&static_cast<StinkyInstruction&>(*it) == target)
             {
@@ -326,7 +299,7 @@ protected:
             }
         }
 
-        if(targetIt == insts.end() || targetIt == insts.begin())
+        if(targetIt == bb->end() || targetIt == bb->begin())
             return nullptr;
 
         // Search backwards from target, checking multiple instructions
@@ -345,7 +318,7 @@ protected:
             // Check if this is a tensor_wait_cnt (different type, keep searching)
             if(prevInst.getModifier<SWaitTensorCntData>())
             {
-                if(prevIt == insts.begin())
+                if(prevIt == bb->begin())
                     return nullptr;
                 --prevIt;
                 continue;
@@ -358,9 +331,8 @@ protected:
 
     SWaitTensorCntData* findTensorWaitCntBefore(StinkyInstruction* target)
     {
-        IRList&          insts    = getIRList();
-        IRList::iterator targetIt = insts.end();
-        for(auto it = insts.begin(); it != insts.end(); ++it)
+        BasicBlock::iterator targetIt = bb->end();
+        for(auto it = bb->begin(); it != bb->end(); ++it)
         {
             if(&static_cast<StinkyInstruction&>(*it) == target)
             {
@@ -369,7 +341,7 @@ protected:
             }
         }
 
-        if(targetIt == insts.end() || targetIt == insts.begin())
+        if(targetIt == bb->end() || targetIt == bb->begin())
             return nullptr;
 
         // Search backwards from target, checking multiple instructions
@@ -388,7 +360,7 @@ protected:
             // Check if this is a regular wait_cnt (different type, keep searching)
             if(prevInst.getModifier<SWaitCntData>())
             {
-                if(prevIt == insts.begin())
+                if(prevIt == bb->begin())
                     return nullptr;
                 --prevIt;
                 continue;
@@ -410,7 +382,7 @@ protected:
 
     void dumpInsts()
     {
-        std::cout << getIRList() << std::endl;
+        std::cout << *func << std::endl;
     }
 
     std::unique_ptr<Function> func;
@@ -679,10 +651,9 @@ TEST_F(ConfigurableWaitCntPassTest, CompleteTest_UnrollLoopConfig)
 // Helper function to create ds_load_b32 instruction (32-bit, 1 register)
 StinkyInstruction* createDSReadB32InBlock(BasicBlock* bb, GfxArchID arch, int destReg, int addrReg)
 {
-    IRList&             insts   = bb->getIR();
-    StinkyInstIRBuilder builder = StinkyInstIRBuilder(insts, arch);
+    AsmIRBuilder builder = AsmIRBuilder(*bb, arch);
     StinkyInstruction*  inst
-        = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::ds_load_b32, arch));
+        = builder.create(getMCIDByUOp(GFX::ds_load_b32, arch));
 
     inst->addDestReg(StinkyRegister("v", destReg, 1));
     inst->addSrcReg(StinkyRegister("v", addrReg, 1)); // DS address is 1 VGPR
@@ -693,10 +664,9 @@ StinkyInstruction* createDSReadB32InBlock(BasicBlock* bb, GfxArchID arch, int de
 StinkyInstruction*
     createVFmacInBlock(BasicBlock* bb, GfxArchID arch, int destReg, int src0Reg, int src1Reg)
 {
-    IRList&             insts   = bb->getIR();
-    StinkyInstIRBuilder builder = StinkyInstIRBuilder(insts, arch);
+    AsmIRBuilder builder = AsmIRBuilder(*bb, arch);
     StinkyInstruction*  inst
-        = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f32, arch));
+        = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
 
     inst->addDestReg(StinkyRegister("v", destReg, 1));
     inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
@@ -708,10 +678,9 @@ StinkyInstruction*
 StinkyInstruction*
     createSSubU32InBlock(BasicBlock* bb, GfxArchID arch, int destReg, int src0Reg, int src1Val)
 {
-    IRList&             insts   = bb->getIR();
-    StinkyInstIRBuilder builder = StinkyInstIRBuilder(insts, arch);
+    AsmIRBuilder builder = AsmIRBuilder(*bb, arch);
     StinkyInstruction*  inst
-        = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::s_sub_u32, arch));
+        = builder.create(getMCIDByUOp(GFX::s_sub_u32, arch));
 
     inst->addDestReg(StinkyRegister("s", destReg, 1));
     inst->addSrcReg(StinkyRegister("s", src0Reg, 1));
@@ -722,10 +691,9 @@ StinkyInstruction*
 // Helper function to create s_cmp_eq_u32 instruction
 StinkyInstruction* createSCmpEqU32InBlock(BasicBlock* bb, GfxArchID arch, int src0Reg, int src1Val)
 {
-    IRList&             insts   = bb->getIR();
-    StinkyInstIRBuilder builder = StinkyInstIRBuilder(insts, arch);
+    AsmIRBuilder builder = AsmIRBuilder(*bb, arch);
     StinkyInstruction*  inst
-        = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::s_cmp_eq_u32, arch));
+        = builder.create(getMCIDByUOp(GFX::s_cmp_eq_u32, arch));
 
     inst->addSrcReg(StinkyRegister("s", src0Reg, 1));
     // For simplicity, we won't add the immediate value in this test
@@ -735,10 +703,9 @@ StinkyInstruction* createSCmpEqU32InBlock(BasicBlock* bb, GfxArchID arch, int sr
 // Helper function to create s_cbranch_scc0 instruction
 StinkyInstruction* createCondBranchInBlock(BasicBlock* bb, GfxArchID arch, const std::string& label)
 {
-    IRList&             insts   = bb->getIR();
-    StinkyInstIRBuilder builder = StinkyInstIRBuilder(insts, arch);
+    AsmIRBuilder builder = AsmIRBuilder(*bb, arch);
     StinkyInstruction*  inst
-        = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::s_cbranch_scc0, arch));
+        = builder.create(getMCIDByUOp(GFX::s_cbranch_scc0, arch));
     return inst;
 }
 
@@ -769,7 +736,6 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_NoLoop)
     TearDown();
     auto        noLoopFunc = std::make_unique<Function>("test_no_loop");
     BasicBlock* block      = noLoopFunc->createBasicBlock("single_block");
-    noLoopFunc->setEntryBlock(block);
 
     // NO back-edge, NO loop
     EXPECT_FALSE(hasLoopBackEdge(block)) << "Should NOT be a loop block";
@@ -790,10 +756,9 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_NoLoop)
     pass->run(*noLoopFunc, passCtx);
 
     // Collect waitcnt instructions
-    IRList&                  insts = block->getIR();
     std::vector<WaitCntInfo> waitcnts;
     int                      position = 0;
-    for(auto& irBase : insts)
+    for(auto& irBase : *block)
     {
         StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
         if(SWaitCntData* wait = inst.getModifier<SWaitCntData>())
@@ -807,7 +772,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_NoLoop)
     int fmac1Pos = -1;
     int fmac2Pos = -1;
     position     = 0;
-    for(auto& irBase : insts)
+    for(auto& irBase : *block)
     {
         StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
         if(&inst == fmac1)
@@ -863,7 +828,6 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_LoopOnly)
     TearDown();
     auto        loopFunc  = std::make_unique<Function>("test_loop_only");
     BasicBlock* loopBlock = loopFunc->createBasicBlock("loop_start");
-    loopFunc->setEntryBlock(loopBlock);
 
     // Set up loop back-edge: block points to itself
     loopBlock->addSuccessor(loopBlock);
@@ -888,10 +852,9 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_LoopOnly)
     pass->run(*loopFunc, passCtx);
 
     // Collect waitcnt instructions
-    IRList&                  insts = loopBlock->getIR();
     std::vector<WaitCntInfo> waitcnts;
     int                      position = 0;
-    for(auto& irBase : insts)
+    for(auto& irBase : *loopBlock)
     {
         StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
         if(SWaitCntData* wait = inst.getModifier<SWaitCntData>())
@@ -905,7 +868,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_LoopOnly)
     int fmac1Pos = -1;
     int fmac2Pos = -1;
     position     = 0;
-    for(auto& irBase : insts)
+    for(auto& irBase : *loopBlock)
     {
         StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
         if(&inst == fmac1)
@@ -1001,7 +964,6 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain)
 
     // Create Block 1 (entry block)
     BasicBlock* block1 = func->createBasicBlock("entry");
-    func->setEntryBlock(block1);
 
     // Create Block 2 (loop block)
     BasicBlock* block2 = func->createBasicBlock("loop_start");
@@ -1039,10 +1001,9 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain)
     pass->run(*func, passCtx);
 
     // Collect all waitcnt instructions in block2
-    IRList&                  block2Insts = block2->getIR();
     std::vector<WaitCntInfo> waitcnts;
     int                      position = 0;
-    for(auto& irBase : block2Insts)
+    for(auto& irBase : *block2)
     {
         StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
         if(SWaitCntData* wait = inst.getModifier<SWaitCntData>())
@@ -1055,7 +1016,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain)
     // Find fmac1 position
     int fmac1Pos = -1;
     position     = 0;
-    for(auto& irBase : block2Insts)
+    for(auto& irBase : *block2)
     {
         if(&static_cast<StinkyInstruction&>(irBase) == fmac1)
         {
@@ -1070,7 +1031,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain)
     // Find fmac2 position
     int fmac2Pos = -1;
     position     = 0;
-    for(auto& irBase : block2Insts)
+    for(auto& irBase : *block2)
     {
         if(&static_cast<StinkyInstruction&>(irBase) == fmac2)
         {
@@ -1158,7 +1119,6 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain2)
 
     // Create Block 1 (entry block)
     BasicBlock* block1 = func->createBasicBlock("entry");
-    func->setEntryBlock(block1);
 
     // Create Block 2 (loop block)
     BasicBlock* block2 = func->createBasicBlock("loop_start");
@@ -1196,10 +1156,9 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain2)
     pass->run(*func, passCtx);
 
     // Collect all waitcnt instructions in block2
-    IRList&                  block2Insts = block2->getIR();
     std::vector<WaitCntInfo> waitcnts;
     int                      position = 0;
-    for(auto& irBase : block2Insts)
+    for(auto& irBase : *block2)
     {
         StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
         if(SWaitCntData* wait = inst.getModifier<SWaitCntData>())
@@ -1212,7 +1171,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain2)
     // Find fmac1 position
     int fmac1Pos = -1;
     position     = 0;
-    for(auto& irBase : block2Insts)
+    for(auto& irBase : *block2)
     {
         if(&static_cast<StinkyInstruction&>(irBase) == fmac1)
         {
@@ -1227,7 +1186,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain2)
     // Find fmac2 position
     int fmac2Pos = -1;
     position     = 0;
-    for(auto& irBase : block2Insts)
+    for(auto& irBase : *block2)
     {
         if(&static_cast<StinkyInstruction&>(irBase) == fmac2)
         {
@@ -1310,7 +1269,6 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     BasicBlock* block1   = testFunc->createBasicBlock("b1");
     BasicBlock* block2   = testFunc->createBasicBlock("b2");
     BasicBlock* block3   = testFunc->createBasicBlock("b3");
-    testFunc->setEntryBlock(entry);
 
     // Build Entry: just a branch (conceptually branches to both b1 and b2)
     // We'll connect it properly in the CFG
@@ -1345,11 +1303,10 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     pass->run(*testFunc, passCtx);
 
     // Collect all inserted waitcnts in block3
-    IRList&                  insts = block3->getIR();
     std::vector<WaitCntInfo> waitcnts;
     int                      position = 0;
 
-    for(auto& irBase : insts)
+    for(auto& irBase : *block3)
     {
         StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
         if(SWaitCntData* wait = inst.getModifier<SWaitCntData>())
@@ -1362,7 +1319,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     // Find fmac position
     int fmacPos = -1;
     position    = 0;
-    for(auto& irBase : insts)
+    for(auto& irBase : *block3)
     {
         if(&static_cast<StinkyInstruction&>(irBase) == fmac)
         {
@@ -1429,7 +1386,6 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     BasicBlock* block2   = testFunc->createBasicBlock("b2");
     BasicBlock* block3   = testFunc->createBasicBlock("b3");
     BasicBlock* block4   = testFunc->createBasicBlock("b4");
-    testFunc->setEntryBlock(entry);
 
     // Build Block 1: ds_read v0, v1, v2
     createDSReadB32InBlock(block1, arch, 0, 10); // v0
@@ -1467,11 +1423,10 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     pass->run(*testFunc, passCtx);
 
     // Collect all inserted waitcnts in block3
-    IRList&                  insts = block3->getIR();
     std::vector<WaitCntInfo> waitcnts;
     int                      position = 0;
 
-    for(auto& irBase : insts)
+    for(auto& irBase : *block3)
     {
         StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
         if(SWaitCntData* wait = inst.getModifier<SWaitCntData>())
@@ -1484,7 +1439,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     // Find fmac position
     int fmacPos = -1;
     position    = 0;
-    for(auto& irBase : insts)
+    for(auto& irBase : *block3)
     {
         if(&static_cast<StinkyInstruction&>(irBase) == fmac)
         {
@@ -1518,11 +1473,10 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
         << "Should wait for v3, v3 from path 2 (multi-path analysis) -> dlcnt=2";
 
     // Collect all inserted waitcnts in block4
-    IRList&                  insts4 = block4->getIR();
     std::vector<WaitCntInfo> waitcnts4;
     position = 0;
 
-    for(auto& irBase : insts4)
+    for(auto& irBase : *block4)
     {
         StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
         if(SWaitCntData* wait = inst.getModifier<SWaitCntData>())
@@ -1535,7 +1489,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     // Find fmac2 position
     int fmac2Pos = -1;
     position     = 0;
-    for(auto& irBase : insts4)
+    for(auto& irBase : *block4)
     {
         if(&static_cast<StinkyInstruction&>(irBase) == fmac2)
         {

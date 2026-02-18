@@ -29,7 +29,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/core/IRBase.hpp"
 
 namespace stinkytofu
 {
@@ -64,9 +65,6 @@ namespace stinkytofu
     class StinkyAsmModule
     {
     public:
-        // Range of instructions in a group
-        using GroupRange = std::pair<IntrusiveListIterator<IRBase>, IntrusiveListIterator<IRBase>>;
-
         /**
          * @brief Construct a new StinkyAsmModule
          * @param name Module/kernel name
@@ -100,32 +98,6 @@ namespace stinkytofu
         std::array<int, 3> getArch() const;
 
         /**
-         * @brief Set the groups for a single assembly instruction
-         *
-         * @param inst Assembly instruction to set the groups for
-         * @param groups Group indices to set for the instruction
-         */
-        void setInstructionGroups(IRBase* inst, const std::vector<int>& groups);
-
-        /**
-         * @brief Get all assembly instructions in this module (const version)
-         * @return Vector of assembly instruction pointers
-         */
-        const std::vector<IRBase*>& getInstructions() const;
-
-        /**
-         * @brief Get number of instructions in this module
-         * @return Instruction count
-         */
-        size_t size() const;
-
-        /**
-         * @brief Convert the object to its string representation.
-         * @return String representation of the module instructions.
-         */
-        std::string toString() const;
-
-        /**
          * @brief Emit assembly code for all instructions
          * @return Assembly code as string
          */
@@ -137,33 +109,22 @@ namespace stinkytofu
         void runOptimizationPipeline();
 
         /**
-         * @brief Get the underlying IRList
+         * @brief Get the underlying Function
          *
-         * This provides access to the internal IRList representation.
-         * The IRList is owned by a Function/BasicBlock internally.
+         * This provides access to the internal Function representation.
+         * The Function is owned by the StinkyAsmModule.
          *
-         * @return Reference to the IRList
+         * @return Reference to the Function
          */
-        IRList& getIRList();
+        Function& getFunction();
 
-        /**
-         * @brief Get the underlying IRList (const version)
-         * @return Const reference to the IRList
-         */
-        const IRList& getIRList() const;
+        const Function& getFunction() const;
 
         /**
          * @brief Add a group name to the module
          * @param name Group name
          */
         void addGroup(const std::string& name);
-
-        /**
-         * @brief Get the group index by name
-         * @param name Group name
-         * @return Module group index
-         */
-        int getGroupIndex(const std::string& name) const;
 
         /**
          * @brief Check if the module has the given group name
@@ -173,46 +134,22 @@ namespace stinkytofu
         bool hasGroup(const std::string& name) const;
 
         /**
-         * @brief Get the group name to index map
-         * @return Group name to index map
-         */
-        const std::unordered_map<std::string, int>& getGroupNameIndexMap() const;
-
-        /**
-         * @brief Get the instruction groups by instruction pointer
-         * @param inst Instruction pointer
-         * @return Instruction groups
-         */
-        std::optional<std::unordered_set<int>> getInstructionGroups(IRBase* inst) const;
-
-        /**
-         * @brief Check if the instruction is in the given group
-         * @param inst Instruction pointer
-         * @param group Group index
-         * @return True if the instruction is in the given group, false otherwise
-         */
-        bool isInstructionInGroup(const IRBase* inst, int group) const;
-
-        /**
-         * @brief Refresh the instruction groups
-         */
-        void refreshInstructionGroups();
-
-        /**
          * @brief Find the range of instructions in the given group
          * @param groupName Group name
-         * @return Pair of iterators to the beginning and end of the group range
+         * @return Optional range of instructions (begin, end) for the given group
          */
-        GroupRange findGroupRange(const std::string& groupName);
+        std::optional<std::pair<IntrusiveListIterator<IRBase>, IntrusiveListIterator<IRBase>>>
+            findGroupRange(const std::string& groupName) const;
+
+        /**
+         * @brief Update the group ranges
+         * @param groups Group names if exists to update
+         * @param instsCountBefore Number of instructions before updating
+         */
+        void updateInstructionGroups(const std::vector<const std::string*>& groups,
+                                     size_t                                 instsCountBefore);
 
     private:
-        /**
-         * @brief Find the range of instructions in the given group
-         * @param groupIndex Group index
-         * @return Pair of iterators to the beginning and end of the group range
-         */
-        GroupRange findGroupRange(int groupIndex);
-
         struct Impl;
         std::unique_ptr<Impl> pImpl;
     };

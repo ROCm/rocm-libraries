@@ -22,9 +22,9 @@
  * ************************************************************************ */
 #include "stinkytofu/pipeline/Backend.hpp"
 
-#include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/core/StinkyAsmModule.hpp"
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
 
 namespace stinkytofu
 {
@@ -101,7 +101,6 @@ namespace stinkytofu
         // Create a temporary Function to hold the IR
         Function    tempFunc("temp");
         BasicBlock* bb = tempFunc.createBasicBlock("entry");
-        tempFunc.setEntryBlock(bb);
 
         bool doOptimization = true;
         if(groupName.empty())
@@ -109,22 +108,25 @@ namespace stinkytofu
             // TODO: whole module optimization
             doOptimization = false;
         }
-        else if(module.hasGroup(groupName))
+        else if(auto groupRange = module.findGroupRange(groupName))
         {
-            auto [begin, end] = module.findGroupRange(groupName);
+            auto [begin, end] = groupRange.value();
+
+            BasicBlock* origBB = begin->getParent();
 
             // Move StinkyInstructions from module to temporary function
             for(auto it = begin; it != end;)
             {
-                auto newInst = it.getNodePtr();
+                IRBase* ir = it.getNodePtr();
                 it++;
-                if(dyn_cast<StinkyInstruction>(newInst))
+                if(dyn_cast<StinkyInstruction>(ir))
                 {
-                    bb->getIR().insert(bb->getIR().end(), newInst);
+                    bb->appendIR(ir);
                 }
                 else
                 {
-                    newInst->removeFromList();
+                    // erase non-StinkyInstruction IRs
+                    ir->erase();
                 }
             }
 
@@ -132,22 +134,19 @@ namespace stinkytofu
             OptimizationPipeline::run(tempFunc, config);
 
             // Move IR from temporary function back to module
-            for(auto bbIt = tempFunc.getBasicBlocks().begin();
-                bbIt != tempFunc.getBasicBlocks().end();
-                bbIt++)
+            assert(module.getFunction().size() == 1
+                   && "Current module should have only one basic block.");
+            for(auto bbIt = tempFunc.begin(); bbIt != tempFunc.end(); bbIt++)
             {
-                for(auto it = bbIt->getIR().begin(); it != bbIt->getIR().end();)
+                for(auto it = bbIt->begin(); it != bbIt->end();)
                 {
-                    auto newInst = it.getNodePtr();
+                    IRBase* ir = it.getNodePtr();
                     it++;
-                    module.getIRList().insert(end, newInst);
+                    // FIXME: currently we insert IR to the range end, which
+                    // assumes the Module has only one basic block.
+                    origBB->insertIR(end, ir);
                 }
             }
-        }
-
-        if(doOptimization)
-        {
-            module.refreshInstructionGroups();
         }
 
         return doOptimization;

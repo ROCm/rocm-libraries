@@ -277,15 +277,18 @@ TEST(HexLiteralTest, GenericIRInstructionDump)
     operands.push_back(IntrinsicOperand("src")); // Register
     operands.push_back(IntrinsicOperand::hexLiteral(7.3890562)); // 0x40ec7326
 
-    // Create instruction
-    GenericIRInstruction inst("dest", "v_mul_f32", operands);
+    // Create instruction via standard API
+    GenericIRInstruction* inst =
+        IRBase::createIR<GenericIRInstruction>("dest", "v_mul_f32", operands);
 
     // Dump to string
     std::ostringstream oss;
-    inst.dump(oss);
+    inst->dump(oss);
 
     // Verify output contains hex literal
     std::string output = oss.str();
     EXPECT_TRUE(output.find("dest = v_mul_f32(src, 0x40ec7326)") != std::string::npos)
         << "Output should contain hex literal format. Got: " << output;
+
+    inst->safeErase();
 }

@@ -25,6 +25,22 @@
 #include <iomanip>
 #include <iostream>
 
+namespace
+{
+    void printBasicBlock(stinkytofu::AsmPrinter& printer, const stinkytofu::BasicBlock& bb)
+    {
+        for(const stinkytofu::IRBase& ir : bb)
+        {
+            if(const stinkytofu::StinkyInstruction* inst
+               = dyn_cast<stinkytofu::StinkyInstruction>(&ir))
+            {
+                printer.getStream() << std::setw(printer.getOptions().indent) << "";
+                printer.print(*inst);
+            }
+        }
+    }
+} // namespace
+
 namespace stinkytofu
 {
     //----------------------------------------------------------------------
@@ -182,16 +198,10 @@ namespace stinkytofu
         os << "\n";
     }
 
-    void AsmPrinter::print(const IRList& irlist)
+    void AsmPrinter::print(const Function& function)
     {
-        for(const IRBase& ir : irlist)
-        {
-            if(const StinkyInstruction* inst = dyn_cast<StinkyInstruction>(&ir))
-            {
-                os << std::setw(getOptions().indent) << "";
-                print(*inst);
-            }
-        }
+        for(const BasicBlock& bb : function)
+            printBasicBlock(*this, bb);
     }
 
 } // namespace stinkytofu

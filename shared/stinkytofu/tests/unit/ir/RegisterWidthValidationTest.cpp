@@ -3,7 +3,7 @@
  * ************************************************************************ */
 
 #include "TestHelpers.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
@@ -20,12 +20,10 @@ using namespace stinkytofu::test;
 
 TEST(RegisterWidthValidationTest, TensorLoadToLds_CorrectWidths)
 {
-    PassManager pm;
-    Function&   func = pm.getPassContext().getFunction();
-    BasicBlock* bb   = func.createBasicBlock("entry");
-    func.setEntryBlock(bb);
+    Function     func("kernel");
+    BasicBlock*  bb = func.createBasicBlock("entry");
 
-    // Configure for gfx1250 (tensor_load_to_lds is gfx1250 only)
+    PassManager pm;
     GemmTileConfig config;
     config.arch     = {12, 5, 0};
     config.TileA0   = 16;
@@ -37,27 +35,23 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_CorrectWidths)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
-    // Create tensor_load_to_lds with CORRECT register widths: src0=4, src1=8
-    bb->getIR().push_back(static_cast<IRBase*>(
+    bb->appendIR(static_cast<IRBase*>(
         stinkytofu::TensorLoadToLds(sgpr(0, 4), sgpr(4, 8)) // group0=4 regs, group1=8 regs
         ));
 
-    // Lower to assembly
     pm.addPass(createToStinkyAsmPass());
-    pm.run();
+    pm.run(func);
 
-    // Verify - should pass with correct widths
     std::string error = validateStinkyIR(func);
     EXPECT_TRUE(error.empty()) << "Should pass with correct register widths, got error: " << error;
 }
 
 TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectSrc0Width)
 {
-    PassManager pm;
-    Function&   func = pm.getPassContext().getFunction();
-    BasicBlock* bb   = func.createBasicBlock("entry");
-    func.setEntryBlock(bb);
+    Function    func("kernel");
+    BasicBlock* bb = func.createBasicBlock("entry");
 
+    PassManager pm;
     GemmTileConfig config;
     config.arch     = {12, 5, 0};
     config.TileA0   = 16;
@@ -69,15 +63,13 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectSrc0Width)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
-    // Create tensor_load_to_lds with INCORRECT src0 width: src0=2 (should be 4)
-    bb->getIR().push_back(static_cast<IRBase*>(
+    bb->appendIR(static_cast<IRBase*>(
         stinkytofu::TensorLoadToLds(sgpr(0, 2), sgpr(2, 8)) // group0=2 regs (WRONG!), group1=8 regs
         ));
 
     pm.addPass(createToStinkyAsmPass());
-    pm.run();
+    pm.run(func);
 
-    // Verify - should fail
     std::string error = validateStinkyIR(func);
     EXPECT_FALSE(error.empty()) << "Should fail with incorrect src0 width";
     EXPECT_NE(error.find("src[0]"), std::string::npos) << "Error should mention src[0]";
@@ -88,11 +80,10 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectSrc0Width)
 
 TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectSrc1Width)
 {
-    PassManager pm;
-    Function&   func = pm.getPassContext().getFunction();
-    BasicBlock* bb   = func.createBasicBlock("entry");
-    func.setEntryBlock(bb);
+    Function    func("kernel");
+    BasicBlock* bb = func.createBasicBlock("entry");
 
+    PassManager pm;
     GemmTileConfig config;
     config.arch     = {12, 5, 0};
     config.TileA0   = 16;
@@ -105,14 +96,13 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectSrc1Width)
     pm.setGemmTileConfig(config);
 
     // Create tensor_load_to_lds with INCORRECT src1 width: src1=4 (should be 8)
-    bb->getIR().push_back(static_cast<IRBase*>(
+    bb->appendIR(static_cast<IRBase*>(
         stinkytofu::TensorLoadToLds(sgpr(0, 4), sgpr(4, 4)) // group0=4 regs, group1=4 regs (WRONG!)
         ));
 
     pm.addPass(createToStinkyAsmPass());
-    pm.run();
+    pm.run(func);
 
-    // Verify - should fail
     std::string error = validateStinkyIR(func);
     EXPECT_FALSE(error.empty()) << "Should fail with incorrect src1 width";
     EXPECT_NE(error.find("src[1]"), std::string::npos) << "Error should mention src[1]";
@@ -123,11 +113,10 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectSrc1Width)
 
 TEST(RegisterWidthValidationTest, OtherInstructions_NoWidthChecks)
 {
-    PassManager pm;
-    Function&   func = pm.getPassContext().getFunction();
-    BasicBlock* bb   = func.createBasicBlock("entry");
-    func.setEntryBlock(bb);
+    Function    func("kernel");
+    BasicBlock* bb = func.createBasicBlock("entry");
 
+    PassManager pm;
     GemmTileConfig config;
     config.arch     = {9, 4, 2};
     config.TileA0   = 16;
@@ -139,24 +128,21 @@ TEST(RegisterWidthValidationTest, OtherInstructions_NoWidthChecks)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
-    // Add normal instruction (no width requirements specified)
-    bb->getIR().push_back(static_cast<IRBase*>(stinkytofu::VAddF32(vgpr(0), vgpr(1), vgpr(2))));
+    bb->appendIR(static_cast<IRBase*>(stinkytofu::VAddF32(vgpr(0), vgpr(1), vgpr(2))));
 
     pm.addPass(createToStinkyAsmPass());
-    pm.run();
+    pm.run(func);
 
-    // Should pass (no width requirements for v_add_f32)
     std::string error = validateStinkyIR(func);
     EXPECT_TRUE(error.empty()) << "Should pass for instructions without width requirements";
 }
 
 TEST(RegisterWidthValidationTest, DisableWidthChecks)
 {
-    PassManager pm;
-    Function&   func = pm.getPassContext().getFunction();
-    BasicBlock* bb   = func.createBasicBlock("entry");
-    func.setEntryBlock(bb);
+    Function    func("kernel");
+    BasicBlock* bb = func.createBasicBlock("entry");
 
+    PassManager pm;
     GemmTileConfig config;
     config.arch     = {12, 5, 0};
     config.TileA0   = 16;
@@ -168,15 +154,13 @@ TEST(RegisterWidthValidationTest, DisableWidthChecks)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
-    // Create tensor_load_to_lds with INCORRECT widths
-    bb->getIR().push_back(static_cast<IRBase*>(
+    bb->appendIR(static_cast<IRBase*>(
         stinkytofu::TensorLoadToLds(sgpr(0, 1), sgpr(1, 1)) // Both WRONG widths (should be 4 and 8)
         ));
 
     pm.addPass(createToStinkyAsmPass());
-    pm.run();
+    pm.run(func);
 
-    // Verify with width checks DISABLED - should pass
     AsmVerifierConfig verifierConfig;
     verifierConfig.checkRegisterWidths = false;
 
@@ -190,11 +174,10 @@ TEST(RegisterWidthValidationTest, DisableWidthChecks)
 
 TEST(RegisterWidthValidationTest, TensorLoadToLds_CorrectRegisterType)
 {
-    PassManager pm;
-    Function&   func = pm.getPassContext().getFunction();
-    BasicBlock* bb   = func.createBasicBlock("entry");
-    func.setEntryBlock(bb);
+    Function    func("kernel");
+    BasicBlock* bb = func.createBasicBlock("entry");
 
+    PassManager pm;
     GemmTileConfig config;
     config.arch     = {12, 5, 0};
     config.TileA0   = 16;
@@ -206,26 +189,23 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_CorrectRegisterType)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
-    // Create tensor_load_to_lds with CORRECT types (SGPRs) and widths
-    bb->getIR().push_back(static_cast<IRBase*>(
+    bb->appendIR(static_cast<IRBase*>(
         stinkytofu::TensorLoadToLds(sgpr(0, 4), sgpr(4, 8)) // Both SGPRs, correct widths
         ));
 
     pm.addPass(createToStinkyAsmPass());
-    pm.run();
+    pm.run(func);
 
-    // Should pass with correct types
     std::string error = validateStinkyIR(func);
     EXPECT_TRUE(error.empty()) << "Should pass with correct register types, got error: " << error;
 }
 
 TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectRegisterType_Src0)
 {
-    PassManager pm;
-    Function&   func = pm.getPassContext().getFunction();
-    BasicBlock* bb   = func.createBasicBlock("entry");
-    func.setEntryBlock(bb);
+    Function    func("kernel");
+    BasicBlock* bb = func.createBasicBlock("entry");
 
+    PassManager pm;
     GemmTileConfig config;
     config.arch     = {12, 5, 0};
     config.TileA0   = 16;
@@ -237,15 +217,13 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectRegisterType_Src0)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
-    // Create tensor_load_to_lds with INCORRECT type for src0 (VGPR instead of SGPR)
-    bb->getIR().push_back(static_cast<IRBase*>(
+    bb->appendIR(static_cast<IRBase*>(
         stinkytofu::TensorLoadToLds(vgpr(0, 4), sgpr(4, 8)) // src0=VGPR (WRONG!), src1=SGPR
         ));
 
     pm.addPass(createToStinkyAsmPass());
-    pm.run();
+    pm.run(func);
 
-    // Should fail with incorrect type
     std::string error = validateStinkyIR(func);
     EXPECT_FALSE(error.empty()) << "Should fail with incorrect src0 register type";
     EXPECT_NE(error.find("src[0]"), std::string::npos) << "Error should mention src[0]";
@@ -257,11 +235,10 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectRegisterType_Src0)
 
 TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectRegisterType_Src1)
 {
-    PassManager pm;
-    Function&   func = pm.getPassContext().getFunction();
-    BasicBlock* bb   = func.createBasicBlock("entry");
-    func.setEntryBlock(bb);
+    Function    func("kernel");
+    BasicBlock* bb = func.createBasicBlock("entry");
 
+    PassManager pm;
     GemmTileConfig config;
     config.arch     = {12, 5, 0};
     config.TileA0   = 16;
@@ -273,15 +250,13 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectRegisterType_Src1)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
-    // Create tensor_load_to_lds with INCORRECT type for src1 (VGPR instead of SGPR)
-    bb->getIR().push_back(static_cast<IRBase*>(
+    bb->appendIR(static_cast<IRBase*>(
         stinkytofu::TensorLoadToLds(sgpr(0, 4), vgpr(4, 8)) // src0=SGPR, src1=VGPR (WRONG!)
         ));
 
     pm.addPass(createToStinkyAsmPass());
-    pm.run();
+    pm.run(func);
 
-    // Should fail with incorrect type
     std::string error = validateStinkyIR(func);
     EXPECT_FALSE(error.empty()) << "Should fail with incorrect src1 register type";
     EXPECT_NE(error.find("src[1]"), std::string::npos) << "Error should mention src[1]";

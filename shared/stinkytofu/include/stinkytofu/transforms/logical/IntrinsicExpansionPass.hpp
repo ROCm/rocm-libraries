@@ -23,14 +23,16 @@
 
 #pragma once
 
-#include "stinkytofu/serialization/asm/PatternParser.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/serialization/asm/PatternParser.hpp"
 #include <memory>
 #include <unordered_map>
 
 namespace stinkytofu
 {
+    class LogicalInstruction;
+
     /**
      * @brief Pass that expands IntrinsicCall instructions using IntrinsicRegistry
      *

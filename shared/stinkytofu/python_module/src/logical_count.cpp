@@ -30,7 +30,7 @@
 
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/ir/logical/LogicalOpcode.hpp"
-#include "stinkytofu/core/PyLogicalModule.hpp"
+#include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/vector.h>

@@ -22,8 +22,8 @@
  * ************************************************************************ */
 
 #include "stinkytofu/transforms/logical/LogicalPeepholePass.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 // Include generated pattern matchers
@@ -80,11 +80,9 @@ namespace
         void runOnBasicBlock(BasicBlock&                                                  bb,
                              std::vector<std::unique_ptr<hlir_patterns::PatternMatcher>>& patterns)
         {
-            IRList& irlist = bb.getIR();
-
             // Collect all LogicalInstructions from the IRList
             std::vector<LogicalInstruction*> instructions;
-            for(IRBase& irNode : irlist)
+            for(IRBase& irNode : bb)
             {
                 if(irNode.getType() == IRBase::IRType::StinkyTofu)
                 {
@@ -140,7 +138,7 @@ namespace
                         for(auto* toRemove : result->instructionsToRemove)
                         {
                             // Remove from IRList
-                            irlist.remove(static_cast<IRBase*>(toRemove));
+                            bb.removeIR(static_cast<IRBase*>(toRemove));
 
                             // Remove from instructions vector
                             auto it = std::find(instructions.begin(), instructions.end(), toRemove);
@@ -178,7 +176,7 @@ namespace
                             for(auto* toRemove : result->instructionsToRemove)
                             {
                                 // Remove from IRList
-                                irlist.remove(static_cast<IRBase*>(toRemove));
+                                bb.removeIR(static_cast<IRBase*>(toRemove));
 
                                 // Remove from instructions vector
                                 auto it

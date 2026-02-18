@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/IRBase.hpp"
 #include <memory>
 #include <string>
 #include <vector>
@@ -49,12 +49,15 @@ namespace stinkytofu
      */
     struct AsmMacroDefinition : public IRBase
     {
+        friend class IRBase;
+
         std::string name; // Macro name (e.g., "V_MAGIC_DIV")
         std::vector<std::string>
             parameters; // Parameter names (e.g., ["vgprDstIdx", "dividend", ...])
         std::shared_ptr<IRListModule> body; // Instructions inside the macro
         std::string                   comment;
 
+    private:
         AsmMacroDefinition()
             : IRBase(IRType::StinkyTofu)
         {
@@ -72,6 +75,9 @@ namespace stinkytofu
         {
         }
 
+        ~AsmMacroDefinition() = default;
+
+    public:
         // Implement IRBase::dump()
         void dump(std::ostream& out) const override
         {
@@ -98,10 +104,13 @@ namespace stinkytofu
      */
     struct AsmMacroInvocation : public IRBase
     {
+        friend class IRBase;
+
         std::string              name; // Macro name to invoke
         std::vector<std::string> arguments; // Actual argument values
         std::string              comment;
 
+    private:
         AsmMacroInvocation()
             : IRBase(IRType::StinkyTofu)
         {
@@ -117,6 +126,9 @@ namespace stinkytofu
         {
         }
 
+        ~AsmMacroInvocation() = default;
+
+    public:
         // Implement IRBase::dump()
         void dump(std::ostream& out) const override
         {

@@ -21,8 +21,9 @@
  *
  * ************************************************************************ */
 #include "stinkytofu-opt.hpp"
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -60,14 +61,13 @@ namespace
 
         void run(Function& func, PassContext& passCtx) override
         {
-            IRList&   insts = func.getEntryBlock()->getIR();
-            GfxArchID arch  = getGfxArchID(passCtx.getGemmTileConfig().arch[0],
-                                          passCtx.getGemmTileConfig().arch[1],
-                                          passCtx.getGemmTileConfig().arch[2]);
+            GfxArchID arch = getGfxArchID(passCtx.getGemmTileConfig().arch[0],
+                                         passCtx.getGemmTileConfig().arch[1],
+                                         passCtx.getGemmTileConfig().arch[2]);
 
             std::string irText = readFile(stinkytofuIRFile);
 
-            // Use the shared conversion logic from StinkyIRConverter
+            // Use the shared conversion logic from StinkyIRConverter (creates entry block)
             StinkyErrorCode result
                 = StinkyIRConverter::populateFunctionFromString(irText, func, passCtx, arch);
             if(result != StinkyErrorCode::SUCCESS)
@@ -254,7 +254,8 @@ int main(int argc, char** argv)
         std::cout << "Use --list-passes to see available passes.\n\n";
     }
 
-    passManager.run();
+    stinkytofu::Function func("kernel");
+    passManager.run(func);
 
     return 0;
 }

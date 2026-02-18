@@ -26,6 +26,7 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/variant.h>
 
+#include "AllHwMappings.hpp"
 #include "code.hpp"
 #include "container.hpp"
 #include "instruction/branch.hpp"
@@ -34,15 +35,13 @@
 #include "instruction/cvt.hpp"
 #include "instruction/mem.hpp"
 #include "instruction/mfma.hpp"
-#include "stinkytofu/pipeline/BackendRegistry.hpp"
-#include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
+#include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/core/StinkyAsmModule.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
-#include "AllHwMappings.hpp"
-#include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 
@@ -61,37 +60,6 @@ namespace
     using namespace rocisa;
     using namespace stinkytofu;
 
-    /**
-     * @brief Get the instruction group indices from the rocisa item
-     * @param item The rocisa item
-     * @param rocisaModuleSet The set of rocisa modules
-     * @param stinkyAsmModule The StinkyAsmModule to get the instruction group indices
-     * @return The instruction group indices
-     */
-    std::vector<int> getInstructionGroupIndices(const rocisa::Item&              item,
-                                                std::set<const rocisa::Module*>& rocisaModuleSet,
-                                                StinkyAsmModule&                 stinkyAsmModule)
-    {
-        std::vector<int>    instructionGroups;
-        const rocisa::Item* parentItem = item.parent;
-        while(const auto* parentModule = dynamic_cast<const rocisa::Module*>(parentItem))
-        {
-            std::string moduleName = parentModule->name;
-            if(rocisaModuleSet.find(parentModule) == rocisaModuleSet.end())
-            {
-                rocisaModuleSet.insert(parentModule);
-                int duplicateCount = 0;
-                while(stinkyAsmModule.hasGroup(moduleName))
-                {
-                    moduleName = parentModule->name + "_" + std::to_string(++duplicateCount);
-                }
-                stinkyAsmModule.addGroup(moduleName);
-            }
-            instructionGroups.push_back(stinkyAsmModule.getGroupIndex(moduleName));
-            parentItem = parentModule->parent;
-        }
-        return instructionGroups;
-    }
     StinkyRegister toStinkyRegister(const Container* container, bool hasVgprMsb);
     StinkyRegister toStinkyRegister(const InstructionInput& input, bool hasVgprMsb);
 
@@ -209,7 +177,7 @@ namespace
 
     Legalized legalizeInstruction(StinkyInstruction*                inst,
                                   rocisa::Instruction*              rocisaInst,
-                                  StinkyInstIRBuilder&              irBuilder,
+                                  AsmIRBuilder&                     irBuilder,
                                   GfxArchID                         archId,
                                   const std::map<std::string, int>& asmCaps,
                                   bool                              hasVgprMsb)
@@ -256,8 +224,7 @@ namespace
     /// Create StinkyInstruction from rocisa instruction
     StinkyInstruction* createStinkyInstructionFromRocisa(rocisa::Instruction& inst,
                                                          std::type_index      rocisaTy,
-                                                         StinkyInstIRBuilder& irBuilder,
-                                                         IRList&              insts,
+                                                         AsmIRBuilder&        irBuilder,
                                                          GfxArchID            archId)
     {
         const HwInstDesc*  hwInstDesc = getRocisaToMCID(rocisaTy, archId);
@@ -266,7 +233,7 @@ namespace
         if(hwInstDesc != nullptr)
         {
             // Direct mapping exists - create instruction directly
-            stinkyInst = irBuilder.createStinkyInstBefore(insts.end(), hwInstDesc);
+            stinkyInst = irBuilder.create(hwInstDesc);
         }
         else
         {
@@ -278,7 +245,7 @@ namespace
             }
 
             // Call conversion function
-            std::vector<StinkyInstruction*> stinkyInsts = convFn(inst, irBuilder, insts);
+            std::vector<StinkyInstruction*> stinkyInsts = convFn(inst, irBuilder);
 
             if(stinkyInsts.empty())
             {
@@ -493,7 +460,7 @@ namespace
     /// Helper to handle SMFMA instruction modifiers
     void handleSMFMAModifiers(StinkyInstruction*              stinkyInst,
                               const rocisa::SMFMAInstruction* smfmaInst,
-                              const std::string&             instString)
+                              const std::string&              instString)
     {
         // Extract neg_lo/neg_hi modifiers
         auto [negStr, hasNegLo, hasNegHi] = extractNegModifiers(instString);
@@ -773,21 +740,22 @@ namespace
 
     /// Emit s_set_vgpr_msb instruction if required MSB differs from current.
     /// \param insertBefore If valid, insert before this position; otherwise insert at end.
-    void emitVgprMsbIfNeeded(int                             requiredSetVal,
-                             bool                            hasVgpr,
-                             int&                            currentVgprMsb,
-                             StinkyInstIRBuilder&            irBuilder,
-                             IRList&                         insts,
-                             GfxArchID                       archId,
-                             std::optional<IRList::iterator> insertBefore = std::nullopt)
+    void emitVgprMsbIfNeeded(int           requiredSetVal,
+                             bool          hasVgpr,
+                             int&          currentVgprMsb,
+                             AsmIRBuilder& irBuilder,
+                             BasicBlock&   bb,
+                             GfxArchID     archId,
+                             IRBase*       insertBefore)
     {
         if(!hasVgpr || requiredSetVal == currentVgprMsb)
+        {
             return;
+        }
 
         const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
         assert(desc != nullptr && "s_set_vgpr_msb is not supported on this architecture");
-        IRList::iterator   pos     = insertBefore ? *insertBefore : insts.end();
-        StinkyInstruction* msbInst = irBuilder.createStinkyInstBefore(pos, desc);
+        StinkyInstruction* msbInst = irBuilder.create(desc, insertBefore);
         msbInst->addSrcReg(StinkyRegister(requiredSetVal));
         currentVgprMsb = requiredSetVal;
     }
@@ -970,6 +938,39 @@ namespace
         return stinkySig;
     }
 
+    /**
+     * @brief Visitor function type for processing each item in the rocisa::Module
+     * @param item The current item being processed
+     * @param moduleNames The hierarchical module names of the current item
+     */
+    using ItemVisitor
+        = std::function<void(rocisa::Item*, const std::vector<const std::string*>& moduleNames)>;
+
+    /**
+     * @brief traversal rocisa::Module with DFS path and process each item
+     * @param module The rocisa::Module to traverse
+     * @param parentModuleNames The hierarchical module names of the parent items
+     * @param visitor The visitor to process each item
+     */
+    void traverseModule(const rocisa::Module&                  module,
+                        const std::vector<const std::string*>& parentModuleNames,
+                        ItemVisitor                            visitor)
+    {
+        std::vector<const std::string*> moduleNames(parentModuleNames);
+        moduleNames.push_back(&module.name);
+        for(auto& item : module.itemList)
+        {
+            if(const auto subModule = dynamic_cast<const rocisa::Module*>(item.get()))
+            {
+                traverseModule(*subModule, moduleNames, visitor);
+            }
+            else
+            {
+                visitor(item.get(), moduleNames);
+            }
+        }
+    }
+
 } // anonymous namespace
 
 namespace stinkytofu
@@ -982,47 +983,44 @@ namespace stinkytofu
         GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
         StinkyAsmModule stinkyAsmModule(moduleName, arch);
-        IRList&         insts = stinkyAsmModule.getIRList();
+
+        // TODO: We can create BasicBlocks when visiting Labels.
+        BasicBlock* currentBB = stinkyAsmModule.getFunction().getEntryBlock();
+
+        // Get group names from BackendRegistry
+        auto pipelineFactories = BackendRegistry::getPipelineFactories(arch);
+        for(const auto& pipelineFactory : pipelineFactories)
+        {
+            stinkyAsmModule.addGroup(pipelineFactory.groupName);
+        }
 
         // Create IRBuilder for lower-level instruction creation
-        StinkyInstIRBuilder irBuilder(insts, archId);
+        AsmIRBuilder irBuilder(*currentBB, archId);
 
         // Process each item
         std::map<std::string, int> asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
         bool hasVgprMsb = asmCaps.count("HasVgprMSB") && asmCaps.at("HasVgprMSB");
 
-        std::set<const rocisa::Module*> rocisaModuleSet;
-        rocisa::Item*                   parentItem = nullptr;
-        std::vector<int>                instructionGroups;
-        int                             currentVgprMsb = -1;
-
-        for(auto itemShared : module.flatitems())
-        {
-            rocisa::Item* item       = itemShared.get();
-            const auto    instsCount = insts.size();
-            if(parentItem != item->parent)
-            {
-                instructionGroups
-                    = getInstructionGroupIndices(*item, rocisaModuleSet, stinkyAsmModule);
-                parentItem = item->parent;
-            }
+        int  currentVgprMsb = -1;
+        auto processItem    = [&](rocisa::Item*                          item,
+                               const std::vector<const std::string*>& moduleNames) {
+            const auto instsCountBefore = currentBB->size();
 
             // Handle text blocks
             if(rocisa::TextBlock* textBlock = dynamic_cast<rocisa::TextBlock*>(item))
             {
-                AsmDirective* directive = new AsmDirective();
+                AsmDirective* directive = IRBase::createIR<AsmDirective>();
                 directive->kind         = AsmDirectiveKind::TEXTBLOCK;
                 directive->value        = textBlock->text;
-                insts.insert(insts.end(), directive);
-                stinkyAsmModule.setInstructionGroups(directive, instructionGroups);
-                continue;
+                currentBB->appendIR(directive);
+                stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
+                return;
             }
 
             // Handle labels
             if(rocisa::Label* rocLabel = dynamic_cast<rocisa::Label*>(item))
             {
-                StinkyInstruction* labelInst
-                    = irBuilder.createStinkyLabel(insts.end(), rocLabel->getLabelName());
+                StinkyInstruction* labelInst = irBuilder.createLabel(rocLabel->getLabelName());
 
                 // Add comment if present
                 if(!rocLabel->comment.empty())
@@ -1030,15 +1028,15 @@ namespace stinkytofu
                     labelInst->addModifier<CommentData>(CommentData{rocLabel->comment});
                 }
 
-                stinkyAsmModule.setInstructionGroups(labelInst, instructionGroups);
+                stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
                 currentVgprMsb = -1;
-                continue;
+                return;
             }
 
             // Handle ValueSet directives
             if(rocisa::ValueSet* valueSet = dynamic_cast<rocisa::ValueSet*>(item))
             {
-                AsmDirective* directive = new AsmDirective();
+                AsmDirective* directive = IRBase::createIR<AsmDirective>();
                 directive->kind         = AsmDirectiveKind::SET;
                 directive->name         = ".set";
                 directive->symbol       = valueSet->name;
@@ -1053,48 +1051,48 @@ namespace stinkytofu
                     directive->value.erase(directive->value.find_last_not_of(" \t\n\r") + 1);
                 }
 
-                insts.insert(insts.end(), directive);
-                stinkyAsmModule.setInstructionGroups(directive, instructionGroups);
-                continue;
+                currentBB->appendIR(directive);
+                stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
+                return;
             }
 
             // Handle macro directives
             if(rocisa::Macro* macro = dynamic_cast<rocisa::Macro*>(item))
             {
-                AsmDirective* directive = new AsmDirective();
+                AsmDirective* directive = IRBase::createIR<AsmDirective>();
                 directive->kind         = AsmDirectiveKind::MACRO;
                 directive->name         = ".macro";
                 directive->symbol       = macro->name;
                 directive->value        = itemToString(item);
-                insts.insert(insts.end(), directive);
-                stinkyAsmModule.setInstructionGroups(directive, instructionGroups);
-                continue;
+                currentBB->appendIR(directive);
+                stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
+                return;
             }
 
             // Handle ValueIf directives
             if(rocisa::ValueIf* valueIf = dynamic_cast<rocisa::ValueIf*>(item))
             {
-                AsmDirective* directive = new AsmDirective();
+                AsmDirective* directive = IRBase::createIR<AsmDirective>();
                 directive->kind         = AsmDirectiveKind::IF;
                 directive->name         = ".if";
                 directive->symbol       = std::to_string(valueIf->value);
                 directive->value        = itemToString(item);
-                insts.insert(insts.end(), directive);
-                stinkyAsmModule.setInstructionGroups(directive, instructionGroups);
-                continue;
+                currentBB->appendIR(directive);
+                stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
+                return;
             }
 
             // Handle ValueEndif directives
             if(rocisa::ValueEndif* valueEndif = dynamic_cast<rocisa::ValueEndif*>(item))
             {
-                AsmDirective* directive = new AsmDirective();
+                AsmDirective* directive = IRBase::createIR<AsmDirective>();
                 directive->kind         = AsmDirectiveKind::ENDIF;
                 directive->name         = ".endif";
                 directive->comment      = valueEndif->comment;
                 directive->value        = itemToString(item);
-                insts.insert(insts.end(), directive);
-                stinkyAsmModule.setInstructionGroups(directive, instructionGroups);
-                continue;
+                currentBB->appendIR(directive);
+                stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
+                return;
             }
 
             // Handle instructions
@@ -1103,7 +1101,7 @@ namespace stinkytofu
             {
                 // TODO: Remove this once we have a better way to handle non-instruction items
                 std::cout << "Skipping non-instruction item: " << itemToString(item) << std::endl;
-                continue;
+                return;
             }
             assert(dynamic_cast<rocisa::SSetVgprMsb*>(inst) == nullptr
                    && "SSetVgprMsb should not be created directly in TensileLite");
@@ -1111,7 +1109,7 @@ namespace stinkytofu
             // Create StinkyInstruction from rocisa instruction
             std::type_index    rocisaTy = std::type_index(typeid(*inst));
             StinkyInstruction* stinkyInst
-                = createStinkyInstructionFromRocisa(*inst, rocisaTy, irBuilder, insts, archId);
+                = createStinkyInstructionFromRocisa(*inst, rocisaTy, irBuilder, archId);
 
             assert(stinkyInst != nullptr
                    && "Failed to create StinkyInstruction from rocisa instruction");
@@ -1127,14 +1125,9 @@ namespace stinkytofu
 
             auto processStinkyInst = [&](StinkyInstruction* inst) {
                 auto [requiredMsb, hasVgpr] = computeRequiredMsbFromStinkyInst(inst, hasVgprMsb);
-                emitVgprMsbIfNeeded(requiredMsb,
-                                    hasVgpr,
-                                    currentVgprMsb,
-                                    irBuilder,
-                                    insts,
-                                    archId,
-                                    IRList::iterator(inst));
-                stinkyAsmModule.setInstructionGroups(inst, instructionGroups);
+                emitVgprMsbIfNeeded(
+                    requiredMsb, hasVgpr, currentVgprMsb, irBuilder, *currentBB, archId, inst);
+                stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
             };
 
             if(legalizedInsts.first != nullptr)
@@ -1151,7 +1144,10 @@ namespace stinkytofu
             {
                 processStinkyInst(stinkyInst);
             }
-        }
+        };
+
+        traverseModule(module, {}, processItem);
+
         return std::make_shared<StinkyAsmModule>(std::move(stinkyAsmModule));
     }
 
@@ -1223,11 +1219,6 @@ void init_stinkytofu(nb::module_ m)
             module_->runOptimizationPipeline();
         }
 
-        size_t size() const
-        {
-            return module_->size();
-        }
-
         std::string getName() const
         {
             return module_->getName();
@@ -1256,7 +1247,6 @@ void init_stinkytofu(nb::module_ m)
     nb::class_<StinkyAsmModuleWithSignature>(m, "StinkyAsmModule")
         .def("runOptimizationPipeline", &StinkyAsmModuleWithSignature::runOptimizationPipeline)
         .def("emitAssembly", &StinkyAsmModuleWithSignature::emitAssembly)
-        .def("size", &StinkyAsmModuleWithSignature::size)
         .def("getName", &StinkyAsmModuleWithSignature::getName)
         .def("getModule", &StinkyAsmModuleWithSignature::getModule);
 

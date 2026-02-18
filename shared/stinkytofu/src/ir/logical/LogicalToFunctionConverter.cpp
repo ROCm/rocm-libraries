@@ -11,96 +11,58 @@ namespace stinkytofu
     {
     }
 
-    void LogicalToFunctionConverter::convert(PyLogicalModule* module, Function& func)
+    void LogicalToFunctionConverter::convert(PyLogicalModule* module, PyLogicalFunction& pyFunc)
     {
         assert(module && "PyLogicalModule cannot be null");
+        Function* func = pyFunc.getFunction();
+        assert(func && "PyLogicalFunction must wrap a Function");
+        assert(func->empty() && "Function must be empty");
 
         // Create a single BasicBlock for all instructions
         // (user can run CFGBuilderPass later to split based on control flow)
-        BasicBlock* bb = func.createBasicBlock("entry");
-        func.setEntryBlock(bb);
-        IRList& irlist = bb->getIR();
+        BasicBlock* bb = func->createBasicBlock("entry");
 
-        // Keep shared_ptrs alive in Function to prevent double-free
-        std::vector<std::shared_ptr<LogicalInstruction>> keepAlive;
-
-        // Add each LogicalInstruction directly to IRList
+        // Add each LogicalInstruction directly to IRList (appendIR sets parent)
         // NO LOWERING - LogicalInstruction* and StinkyInstruction* both inherit from IRBase*
+        // PyLogicalFunction destructor will detach ownedExternally IRs so the list does not delete them.
         for(const auto& sharedInst : module->getInstructions())
         {
-            // Extract raw pointer from shared_ptr
             LogicalInstruction* logicalInst = sharedInst.get();
-
-            // Mark as externally owned so passes don't delete it
-            logicalInst->setExternallyOwned(true);
-
-            // Add directly to IRList (cast to IRBase*)
-            irlist.push_back(static_cast<IRBase*>(logicalInst));
-
-            // Keep shared_ptr alive
-            keepAlive.push_back(sharedInst);
+            bb->appendIR(static_cast<IRBase*>(logicalInst));
         }
-
-        // Transfer shared_ptr ownership to Function
-        func.keepLogicalInstructionsAlive(std::move(keepAlive));
     }
 
-    void LogicalToFunctionConverter::convertWithAutoBlocks(PyLogicalModule* module,
-                                                           Function&        func,
-                                                           bool             autoSplitBlocks)
+    void LogicalToFunctionConverter::convertWithAutoBlocks(PyLogicalModule*   module,
+                                                           PyLogicalFunction& pyFunc,
+                                                           bool               autoSplitBlocks)
     {
         assert(module && "PyLogicalModule cannot be null");
+        Function* func = pyFunc.getFunction();
+        assert(func && "PyLogicalFunction must wrap a Function");
 
         // Step 1: Identify labels in the instruction stream
         auto labelMap = identifyLabels(module->getInstructions());
 
-        // Step 2: Handle Python/LogicalModule shared_ptr ownership
-        //
-        // IMPORTANT: This prevents double-free when converting from Python's LogicalModule.
-        //
-        // Python's LogicalModule owns instructions via shared_ptr. We extract raw pointers
-        // to add to IRList, but we must keep the shared_ptrs alive. Otherwise:
-        // - Python's shared_ptr destructs -> frees memory
-        // - C++ pass tries to delete same pointer -> DOUBLE FREE!
-        //
-        // Solution:
-        // 1. Mark instructions as "externally owned" so passes don't delete them
-        // 2. Store shared_ptrs in Function to keep instructions alive
-        // 3. After lowering, call Function::releaseLogicalInstructionOwnership()
-        std::vector<std::shared_ptr<LogicalInstruction>> keepAlive;
-        std::vector<LogicalInstruction*>                 allInsts;
-
+        // Step 2: Extract raw pointers. PyLogicalFunction destructor detaches ownedExternally IRs.
+        std::vector<LogicalInstruction*> allInsts;
         for(const auto& sharedInst : module->getInstructions())
         {
-            // Extract raw pointer for IRList
-            LogicalInstruction* rawPtr = sharedInst.get();
-            allInsts.push_back(rawPtr);
-
-            // Mark as externally owned so passes don't delete it
-            rawPtr->setExternallyOwned(true);
-
-            // Keep shared_ptr alive
-            keepAlive.push_back(sharedInst);
+            allInsts.push_back(sharedInst.get());
         }
-
-        // Transfer shared_ptr ownership to Function
-        func.keepLogicalInstructionsAlive(std::move(keepAlive));
 
         // Step 3: Split into BasicBlocks based on labels
         if(autoSplitBlocks && !labelMap.empty())
         {
-            splitIntoBasicBlocks(func, allInsts, labelMap);
+            splitIntoBasicBlocks(*func, allInsts, labelMap);
         }
         else
         {
             // No splitting: put all instructions in a single block
-            BasicBlock* bb = func.createBasicBlock("entry");
-            func.setEntryBlock(bb);
-            IRList& irlist = bb->getIR();
+            BasicBlock* bb = func->createBasicBlock("entry");
 
             for(LogicalInstruction* inst : allInsts)
             {
-                irlist.push_back(static_cast<IRBase*>(inst));
+                bb->appendIR(static_cast<IRBase*>(inst));
             }
         }
     }
@@ -142,7 +104,6 @@ namespace stinkytofu
 
         // Create an initial BasicBlock
         BasicBlock* currentBB = func.createBasicBlock("bb0");
-        func.setEntryBlock(currentBB);
 
         size_t bbIndex = 1;
 
@@ -168,8 +129,8 @@ namespace stinkytofu
                 currentBB          = func.createBasicBlock(bbName);
             }
 
-            // Add instruction to current BasicBlock (cast to IRBase*)
-            currentBB->getIR().push_back(static_cast<IRBase*>(inst));
+            // Add instruction to current BasicBlock (appendIR sets parent)
+            currentBB->appendIR(static_cast<IRBase*>(inst));
         }
     }
 

@@ -24,6 +24,7 @@
 
 #include <cstddef>
 #include <iterator>
+#include <type_traits>
 
 // This is a lightweight intrusive list implementation inspired by LLVM's design.
 // Key advantages:
@@ -32,27 +33,123 @@
 // 3. Efficient move operations (moveBefore/moveAfter).
 // 4. Familiar LLVM-style API for compiler and systems developers.
 //
+// When Parent is not void, the list stores a pointer to its parent container and
+// nodes can query getParent() to obtain it (e.g. IRBase in a BasicBlock's IR list).
 namespace stinkytofu
 {
-    // Forward declarations
-    template <typename T>
+    // Forward declarations (Traits default defined after IntrusiveListTraits)
+    template <typename T, typename Parent>
+    class IntrusiveListBase;
+    template <typename T, typename Parent, typename Traits>
     class IntrusiveList;
 
     template <typename T>
     class IntrusiveListIterator;
 
-    // Base class for nodes that can be inserted into an intrusive list
-    template <typename T>
+    //----------------------------------------------------------------------
+    // Intrusive list traits (LLVM-style customization points)
+    //----------------------------------------------------------------------
+
+    /// Use delete by default for ownership semantics.
+    ///
+    /// Specialize this to get different behaviour for ownership-related API.
+    /// \see IntrusiveListNoAllocTraits
+    template <typename NodeTy>
+    struct IntrusiveListAllocTraits
+    {
+        static void deleteNode(NodeTy* V)
+        {
+            delete V;
+        }
+    };
+
+    /// Custom traits to do nothing on deletion.
+    ///
+    /// Specialize IntrusiveListAllocTraits to inherit from this to disable
+    /// non-intrusive deletion (e.g. when nodes are not owned by the list).
+    ///
+    /// \code
+    /// template <>
+    /// struct IntrusiveListAllocTraits<MyType> : IntrusiveListNoAllocTraits<MyType> {};
+    /// \endcode
+    template <typename NodeTy>
+    struct IntrusiveListNoAllocTraits
+    {
+        static void deleteNode(NodeTy*) {}
+    };
+
+    /// Callbacks do nothing by default.
+    ///
+    /// Specialize this to use callbacks when nodes change their list membership.
+    template <typename NodeTy>
+    struct IntrusiveListCallbackTraits
+    {
+        static void addNodeToList(NodeTy*) {}
+        static void removeNodeFromList(NodeTy*) {}
+
+        /// Callback before transferring nodes to this list (e.g. splice).
+        /// The nodes may already be in this same list.
+        template <typename Iterator>
+        static void transferNodesFromList(Iterator /*first*/, Iterator /*last*/)
+        {
+        }
+    };
+
+    /// Template traits for intrusive list.
+    /// Customize callbacks and allocation semantics.
+    template <typename NodeTy>
+    struct IntrusiveListTraits : IntrusiveListAllocTraits<NodeTy>,
+                                 IntrusiveListCallbackTraits<NodeTy>
+    {
+    };
+
+    /// Const traits should never be instantiated.
+    template <typename Ty>
+    struct IntrusiveListTraits<const Ty>
+    {
+    };
+
+    // Helper: store parent pointer only when Parent is not void
+    template <typename Parent>
+    struct IntrusiveListParentStorage
+    {
+        Parent* parent_ = nullptr;
+        Parent* getParent() const
+        {
+            return parent_;
+        }
+        void setParent(Parent* p)
+        {
+            parent_ = p;
+        }
+    };
+    template <>
+    struct IntrusiveListParentStorage<void>
+    {
+        void* getParent() const
+        {
+            return nullptr;
+        }
+        void setParent(void*) {}
+    };
+
+    // Base class for nodes that can be inserted into an intrusive list.
+    // When Parent is not void, getParent() returns the list's parent (e.g. BasicBlock*).
+    template <typename T, typename Parent = void>
     class IntrusiveListNode
     {
-        friend class IntrusiveList<T>;
+        template <typename U, typename P, typename Tr>
+        friend class IntrusiveList;
+        friend class IntrusiveListBase<T, Parent>;
         friend class IntrusiveListIterator<T>;
         friend class IntrusiveListIterator<const T>;
 
     private:
-        T*                prev_;
-        T*                next_;
-        IntrusiveList<T>* parent_list_;
+        T* prev_;
+        T* next_;
+
+        /// The list that this node is in. nullptr if not in any list.
+        IntrusiveListBase<T, Parent>* parent_list_;
 
     public:
         IntrusiveListNode()
@@ -82,6 +179,18 @@ namespace stinkytofu
         T* getPrev() const
         {
             return prev_;
+        }
+
+        /// When Parent is not void, return the list's parent (e.g. the BasicBlock owning this node). Otherwise not available.
+        template <typename P = Parent>
+        typename std::enable_if<!std::is_void<P>::value, P*>::type getParent()
+        {
+            return parent_list_ ? parent_list_->getParent() : nullptr;
+        }
+        template <typename P = Parent>
+        typename std::enable_if<!std::is_void<P>::value, const P*>::type getParent() const
+        {
+            return parent_list_ ? parent_list_->getParent() : nullptr;
         }
 
         // Remove this node from whatever list it's currently in
@@ -197,27 +306,63 @@ namespace stinkytofu
         }
     };
 
-    // The intrusive list container
-    template <typename T>
-    class IntrusiveList
+    // Base for intrusive list: holds storage and link fields so the node can store a list pointer
+    // that works with any Traits. IntrusiveList<T, Parent, Traits> inherits this.
+    template <typename T, typename Parent>
+    class IntrusiveListBase
     {
-        friend class IntrusiveListNode<T>;
+        friend class IntrusiveListNode<T, Parent>;
 
-    private:
+    protected:
+        IntrusiveListParentStorage<Parent> parent_storage_;
+
         T*     head_;
         T*     tail_;
         size_t size_;
 
     public:
-        using iterator       = IntrusiveListIterator<T>;
-        using const_iterator = IntrusiveListIterator<const T>;
-
-        IntrusiveList()
+        IntrusiveListBase()
             : head_(nullptr)
             , tail_(nullptr)
             , size_(0)
         {
         }
+
+        /// When Parent is not void, return the parent container.
+        template <typename P = Parent>
+        typename std::enable_if<!std::is_void<P>::value, P*>::type getParent()
+        {
+            return static_cast<P*>(parent_storage_.getParent());
+        }
+        template <typename P = Parent>
+        typename std::enable_if<!std::is_void<P>::value, const P*>::type getParent() const
+        {
+            return static_cast<const P*>(parent_storage_.getParent());
+        }
+    };
+
+    // The intrusive list container. When Parent is not void, the list stores the parent and nodes can query it via getParent().
+    // By default uses IntrusiveListTraits<T> (delete on erase/clear; no-op callbacks).
+    template <typename T, typename Parent = void, typename Traits = IntrusiveListTraits<T>>
+    class IntrusiveList : public IntrusiveListBase<T, Parent>
+    {
+        friend class IntrusiveListNode<T, Parent>;
+
+    public:
+        using iterator       = IntrusiveListIterator<T>;
+        using const_iterator = IntrusiveListIterator<const T>;
+
+        IntrusiveList() = default;
+
+        /// When Parent is not void, construct the list with its parent (e.g. BasicBlock* for IRList).
+        template <typename P = Parent>
+        explicit IntrusiveList(typename std::enable_if<!std::is_void<P>::value, P*>::type p)
+        {
+            this->parent_storage_.setParent(p);
+        }
+
+        /// When Parent is not void, return the parent container (e.g. the BasicBlock owning this list).
+        using IntrusiveListBase<T, Parent>::getParent;
 
         // Disable copy constructor and assignment for now
         IntrusiveList(const IntrusiveList&)            = delete;
@@ -231,7 +376,7 @@ namespace stinkytofu
         // Iterator support
         iterator begin()
         {
-            return iterator(head_);
+            return iterator(this->head_);
         }
         iterator end()
         {
@@ -239,7 +384,7 @@ namespace stinkytofu
         }
         const_iterator begin() const
         {
-            return const_iterator(head_);
+            return const_iterator(this->head_);
         }
         const_iterator end() const
         {
@@ -250,11 +395,11 @@ namespace stinkytofu
         class reverse_iterator
         {
         private:
-            T*                node_;
-            IntrusiveList<T>* list_;
+            T*             node_;
+            IntrusiveList* list_;
 
         public:
-            reverse_iterator(T* node, IntrusiveList<T>* list)
+            reverse_iterator(T* node, IntrusiveList* list)
                 : node_(node)
                 , list_(list)
             {
@@ -289,7 +434,7 @@ namespace stinkytofu
                 if(node_)
                     node_ = node_->next_;
                 else if(list_)
-                    node_ = list_->tail_; // From rend() to last element
+                    node_ = list_->tail_; // From rend() to last element (base member)
                 return *this;
             }
 
@@ -321,7 +466,7 @@ namespace stinkytofu
 
         reverse_iterator rbegin()
         {
-            return reverse_iterator(tail_, this);
+            return reverse_iterator(this->tail_, this);
         }
 
         reverse_iterator rend()
@@ -331,40 +476,40 @@ namespace stinkytofu
 
         const_reverse_iterator rbegin() const
         {
-            return const_reverse_iterator(tail_, const_cast<IntrusiveList<T>*>(this));
+            return const_reverse_iterator(this->tail_, const_cast<IntrusiveList*>(this));
         }
 
         const_reverse_iterator rend() const
         {
-            return const_reverse_iterator(nullptr, const_cast<IntrusiveList<T>*>(this));
+            return const_reverse_iterator(nullptr, const_cast<IntrusiveList*>(this));
         }
 
         // Size and empty check
         size_t size() const
         {
-            return size_;
+            return this->size_;
         }
         bool empty() const
         {
-            return size_ == 0;
+            return this->size_ == 0;
         }
 
         // Access front and back
         T& front()
         {
-            return *head_;
+            return *this->head_;
         }
         T& back()
         {
-            return *tail_;
+            return *this->tail_;
         }
         const T& front() const
         {
-            return *head_;
+            return *this->head_;
         }
         const T& back() const
         {
-            return *tail_;
+            return *this->tail_;
         }
 
         // Add to front or back
@@ -374,17 +519,18 @@ namespace stinkytofu
                 return;
             node->removeFromList();
 
-            node->next_        = head_;
+            node->next_        = this->head_;
             node->prev_        = nullptr;
             node->parent_list_ = this;
 
-            if(head_)
-                head_->prev_ = node;
+            if(this->head_)
+                this->head_->prev_ = node;
             else
-                tail_ = node;
+                this->tail_ = node;
 
-            head_ = node;
-            ++size_;
+            this->head_ = node;
+            ++this->size_;
+            Traits::addNodeToList(node);
         }
 
         void push_back(T* node)
@@ -393,17 +539,18 @@ namespace stinkytofu
                 return;
             node->removeFromList();
 
-            node->prev_        = tail_;
+            node->prev_        = this->tail_;
             node->next_        = nullptr;
             node->parent_list_ = this;
 
-            if(tail_)
-                tail_->next_ = node;
+            if(this->tail_)
+                this->tail_->next_ = node;
             else
-                head_ = node;
+                this->head_ = node;
 
-            tail_ = node;
-            ++size_;
+            this->tail_ = node;
+            ++this->size_;
+            Traits::addNodeToList(node);
         }
 
         // Insert before iterator position
@@ -428,15 +575,15 @@ namespace stinkytofu
             if(insertPos->prev_)
                 insertPos->prev_->next_ = node;
             else
-                head_ = node;
+                this->head_ = node;
 
             insertPos->prev_ = node;
-            ++size_;
-
+            ++this->size_;
+            Traits::addNodeToList(node);
             return iterator(node);
         }
 
-        // Remove node from list
+        // Remove node from list (and delete via traits when using default alloc traits)
         iterator erase(iterator pos)
         {
             if(pos == end())
@@ -445,24 +592,29 @@ namespace stinkytofu
             T* node = pos.getNodePtr();
             T* next = node->next_;
             node->removeFromList();
-
+            Traits::removeNodeFromList(node);
+            Traits::deleteNode(node);
             return iterator(next);
         }
 
-        // Remove specific node (if it's in this list)
+        // Remove specific node (if it's in this list). Does not delete.
         void remove(T* node)
         {
             if(!node || node->parent_list_ != this)
                 return;
             node->removeFromList();
+            Traits::removeNodeFromList(node);
         }
 
-        // Clear all nodes
+        // Clear all nodes (deletes via traits when using default alloc traits)
         void clear()
         {
             while(!empty())
             {
-                head_->removeFromList();
+                T* node = this->head_;
+                node->removeFromList();
+                Traits::removeNodeFromList(node);
+                Traits::deleteNode(node);
             }
         }
 
@@ -480,24 +632,24 @@ namespace stinkytofu
             if(node->prev_)
                 node->prev_->next_ = node->next_;
             else
-                head_ = node->next_;
+                this->head_ = node->next_;
 
             if(node->next_)
                 node->next_->prev_ = node->prev_;
             else
-                tail_ = node->prev_;
+                this->tail_ = node->prev_;
 
             // Insert before where
             if(where == end())
             {
                 // Insert at end
-                node->prev_ = tail_;
+                node->prev_ = this->tail_;
                 node->next_ = nullptr;
-                if(tail_)
-                    tail_->next_ = node;
+                if(this->tail_)
+                    this->tail_->next_ = node;
                 else
-                    head_ = node;
-                tail_ = node;
+                    this->head_ = node;
+                this->tail_ = node;
             }
             else
             {
@@ -508,7 +660,7 @@ namespace stinkytofu
                 if(insertPos->prev_)
                     insertPos->prev_->next_ = node;
                 else
-                    head_ = node;
+                    this->head_ = node;
 
                 insertPos->prev_ = node;
             }

@@ -87,7 +87,7 @@ namespace
         {
             for(BasicBlock& bb : func)
             {
-                for(IRBase& irNode : bb.getIR())
+                for(IRBase& irNode : bb)
                 {
                     if(irNode.getType() == IRBase::IRType::StinkyTofu)
                     {
@@ -104,7 +104,7 @@ namespace
             // Rule 2: If assigned again, and register NOT used between assignments -> DELETE first assignment
 
             std::vector<StinkyInstruction*> blockInstructions;
-            for(IRBase& irNode : bb.getIR())
+            for(IRBase& irNode : bb)
             {
                 if(irNode.getType() == IRBase::IRType::StinkyTofu)
                 {
@@ -236,14 +236,13 @@ namespace
             }
 
             // Now remove dead instructions that belong to this basic block
-            IRList& irList      = bb.getIR();
-            int     removedInBB = 0;
+            int removedInBB = 0;
 
             for(StinkyInstruction* inst : toRemove)
             {
                 // Check if this instruction belongs to current basic block
                 bool inThisBlock = false;
-                for(IRBase& irNode : irList)
+                for(IRBase& irNode : bb)
                 {
                     if(&irNode == inst)
                     {
@@ -257,9 +256,7 @@ namespace
                     // Clean up use-def chains before deletion to prevent dangling pointers
                     inst->unlinkFromSources();
                     inst->unlinkFromUsers();
-
-                    irList.remove(inst);
-                    delete inst;
+                    inst->erase();
                     removedInBB++;
                 }
             }

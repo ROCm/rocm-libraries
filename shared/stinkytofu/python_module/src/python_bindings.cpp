@@ -21,14 +21,14 @@
  *
  * ************************************************************************ */
 
+#include "stinkytofu/bindings/python/LogicalModule.hpp"
+#include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/IntrinsicCall.hpp"
 #include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/core/StinkyAsmModule.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
-#include "stinkytofu/core/PyLogicalModule.hpp"
-#include "stinkytofu/hardware/GfxIsa.hpp"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
@@ -58,8 +58,7 @@ NB_MODULE(_stinkytofu, m)
              "Emit the assembly code for all instructions in this module")
         .def("runOptimizationPipeline",
              &StinkyAsmModule::runOptimizationPipeline,
-             "Run the optimization pipeline on this module")
-        .def("__str__", &StinkyAsmModule::toString, "Get a string representation of this module");
+             "Run the optimization pipeline on this module");
 
     // ========================================================================
     // Register Types
@@ -287,19 +286,19 @@ NB_MODULE(_stinkytofu, m)
            std::optional<StinkyRegister> acc2,
            bool                          neg,
            const std::string&            comment) {
-            return std::shared_ptr<LogicalInstruction>(MFMA(instType,
-                                                            accType,
-                                                            m,
-                                                            n,
-                                                            k,
-                                                            blocks,
-                                                            mfma1k,
-                                                            acc,
-                                                            a,
-                                                            b,
-                                                            acc2 ? &(*acc2) : nullptr,
-                                                            neg,
-                                                            comment));
+            return makeLogicalInstructionShared(MFMA(instType,
+                                                     accType,
+                                                     m,
+                                                     n,
+                                                     k,
+                                                     blocks,
+                                                     mfma1k,
+                                                     acc,
+                                                     a,
+                                                     b,
+                                                     acc2 ? &(*acc2) : nullptr,
+                                                     neg,
+                                                     comment));
         },
         nb::arg("instType"),
         nb::arg("accType"),
@@ -336,23 +335,23 @@ NB_MODULE(_stinkytofu, m)
            bool                  reuseA,
            bool                  reuseB,
            const std::string&    comment) {
-            return std::shared_ptr<LogicalInstruction>(MXMFMA(instType,
-                                                              accType,
-                                                              mxScaleATypeStr,
-                                                              mxScaleBTypeStr,
-                                                              m,
-                                                              n,
-                                                              k,
-                                                              block,
-                                                              acc,
-                                                              a,
-                                                              b,
-                                                              acc2,
-                                                              mxsa,
-                                                              mxsb,
-                                                              reuseA,
-                                                              reuseB,
-                                                              comment));
+            return makeLogicalInstructionShared(MXMFMA(instType,
+                                                       accType,
+                                                       mxScaleATypeStr,
+                                                       mxScaleBTypeStr,
+                                                       m,
+                                                       n,
+                                                       k,
+                                                       block,
+                                                       acc,
+                                                       a,
+                                                       b,
+                                                       acc2,
+                                                       mxsa,
+                                                       mxsb,
+                                                       reuseA,
+                                                       reuseB,
+                                                       comment));
         },
         nb::arg("instType"),
         nb::arg("accType"),
@@ -389,7 +388,7 @@ NB_MODULE(_stinkytofu, m)
            const StinkyRegister& metadata,
            bool                  neg,
            const std::string&    comment) {
-            return std::shared_ptr<LogicalInstruction>(SMFMA(
+            return makeLogicalInstructionShared(SMFMA(
                 instType, accType, m, n, k, blocks, mfma1k, acc, a, b, metadata, neg, comment));
         },
         nb::arg("instType"),
@@ -415,12 +414,11 @@ NB_MODULE(_stinkytofu, m)
            std::optional<StinkyRegister> group2,
            std::optional<StinkyRegister> group3,
            const std::string&            comment) {
-            return std::shared_ptr<LogicalInstruction>(
-                TensorLoadToLds(group0,
-                                group1,
-                                group2 ? &(*group2) : nullptr,
-                                group3 ? &(*group3) : nullptr,
-                                comment));
+            return makeLogicalInstructionShared(TensorLoadToLds(group0,
+                                                                group1,
+                                                                group2 ? &(*group2) : nullptr,
+                                                                group3 ? &(*group3) : nullptr,
+                                                                comment));
         },
         nb::arg("group0"),
         nb::arg("group1"),
@@ -432,9 +430,7 @@ NB_MODULE(_stinkytofu, m)
     // Label - Control flow label
     m.def(
         "Label",
-        [](const std::string& labelName) {
-            return std::shared_ptr<LogicalInstruction>(Label(labelName));
-        },
+        [](const std::string& labelName) { return makeLogicalInstructionShared(Label(labelName)); },
         nb::arg("labelName"),
         "Create a Label");
 
@@ -442,10 +438,6 @@ NB_MODULE(_stinkytofu, m)
     // IntrinsicCall - Placeholder for intrinsic function calls
     // ========================================================================
     nb::class_<IntrinsicCall, LogicalInstruction>(m, "IntrinsicCall")
-        .def(nb::init<const std::string&, const std::vector<StinkyRegister>&>(),
-             nb::arg("name"),
-             nb::arg("args"),
-             "Create an intrinsic call (placeholder, expanded during optimization)")
         .def("get_function_name", &IntrinsicCall::getFunctionName, "Get intrinsic name")
         .def_rw("function_name", &IntrinsicCall::functionName, "Intrinsic function name");
 
@@ -550,7 +542,7 @@ NB_MODULE(_stinkytofu, m)
                 }
             }
 
-            return std::shared_ptr<LogicalInstruction>(new IntrinsicCall(name, args));
+            return makeLogicalInstructionShared(IRBase::createIR<IntrinsicCall>(name, args));
         },
         "Create an intrinsic call with named arguments\n\n"
         "Example:\n"

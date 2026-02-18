@@ -46,23 +46,22 @@ namespace stinkytofu
      */
     class IntrinsicCall : public LogicalInstruction
     {
-    public:
-        std::string functionName;
+    private:
+        friend class IRBase;
 
-        /**
-         * @brief Construct an intrinsic call
-         *
-         * @param name Intrinsic name (e.g., "ReluF32")
-         * @param allRegs All registers in signature order (dest, src, temps)
-         */
         IntrinsicCall(const std::string& name, const std::vector<StinkyRegister>& allRegs)
-            : LogicalInstruction()
+            : LogicalInstruction(logical::IntrinsicCall)
             , functionName(name)
         {
             // Store all registers - IntrinsicExpansionPass will map them
             // to the intrinsic's argument list
             dests = allRegs;
         }
+
+        ~IntrinsicCall() override = default;
+
+    public:
+        std::string functionName;
 
         const char* getLogicalName() const override
         {

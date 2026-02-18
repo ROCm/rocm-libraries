@@ -32,7 +32,8 @@
 #include "stinkytofu/transforms/logical/IntrinsicExpansionPass.hpp"
 #include "stinkytofu/ir/logical/IntrinsicCall.hpp"
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/IRBase.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include <cstring>
 #include <gtest/gtest.h>
 
@@ -58,23 +59,20 @@ protected:
 
 TEST_F(IntrinsicExpansionPassTest, ExpandSimpleIntrinsic)
 {
-    // Create a Function with a BasicBlock containing an IntrinsicCall
-    Function& func = passCtx.getFunction();
-    func.deleteAllBasicBlocks();
-
-    auto* bb = new BasicBlock(&func, "entry");
-    func.getBasicBlocks().push_back(bb);
+    Function    func("kernel");
+    BasicBlock* bb = func.createBasicBlock("entry");
 
     // Create an IntrinsicCall for "ReluF32"
     // ReluF32 signature: (dest, src)
     StinkyRegister v0(RegType::V, 0, 1);
     StinkyRegister v1(RegType::V, 1, 1);
 
-    auto* intrinsicCall = new IntrinsicCall("ReluF32", {v0, v1});
-    bb->getIR().push_back(intrinsicCall);
+    std::vector<StinkyRegister> args1 = {v0, v1};
+    auto* ir = IRBase::createIR<IntrinsicCall>("ReluF32", args1);
+    bb->insertIR(bb->end(), ir);
 
     // Verify initial state: 1 instruction (IntrinsicCall)
-    ASSERT_EQ(bb->getIR().size(), 1);
+    ASSERT_EQ(bb->size(), 1);
 
     // Run IntrinsicExpansionPass
     auto pass = createIntrinsicExpansionPass();
@@ -82,12 +80,12 @@ TEST_F(IntrinsicExpansionPassTest, ExpandSimpleIntrinsic)
 
     // After expansion, IntrinsicCall should be replaced with expanded instructions
     // ReluF32 expands to 1 instruction (v_max_f32)
-    size_t numInsts = bb->getIR().size();
+    size_t numInsts = bb->size();
     EXPECT_EQ(numInsts, 1) << "IntrinsicCall should be expanded into 1 instruction (v_max_f32)";
 
     // Verify no IntrinsicCall remains
     bool hasIntrinsicCall = false;
-    for(auto& ir : bb->getIR())
+    for(auto& ir : *bb)
     {
         if(ir.getType() == IRBase::IRType::LogicalIR)
         {
@@ -103,7 +101,7 @@ TEST_F(IntrinsicExpansionPassTest, ExpandSimpleIntrinsic)
 
     // Dump expanded instructions for debugging
     std::cout << "Expanded ReluF32 into " << numInsts << " instructions:\n";
-    for(auto& ir : bb->getIR())
+    for(auto& ir : *bb)
     {
         if(ir.getType() == IRBase::IRType::LogicalIR)
         {
@@ -115,17 +113,14 @@ TEST_F(IntrinsicExpansionPassTest, ExpandSimpleIntrinsic)
 
 TEST_F(IntrinsicExpansionPassTest, UnknownIntrinsicFails)
 {
-    // Create a Function with a BasicBlock containing an unknown IntrinsicCall
-    Function& func = passCtx.getFunction();
-    func.deleteAllBasicBlocks();
-
-    auto* bb = new BasicBlock(&func, "entry");
-    func.getBasicBlocks().push_back(bb);
+    Function    func("kernel");
+    BasicBlock* bb = func.createBasicBlock("entry");
 
     // Create an IntrinsicCall for non-existent intrinsic
     StinkyRegister v0(RegType::V, 0, 1);
-    auto*          intrinsicCall = new IntrinsicCall("NonExistentIntrinsic", {v0});
-    bb->getIR().push_back(intrinsicCall);
+    std::vector<StinkyRegister> args2 = {v0};
+    auto* ir = IRBase::createIR<IntrinsicCall>("NonExistentIntrinsic", args2);
+    bb->insertIR(bb->end(), ir);
 
     // Run IntrinsicExpansionPass - should fail gracefully
     auto pass = createIntrinsicExpansionPass();
@@ -133,7 +128,7 @@ TEST_F(IntrinsicExpansionPassTest, UnknownIntrinsicFails)
 
     // IntrinsicCall should still be there (expansion failed)
     bool hasIntrinsicCall = false;
-    for(auto& ir : bb->getIR())
+    for(auto& ir : *bb)
     {
         if(ir.getType() == IRBase::IRType::LogicalIR)
         {
@@ -150,12 +145,8 @@ TEST_F(IntrinsicExpansionPassTest, UnknownIntrinsicFails)
 
 TEST_F(IntrinsicExpansionPassTest, MultipleIntrinsicCalls)
 {
-    // Test expansion of multiple intrinsic calls in one BasicBlock
-    Function& func = passCtx.getFunction();
-    func.deleteAllBasicBlocks();
-
-    auto* bb = new BasicBlock(&func, "entry");
-    func.getBasicBlocks().push_back(bb);
+    Function    func("kernel");
+    BasicBlock* bb = func.createBasicBlock("entry");
 
     // Add multiple IntrinsicCalls
     StinkyRegister v0(RegType::V, 0, 1);
@@ -163,21 +154,24 @@ TEST_F(IntrinsicExpansionPassTest, MultipleIntrinsicCalls)
     StinkyRegister v2(RegType::V, 2, 1);
     StinkyRegister v3(RegType::V, 3, 1);
 
-    bb->getIR().push_back(new IntrinsicCall("ReluF32", {v0, v1}));
-    bb->getIR().push_back(new IntrinsicCall("ReluF32", {v2, v3}));
+    std::vector<StinkyRegister> args3a = {v0, v1}, args3b = {v2, v3};
+    auto* ir1 = IRBase::createIR<IntrinsicCall>("ReluF32", args3a);
+    bb->insertIR(bb->end(), ir1);
+    auto* ir2 = IRBase::createIR<IntrinsicCall>("ReluF32", args3b);
+    bb->insertIR(bb->end(), ir2);
 
-    ASSERT_EQ(bb->getIR().size(), 2);
+    ASSERT_EQ(bb->size(), 2);
 
     // Run IntrinsicExpansionPass
     auto pass = createIntrinsicExpansionPass();
     pass->run(func, passCtx);
 
     // Should have 2 instructions (each ReluF32 expands to 1 v_max_f32)
-    EXPECT_EQ(bb->getIR().size(), 2) << "Both IntrinsicCalls should be expanded to v_max_f32";
+    EXPECT_EQ(bb->size(), 2) << "Both IntrinsicCalls should be expanded to v_max_f32";
 
     // Verify no IntrinsicCalls remain
     size_t intrinsicCallCount = 0;
-    for(auto& ir : bb->getIR())
+    for(auto& ir : *bb)
     {
         if(ir.getType() == IRBase::IRType::LogicalIR)
         {

@@ -85,10 +85,10 @@ int main() {
 
     // Get the IRList and builder
     IRList& irlist = ctx->getIRList();
-    StinkyInstIRBuilder* builder = ctx->getIRBuilder();
+    AsmIRBuilder* builder = ctx->getIRBuilder();
 
-    // Create a label
-    builder->createStinkyLabel(irlist.end(), "loop_start");
+    // Create a label (builder must be bound to a block, e.g. via setInsertionPoint)
+    builder->createLabel("loop_start");
 
     // Create a ds_read instruction
     StinkyInstruction* inst1 = builder->createStinkyInstruction(

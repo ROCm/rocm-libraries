@@ -23,8 +23,8 @@
 
 #pragma once
 
-#include "stinkytofu/serialization/asm/PatternParser.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/serialization/asm/PatternParser.hpp"
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -44,10 +44,8 @@ namespace stinkytofu
      */
     class GenericIRInstruction : public LogicalInstruction
     {
-    public:
-        std::string                   destReg; ///< Destination register name
-        std::string                   operation; ///< Operation name (e.g., "v_add_f32")
-        std::vector<IntrinsicOperand> operands; ///< Typed operands
+    private:
+        friend class IRBase;
 
         GenericIRInstruction(const std::string&                   dest,
                              const std::string&                   op,
@@ -59,7 +57,14 @@ namespace stinkytofu
         {
         }
 
-        const char* getLogicalName() const
+        ~GenericIRInstruction() override = default;
+
+    public:
+        std::string                   destReg; ///< Destination register name
+        std::string                   operation; ///< Operation name (e.g., "v_add_f32")
+        std::vector<IntrinsicOperand> operands; ///< Typed operands
+
+        const char* getLogicalName() const override
         {
             return operation.c_str();
         }

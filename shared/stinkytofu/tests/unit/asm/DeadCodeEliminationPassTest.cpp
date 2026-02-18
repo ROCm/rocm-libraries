@@ -23,9 +23,10 @@
 #include <gtest/gtest.h>
 
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/serialization/asm/IRConverter.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
-#include "stinkytofu/core/stinkytofu.hpp"
 
 #include <optional>
 #include <sstream>
@@ -68,7 +69,7 @@ protected:
         AsmPrinter         printer(oss);
         for(BasicBlock& bb : func)
         {
-            for(IRBase& ir : bb.getIR())
+            for(IRBase& ir : bb)
             {
                 if(ir.getType() == IRBase::IRType::StinkyTofu)
                 {

@@ -21,9 +21,9 @@
  *
  * ************************************************************************ */
 #include "stinkytofu/pipeline/OptimizationPipeline.hpp"
+#include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/ir/asm/DefUseChain.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
-#include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
@@ -156,44 +156,12 @@ namespace stinkytofu
 
     void OptimizationPipeline::run(Function& func, const PipelineConfig& config)
     {
-        // Create PassManager with its own internal PassContext
         PassManager passManager;
-
-        // Transfer Function to PassManager's internal PassContext
-        passManager.setFunction(func);
-
-        // Run the pipeline
-        runPipelineInternal(passManager, config);
-
-        // Transfer results back
-        Function& internalFunc = passManager.getPassContext().getFunction();
-        func.deleteAllBasicBlocks();
-
-        while(!internalFunc.getBasicBlocks().empty())
-        {
-            BasicBlock* bb = &internalFunc.getBasicBlocks().front();
-            internalFunc.getBasicBlocks().remove(bb);
-            bb->setParent(&func);
-            func.getBasicBlocks().push_back(bb);
-        }
-
-        if(internalFunc.getEntryBlock())
-        {
-            func.setEntryBlock(internalFunc.getEntryBlock());
-        }
-    }
-
-    void OptimizationPipeline::run(const PipelineConfig&        config,
-                                   stinkytofu::BasicBlockFilter bbFilter)
-    {
-        // Create PassManager with its own internal PassContext (empty Function)
-        PassManager passManager;
-
-        // Run the pipeline (custom passes will populate the Function)
-        runPipelineInternal(passManager, config);
+        runPipelineInternal(passManager, func, config);
     }
 
     void OptimizationPipeline::runPipelineInternal(PassManager&          passManager,
+                                                   Function&             func,
                                                    const PipelineConfig& config)
     {
         // This is the shared implementation used by both run() overloads
@@ -383,7 +351,7 @@ namespace stinkytofu
         }
 
         // ========== Run All Passes ==========
-        passManager.run();
+        passManager.run(func);
 
         if(config.verbose)
         {

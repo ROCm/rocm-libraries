@@ -48,6 +48,10 @@ namespace stinkytofu
     static void emitDirective(std::ostream&            os,
                               const AsmDirective&      directive,
                               const AsmEmitterOptions& options);
+    static void emitBasicBlock(std::ostream&            os,
+                               const BasicBlock&        bb,
+                               const AsmEmitterOptions& options,
+                               StinkyAsmEmitter*        emitter);
 
     // Helper function to check if a register is a pseudo register
     // Pseudo registers (BARRIER, DS_WRITE, TENSOR_LOAD, etc.) are used internally
@@ -571,28 +575,28 @@ namespace stinkytofu
         os << "\n";
     }
 
-    void StinkyAsmEmitter::emit(std::ostream& os, const IRList& irlist)
+    static void emitBasicBlock(std::ostream&            os,
+                               const BasicBlock&        bb,
+                               const AsmEmitterOptions& options,
+                               StinkyAsmEmitter*        emitter)
     {
-        for(auto it = irlist.begin(); it != irlist.end(); ++it)
+        for(const IRBase& ir : bb)
         {
-            const StinkyInstruction* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-            if(inst)
+            if(const StinkyInstruction* inst = dyn_cast<StinkyInstruction>(&ir))
             {
-                emit(os, *inst);
-
+                emitter->emit(os, *inst);
                 if(options.emitBlankLines && inst->getUnifiedOpcode() != GFX::LABEL)
-                {
                     os << "\n";
-                }
-                continue;
             }
-
-            const AsmDirective* directive = dyn_cast<AsmDirective>(it.getNodePtr());
-            if(directive)
-            {
+            else if(const AsmDirective* directive = dyn_cast<AsmDirective>(&ir))
                 emitDirective(os, *directive, options);
-            }
         }
+    }
+
+    void StinkyAsmEmitter::emit(std::ostream& os, const Function& function)
+    {
+        for(const BasicBlock& bb : function)
+            emitBasicBlock(os, bb, options, this);
     }
 
     std::string StinkyAsmEmitter::emit(const StinkyInstruction& inst)
@@ -602,10 +606,10 @@ namespace stinkytofu
         return oss.str();
     }
 
-    std::string StinkyAsmEmitter::emit(const IRList& irlist)
+    std::string StinkyAsmEmitter::emit(const Function& function)
     {
         std::ostringstream oss;
-        emit(oss, irlist);
+        emit(oss, function);
         return oss.str();
     }
 

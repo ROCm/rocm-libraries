@@ -22,7 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu/core/stinkytofu.hpp"
+#include "stinkytofu/core/Function.hpp"
 #include <memory>
 #include <string>
 #include <vector>
@@ -47,9 +47,8 @@ namespace stinkytofu
     // Python workflow:
     //   1. Python creates PyLogicalModule and adds shared_ptr<LogicalInstruction>
     //   2. LogicalToFunctionConverter extracts raw pointers for Function/IRList
-    //   3. Ownership is tracked via Function::logicalInstructionOwners
+    //   3. Caller keeps PyLogicalModule alive for the lifetime of the Function
     //   4. PassManager runs optimization and lowering passes
-    //   5. After lowering, Function::releaseLogicalInstructionOwnership() frees memory
     //
     // This design allows Python to be easily removed/deprecated in the future
     // without impacting the core C++ optimization infrastructure.
@@ -153,6 +152,42 @@ namespace stinkytofu
     private:
         struct Impl;
         std::unique_ptr<Impl> pImpl;
+    };
+
+    /**
+     * @brief Python-specific Function wrapper that holds an external Function*
+     *        and detaches externally owned IRs when destroyed.
+     *
+     * Does not own the Function. When the destructor runs, it traverses all IRs
+     * in all BasicBlocks and removes (detaches) any LogicalInstruction with
+     * ownedExternally == true from the IRList, so that the list does not delete
+     * them. The caller owns the Function and must keep it alive while this
+     * wrapper is in use.
+     */
+    class PyLogicalFunction
+    {
+    public:
+        /** @brief Take an external Function* (caller owns it; this wrapper does not). */
+        explicit PyLogicalFunction(Function* func);
+
+        ~PyLogicalFunction();
+
+        PyLogicalFunction(const PyLogicalFunction&)            = delete;
+        PyLogicalFunction& operator=(const PyLogicalFunction&) = delete;
+
+        /** @brief Get the wrapped Function pointer. */
+        Function* getFunction()
+        {
+            return func;
+        }
+        const Function* getFunction() const
+        {
+            return func;
+        }
+
+    private:
+        void      detachExternallyOwnedIRs();
+        Function* func;
     };
 
 } // namespace stinkytofu

@@ -10,10 +10,10 @@
 #include <map>
 #include <vector>
 
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
+#include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
 
 namespace
 {
@@ -381,14 +381,14 @@ namespace
             DependencyType     type;
         };
 
-        ConfigurableWaitCntInserter(IRList&              insts,
-                                    StinkyInstIRBuilder& irBuilder,
+        ConfigurableWaitCntInserter(BasicBlock&          bb,
+                                    AsmIRBuilder&        irBuilder,
                                     GfxArchID            arch,
                                     const WaitCntConfig& config = WaitCntConfig::standard(),
                                     const std::vector<MemoryOperationState>* predecessorStates
                                     = nullptr,
                                     bool isLoopBlock = false)
-            : insts_(insts)
+            : bb_(&bb)
             , irBuilder_(irBuilder)
             , arch_(arch)
             , config_(config)
@@ -581,7 +581,7 @@ namespace
             const int MAX_SCAN          = 10; // Look at first 10 instructions
             bool      firstWaitInserted = false;
 
-            for(auto it = insts_.begin(); it != insts_.end() && scanned < MAX_SCAN; ++it, ++scanned)
+            for(auto it = bb_->begin(); it != bb_->end() && scanned < MAX_SCAN; ++it, ++scanned)
             {
                 StinkyInstruction& inst = getStinkyInst(it);
 
@@ -657,7 +657,7 @@ namespace
                 // Insert waitcnt if needed
                 if(finalReq.isValid())
                 {
-                    insertWaitCntInstruction(it, finalReq);
+                    insertWaitCntInstruction(&inst, finalReq);
 
                     if(!firstWaitInserted)
                     {
@@ -718,7 +718,7 @@ namespace
             {
                 // Find all waits inserted in this block (Phase 0, 1, 2, 3)
                 std::vector<const SWaitCntData*> insertedWaits;
-                for(auto it = insts_.begin(); it != insts_.end(); ++it)
+                for(auto it = bb_->begin(); it != bb_->end(); ++it)
                 {
                     StinkyInstruction& inst = getStinkyInst(it);
                     if(isWaitCnt(inst))
@@ -735,7 +735,7 @@ namespace
                     MemoryOperationState pathExit = predState;
 
                     // Apply all new memory operations in this block
-                    for(auto it = insts_.begin(); it != insts_.end(); ++it)
+                    for(auto it = bb_->begin(); it != bb_->end(); ++it)
                     {
                         StinkyInstruction& inst = getStinkyInst(it);
 
@@ -762,7 +762,7 @@ namespace
                 MemoryOperationState exitState = currentState_;
 
                 bool seenMemoryOp = false;
-                for(auto it = insts_.begin(); it != insts_.end(); ++it)
+                for(auto it = bb_->begin(); it != bb_->end(); ++it)
                 {
                     StinkyInstruction& inst = getStinkyInst(it);
 
@@ -819,7 +819,7 @@ namespace
 
         void insertBarrierWaitCounts()
         {
-            for(auto it = insts_.begin(); it != insts_.end(); ++it)
+            for(auto it = bb_->begin(); it != bb_->end(); ++it)
             {
                 StinkyInstruction& inst = getStinkyInst(it);
 
@@ -832,7 +832,7 @@ namespace
                 // Insert tensor wait if needed
                 if(req.needTensorWait && config_.barrierPolicy.waitTensorLoad)
                 {
-                    insertTensorWaitCnt(it);
+                    insertTensorWaitCnt(&inst);
                 }
 
                 // Build waitcnt requirement based on policy
@@ -840,7 +840,7 @@ namespace
 
                 if(waitReq.isValid())
                 {
-                    insertWaitCntInstruction(it, waitReq);
+                    insertWaitCntInstruction(&inst, waitReq);
                 }
             }
         }
@@ -861,7 +861,7 @@ namespace
         {
             BarrierRequirements req;
 
-            if(barrierIt == insts_.begin())
+            if(barrierIt == bb_->begin())
                 return req;
 
             // Scan backwards to find all operations
@@ -888,7 +888,7 @@ namespace
                 if(isBarrier(inst))
                     break;
 
-            } while(it != insts_.begin());
+            } while(it != bb_->begin());
 
             // Determine if tensor wait is needed
             req.needTensorWait = req.foundTensorLoad;
@@ -924,10 +924,10 @@ namespace
             return waitReq;
         }
 
-        void insertTensorWaitCnt(IRList::iterator insertPoint)
+        void insertTensorWaitCnt(StinkyInstruction* insertPoint)
         {
-            StinkyInstruction* waitInst = irBuilder_.createStinkyInstBefore(
-                insertPoint, getMCIDByUOp(GFX::s_wait_tensorcnt, arch_));
+            StinkyInstruction* waitInst
+                = irBuilder_.create(getMCIDByUOp(GFX::s_wait_tensorcnt, arch_), insertPoint);
             waitInst->addModifier<SWaitTensorCntData>(SWaitTensorCntData(WAIT_COMPLETE));
         }
 
@@ -939,7 +939,7 @@ namespace
         {
             dependencies_.clear();
 
-            for(auto it = insts_.begin(); it != insts_.end(); ++it)
+            for(auto it = bb_->begin(); it != bb_->end(); ++it)
             {
                 StinkyInstruction& inst = getStinkyInst(it);
 
@@ -964,7 +964,7 @@ namespace
             {
                 IRList::iterator useIt = findFirstRegisterUse(it, destReg);
 
-                if(useIt != insts_.end())
+                if(useIt != bb_->end())
                 {
                     MemoryDependency dep;
                     dep.memOp    = it;
@@ -981,7 +981,7 @@ namespace
         {
             IRList::iterator nextMemIt = findNextConflictingMemoryOp(it, inst);
 
-            if(nextMemIt != insts_.end())
+            if(nextMemIt != bb_->end())
             {
                 MemoryDependency dep;
                 dep.memOp    = it;
@@ -1023,7 +1023,7 @@ namespace
                 if(mergedReq.isValid())
                 {
                     // Use the iterator from the first dependency (they all point to same place)
-                    IRList::iterator insertPoint = deps[0]->consumer;
+                    StinkyInstruction* insertPoint = &getStinkyInst(deps[0]->consumer);
 
                     if(config_.dependencyPolicy.mergeAdjacentWaitCnt)
                     {
@@ -1037,14 +1037,13 @@ namespace
             }
         }
 
-        void insertOrMergeWaitCnt(IRList::iterator insertPoint, const WaitCntRequirement& req)
+        void insertOrMergeWaitCnt(StinkyInstruction* insertPoint, const WaitCntRequirement& req)
         {
             // Try to merge with previous waitcnt
-            if(insertPoint != insts_.begin())
+            if(IRList::iterator(insertPoint) != bb_->begin())
             {
-                IRList::iterator prevIt = insertPoint;
-                --prevIt;
-                StinkyInstruction& prevInst = getStinkyInst(prevIt);
+                StinkyInstruction& prevInst
+                    = *static_cast<StinkyInstruction*>(insertPoint->getPrev());
 
                 if(isWaitCnt(prevInst))
                 {
@@ -1063,10 +1062,10 @@ namespace
             insertWaitCntInstruction(insertPoint, req);
         }
 
-        void insertWaitCntInstruction(IRList::iterator insertPoint, const WaitCntRequirement& req)
+        void insertWaitCntInstruction(StinkyInstruction* insertPoint, const WaitCntRequirement& req)
         {
-            StinkyInstruction* waitInst = irBuilder_.createStinkyInstBefore(
-                insertPoint, getMCIDByUOp(GFX::s_waitcnt, arch_));
+            StinkyInstruction* waitInst
+                = irBuilder_.create(getMCIDByUOp(GFX::s_waitcnt, arch_), insertPoint);
 
             SWaitCntData waitData(req.vlcnt, req.vscnt, req.dlcnt, req.dscnt, WAIT_IGNORE);
             waitInst->addModifier<SWaitCntData>(waitData);
@@ -1115,7 +1114,7 @@ namespace
             // if(allowCrossBoundary && properties_.containsLoop && it == properties_.loopEnd)
             //     it = properties_.loopBegin;
 
-            while(it != start && it != insts_.end())
+            while(it != start && it != bb_->end())
             {
                 StinkyInstruction& inst = getStinkyInst(it);
 
@@ -1128,7 +1127,7 @@ namespace
                 if(isWaitCnt(inst))
                 {
                     if(loadSatisfiedBy(start, inst))
-                        return insts_.end();
+                        return bb_->end();
                 }
 
                 ++it;
@@ -1137,7 +1136,7 @@ namespace
                 //     it = properties_.loopBegin;
             }
 
-            return insts_.end();
+            return bb_->end();
         }
 
         IRList::iterator findNextConflictingMemoryOp(IRList::iterator         storeIt,
@@ -1150,7 +1149,7 @@ namespace
             // if(allowCrossBoundary && properties_.containsLoop && it == properties_.loopEnd)
             //     it = properties_.loopBegin;
 
-            while(it != storeIt && it != insts_.end())
+            while(it != storeIt && it != bb_->end())
             {
                 StinkyInstruction& inst = getStinkyInst(it);
 
@@ -1167,7 +1166,7 @@ namespace
                 {
                     const SWaitCntData* wait = inst.getModifier<SWaitCntData>();
                     if(wait && storeCompletedBy(storeInst, *wait))
-                        return insts_.end();
+                        return bb_->end();
                 }
 
                 ++it;
@@ -1176,7 +1175,7 @@ namespace
                 //     it = properties_.loopBegin;
             }
 
-            return insts_.end();
+            return bb_->end();
         }
 
         bool loadSatisfiedBy(IRList::iterator memIt, const StinkyInstruction& waitInst) const
@@ -1215,7 +1214,7 @@ namespace
             IRList::iterator it = memIt;
             ++it;
 
-            while(it != useIt && it != insts_.end())
+            while(it != useIt && it != bb_->end())
             {
                 StinkyInstruction& inst = getStinkyInst(it);
                 state.incrementForInst(inst);
@@ -1253,7 +1252,7 @@ namespace
             IRList::iterator it = storeIt;
             ++it;
 
-            while(it != nextMemIt && it != insts_.end())
+            while(it != nextMemIt && it != bb_->end())
             {
                 StinkyInstruction& inst = getStinkyInst(it);
                 state.incrementForInst(inst);
@@ -1280,8 +1279,8 @@ namespace
             return req;
         }
 
-        IRList&                           insts_;
-        StinkyInstIRBuilder&              irBuilder_;
+        BasicBlock*                       bb_;
+        AsmIRBuilder&                     irBuilder_;
         GfxArchID                         arch_;
         WaitCntConfig                     config_;
         std::vector<MemoryDependency>     dependencies_;
@@ -1345,9 +1344,7 @@ namespace
 
                 // Process each BasicBlock in RPO
                 traverseCFGInRPO(func, [&](BasicBlock* bb) {
-                    IRList& insts = bb->getIR();
-
-                    if(insts.empty())
+                    if(bb->empty())
                         return;
 
                     // Compute entry state from predecessors
@@ -1459,15 +1456,15 @@ namespace
                         // Clear existing waitcnts if reprocessing
                         if(bbState.processed)
                         {
-                            clearWaitCnts(insts);
+                            clearWaitCnts(*bb);
                         }
 
-                        auto irBuilder = passCtx.getIRBuilder<StinkyInstIRBuilder>(insts, arch);
+                        auto irBuilder = AsmIRBuilder(*bb, arch);
 
                         // Pass predecessor states separately for multi-path analysis
                         bool                        isLoop = hasLoopBackEdge(bb);
                         ConfigurableWaitCntInserter inserter(
-                            insts, irBuilder, arch, config_, &predecessorStates, isLoop);
+                            *bb, irBuilder, arch, config_, &predecessorStates, isLoop);
                         std::vector<MemoryOperationState> newExitStates
                             = inserter.insertWaitCounts();
 
@@ -1539,17 +1536,17 @@ namespace
         }
 
         /**
-         * @brief Clear all waitcnt instructions from an instruction list
+         * @brief Clear all waitcnt instructions from a basic block
          */
-        void clearWaitCnts(IRList& insts) const
+        void clearWaitCnts(BasicBlock& bb) const
         {
-            for(auto it = insts.begin(); it != insts.end();)
+            for(auto it = bb.begin(); it != bb.end();)
             {
                 StinkyInstruction& inst = static_cast<StinkyInstruction&>(*it);
                 if(inst.getModifier<SWaitCntData>() != nullptr
                    || inst.getModifier<SWaitTensorCntData>() != nullptr)
                 {
-                    it = insts.erase(it);
+                    it = bb.eraseIR(it);
                 }
                 else
                 {
