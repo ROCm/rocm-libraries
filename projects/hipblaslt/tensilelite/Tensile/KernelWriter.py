@@ -4723,7 +4723,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # num vgprs: global -> local elements : MXSA
     if kernel["ProblemType"]["MXBlockA"]:
       self.states.mxsa.numVgprG2L = 0
-      if not kernel["DirectToLdsA"] or self.do["KeepDirectToLdsAlloc"]: #TODO
+      if not kernel["DirectToLdsMXSA"] or self.do["KeepDirectToLdsAlloc"]: #TODO
         self.states.mxsa.numVgprG2L = roundUp((kernel["NumLoadsCoalescedMXSA"] * kernel["NumLoadsPerpendicularMXSA"] * \
           kernel["GlobalReadVectorWidthMXSA"]) / (float)(self.states.bpr))
         if self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]:
@@ -4784,7 +4784,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # num vgprs: global -> local elements : MXSB
     if kernel["ProblemType"]["MXBlockB"]:
       self.states.mxsb.numVgprG2L = 0
-      if not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"]: #TODO
+      if not kernel["DirectToLdsMXSB"] or self.do["KeepDirectToLdsAlloc"]: #TODO
         self.states.mxsb.numVgprG2L = roundUp((kernel["NumLoadsCoalescedMXSB"] * kernel["NumLoadsPerpendicularMXSB"] * \
           kernel["GlobalReadVectorWidthMXSB"]) / (float)(self.states.bpr))
         if self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]:
@@ -5116,7 +5116,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       vgprIdx += self.states.a.numVgprLocalWriteAddr
 
     if kernel["ProblemType"]["MXBlockA"]:
-      if not kernel["LocalWriteUseSgprA"]:
+      if not kernel["DirectToLdsMXSA"]:
         self.states.mxsa.startVgprLocalWriteAddr = vgprIdx
         vgprIdx += self.states.mxsa.numVgprLocalWriteAddr
 
@@ -5125,7 +5125,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       vgprIdx += self.states.b.numVgprLocalWriteAddr
 
     if kernel["ProblemType"]["MXBlockB"]:
-      if not kernel["LocalWriteUseSgprB"]:
+      if not kernel["DirectToLdsMXSB"]:
         self.states.mxsb.startVgprLocalWriteAddr = vgprIdx
         vgprIdx += self.states.mxsb.numVgprLocalWriteAddr
 
