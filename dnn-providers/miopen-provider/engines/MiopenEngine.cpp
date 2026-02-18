@@ -6,13 +6,63 @@
 
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace miopen_plugin
 {
+
+namespace
+{
+
+auto createBenchmarkingKnob(flatbuffers::FlatBufferBuilder& builder)
+{
+    return hipdnn_plugin_sdk::KnobFactory::createIntKnob(
+        builder, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1, {});
+}
+
+void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+                                   MiopenExecutionSettings& executionSettings)
+{
+    if(!engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
+    {
+        return;
+    }
+
+    const auto& knobSetting
+        = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
+
+    if(knobSetting.valueType() != hipdnn_data_sdk::data_objects::KnobValue::IntValue)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Benchmarking knob setting value is not an integer. Type: "
+                + std::string(
+                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType())));
+    }
+
+    auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
+    executionSettings.setBenchmarkingEnabled(value != 0);
+}
+
+void initializeMiopenExecutionSettings(
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    MiopenExecutionSettings& executionSettings)
+{
+    if(engineConfig.isValid())
+    {
+        handleBenchmarkingKnobSetting(engineConfig, executionSettings);
+    }
+    else
+    {
+        HIPDNN_PLUGIN_LOG_WARN("Engine config is invalid");
+    }
+}
+
+} // namespace
 
 MiopenEngine::MiopenEngine(int64_t id)
     : _id(id)
@@ -45,11 +95,10 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
 {
     flatbuffers::FlatBufferBuilder builder;
 
-    auto knob = hipdnn_plugin_sdk::KnobFactory::createIntKnob(
-        builder, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1, {});
+    auto benchmarkingKnob = createBenchmarkingKnob(builder);
 
     std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
-    knobsVector.push_back(knob);
+    knobsVector.push_back(benchmarkingKnob);
 
     // Collect custom knobs from plan builders
     for(const auto& planBuilder : _planBuilders)
@@ -83,18 +132,29 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
     handle.storeEngineDetailsDetachedBuffer(detailsOut.ptr, std::move(detachedBuffer));
 }
 
-size_t MiopenEngine::getWorkspaceSize(
+size_t MiopenEngine::getMaxWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
+    MiopenExecutionSettings baseExecutionSettings;
+    initializeMiopenExecutionSettings(engineConfig, baseExecutionSettings);
+
     size_t workspaceSize = 0;
+
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            workspaceSize = std::max(workspaceSize, planBuilder->getWorkspaceSize(handle, opGraph));
+            MiopenExecutionSettings executionSettings = baseExecutionSettings;
+            planBuilder->initializeExecutionSettings(
+                handle, opGraph, engineConfig, executionSettings);
+            workspaceSize
+                = std::max(workspaceSize,
+                           planBuilder->getMaxWorkspaceSize(handle, opGraph, executionSettings));
         }
     }
+
     return workspaceSize;
 }
 
@@ -104,35 +164,26 @@ void MiopenEngine::initializeExecutionContext(
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
-    if(engineConfig.isValid())
-    {
-        if(engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
-        {
-            const auto& knobSetting
-                = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
-            if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
-            {
-                auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
-                executionContext.setBenchmarkingEnabled(value != 0);
-            }
-            else
-            {
-                HIPDNN_LOG_WARN(
-                    "Benchmarking knob setting value is not an integer. Type: {}",
-                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
-            }
-        }
-    }
-    else
-    {
-        HIPDNN_LOG_WARN("Engine config is invalid");
-    }
+    MiopenExecutionSettings executionSettings;
+    initializeMiopenExecutionSettings(engineConfig, executionSettings);
 
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
+            planBuilder->initializeExecutionSettings(
+                handle, opGraph, engineConfig, executionSettings);
+            break;
+        }
+    }
+
+    executionContext.setExecutionSettings(executionSettings);
+
+    for(const auto& planBuilder : _planBuilders)
+    {
+        if(planBuilder->isApplicable(handle, opGraph))
+        {
+            planBuilder->buildPlan(handle, opGraph, executionContext);
             break;
         }
     }

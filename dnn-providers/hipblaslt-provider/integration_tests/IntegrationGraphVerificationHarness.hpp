@@ -10,6 +10,7 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
@@ -65,7 +66,7 @@ protected:
         }
     }
 
-    virtual void runGraphTest(DataType tolerance) = 0;
+    virtual void runGraphTest(float tolerance) = 0;
 
 protected:
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
@@ -88,7 +89,7 @@ protected:
             << "At least one output tensor id must be specified for "
                "validation.";
 
-        HIPDNN_LOG_INFO("Validating {} output tensors", outputTensorIds);
+        HIPDNN_PLUGIN_LOG_INFO("Validating " << outputTensorIds.size() << " output tensors");
 
         // Lazily register validators after graph execution since tensor Ids and types may be inferred during graph finalization
         for(const auto& registerValidator : _deferredValidators)

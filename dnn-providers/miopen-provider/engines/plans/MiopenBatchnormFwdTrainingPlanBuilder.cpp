@@ -3,8 +3,8 @@
 
 #include <string>
 
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenBatchnormFwdTrainingPlanBuilder.hpp"
@@ -268,8 +268,9 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
                         opGraph.nodeWrappers().end(),
                         hasFloatComputeDataType))
         {
-            HIPDNN_LOG_ERROR("BatchnormFwdTraining plan builder only supports nodes with an fp32 "
-                             "compute_data_type");
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "BatchnormFwdTraining plan builder only supports nodes with an fp32 "
+                "compute_data_type");
             return false;
         }
 
@@ -282,8 +283,8 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
             // checks manually.
             checkBatchnormFwdTrainingTensorConfigSupported(bnAttr, opGraph.getTensorMap());
 
-            HIPDNN_LOG_INFO("BatchnormFwdTraining plan builder applicable for single node "
-                            "batchnorm training");
+            HIPDNN_PLUGIN_LOG_INFO("BatchnormFwdTraining plan builder applicable for single node "
+                                   "batchnorm training");
             return true;
         }
 
@@ -295,29 +296,37 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
             bnAttr, activAttr, opGraph.getTensorMap());
         checkBatchnormFwdActivationModeSupported(activAttr);
 
-        HIPDNN_LOG_INFO(
+        HIPDNN_PLUGIN_LOG_INFO(
             "BatchnormFwdTraining plan builder applicable for training + activation fusion");
         return true;
     }
     catch(const std::exception& e)
     {
-        HIPDNN_LOG_INFO(e.what());
+        HIPDNN_PLUGIN_LOG_INFO(e.what());
         return false;
     }
 }
 
-size_t MiopenBatchnormFwdTrainingPlanBuilder::getWorkspaceSize(
+size_t MiopenBatchnormFwdTrainingPlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const MiopenExecutionSettings& executionSettings) const
 {
     // No workspace needed for batchnorm forward training
     return 0;
 }
 
+void MiopenBatchnormFwdTrainingPlanBuilder::initializeExecutionSettings(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] MiopenExecutionSettings& executionSettings) const
+{
+}
+
 void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() == 1)
@@ -329,7 +338,7 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
 
         BatchnormFwdTrainingParams params(bnAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
-            std::move(params), executionContext.benchmarkingEnabled());
+            std::move(params), executionContext.executionSettings());
         executionContext.setPlan(std::move(plan));
     }
     else if(opGraph.nodeCount() == 2)
@@ -344,7 +353,7 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
 
         BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
-            std::move(params), executionContext.benchmarkingEnabled());
+            std::move(params), executionContext.executionSettings());
         executionContext.setPlan(std::move(plan));
     }
     else
