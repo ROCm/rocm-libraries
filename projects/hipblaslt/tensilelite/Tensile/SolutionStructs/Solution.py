@@ -3040,8 +3040,6 @@ class Solution(collections.abc.Mapping):
         state["DtlPlusLdsBuf"] = 0
       # restrict feature combinations
       if state["DtlPlusLdsBuf"]:
-        # disable CMS for DtlPlusLdsBuf (not supported yet)
-        state["UseCustomMainLoopSchedule"] = 0
         # force 1LDSBuffer = 0
         state["1LDSBuffer"] = 0
 

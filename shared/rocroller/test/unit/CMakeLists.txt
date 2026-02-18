@@ -67,6 +67,7 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/FastDivisionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FastMultiplicationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FileWritingObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMBasicTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMDirectLDSTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMF16Test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMF8F6F4Test.cpp"
