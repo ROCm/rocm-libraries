@@ -1609,6 +1609,8 @@ class Solution(collections.abc.Mapping):
     # Check if CMS is available for this solution
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       hasCMS,_ = hasCustomSchedule(state)
+      if state["UseCustomMainLoopSchedule"] == 1 and not hasCMS:
+        reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 but CMS is not supported")
       state["UseCustomMainLoopSchedule"] = 1 if hasCMS else 0
 
     # 0: Normal mode. Hardware applies all of the normal data dependency checks
@@ -3038,8 +3040,6 @@ class Solution(collections.abc.Mapping):
         state["DtlPlusLdsBuf"] = 0
       # restrict feature combinations
       if state["DtlPlusLdsBuf"]:
-        # disable CMS for DtlPlusLdsBuf (not supported yet)
-        state["UseCustomMainLoopSchedule"] = 0
         # force 1LDSBuffer = 0
         state["1LDSBuffer"] = 0
 

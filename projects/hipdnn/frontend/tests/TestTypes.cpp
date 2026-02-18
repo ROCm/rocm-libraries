@@ -72,13 +72,13 @@ TEST(TestTypes, GetDataTypeEnumFromType)
 
     EXPECT_EQ(getDataTypeEnumFromType<float>(), DataType::FLOAT);
     EXPECT_EQ(getDataTypeEnumFromType<half>(), DataType::HALF);
-    EXPECT_EQ(getDataTypeEnumFromType<hip_bfloat16>(), DataType::BFLOAT16);
+    EXPECT_EQ(getDataTypeEnumFromType<bfloat16>(), DataType::BFLOAT16);
     EXPECT_EQ(getDataTypeEnumFromType<double>(), DataType::DOUBLE);
     EXPECT_EQ(getDataTypeEnumFromType<uint8_t>(), DataType::UINT8);
     EXPECT_EQ(getDataTypeEnumFromType<int32_t>(), DataType::INT32);
     EXPECT_EQ(getDataTypeEnumFromType<int8_t>(), DataType::INT8);
-    EXPECT_EQ(getDataTypeEnumFromType<hip_fp8_e4m3>(), DataType::FP8_E4M3);
-    EXPECT_EQ(getDataTypeEnumFromType<hip_fp8_e5m2>(), DataType::FP8_E5M2);
+    EXPECT_EQ(getDataTypeEnumFromType<fp8_e4m3>(), DataType::FP8_E4M3);
+    EXPECT_EQ(getDataTypeEnumFromType<fp8_e5m2>(), DataType::FP8_E5M2);
 
     EXPECT_EQ(getDataTypeEnumFromType<float*>(), DataType::NOT_SET);
     EXPECT_EQ(getDataTypeEnumFromType<char>(), DataType::NOT_SET);
