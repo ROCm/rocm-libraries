@@ -10,3 +10,7 @@ This plugin is built as a standalone plugin. To build the plugin, first install 
 1. Make a build directory using `mkdir build && cd build`.
 1. Configure the build using `cmake -DCMAKE_CXX_COMPILER=<path to amdclang>/clang++ ..`.
 1. Finally, run `ninja` to build the plugin.
+
+## Operation support
+
+The list of supported operations is described in [Operation Support](docs/OperationSupport.md) documentation.

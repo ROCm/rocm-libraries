@@ -7,19 +7,13 @@
    - Follow the instructions in [Building.md](../docs/Building.md) to install the needed dependencies, compilers, and libraries for building hipDNN projects. Specifically:
      * CMake
      * Ninja
-     * ROCm / TheRock (includes AMD Clang compiler)
+     * ROCm (for HIP runtime)
    - A ROCm-compatible GPU is required to run the samples
-
-> [!IMPORTANT]
-> **AMD Clang++ Requirement for Samples**
-> **AMD Clang++ is required** to compile hipDNN samples and tests. These components utilize `Tensor.hpp` and reference validation implementations that depend on HIP device headers for GPU buffer allocation.
->
-> **Note for API Consumers:** This requirement **does not** apply to standard usage of the `hipDNN` Frontend. Projects consuming the library API without using these specific `data_sdk` utilities for validation & GPU memory allocation do not require AMD Clang++.
 
 2. **Build Samples:** From this `samples` directory:
    ```bash
    mkdir build && cd build
-   cmake -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ -G Ninja ..
+   cmake -G Ninja ..
    ninja
    ```
    - Note: If you have installed hipdnn to a custom location you just need to specify the `CMAKE_PREFIX_PATH` to point to the install location.  Ensure you specify the full path and not a relative one.

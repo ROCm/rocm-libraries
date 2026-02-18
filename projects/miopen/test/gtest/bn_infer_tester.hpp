@@ -77,7 +77,7 @@ struct BatchNormInferTester
         estVariance_dev = handle.Write(estVariance.data);
     }
 
-    virtual void RunTestGPU(bool hip_en = true) = 0;
+    virtual void RunTestGPU() = 0;
 
     void RunTestCPU()
     { // Run the CPU implementation
