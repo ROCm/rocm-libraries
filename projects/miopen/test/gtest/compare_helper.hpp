@@ -29,6 +29,7 @@
 #include <limits>
 #include <type_traits>
 #include <utility>
+#include <functional>
 #include <half/half.hpp>
 
 #include <iostream>
@@ -117,6 +118,21 @@ auto CompareResults(VerifyT&& verifier, double tolerance = 80.f)
     if(!Compare(cpu_result, gpu_result, tolerance))
     {
         verifier.fail();
+    }
+
+    return std::make_pair(cpu_result, gpu_result);
+}
+
+template<class VerifyT, class OnFailFunc>
+auto CompareResults(VerifyT&& verifier, OnFailFunc&& on_fail, double tolerance = 80.f)
+    -> std::pair<decltype(verifier.cpu()), decltype(verifier.gpu())>
+{
+    const auto cpu_result = verifier.cpu();
+    const auto gpu_result = verifier.gpu();
+    if(!Compare(cpu_result, gpu_result, tolerance))
+    {
+        verifier.fail();
+        std::invoke(std::forward<OnFailFunc>(on_fail));
     }
 
     return std::make_pair(cpu_result, gpu_result);
