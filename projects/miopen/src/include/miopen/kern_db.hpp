@@ -34,8 +34,6 @@
 #include <miopen/bz2.hpp>
 #include <miopen/md5.hpp>
 
-#include <boost/core/explicit_operator_bool.hpp>
-
 #include <functional>
 #include <optional>
 #include <string>
