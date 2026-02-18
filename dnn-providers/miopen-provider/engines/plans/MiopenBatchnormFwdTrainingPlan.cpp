@@ -204,9 +204,9 @@ const std::optional<MiopenTensor>& BatchnormFwdTrainingParams::activationOut() c
 }
 
 BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,
-                                                   bool benchmarkingEnabled)
+                                                   const MiopenExecutionSettings& executionSettings)
     : _trainingParams(std::move(trainingParams))
-    , _benchmarkingEnabled(benchmarkingEnabled)
+    , _executionSettings(executionSettings)
 {
 }
 
@@ -223,7 +223,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
                                        [[maybe_unused]] void* workspace) const
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
 
     float alpha = 1.0f;
     float beta = 0.0f;
@@ -237,8 +237,8 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
     if(_trainingParams.hasRunningStats())
     {
         expAvgFactor = _trainingParams.momentumValue();
-        HIPDNN_PLUGIN_LOG_INFO("BatchnormFwdTrainingPlan: expAvgFactor (momentum) = {}",
-                               expAvgFactor);
+        HIPDNN_PLUGIN_LOG_INFO(
+            "BatchnormFwdTrainingPlan: expAvgFactor (momentum) = " << expAvgFactor);
     }
 
     // Get all required device buffers

@@ -12,7 +12,13 @@ namespace miopen_plugin
 class MiopenConvPlanBuilder : public IPlanBuilder
 {
 public:
-    MiopenConvPlanBuilder() = default;
+    struct WorkspaceSizeRange
+    {
+        size_t min;
+        size_t max;
+    };
+
+    explicit MiopenConvPlanBuilder(bool deterministic = false);
     ~MiopenConvPlanBuilder() override = default;
 
     // Disallow copy and assignment
@@ -21,18 +27,29 @@ public:
 
     bool isApplicable(const HipdnnEnginePluginHandle& handle,
                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
-    size_t getWorkspaceSize(
+    WorkspaceSizeRange
+        getWorkspaceSizeRange(const HipdnnEnginePluginHandle& handle,
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const;
+    size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                               const MiopenExecutionSettings& executionSettings) const override;
+
+    void initializeExecutionSettings(
         const HipdnnEnginePluginHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        MiopenExecutionSettings& executionSettings) const override;
 
     void buildPlan(const HipdnnEnginePluginHandle& handle,
                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                   const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
                    HipdnnEnginePluginExecutionContext& executionContext) const override;
 
     std::vector<hipdnn_data_sdk::data_objects::KnobT>
         getCustomKnobs(const HipdnnEnginePluginHandle& handle,
                        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+
+private:
+    bool _deterministic;
 };
 
 }
