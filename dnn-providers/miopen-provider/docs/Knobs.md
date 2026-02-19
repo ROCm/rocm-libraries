@@ -201,55 +201,7 @@ if (error.is_good()) {
 }
 ```
 
-### Example 2: Enable Benchmarking
-
-```cpp
-#include <hipdnn_frontend.hpp>
-
-using namespace hipdnn_frontend;
-
-Graph graph;
-// ... setup convolution graph ...
-graph.build_operation_graph(handle);
-
-// Enable benchmarking for optimal kernel selection
-std::vector<KnobSetting> settings;
-settings.emplace_back("global.benchmarking", 1);
-
-auto error = graph.create_execution_plan_ext(MIOPEN_ENGINE_ID, settings);
-
-if (error.is_good()) {
-    std::cout << "Execution plan created with benchmarking enabled\n";
-    std::cout << "Note: First execution will be slow due to kernel benchmarking\n";
-}
-```
-
-### Example 3: Limit Workspace for Memory-Constrained Systems
-
-```cpp
-#include <hipdnn_frontend.hpp>
-
-using namespace hipdnn_frontend;
-
-Graph graph;
-// ... setup convolution graph ...
-graph.build_operation_graph(handle);
-
-// Limit workspace to 64 MB to conserve GPU memory
-std::vector<KnobSetting> settings;
-settings.emplace_back("global.workspace_size_limit", 64LL * 1024 * 1024);
-
-auto error = graph.create_execution_plan_ext(MIOPEN_ENGINE_ID, settings);
-
-if (error.is_good()) {
-    std::cout << "Execution plan created with 64 MB workspace limit\n";
-} else {
-    std::cerr << "Error: " << error.get_message() << "\n";
-    std::cerr << "Workspace limit may be below minimum required\n";
-}
-```
-
-### Example 4: Combined Knob Settings
+### Example 2: Combined Knob Settings
 
 ```cpp
 #include <hipdnn_frontend.hpp>
