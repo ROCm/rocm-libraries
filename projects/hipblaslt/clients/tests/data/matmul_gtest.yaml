@@ -150,7 +150,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha: 1
   beta: 0
-  gpu_arch: '1201'
+  gpu_arch: '120[0-1]'
 
 - name: matmul_grid_limit_double
   category: quick
@@ -161,7 +161,7 @@ Tests:
   alpha: 1
   beta: 0
   api_method: [0, 2]
-  gpu_arch: '1201'
+  gpu_arch: '120[0-1]'
 
 - name: matmul_deepbench
   category: nightly

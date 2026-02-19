@@ -143,18 +143,18 @@ public:
     {
         char* d = nullptr;
 
-        // size_t tmp = (size_t)340 * 1024 * 1024 * 1024 - get_available_host_memory();
-        // size_t available_host_memory = (tmp < (size_t)32 * 1024 * 1024 * 1024) ? ((size_t)32 * 1024 * 1024 * 1024 - tmp) : 0;
-        // available_host_memory = available_host_memory * 0.8;
-        // Keep 20% of the available host memory for room of emergency
-        size_t available_host_memory = get_available_host_memory() * 0.8;
-        // Ensure sufficient host memory, otherwise hipHostMalloc may OOM and hip api won't return error code
-        if(available_host_memory < capacity)
-        {
-            d      = nullptr;
-            m_size = m_capacity = 0;
-        }
-        else if(hipHostMalloc(&d, capacity) != hipSuccess)
+        // // size_t tmp = (size_t)340 * 1024 * 1024 * 1024 - get_available_host_memory();
+        // // size_t available_host_memory = (tmp < (size_t)32 * 1024 * 1024 * 1024) ? ((size_t)32 * 1024 * 1024 * 1024 - tmp) : 0;
+        // // available_host_memory = available_host_memory * 0.8;
+        // // Keep 20% of the available host memory for room of emergency
+        // size_t available_host_memory = get_available_host_memory() * 0.8;
+        // // Ensure sufficient host memory, otherwise hipHostMalloc may OOM and hip api won't return error code
+        // if(available_host_memory < capacity)
+        // {
+        //     d      = nullptr;
+        //     m_size = m_capacity = 0;
+        // }
+        if(hipHostMalloc(&d, capacity) != hipSuccess)
         {
             hipblaslt_cerr << "Error allocating (" << (capacity >> 30) << " GB) host memory"
                            << std::endl;
