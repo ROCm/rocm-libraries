@@ -716,11 +716,13 @@ class RegisterSchedule:
         for transA, transB in product([True, False], repeat=2):
             for useLDSTr, TLDS in product([True, False], [1, 0]):                
                 probe = self._make_probe_kernel(transA, transB, useLDSTr, TLDS)
-                
-                found, _ = func(probe, useLDSTr, TLDS)
-                if found:
-                    detected.add(as_str(transA) + as_str(transB))
-                    
+                try:
+                    found, _ = func(probe, useLDSTr, TLDS)
+                    if found:
+                        detected.add(as_str(transA) + as_str(transB))
+                except ValueError:
+                    continue
+
         return list(detected)
 
     def __call__(self, func: Callable) -> Callable:
