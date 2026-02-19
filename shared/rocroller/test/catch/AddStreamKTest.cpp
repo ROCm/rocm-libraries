@@ -120,6 +120,30 @@ void computeReference(std::function<void(uint, uint, uint, uint)> f,
                 REQUIRE(coverage[{m, n, k}] == 1);
 }
 
+void applyGraphTransforms(rocRoller::KernelGraph::KernelGraph& kgraph,
+                          rocRoller::CommandParametersPtr      params,
+                          rocRoller::ContextPtr                context,
+                          rocRoller::Expression::ExpressionPtr numWGsExpr)
+{
+    using namespace rocRoller::KernelGraph;
+    std::vector<GraphTransformPtr> transforms;
+    transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
+    transforms.push_back(std::make_shared<OrderMemory>(false));
+    transforms.push_back(std::make_shared<UpdateParameters>(params));
+    transforms.push_back(std::make_shared<AddLDS>(params, context));
+    transforms.push_back(std::make_shared<LowerLinear>(context));
+    transforms.push_back(std::make_shared<LowerTile>(params, context));
+    transforms.push_back(std::make_shared<LowerTensorContraction>(params, context));
+    transforms.push_back(std::make_shared<Simplify>());
+    transforms.push_back(std::make_shared<FuseExpressions>());
+    transforms.push_back(std::make_shared<AddStreamK>(
+        context, params, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
+    transforms.push_back(std::make_shared<ConnectWorkgroups>(context));
+
+    for(auto& t : transforms)
+        kgraph = kgraph.transform(t);
+}
+
 //
 // Coordinate graph looks like:
 //
@@ -559,30 +583,10 @@ TEST_CASE("AddStreamK with unroll K", "[streamk][kernel-graph]")
     auto numWGs     = example.getFlattenedWorkgroupSize();
     auto numWGsExpr = std::make_shared<Expression::Expression>(numWGs);
 
-    auto applyGraphTransforms
-        = [&numWGsExpr, &context](CommandParametersPtr                 params,
-                                  rocRoller::KernelGraph::KernelGraph& kgraph) {
-              std::vector<GraphTransformPtr> transforms;
-              transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
-              transforms.push_back(std::make_shared<OrderMemory>(false));
-              transforms.push_back(std::make_shared<UpdateParameters>(params));
-              transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
-              transforms.push_back(std::make_shared<LowerLinear>(context.get()));
-              transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
-              transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
-              transforms.push_back(std::make_shared<Simplify>());
-              transforms.push_back(std::make_shared<FuseExpressions>());
-              transforms.push_back(std::make_shared<AddStreamK>(
-                  context.get(), params, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
-              transforms.push_back(std::make_shared<ConnectWorkgroups>(context.get()));
-              for(auto& t : transforms)
-                  kgraph = kgraph.transform(t);
-          };
-
     auto kgraph = example.getKernelGraph();
     auto params = example.getCommandParameters();
 
-    applyGraphTransforms(params, kgraph);
+    applyGraphTransforms(kgraph, params, context.get(), numWGsExpr);
 
     auto loopPredicate = [&](int tag) {
         auto maybeForLoop = kgraph.control.get<ForLoopOp>(tag);
@@ -647,23 +651,7 @@ TEST_CASE("AddStreamK scratch policy usage", "[streamk][kernel-graph][scratch]")
     auto kgraph = example.getKernelGraph();
     auto params = example.getCommandParameters();
 
-    // Apply transforms including AddStreamK
-    std::vector<GraphTransformPtr> transforms;
-    transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
-    transforms.push_back(std::make_shared<OrderMemory>(false));
-    transforms.push_back(std::make_shared<UpdateParameters>(params));
-    transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
-    transforms.push_back(std::make_shared<LowerLinear>(context.get()));
-    transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
-    transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
-    transforms.push_back(std::make_shared<Simplify>());
-    transforms.push_back(std::make_shared<FuseExpressions>());
-    transforms.push_back(std::make_shared<AddStreamK>(
-        context.get(), params, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
-    transforms.push_back(std::make_shared<ConnectWorkgroups>(context.get()));
-
-    for(auto& t : transforms)
-        kgraph = kgraph.transform(t);
+    applyGraphTransforms(kgraph, params, context.get(), numWGsExpr);
 
     SECTION("Tile data uses None policy")
     {
@@ -807,5 +795,292 @@ TEST_CASE("AddStreamK scratch policy usage", "[streamk][kernel-graph][scratch]")
         auto order
             = kgraph.control.compareNodes(rocRoller::UpdateCache, storeFlagsTag, resetFlagsTag);
         CHECK(order == NodeOrdering::LeftFirst);
+    }
+}
+
+TEST_CASE("AddStreamK control graph structure", "[streamk][kernel-graph][control-graph]")
+{
+    using namespace rocRoller;
+    using namespace KernelGraph;
+    using namespace ControlGraph;
+    using namespace CoordinateGraph;
+
+    auto context = TestContext::ForDefaultTarget();
+    auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
+
+    auto mode = GENERATE(StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst);
+
+    example.setTileSize(128, 256, 8);
+    example.setMFMA(32, 32, 2, 1);
+    example.setUseLDS(false, false, false);
+    example.setPrefetch(false, 0, 0, false);
+    example.setStreamK(mode);
+
+    auto numWGs     = example.getFlattenedWorkgroupSize();
+    auto numWGsExpr = std::make_shared<Expression::Expression>(numWGs);
+
+    auto kgraph = example.getKernelGraph();
+    auto params = example.getCommandParameters();
+
+    applyGraphTransforms(kgraph, params, context.get(), numWGsExpr);
+
+    auto findForLoops = [&](std::string const& name) {
+        return kgraph.control
+            .findElements([&](int tag) {
+                auto maybeForLoop = kgraph.control.get<ForLoopOp>(tag);
+                return maybeForLoop && maybeForLoop->loopName == name;
+            })
+            .to<std::vector>();
+    };
+
+    auto findConditionals = [&](std::string const& name) {
+        return kgraph.control
+            .findElements([&](int tag) {
+                auto maybeCond = kgraph.control.get<ConditionalOp>(tag);
+                return maybeCond && maybeCond->conditionName == name;
+            })
+            .to<std::vector>();
+    };
+
+    auto findDoWhileLoops = [&](std::string const& name) {
+        return kgraph.control
+            .findElements([&](int tag) {
+                auto maybeDoWhile = kgraph.control.get<DoWhileOp>(tag);
+                return maybeDoWhile && maybeDoWhile->loopName == name;
+            })
+            .to<std::vector>();
+    };
+
+    bool isTwoTile = mode == StreamKMode::TwoTile || mode == StreamKMode::TwoTileDPFirst;
+
+    SECTION("Send, receive, spin, post-accumulation are in SK section")
+    {
+        auto skLoops   = findForLoops("SKStreamTileLoop");
+        auto sendConds = findConditionals("Send Tile");
+        auto recvConds = findConditionals("Receive Tile");
+        auto spinLoops = findDoWhileLoops("Global sync spin loop");
+        auto postAccum = findConditionals("Post-accumulation Condition");
+
+        REQUIRE(skLoops.size() == 1);
+        REQUIRE(sendConds.size() == 1);
+        REQUIRE(recvConds.size() == 1);
+        REQUIRE(spinLoops.size() == 1);
+        REQUIRE(postAccum.size() == 1);
+
+        // Send, receive, spin, and post-accumulation are all inside the body
+        // of the SK tile loop (chained via Body -> Sequence within the loop).
+        CHECK(kgraph.control.compareNodes(rocRoller::UpdateCache, skLoops[0], sendConds[0])
+              == NodeOrdering::RightInBodyOfLeft);
+        CHECK(kgraph.control.compareNodes(rocRoller::UpdateCache, skLoops[0], recvConds[0])
+              == NodeOrdering::RightInBodyOfLeft);
+        auto spinContainers = kgraph.control.nodesContaining(spinLoops[0]).to<std::set>();
+        CHECK(spinContainers.contains(skLoops[0]));
+        CHECK(spinContainers.contains(recvConds[0]));
+        CHECK(kgraph.control.compareNodes(rocRoller::UpdateCache, skLoops[0], postAccum[0])
+              == NodeOrdering::RightInBodyOfLeft);
+
+        // Within the body, they are ordered: send -> receive -> post-accumulation
+        CHECK(kgraph.control.compareNodes(rocRoller::UpdateCache, sendConds[0], recvConds[0])
+              == NodeOrdering::LeftFirst);
+        CHECK(kgraph.control.compareNodes(rocRoller::UpdateCache, recvConds[0], postAccum[0])
+              == NodeOrdering::LeftFirst);
+    }
+
+    if(isTwoTile)
+    {
+        SECTION("TwoTile: SK and DP tile loop ordering matches mode")
+        {
+            auto skLoops = findForLoops("SKStreamTileLoop");
+            auto dpLoops = findForLoops("DPStreamTileLoop");
+
+            REQUIRE(skLoops.size() == 1);
+            REQUIRE(dpLoops.size() == 1);
+
+            auto order
+                = kgraph.control.compareNodes(rocRoller::UpdateCache, skLoops[0], dpLoops[0]);
+
+            if(mode == StreamKMode::TwoTile)
+            {
+                // SK first, then DP
+                CHECK(order == NodeOrdering::LeftFirst);
+            }
+            else
+            {
+                // TwoTileDPFirst: DP first, then SK
+                CHECK(order == NodeOrdering::RightFirst);
+            }
+        }
+    }
+}
+
+TEST_CASE("AddStreamK coordinate graph structure", "[streamk][kernel-graph][coordinate-graph]")
+{
+    using namespace rocRoller;
+    using namespace KernelGraph;
+    using namespace ControlGraph;
+    using namespace CoordinateGraph;
+
+    auto context = TestContext::ForDefaultTarget();
+    auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
+
+    auto mode = GENERATE(StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst);
+
+    example.setTileSize(128, 256, 8);
+    example.setMFMA(32, 32, 2, 1);
+    example.setUseLDS(false, false, false);
+    example.setPrefetch(false, 0, 0, false);
+    example.setStreamK(mode);
+
+    auto numWGs     = example.getFlattenedWorkgroupSize();
+    auto numWGsExpr = std::make_shared<Expression::Expression>(numWGs);
+
+    auto kgraph = example.getKernelGraph();
+    auto params = example.getCommandParameters();
+
+    applyGraphTransforms(kgraph, params, context.get(), numWGsExpr);
+
+    bool isTwoTile = mode == StreamKMode::TwoTile || mode == StreamKMode::TwoTileDPFirst;
+
+    auto isSplitEdge       = isEdge<Split>;
+    auto isTileEdge        = isEdge<Tile>;
+    auto isPassThroughEdge = isEdge<PassThrough>;
+    auto isDataFlowEdge    = isEdge<DataFlow>;
+
+    auto findForLoops = [&](std::string const& name) {
+        return kgraph.control
+            .findElements([&](int tag) {
+                auto maybeForLoop = kgraph.control.get<ForLoopOp>(tag);
+                return maybeForLoop && maybeForLoop->loopName == name;
+            })
+            .to<std::vector>();
+    };
+
+    // Get the forward ForLoop coordinate from a tile loop's control node.
+    // conditionalFor connects via NaryArgument::DEST to the increment coordinate
+    // (a Linear node). DataFlow edges lead from that to the forward/reverse
+    // ForLoop coordinates. The forward one has a Split input.
+    auto getForwardForLoopCoord = [&](int tileLoopControlTag) -> std::optional<int> {
+        auto incrCoord = kgraph.mapper.get(tileLoopControlTag, NaryArgument::DEST);
+        if(incrCoord == -1)
+            return std::nullopt;
+
+        auto dataFlowOutputs
+            = kgraph.coordinates.getOutputNodeIndices(incrCoord, isDataFlowEdge).to<std::vector>();
+
+        for(auto coord : dataFlowOutputs)
+        {
+            auto splitInputs
+                = kgraph.coordinates.getInputNodeIndices(coord, isSplitEdge).to<std::vector>();
+            if(!splitInputs.empty())
+                return coord;
+        }
+        return std::nullopt;
+    };
+
+    // Trace from a tile loop to its tileSpace node:
+    //   tileLoop -> ForLoop coord -> Split -> localTileSpace -> Tile -> tileSpace
+    auto getTileSpaceNode = [&](int tileLoopControlTag) -> std::optional<int> {
+        auto forLoopCoord = getForwardForLoopCoord(tileLoopControlTag);
+        if(!forLoopCoord)
+            return std::nullopt;
+
+        auto splitParents
+            = kgraph.coordinates.getInputNodeIndices(*forLoopCoord, isSplitEdge).to<std::vector>();
+        if(splitParents.empty())
+            return std::nullopt;
+
+        auto tileParents
+            = kgraph.coordinates.getInputNodeIndices(splitParents[0], isTileEdge).to<std::vector>();
+        if(tileParents.empty())
+            return std::nullopt;
+
+        return tileParents[0];
+    };
+
+    // Find the Sunder edge upstream of a given node (if any).
+    auto findUpstreamSunderEdge = [&](int nodeTag) -> std::optional<int> {
+        for(auto edgeTag : kgraph.coordinates.getNeighbours<Graph::Direction::Upstream>(nodeTag))
+        {
+            if(kgraph.coordinates.get<Sunder>(edgeTag).has_value())
+                return edgeTag;
+        }
+        return std::nullopt;
+    };
+
+    if(!isTwoTile)
+    {
+        SECTION("Standard: tileSpace connected to tileSpaceSK via PassThrough, not Sunder")
+        {
+            auto skLoops = findForLoops("SKStreamTileLoop");
+            REQUIRE(skLoops.size() == 1);
+
+            auto tileSpaceSK = getTileSpaceNode(skLoops[0]);
+            REQUIRE(tileSpaceSK.has_value());
+
+            // tileSpaceSK should have a PassThrough edge upstream to tileSpace
+            auto ptParents = kgraph.coordinates.getInputNodeIndices(*tileSpaceSK, isPassThroughEdge)
+                                 .to<std::vector>();
+            CHECK(ptParents.size() == 1);
+
+            // No Sunder edge upstream in Standard mode
+            CHECK(!findUpstreamSunderEdge(*tileSpaceSK).has_value());
+        }
+    }
+
+    if(isTwoTile)
+    {
+        SECTION("TwoTile: Sunder output ordering matches mode")
+        {
+            // Trace from SK tile loop to tileSpaceSK, then find its Sunder edge
+            auto skLoops = findForLoops("SKStreamTileLoop");
+            REQUIRE(skLoops.size() == 1);
+
+            auto tileSpaceSK = getTileSpaceNode(skLoops[0]);
+            REQUIRE(tileSpaceSK.has_value());
+
+            auto sunderEdgeTag = findUpstreamSunderEdge(*tileSpaceSK);
+            REQUIRE(sunderEdgeTag.has_value());
+
+            auto loc = kgraph.coordinates.getLocation(*sunderEdgeTag);
+            // Forward Sunder: 1 input (tileSpace), 3 outputs (SK, DP, selector)
+            CHECK(loc.incoming.size() == 1);
+            REQUIRE(loc.outgoing.size() == 3);
+
+            auto first  = loc.outgoing[0];
+            auto second = loc.outgoing[1];
+
+            // For TwoTile (SK first): outputs are [tileSpaceSK, tileSpaceDP, selector]
+            // For TwoTileDPFirst:     outputs are [tileSpaceDP, tileSpaceSK, selector]
+            if(mode == StreamKMode::TwoTile)
+                CHECK(*tileSpaceSK == first);
+            else
+                CHECK(*tileSpaceSK == second);
+        }
+
+        SECTION("TwoTile: SK and DP have separate tile ForLoop dims")
+        {
+            auto skLoops = findForLoops("SKStreamTileLoop");
+            auto dpLoops = findForLoops("DPStreamTileLoop");
+            REQUIRE(skLoops.size() == 1);
+            REQUIRE(dpLoops.size() == 1);
+
+            auto skCoord = getForwardForLoopCoord(skLoops[0]);
+            auto dpCoord = getForwardForLoopCoord(dpLoops[0]);
+            REQUIRE(skCoord.has_value());
+            REQUIRE(dpCoord.has_value());
+
+            // SK and DP tile loops should map to different ForLoop coordinates
+            CHECK(*skCoord != *dpCoord);
+
+            // Each should come from a different Split (different local tile space)
+            auto skSplitParents
+                = kgraph.coordinates.getInputNodeIndices(*skCoord, isSplitEdge).to<std::vector>();
+            auto dpSplitParents
+                = kgraph.coordinates.getInputNodeIndices(*dpCoord, isSplitEdge).to<std::vector>();
+            REQUIRE(skSplitParents.size() == 1);
+            REQUIRE(dpSplitParents.size() == 1);
+
+            CHECK(skSplitParents[0] != dpSplitParents[0]);
+        }
     }
 }

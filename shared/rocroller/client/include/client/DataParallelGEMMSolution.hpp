@@ -580,13 +580,10 @@ namespace rocRoller
                         params->prefetch = false;
                     }
 
-                    if(solutionParams.matchMemoryAccess)
-                    {
-                        params->transposeMemoryAccess.set(
-                            LayoutType::MATRIX_A, solutionParams.types.transA == TransposeType::T);
-                        params->transposeMemoryAccess.set(
-                            LayoutType::MATRIX_B, solutionParams.types.transB == TransposeType::T);
-                    }
+                    params->transposeMemoryAccess.set(
+                        LayoutType::MATRIX_A, solutionParams.types.transA == TransposeType::T);
+                    params->transposeMemoryAccess.set(
+                        LayoutType::MATRIX_B, solutionParams.types.transB == TransposeType::T);
 
                     uint workgroup_size_x
                         = solutionParams.workgroupSizeX * solutionParams.workgroupSizeY;

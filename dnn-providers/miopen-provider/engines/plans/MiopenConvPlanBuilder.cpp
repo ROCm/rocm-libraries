@@ -140,10 +140,184 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle,
     return solutionCount != 0;
 }
 
-size_t getWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                           bool deterministicEnabled)
+MiopenConvPlanBuilder::WorkspaceSizeRange
+    getWorkspaceSizeRangeFwd(const HipdnnEnginePluginHandle& handle,
+                             const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                             bool deterministicEnabled)
 {
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
+    ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+
+    size_t solutionCount = 0;
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
+                                                                     params.w().tensorDescriptor(),
+                                                                     params.x().tensorDescriptor(),
+                                                                     params.conv().convDescriptor(),
+                                                                     params.y().tensorDescriptor(),
+                                                                     &solutionCount));
+
+    if(solutionCount == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "No solutions found for forward convolution");
+    }
+
+    std::vector<miopenConvSolution_t> solutions(solutionCount);
+    size_t returnedSolutionCount = 0;
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetSolution(handle.miopenHandle,
+                                                                params.w().tensorDescriptor(),
+                                                                params.x().tensorDescriptor(),
+                                                                params.conv().convDescriptor(),
+                                                                params.y().tensorDescriptor(),
+                                                                solutionCount,
+                                                                &returnedSolutionCount,
+                                                                solutions.data()));
+
+    HIPDNN_PLUGIN_LOG_INFO("Getting workspace size range for Convolution Fwd: Found "
+                           << returnedSolutionCount << " solutions");
+
+    size_t minWorkspace = std::numeric_limits<size_t>::max();
+    size_t maxWorkspace = 0;
+    for(const auto& solution : solutions)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("Convolution Fwd: solution_id="
+                               << solution.solution_id << ", algorithm="
+                               << static_cast<int>(solution.algorithm) << ", time=" << solution.time
+                               << ", workspace_size=" << solution.workspace_size);
+        minWorkspace = std::min(minWorkspace, solution.workspace_size);
+        maxWorkspace = std::max(maxWorkspace, solution.workspace_size);
+    }
+
+    HIPDNN_PLUGIN_LOG_INFO("Convolution Fwd: Workspace range: min=" << minWorkspace
+                                                                    << ", max=" << maxWorkspace);
+
+    return {minWorkspace, maxWorkspace};
+}
+
+MiopenConvPlanBuilder::WorkspaceSizeRange
+    getWorkspaceSizeRangeBwd(const HipdnnEnginePluginHandle& handle,
+                             const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                             bool deterministicEnabled)
+{
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
+    ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+
+    size_t solutionCount = 0;
+    THROW_ON_MIOPEN_FAILURE(
+        miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
+                                                      params.dy().tensorDescriptor(),
+                                                      params.w().tensorDescriptor(),
+                                                      params.conv().convDescriptor(),
+                                                      params.dx().tensorDescriptor(),
+                                                      &solutionCount));
+
+    if(solutionCount == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "No solutions found for backward data convolution");
+    }
+
+    std::vector<miopenConvSolution_t> solutions(solutionCount);
+    size_t returnedSolutionCount = 0;
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionBackwardDataGetSolution(handle.miopenHandle,
+                                                                     params.dy().tensorDescriptor(),
+                                                                     params.w().tensorDescriptor(),
+                                                                     params.conv().convDescriptor(),
+                                                                     params.dx().tensorDescriptor(),
+                                                                     solutionCount,
+                                                                     &returnedSolutionCount,
+                                                                     solutions.data()));
+
+    HIPDNN_PLUGIN_LOG_INFO("Getting workspace size range for Convolution Bwd: Found "
+                           << returnedSolutionCount << " solutions");
+
+    size_t minWorkspace = std::numeric_limits<size_t>::max();
+    size_t maxWorkspace = 0;
+    for(const auto& solution : solutions)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("Convolution Bwd: solution_id="
+                               << solution.solution_id << ", algorithm="
+                               << static_cast<int>(solution.algorithm) << ", time=" << solution.time
+                               << ", workspace_size=" << solution.workspace_size);
+        minWorkspace = std::min(minWorkspace, solution.workspace_size);
+        maxWorkspace = std::max(maxWorkspace, solution.workspace_size);
+    }
+
+    HIPDNN_PLUGIN_LOG_INFO("Convolution Bwd: Workspace range: min=" << minWorkspace
+                                                                    << ", max=" << maxWorkspace);
+
+    return {minWorkspace, maxWorkspace};
+}
+
+MiopenConvPlanBuilder::WorkspaceSizeRange
+    getWorkspaceSizeRangeWrw(const HipdnnEnginePluginHandle& handle,
+                             const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                             bool deterministicEnabled)
+{
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
+    ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+
+    size_t solutionCount = 0;
+    THROW_ON_MIOPEN_FAILURE(
+        miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
+                                                         params.dy().tensorDescriptor(),
+                                                         params.x().tensorDescriptor(),
+                                                         params.conv().convDescriptor(),
+                                                         params.dw().tensorDescriptor(),
+                                                         &solutionCount));
+
+    if(solutionCount == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "No solutions found for backward weights convolution");
+    }
+
+    std::vector<miopenConvSolution_t> solutions(solutionCount);
+    size_t returnedSolutionCount = 0;
+    THROW_ON_MIOPEN_FAILURE(
+        miopenConvolutionBackwardWeightsGetSolution(handle.miopenHandle,
+                                                    params.dy().tensorDescriptor(),
+                                                    params.x().tensorDescriptor(),
+                                                    params.conv().convDescriptor(),
+                                                    params.dw().tensorDescriptor(),
+                                                    solutionCount,
+                                                    &returnedSolutionCount,
+                                                    solutions.data()));
+
+    HIPDNN_PLUGIN_LOG_INFO("Getting workspace size range for Convolution Wrw: Found "
+                           << returnedSolutionCount << " solutions");
+
+    size_t minWorkspace = std::numeric_limits<size_t>::max();
+    size_t maxWorkspace = 0;
+    for(const auto& solution : solutions)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("Convolution Wrw: solution_id="
+                               << solution.solution_id << ", algorithm="
+                               << static_cast<int>(solution.algorithm) << ", time=" << solution.time
+                               << ", workspace_size=" << solution.workspace_size);
+        minWorkspace = std::min(minWorkspace, solution.workspace_size);
+        maxWorkspace = std::max(maxWorkspace, solution.workspace_size);
+    }
+
+    HIPDNN_PLUGIN_LOG_INFO("Convolution Wrw: Workspace range: min=" << minWorkspace
+                                                                    << ", max=" << maxWorkspace);
+
+    return {minWorkspace, maxWorkspace};
+}
+
+size_t getMaxWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                              const MiopenExecutionSettings& executionSettings,
+                              bool deterministicEnabled)
+{
+    if(executionSettings.workspaceSizeLimit().has_value())
+    {
+        return executionSettings.workspaceSizeLimit().value();
+    }
+
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
     ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
@@ -158,10 +332,16 @@ size_t getWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
     return workSpaceSize;
 }
 
-size_t getWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                           bool deterministicEnabled)
+size_t getMaxWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                              const MiopenExecutionSettings& executionSettings,
+                              bool deterministicEnabled)
 {
+    if(executionSettings.workspaceSizeLimit().has_value())
+    {
+        return executionSettings.workspaceSizeLimit().value();
+    }
+
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
     ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
@@ -178,10 +358,16 @@ size_t getWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
     return workSpaceSize;
 }
 
-size_t getWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                           bool deterministicEnabled)
+size_t getMaxWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                              const MiopenExecutionSettings& executionSettings,
+                              bool deterministicEnabled)
 {
+    if(executionSettings.workspaceSizeLimit().has_value())
+    {
+        return executionSettings.workspaceSizeLimit().value();
+    }
+
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
     ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
@@ -207,7 +393,7 @@ void buildPlanFwd(const HipdnnEnginePluginHandle& handle,
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
     ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     auto plan = std::make_unique<ConvFwdPlan>(
-        handle, std::move(params), executionContext.benchmarkingEnabled());
+        handle, std::move(params), executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -220,7 +406,7 @@ void buildPlanBwd(const HipdnnEnginePluginHandle& handle,
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
     ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     auto plan = std::make_unique<ConvBwdPlan>(
-        handle, std::move(params), executionContext.benchmarkingEnabled());
+        handle, std::move(params), executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -233,7 +419,7 @@ void buildPlanWrw(const HipdnnEnginePluginHandle& handle,
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
     ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     auto plan = std::make_unique<ConvWrwPlan>(
-        handle, std::move(params), executionContext.benchmarkingEnabled());
+        handle, std::move(params), executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -284,7 +470,7 @@ bool MiopenConvPlanBuilder::isApplicable(
     return ret;
 }
 
-size_t MiopenConvPlanBuilder::getWorkspaceSize(
+MiopenConvPlanBuilder::WorkspaceSizeRange MiopenConvPlanBuilder::getWorkspaceSizeRange(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
@@ -301,11 +487,11 @@ size_t MiopenConvPlanBuilder::getWorkspaceSize(
     switch(node.attributes_type())
     {
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
-        return getWorkspaceSizeFwd(handle, opGraph, _deterministic);
+        return getWorkspaceSizeRangeFwd(handle, opGraph, _deterministic);
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
-        return getWorkspaceSizeBwd(handle, opGraph, _deterministic);
+        return getWorkspaceSizeRangeBwd(handle, opGraph, _deterministic);
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
-        return getWorkspaceSizeWrw(handle, opGraph, _deterministic);
+        return getWorkspaceSizeRangeWrw(handle, opGraph, _deterministic);
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -314,11 +500,86 @@ size_t MiopenConvPlanBuilder::getWorkspaceSize(
     }
 }
 
-void MiopenConvPlanBuilder::buildPlan(
+size_t MiopenConvPlanBuilder::getMaxWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    HipdnnEnginePluginExecutionContext& executionContext) const
+    const MiopenExecutionSettings& executionSettings) const
+{
+    if(opGraph.nodeCount() != 1)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Convolution plan builder supports only single node graphs. Graph has "
+                + std::to_string(opGraph.nodeCount()) + " nodes");
+    }
+
+    const auto& node = opGraph.getNode(0);
+
+    switch(node.attributes_type())
+    {
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+        return getMaxWorkspaceSizeFwd(handle, opGraph, executionSettings, _deterministic);
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+        return getMaxWorkspaceSizeBwd(handle, opGraph, executionSettings, _deterministic);
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+        return getMaxWorkspaceSizeWrw(handle, opGraph, executionSettings, _deterministic);
+    default:
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported node type for convolution plan builder: "
+                + std::string(hipdnn_data_sdk::data_objects::toString(node.attributes_type())));
+    }
+}
+
+void MiopenConvPlanBuilder::initializeExecutionSettings(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    MiopenExecutionSettings& executionSettings) const
+{
+    // Read workspace size limit knob setting
+    if(engineConfig.isValid()
+       && engineConfig.hasKnobSetting(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME))
+    {
+        const auto& knobSetting
+            = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME);
+
+        if(knobSetting.valueType() != hipdnn_data_sdk::data_objects::KnobValue::IntValue)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Workspace size limit knob setting value is not an integer. Type: "
+                    + std::string(
+                        hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType())));
+        }
+
+        auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
+
+        if(value < 0)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                "Invalid workspace size limit value: " + std::to_string(value) + ". Must be >= 0");
+        }
+
+        const auto range = getWorkspaceSizeRange(handle, opGraph);
+
+        if(static_cast<size_t>(value) < range.min || static_cast<size_t>(value) > range.max)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                "Invalid workspace size limit value: " + std::to_string(value)
+                    + ". Must be in range [" + std::to_string(range.min) + ", "
+                    + std::to_string(range.max) + "]");
+        }
+
+        executionSettings.setWorkspaceSizeLimit(static_cast<size_t>(value));
+    }
+}
+
+void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
+                                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                                      HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -355,10 +616,55 @@ void MiopenConvPlanBuilder::buildPlan(
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvPlanBuilder::getCustomKnobs(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    return {};
+    std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
+
+    if(!isApplicable(handle, opGraph))
+    {
+        return knobs;
+    }
+
+    // Workspace size limit knob
+    const auto range = getWorkspaceSizeRange(handle, opGraph);
+
+    // Validate that size_t values can fit into int64_t
+    if(range.min > std::numeric_limits<int64_t>::max())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "Workspace size range minimum (" + std::to_string(range.min)
+                + ") exceeds maximum representable int64_t value");
+    }
+    if(range.max > std::numeric_limits<int64_t>::max())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "Workspace size range maximum (" + std::to_string(range.max)
+                + ") exceeds maximum representable int64_t value");
+    }
+
+    const auto minWorkspace = static_cast<int64_t>(range.min);
+    const auto maxWorkspace = static_cast<int64_t>(range.max);
+
+    hipdnn_data_sdk::data_objects::KnobT workspaceKnob;
+    workspaceKnob.knob_id = hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME;
+    workspaceKnob.description = "Workspace size limit in bytes";
+
+    hipdnn_data_sdk::data_objects::IntValueT workspaceDefaultValue;
+    workspaceDefaultValue.value = maxWorkspace;
+    workspaceKnob.default_value.Set(workspaceDefaultValue);
+
+    hipdnn_data_sdk::data_objects::IntConstraintT workspaceConstraint;
+    workspaceConstraint.min_value = minWorkspace;
+    workspaceConstraint.max_value = maxWorkspace;
+    workspaceConstraint.step = 1;
+    workspaceKnob.constraint.Set(workspaceConstraint);
+
+    knobs.push_back(std::move(workspaceKnob));
+
+    return knobs;
 }
 
 } // namespace miopen_plugin
