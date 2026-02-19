@@ -5819,3 +5819,140 @@ TEST_F(TestGraph, GetRankedEngineIdsFailsWhenHeuristicCreationFails)
     EXPECT_NE(result.get_message().find("Failed to finalize engine heuristic descriptor"),
               std::string::npos);
 }
+
+// ============================================================================
+// Move Semantics Tests
+// ============================================================================
+
+TEST_F(TestGraph, MoveConstruction)
+{
+    Graph originalGraph;
+    originalGraph.set_name("OriginalGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    // Move construct
+    Graph movedGraph(std::move(originalGraph));
+
+    // Verify moved graph has the original state
+    EXPECT_EQ(movedGraph.get_name(), "OriginalGraph");
+    EXPECT_EQ(movedGraph.get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(movedGraph.get_intermediate_data_type(), DataType::HALF);
+    EXPECT_EQ(movedGraph.get_io_data_type(), DataType::FLOAT);
+}
+
+TEST_F(TestGraph, MoveAssignment)
+{
+    Graph originalGraph;
+    originalGraph.set_name("OriginalGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    Graph movedGraph;
+    movedGraph.set_name("TargetGraph");
+
+    // Move assign
+    movedGraph = std::move(originalGraph);
+
+    // Verify moved graph has the original state
+    EXPECT_EQ(movedGraph.get_name(), "OriginalGraph");
+    EXPECT_EQ(movedGraph.get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(movedGraph.get_intermediate_data_type(), DataType::HALF);
+    EXPECT_EQ(movedGraph.get_io_data_type(), DataType::FLOAT);
+}
+
+TEST_F(TestGraph, MoveConstructionWithNodes)
+{
+    Graph originalGraph;
+    originalGraph.set_name("GraphWithNodes")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    // Add a batchnorm node to the graph
+    auto y = createBasicBatchnormGraph(originalGraph);
+    EXPECT_NE(y, nullptr);
+
+    // Get tensor count before move
+    auto tensorsBeforeMove = originalGraph.getTensorsByName();
+    size_t tensorCountBeforeMove = tensorsBeforeMove.size();
+    EXPECT_GT(tensorCountBeforeMove, 0);
+
+    // Move construct
+    Graph movedGraph(std::move(originalGraph));
+
+    // Verify moved graph has the nodes
+    auto tensorsAfterMove = movedGraph.getTensorsByName();
+    EXPECT_EQ(tensorsAfterMove.size(), tensorCountBeforeMove);
+
+    // Verify graph name was moved
+    EXPECT_EQ(movedGraph.get_name(), "SerializedGraphTest");
+}
+
+TEST_F(TestGraph, MoveAssignmentWithNodes)
+{
+    Graph originalGraph;
+    originalGraph.set_name("GraphWithNodes")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    // Add a batchnorm node to the graph
+    auto y = createBasicBatchnormGraph(originalGraph);
+    EXPECT_NE(y, nullptr);
+
+    // Get tensor count before move
+    auto tensorsBeforeMove = originalGraph.getTensorsByName();
+    size_t tensorCountBeforeMove = tensorsBeforeMove.size();
+    EXPECT_GT(tensorCountBeforeMove, 0);
+
+    Graph movedGraph;
+    movedGraph.set_name("TargetGraph");
+
+    // Move assign
+    movedGraph = std::move(originalGraph);
+
+    // Verify moved graph has the nodes
+    auto tensorsAfterMove = movedGraph.getTensorsByName();
+    EXPECT_EQ(tensorsAfterMove.size(), tensorCountBeforeMove);
+
+    // Verify graph name was moved
+    EXPECT_EQ(movedGraph.get_name(), "SerializedGraphTest");
+}
+
+TEST_F(TestGraph, MoveConstructionWithPreferredEngineId)
+{
+    Graph originalGraph;
+    originalGraph.set_name("GraphWithEngineId")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_preferred_engine_id_ext(42);
+
+    EXPECT_TRUE(originalGraph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(originalGraph.get_preferred_engine_id_ext().value(), 42);
+
+    // Move construct
+    Graph movedGraph(std::move(originalGraph));
+
+    // Verify preferred engine id was moved
+    EXPECT_TRUE(movedGraph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(movedGraph.get_preferred_engine_id_ext().value(), 42);
+}
+
+TEST_F(TestGraph, MoveAssignmentToEmptyGraph)
+{
+    Graph sourceGraph;
+    sourceGraph.set_name("SourceGraph").set_compute_data_type(DataType::FLOAT);
+
+    Graph targetGraph;
+    // Target starts empty
+    EXPECT_EQ(targetGraph.get_name(), "");
+
+    // Move assign
+    targetGraph = std::move(sourceGraph);
+
+    // Target now has source's state
+    EXPECT_EQ(targetGraph.get_name(), "SourceGraph");
+    EXPECT_EQ(targetGraph.get_compute_data_type(), DataType::FLOAT);
+}

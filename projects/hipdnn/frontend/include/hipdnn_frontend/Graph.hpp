@@ -531,6 +531,11 @@ public:
         HIPDNN_FE_LOG_INFO("Creating new Graph instance");
     }
 
+    // Copy operations disabled via INode base class
+    // Move operations defaulted - automatically handles all members
+    Graph(Graph&&) = default;
+    Graph& operator=(Graph&&) = default;
+
     Error validate()
     {
         HIPDNN_FE_LOG_INFO("Validating graph " << graph_attributes.get_name());
