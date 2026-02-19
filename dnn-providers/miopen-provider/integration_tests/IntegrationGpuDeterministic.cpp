@@ -1,28 +1,26 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <filesystem>
-#include <random>
+#include <cstring>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/BatchnormCommon.hpp"
 #include "../tests/common/ConvolutionCommon.hpp"
-#include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
-using namespace miopen_plugin::test_utilities;
 using namespace test_conv_common;
 using namespace test_bn_common;
 
@@ -30,8 +28,114 @@ namespace
 {
 
 // ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Populates a GraphTensorBundle from a built graph by visiting all nodes
+/// and creating tensors for non-virtual tensor attributes.
+void populateBundleFromGraph(Graph& graph, GraphTensorBundle& bundle)
+{
+    graph.visit([&](const INode& node) {
+        for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+        {
+            int64_t tensorId = tensorAttr->get_uid();
+            if(!tensorAttr->get_is_virtual()
+               && bundle.tensors.find(tensorId) == bundle.tensors.end())
+            {
+                bundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+            }
+        }
+        for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
+        {
+            int64_t tensorId = tensorAttr->get_uid();
+            if(!tensorAttr->get_is_virtual()
+               && bundle.tensors.find(tensorId) == bundle.tensors.end())
+            {
+                bundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+            }
+        }
+    });
+}
+
+/// Randomizes all tensors in a bundle with the given seed.
+void randomizeBundle(GraphTensorBundle& bundle,
+                     unsigned int seed,
+                     float min = -1.0f,
+                     float max = 1.0f)
+{
+    for(auto& [tensorId, tensor] : bundle.tensors)
+    {
+        bundle.randomizeTensor(tensorId, min, max, seed);
+    }
+}
+
+/// Compares output tensors between two bundles for bit-exact equality.
+/// Uses raw byte comparison to handle all data types correctly.
+void assertBundleOutputsMatch(GraphTensorBundle& bundle1,
+                              GraphTensorBundle& bundle2,
+                              int64_t outputTensorId,
+                              hipStream_t stream)
+{
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+
+    auto& tensor1 = bundle1.tensors.at(outputTensorId);
+    auto& tensor2 = bundle2.tensors.at(outputTensorId);
+
+    tensor1->markDeviceModified();
+    tensor2->markDeviceModified();
+
+    auto* host1 = static_cast<const uint8_t*>(tensor1->rawHostData());
+    auto* host2 = static_cast<const uint8_t*>(tensor2->rawHostData());
+
+    size_t elementCount = tensor1->elementCount();
+    size_t elementSize = tensor1->elementSize();
+    size_t totalBytes = elementCount * elementSize;
+
+    ASSERT_EQ(elementCount, tensor2->elementCount()) << "Output tensor sizes differ";
+
+    int mismatchResult = std::memcmp(host1, host2, totalBytes);
+    ASSERT_EQ(mismatchResult, 0) << "Output tensors are not bit-exact";
+}
+
+// ============================================================================
+// Base Test Fixture for Deterministic Tests
+// Manages hipdnn handle and HIP stream lifecycle
+// ============================================================================
+
+template <typename TestCaseType>
+class DeterministicTestBase : public ::testing::TestWithParam<TestCaseType>
+{
+protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+
+        ASSERT_EQ(hipInit(0), hipSuccess);
+        ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
+        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
+        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
+    }
+
+    void TearDown() override
+    {
+        if(_handle != nullptr)
+        {
+            EXPECT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
+        }
+        if(_stream != nullptr)
+        {
+            EXPECT_EQ(hipStreamDestroy(_stream), hipSuccess);
+        }
+    }
+
+    hipdnnHandle_t _handle = nullptr;
+    hipStream_t _stream = nullptr;
+    int _deviceId = 0;
+};
+
+// ============================================================================
 // Deterministic Convolution Smoke Test Cases
-// Uses a subset of the standard convolution test cases for smoke testing
 // ============================================================================
 
 inline std::vector<ConvTestCase> getDeterministicConvTestCases4D()
@@ -63,44 +167,50 @@ inline std::vector<BatchnormTestCase> getDeterministicBnTestCases()
 }
 
 // ============================================================================
+// Fused Convolution Test Cases
+// ============================================================================
+
+using FusedConvTestCase = std::tuple<ConvTestCase, bool, test_activation_common::ActivTestCase>;
+
+inline std::vector<FusedConvTestCase> getDeterministicFusedConvTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    std::vector<ConvTestCase> convCases = {
+        {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
+    };
+
+    auto activCases = test_activation_common::createFwdActivationSmokeCases();
+
+    std::vector<FusedConvTestCase> fusedCases;
+    for(const auto& convCase : convCases)
+    {
+        for(const auto& activCase : activCases)
+        {
+            fusedCases.emplace_back(convCase, true, activCase); // With bias
+            fusedCases.emplace_back(convCase, false, activCase); // Without bias
+        }
+    }
+    return fusedCases;
+}
+
+// ============================================================================
 // Convolution Forward Determinism Test
-// Verifies that running the same convolution twice produces identical results
 // ============================================================================
 
 template <typename DataType>
-class DeterministicConvForward : public IntegrationGraphVerificationHarness<DataType, ConvTestCase>
+class DeterministicConvForward : public DeterministicTestBase<ConvTestCase>
 {
 protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
-        SKIP_IF_NO_DEVICES();
 
-        const ConvTestCase& testCase = this->GetParam();
+        const ConvTestCase& testCase = DeterministicTestBase<ConvTestCase>::GetParam();
 
-        // First execution
-        auto result1 = executeConvolution(testCase, layout);
-
-        // Second execution with same inputs
-        auto result2 = executeConvolution(testCase, layout);
-
-        // Compare results - should be bit-exact for deterministic execution
-        ASSERT_EQ(result1.size(), result2.size()) << "Output sizes differ";
-
-        for(size_t i = 0; i < result1.size(); ++i)
-        {
-            ASSERT_EQ(result1[i], result2[i])
-                << "Mismatch at index " << i << ": " << result1[i] << " != " << result2[i];
-        }
-    }
-
-private:
-    std::vector<float> executeConvolution(const ConvTestCase& testCase, const TensorLayout& layout)
-    {
-        hipdnn_frontend::graph::Graph graphObj;
+        // Build the graph
+        Graph graphObj;
         graphObj.set_name("DeterministicConvForwardTest");
-
-        // Set preferred engine to deterministic
         graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
@@ -108,15 +218,12 @@ private:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xAttr = makeTensorAttributes(
-            "x", testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        auto xTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+            "x", testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder)));
+        auto wTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+            "w", testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder)));
 
-        auto wAttr = makeTensorAttributes(
-            "w", testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
-        auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
-
-        graph::ConvFpropAttributes convAttrs;
+        ConvFpropAttributes convAttrs;
         convAttrs.set_pre_padding(testCase.convPrePadding);
         convAttrs.set_post_padding(testCase.convPostPadding);
         convAttrs.set_stride(testCase.convStride);
@@ -125,99 +232,32 @@ private:
         auto yAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
         yAttr->set_output(true);
 
-        // Build the graph
-        hipdnnHandle_t handle;
-        EXPECT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
+        auto result = graphObj.build(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        hipStream_t stream;
-        EXPECT_EQ(hipStreamCreate(&stream), hipSuccess);
-        EXPECT_EQ(hipdnnSetStream(handle, stream), HIPDNN_STATUS_SUCCESS);
+        // Create two bundles with same random values for determinism check
+        GraphTensorBundle bundle1;
+        GraphTensorBundle bundle2;
+        populateBundleFromGraph(graphObj, bundle1);
+        populateBundleFromGraph(graphObj, bundle2);
+        randomizeBundle(bundle1, testCase.seed);
+        randomizeBundle(bundle2, testCase.seed);
 
-        auto result = graphObj.build(handle);
-        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        // Allocate and initialize tensors
-        auto xSize = getTensorSize(testCase.xDims);
-        auto wSize = getTensorSize(testCase.wDims);
-        auto ySize = getTensorSize(yAttr->get_dim());
-
-        std::vector<DataType> xHost(xSize);
-        std::vector<DataType> wHost(wSize);
-        std::vector<float> yHost(ySize);
-
-        // Initialize with deterministic values based on seed
-        std::mt19937 gen(testCase.seed);
-        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-        for(auto& val : xHost)
-        {
-            val = static_cast<DataType>(dist(gen));
-        }
-        for(auto& val : wHost)
-        {
-            val = static_cast<DataType>(dist(gen));
-        }
-
-        // Allocate device memory
-        DataType* xDev = nullptr;
-        DataType* wDev = nullptr;
-        DataType* yDev = nullptr;
-
-        EXPECT_EQ(hipMalloc(&xDev, xSize * sizeof(DataType)), hipSuccess);
-        EXPECT_EQ(hipMalloc(&wDev, wSize * sizeof(DataType)), hipSuccess);
-        EXPECT_EQ(hipMalloc(&yDev, ySize * sizeof(DataType)), hipSuccess);
-
-        EXPECT_EQ(hipMemcpy(xDev, xHost.data(), xSize * sizeof(DataType), hipMemcpyHostToDevice),
-                  hipSuccess);
-        EXPECT_EQ(hipMemcpy(wDev, wHost.data(), wSize * sizeof(DataType), hipMemcpyHostToDevice),
-                  hipSuccess);
-
-        // Create variant pack
-        std::unordered_map<int64_t, void*> variantPack;
-        variantPack[xTensorAttr->get_uid()] = xDev;
-        variantPack[wTensorAttr->get_uid()] = wDev;
-        variantPack[yAttr->get_uid()] = yDev;
-
-        // Get workspace
+        // Execute twice
         int64_t workspaceSize;
         result = graphObj.get_workspace_size(workspaceSize);
-        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-        hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        Workspace workspace(static_cast<size_t>(workspaceSize));
 
-        // Execute
-        result = graphObj.execute(handle, variantPack, workspace.get());
-        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        auto variantPack1 = bundle1.toDeviceVariantPack();
+        result = graphObj.execute(_handle, variantPack1, workspace.get());
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
+        auto variantPack2 = bundle2.toDeviceVariantPack();
+        result = graphObj.execute(_handle, variantPack2, workspace.get());
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        // Copy results back
-        std::vector<DataType> yDevHost(ySize);
-        EXPECT_EQ(hipMemcpy(yDevHost.data(), yDev, ySize * sizeof(DataType), hipMemcpyDeviceToHost),
-                  hipSuccess);
-
-        // Convert to float for comparison
-        for(size_t i = 0; i < ySize; ++i)
-        {
-            yHost[i] = static_cast<float>(yDevHost[i]);
-        }
-
-        // Cleanup
-        EXPECT_EQ(hipFree(xDev), hipSuccess);
-        EXPECT_EQ(hipFree(wDev), hipSuccess);
-        EXPECT_EQ(hipFree(yDev), hipSuccess);
-        EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
-        EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
-
-        return yHost;
-    }
-
-    static size_t getTensorSize(const std::vector<int64_t>& dims)
-    {
-        size_t size = 1;
-        for(auto dim : dims)
-        {
-            size *= static_cast<size_t>(dim);
-        }
-        return size;
+        assertBundleOutputsMatch(bundle1, bundle2, yAttr->get_uid(), _stream);
     }
 };
 
@@ -227,43 +267,20 @@ using DeterministicConvFwdNchwFp16 = DeterministicConvForward<half>;
 
 // ============================================================================
 // Convolution Backward Data (Dgrad) Determinism Test
-// Verifies that running the same conv dgrad twice produces identical results
 // ============================================================================
 
 template <typename DataType>
-class DeterministicConvDgrad : public IntegrationGraphVerificationHarness<DataType, ConvTestCase>
+class DeterministicConvDgrad : public DeterministicTestBase<ConvTestCase>
 {
 protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
-        SKIP_IF_NO_DEVICES();
 
-        const ConvTestCase& testCase = this->GetParam();
+        const ConvTestCase& testCase = DeterministicTestBase<ConvTestCase>::GetParam();
 
-        // First execution
-        auto result1 = executeConvDgrad(testCase, layout);
-
-        // Second execution with same inputs
-        auto result2 = executeConvDgrad(testCase, layout);
-
-        // Compare results - should be bit-exact for deterministic execution
-        ASSERT_EQ(result1.size(), result2.size()) << "Output sizes differ";
-
-        for(size_t i = 0; i < result1.size(); ++i)
-        {
-            ASSERT_EQ(result1[i], result2[i])
-                << "Mismatch at index " << i << ": " << result1[i] << " != " << result2[i];
-        }
-    }
-
-private:
-    std::vector<float> executeConvDgrad(const ConvTestCase& testCase, const TensorLayout& layout)
-    {
-        hipdnn_frontend::graph::Graph graphObj;
+        Graph graphObj;
         graphObj.set_name("DeterministicConvDgradTest");
-
-        // Set preferred engine to deterministic
         graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
@@ -271,15 +288,12 @@ private:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto dyAttr = makeTensorAttributes(
-            "dy", testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
-        auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
+        auto dyTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+            "dy", testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder)));
+        auto wTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+            "w", testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder)));
 
-        auto wAttr = makeTensorAttributes(
-            "w", testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
-        auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
-
-        graph::ConvDgradAttributes convAttrs;
+        ConvDgradAttributes convAttrs;
         convAttrs.set_pre_padding(testCase.convPrePadding);
         convAttrs.set_post_padding(testCase.convPostPadding);
         convAttrs.set_stride(testCase.convStride);
@@ -287,105 +301,33 @@ private:
 
         auto dxTensorAttr = graphObj.conv_dgrad(dyTensorAttr, wTensorAttr, convAttrs);
         dxTensorAttr->set_output(true);
-
-        // Set these explicitly since grouped convs cannot infer tensor shape
         dxTensorAttr->set_dim(testCase.xDims);
         dxTensorAttr->set_stride(generateStrides(testCase.xDims, layout.strideOrder));
 
-        // Build the graph
-        hipdnnHandle_t handle;
-        EXPECT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
+        auto result = graphObj.build(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        hipStream_t stream;
-        EXPECT_EQ(hipStreamCreate(&stream), hipSuccess);
-        EXPECT_EQ(hipdnnSetStream(handle, stream), HIPDNN_STATUS_SUCCESS);
+        GraphTensorBundle bundle1;
+        GraphTensorBundle bundle2;
+        populateBundleFromGraph(graphObj, bundle1);
+        populateBundleFromGraph(graphObj, bundle2);
+        randomizeBundle(bundle1, testCase.seed);
+        randomizeBundle(bundle2, testCase.seed);
 
-        auto result = graphObj.build(handle);
-        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        // Allocate and initialize tensors
-        auto dySize = getTensorSize(testCase.yDims);
-        auto wSize = getTensorSize(testCase.wDims);
-        auto dxSize = getTensorSize(testCase.xDims);
-
-        std::vector<DataType> dyHost(dySize);
-        std::vector<DataType> wHost(wSize);
-        std::vector<float> dxHost(dxSize);
-
-        // Initialize with deterministic values based on seed
-        std::mt19937 gen(testCase.seed);
-        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-        for(auto& val : dyHost)
-        {
-            val = static_cast<DataType>(dist(gen));
-        }
-        for(auto& val : wHost)
-        {
-            val = static_cast<DataType>(dist(gen));
-        }
-
-        // Allocate device memory
-        DataType* dyDev = nullptr;
-        DataType* wDev = nullptr;
-        DataType* dxDev = nullptr;
-
-        EXPECT_EQ(hipMalloc(&dyDev, dySize * sizeof(DataType)), hipSuccess);
-        EXPECT_EQ(hipMalloc(&wDev, wSize * sizeof(DataType)), hipSuccess);
-        EXPECT_EQ(hipMalloc(&dxDev, dxSize * sizeof(DataType)), hipSuccess);
-
-        EXPECT_EQ(hipMemcpy(dyDev, dyHost.data(), dySize * sizeof(DataType), hipMemcpyHostToDevice),
-                  hipSuccess);
-        EXPECT_EQ(hipMemcpy(wDev, wHost.data(), wSize * sizeof(DataType), hipMemcpyHostToDevice),
-                  hipSuccess);
-
-        // Create variant pack
-        std::unordered_map<int64_t, void*> variantPack;
-        variantPack[dyTensorAttr->get_uid()] = dyDev;
-        variantPack[wTensorAttr->get_uid()] = wDev;
-        variantPack[dxTensorAttr->get_uid()] = dxDev;
-
-        // Get workspace
         int64_t workspaceSize;
         result = graphObj.get_workspace_size(workspaceSize);
-        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-        hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        Workspace workspace(static_cast<size_t>(workspaceSize));
 
-        // Execute
-        result = graphObj.execute(handle, variantPack, workspace.get());
-        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        auto variantPack1 = bundle1.toDeviceVariantPack();
+        result = graphObj.execute(_handle, variantPack1, workspace.get());
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
+        auto variantPack2 = bundle2.toDeviceVariantPack();
+        result = graphObj.execute(_handle, variantPack2, workspace.get());
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        // Copy results back
-        std::vector<DataType> dxDevHost(dxSize);
-        EXPECT_EQ(
-            hipMemcpy(dxDevHost.data(), dxDev, dxSize * sizeof(DataType), hipMemcpyDeviceToHost),
-            hipSuccess);
-
-        // Convert to float for comparison
-        for(size_t i = 0; i < dxSize; ++i)
-        {
-            dxHost[i] = static_cast<float>(dxDevHost[i]);
-        }
-
-        // Cleanup
-        EXPECT_EQ(hipFree(dyDev), hipSuccess);
-        EXPECT_EQ(hipFree(wDev), hipSuccess);
-        EXPECT_EQ(hipFree(dxDev), hipSuccess);
-        EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
-        EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
-
-        return dxHost;
-    }
-
-    static size_t getTensorSize(const std::vector<int64_t>& dims)
-    {
-        size_t size = 1;
-        for(auto dim : dims)
-        {
-            size *= static_cast<size_t>(dim);
-        }
-        return size;
+        assertBundleOutputsMatch(bundle1, bundle2, dxTensorAttr->get_uid(), _stream);
     }
 };
 
@@ -395,43 +337,20 @@ using DeterministicConvDgradNchwFp16 = DeterministicConvDgrad<half>;
 
 // ============================================================================
 // Convolution Backward Weights (Wgrad) Determinism Test
-// Verifies that running the same conv wgrad twice produces identical results
 // ============================================================================
 
 template <typename DataType>
-class DeterministicConvWgrad : public IntegrationGraphVerificationHarness<DataType, ConvTestCase>
+class DeterministicConvWgrad : public DeterministicTestBase<ConvTestCase>
 {
 protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
-        SKIP_IF_NO_DEVICES();
 
-        const ConvTestCase& testCase = this->GetParam();
+        const ConvTestCase& testCase = DeterministicTestBase<ConvTestCase>::GetParam();
 
-        // First execution
-        auto result1 = executeConvWgrad(testCase, layout);
-
-        // Second execution with same inputs
-        auto result2 = executeConvWgrad(testCase, layout);
-
-        // Compare results - should be bit-exact for deterministic execution
-        ASSERT_EQ(result1.size(), result2.size()) << "Output sizes differ";
-
-        for(size_t i = 0; i < result1.size(); ++i)
-        {
-            ASSERT_EQ(result1[i], result2[i])
-                << "Mismatch at index " << i << ": " << result1[i] << " != " << result2[i];
-        }
-    }
-
-private:
-    std::vector<float> executeConvWgrad(const ConvTestCase& testCase, const TensorLayout& layout)
-    {
-        hipdnn_frontend::graph::Graph graphObj;
+        Graph graphObj;
         graphObj.set_name("DeterministicConvWgradTest");
-
-        // Set preferred engine to deterministic
         graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
@@ -439,15 +358,12 @@ private:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xAttr = makeTensorAttributes(
-            "x", testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        auto xTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+            "x", testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder)));
+        auto dyTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+            "dy", testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder)));
 
-        auto dyAttr = makeTensorAttributes(
-            "dy", testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
-        auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
-
-        graph::ConvWgradAttributes convAttrs;
+        ConvWgradAttributes convAttrs;
         convAttrs.set_pre_padding(testCase.convPrePadding);
         convAttrs.set_post_padding(testCase.convPostPadding);
         convAttrs.set_stride(testCase.convStride);
@@ -455,105 +371,33 @@ private:
 
         auto dwTensorAttr = graphObj.conv_wgrad(dyTensorAttr, xTensorAttr, convAttrs);
         dwTensorAttr->set_output(true);
-
-        // Set these explicitly since grouped convs cannot infer tensor shape
         dwTensorAttr->set_dim(testCase.wDims);
         dwTensorAttr->set_stride(generateStrides(testCase.wDims, layout.strideOrder));
 
-        // Build the graph
-        hipdnnHandle_t handle;
-        EXPECT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
+        auto result = graphObj.build(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        hipStream_t stream;
-        EXPECT_EQ(hipStreamCreate(&stream), hipSuccess);
-        EXPECT_EQ(hipdnnSetStream(handle, stream), HIPDNN_STATUS_SUCCESS);
+        GraphTensorBundle bundle1;
+        GraphTensorBundle bundle2;
+        populateBundleFromGraph(graphObj, bundle1);
+        populateBundleFromGraph(graphObj, bundle2);
+        randomizeBundle(bundle1, testCase.seed);
+        randomizeBundle(bundle2, testCase.seed);
 
-        auto result = graphObj.build(handle);
-        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        // Allocate and initialize tensors
-        auto xSize = getTensorSize(testCase.xDims);
-        auto dySize = getTensorSize(testCase.yDims);
-        auto dwSize = getTensorSize(testCase.wDims);
-
-        std::vector<DataType> xHost(xSize);
-        std::vector<DataType> dyHost(dySize);
-        std::vector<float> dwHost(dwSize);
-
-        // Initialize with deterministic values based on seed
-        std::mt19937 gen(testCase.seed);
-        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-        for(auto& val : xHost)
-        {
-            val = static_cast<DataType>(dist(gen));
-        }
-        for(auto& val : dyHost)
-        {
-            val = static_cast<DataType>(dist(gen));
-        }
-
-        // Allocate device memory
-        DataType* xDev = nullptr;
-        DataType* dyDev = nullptr;
-        DataType* dwDev = nullptr;
-
-        EXPECT_EQ(hipMalloc(&xDev, xSize * sizeof(DataType)), hipSuccess);
-        EXPECT_EQ(hipMalloc(&dyDev, dySize * sizeof(DataType)), hipSuccess);
-        EXPECT_EQ(hipMalloc(&dwDev, dwSize * sizeof(DataType)), hipSuccess);
-
-        EXPECT_EQ(hipMemcpy(xDev, xHost.data(), xSize * sizeof(DataType), hipMemcpyHostToDevice),
-                  hipSuccess);
-        EXPECT_EQ(hipMemcpy(dyDev, dyHost.data(), dySize * sizeof(DataType), hipMemcpyHostToDevice),
-                  hipSuccess);
-
-        // Create variant pack
-        std::unordered_map<int64_t, void*> variantPack;
-        variantPack[xTensorAttr->get_uid()] = xDev;
-        variantPack[dyTensorAttr->get_uid()] = dyDev;
-        variantPack[dwTensorAttr->get_uid()] = dwDev;
-
-        // Get workspace
         int64_t workspaceSize;
         result = graphObj.get_workspace_size(workspaceSize);
-        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-        hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        Workspace workspace(static_cast<size_t>(workspaceSize));
 
-        // Execute
-        result = graphObj.execute(handle, variantPack, workspace.get());
-        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        auto variantPack1 = bundle1.toDeviceVariantPack();
+        result = graphObj.execute(_handle, variantPack1, workspace.get());
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
+        auto variantPack2 = bundle2.toDeviceVariantPack();
+        result = graphObj.execute(_handle, variantPack2, workspace.get());
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        // Copy results back
-        std::vector<DataType> dwDevHost(dwSize);
-        EXPECT_EQ(
-            hipMemcpy(dwDevHost.data(), dwDev, dwSize * sizeof(DataType), hipMemcpyDeviceToHost),
-            hipSuccess);
-
-        // Convert to float for comparison
-        for(size_t i = 0; i < dwSize; ++i)
-        {
-            dwHost[i] = static_cast<float>(dwDevHost[i]);
-        }
-
-        // Cleanup
-        EXPECT_EQ(hipFree(xDev), hipSuccess);
-        EXPECT_EQ(hipFree(dyDev), hipSuccess);
-        EXPECT_EQ(hipFree(dwDev), hipSuccess);
-        EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
-        EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
-
-        return dwHost;
-    }
-
-    static size_t getTensorSize(const std::vector<int64_t>& dims)
-    {
-        size_t size = 1;
-        for(auto dim : dims)
-        {
-            size *= static_cast<size_t>(dim);
-        }
-        return size;
+        assertBundleOutputsMatch(bundle1, bundle2, dwTensorAttr->get_uid(), _stream);
     }
 };
 
@@ -563,77 +407,22 @@ using DeterministicConvWgradNchwFp16 = DeterministicConvWgrad<half>;
 
 // ============================================================================
 // Fused Convolution Forward + Bias + Activation Determinism Test
-// Verifies that running the same fused conv twice produces identical results
 // ============================================================================
 
-using FusedConvTestCase = std::tuple<ConvTestCase, bool, test_activation_common::ActivTestCase>;
-
-inline std::vector<FusedConvTestCase> getDeterministicFusedConvTestCases()
-{
-    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
-
-    // Use a subset of conv test cases with bias and activation
-    std::vector<ConvTestCase> convCases = {
-        // Filter 3x3 with padding - common case
-        {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
-    };
-
-    // ReLU activation only (supported by MIOpen fusion)
-    auto activCases = test_activation_common::createFwdActivationSmokeCases();
-
-    std::vector<FusedConvTestCase> fusedCases;
-    for(const auto& convCase : convCases)
-    {
-        for(const auto& activCase : activCases)
-        {
-            // With bias
-            fusedCases.emplace_back(convCase, true, activCase);
-            // Without bias
-            fusedCases.emplace_back(convCase, false, activCase);
-        }
-    }
-    return fusedCases;
-}
-
 template <typename DataType>
-class DeterministicConvFwdBiasActiv
-    : public IntegrationGraphVerificationHarness<DataType, FusedConvTestCase>
+class DeterministicConvFwdBiasActiv : public DeterministicTestBase<FusedConvTestCase>
 {
 protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
-        SKIP_IF_NO_DEVICES();
 
-        const auto& [convTestCase, doBias, activTestCase] = this->GetParam();
+        const auto& [convTestCase, doBias, activTestCase]
+            = DeterministicTestBase<FusedConvTestCase>::GetParam();
 
-        // First execution
-        auto result1 = executeFusedConv(convTestCase, doBias, activTestCase, layout);
-
-        // Second execution with same inputs
-        auto result2 = executeFusedConv(convTestCase, doBias, activTestCase, layout);
-
-        // Compare results - should be bit-exact for deterministic execution
-        ASSERT_EQ(result1.size(), result2.size()) << "Output sizes differ";
-
-        for(size_t i = 0; i < result1.size(); ++i)
-        {
-            ASSERT_EQ(result1[i], result2[i])
-                << "Mismatch at index " << i << ": " << result1[i] << " != " << result2[i];
-        }
-    }
-
-private:
-    std::vector<float> executeFusedConv(const ConvTestCase& testCase,
-                                        bool doBias,
-                                        const test_activation_common::ActivTestCase& activTestCase,
-                                        const TensorLayout& layout)
-    {
-        hipdnn_frontend::graph::Graph graphObj;
+        Graph graphObj;
         graphObj.set_name(doBias ? "DeterministicConvFwdBiasActivTest"
                                  : "DeterministicConvFwdActivTest");
-
-        // Set preferred engine to deterministic
         graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
@@ -641,41 +430,36 @@ private:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xAttr = makeTensorAttributes(
-            "x", testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        auto xTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+            "x", convTestCase.xDims, generateStrides(convTestCase.xDims, layout.strideOrder)));
+        auto wTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+            "w", convTestCase.wDims, generateStrides(convTestCase.wDims, layout.strideOrder)));
 
-        auto wAttr = makeTensorAttributes(
-            "w", testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
-        auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
-
-        graph::ConvFpropAttributes convAttrs;
-        convAttrs.set_pre_padding(testCase.convPrePadding);
-        convAttrs.set_post_padding(testCase.convPostPadding);
-        convAttrs.set_stride(testCase.convStride);
-        convAttrs.set_dilation(testCase.convDilation);
+        ConvFpropAttributes convAttrs;
+        convAttrs.set_pre_padding(convTestCase.convPrePadding);
+        convAttrs.set_post_padding(convTestCase.convPostPadding);
+        convAttrs.set_stride(convTestCase.convStride);
+        convAttrs.set_dilation(convTestCase.convDilation);
 
         auto yConvTensorAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
 
-        std::shared_ptr<graph::TensorAttributes> biasTensorAttr;
-        std::shared_ptr<graph::TensorAttributes> yBiasTensorAttr;
+        std::shared_ptr<TensorAttributes> biasTensorAttr;
+        std::shared_ptr<TensorAttributes> yBiasTensorAttr;
         if(doBias)
         {
-            const auto biasDims = getDerivedShape(testCase.yDims);
+            const auto biasDims = getDerivedShape(convTestCase.yDims);
+            biasTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+                "bias", biasDims, generateStrides(biasDims, layout.strideOrder)));
 
-            auto biasAttr = makeTensorAttributes(
-                "bias", biasDims, generateStrides(biasDims, layout.strideOrder));
-            biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
-
-            graph::PointwiseAttributes biasAttrs;
-            biasAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
+            PointwiseAttributes biasAttrs;
+            biasAttrs.set_mode(PointwiseMode::ADD);
             biasAttrs.set_compute_data_type(dataType);
 
             yBiasTensorAttr = graphObj.pointwise(yConvTensorAttr, biasTensorAttr, biasAttrs);
         }
 
-        graph::PointwiseAttributes activAttrs;
-        activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
+        PointwiseAttributes activAttrs;
+        activAttrs.set_mode(static_cast<PointwiseMode>(activTestCase.mode));
         if(activTestCase.reluLowerClip.has_value())
         {
             activAttrs.set_relu_lower_clip(activTestCase.reluLowerClip.value());
@@ -689,125 +473,30 @@ private:
             = graphObj.pointwise(doBias ? yBiasTensorAttr : yConvTensorAttr, activAttrs);
         yTensorAttr->set_output(true);
 
-        // Build the graph
-        hipdnnHandle_t handle;
-        EXPECT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
+        auto result = graphObj.build(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        hipStream_t stream;
-        EXPECT_EQ(hipStreamCreate(&stream), hipSuccess);
-        EXPECT_EQ(hipdnnSetStream(handle, stream), HIPDNN_STATUS_SUCCESS);
+        GraphTensorBundle bundle1;
+        GraphTensorBundle bundle2;
+        populateBundleFromGraph(graphObj, bundle1);
+        populateBundleFromGraph(graphObj, bundle2);
+        randomizeBundle(bundle1, convTestCase.seed);
+        randomizeBundle(bundle2, convTestCase.seed);
 
-        auto result = graphObj.build(handle);
-        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        // Allocate and initialize tensors
-        auto xSize = getTensorSize(testCase.xDims);
-        auto wSize = getTensorSize(testCase.wDims);
-        auto ySize = getTensorSize(yTensorAttr->get_dim());
-
-        std::vector<DataType> xHost(xSize);
-        std::vector<DataType> wHost(wSize);
-        std::vector<float> yHost(ySize);
-
-        // Initialize with deterministic values based on seed
-        std::mt19937 gen(testCase.seed);
-        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-        for(auto& val : xHost)
-        {
-            val = static_cast<DataType>(dist(gen));
-        }
-        for(auto& val : wHost)
-        {
-            val = static_cast<DataType>(dist(gen));
-        }
-
-        // Allocate device memory
-        DataType* xDev = nullptr;
-        DataType* wDev = nullptr;
-        DataType* yDev = nullptr;
-        DataType* biasDev = nullptr;
-
-        EXPECT_EQ(hipMalloc(&xDev, xSize * sizeof(DataType)), hipSuccess);
-        EXPECT_EQ(hipMalloc(&wDev, wSize * sizeof(DataType)), hipSuccess);
-        EXPECT_EQ(hipMalloc(&yDev, ySize * sizeof(DataType)), hipSuccess);
-
-        EXPECT_EQ(hipMemcpy(xDev, xHost.data(), xSize * sizeof(DataType), hipMemcpyHostToDevice),
-                  hipSuccess);
-        EXPECT_EQ(hipMemcpy(wDev, wHost.data(), wSize * sizeof(DataType), hipMemcpyHostToDevice),
-                  hipSuccess);
-
-        // Create variant pack
-        std::unordered_map<int64_t, void*> variantPack;
-        variantPack[xTensorAttr->get_uid()] = xDev;
-        variantPack[wTensorAttr->get_uid()] = wDev;
-        variantPack[yTensorAttr->get_uid()] = yDev;
-
-        std::vector<DataType> biasHost;
-        if(doBias)
-        {
-            const auto biasDims = getDerivedShape(testCase.yDims);
-            auto biasSize = getTensorSize(biasDims);
-            biasHost.resize(biasSize);
-
-            for(auto& val : biasHost)
-            {
-                val = static_cast<DataType>(dist(gen));
-            }
-
-            EXPECT_EQ(hipMalloc(&biasDev, biasSize * sizeof(DataType)), hipSuccess);
-            EXPECT_EQ(
-                hipMemcpy(
-                    biasDev, biasHost.data(), biasSize * sizeof(DataType), hipMemcpyHostToDevice),
-                hipSuccess);
-
-            variantPack[biasTensorAttr->get_uid()] = biasDev;
-        }
-
-        // Get workspace
         int64_t workspaceSize;
         result = graphObj.get_workspace_size(workspaceSize);
-        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-        hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        Workspace workspace(static_cast<size_t>(workspaceSize));
 
-        // Execute
-        result = graphObj.execute(handle, variantPack, workspace.get());
-        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        auto variantPack1 = bundle1.toDeviceVariantPack();
+        result = graphObj.execute(_handle, variantPack1, workspace.get());
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
+        auto variantPack2 = bundle2.toDeviceVariantPack();
+        result = graphObj.execute(_handle, variantPack2, workspace.get());
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        // Copy results back
-        std::vector<DataType> yDevHost(ySize);
-        EXPECT_EQ(hipMemcpy(yDevHost.data(), yDev, ySize * sizeof(DataType), hipMemcpyDeviceToHost),
-                  hipSuccess);
-
-        // Convert to float for comparison
-        for(size_t i = 0; i < ySize; ++i)
-        {
-            yHost[i] = static_cast<float>(yDevHost[i]);
-        }
-
-        // Cleanup
-        EXPECT_EQ(hipFree(xDev), hipSuccess);
-        EXPECT_EQ(hipFree(wDev), hipSuccess);
-        EXPECT_EQ(hipFree(yDev), hipSuccess);
-        if(doBias)
-        {
-            EXPECT_EQ(hipFree(biasDev), hipSuccess);
-        }
-        EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
-        EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
-
-        return yHost;
-    }
-
-    static size_t getTensorSize(const std::vector<int64_t>& dims)
-    {
-        size_t size = 1;
-        for(auto dim : dims)
-        {
-            size *= static_cast<size_t>(dim);
-        }
-        return size;
+        assertBundleOutputsMatch(bundle1, bundle2, yTensorAttr->get_uid(), _stream);
     }
 };
 
@@ -820,41 +509,16 @@ using DeterministicConvFwdBiasActivNchwFp16 = DeterministicConvFwdBiasActiv<half
 // Verifies that deterministic engine does not support batchnorm operations
 // ============================================================================
 
-class DeterministicBnNoSolver : public ::testing::TestWithParam<BatchnormTestCase>
+class DeterministicBnNoSolver : public DeterministicTestBase<BatchnormTestCase>
 {
 protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-        ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
-        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            EXPECT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
-        }
-        if(_stream != nullptr)
-        {
-            EXPECT_EQ(hipStreamDestroy(_stream), hipSuccess);
-        }
-    }
-
     void runNoSolverTest()
     {
         const BatchnormTestCase& testCase = GetParam();
         auto derivedDims = getDerivedShape(testCase.dims);
 
-        hipdnn_frontend::graph::Graph graphObj;
+        Graph graphObj;
         graphObj.set_name("DeterministicBnNoSolverTest");
-
-        // Set preferred engine to deterministic
         graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
         auto dataType = hipdnn_frontend::DataType::FLOAT;
@@ -862,27 +526,18 @@ protected:
             .set_compute_data_type(dataType)
             .set_io_data_type(dataType);
 
-        auto xAttr = makeTensorAttributes("X", testCase.dims, generateStrides(testCase.dims));
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        auto xTensorAttr = std::make_shared<TensorAttributes>(
+            makeTensorAttributes("X", testCase.dims, generateStrides(testCase.dims)));
+        auto meanTensorAttr = std::make_shared<TensorAttributes>(
+            makeTensorAttributes("mean", dataType, derivedDims, generateStrides(derivedDims)));
+        auto invVarianceTensorAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+            "inv_variance", dataType, derivedDims, generateStrides(derivedDims)));
+        auto scaleTensorAttr = std::make_shared<TensorAttributes>(
+            makeTensorAttributes("scale", dataType, derivedDims, generateStrides(derivedDims)));
+        auto biasTensorAttr = std::make_shared<TensorAttributes>(
+            makeTensorAttributes("bias", dataType, derivedDims, generateStrides(derivedDims)));
 
-        auto meanAttr
-            = makeTensorAttributes("mean", dataType, derivedDims, generateStrides(derivedDims));
-        auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
-
-        auto invVarianceAttr = makeTensorAttributes(
-            "inv_variance", dataType, derivedDims, generateStrides(derivedDims));
-        auto invVarianceTensorAttr
-            = std::make_shared<graph::TensorAttributes>(std::move(invVarianceAttr));
-
-        auto scaleAttr
-            = makeTensorAttributes("scale", dataType, derivedDims, generateStrides(derivedDims));
-        auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
-
-        auto biasAttr
-            = makeTensorAttributes("bias", dataType, derivedDims, generateStrides(derivedDims));
-        auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
-
-        graph::BatchnormInferenceAttributes bnAttrs;
+        BatchnormInferenceAttributes bnAttrs;
 
         auto yTensorAttr = graphObj.batchnorm_inference(xTensorAttr,
                                                         meanTensorAttr,
@@ -890,21 +545,17 @@ protected:
                                                         scaleTensorAttr,
                                                         biasTensorAttr,
                                                         bnAttrs);
-
         yTensorAttr->set_output(true);
 
         auto result = graphObj.validate();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
         result = graphObj.build_operation_graph(_handle);
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        // Get ranked engine IDs - should be empty or not contain deterministic engine for batchnorm
         std::vector<int64_t> rankedEngineIds;
         result = graphObj.get_ranked_engine_ids(rankedEngineIds);
 
-        // The deterministic engine should not be available for batchnorm
-        // Either no engines are available, or the build should fail
         bool deterministicEngineFound = false;
         for(auto engineId : rankedEngineIds)
         {
@@ -918,11 +569,6 @@ protected:
         EXPECT_FALSE(deterministicEngineFound)
             << "Deterministic engine should not support batchnorm operations";
     }
-
-private:
-    hipdnnHandle_t _handle = nullptr;
-    hipStream_t _stream = nullptr;
-    int _deviceId = 0;
 };
 
 } // namespace
