@@ -20,8 +20,8 @@ contains the official mapping of supported PCI chip IDs and their fallback relat
 
 .. code-block:: yaml
 
-    - {PCIChipID: 0x75a3, DeviceName: AMD Instinct MI355X}
-    - {PCIChipID: 0x75a2, DeviceName: AMD Instinct MI355X}
+    - {PCIChipId: 0x75a3, DeviceName: AMD Instinct MI355X}
+    - {PCIChipId: 0x75a2, DeviceName: AMD Instinct MI355X}
 
 Hardware predicates
 -----------------------
@@ -60,13 +60,13 @@ could appear as:
         - {type: Processor, value: gfx1201}
         - {type: CUCount, value: 64}
         # if only one chip ID is specified
-        - {type: PciChipID, value: 30032}       # <-- placed directly alongside Process
+        - {type: PciChipId, value: 30032}       # <-- placed directly alongside Process
         
         # if multiple chip IDs are specified
         - type: Or                              # <-- expanded into an `Or` conditioned list
           value:
-          - {type: PciChipID, value: 30032}
-          - {type: PciChipID, value: 30583}
+          - {type: PciChipId, value: 30032}
+          - {type: PciChipId, value: 30583}
 
 That is, groups of solutions are co-resident in a LL file and marked by a set of `Device xxxx` strings. This allows solution filtering
 (predicate matching) to be performed at the lazy library level. Consequentially, any candidate libraries that don't at least match the
@@ -88,8 +88,8 @@ that has the gfx1201 chip ID (7550) and another, random one:
     [OK]    Processor                   gpu=gfx950:sramecc+:xnack- == sol=gfx950
     [!!]    CUCount                     gpu=256 == sol=64
     [OK]    Or                          (2 predicates)
-    [OK]      PciChipID                 [AMD Instinct MI355X] gpu=0x75a3 == sol=0x75a3
-    [!!]      PciChipID                 [AMD Instinct MI355X] gpu=0x75a3 == sol=0x75a2
+    [OK]      PciChipId                 [AMD Instinct MI355X] gpu=0x75a3 == sol=0x75a3
+    [!!]      PciChipId                 [AMD Instinct MI355X] gpu=0x75a3 == sol=0x75a2
     --------------------------------------------------------------------------------
     Result: NO MATCH
     --------------------------------------------------------------------------------

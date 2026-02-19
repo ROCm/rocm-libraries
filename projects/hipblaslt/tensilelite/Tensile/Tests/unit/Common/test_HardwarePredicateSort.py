@@ -343,13 +343,13 @@ class TestSerializationRoundTrip:
 
 def _extract_chip_id(pred):
     """Extract the PCI chip ID from a HardwarePredicate, or None."""
-    from Tensile.Hardware import _extractPciChipIDs
+    from Tensile.Hardware import _extractPciChipIds
     if pred.tag == "TruePred":
         return None
     inner = pred.value  # the AMDGPU-level predicate
     if inner.tag == "And":
-        pci_pred = next((p for p in inner.value if p.tag in ("PciChipID", "Or")), None)
-        return _extractPciChipIDs(pci_pred)
+        pci_pred = next((p for p in inner.value if p.tag in ("PciChipId", "Or")), None)
+        return _extractPciChipIds(pci_pred)
     return None
 
 

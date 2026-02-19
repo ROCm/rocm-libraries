@@ -48,7 +48,7 @@ namespace TensileLite
     namespace ChipIdRegistry
     {
         // Check whether to use PCI Chip ID predicates for the given processor
-        inline bool supportsChipIdPredicates(AMDGPU::Processor processor)
+        inline bool supportsChipIdPredicate(AMDGPU::Processor processor)
         {
             return processor == AMDGPU::Processor::gfx950;
         }
@@ -198,7 +198,7 @@ namespace TensileLite
                 }
             };
 
-            struct PciChipIDEqual : public Predicate_CRTP<PciChipIDEqual, AMDGPU>
+            struct PciChipIdEqual : public Predicate_CRTP<PciChipIdEqual, AMDGPU>
             {
                 enum
                 {
@@ -207,20 +207,20 @@ namespace TensileLite
                 };
                 int value;
 
-                PciChipIDEqual() = default;
-                PciChipIDEqual(int val)
+                PciChipIdEqual() = default;
+                PciChipIdEqual(int val)
                     : value(val)
                 {
                 }
 
                 static std::string Type()
                 {
-                    return "PciChipID";
+                    return "PciChipId";
                 }
 
                 virtual bool operator()(AMDGPU const& gpu) const override
                 {
-                    if(!ChipIdRegistry::supportsChipIdPredicates(gpu.processor))
+                    if(!ChipIdRegistry::supportsChipIdPredicate(gpu.processor))
                         return false;
 
                     if(!gpu.pciChipId().has_value())
@@ -233,7 +233,7 @@ namespace TensileLite
 
                 virtual bool isFallbackMatch(AMDGPU const& gpu) const override
                 {
-                    if(!ChipIdRegistry::supportsChipIdPredicates(gpu.processor))
+                    if(!ChipIdRegistry::supportsChipIdPredicate(gpu.processor))
                         return false;
 
                     if(!gpu.pciChipId().has_value())

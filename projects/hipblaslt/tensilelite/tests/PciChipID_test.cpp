@@ -23,7 +23,7 @@ using namespace TensileLite::testing;
 
 // Verify that hipDeviceAttributePciChipId is correctly queried and matches
 // a known chip ID.
-TEST(PciChipIDTest, QueryDeviceChipId)
+TEST(PciChipIdTest, QueryDeviceChipId)
 {
     int deviceCount = 0;
     hipError_t err = hipGetDeviceCount(&deviceCount);
@@ -33,7 +33,7 @@ TEST(PciChipIDTest, QueryDeviceChipId)
     hipDeviceProp_t prop;
     ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess) << "Failed to get device properties";
     auto processor = AMDGPU::toProcessor(prop.gcnArchName);
-    if(!ChipIdRegistry::supportsChipIdPredicates(processor))
+    if(!ChipIdRegistry::supportsChipIdPredicate(processor))
         GTEST_SKIP() << "PCI chip ID querying is gfx950-only at runtime";
 
     // Query PCI Chip ID using hipDeviceGetAttribute directly
@@ -47,7 +47,7 @@ TEST(PciChipIDTest, QueryDeviceChipId)
 
 // Verify that HipAMDGPU correctly populates pciChipId from HIP runtime
 // and matches a known chip ID.
-TEST(PciChipIDTest, HipHardwarePopulatesPciChipId)
+TEST(PciChipIdTest, HipHardwarePopulatesPciChipId)
 {
     int deviceCount = 0;
     hipError_t err = hipGetDeviceCount(&deviceCount);
@@ -62,7 +62,7 @@ TEST(PciChipIDTest, HipHardwarePopulatesPciChipId)
     auto* amdgpu = dynamic_cast<AMDGPU*>(hardware.get());
     ASSERT_NE(amdgpu, nullptr) << "Hardware is not an AMDGPU";
 
-    if(!ChipIdRegistry::supportsChipIdPredicates(amdgpu->processor))
+    if(!ChipIdRegistry::supportsChipIdPredicate(amdgpu->processor))
     {
         EXPECT_FALSE(amdgpu->pciChipId().has_value())
             << "pciChipId should be unset for non-gfx950 processors";
@@ -95,8 +95,8 @@ TEST(PciChipIDTest, HipHardwarePopulatesPciChipId)
     EXPECT_TRUE(isKnownChipId) << "PCI Chip ID should be known";
 }
 
-// Verify PciChipIDEqual predicate matches the correct device
-TEST(PciChipIDTest, PciChipIDEqualPredicate)
+// Verify PciChipIdEqual predicate matches the correct device
+TEST(PciChipIdTest, PciChipIdEqualPredicate)
 {
     int deviceCount = 0;
     hipError_t err = hipGetDeviceCount(&deviceCount);
@@ -110,36 +110,36 @@ TEST(PciChipIDTest, PciChipIDEqualPredicate)
     auto* amdgpu = dynamic_cast<AMDGPU*>(hardware.get());
     ASSERT_NE(amdgpu, nullptr);
 
-    if(!ChipIdRegistry::supportsChipIdPredicates(amdgpu->processor))
-        GTEST_SKIP() << "PciChipIDEqual runtime matching is gfx950-only";
+    if(!ChipIdRegistry::supportsChipIdPredicate(amdgpu->processor))
+        GTEST_SKIP() << "PciChipIdEqual runtime matching is gfx950-only";
 
     ASSERT_TRUE(amdgpu->pciChipId().has_value()) << "pciChipId must be set for this test";
     int actualPciChipId = amdgpu->pciChipId().value();
     ASSERT_GT(actualPciChipId, 0) << "pciChipId must be valid for this test";
 
     // Create predicate that matches the actual chip ID
-    auto matchingPred = std::make_shared<Predicates::GPU::PciChipIDEqual>(actualPciChipId);
+    auto matchingPred = std::make_shared<Predicates::GPU::PciChipIdEqual>(actualPciChipId);
 
     // Create predicate that does NOT match (use a different ID)
-    auto nonMatchingPred = std::make_shared<Predicates::GPU::PciChipIDEqual>(0x1234);
+    auto nonMatchingPred = std::make_shared<Predicates::GPU::PciChipIdEqual>(0x1234);
 
     EXPECT_TRUE((*matchingPred)(*amdgpu)) << "Predicate should match actual chip ID";
     EXPECT_FALSE((*nonMatchingPred)(*amdgpu)) << "Predicate should NOT match different chip ID";
 }
 
-TEST(PciChipIDTest, PciChipIDEqualIgnoredOnNonGfx950)
+TEST(PciChipIdTest, PciChipIdEqualIgnoredOnNonGfx950)
 {
     AMDGPU gpuWithChipId(AMDGPU::Processor::gfx942, 120, "gfx942-mock", std::make_optional(0x75a0));
-    auto   pred = std::make_shared<Predicates::GPU::PciChipIDEqual>(0x75a0);
+    auto   pred = std::make_shared<Predicates::GPU::PciChipIdEqual>(0x75a0);
 
     EXPECT_FALSE((*pred)(gpuWithChipId))
-        << "PciChipIDEqual must ignore chip IDs for non-gfx950 processors";
+        << "PciChipIdEqual must ignore chip IDs for non-gfx950 processors";
     EXPECT_FALSE(pred->isFallbackMatch(gpuWithChipId))
         << "Fallback matching must also be disabled for non-gfx950 processors";
 }
 
-// Test: Hardware selection with PciChipIDEqual in a library hierarchy
-TEST(PciChipIDTest, HardwareSelectionWithPciChipID)
+// Test: Hardware selection with PciChipIdEqual in a library hierarchy
+TEST(PciChipIdTest, HardwareSelectionWithPciChipId)
 {
     int deviceCount = 0;
     hipError_t err = hipGetDeviceCount(&deviceCount);
@@ -153,8 +153,8 @@ TEST(PciChipIDTest, HardwareSelectionWithPciChipID)
     auto* amdgpu = dynamic_cast<AMDGPU*>(hardware.get());
     ASSERT_NE(amdgpu, nullptr);
 
-    if(!ChipIdRegistry::supportsChipIdPredicates(amdgpu->processor))
-        GTEST_SKIP() << "HardwareSelectionWithPciChipID is gfx950-specific";
+    if(!ChipIdRegistry::supportsChipIdPredicate(amdgpu->processor))
+        GTEST_SKIP() << "HardwareSelectionWithPciChipId is gfx950-specific";
 
     ASSERT_TRUE(amdgpu->pciChipId().has_value()) << "pciChipId must be set for this test";
     int actualPciChipId = amdgpu->pciChipId().value();
@@ -175,7 +175,7 @@ TEST(PciChipIDTest, HardwareSelectionWithPciChipID)
     auto fallbackLib = std::make_shared<SingleContractionLibrary>(fallbackSolution);
 
     // Create hardware predicate for specific PCI Chip ID + Processor
-    auto isPciChip = std::make_shared<Predicates::GPU::PciChipIDEqual>(actualPciChipId);
+    auto isPciChip = std::make_shared<Predicates::GPU::PciChipIdEqual>(actualPciChipId);
     auto isProcessor = std::make_shared<Predicates::GPU::ProcessorEqual>(actualProcessor);
     auto isSpecificDevice = std::make_shared<Predicates::And<AMDGPU>>(
         std::initializer_list<std::shared_ptr<Predicates::Predicate<AMDGPU>>>{isProcessor, isPciChip});
@@ -236,7 +236,7 @@ TEST(PciChipIDTest, HardwareSelectionWithPciChipID)
 }
 
 // Test: findAllSolutions with hardware containing pciChipId
-TEST(PciChipIDTest, FindAllSolutionsWithPciChipID)
+TEST(PciChipIdTest, FindAllSolutionsWithPciChipId)
 {
     int deviceCount = 0;
     hipError_t err = hipGetDeviceCount(&deviceCount);
@@ -310,7 +310,7 @@ TEST(PciChipIDTest, FindAllSolutionsWithPciChipID)
 // processor-only catch-all last).
 //
 // Row evaluation is first-match-wins (ExactLogicLibrary), and
-// PciChipIDEqual includes one-directional fallback (mi355->mi350).
+// PciChipIdEqual includes one-directional fallback (mi355->mi350).
 // ===========================================================================
 class ChipIdFallbackTest : public ::testing::Test
 {

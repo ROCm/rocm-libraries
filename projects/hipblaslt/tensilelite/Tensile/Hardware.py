@@ -49,20 +49,20 @@ def parseDeviceNameToInt(deviceName: str):
                      deviceName}', expected 'Device XXXX'")
 
 
-def _extractPciChipIDs(pred: Properties.Predicate):
-    """Extract chip ID(s) from PciChipID or the 'Or' predicate.
+def _extractPciChipIds(pred: Properties.Predicate):
+    """Extract chip ID(s) from PciChipId or the 'Or' predicate.
 
     Returns:
-        - Single int if pred is PciChipID
-        - First int from list if pred is Or with PciChipID children (TODO: isn't this a problem since I should be able to match against multiple chip IDs)
-        - None if pred is None or has no PciChipID values
+        - Single int if pred is PciChipId
+        - First int from list if pred is Or with PciChipId children (TODO: isn't this a problem since I should be able to match against multiple chip IDs)
+        - None if pred is None or has no PciChipId values
     """
     if pred is None:
         return None
-    if pred.tag == "PciChipID":
+    if pred.tag == "PciChipId":
         return pred.value
     if pred.tag == "Or":
-        ids = [p.value for p in pred.value if p.tag == "PciChipID"]
+        ids = [p.value for p in pred.value if p.tag == "PciChipId"]
         return ids[0] if ids else None
     return None
 
@@ -101,17 +101,17 @@ class HardwarePredicate(Properties.Predicate):
 
     @classmethod
     def _createPciChipIdPredicate(cls, deviceNames):
-        """Create PciChipID predicate(s) from device names.
+        """Create PciChipId predicate(s) from device names.
 
         Args:
             deviceNames: Can be:
                 - None: returns None
                 - Empty list []: returns None
-                - Single string "Device XXXX": returns one PciChipID predicate
-                - Single item list ["Device XXXX"]: returns one PciChipID predicate
-                - Multiple item list: returns Or predicate with all PciChipID predicates
+                - Single string "Device XXXX": returns one PciChipId predicate
+                - Single item list ["Device XXXX"]: returns one PciChipId predicate
+                - Multiple item list: returns Or predicate with all PciChipId predicates
         Returns:
-            A HardwarePredicate of type "PciChipID"
+            A HardwarePredicate of type "PciChipId"
         """
         if deviceNames is None:
             return None
@@ -127,9 +127,9 @@ class HardwarePredicate(Properties.Predicate):
         if len(pciChipIds) == 0:
             return None
         if len(pciChipIds) == 1:
-            return cls("PciChipID", value=pciChipIds[0])
+            return cls("PciChipId", value=pciChipIds[0])
 
-        pciChipIdPredicates = [cls("PciChipID", value=chipId)
+        pciChipIdPredicates = [cls("PciChipId", value=chipId)
                                for chipId in pciChipIds]
         return cls.Or(pciChipIdPredicates)
 
@@ -146,14 +146,14 @@ class HardwarePredicate(Properties.Predicate):
                 iter(x for x in myAndPred.value if x.tag == "Processor"), None)
             myCUPred = next(
                 iter(x for x in myAndPred.value if x.tag == "CUCount"), None)
-            myPciChipIDPred = next(
-                iter(x for x in myAndPred.value if x.tag in ("PciChipID", "Or")), None)
+            myPciChipIdPred = next(
+                iter(x for x in myAndPred.value if x.tag in ("PciChipId", "Or")), None)
             myCUCount = myCUPred.value if myCUPred is not None else None
-            myPciChipID = _extractPciChipIDs(myPciChipIDPred)
+            myPciChipId = _extractPciChipIds(myPciChipIdPred)
         else:
             myProcPred = self.value
             myCUCount = None
-            myPciChipID = None
+            myPciChipId = None
 
         if other.value.tag == 'And':
             otherAndPred = other.value
@@ -161,25 +161,25 @@ class HardwarePredicate(Properties.Predicate):
                 iter(x for x in otherAndPred.value if x.tag == "Processor"), None)
             otherCUPred = next(
                 iter(x for x in otherAndPred.value if x.tag == "CUCount"), None)
-            otherPciChipIDPred = next(
-                iter(x for x in otherAndPred.value if x.tag in ("PciChipID", "Or")), None)
+            otherPciChipIdPred = next(
+                iter(x for x in otherAndPred.value if x.tag in ("PciChipId", "Or")), None)
             otherCUCount = otherCUPred.value if otherCUPred is not None else None
-            otherPciChipID = _extractPciChipIDs(otherPciChipIDPred)
+            otherPciChipId = _extractPciChipIds(otherPciChipIdPred)
         else:
             otherProcPred = other.value
             otherCUCount = None
-            otherPciChipID = None
+            otherPciChipId = None
 
-        # Prioritize ChipID (more specific match first)
+        # Prioritize ChipId (more specific match first)
         # A predicate with a chip ID set is more specific than one without
-        if myPciChipID is not None and otherPciChipID is None:
+        if myPciChipId is not None and otherPciChipId is None:
             return True
-        if myPciChipID is None and otherPciChipID is not None:
+        if myPciChipId is None and otherPciChipId is not None:
             return False
-        if myPciChipID is not None and otherPciChipID is not None and myPciChipID != otherPciChipID:
+        if myPciChipId is not None and otherPciChipId is not None and myPciChipId != otherPciChipId:
             # Sort descending so that fallback-source devices (higher chip IDs,
             # e.g. mi355=0x75a3) appear before fallback-target devices (lower
-            # chip IDs, e.g. mi350=0x75a0).  At runtime PciChipIDEqual uses
+            # chip IDs, e.g. mi350=0x75a0).  At runtime PciChipIdEqual uses
             # one-directional fallback (mi355->mi350 but NOT mi350->mi355), so
             # mi350 will skip the mi355 row and reach its own.  If no mi355-
             # specific row exists, mi355 naturally falls through to the mi350
@@ -189,7 +189,7 @@ class HardwarePredicate(Properties.Predicate):
             # case whereby higher values (or logical greater than) for chip IDs,
             # but we make this assumption now based on historical observation of
             # chip IDs by variant.
-            return myPciChipID > otherPciChipID
+            return myPciChipId > otherPciChipId
 
         # If CU properties are empty, then compare processor predicates
         if myCUCount is None and otherCUCount is None:

@@ -84,7 +84,7 @@ namespace testing
     // Hardware predicate builder
     // -----------------------------------------------------------------------
 
-    /// Build a HardwarePredicate wrapping And(ProcessorEqual, [PciChipIDEqual], [CUCountEqual]).
+    /// Build a HardwarePredicate wrapping And(ProcessorEqual, [PciChipIdEqual], [CUCountEqual]).
     /// Omitted optional arguments are simply left out of the And predicate.
     inline HardwarePredicate makeHwPred(
         AMDGPU::Processor            processor,
@@ -95,7 +95,7 @@ namespace testing
         preds.push_back(std::make_shared<Predicates::GPU::ProcessorEqual>(processor));
 
         if(chipId.has_value())
-            preds.push_back(std::make_shared<Predicates::GPU::PciChipIDEqual>(chipId.value()));
+            preds.push_back(std::make_shared<Predicates::GPU::PciChipIdEqual>(chipId.value()));
 
         if(cuCount.has_value())
             preds.push_back(std::make_shared<Predicates::GPU::CUCountEqual>(cuCount.value()));

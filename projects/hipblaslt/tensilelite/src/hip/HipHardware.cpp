@@ -76,7 +76,7 @@ namespace TensileLite
             }
 #endif
             const auto processor = AMDGPU::toProcessor(prop.gcnArchName);
-            if(!ChipIdRegistry::supportsChipIdPredicates(processor))
+            if(!ChipIdRegistry::supportsChipIdPredicate(processor))
             {
                 // For processors that don't support PCI Chip ID predicates
                 // these are intentionally ignored at runtime

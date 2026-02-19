@@ -136,7 +136,7 @@ SUPPORTED_CU_COUNT_FALLBACKS = {
     "cu=304": None,
 }
 
-def supportsChipIdPredicates(gfx: str) -> bool:
+def supportsChipIdPredicate(gfx: str) -> bool:
     """
     Returns whether PCI chip ID predicates are currently enabled for a GFX architecture.
 
@@ -337,7 +337,7 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
     hasOnlyPlaceholders = all(devId in placeholderIds for devId in deviceIds)
     hasNoRegisteredIds = not any(devId in SUPPORTED_BUILD_CHIP_IDS for devId in deviceIds)
 
-    if supportsChipIdPredicates(gfx) and (hasOnlyPlaceholders or hasNoRegisteredIds):
+    if supportsChipIdPredicate(gfx) and (hasOnlyPlaceholders or hasNoRegisteredIds):
         expectedIds = GFX_CHIP_IDS.get(gfx, [])
         if expectedIds:
             print2(f"")

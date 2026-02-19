@@ -165,7 +165,7 @@ namespace TensileLite
             {
                 SubclassMap rv({Base::template Pair<Predicates::GPU::ProcessorEqual>(),
                                 Base::template Pair<Predicates::GPU::CUCountEqual>(),
-                                Base::template Pair<Predicates::GPU::PciChipIDEqual>(),
+                                Base::template Pair<Predicates::GPU::PciChipIdEqual>(),
                                 Base::template Pair<Predicates::GPU::RunsKernelTargeting>()});
 
                 auto gmap = Generic::GetSubclasses();
@@ -195,8 +195,8 @@ namespace TensileLite
         };
 
         template <typename IO>
-        struct MappingTraits<Predicates::GPU::PciChipIDEqual, IO>
-            : public AutoMappingTraits<Predicates::GPU::PciChipIDEqual, IO>
+        struct MappingTraits<Predicates::GPU::PciChipIdEqual, IO>
+            : public AutoMappingTraits<Predicates::GPU::PciChipIdEqual, IO>
         {
         };
 
