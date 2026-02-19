@@ -139,7 +139,8 @@ CK_TILE_HOST double get_absolute_threshold(const double max_possible_num,
 
     // Use discrete exponent (floor of log2) to match actual floating-point exponent levels
     // This ensures ULP calculation matches the discrete precision levels of FP representation
-    int discrete_expo    = static_cast<int>(std::floor(std::log2(std::abs(max_possible_num))));
+    int discrete_expo =
+        std::floor(static_cast<int>(std::floor(std::log2(std::abs(max_possible_num)))));
     double compute_error = 0;
     if constexpr(is_any_of<ComputeDataType, pk_int4_t, I8, I32, int>::value)
     {
