@@ -47,6 +47,12 @@ void EnginePluginResourceManager::setPluginPaths(
 {
     std::lock_guard<std::mutex> lock(pluginMutex);
 
+    auto newPathsSet = std::set<std::filesystem::path>{pluginPaths.begin(), pluginPaths.end()};
+    if(pluginConfig.paths == newPathsSet && pluginConfig.mode == loadingMode)
+    {
+        return;
+    }
+
     // Clear persistent pointer first to allow lazy mode check to work correctly.
     // If only persistentPmPtr is keeping plugins alive (no active handles),
     // then pmPtr will expire after this reset.

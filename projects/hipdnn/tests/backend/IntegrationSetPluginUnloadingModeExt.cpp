@@ -87,9 +87,6 @@ TEST_F(IntegrationSetPluginUnloadingModeExt, LazyModeKeepsPluginLoaded)
     hipdnnStatus_t status = hipdnnSetPluginUnloadMode_ext(HIPDNN_PLUGIN_UNLOAD_LAZY);
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
-    // Plugin should not be loaded yet (no handle created)
-    EXPECT_FALSE(isSharedLibraryLoaded(getPluginPath().c_str()));
-
     // Create first handle - this loads plugins
     hipdnnHandle_t handle1 = nullptr;
     status = hipdnnCreate(&handle1);
@@ -191,7 +188,7 @@ TEST_F(IntegrationSetPluginUnloadingModeExt, SetPluginPathsUnloadsPluginsInLazyM
 
     // Set plugin paths again - should clear persistentPmPtr and unload plugins
     const std::array<const char*, 1> paths
-        = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
+        = {hipdnn_tests::plugin_constants::testExecuteFailsPluginPath().c_str()};
     status = hipdnnSetEnginePluginPaths_ext(
         paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE);
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
