@@ -36,6 +36,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32
 from rocisa.instruction import SAddU32, SAddCU32, SCmpEQU32, SCSelectB32, SSubBU32
 from Tensile.Common import IsaVersion
+from Tensile.Common.Utilities import printWarning
 from Tensile.Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
@@ -720,7 +721,15 @@ class RegisterSchedule:
                     found, _ = func(probe, useLDSTr, TLDS)
                     if found:
                         detected.add(as_str(transA) + as_str(transB))
-                except ValueError:
+                except ValueError as e:
+                    layout = as_str(transA) + as_str(transB)
+                    printWarning(
+                        f"Layout probe failed for func '{func.__name__}' "
+                        f"with layout={layout}, useLDSTr={useLDSTr}, TLDS={TLDS}\n"
+                        f"  Probe kernel: transA={transA}, transB={transB}, "
+                        f"MT0={probe['MacroTile0']}, MT1={probe['MacroTile1']}, DU={probe['DepthU']}\n"
+                        f"  Error: {e}"
+                    )
                     continue
 
         return list(detected)

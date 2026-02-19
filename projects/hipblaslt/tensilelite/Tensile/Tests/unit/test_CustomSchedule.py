@@ -1183,6 +1183,31 @@ class TestLayoutAutoDetection:
         info = _SCHEDULE_METADATA[-1]
         assert sorted(info.supported_layouts) == ["NN", "TN"]
 
+    def test_detect_layouts_logs_on_value_error(self, capsys):
+        """When the inner function raises ValueError, the probe should log a warning and skip that combo."""
+        @RegisterSchedule(
+            tile_config=self.TILE,
+            dtype_predicate=is16bit,
+            vector_widths=[8, 8, 8],
+            matrix_inst=[16, 16, 32, 1],
+            mfma_wave_group=[2, 2],
+        )
+        def _fake_raises_on_nt(kernel, useLDSTr, TLDS):
+            if not kernel["ProblemType"]["TransposeA"] and kernel["ProblemType"]["TransposeB"]:
+                raise ValueError("Value error for NT layout")
+            if kernel["ProblemType"]["TransposeA"] and not kernel["ProblemType"]["TransposeB"] and TLDS == 1:
+                return True, None
+            return False, None
+
+        info = _SCHEDULE_METADATA[-1]
+        assert sorted(info.supported_layouts) == ["TN"]
+
+        captured = capsys.readouterr()
+
+        "Layout probe failed for func '_fake_raises_on_nt' with layout=NT, useLDSTr=True, TLDS=1 Probe kernel: transA=False, transB=True, MT0=256, MT1=256, DU=64"
+        assert "Layout probe failed for func '_fake_raises_on_nt'" in captured.out
+        assert "Value error for NT layout" in captured.out
+
     def test_consistency_with_existing_schedules(self):
         """Auto-detected layouts must match the previously hand-declared layouts for all existing schedules."""
         # Expected layouts from the original manual annotations (prior to auto-detection)
