@@ -24,7 +24,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
-from Tensile.Components.CMSValidator import isValid
+from Tensile.Components.CMSValidator import isValid, ValidatorPass
 from Tensile.Common import IsaVersion
 
 # Helper to create a mock data type
@@ -1101,26 +1101,72 @@ class TestCustomScheduleTF32:
         assert valid, message
 
 class TestCustomScheduleValidation:
-    def test_schedule_validation_disable(self):
-        """
-        Test of the flag that custom mainloop schedule (CMS) developers can use to override the
-        validation checks.
-        """
+    def test_disable_single_pass(self):
+        """Disabling a single pass allows an otherwise-invalid schedule to pass that check."""
         kernel = create_base_kernel()
         invalid_schedule = {"P": [[3, 2, 1]]}
 
-        # No verification message means that the schedule info is considered valid.
-        scheduleInfo = ScheduleInfo(
-            1, None, invalid_schedule, None, None, None, None
-        )
-        scheduleInfo.disableValidation()
-        status, message = isValid(scheduleInfo, {"kernel" : {"DepthU": 42}})
-        assert status == True
-        assert message == "CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = ?x?x42 NN"
-
-        # A non-empty verification message means that the schedule info is considered invalid.
-        status, message = isValid(
-            ScheduleInfo(1, None, invalid_schedule, None, None, None, None), {"kernel" : {"DepthU": 42}}
-        )
+        # Without disabling, the non-ascending schedule fails on ascending order.
+        si = ScheduleInfo(1, None, invalid_schedule, None, None, None, None)
+        status, message = isValid(si, {"kernel": kernel})
         assert status == False
+        assert "Non-descending-order" in message
+
+        # Disabling VERIFY_ASCENDING_ORDER skips that check.
+        # Remaining structural and timeline passes are also disabled because this
+        # minimal schedule lacks the keys/data they require.
+        si = ScheduleInfo(1, 0, invalid_schedule, None, None, None, None)
+        for p in ValidatorPass:
+            if p != ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS:
+                si.disablePass(p, reason="Not relevant to this test")
+        status, message = isValid(si, {"kernel": kernel})
+        # The ascending-order error is gone; the schedule passes the remaining enabled check.
+        assert "Non-descending-order" not in message
+        assert status == True
+
+    def test_disable_pass_reason_required(self):
+        """disablePass requires a non-empty reason string and a valid ValidatorPass enum member."""
+        si = ScheduleInfo(1, None, {}, None, None, None, None)
+
+        with pytest.raises(ValueError):
+            si.disablePass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="")
+
+        with pytest.raises(ValueError):
+            si.disablePass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="   ")
+
+        with pytest.raises(TypeError):
+            si.disablePass("not_an_enum", reason="some reason")
+
+        with pytest.raises(TypeError):
+            si.disablePass(42, reason="some reason")
+
+    def test_disable_multiple_passes(self):
+        """Multiple passes can be disabled independently."""
+        invalid_schedule = {"P": [[3, 2, 1]]}
+        si = ScheduleInfo(1, None, invalid_schedule, None, None, None, None)
+        si.disablePass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="Reason A")
+        si.disablePass(ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS, reason="Reason B")
+
+        assert si.reasonForDisablingPass(ValidatorPass.VERIFY_ASCENDING_ORDER) == "Reason A"
+        assert si.reasonForDisablingPass(ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS) == "Reason B"
+        # Passes not disabled return None.
+        assert si.reasonForDisablingPass(ValidatorPass.VERIFY_SCC_OVERLAP) is None
+
+    def test_reason_for_disabling_pass(self):
+        """reasonForDisablingPass returns the reason for disabled passes, None for enabled ones,
+        and raises TypeError for non-enum arguments."""
+        si = ScheduleInfo(1, None, {}, None, None, None, None)
+
+        # Nothing disabled yet.
+        assert si.reasonForDisablingPass(ValidatorPass.VERIFY_ASCENDING_ORDER) is None
+
+        si.disablePass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="test reason")
+        assert si.reasonForDisablingPass(ValidatorPass.VERIFY_ASCENDING_ORDER) == "test reason"
+
+        # Non-enum argument raises TypeError.
+        with pytest.raises(TypeError):
+            si.reasonForDisablingPass("not_an_enum")
+
+        with pytest.raises(TypeError):
+            si.reasonForDisablingPass(42)
 
