@@ -261,7 +261,7 @@ def buildDevDockerImage(Map conf=[:])
     env.DOCKER_BUILDKIT=1
     def prefixpath = conf.get("prefixpath", "/opt/rocm") 
 
-    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache"
+    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache_dev_build"
 
     def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151;gfx1201" // multiarch builds
 
