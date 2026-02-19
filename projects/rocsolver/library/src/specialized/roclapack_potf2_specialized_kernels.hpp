@@ -316,6 +316,12 @@ rocblas_status potf2_run_small(rocblas_handle handle,
 
     size_t lmemsize = sizeof(T) * nb * BS2 * BS2;
 
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    if(lmemsize > props->sharedMemPerBlock)
+    {
+        return rocblas_status_internal_error;
+    }
+
     bool const is_upper = (uplo == rocblas_fill_upper);
     auto kernel = std::array{
         potf2_kernel_small<1, BS2, T, I, INFO, U>, potf2_kernel_small<2, BS2, T, I, INFO, U>,
