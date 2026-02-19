@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <type_traits>
 
 #include "ck/ck.hpp"
 #include "ck/utility/common_header.hpp"
@@ -35,6 +36,146 @@ TEST(ThreadwiseTransferHelperBase, ConstantsInheritedBySFC)
     // SFC inherits all constants from Base via public inheritance.
     EXPECT_EQ(ThreadwiseTransferHelper_SFC::I0.value, 0);
     EXPECT_EQ(ThreadwiseTransferHelper_SFC::I16.value, 16);
+}
+
+// =============================================================================
+// ThreadwiseTransferHelper_Base::MoveSliceWindow tests
+// =============================================================================
+
+TEST(ThreadwiseTransferHelperBase, MoveSliceWindow_ResetAlreadyDone)
+{
+    /*
+     * Scenario: v3r1's MoveSrcSliceWindow after RunRead has already reset
+     * the coordinate back to the slice origin (SrcResetCoordinateAfterRun=true).
+     *
+     * 2D packed tensor (4 rows x 8 columns), modelling a tile transfer:
+     *
+     *     col: 0  1  2  3  4  5  6  7
+     *   row 0: [*] .  .  .  .  .  .  .   <-- start at (0,0), offset=0
+     *   row 1:  .  .  .  .  .  .  .  .
+     *   row 2:  .  .  .  .  .  .  .  .
+     *   row 3:  .  .  .  .  .  .  .  .
+     *
+     * Step = (1, 0): move one row down.
+     * Reset step = (-3, 0): would move 3 rows up (irrelevant here).
+     *
+     * Since ResetCoordinateAfterRun=true, the reset step is NOT fused
+     * into the movement. The coordinate simply moves by the step alone.
+     *
+     * Expected: (0,0) + (1,0) = (1,0), offset = 1*8 + 0 = 8
+     */
+    using Helper = ThreadwiseTransferHelper_Base;
+
+    constexpr auto desc = make_naive_tensor_descriptor_packed(make_tuple(Number<4>{}, Number<8>{}));
+
+    auto coord = make_tensor_coordinate(desc, make_multi_index(0, 0));
+
+    EXPECT_EQ(coord.GetOffset(), 0);
+
+    const auto step_idx = make_multi_index(1, 0);
+
+    auto get_reset_step = []() { return make_multi_index(-3, 0); };
+
+    Helper::MoveSliceWindow<decltype(desc), decltype(coord), true>(
+        desc, coord, step_idx, get_reset_step);
+
+    // Coordinate moved by step only: (0,0) -> (1,0)
+    // Offset in row-major packed layout: 1*8 + 0 = 8
+    EXPECT_EQ(coord.GetOffset(), 8);
+}
+
+TEST(ThreadwiseTransferHelperBase, MoveSliceWindow_ResetFused)
+{
+    /*
+     * Scenario: v3r1's MoveSrcSliceWindow when RunRead did NOT reset
+     * the coordinate (SrcResetCoordinateAfterRun=false). This is the
+     * optimization path where MoveSliceWindow fuses the reset step
+     * with the movement step to save a separate coordinate adjustment.
+     *
+     * Same 2D packed tensor (4 rows x 8 columns):
+     *
+     *     col: 0  1  2  3  4  5  6  7
+     *   row 0: [*] .  .  .  .  .  .  .   <-- start at (0,0), offset=0
+     *   row 1:  .  .  .  .  .  .  .  .
+     *   row 2:  .  .  .  .  .  .  .  .
+     *   row 3:  .  .  .  .  .  .  .  .
+     *
+     * Step = (2, 0): move two rows down.
+     * Reset step = (-1, 0): move one row up (e.g., undo traversal overshoot).
+     *
+     * Since ResetCoordinateAfterRun=false, MoveSliceWindow adds the
+     * reset step to the movement step before applying:
+     *   adjusted_step = step + reset = (2,0) + (-1,0) = (1,0)
+     *
+     * Expected: (0,0) + (1,0) = (1,0), offset = 1*8 + 0 = 8
+     */
+    using Helper = ThreadwiseTransferHelper_Base;
+
+    constexpr auto desc = make_naive_tensor_descriptor_packed(make_tuple(Number<4>{}, Number<8>{}));
+
+    auto coord = make_tensor_coordinate(desc, make_multi_index(0, 0));
+
+    EXPECT_EQ(coord.GetOffset(), 0);
+
+    const auto step_idx = make_multi_index(2, 0);
+
+    auto get_reset_step = []() { return make_multi_index(-1, 0); };
+
+    Helper::MoveSliceWindow<decltype(desc), decltype(coord), false>(
+        desc, coord, step_idx, get_reset_step);
+
+    // adjusted_step = (2,0) + (-1,0) = (1,0)
+    // Offset: 1*8 + 0 = 8
+    EXPECT_EQ(coord.GetOffset(), 8);
+}
+
+TEST(ThreadwiseTransferHelperBase, MoveSliceWindow_3D_ResetFused)
+{
+    /*
+     * Scenario: 3D packed tensor (2 x 4 x 8), modelling a typical GEMM
+     * intermediate buffer with SliceLengths = (batch, row, col).
+     *
+     * Layout (batch=0 shown, row-major packed):
+     *
+     *   batch 0:
+     *     col: 0  1  2  3  4  5  6  7
+     *   row 0:  .  .  .  .  .  .  .  .
+     *   row 1:  .  .  .  .  .  .  .  .
+     *   row 2:  .  .  .  .  .  .  .  .
+     *   row 3:  .  .  .  .  .  .  .  .
+     *
+     *   batch 1: (same structure, offset += 4*8 = 32)
+     *
+     * Start at (0, 0, 0), offset=0.
+     *
+     * Step = (0, 2, 0): move 2 rows down within the same batch.
+     * Reset step = (0, -1, 0): undo 1 row of traversal overshoot.
+     *
+     * ResetCoordinateAfterRun=false, so steps are fused:
+     *   adjusted_step = (0,2,0) + (0,-1,0) = (0,1,0)
+     *
+     * Expected: (0,0,0) + (0,1,0) = (0,1,0)
+     * Offset in packed layout: 0*(4*8) + 1*8 + 0 = 8
+     */
+    using Helper = ThreadwiseTransferHelper_Base;
+
+    constexpr auto desc =
+        make_naive_tensor_descriptor_packed(make_tuple(Number<2>{}, Number<4>{}, Number<8>{}));
+
+    auto coord = make_tensor_coordinate(desc, make_multi_index(0, 0, 0));
+
+    EXPECT_EQ(coord.GetOffset(), 0);
+
+    const auto step_idx = make_multi_index(0, 2, 0);
+
+    auto get_reset_step = []() { return make_multi_index(0, -1, 0); };
+
+    Helper::MoveSliceWindow<decltype(desc), decltype(coord), false>(
+        desc, coord, step_idx, get_reset_step);
+
+    // adjusted_step = (0,2,0) + (0,-1,0) = (0,1,0)
+    // Offset: 0*32 + 1*8 + 0 = 8
+    EXPECT_EQ(coord.GetOffset(), 8);
 }
 
 // =============================================================================
@@ -266,7 +407,7 @@ TEST(ThreadwiseTransferHelperSerpentine, VectorSizeLookupTable)
 TEST(ThreadwiseTransferHelperSerpentine, VectorOffsetsLookupTable)
 {
     /*
-     * Starting byte offsets for each sub-load in the decomposition:
+     * Starting element offsets for each sub-load in the decomposition:
      *
      * Width 7 = {4, 2, 1}:
      *   |<--- 4 --->|<- 2 ->|1|
@@ -304,6 +445,186 @@ TEST(ThreadwiseTransferHelperSFC, ComputeSFCCoordinateResetStep_SingleAccess)
 
     EXPECT_EQ(reset[Number<0>{}], 0);
     EXPECT_EQ(reset[Number<1>{}], 0);
+}
+
+TEST(ThreadwiseTransferHelperSFC, ComputeSFCCoordinateResetStep_2D_RowMajor)
+{
+    /*
+     * Typical v6r1 scenario: 2D slice transfer with vectorized column access.
+     *
+     * SliceLengths    = (4, 8)   -- 4 rows, 8 columns
+     * DimAccessOrder  = (0, 1)   -- row-major traversal (rows change slowest)
+     * ScalarPerAccess = (1, 4)   -- 4-wide vector loads along columns
+     *
+     * access_lengths = SliceLengths / ScalarPerAccess = (4, 2)
+     *
+     * The SFC traverses in serpentine order through 4*2 = 8 access positions:
+     *
+     *     col: 0..3  4..7
+     *   row 0:  [0]-->[1]     access 0 -> idx (0,0), access 1 -> idx (0,4)
+     *   row 1:  [3]<--[2]     access 2 -> idx (1,4), access 3 -> idx (1,0)
+     *   row 2:  [4]-->[5]     access 4 -> idx (2,0), access 5 -> idx (2,4)
+     *   row 3:  [7]<--[6]     access 6 -> idx (3,4), access 7 -> idx (3,0)
+     *
+     * Last access (#7) lands at index (3, 0).
+     * Reset step = origin - last = (0,0) - (3,0) = (-3, 0)
+     */
+    using SFCHelper = ThreadwiseTransferHelper_SFC;
+
+    constexpr auto scalar_per_access = Sequence<1, 4>{};
+    constexpr auto reset             = SFCHelper::ComputeSFCCoordinateResetStep<Sequence<4, 8>,
+                                                                                Sequence<0, 1>,
+                                                                                decltype(scalar_per_access)>();
+
+    EXPECT_EQ(reset[Number<0>{}], -3); // return 3 rows up
+    EXPECT_EQ(reset[Number<1>{}], 0);  // column already at origin
+}
+
+TEST(ThreadwiseTransferHelperSFC, ComputeSFCCoordinateResetStep_2D_ColMajor)
+{
+    /*
+     * Same 2D slice but column-major traversal order.
+     *
+     * SliceLengths    = (4, 8)   -- 4 rows, 8 columns
+     * DimAccessOrder  = (1, 0)   -- column-major (columns change slowest)
+     * ScalarPerAccess = (1, 4)   -- 4-wide vector loads along columns
+     *
+     * access_lengths         = (4, 2)
+     * ordered_access_lengths = reorder_new2old((4,2), (1,0)) = (2, 4)
+     *   (dim 1 is the "slow" outer dimension, dim 0 is the "fast" inner)
+     *
+     * Traversal (ordered dims are [col_block, row]):
+     *
+     *     col_block: 0    1
+     *   row 0:      [0]  [7]
+     *   row 1:      [1]  [6]
+     *   row 2:      [2]  [5]
+     *   row 3:      [3]  [4]
+     *
+     * Unordered indices (natural dim order):
+     *   access 0 -> (row=0, col=0*4=0)
+     *   access 3 -> (row=3, col=0)
+     *   access 4 -> (row=3, col=1*4=4)  (serpentine reversal in row)
+     *   access 7 -> (row=0, col=4)
+     *
+     * Last access (#7) lands at index (0, 4).
+     * Reset step = (0,0) - (0,4) = (0, -4)
+     */
+    using SFCHelper = ThreadwiseTransferHelper_SFC;
+
+    constexpr auto scalar_per_access = Sequence<1, 4>{};
+    constexpr auto reset             = SFCHelper::ComputeSFCCoordinateResetStep<Sequence<4, 8>,
+                                                                                Sequence<1, 0>,
+                                                                                decltype(scalar_per_access)>();
+
+    EXPECT_EQ(reset[Number<0>{}], 0);  // row already at origin
+    EXPECT_EQ(reset[Number<1>{}], -4); // return 4 columns left
+}
+
+TEST(ThreadwiseTransferHelperSFC, ComputeSFCCoordinateResetStep_3D)
+{
+    /*
+     * 3D slice transfer, modelling a batch x row x col tile as used in
+     * batched GEMM or attention kernels (v7r2/v7r3).
+     *
+     * SliceLengths    = (2, 4, 8)   -- 2 batches, 4 rows, 8 columns
+     * DimAccessOrder  = (0, 1, 2)   -- batch outermost, column innermost
+     * ScalarPerAccess = (1, 1, 8)   -- 8-wide vector loads on columns
+     *
+     * access_lengths = (2, 4, 1)
+     * Total accesses = 2 * 4 * 1 = 8
+     *
+     * Traversal within each batch is serpentine on rows, columns scalar:
+     *
+     *   batch 0:
+     *     row 0: [0]   -- (0, 0, 0)
+     *     row 1: [1]   -- (0, 1, 0)
+     *     row 2: [2]   -- (0, 2, 0)
+     *     row 3: [3]   -- (0, 3, 0)
+     *
+     *   batch 1: (serpentine reversal on rows)
+     *     row 3: [4]   -- (1, 3, 0)
+     *     row 2: [5]   -- (1, 2, 0)
+     *     row 1: [6]   -- (1, 1, 0)
+     *     row 0: [7]   -- (1, 0, 0)
+     *
+     * Last access (#7) lands at index (1, 0, 0).
+     * Reset step = (0,0,0) - (1,0,0) = (-1, 0, 0)
+     */
+    using SFCHelper = ThreadwiseTransferHelper_SFC;
+
+    constexpr auto scalar_per_access = Sequence<1, 1, 8>{};
+    constexpr auto reset             = SFCHelper::ComputeSFCCoordinateResetStep<Sequence<2, 4, 8>,
+                                                                                Sequence<0, 1, 2>,
+                                                                                decltype(scalar_per_access)>();
+
+    EXPECT_EQ(reset[Number<0>{}], -1); // return 1 batch
+    EXPECT_EQ(reset[Number<1>{}], 0);  // row already at origin (serpentine came back)
+    EXPECT_EQ(reset[Number<2>{}], 0);  // column at origin (single access per row)
+}
+
+TEST(ThreadwiseTransferHelperSFC, ComputeSFCCoordinateResetStep_EvenInnerAccesses)
+{
+    /*
+     * When the number of accesses along the inner dimension is even, the
+     * serpentine traversal returns to the starting side on that dimension.
+     *
+     * SliceLengths    = (4, 4)
+     * DimAccessOrder  = (0, 1)
+     * ScalarPerAccess = (1, 2)   -- 2-wide vector loads
+     *
+     * access_lengths = (4, 2)    -- 2 accesses along cols (even)
+     *
+     *     col: 0..1  2..3
+     *   row 0:  [0]-->[1]     access 0 -> (0,0), access 1 -> (0,2)
+     *   row 1:  [3]<--[2]     access 2 -> (1,2), access 3 -> (1,0)
+     *   row 2:  [4]-->[5]     access 4 -> (2,0), access 5 -> (2,2)
+     *   row 3:  [7]<--[6]     access 6 -> (3,2), access 7 -> (3,0)
+     *
+     * Last access (#7) at (3, 0). Even number of column accesses (2)
+     * means the serpentine always returns to col=0 at the end of each row.
+     * Reset step = (0,0) - (3,0) = (-3, 0)
+     */
+    using SFCHelper = ThreadwiseTransferHelper_SFC;
+
+    constexpr auto scalar_per_access = Sequence<1, 2>{};
+    constexpr auto reset             = SFCHelper::ComputeSFCCoordinateResetStep<Sequence<4, 4>,
+                                                                                Sequence<0, 1>,
+                                                                                decltype(scalar_per_access)>();
+
+    EXPECT_EQ(reset[Number<0>{}], -3);
+    EXPECT_EQ(reset[Number<1>{}], 0); // even inner accesses -> back at start column
+}
+
+TEST(ThreadwiseTransferHelperSFC, ComputeSFCCoordinateResetStep_OddInnerAccesses)
+{
+    /*
+     * When the number of accesses along the inner dimension is odd and the
+     * outer dimension is even, the serpentine returns to col=0.
+     *
+     * SliceLengths    = (2, 6)
+     * DimAccessOrder  = (0, 1)
+     * ScalarPerAccess = (1, 2)   -- 2-wide vector loads
+     *
+     * access_lengths = (2, 3)   -- 3 accesses along cols (odd!)
+     *
+     *     col: 0..1  2..3  4..5
+     *   row 0:  [0]-->[1]-->[2]      access 0 -> (0,0), 1 -> (0,2), 2 -> (0,4)
+     *   row 1:  [5]<--[4]<--[3]      access 3 -> (1,4), 4 -> (1,2), 5 -> (1,0)
+     *
+     * Last access (#5) at (1, 0). Even row count means serpentine reversal
+     * on the inner dim brings us back to col=0.
+     * Reset step = (0,0) - (1,0) = (-1, 0)
+     */
+    using SFCHelper = ThreadwiseTransferHelper_SFC;
+
+    constexpr auto scalar_per_access = Sequence<1, 2>{};
+    constexpr auto reset             = SFCHelper::ComputeSFCCoordinateResetStep<Sequence<2, 6>,
+                                                                                Sequence<0, 1>,
+                                                                                decltype(scalar_per_access)>();
+
+    EXPECT_EQ(reset[Number<0>{}], -1); // return 1 row
+    EXPECT_EQ(reset[Number<1>{}], 0);  // even outer accesses -> serpentine came back to col=0
 }
 
 // =============================================================================
