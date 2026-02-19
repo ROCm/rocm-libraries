@@ -32,7 +32,7 @@ from .Utilities import print2
 
 import rocisa
 
-# Translate GPU targets to filter filenames in Tensile_LOGIC directory
+# Translate GPU targets to filename prefixes in tensilelite logic files
 architectureMap = {
     "all": "_",
     "gfx000": "none",
@@ -101,39 +101,32 @@ SUPPORTED_ISA = [
     IsaVersion(12, 0, 1),
 ]
 
-SUPPORTED_ARCH_DEVICE_IDS = {
-    "id=74a0": "gfx942",
-    "id=74a1": "gfx942",
-    "id=74a2": "gfx942",
-    "id=74a3": "gfx942",
-    "id=74a5": "gfx942",
-    "id=74a9": "gfx942",
-    "id=75a0": "gfx950",
-    "id=75a2": "gfx950",
-    "id=75a3": "gfx950",
-    # This dictionary should be extended to add device ID-based
-    # filtering support for other architectures.
+# Source-of-truth chip IDs used to generate build predicates.
+GFX_CHIP_IDS = {
+    "gfx942": ["74a0", "74a1", "74a2", "74a3", "74a5", "74a9"],
+    "gfx950": ["75a0", "75a2", "75a3"],
 }
 
-SUPPORTED_ARCH_CU_COUNTS = {
-    "cu=20": "gfx942",
-    "cu=38": "gfx942",
-    "cu=64": "gfx942",
-    "cu=80": "gfx942",
-    "cu=96": "gfx942",
-    "cu=228": "gfx942",
-    "cu=304": "gfx942",
-    # This dictionary should be extended to add CU count-based
-    # filtering support for other architectures.
+# Source-of-truth CU counts used to generate build predicates.
+GFX_CU_COUNTS = {
+    "gfx942": ["20", "38", "64", "80", "96", "228", "304"],
 }
 
-ARCH_DEVICE_ID_FALLBACKS = {
+SUPPORTED_BUILD_CHIP_IDS = {
+    f"id={chipId}": gfx for gfx, chipIds in GFX_CHIP_IDS.items() for chipId in chipIds
+}
+
+SUPPORTED_BUILD_CU_COUNTS = {
+    f"cu={cuCount}": gfx for gfx, cuCounts in GFX_CU_COUNTS.items() for cuCount in cuCounts
+}
+
+SUPPORTED_CHIP_ID_FALLBACKS = {
     "id=75a2": ["id=75a0"],
     "id=75a3": ["id=75a0"],
 }
 
-# Here, `None` refers to an unspecified CU count.
-ARCH_CU_COUNT_FALLBACKS = {
+# `None` refers to an unspecified CU count.
+SUPPORTED_CU_COUNT_FALLBACKS = {
     "cu=20": None,
     "cu=38": None,
     "cu=64": None,
@@ -143,12 +136,13 @@ ARCH_CU_COUNT_FALLBACKS = {
     "cu=304": None,
 }
 
-# Maps GFX architectures to their expected device IDs for use in warnings
-# This helps users know what chip IDs they should specify in logic files
-GFX_TO_EXPECTED_DEVICE_IDS = {
-    "gfx942": ["74a0", "74a1", "74a2", "74a3", "74a5", "74a9"],
-    "gfx950": ["75a0", "75a2", "75a3"],
-}
+def supportsChipIdPredicates(gfx: str) -> bool:
+    """
+    Returns whether PCI chip ID predicates are currently enabled for a GFX architecture.
+
+    Extend as needed to support other architectures.
+    """
+    return gfx == "gfx950"
 
 
 def isaToGfx(arch: IsaVersion) -> str:
@@ -341,10 +335,10 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
     # Check for placeholder/invalid device IDs and warn
     placeholderIds = {"id=0000", "id=ffff", "id=0"}
     hasOnlyPlaceholders = all(devId in placeholderIds for devId in deviceIds)
-    hasNoRegisteredIds = not any(devId in SUPPORTED_ARCH_DEVICE_IDS for devId in deviceIds)
+    hasNoRegisteredIds = not any(devId in SUPPORTED_BUILD_CHIP_IDS for devId in deviceIds)
 
-    if hasOnlyPlaceholders or hasNoRegisteredIds:
-        expectedIds = GFX_TO_EXPECTED_DEVICE_IDS.get(gfx, [])
+    if supportsChipIdPredicates(gfx) and (hasOnlyPlaceholders or hasNoRegisteredIds):
+        expectedIds = GFX_CHIP_IDS.get(gfx, [])
         if expectedIds:
             print2(f"")
             print2(f"********************************************************************************")
@@ -389,14 +383,14 @@ def _verifyPredicate(predicateSpec: str, gfx: str) -> str:
     msgPrefix = f"Invalid predicate: {predicateSpec}"
     key, _, val = predicateSpec.partition("=")
     if key == "id":
-        if predicateSpec not in SUPPORTED_ARCH_DEVICE_IDS:
+        if predicateSpec not in SUPPORTED_BUILD_CHIP_IDS:
             raise ValueError(f"{msgPrefix}: device ID not supported")
-        if gfx and SUPPORTED_ARCH_DEVICE_IDS[predicateSpec] != gfx:
+        if gfx and SUPPORTED_BUILD_CHIP_IDS[predicateSpec] != gfx:
             raise ValueError(f"{msgPrefix}: device ID is not associated with {gfx}")
     elif key == "cu":
-        if predicateSpec not in SUPPORTED_ARCH_CU_COUNTS:
+        if predicateSpec not in SUPPORTED_BUILD_CU_COUNTS:
             raise ValueError(f"{msgPrefix}: CU count not supported")
-        if gfx and SUPPORTED_ARCH_CU_COUNTS[predicateSpec] != gfx:
+        if gfx and SUPPORTED_BUILD_CU_COUNTS[predicateSpec] != gfx:
             raise ValueError(f"{msgPrefix}: CU count is not associated with {gfx}")
     else:
         raise ValueError(f"{msgPrefix}: only device ID and CU count-based predicates are currently supported")
@@ -497,10 +491,10 @@ def _populateVariantMap(
     fallbackDevIds = {
         fallbackId
         for v in requestedDevIds
-        if v in ARCH_DEVICE_ID_FALLBACKS
-        for fallbackId in ARCH_DEVICE_ID_FALLBACKS[v]
+        if v in SUPPORTED_CHIP_ID_FALLBACKS
+        for fallbackId in SUPPORTED_CHIP_ID_FALLBACKS[v]
     }
-    fallbackCUs = {ARCH_CU_COUNT_FALLBACKS[v] for v in requestedCUs if v in ARCH_CU_COUNT_FALLBACKS}
+    fallbackCUs = {SUPPORTED_CU_COUNT_FALLBACKS[v] for v in requestedCUs if v in SUPPORTED_CU_COUNT_FALLBACKS}
 
     isCuFallback = not requestedCUs or archinfo.CUCount in fallbackCUs
     isDevIdFallback = not requestedDevIds or (

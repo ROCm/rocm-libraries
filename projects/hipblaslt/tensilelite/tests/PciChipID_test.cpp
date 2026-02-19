@@ -30,6 +30,12 @@ TEST(PciChipIDTest, QueryDeviceChipId)
     ASSERT_EQ(err, hipSuccess) << "Failed to get device count";
     ASSERT_GT(deviceCount, 0) << "No HIP devices available";
 
+    hipDeviceProp_t prop;
+    ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess) << "Failed to get device properties";
+    auto processor = AMDGPU::toProcessor(prop.gcnArchName);
+    if(!ChipIdRegistry::supportsChipIdPredicates(processor))
+        GTEST_SKIP() << "PCI chip ID querying is gfx950-only at runtime";
+
     // Query PCI Chip ID using hipDeviceGetAttribute directly
     int pciChipId = 0;
     err = hipDeviceGetAttribute(&pciChipId, hipDeviceAttributePciChipId, 0);
@@ -55,6 +61,13 @@ TEST(PciChipIDTest, HipHardwarePopulatesPciChipId)
     // Cast to AMDGPU to access pciChipId
     auto* amdgpu = dynamic_cast<AMDGPU*>(hardware.get());
     ASSERT_NE(amdgpu, nullptr) << "Hardware is not an AMDGPU";
+
+    if(!ChipIdRegistry::supportsChipIdPredicates(amdgpu->processor))
+    {
+        EXPECT_FALSE(amdgpu->pciChipId().has_value())
+            << "pciChipId should be unset for non-gfx950 processors";
+        return;
+    }
 
     if(Debug::Instance().debugEnabled())
     {
@@ -97,6 +110,9 @@ TEST(PciChipIDTest, PciChipIDEqualPredicate)
     auto* amdgpu = dynamic_cast<AMDGPU*>(hardware.get());
     ASSERT_NE(amdgpu, nullptr);
 
+    if(!ChipIdRegistry::supportsChipIdPredicates(amdgpu->processor))
+        GTEST_SKIP() << "PciChipIDEqual runtime matching is gfx950-only";
+
     ASSERT_TRUE(amdgpu->pciChipId().has_value()) << "pciChipId must be set for this test";
     int actualPciChipId = amdgpu->pciChipId().value();
     ASSERT_GT(actualPciChipId, 0) << "pciChipId must be valid for this test";
@@ -109,6 +125,17 @@ TEST(PciChipIDTest, PciChipIDEqualPredicate)
 
     EXPECT_TRUE((*matchingPred)(*amdgpu)) << "Predicate should match actual chip ID";
     EXPECT_FALSE((*nonMatchingPred)(*amdgpu)) << "Predicate should NOT match different chip ID";
+}
+
+TEST(PciChipIDTest, PciChipIDEqualIgnoredOnNonGfx950)
+{
+    AMDGPU gpuWithChipId(AMDGPU::Processor::gfx942, 120, "gfx942-mock", std::make_optional(0x75a0));
+    auto   pred = std::make_shared<Predicates::GPU::PciChipIDEqual>(0x75a0);
+
+    EXPECT_FALSE((*pred)(gpuWithChipId))
+        << "PciChipIDEqual must ignore chip IDs for non-gfx950 processors";
+    EXPECT_FALSE(pred->isFallbackMatch(gpuWithChipId))
+        << "Fallback matching must also be disabled for non-gfx950 processors";
 }
 
 // Test: Hardware selection with PciChipIDEqual in a library hierarchy
@@ -125,6 +152,9 @@ TEST(PciChipIDTest, HardwareSelectionWithPciChipID)
 
     auto* amdgpu = dynamic_cast<AMDGPU*>(hardware.get());
     ASSERT_NE(amdgpu, nullptr);
+
+    if(!ChipIdRegistry::supportsChipIdPredicates(amdgpu->processor))
+        GTEST_SKIP() << "HardwareSelectionWithPciChipID is gfx950-specific";
 
     ASSERT_TRUE(amdgpu->pciChipId().has_value()) << "pciChipId must be set for this test";
     int actualPciChipId = amdgpu->pciChipId().value();

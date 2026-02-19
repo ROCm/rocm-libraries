@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <iostream>
-#include <sstream>
+#include <stdexcept>
 
 namespace TensileLite
 {
@@ -75,6 +75,14 @@ namespace TensileLite
                                                     deviceId));
             }
 #endif
+            const auto processor = AMDGPU::toProcessor(prop.gcnArchName);
+            if(!ChipIdRegistry::supportsChipIdPredicates(processor))
+            {
+                // For processors that don't support PCI Chip ID predicates
+                // these are intentionally ignored at runtime
+                return std::make_shared<HipAMDGPU>(prop, std::nullopt);
+            }
+
             // Query the PCI Chip ID (the actual hardware identifier, e.g., 0x7550)
             // This is distinct from prop.pciDeviceID which is the PCIe bus slot number
             int pciChipId = 0;
@@ -82,45 +90,14 @@ namespace TensileLite
 
             // Check if the attribute is supported by this HIP runtime version
             if(chipIdResult == hipErrorInvalidValue)
-            {
-                std::ostringstream msg;
-                msg << "\n"
-                    << "********************************************************************************\n"
-                    << "* FATAL ERROR: hipDeviceAttributePciChipId is not supported!\n"
-                    << "*\n"
-                    << "* The HIP runtime does not support hipDeviceAttributePciChipId.\n"
-                    << "* This attribute is required for device-specific kernel selection.\n"
-                    << "*\n"
-                    << "* Device: " << prop.name << "\n"
-                    << "* Architecture: " << prop.gcnArchName << "\n"
-                    << "* HIP Version: " << HIP_VERSION << "\n"
-                    << "*\n"
-                    << "* Please update to a HIP runtime that supports PCI Chip ID queries,\n"
-                    << "* or rebuild with an older version of this code that doesn't require it.\n"
-                    << "********************************************************************************\n";
-                throw std::runtime_error(msg.str());
-            }
+                throw std::runtime_error(pciChipIdUnsupportedErrorMessage(prop));
 
             // For any other error, use standard error checking
             HIP_CHECK_EXC(chipIdResult);
 
             // Warn if the chip ID is not registered in the known chip ID registry
             if(!ChipIdRegistry::isKnownChipId(pciChipId))
-            {
-                std::cerr << "\n"
-                          << "********************************************************************************\n"
-                          << "* WARNING: Unregistered PCI Chip ID detected!\n"
-                          << "*\n"
-                          << "* Device: " << prop.name << "\n"
-                          << "* Chip ID: 0x" << std::hex << pciChipId << std::dec << "\n"
-                          << "* Architecture: " << prop.gcnArchName << "\n"
-                          << "*\n"
-                          << "* This chip ID is not registered in Tensile's ChipIdRegistry.\n"
-                          << "* Chip ID-specific kernel selection may not work correctly.\n"
-                          << "* Please update AMDGPUPredicates.hpp and Architectures.py to add this chip ID.\n"
-                          << "********************************************************************************\n"
-                          << std::endl;
-            }
+                std::cerr << unregisteredPciChipIdWarningMessage(prop, pciChipId) << std::endl;
 
             return std::make_shared<HipAMDGPU>(prop, std::make_optional(pciChipId));
         }

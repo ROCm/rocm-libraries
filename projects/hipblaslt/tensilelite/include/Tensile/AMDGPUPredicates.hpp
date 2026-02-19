@@ -40,13 +40,19 @@ namespace TensileLite
     /**
      * @brief Registry of known PCI Chip IDs and their fallback relationships.
      *
-     * This mirrors the Python-side SUPPORTED_ARCH_DEVICE_IDS and ARCH_DEVICE_ID_FALLBACKS
+     * This mirrors the Python-side SUPPORTED_BUILD_CHIP_IDS and SUPPORTED_CHIP_ID_FALLBACKS
      * from Architectures.py to ensure consistency between build-time and runtime behavior.
      * @todo Move this definition to a shared configuration file so both the Python-side and
      * runtime side use the same definitions -- single source of truth.
      */
     namespace ChipIdRegistry
     {
+        // Check whether to use PCI Chip ID predicates for the given processor
+        inline bool supportsChipIdPredicates(AMDGPU::Processor processor)
+        {
+            return processor == AMDGPU::Processor::gfx950;
+        }
+
         // Registered chip IDs mapped to their GFX architecture
         inline const std::map<int, AMDGPU::Processor>& knownChipIds()
         {
@@ -214,6 +220,9 @@ namespace TensileLite
 
                 virtual bool operator()(AMDGPU const& gpu) const override
                 {
+                    if(!ChipIdRegistry::supportsChipIdPredicates(gpu.processor))
+                        return false;
+
                     if(!gpu.pciChipId().has_value())
                         return false;
 
@@ -224,6 +233,9 @@ namespace TensileLite
 
                 virtual bool isFallbackMatch(AMDGPU const& gpu) const override
                 {
+                    if(!ChipIdRegistry::supportsChipIdPredicates(gpu.processor))
+                        return false;
+
                     if(!gpu.pciChipId().has_value())
                         return false;
                     return ChipIdRegistry::isFallbackMatch(gpu.pciChipId().value(), value);

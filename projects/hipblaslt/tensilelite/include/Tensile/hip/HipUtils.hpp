@@ -102,6 +102,45 @@ namespace TensileLite
 {
     namespace hip
     {
+        inline std::string pciChipIdUnsupportedErrorMessage(hipDeviceProp_t const& prop)
+        {
+            std::ostringstream msg;
+            msg << "\n"
+                << "********************************************************************************\n"
+                << "* FATAL ERROR: hipDeviceAttributePciChipId is not supported!\n"
+                << "*\n"
+                << "* The HIP runtime does not support hipDeviceAttributePciChipId.\n"
+                << "* This attribute is required for device-specific kernel selection.\n"
+                << "*\n"
+                << "* Device: " << prop.name << "\n"
+                << "* Architecture: " << prop.gcnArchName << "\n"
+                << "* HIP Version: " << HIP_VERSION << "\n"
+                << "*\n"
+                << "* Please update to a HIP runtime that supports PCI Chip ID queries,\n"
+                << "* or rebuild with an older version of this code that doesn't require it.\n"
+                << "********************************************************************************\n";
+            return msg.str();
+        }
+
+        inline std::string unregisteredPciChipIdWarningMessage(hipDeviceProp_t const& prop,
+                                                               int                    pciChipId)
+        {
+            std::ostringstream msg;
+            msg << "\n"
+                << "********************************************************************************\n"
+                << "* WARNING: Unregistered PCI Chip ID detected!\n"
+                << "*\n"
+                << "* Device: " << prop.name << "\n"
+                << "* Chip ID: 0x" << std::hex << pciChipId << std::dec << "\n"
+                << "* Architecture: " << prop.gcnArchName << "\n"
+                << "*\n"
+                << "* This chip ID is not registered in Tensile's ChipIdRegistry.\n"
+                << "* Chip ID-specific kernel selection may not work correctly.\n"
+                << "* Please update AMDGPUPredicates.hpp and Architectures.py to add this chip ID.\n"
+                << "********************************************************************************\n";
+            return msg.str();
+        }
+
         inline void CopyTensorVoid(void*                   dst,
                                    void const*             src,
                                    TensorDescriptor const& desc,
