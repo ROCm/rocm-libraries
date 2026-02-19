@@ -31,4 +31,8 @@ if (DEFINED ENV{VCPKG_PATH})
 else()
   set(VCPKG_PATH "C:/github/vcpkg")
 endif()
+
+# Force static libraries on Windows
+set(VCPKG_TARGET_TRIPLET "x64-windows-static")
+
 include("${VCPKG_PATH}/scripts/buildsystems/vcpkg.cmake")
