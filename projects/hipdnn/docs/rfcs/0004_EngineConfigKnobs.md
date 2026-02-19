@@ -889,15 +889,6 @@ The knobs system has been fully implemented in hipDNN as of version 1.0+. The im
    - MIOpen provider knobs documentation with examples
    - This RFC updated with implementation status
 
-#### ⏳ Pending Components (Future)
-
-1. **Plugin SDK Helper Classes** (Phase X - Deferred)
-   - `KnobRegistry` helper class - Not yet available
-   - `EngineBase::registerKnobs()` - Not yet available
-   - Plugins currently use FlatBuffer wrappers directly
-
-**Rationale**: Plugin SDK helper classes are deferred until the Plugin SDK architecture is fully designed and implemented. Current FlatBuffer-based approach provides all necessary functionality.
-
 ### 11.2 Implementation Deviations
 
 The following deviations from the original RFC were made during implementation:
@@ -939,13 +930,9 @@ The following deviations from the original RFC were made during implementation:
 
 ### 11.3 Known Limitations
 
-1. **No Plugin SDK Helper Classes**: Plugins must use FlatBuffer wrappers directly. This is more verbose but provides full functionality.
+1. **String-based Knob IDs**: Slightly less efficient than integer IDs, but acceptable for configuration-time operations.
 
-2. **String-based Knob IDs**: Slightly less efficient than integer IDs, but acceptable for configuration-time operations.
-
-3. **No Auto-Tuning Integration**: Auto-tuning integration (section 9.1) is planned for a future release.
-
-4. **No Knob Identifier Headers**: Knob identifier header files (section 9.2) are not yet available. Users must use string literals.
+2. **No Auto-Tuning Integration**: Auto-tuning integration (section 9.1) is planned for a future release.
 
 ### 11.4 Actual API Signatures
 
@@ -1044,13 +1031,6 @@ For implementation details and usage examples, refer to:
   - `frontend/include/hipdnn_frontend/knob/KnobSetting.hpp`
   - `frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp`
   - `data_sdk/schemas/knob_value.fbs`
-
-### 11.9 Future Work
-
-Planned enhancements for future releases:
-
-1. **Plugin SDK Helper Classes**: Simplify knob registration for plugin developers
-2. **Knob Identifier Headers**: Type-safe knob ID constants
 
 ---
 

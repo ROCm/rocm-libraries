@@ -358,7 +358,13 @@ enum class KnobValueType {
 
 ### For Plugin Developers
 
-For guidance on exposing knobs in your plugin, see the [Plugin Development Guide](./PluginDevelopment.md#providing-knobs).
+Plugin developers can expose custom knobs using the Plugin SDK utilities:
+
+- **[`KnobFactory`](../plugin_sdk/include/hipdnn_plugin_sdk/KnobFactory.hpp)** - Helper class to create knob definitions
+- **[`IPlanBuilder::getCustomKnobs()`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp)** - Interface method for exposing knobs
+- **[`GlobalKnobDefines`](../plugin_sdk/include/hipdnn_plugin_sdk/GlobalKnobDefines.hpp)** - Constants for standard global knob names
+
+For comprehensive guidance on exposing knobs in your plugin, see the [Plugin Development Guide](./PluginDevelopment.md#providing-knobs).
 
 ---
 

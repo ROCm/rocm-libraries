@@ -6,13 +6,19 @@
 - [Plugin Types](#plugin-types)
 - [SDK Libraries](#sdk-libraries)
 - [Plugin API](#plugin-api)
+- [Engine IDs](#engine-ids)
 - [Creating a Kernel Engine Plugin](#creating-a-kernel-engine-plugin)
+  - [Prerequisites](#prerequisites)
   - [Steps Overview](#steps-overview)
   - [Implementation Details & Best Practices](#implementation-details)
   - [Providing Knobs](#providing-knobs)
+    - [Plugin SDK Knob Utilities](#plugin-sdk-knob-utilities)
+    - [Registering Knobs with the Plugin SDK](#registering-knobs-with-the-plugin-sdk)
+    - [Accessing Knob Settings in Your Plugin](#accessing-knob-settings-in-your-plugin)
   - [Key Files Reference](#key-files-reference)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
+- [How to Test Plugins](#how-to-test-plugins)
 - [Example: MIOpen Provider Plugin](#example-miopen-provider-plugin)
 - [Troubleshooting](#troubleshooting)
 
@@ -165,26 +171,39 @@ Before creating a plugin, ensure you have **built and installed hipDNN**. Plugin
 
 ### Implementation Details
 
-The **Engine Manager** is responsible for:
-- Creating and managing engine instances
-- Reporting supported operations
+The Plugin SDK provides template interfaces that simplify plugin development. While you can implement the raw C API directly, using these interfaces is recommended for code organization and maintainability.
+
+#### Using Plugin SDK Interfaces
+
+**Template Parameters**: All SDK interfaces are templated on three types:
+- `THandle` - Your plugin's handle type (wraps backend resources)
+- `TSettings` - Your plugin's settings type (stores knob values)
+- `TContext` - Your plugin's context type (holds the execution plan)
+
+The **EngineManager** ([`EngineManager.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/EngineManager.hpp)) is responsible for:
+- Creating and managing `IEngine` instances
+- Reporting supported operations via `getApplicableEngineIds()`
+- Delegating to the appropriate engine based on engine ID
 - Handling resource allocation
-- Managing device-specific contexts
 
-For **Engine Implementations**:
+For **Engine Implementations** ([`IEngine.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IEngine.hpp)):
 - Each engine must have a unique inter-plugin `int64_t` identifier
-- Implement the `execute()` method for graph execution
-- Provide `get_supported_operations()` to report capabilities
-- Handle operation-specific kernel launches
-- Manage memory transfers and synchronization
+- Implement `isApplicable()` to report graph support
+- Implement `getDetails()` to return engine metadata and knobs
+- Delegate plan building to `IPlanBuilder` implementations
 
-**Execution plans** for kernel engines:
+For **Plan Builder Implementations** ([`IPlanBuilder.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp)):
+- Implement `getCustomKnobs()` to expose configurable parameters
+- Implement `initializeExecutionSettings()` to apply knob values
+- Implement `buildPlan()` to create executable plans
+
+**Execution plans** ([`IPlan.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IPlan.hpp)) for kernel engines:
 - Map hipDNN operations to backend-specific kernel implementations
 - Define memory layouts and data transformations
 - Specify kernel launch configurations
 - Handle device-specific optimizations
 
-In general, the **best practices** consist of:
+#### Best Practices
 
 1. Organizing kernels by operation type
 2. Efficiently managing device memory allocations and transfers
@@ -235,159 +254,126 @@ custom_plugin.matmul.block_size
 - `global.benchmarking` - Enable kernel benchmarking
 - `global.workspace_size_limit` - Maximum workspace memory (operation-specific)
 
-#### Registering Knobs
-
-Plugins expose knobs through the engine details descriptor. When hipDNN queries your engine for its capabilities, you should include knob metadata in the response.
-
-**Current Implementation Approach**:
-
-Since the Plugin SDK helper classes are not yet available, plugins should create knobs using FlatBuffer wrappers directly. The process involves:
-
-1. **Create Knob FlatBuffers** when responding to engine details queries
-2. **Include knob metadata** in the `EngineDetails` response
-3. **Validate knob settings** when building execution plans
-4. **Apply knob values** during plan execution
-
-**Example: Defining Knobs in Engine Details**
+These constants are defined in [`GlobalKnobDefines.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/GlobalKnobDefines.hpp):
 
 ```cpp
-// When hipDNN queries engine details via hipdnnEnginePluginGetEngineDetails()
-// your plugin should create knob metadata
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 
+// Use the constants instead of string literals
+hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME        // "global.benchmarking"
+hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME // "global.workspace_size_limit"
+```
+
+#### Plugin SDK Knob Utilities
+
+The Plugin SDK provides helper classes that simplify knob implementation:
+
+| Class | Purpose |
+|-------|---------|
+| [`KnobFactory`](../plugin_sdk/include/hipdnn_plugin_sdk/KnobFactory.hpp) | Create knob definitions with constraints |
+| [`KnobSettingFactory`](../plugin_sdk/include/hipdnn_plugin_sdk/KnobSettingFactory.hpp) | Create knob settings (for testing) |
+| [`GlobalKnobDefines`](../plugin_sdk/include/hipdnn_plugin_sdk/GlobalKnobDefines.hpp) | Constants for standard global knobs |
+
+The [`IPlanBuilder`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp) interface includes a `getCustomKnobs()` method that plan builders implement to expose their knobs.
+
+#### Registering Knobs with the Plugin SDK
+
+Plugins expose knobs through the `IPlanBuilder::getCustomKnobs()` method. When hipDNN queries your engine for its details, the engine collects knobs from all applicable plan builders and includes them in the response.
+
+```cpp
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 
-// Create a FlatBuffer with knob information
-flatbuffers::FlatBufferBuilder builder;
+std::vector<hipdnn_data_sdk::data_objects::KnobT> MyPlanBuilder::getCustomKnobs(
+    const HipdnnMiopenHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+{
+    std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
 
-// Define an integer knob with constraints
-auto knobIdStr = builder.CreateString("miopen.conv.tile_size");
-auto description = builder.CreateString("Convolution tile size (must be power of 2)");
+    if(!isApplicable(handle, opGraph))
+    {
+        return knobs;
+    }
 
-// Create default value
-auto defaultIntValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, 16);
+    hipdnn_data_sdk::data_objects::KnobT sampleKnob;
+    sampleKnob.knob_id = "myplugin.myoperation.myknob";
+    sampleKnob.description = "Sample Knob Description";
 
-// Create constraints
-std::vector<int64_t> validValues = {8, 16, 32, 64, 128};
-auto validValuesVec = builder.CreateVector(validValues);
-auto constraint = hipdnn_data_sdk::data_objects::CreateIntConstraint(
-    builder,
-    8,      // min
-    128,    // max
-    8,      // step
-    validValuesVec
-);
+    hipdnn_data_sdk::data_objects::IntValueT defaultValue;
+    defaultValue.value = 1;
+    sampleKnob.default_value.Set(defaultValue);
 
-// Create the knob
-auto knob = hipdnn_data_sdk::data_objects::CreateKnob(
-    builder,
-    knobIdStr,
-    description,
-    hipdnn_data_sdk::data_objects::KnobValue_IntValue,
-    defaultIntValue.Union(),
-    hipdnn_data_sdk::data_objects::KnobConstraint_IntConstraint,
-    constraint.Union(),
-    false  // not deprecated
-);
+    hipdnn_data_sdk::data_objects::IntConstraintT constraint;
+    constraint.min_value = 0;
+    constraint.max_value = 4;
+    constraint.step = 1;
+    sampleKnob.constraint.Set(constraint);
 
-// Add to engine details...
+    knobs.push_back(std::move(sampleKnob));
+
+    return knobs;
+}
 ```
 
-#### Knob Types and Constraints
+#### Accessing Knob Settings in Your Plugin
 
-**Integer Knobs** (int64_t):
-```cpp
-// Range-based constraint
-auto constraint = CreateIntConstraint(builder,
-    minValue,
-    maxValue,
-    step,
-    nullptr  // no explicit valid values
-);
+When a user creates an execution plan with knob settings, those settings are passed in the `EngineConfig` to your plan builder. Your plugin should:
 
-// Explicit valid values (e.g., {1, 4, 8, 16})
-std::vector<int64_t> validValues = {1, 4, 8, 16};
-auto validValuesVec = builder.CreateVector(validValues);
-auto constraint = CreateIntConstraint(builder,
-    1,      // min
-    16,     // max
-    1,      // step (ignored when validValues present)
-    validValuesVec
-);
-```
-
-**Float Knobs** (double):
-```cpp
-// Range-based constraint only
-auto constraint = CreateFloatConstraint(builder,
-    0.0,    // min
-    1.0     // max
-);
-```
-
-**String Knobs**:
-```cpp
-// Length-based constraint
-auto constraint = CreateStringConstraint(builder,
-    256,    // max length
-    nullptr // no explicit valid values
-);
-
-// Enum-like constraint with valid values
-std::vector<flatbuffers::Offset<flatbuffers::String>> validStrings;
-validStrings.push_back(builder.CreateString("option1"));
-validStrings.push_back(builder.CreateString("option2"));
-auto validStringsVec = builder.CreateVector(validStrings);
-
-auto constraint = CreateStringConstraint(builder,
-    32,
-    validStringsVec
-);
-```
-
-#### Accessing Knob Settings in Your Engine
-
-When a user creates an execution plan with knob settings, those settings are passed in the `EngineConfig`. Your plugin should:
-
-1. **Extract knob settings** from the EngineConfig during plan creation
+1. **Extract knob settings** in `initializeExecutionSettings()` or `buildPlan()`
 2. **Validate settings** against your knob constraints
-3. **Store settings** in your execution plan
-4. **Apply settings** during execution
+3. **Store settings** in your execution settings or plan
+4. **Apply settings** during plan execution
 
-**Example: Reading Knob Settings**
+**Using the IPlanBuilder Interface**
+
+The recommended approach is to implement the [`IPlanBuilder`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp) interface. This interface provides a clean separation between knob definition (`getCustomKnobs()`) and knob consumption (`initializeExecutionSettings()`, `buildPlan()`):
 
 ```cpp
-// In your plan builder, when receiving an EngineConfig:
-void MyPlanBuilder::buildPlan(const EngineConfig& config) {
-    // EngineConfig contains a vector of KnobSetting flatbuffers
+#include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 
-    // Iterate through settings
-    for (const auto* setting : *config.knobs()) {
-        std::string knobId = setting->knob_id_str()->str();
+class MyPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<MyHandle, MySettings, MyContext>
+{
+public:
+    // Define the knobs this plan builder supports
+    std::vector<hipdnn_data_sdk::data_objects::KnobT> getCustomKnobs(
+        const MyHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override
+    {
+        // Return knob definitions (see "Registering Knobs" section above)
+        return {};
+    }
 
-        // Check knob value type and extract value
-        switch (setting->value_type()) {
-            case KnobValue_IntValue: {
-                int64_t value = setting->value_as_IntValue()->value();
-                if (knobId == "miopen.conv.tile_size") {
-                    // Apply tile size setting
-                    planConfig.tileSize = value;
-                }
-                break;
+    // Initialize execution settings from knob values
+    void initializeExecutionSettings(
+        const MyHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        MySettings& executionSettings) const override
+    {
+        // Extract and apply knob settings to execution settings
+        for (const auto& setting : engineConfig.knobSettings()) {
+            const std::string& knobId = setting.knobIdStr();
+
+            if (knobId == hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME) {
+                executionSettings.benchmarkingEnabled = (setting.intValue() == 1);
             }
-            case KnobValue_FloatValue: {
-                double value = setting->value_as_FloatValue()->value();
-                // Handle float setting...
-                break;
-            }
-            case KnobValue_StringValue: {
-                std::string value = setting->value_as_StringValue()->value()->str();
-                // Handle string setting...
-                break;
+            else if (knobId == "myplugin.tile_size") {
+                executionSettings.tileSize = setting.intValue();
             }
         }
     }
-}
+
+    // Build the plan using the configured settings
+    void buildPlan(
+        const MyHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        MyContext& executionContext) const override
+    {
+        // Build plan using engineConfig knob settings
+    }
+};
 ```
 
 #### Validation Best Practices
@@ -417,91 +403,13 @@ void MyPlanBuilder::buildPlan(const EngineConfig& config) {
 - `global.benchmarking`: Enable benchmarking for kernel selection
 - `global.workspace_size_limit`: Limit workspace memory (when applicable)
 
-#### Complete Example: MIOpen Benchmarking Knob
-
-The MIOpen provider exposes the `global.benchmarking` knob:
-
-**Registration** (in engine details):
-```cpp
-// Create benchmarking knob
-auto knobId = builder.CreateString("global.benchmarking");
-auto desc = builder.CreateString("Enable MIOpen solver benchmarking");
-
-auto defaultValue = CreateIntValue(builder, 0);  // Disabled by default
-auto constraint = CreateIntConstraint(builder, 0, 1, 1);  // Boolean: 0 or 1
-
-auto knob = CreateKnob(
-    builder,
-    knobId,
-    desc,
-    KnobValue_IntValue,
-    defaultValue.Union(),
-    KnobConstraint_IntConstraint,
-    constraint.Union(),
-    false
-);
-```
-
-**Usage** (in plan builder):
-```cpp
-bool benchmarkingEnabled = false;
-
-for (const auto* setting : *engineConfig.knobs()) {
-    if (setting->knob_id_str()->str() == "global.benchmarking") {
-        benchmarkingEnabled = (setting->value_as_IntValue()->value() == 1);
-    }
-}
-
-if (benchmarkingEnabled) {
-    // Enable MIOpen's find/benchmark mode
-    miopenSetTuningMode(handle, miopenTuningModeFast);
-}
-```
-
 #### Deprecating Knobs
 
-When a knob is no longer needed:
-
-1. **Mark as deprecated** rather than removing it:
-   ```cpp
-   auto knob = CreateKnob(
-       builder,
-       knobId,
-       description,
-       valueType,
-       defaultValue.Union(),
-       constraintType,
-       constraint.Union(),
-       true  // deprecated = true
-   );
-   ```
+When a knob is no longer needed, mark it as deprecated rather than removing it. All knobs have a deprecated flag on them that can be set.
 
 2. **Update documentation** to indicate the deprecation and recommend alternatives.
 
 3. **Remove only during major version updates** to maintain backward compatibility.
-
-#### Documentation Requirements
-
-For each knob your plugin exposes, document:
-
-1. **Knob identifier and type**
-2. **Purpose and behavior**
-3. **Default value**
-4. **Valid range/values**
-5. **Performance implications**
-6. **Usage examples**
-
-See [MIOpen Provider Knobs Documentation](../../dnn-providers/miopen-provider/docs/Knobs.md) for an example.
-
-> [!TIP]
-> For comprehensive information on the knobs system design and architecture, see [RFC 0004 - Engine Configuration Knobs](./rfcs/0004_EngineConfigKnobs.md).
-
-### Key Files Reference
-
-- **Plugin API Interface**: [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
-- **Example Plugin Implementation**: [`dnn-providers/miopen-provider/MiopenPlugin.cpp`](../../../dnn-providers/miopen-provider/MiopenPlugin.cpp)
-- **Example Engine Manager**: [`dnn-providers/miopen-provider/EngineManager.hpp`](../../../dnn-providers/miopen-provider/EngineManager.hpp)
-- **Example Engine Implementation**: [`dnn-providers/miopen-provider/engines/MiopenEngine.cpp`](../../../dnn-providers/miopen-provider/engines/MiopenEngine.cpp)
 
 ## Plugin Architecture
 

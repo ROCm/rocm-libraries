@@ -212,7 +212,13 @@ This section covers how to extend hipDNN with new functionality.
 
 ### Adding a New Plugin
 
-Plugins extend hipDNN to support new or additional implementations of kernel engines, benchmarking, and heuristics. For comprehensive guidance on plugin development, including architecture details, implementation steps, and examples, see the [Plugin Development Guide](./PluginDevelopment.md).
+Plugins extend hipDNN to support new or additional implementations of kernel engines, benchmarking, and heuristics. The Plugin SDK provides interfaces and utilities to simplify plugin development:
+
+- **Engine interfaces**: `IEngine`, `IPlanBuilder`, `IPlan` templates for building plugin components
+- **Engine management**: `EngineManager` template for managing multiple engines
+- **Knob utilities**: `KnobFactory`, `KnobSettingFactory`, and `GlobalKnobDefines` for implementing runtime-configurable knobs
+
+For comprehensive guidance on plugin development, including architecture details, implementation steps, and examples, see the [Plugin Development Guide](./PluginDevelopment.md).
 
 ### Adding a New Operation
 
