@@ -152,7 +152,7 @@ namespace ArgumentLoaderGPUTest
      */
     TEST_CASE("ArgumentLoader GPU kernel", "[argument-loader][gpu]")
     {
-        auto numScalarArgs    = GENERATE(4, 14, 42);
+        auto numScalarArgs    = GENERATE(1, 4, 14, 42);
         auto numPreloadedArgs = GENERATE(0, 2, -1);
 
         auto numWorkgroupRegs = GENERATE(0, 1, 2, 3);
@@ -247,8 +247,13 @@ namespace ArgumentLoaderGPUTest
 
             if(!doShuffle)
             {
+                bool splitCounters = context->targetArchitecture().HasCapability(
+                    GPUCapability::HasSplitWaitCounters);
+
+                std::string inst = splitCounters ? "s_wait_kmcnt" : "s_waitcnt";
+                CAPTURE(inst);
                 // Shuffling makes the number of waitcnt instructions very hard to predict.
-                CHECK(countSubstr(output, "s_waitcnt") == expectedStats.numWaits);
+                CHECK(countSubstr(output, inst) == expectedStats.numWaits);
             }
 
             for(auto const& [width, count] : expectedStats.scalarLoadsByDWordCount)
@@ -512,7 +517,12 @@ namespace ArgumentLoaderGPUTest
                 co_yield m_context->argLoader()->getValue(arg.name + "_value", argValue);
                 co_yield m_context->argLoader()->getValue(arg.name + "_pointer", argPointer);
 
-                co_yield m_context->mem()->storeScalar(
+                co_yield m_context->copier()->ensureType(
+                    argPointer, argPointer, Register::Type::Vector);
+                co_yield m_context->copier()->ensureType(
+                    argValue, argValue, Register::Type::Vector);
+
+                co_yield m_context->mem()->storeGlobal(
                     argPointer, argValue, 0, typeInfo.elementBytes);
             }
 
@@ -545,15 +555,18 @@ namespace ArgumentLoaderGPUTest
                 co_yield Expression::generate(
                     storePointer, resultPointer->expression() + resultIndexExpr, m_context);
 
-                co_yield m_context->mem()->storeScalar(
+                co_yield m_context->copier()->ensureType(
+                    storePointer, storePointer, Register::Type::Vector);
+                co_yield m_context->copier()->ensureType(
+                    resultValue, resultValue, Register::Type::Vector);
+
+                co_yield m_context->mem()->storeGlobal(
                     storePointer, resultValue, 0, typeInfo.elementBytes);
             }
             else
             {
                 co_yield Instruction::Comment("No result expression");
             }
-
-            co_yield_(Instruction("s_dcache_wb", {}, {}, {}, "Flush data cache"));
 
             co_yield_(Instruction("s_endpgm", {}, {}, {}, "End program"));
         };
