@@ -111,6 +111,7 @@
  */
 
 #include <map>
+#include <optional>
 #include <unordered_set>
 #include <vector>
 
@@ -181,9 +182,9 @@ namespace rocRoller
         /// Info about the SK and DP tile spaces.
         struct StreamKInfo
         {
-            int localTileSpaceSK; /// Streaming tile space
-            int localTileSpaceDP; /// Data-parallel tile space
-            int selector; /// SK vs DP selector (for Sunder)
+            int                localTileSpaceSK; /// Streaming tile space
+            std::optional<int> localTileSpaceDP; /// Data-parallel tile space (TwoTile only)
+            std::optional<int> selector; /// SK vs DP selector for Sunder (TwoTile only)
         };
 
         /// Info about the "number of tiles" kernel arguments.
@@ -763,21 +764,31 @@ namespace rocRoller
 
         /**
          * Add chain of SetCoordinate and Assign nodes to initialize coordinates.
+         *
+         * @p setCoordinateGroups is a list of {coordinates, value} pairs.
+         * Each group's coordinates get SetCoordinate nodes with the group's
+         * value. All SetCoordinate nodes are chained via Body edges from @p top.
+         *
+         * @p assigns get Assign nodes with @p assignValue, chained via
+         * Sequence edges after the SetCoordinate chain.
          */
-        int initializeCoordinates(KernelGraph&               graph,
-                                  int                        top,
-                                  std::initializer_list<int> setCoordinates,
-                                  ExpressionPtr              setValue,
-                                  std::initializer_list<int> assigns,
-                                  ExpressionPtr              assignValue)
-
+        int initializeCoordinates(
+            KernelGraph& graph,
+            int          top,
+            std::initializer_list<std::pair<std::initializer_list<int>, ExpressionPtr>>
+                                       setCoordinateGroups,
+            std::initializer_list<int> assigns,
+            ExpressionPtr              assignValue)
         {
             std::vector<int> setChain;
-            for(auto coordinate : setCoordinates)
+            for(auto const& [coordinates, value] : setCoordinateGroups)
             {
-                auto setCoordinate = graph.control.addElement(SetCoordinate(setValue));
-                graph.mapper.connect(setCoordinate, coordinate, NaryArgument::DEST);
-                setChain.push_back(setCoordinate);
+                for(auto coordinate : coordinates)
+                {
+                    auto setCoordinate = graph.control.addElement(SetCoordinate(value));
+                    graph.mapper.connect(setCoordinate, coordinate, NaryArgument::DEST);
+                    setChain.push_back(setCoordinate);
+                }
             }
 
             std::vector<int> assignChain;
@@ -789,13 +800,13 @@ namespace rocRoller
             }
 
             graph.control.addElement(Body(), {top}, {setChain.front()});
-            for(int i = 1; i < setChain.size(); ++i)
+            for(auto i = 1; i < setChain.size(); ++i)
             {
                 graph.control.addElement(Body(), {setChain[i - 1]}, {setChain[i]});
             }
 
             graph.control.addElement(Body(), {setChain.back()}, {assignChain.front()});
-            for(int i = 1; i < assignChain.size(); ++i)
+            for(auto i = 1; i < assignChain.size(); ++i)
             {
                 graph.control.addElement(Sequence(), {assignChain[i - 1]}, {assignChain[i]});
             }
@@ -840,7 +851,8 @@ namespace rocRoller
                                    LoopInfo const&        loopInfo,
                                    AccumulatorInfo const& accumInfo,
                                    ArgumentInfo const&    argInfo,
-                                   ExpressionPtr          numTotalTiles)
+                                   ExpressionPtr          numTotalTiles,
+                                   StreamKConfig          streamKMode)
         {
             // Create forward/reverse tile-numbers for each dimension
             // and attach to all staged tile-number coordinates
@@ -873,43 +885,86 @@ namespace rocRoller
             //
             tileNumbers.push_back(accumInfo.accumulatorCoord);
 
-            // Create foward/reverse flattened tile-space
+            // Create forward/reverse flattened tile-space
             auto tileSpace   = graph.coordinates.addElement(Linear(numTotalTiles, nullptr));
             auto tileSpaceSK = graph.coordinates.addElement(Linear(argInfo.numSKTiles, nullptr));
-            auto tileSpaceDP = graph.coordinates.addElement(Linear(argInfo.numDPTiles, nullptr));
-            auto selector    = graph.coordinates.addElement(Linear(literal(2u), nullptr));
-
-            if(forward)
-            {
-                graph.coordinates.addElement(Flatten(), tileNumbers, std::vector<int>{tileSpace});
-                graph.coordinates.addElement(
-                    Sunder(), {tileSpace}, {tileSpaceSK, tileSpaceDP, selector});
-            }
-            else
-            {
-                graph.coordinates.addElement(
-                    Sunder(), {tileSpaceSK, tileSpaceDP, selector}, {tileSpace});
-                graph.coordinates.addElement(Tile(), std::vector<int>{tileSpace}, tileNumbers);
-            }
 
             auto WGs       = graph.coordinates.addElement(Linear(argInfo.numWGs, nullptr));
             auto workgroup = graph.coordinates.addElement(Workgroup());
 
             auto localTileSpaceSK
                 = graph.coordinates.addElement(Linear(argInfo.numSKTilesPerWG, nullptr));
-            auto localTileSpaceDP
-                = graph.coordinates.addElement(Linear(argInfo.numDPTilesPerWG, nullptr));
-            if(forward)
+
+            std::optional<int> localTileSpaceDP;
+            std::optional<int> selector;
+
+            if(streamKMode.isTwoTileMode())
             {
-                graph.coordinates.addElement(PassThrough(), {WGs}, {workgroup});
-                graph.coordinates.addElement(Tile(), {tileSpaceSK}, {WGs, localTileSpaceSK});
-                graph.coordinates.addElement(Tile(), {tileSpaceDP}, {WGs, localTileSpaceDP});
+                bool dpFirst = streamKMode == StreamKMode::TwoTileDPFirst;
+
+                auto tileSpaceDP
+                    = graph.coordinates.addElement(Linear(argInfo.numDPTiles, nullptr));
+                auto selectorCoord = graph.coordinates.addElement(Linear(literal(2u), nullptr));
+                auto localDP
+                    = graph.coordinates.addElement(Linear(argInfo.numDPTilesPerWG, nullptr));
+
+                if(forward)
+                {
+                    graph.coordinates.addElement(
+                        Flatten(), tileNumbers, std::vector<int>{tileSpace});
+                    if(dpFirst)
+                    {
+                        graph.coordinates.addElement(
+                            Sunder(), {tileSpace}, {tileSpaceDP, tileSpaceSK, selectorCoord});
+                    }
+                    else
+                    {
+                        graph.coordinates.addElement(
+                            Sunder(), {tileSpace}, {tileSpaceSK, tileSpaceDP, selectorCoord});
+                    }
+                    graph.coordinates.addElement(PassThrough(), {WGs}, {workgroup});
+                    graph.coordinates.addElement(Tile(), {tileSpaceSK}, {WGs, localTileSpaceSK});
+                    graph.coordinates.addElement(Tile(), {tileSpaceDP}, {WGs, localDP});
+                }
+                else
+                {
+                    if(dpFirst)
+                    {
+                        graph.coordinates.addElement(
+                            Sunder(), {tileSpaceDP, tileSpaceSK, selectorCoord}, {tileSpace});
+                    }
+                    else
+                    {
+                        graph.coordinates.addElement(
+                            Sunder(), {tileSpaceSK, tileSpaceDP, selectorCoord}, {tileSpace});
+                    }
+                    graph.coordinates.addElement(Tile(), std::vector<int>{tileSpace}, tileNumbers);
+                    graph.coordinates.addElement(PassThrough(), {workgroup}, {WGs});
+                    graph.coordinates.addElement(Flatten(), {WGs, localTileSpaceSK}, {tileSpaceSK});
+                    graph.coordinates.addElement(Flatten(), {WGs, localDP}, {tileSpaceDP});
+                }
+
+                localTileSpaceDP = localDP;
+                selector         = selectorCoord;
             }
             else
             {
-                graph.coordinates.addElement(PassThrough(), {workgroup}, {WGs});
-                graph.coordinates.addElement(Flatten(), {WGs, localTileSpaceSK}, {tileSpaceSK});
-                graph.coordinates.addElement(Flatten(), {WGs, localTileSpaceDP}, {tileSpaceDP});
+                // Standard mode: entire tile space is SK, no Sunder needed.
+                if(forward)
+                {
+                    graph.coordinates.addElement(
+                        Flatten(), tileNumbers, std::vector<int>{tileSpace});
+                    graph.coordinates.addElement(PassThrough(), {tileSpace}, {tileSpaceSK});
+                    graph.coordinates.addElement(PassThrough(), {WGs}, {workgroup});
+                    graph.coordinates.addElement(Tile(), {tileSpaceSK}, {WGs, localTileSpaceSK});
+                }
+                else
+                {
+                    graph.coordinates.addElement(PassThrough(), {tileSpaceSK}, {tileSpace});
+                    graph.coordinates.addElement(Tile(), std::vector<int>{tileSpace}, tileNumbers);
+                    graph.coordinates.addElement(PassThrough(), {workgroup}, {WGs});
+                    graph.coordinates.addElement(Flatten(), {WGs, localTileSpaceSK}, {tileSpaceSK});
+                }
             }
 
             return {localTileSpaceSK, localTileSpaceDP, selector};
@@ -1084,40 +1139,105 @@ namespace rocRoller
             //
             // Add forward/reverse tile-space coordinate transforms
             //
-            auto forwardInfo
-                = addTileSpaceCT(graph, true, loopInfo, accumInfo, argInfo, numTotalTiles);
-            auto reverseInfo
-                = addTileSpaceCT(graph, false, loopInfo, accumInfo, argInfo, numTotalTiles);
 
-            //
-            // Add local-tile and accumulator for-loop dimensions and iterators
-            //
-            auto forTileIncr = graph.coordinates.addElement(Linear(argInfo.numSKTilesPerWG, one));
-            auto forwardForTileIdx
-                = graph.coordinates.addElement(ForLoop(argInfo.numSKTilesPerWG, one));
-            auto reverseForTileIdx
-                = graph.coordinates.addElement(ForLoop(argInfo.numSKTilesPerWG, one));
-            auto forwardForAccumIdx = graph.coordinates.addElement(ForLoop(numAccumTiles, one));
-            auto reverseForAccumIdx = graph.coordinates.addElement(ForLoop(numAccumTiles, one));
+            auto forwardInfo = addTileSpaceCT(
+                graph, true, loopInfo, accumInfo, argInfo, numTotalTiles, params->streamK);
+            auto reverseInfo = addTileSpaceCT(
+                graph, false, loopInfo, accumInfo, argInfo, numTotalTiles, params->streamK);
 
-            Log::debug(
-                "  forward ForLoops: tile {} accum {}", forwardForTileIdx, forwardForAccumIdx);
-            Log::debug(
-                "  reverse ForLoops: tile {} accum {}", reverseForTileIdx, reverseForAccumIdx);
-
+            // Hijack the old accumulator loop. Remove the DataFlow edge
+            // from the accumulator increment counter to the original
+            // accumulator ForLoop coordinate.
             auto forAccumIncr = only(graph.coordinates.getInputNodeIndices(
                                          accumInfo.accumulatorCoord, CG::isEdge<CG::DataFlow>))
                                     .value();
+            {
+                auto dataflow
+                    = only(graph.coordinates.getNeighbours<GD::Downstream>(forAccumIncr)).value();
+                graph.coordinates.deleteElement(dataflow);
+            }
+
+            // Create new forward/reverse accum ForLoop dims, shared by both
+            // SK and DP (both iterate over the same number of accum tiles).
+            auto forwardForAccumIdx = graph.coordinates.addElement(ForLoop(numAccumTiles, one));
+            auto reverseForAccumIdx = graph.coordinates.addElement(ForLoop(numAccumTiles, one));
+
+            // Wire the accumulator increment counter to the new dims.
+            graph.coordinates.addElement(DataFlow(), {forAccumIncr}, {forwardForAccumIdx});
+            graph.coordinates.addElement(DataFlow(), {forAccumIncr}, {reverseForAccumIdx});
+
+            // Identify edges let index computation traverse from the new
+            // ForLoop dims back to the original coordinate for offsets/strides.
+            graph.coordinates.addElement(
+                Identify(), {forwardForAccumIdx}, {accumInfo.accumulatorCoord});
+            graph.coordinates.addElement(
+                Identify(), {reverseForAccumIdx}, {accumInfo.accumulatorCoord});
+
+            graph.mapper.connect<ForLoop>(loopInfo.accumulatorLoopOp, forwardForAccumIdx);
+
+            // Create tile ForLoop dims and connect them to the local tile
+            // spaces via Split/Join. SK and DP get separate tile dims
+            // but share the accum dims created above.
+
+            auto skForTileIncr = graph.coordinates.addElement(Linear(argInfo.numSKTilesPerWG, one));
+            auto skForwardForTileIdx
+                = graph.coordinates.addElement(ForLoop(argInfo.numSKTilesPerWG, one));
+            auto skReverseForTileIdx
+                = graph.coordinates.addElement(ForLoop(argInfo.numSKTilesPerWG, one));
+
+            Log::debug(
+                "  SK tile ForLoops: fwd {} rev {}", skForwardForTileIdx, skReverseForTileIdx);
+            Log::debug(
+                "  Shared accum ForLoops: fwd {} rev {}", forwardForAccumIdx, reverseForAccumIdx);
 
             graph.coordinates.addElement(
-                Split(), {forwardInfo.localTileSpaceSK}, {forwardForTileIdx, forwardForAccumIdx});
+                Split(), {forwardInfo.localTileSpaceSK}, {skForwardForTileIdx, forwardForAccumIdx});
             graph.coordinates.addElement(
-                Join(), {reverseForTileIdx, reverseForAccumIdx}, {reverseInfo.localTileSpaceSK});
+                Join(), {skReverseForTileIdx, reverseForAccumIdx}, {reverseInfo.localTileSpaceSK});
 
-            graph.coordinates.addElement(
-                Split(), {forwardInfo.localTileSpaceDP}, {forwardForTileIdx, forwardForAccumIdx});
-            graph.coordinates.addElement(
-                Join(), {reverseForTileIdx, reverseForAccumIdx}, {reverseInfo.localTileSpaceDP});
+            graph.coordinates.addElement(DataFlow(), {skForTileIncr}, {skForwardForTileIdx});
+            graph.coordinates.addElement(DataFlow(), {skForTileIncr}, {skReverseForTileIdx});
+
+            // DP tile ForLoop dims (TwoTile only)
+            std::optional<int> dpForTileIncr;
+            std::optional<int> dpForwardForTileIdx;
+            std::optional<int> dpReverseForTileIdx;
+
+            if(params->streamK.isTwoTileMode())
+            {
+                dpForTileIncr = graph.coordinates.addElement(Linear(argInfo.numDPTilesPerWG, one));
+
+                dpForwardForTileIdx
+                    = graph.coordinates.addElement(ForLoop(argInfo.numDPTilesPerWG, one));
+                dpReverseForTileIdx
+                    = graph.coordinates.addElement(ForLoop(argInfo.numDPTilesPerWG, one));
+
+                Log::debug("  DP tile ForLoops: fwd {} rev {}",
+                           dpForwardForTileIdx.value(),
+                           dpReverseForTileIdx.value());
+
+                graph.coordinates.addElement(Split(),
+                                             {forwardInfo.localTileSpaceDP.value()},
+                                             {dpForwardForTileIdx.value(), forwardForAccumIdx});
+                graph.coordinates.addElement(Join(),
+                                             {dpReverseForTileIdx.value(), reverseForAccumIdx},
+                                             {reverseInfo.localTileSpaceDP.value()});
+
+                graph.coordinates.addElement(
+                    DataFlow(), {dpForTileIncr.value()}, {dpForwardForTileIdx.value()});
+                graph.coordinates.addElement(
+                    DataFlow(), {dpForTileIncr.value()}, {dpReverseForTileIdx.value()});
+            }
+
+            // The original accumulator coordinate no longer has a DataFlow
+            // input. Replace it with a Linear so that loop-related passes
+            // don't treat it as an active ForLoop iterator.
+            {
+                auto accumulatorCoordSize
+                    = getSize(graph.coordinates.getNode(accumInfo.accumulatorCoord));
+                auto linear = Linear(accumulatorCoordSize, nullptr);
+                graph.coordinates.setElement(accumInfo.accumulatorCoord, linear);
+            }
 
             // Pre-compute and save (into SGPRs):
             //
@@ -1140,77 +1260,22 @@ namespace rocRoller
                 auto numSKTilesBound      = conditionalSubtract(
                     argInfo.numSKTiles, argInfo.numSKTilesPerWG * wgExpr, numTilesVarType.dataType);
                 auto forTileSKConditionExpr
-                    = DF(forTileIncr) < minimum(numSKTilesPerWGBound, numSKTilesBound);
+                    = DF(skForTileIncr) < minimum(numSKTilesPerWGBound, numSKTilesBound);
 
-                auto forTileSKIncrementExpr = DF(forTileIncr) + DF(numAccumTilesProcessed);
+                auto forTileSKIncrementExpr = DF(skForTileIncr) + DF(numAccumTilesProcessed);
 
                 forTileSKOp = conditionalFor(graph,
-                                             forTileIncr,
+                                             skForTileIncr,
                                              forTileSKConditionExpr,
                                              forTileSKIncrementExpr,
                                              "SKStreamTileLoop",
                                              numTilesVarType);
             }
 
-            graph.coordinates.addElement(DataFlow(), {forTileIncr}, {forwardForTileIdx});
-            graph.coordinates.addElement(DataFlow(), {forTileIncr}, {reverseForTileIdx});
-
-            //
-            // Hijack old accumulator loop.
-            //
-            // The old accumulator loop was a simple range-based loop.
-            // The new accumulator loop streams the accumulator tile
-            // index.
-            //
-            // This is done in two steps:
-            //
-            // 1. Remove the previous DataFlow edge between the loop
-            //    increment and the ForLoop coordinate.
-            // 2. Replace the conditions.
-            //
-
-            //
-            // Remove DataFlow edge from accumulator increment to
-            // accumulator ForLoop dimension.  Add new DataFlow edges
-            // from accumulator increment to forward and reverse
-            // accumulator ForLoop dimensions.
-            //
-            // Add Identify edges from the new accumulator coordinate
-            // to the original coordinate.  These edges are traversed
-            // when computing indexes, so that offsets and strides are
-            // appropriately placed.
-            //
-            {
-                auto dataflow
-                    = only(graph.coordinates.getNeighbours<GD::Downstream>(forAccumIncr)).value();
-                graph.coordinates.deleteElement(dataflow);
-                graph.coordinates.addElement(DataFlow(), {forAccumIncr}, {forwardForAccumIdx});
-                graph.coordinates.addElement(DataFlow(), {forAccumIncr}, {reverseForAccumIdx});
-
-                Log::debug("Adding StreamK Identify from {} to {}",
-                           forwardForAccumIdx,
-                           accumInfo.accumulatorCoord);
-                graph.coordinates.addElement(
-                    Identify(), {forwardForAccumIdx}, {accumInfo.accumulatorCoord});
-                Log::debug("Adding StreamK Identify from {} to {}",
-                           reverseForAccumIdx,
-                           accumInfo.accumulatorCoord);
-                graph.coordinates.addElement(
-                    Identify(), {reverseForAccumIdx}, {accumInfo.accumulatorCoord});
-
-                graph.mapper.connect<ForLoop>(loopInfo.accumulatorLoopOp, forwardForAccumIdx);
-
-                // Replace ForLoop dim with a linear dim
-                auto accumulatorCoordSize
-                    = getSize(graph.coordinates.getNode(accumInfo.accumulatorCoord));
-                auto linear = Linear(accumulatorCoordSize, nullptr);
-                graph.coordinates.setElement(accumInfo.accumulatorCoord, linear);
-            }
-
             int assignCurrentTile;
             {
                 assignCurrentTile = graph.control.addElement(Assign{
-                    Register::Type::Scalar, argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr)});
+                    Register::Type::Scalar, argInfo.numSKTilesPerWG * wgExpr + DF(skForTileIncr)});
                 graph.mapper.connect(assignCurrentTile, currentTile, NaryArgument::DEST);
             }
 
@@ -1233,7 +1298,7 @@ namespace rocRoller
                 auto sameNonAccumTileBound = conditionalSubtract(
                     numAccumTiles, DF(firstAccumTile), numTilesVarType.dataType);
                 auto numSKTilesPerWGBound = conditionalSubtract(
-                    argInfo.numSKTilesPerWG, DF(forTileIncr), numTilesVarType.dataType);
+                    argInfo.numSKTilesPerWG, DF(skForTileIncr), numTilesVarType.dataType);
                 auto numSKTilesExprBound = conditionalSubtract(
                     argInfo.numSKTiles, DF(currentTile), numTilesVarType.dataType);
 
@@ -1375,96 +1440,108 @@ namespace rocRoller
             }
             graph.control.addElement(Sequence(), {receiveInfo.receiveCond}, {postAccumulationCond});
 
-            //
-            // Add definitions to the Scope
-            //
-            auto lastInit = initializeCoordinates(graph,
-                                                  scope,
-                                                  {forwardForAccumIdx,
-                                                   reverseForAccumIdx,
-                                                   forwardInfo.selector,
-                                                   reverseInfo.selector},
-                                                  zero,
-                                                  {forTileIncr,
-                                                   forAccumIncr,
-                                                   currentTile,
-                                                   numAccumTilesProcessed,
-                                                   firstAccumTile,
-                                                   lastAccumTile},
-                                                  zero);
-
-            //
-            // Add local-tile loop
-            //
-            graph.control.addElement(Sequence(), {lastInit}, {receiveInfo.setPlusOne});
-
-            //
-            // Add accumulator loop; send and receive after
-            //
-            graph.control.chain<Body>(
-                receiveInfo.setPlusOne, scratchTileInfo.setPlusOne, forTileSKOp);
-            graph.control.chain<Body>(forTileSKOp, assignCurrentTile);
-            // Order: currentTile -> firstAccumTile -> numAccumTilesProcessed -> lastAccumTile
-            // (firstAccumTile must come before numAccumTilesProcessed since we reuse it for sameNonAccumTileBound)
-            graph.control.chain<Sequence>(assignCurrentTile,
-                                          assignFirstAccumTile,
-                                          assignNumAccumTilesProcessed,
-                                          assignLastAccumTile,
-                                          loopInfo.topLoopOp,
-                                          sendInfo.preWaitZero);
-
-            graph.control.chain<Sequence>(sendInfo.sendCond, receiveInfo.preWaitZero);
+            // Add local-tile loop and accumulator loop
             if(params->streamK.isTwoTileMode())
             {
-                int scopeSK = graph.control.addElement(Scope());
-                int scopeDP = graph.control.addElement(Scope());
+                bool dpFirst = params->streamK == StreamKMode::TwoTileDPFirst;
+                int  scopeSK = graph.control.addElement(Scope());
+                int  scopeDP = graph.control.addElement(Scope());
 
-                if(params->streamK == StreamKMode::TwoTileDPFirst)
+                // Connect scopes in the appropriate order.
+                if(dpFirst)
                 {
-                    scopeDP = replaceWith(graph, forTileSKOp, scopeDP, false);
+                    graph.control.addElement(Sequence(), {scope}, {scopeDP});
                     graph.control.addElement(Sequence(), {scopeDP}, {scopeSK});
                 }
                 else
                 {
-                    scopeSK = replaceWith(graph, forTileSKOp, scopeSK, false);
+                    graph.control.addElement(Sequence(), {scope}, {scopeSK});
                     graph.control.addElement(Sequence(), {scopeSK}, {scopeDP});
                 }
 
-                graph.control.addElement(Body(), {scopeSK}, {forTileSKOp});
+                auto skSelectorValue = dpFirst ? one : zero;
+                auto dpSelectorValue = dpFirst ? zero : one;
 
-                //
-                // Set SK/DP selectors to select DP
-                //
-                auto lastInit = initializeCoordinates(graph,
-                                                      scopeDP,
-                                                      {forwardInfo.selector, reverseInfo.selector},
-                                                      one,
-                                                      {forTileIncr, forAccumIncr},
-                                                      zero);
+                // Initialize SK section.
+                // The DP tile dims are also initialized to zero here so
+                // that the reverse Sunder can be fully traversed.  The
+                // selector ensures only the SK branch is evaluated at
+                // runtime.
+                auto skInit = initializeCoordinates(
+                    graph,
+                    scopeSK,
+                    {{{skForwardForTileIdx,
+                       skReverseForTileIdx,
+                       dpForwardForTileIdx.value(),
+                       dpReverseForTileIdx.value(),
+                       forwardForAccumIdx,
+                       reverseForAccumIdx},
+                      zero},
+                     {{forwardInfo.selector.value(), reverseInfo.selector.value()},
+                      skSelectorValue}},
+                    {skForTileIncr,
+                     forAccumIncr,
+                     currentTile,
+                     numAccumTilesProcessed,
+                     firstAccumTile,
+                     lastAccumTile},
+                    zero);
 
-                //
-                // Create DP tile loop.
-                //
+                // Chain SK-specific setup inside scopeSK
+                graph.control.chain<Sequence>(skInit, receiveInfo.setPlusOne);
+                graph.control.chain<Body>(
+                    receiveInfo.setPlusOne, scratchTileInfo.setPlusOne, forTileSKOp);
+                graph.control.chain<Body>(forTileSKOp, assignCurrentTile);
+                graph.control.chain<Sequence>(assignCurrentTile,
+                                              assignFirstAccumTile,
+                                              assignNumAccumTilesProcessed,
+                                              assignLastAccumTile,
+                                              loopInfo.topLoopOp,
+                                              sendInfo.preWaitZero);
+
+                graph.control.chain<Sequence>(sendInfo.sendCond, receiveInfo.preWaitZero);
+
+                // Initialize DP section.
+                // The SK tile dims are also initialized to zero here so
+                // that the reverse Sunder can be fully traversed.  The
+                // selector ensures only the DP branch is evaluated at
+                // runtime.
+                auto dpInit = initializeCoordinates(
+                    graph,
+                    scopeDP,
+                    {{{skForwardForTileIdx,
+                       skReverseForTileIdx,
+                       dpForwardForTileIdx.value(),
+                       dpReverseForTileIdx.value(),
+                       forwardForAccumIdx,
+                       reverseForAccumIdx},
+                      zero},
+                     {{forwardInfo.selector.value(), reverseInfo.selector.value()},
+                      dpSelectorValue}},
+                    {dpForTileIncr.value(), forAccumIncr},
+                    zero);
+
+                // Create DP tile loop (uses its own dpForTileIncr counter).
                 int forTileDPOp;
                 {
-                    auto numDPTilesPerWGBound = argInfo.numDPTilesPerWG;
-                    auto numDPTilesBound      = conditionalSubtract(argInfo.numDPTiles,
+                    auto numDPTilesPerWGBound   = argInfo.numDPTilesPerWG;
+                    auto numDPTilesBound        = conditionalSubtract(argInfo.numDPTiles,
                                                                argInfo.numDPTilesPerWG * wgExpr,
                                                                numTilesVarType.dataType);
-                    auto forTileDPConditionExpr
-                        = DF(forTileIncr) < minimum(numDPTilesPerWGBound, numDPTilesBound);
+                    auto forTileDPConditionExpr = DF(dpForTileIncr.value())
+                                                  < minimum(numDPTilesPerWGBound, numDPTilesBound);
 
-                    auto forTileDPIncrementExpr = DF(forTileIncr) + DF(forAccumIncr);
+                    auto forTileDPIncrementExpr = DF(dpForTileIncr.value()) + DF(forAccumIncr);
 
                     forTileDPOp = conditionalFor(graph,
-                                                 forTileIncr,
+                                                 dpForTileIncr.value(),
                                                  forTileDPConditionExpr,
                                                  forTileDPIncrementExpr,
                                                  "DPStreamTileLoop",
                                                  numTilesVarType);
                 }
 
-                graph.control.addElement(Sequence(), {lastInit}, {forTileDPOp});
+                graph.control.addElement(Sequence(), {dpInit}, {forTileDPOp});
                 graph.control.addElement(Body(), {forTileDPOp}, {dpTopLoop});
 
                 auto forAccumOp      = *graph.control.get<ForLoopOp>(dpAccumLoop);
@@ -1472,6 +1549,37 @@ namespace rocRoller
                 graph.control.setElement(dpAccumLoop, forAccumOp);
 
                 graph.mapper.connect<ForLoop>(dpAccumLoop, forwardForAccumIdx);
+            }
+            else
+            {
+                // Standard mode — no selector, no DP dims
+                auto standardInit = initializeCoordinates(graph,
+                                                          scope,
+                                                          {{{skForwardForTileIdx,
+                                                             skReverseForTileIdx,
+                                                             forwardForAccumIdx,
+                                                             reverseForAccumIdx},
+                                                            zero}},
+                                                          {skForTileIncr,
+                                                           forAccumIncr,
+                                                           currentTile,
+                                                           numAccumTilesProcessed,
+                                                           firstAccumTile,
+                                                           lastAccumTile},
+                                                          zero);
+
+                graph.control.chain<Sequence>(standardInit, receiveInfo.setPlusOne);
+                graph.control.chain<Body>(
+                    receiveInfo.setPlusOne, scratchTileInfo.setPlusOne, forTileSKOp);
+                graph.control.chain<Body>(forTileSKOp, assignCurrentTile);
+                graph.control.chain<Sequence>(assignCurrentTile,
+                                              assignFirstAccumTile,
+                                              assignNumAccumTilesProcessed,
+                                              assignLastAccumTile,
+                                              loopInfo.topLoopOp,
+                                              sendInfo.preWaitZero);
+
+                graph.control.chain<Sequence>(sendInfo.sendCond, receiveInfo.preWaitZero);
             }
 
             //
@@ -1551,12 +1659,12 @@ namespace rocRoller
             // numSKTilesPerWG: Computed on host:
             //
             //   for basic StreamK:   (numTiles0 * numTiles1 * numTilesAcc + numWGs - 1) / numWGs
-            //   fro 2-tile StreamK:  ((numTilesAcc * ((numTiles0 * numTiles1) % numWGs + numWGs) + numWGs - 1) / numWGs
+            //   for 2-tile StreamK:  ((numTilesAcc * ((numTiles0 * numTiles1) % numWGs + numWGs) + numWGs - 1) / numWGs
             //
             // numDPTilesPerWG: Computed on host:
             //
             //   for basic StreamK:   0
-            //   fro 2-tile StreamK:  ((numTiles0 * numTiles1) / numWGs - 1) * numTilesAcc
+            //   for 2-tile StreamK:  ((numTiles0 * numTiles1) / numWGs - 1) * numTilesAcc
             //
             for(auto d : loopInfo.dimensionIndices)
             {
