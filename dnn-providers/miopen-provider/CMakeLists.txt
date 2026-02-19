@@ -122,15 +122,13 @@ add_library(
     engines/plans/MiopenConvFwdPlan.cpp
     engines/plans/MiopenConvPlanBuilder.cpp
     engines/plans/MiopenConvWrwPlan.cpp
-    EngineManager.cpp
+    HipdnnMiopenHandle.cpp
     MiopenActivationDescriptor.cpp
     MiopenContainer.cpp
     MiopenConvDescriptor.cpp
-    MiopenHandleFactory.cpp
-    MiopenPlugin.cpp
-    MiopenPluginPublic.cpp
-    MiopenTensor.cpp
     MiopenUtils.cpp
+    MiopenTensor.cpp
+    MiopenPluginPublic.cpp
 )
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
