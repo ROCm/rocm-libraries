@@ -5519,9 +5519,7 @@ class KernelWriterAssembly(KernelWriter):
         imod.add(checkAddrLabel)
         imod.add(VSubU32(dst=vgpr(tmpVgpr), src0=vgpr(tmpVgpr),
                          src1=int(self.states.srdShiftLeft[tc] * tP["bpeGR"]), comment="sub prepad"))
-                         #src1=self.states.srdShiftLeft[tc] * tP["bpeGR"], comment="sub prepad"))
         loadRangePerThread = tP["glvw"] * tP["bpeGR"] - 1
-        #imod.add(VAddU32(dst=vgpr(tmpVgpr+1), src0=vgpr(tmpVgpr), src1=loadRangePerThread, \
         imod.add(VAddU32(dst=vgpr(tmpVgpr+1), src0=vgpr(tmpVgpr), src1=int(loadRangePerThread), \
                          comment="Calculate load range per thread"))
         imod.add(VCmpLtI32(dst=sgpr(sCmpLoadStartAddrStatusx2, 2), src0=vgpr(tmpVgpr), \
@@ -12789,7 +12787,6 @@ class KernelWriterAssembly(KernelWriter):
 
     if useBuffer:
       rv = Module("Global Read")
-
       mubuf = MUBUFModifiers(offen=True, offset12=int(offset), glc=glc, slc=slc, nt=nt, lds=lds)
 
       # Nested buffer load implementation function for easy branching for soffset
@@ -12924,7 +12921,6 @@ class KernelWriterAssembly(KernelWriter):
         return FlatLoadB128(dst=vgpr(destVgpr, rpv), vaddr=addr0, flat=flat, comment=comment)
       else:
         assert 0, "chooseGlobalRead: bad bpl"
-
 
   ##############################################################################
   def chooseGlobalWrite(self, useBuffer, bps, srcVgpr, rpv, \
