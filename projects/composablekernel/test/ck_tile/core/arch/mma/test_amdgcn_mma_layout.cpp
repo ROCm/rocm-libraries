@@ -42,7 +42,7 @@ namespace mma = ck_tile::core::arch::mma;
 //
 // The kernel uses RegisterMap to scatter A and B into the correct (lane, vecIdx) positions
 // of the MMA fragment registers, executes the intrinsic, then uses RegisterMap again to
-// gather back into C matrix. The result is compared to a host-side reference GEMM.
+// gather back into C matrix. The position of "1" in C is checked against the expected (m, n) location.
 
 namespace {
 
@@ -71,7 +71,7 @@ struct MmaLayoutTestKernel
 {
     static constexpr int kBlockSize = BlockSize;
 
-    __device__ void operator()(ADataType* a, BDataType* b, CDataType* c) const
+    __device__ void operator()(uint32_t* error_flags) const
     {
         using Selector =
             mma::MmaDefaultSelector<ADataType,
@@ -101,42 +101,59 @@ struct MmaLayoutTestKernel
         constexpr uint32_t TileN = MmaTraits::BlockN;
         constexpr uint32_t TileK = MmaTraits::BlockK;
 
-        for(uint32_t m = 0; m < TileM; ++m)
+        // get (m, k, n), where "1" should be placed for this block 
+        const uint32_t case_idx = static_cast<uint32_t>(blockIdx.x);
+        const uint32_t m = case_idx / (TileK * TileN);
+        const uint32_t k = (case_idx / TileN) % TileK;
+        const uint32_t n = case_idx % TileN;
+
+        // place a single "1" in A/B fragments
+        auto a_pos = RegisterMap<MmaOp>::A2RegisterMap(m, k);
+        if(a_pos.lane == lane && a_pos.vecIdx < a_vec_size)
         {
-            for(uint32_t k = 0; k < TileK; ++k)
-            {
-                auto pos = RegisterMap<MmaOp>::A2RegisterMap(m, k);
-                if(pos.lane == lane && pos.vecIdx < a_vec_size)
-                {
-                    a_frag[pos.vecIdx] = static_cast<ADataType>(a[m * TileK + k]);
-                }
-            }
+            a_frag[a_pos.vecIdx] = static_cast<ADataType>(1);
         }
 
-        for(uint32_t k = 0; k < TileK; ++k)
+        auto b_pos = RegisterMap<MmaOp>::B2RegisterMap(k, n);
+        if(b_pos.lane == lane && b_pos.vecIdx < b_vec_size)
         {
-            for(uint32_t n = 0; n < TileN; ++n)
-            {
-                auto pos = RegisterMap<MmaOp>::B2RegisterMap(k, n);
-                if(pos.lane == lane && pos.vecIdx < b_vec_size)
-                {
-                    b_frag[pos.vecIdx] = static_cast<BDataType>(b[k * TileN + n]);
-                }
-            }
+            b_frag[b_pos.vecIdx] = static_cast<BDataType>(1);
         }
 
         c_frag = MmaOp::exec(a_frag, b_frag, c_frag);
+        __syncthreads();
 
-        for(uint32_t m = 0; m < TileM; ++m)
+        __shared__ uint32_t err;
+        if(threadIdx.x == 0)
         {
-            for(uint32_t n = 0; n < TileN; ++n)
+            err = 0;
+        }
+        __syncthreads();
+
+        const CDataType tol = static_cast<CDataType>(1.0e-1f); // TODO: this tolerance might not be suitable for all data types and should be revisited if we add more configurations
+        for(uint32_t i = 0; i < TileM; ++i)
+        {
+            for(uint32_t j = 0; j < TileN; ++j)
             {
-                auto pos = RegisterMap<MmaOp>::C2RegisterMap(m, n);
+                auto pos = RegisterMap<MmaOp>::C2RegisterMap(i, j);
                 if(pos.lane == threadIdx.x && pos.vecIdx < c_vec_size)
                 {
-                    c[m * TileN + n] = static_cast<CDataType>(c_frag[pos.vecIdx]);
+                    const CDataType expected = (i == m && j == n)
+                                                   ? static_cast<CDataType>(1)
+                                                   : static_cast<CDataType>(0);
+                    const CDataType value = static_cast<CDataType>(c_frag[pos.vecIdx]);
+                    if(fabsf(static_cast<float>(value - expected)) > static_cast<float>(tol))
+                    {
+                        atomicExch(&err, 1);
+                    }
                 }
             }
+        }
+
+        __syncthreads();
+        if(threadIdx.x == 0)
+        {
+            error_flags[case_idx] = err;
         }
     }
 };
@@ -186,12 +203,10 @@ struct MmaLayoutTestConfig
 /**
  * @brief Test driver: runs the test for a given MMA configuration.
  *
- * For every (m, k, n) in the tensor it:
+ * The testlaunches (mkn) test cases (one per block) to check all possible positions of the "1" in the A/B tensors.
  *   1. Constructs A and B tensors with a single 1 at A(m,k) and B(k,n).
- *   2. Launches MmaLayoutTestKernel which uses RegisterMap to load fragments, executes the
- *      MMA intrinsic, and writes C back.
- *   3. Computes a host-side reference C = AB.
- *   4. Compares the reference and device C element-by-element.
+ *   2. Executes MMA intrinsic to compute C tensor.
+ *   3. Checks if C has the 1 in the expected position.
  *
  * @tparam Config An MmaLayoutTestConfig instantiation
  * @return true if the test ran on hardware; false if skipped (no matching device)
@@ -218,97 +233,44 @@ bool run_mma_layout_test_case()
     using Selector   = typename Config::Selector;
     using MmaOp      = typename Selector::SelectedOp;
     using MmaTraits  = mma::MmaOpTraits<MmaOp>;
-    using AInputType = typename MmaTraits::ADataType;
-    using BInputType = typename MmaTraits::BDataType;
-    using AccType    = typename MmaTraits::CDataType;
 
     static_assert(MmaTraits::IsSupported, "Mma layout test requires supported register mappings");
 
-    ck_tile::DeviceMem d_a(MmaTraits::BlockM * MmaTraits::BlockK * sizeof(AInputType));
-    ck_tile::DeviceMem d_b(MmaTraits::BlockK * MmaTraits::BlockN * sizeof(BInputType));
-    ck_tile::DeviceMem d_c(MmaTraits::BlockM * MmaTraits::BlockN * sizeof(AccType));
-    std::array<AInputType, MmaTraits::BlockM * MmaTraits::BlockK> h_a;
-    std::array<BInputType, MmaTraits::BlockK * MmaTraits::BlockN> h_b;
-    std::array<AccType, MmaTraits::BlockM * MmaTraits::BlockN> h_c;
-    std::array<AccType, MmaTraits::BlockM * MmaTraits::BlockN> h_c_result;
+    constexpr uint32_t total_cases =
+        MmaTraits::BlockM * MmaTraits::BlockK * MmaTraits::BlockN;
+    ck_tile::DeviceMem d_errors(total_cases * sizeof(uint32_t));
+    std::vector<uint32_t> h_errors(total_cases, 0u);
 
-    auto* d_a_ptr = static_cast<AInputType*>(d_a.GetDeviceBuffer());
-    auto* d_b_ptr = static_cast<BInputType*>(d_b.GetDeviceBuffer());
-    auto* d_c_ptr = static_cast<AccType*>(d_c.GetDeviceBuffer());
+    auto* d_error_ptr = static_cast<uint32_t*>(d_errors.GetDeviceBuffer());
 
-    // test all possible (m, k, n) positions within the tile
-    // e.g. for a 16x16x16 tile this is 4096 test cases
-    std::vector<CaseDim> cases;
-    cases.reserve(MmaTraits::BlockM * MmaTraits::BlockK * MmaTraits::BlockN);
-    for(uint32_t m = 0; m < MmaTraits::BlockM; ++m)
+    using Kernel = MmaLayoutTestKernel<typename MmaTraits::ADataType,
+                                       typename MmaTraits::BDataType,
+                                       typename MmaTraits::CDataType,
+                                       MmaTraits::BlockM,
+                                       MmaTraits::BlockN,
+                                       MmaTraits::BlockK,
+                                       Config::LaneGroupSize,
+                                       Config::WaveSize>;
+
+    (void)hipGetLastError();
+
+    (void)ck_tile::launch_kernel(
+        ck_tile::stream_config{nullptr, false, 0, 0, 1},
+        ck_tile::make_kernel(
+            Kernel{}, dim3(total_cases), dim3(Config::WaveSize), 0, d_error_ptr));
+
+    HIP_CHECK_ERROR(
+        hipMemcpyAsync(h_errors.data(), d_error_ptr, d_errors.GetBufferSize(), hipMemcpyDeviceToHost));
+    HIP_CHECK_ERROR(hipStreamSynchronize(nullptr));
+
+    for(uint32_t case_idx = 0; case_idx < total_cases; ++case_idx)
     {
-        for(uint32_t k = 0; k < MmaTraits::BlockK; ++k)
-        {
-            for(uint32_t n = 0; n < MmaTraits::BlockN; ++n)
-            {
-                cases.push_back({m, k, n});
-            }
-        }
-    }
+        const uint32_t m = case_idx / (MmaTraits::BlockK * MmaTraits::BlockN);
+        const uint32_t k = (case_idx / MmaTraits::BlockN) % MmaTraits::BlockK;
+        const uint32_t n = case_idx % MmaTraits::BlockN;
 
-    for(auto const& test_case : cases)
-    {
-        std::fill(h_a.begin(), h_a.end(), static_cast<AInputType>(0));
-        std::fill(h_b.begin(), h_b.end(), static_cast<BInputType>(0));
-        std::fill(h_c.begin(), h_c.end(), static_cast<AccType>(0));
-
-        // place a single 1 in A(m,k) and B(k,n)
-        h_a[test_case.m * MmaTraits::BlockK + test_case.k] = static_cast<AInputType>(1);
-        h_b[test_case.k * MmaTraits::BlockN + test_case.n] = static_cast<BInputType>(1);
-
-        HIP_CHECK_ERROR(hipMemcpyAsync(
-            d_a_ptr, h_a.data(), h_a.size() * sizeof(AInputType), hipMemcpyHostToDevice));
-        HIP_CHECK_ERROR(hipMemcpyAsync(
-            d_b_ptr, h_b.data(), h_b.size() * sizeof(BInputType), hipMemcpyHostToDevice));
-        HIP_CHECK_ERROR(hipMemcpyAsync(
-            d_c_ptr, h_c.data(), h_c.size() * sizeof(AccType), hipMemcpyHostToDevice));
-
-        using Kernel = MmaLayoutTestKernel<typename MmaTraits::ADataType,
-                                           typename MmaTraits::BDataType,
-                                           typename MmaTraits::CDataType,
-                                           MmaTraits::BlockM,
-                                           MmaTraits::BlockN,
-                                           MmaTraits::BlockK,
-                                           Config::LaneGroupSize,
-                                           Config::WaveSize>;
-
-        (void)hipGetLastError();
-
-        (void)ck_tile::launch_kernel(
-            ck_tile::stream_config{nullptr, false, 0, 0, 1},
-            ck_tile::make_kernel(
-                Kernel{}, dim3(1), dim3(Config::WaveSize), 0, d_a_ptr, d_b_ptr, d_c_ptr));
-
-        HIP_CHECK_ERROR(
-            hipMemcpyAsync(h_c_result.data(), d_c_ptr, d_c.GetBufferSize(), hipMemcpyDeviceToHost));
-        HIP_CHECK_ERROR(hipStreamSynchronize(nullptr));
-
-        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-        {
-            std::printf("MMA tensors for m=%u k=%u n=%u\n", test_case.m, test_case.k, test_case.n);
-            print_tensor("  Device tensor C", h_c_result, MmaTraits::BlockM, MmaTraits::BlockN);
-        }
-
-        // check if the 1 that was placed A(m,k) and B(k,n) found its way to C(m,n) in the device
-        // tensor
-        const AccType tol = 1.0e-1f; // TODO: this tolerance might not be suitable for all data
-                                     // types and should be revisited if we add more configurations
-        for(uint32_t m = 0; m < MmaTraits::BlockM; ++m)
-        {
-            for(uint32_t n = 0; n < MmaTraits::BlockN; ++n)
-            {
-                const AccType expected = (m == test_case.m && n == test_case.n)
-                                             ? static_cast<AccType>(1)
-                                             : static_cast<AccType>(0);
-                EXPECT_NEAR(h_c_result[m * MmaTraits::BlockN + n], expected, tol)
-                    << "Mismatch at C(" << m << "," << n << ")";
-            }
-        }
+        EXPECT_EQ(h_errors[case_idx], 0u)
+            << "Mismatch for m=" << m << " k=" << k << " n=" << n;
     }
 
     return true;
