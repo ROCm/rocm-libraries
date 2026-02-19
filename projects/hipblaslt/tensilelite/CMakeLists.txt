@@ -56,10 +56,8 @@ if(TENSILELITE_ENABLE_HOST)
     add_subdirectory(include)
 
     if(TENSILELITE_ENABLE_CLIENT)
-        option(TENSILELITE_ENABLE_ROCROLLER "Enable MX data generator for FP4 testing" ON)
-
-        # Add mxDataGenerator if ROCROLLER is enabled and it hasn't been added by clients build
-        if(TENSILELITE_ENABLE_ROCROLLER AND NOT TARGET roc::mxDataGenerator)
+        # Add mxDataGenerator if it hasn't been added by clients build
+        if(NOT TARGET roc::mxDataGenerator)
             if(NOT ROCM_LIBS_SUPERBUILD)
                 if(HIPBLASLT_ENABLE_THEROCK)
                     find_package(mxDataGenerator REQUIRED)

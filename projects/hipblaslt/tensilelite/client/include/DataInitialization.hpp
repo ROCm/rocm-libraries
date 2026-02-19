@@ -39,9 +39,7 @@
 
 #include "RunListener.hpp"
 
-#ifdef HIPBLASLT_USE_ROCROLLER
 #include <mxDataGen.hpp>
-#endif
 
 namespace po = boost::program_options;
 
@@ -948,10 +946,7 @@ namespace TensileLite
 
             void initializeConstantInputs(ContractionProblemGemm const& problem);
 
-#ifdef HIPBLASLT_USE_ROCROLLER
-            // Initialize FP4 matrices with proper MX data distribution
             void initializeMXDataForFP4(ContractionProblemGemm const& problem);
-#endif
 
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,

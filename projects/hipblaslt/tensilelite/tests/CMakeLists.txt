@@ -50,6 +50,20 @@ target_link_libraries(tensilelite-tests
         ${CMAKE_DL_LIBS}
 )
 
+if(TARGET roc::mxDataGenerator)
+    target_sources(tensilelite-tests
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/MXDataGen_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../clients/common/src/mxDataGen.cpp"
+    )
+    target_include_directories(tensilelite-tests
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../clients/common/include"
+    )
+    target_link_libraries(tensilelite-tests PRIVATE roc::mxDataGenerator)
+    target_compile_features(tensilelite-tests PRIVATE cxx_std_20)
+endif()
+
 gtest_discover_tests(tensilelite-tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 60)
 
 target_link_libraries(tensilelite-tests PUBLIC GTest::gtest)
