@@ -274,7 +274,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -510,7 +510,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -746,7 +746,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -980,7 +980,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -1211,7 +1211,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -1442,7 +1442,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -1673,7 +1673,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -1904,7 +1904,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -2137,7 +2137,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -2370,7 +2370,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -2603,7 +2603,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -2836,7 +2836,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -3069,7 +3069,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -3302,7 +3302,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -3535,7 +3535,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -3768,7 +3768,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -4003,7 +4003,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -4239,7 +4239,7 @@
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false

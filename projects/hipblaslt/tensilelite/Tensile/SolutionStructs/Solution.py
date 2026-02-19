@@ -1612,6 +1612,8 @@ class Solution(collections.abc.Mapping):
       state["UsePLRPack"] = False
 
       hasCMS,_ = hasCustomSchedule(state)
+      if state["UseCustomMainLoopSchedule"] == 1 and not hasCMS:
+        reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 but CMS is not supported")
       state["UseCustomMainLoopSchedule"] = 1 if hasCMS else 0
 
     # additional setting for non CMS
