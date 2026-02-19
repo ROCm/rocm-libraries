@@ -35,10 +35,6 @@ if(ENABLE_CLANG_FORMAT)
         "./build"
         -prune
         -o
-        -path
-        "./data_sdk/include/hipdnn_data_sdk/data_objects"
-        -prune
-        -o
     )
 
     # Find and check clang-format version using unified function
