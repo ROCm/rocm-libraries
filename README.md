@@ -240,7 +240,7 @@ GPU synchronization primitives are approximations of their CPU counterparts:
 
 ## License
 
-hipThreads is distributed under the MIT License. See `LICENSE.txt` for details.
+hipThreads is distributed under the Apache License v2.0 with LLVM Exceptions. See `LICENSE.txt` for details.
 
 ## Disclaimers
 

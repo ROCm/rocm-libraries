@@ -1,5 +1,5 @@
 ==============================================================================
-libhipcxx is under the Apache License v2.0 with LLVM Exceptions:
+hipThreads is under the Apache License v2.0 with LLVM Exceptions:
 ==============================================================================
 
                                  Apache License
@@ -312,7 +312,7 @@ THE SOFTWARE.
 
 ==============================================================================
 
-Some libhipcxx components are covered by the below license. Each source file
+Some hipThreads components are covered by the below license. Each source file
 indicates which license it is under.
 
 ==============================================================================
