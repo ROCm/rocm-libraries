@@ -93,18 +93,8 @@ def create_configs(hardware: origami.hardware_t, dtype: str) -> list[origami.con
     for mi in mi_list:
         mi_m, mi_n, mi_k = mi
         for mt_m in mt_sizes:
-            if mt_m < mi_m or mt_m % mi_m != 0:
-                continue
             for mt_n in mt_sizes:
-                if mt_n < mi_n or mt_n % mi_n != 0:
-                    continue
-                if mt_m * mt_n > 256 * 256:
-                    continue
-
                 for mt_k in depth_unroll_values:
-                    if mt_k < mi_k or mt_k % mi_k != 0:
-                        continue
-
                     for occ in occupancy_values:
                         for wgm in wgm_values:
                             config = origami.config_t()
