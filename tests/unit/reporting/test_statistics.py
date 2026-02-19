@@ -38,12 +38,13 @@ class TestBenchmarkStats:
             BenchmarkStats.from_timings([])
 
     def test_from_timings_std_calculation(self) -> None:
-        """Test standard deviation calculation."""
+        """Test standard deviation calculation (sample std, ddof=1)."""
         timings = [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]
         stats = BenchmarkStats.from_timings(timings)
 
         assert stats.mean_ms == 5.0
-        assert stats.std_ms == pytest.approx(2.0, rel=0.01)
+        # Sample std (ddof=1): sqrt(32/7) ≈ 2.138
+        assert stats.std_ms == pytest.approx(2.1381, rel=0.01)
 
     def test_from_timings_percentiles(self) -> None:
         """Test percentile calculations."""

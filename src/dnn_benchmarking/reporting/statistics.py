@@ -60,7 +60,7 @@ class BenchmarkStats:
 
         return cls(
             mean_ms=float(np.mean(arr)),
-            std_ms=float(np.std(arr)),
+            std_ms=float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0,
             min_ms=float(np.min(arr)),
             max_ms=float(np.max(arr)),
             p95_ms=float(np.percentile(arr, 95)),

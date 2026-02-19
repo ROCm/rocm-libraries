@@ -1,5 +1,6 @@
 """Tensor information dataclass."""
 
+import warnings
 from dataclasses import dataclass, field
 from typing import List
 
@@ -41,7 +42,15 @@ class TensorInfo:
     @property
     def element_size(self) -> int:
         """Get size of one element in bytes."""
-        return DTYPE_SIZES.get(self.data_type.lower(), 4)
+        dtype_lower = self.data_type.lower()
+        size = DTYPE_SIZES.get(dtype_lower)
+        if size is None:
+            warnings.warn(
+                f"Unknown data type '{self.data_type}', defaulting to 4 bytes",
+                stacklevel=2,
+            )
+            return 4
+        return size
 
     @property
     def num_elements(self) -> int:
@@ -53,7 +62,18 @@ class TensorInfo:
 
     @property
     def size_bytes(self) -> int:
-        """Get total size in bytes."""
+        """Get total size in bytes.
+
+        Uses strides to compute actual memory footprint when available,
+        since non-contiguous tensors may require more memory than
+        product(dims) * element_size.
+        """
+        if self.strides:
+            # Memory footprint = max(dim_i * stride_i) * element_size
+            max_extent = max(
+                d * s for d, s in zip(self.dims, self.strides)
+            )
+            return max_extent * self.element_size
         return self.num_elements * self.element_size
 
     @classmethod

@@ -115,7 +115,7 @@ class ABRunner:
         engine_id: int,
         buffer_manager: BufferManager,
         config_name: str = "",
-    ) -> Tuple[np.ndarray, BenchmarkResult, float]:
+    ) -> Tuple[Dict[int, np.ndarray], BenchmarkResult, float]:
         """Execute graph with specific plugin/engine configuration.
 
         Args:
@@ -125,7 +125,8 @@ class ABRunner:
             config_name: Name for this configuration (e.g., "A" or "B").
 
         Returns:
-            Tuple of (output_data, benchmark_result, init_time_ms).
+            Tuple of (outputs_dict, benchmark_result, init_time_ms) where
+            outputs_dict maps tensor UID to numpy array for all output tensors.
         """
         import hipdnn_frontend as hipdnn
 
@@ -143,20 +144,25 @@ class ABRunner:
         executor.warmup(handle, variant_pack)
         result = executor.benchmark(handle, variant_pack, graph_name=config_name)
 
-        # Get output data - copy to avoid overwriting
+        # Get all output data - copy to avoid overwriting
         output_tensors = buffer_manager.get_output_tensors()
         if not output_tensors:
             raise ExecutionError("No output tensors found in graph")
 
-        output_data = buffer_manager.get_output_data(output_tensors[0].uid)
-        if output_data is None:
-            raise ExecutionError("Failed to retrieve output data")
+        outputs: Dict[int, np.ndarray] = {}
+        for tensor in output_tensors:
+            data = buffer_manager.get_output_data(tensor.uid)
+            if data is None:
+                raise ExecutionError(
+                    f"Failed to retrieve output data for tensor uid={tensor.uid}"
+                )
+            outputs[tensor.uid] = data.copy()
 
-        return output_data.copy(), result, init_time_ms
+        return outputs, result, init_time_ms
 
     def _validate_output(
         self,
-        output_data: np.ndarray,
+        outputs: Dict[int, np.ndarray],
         tensor_infos: List[TensorInfo],
         buffer_manager: BufferManager,
         config_name: str,
@@ -164,7 +170,7 @@ class ABRunner:
         """Validate output against reference provider.
 
         Args:
-            output_data: Output data from execution.
+            outputs: Dict mapping tensor UID to output data from execution.
             tensor_infos: List of tensor info objects.
             buffer_manager: Buffer manager with input data.
             config_name: Name of the configuration being validated.
@@ -199,28 +205,30 @@ class ABRunner:
             # Compute reference
             reference_outputs = provider.compute_reference(self._graph_json, input_data)
 
-            # Get output tensor UID
-            output_tensors = buffer_manager.get_output_tensors()
-            if not output_tensors:
-                return None
-
-            output_uid = output_tensors[0].uid
-            ref_output = reference_outputs.get(output_uid)
-            if ref_output is None:
-                return None
-
-            # Compare
+            # Compare all output tensors, track worst-case diffs
             comparator = ArrayComparator(
                 rtol=self._validation_config.rtol, atol=self._validation_config.atol
             )
-            comparison = comparator.compare(
-                output_data, ref_output.data, config_name, self._validation_config.provider
-            )
+            all_passed = True
+            worst_abs = 0.0
+            worst_rel = 0.0
+
+            for uid, output_data in outputs.items():
+                ref_output = reference_outputs.get(uid)
+                if ref_output is None:
+                    continue
+                comparison = comparator.compare(
+                    output_data, ref_output.data, config_name, self._validation_config.provider
+                )
+                if not comparison.passed:
+                    all_passed = False
+                worst_abs = max(worst_abs, comparison.max_abs_diff)
+                worst_rel = max(worst_rel, comparison.max_rel_diff)
 
             return ValidationResult(
-                passed=comparison.passed,
-                max_abs_diff=comparison.max_abs_diff,
-                max_rel_diff=comparison.max_rel_diff,
+                passed=all_passed,
+                max_abs_diff=worst_abs,
+                max_rel_diff=worst_rel,
                 provider_name=self._validation_config.provider,
             )
 
@@ -248,40 +256,63 @@ class ABRunner:
 
             # Run configuration A
             buffer_manager.zero_outputs()
-            output_a, result_a, init_a = self._run_single(
+            outputs_a, result_a, init_a = self._run_single(
                 self._ab_config.a_path, self._ab_config.a_id, buffer_manager, "A"
             )
 
             # Validate A if configured
             validation_a = self._validate_output(
-                output_a, tensor_infos, buffer_manager, "A"
+                outputs_a, tensor_infos, buffer_manager, "A"
             )
+
+            # Synchronize GPU to ensure Config A's work is complete before B starts
+            # This prevents stream state contamination in timing measurements
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+            except ImportError:
+                pass
 
             # Run configuration B (same inputs)
             buffer_manager.zero_outputs()
-            output_b, result_b, init_b = self._run_single(
+            outputs_b, result_b, init_b = self._run_single(
                 self._ab_config.b_path, self._ab_config.b_id, buffer_manager, "B"
             )
 
             # Validate B if configured
             validation_b = self._validate_output(
-                output_b, tensor_infos, buffer_manager, "B"
+                outputs_b, tensor_infos, buffer_manager, "B"
             )
 
-        # Compare outputs using unified comparator
+        # Compare all output tensors, track worst-case diffs across all outputs
         comparator = ArrayComparator(
             rtol=self._ab_config.rtol, atol=self._ab_config.atol
         )
-        comparison = comparator.compare(output_a, output_b, "A", "B")
+        all_passed = True
+        worst_abs = 0.0
+        worst_rel = 0.0
+
+        for uid in outputs_a:
+            if uid not in outputs_b:
+                all_passed = False
+                worst_abs = float("inf")
+                worst_rel = float("inf")
+                continue
+            comparison = comparator.compare(outputs_a[uid], outputs_b[uid], "A", "B")
+            if not comparison.passed:
+                all_passed = False
+            worst_abs = max(worst_abs, comparison.max_abs_diff)
+            worst_rel = max(worst_rel, comparison.max_rel_diff)
 
         return ABTestResult(
             result_a=result_a,
             result_b=result_b,
             init_time_a_ms=init_a,
             init_time_b_ms=init_b,
-            passed=comparison.passed,
-            max_abs_diff=comparison.max_abs_diff,
-            max_rel_diff=comparison.max_rel_diff,
+            passed=all_passed,
+            max_abs_diff=worst_abs,
+            max_rel_diff=worst_rel,
             validation_a=validation_a,
             validation_b=validation_b,
         )

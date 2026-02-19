@@ -1,11 +1,43 @@
 """Graph execution with timing for benchmarks."""
 
+import json
 from typing import Any, Dict, List, Literal, Optional
 
 from ..common.exceptions import ExecutionError
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
 from .timing import GpuTimerInterface, Timer, create_gpu_timer
+
+
+# Map graph JSON data type strings to hipdnn DataType enum names.
+# The hipdnn.DataType enum is only available when hipdnn_frontend is imported,
+# so we map to attribute name strings and resolve at runtime.
+_DATA_TYPE_STR_MAP = {
+    "FLOAT": "FLOAT",
+    "DOUBLE": "DOUBLE",
+    "HALF": "HALF",
+    "BFLOAT16": "BFLOAT16",
+    "INT8": "INT8",
+    "INT32": "INT32",
+    "UINT8": "UINT8",
+    "INT64": "INT64",
+    "BOOLEAN": "BOOLEAN",
+}
+
+
+def _resolve_data_type(hipdnn: Any, type_str: str, fallback: str = "FLOAT") -> Any:
+    """Resolve a data type string to a hipdnn.DataType enum value.
+
+    Args:
+        hipdnn: The hipdnn_frontend module.
+        type_str: Data type string from graph JSON (e.g. "FLOAT", "HALF").
+        fallback: Fallback enum name if type_str is not recognized.
+
+    Returns:
+        hipdnn.DataType enum value.
+    """
+    enum_name = _DATA_TYPE_STR_MAP.get(type_str.upper(), fallback)
+    return getattr(hipdnn.DataType, enum_name, hipdnn.DataType.FLOAT)
 
 
 class Executor:
@@ -64,9 +96,26 @@ class Executor:
         with Timer() as t:
             # Create and configure graph
             self._graph = hipdnn.Graph()
-            self._graph.set_io_data_type(hipdnn.DataType.FLOAT)
-            self._graph.set_intermediate_data_type(hipdnn.DataType.FLOAT)
-            self._graph.set_compute_data_type(hipdnn.DataType.FLOAT)
+
+            # Parse data types from the graph JSON; fall back to FLOAT
+            try:
+                graph_dict = json.loads(self._graph_json_str)
+            except (json.JSONDecodeError, TypeError):
+                graph_dict = {}
+
+            io_dt = _resolve_data_type(
+                hipdnn, graph_dict.get("io_data_type", "FLOAT")
+            )
+            intermediate_dt = _resolve_data_type(
+                hipdnn, graph_dict.get("intermediate_data_type", "FLOAT")
+            )
+            compute_dt = _resolve_data_type(
+                hipdnn, graph_dict.get("compute_data_type", "FLOAT")
+            )
+
+            self._graph.set_io_data_type(io_dt)
+            self._graph.set_intermediate_data_type(intermediate_dt)
+            self._graph.set_compute_data_type(compute_dt)
 
             # Deserialize from JSON
             result = self._graph.from_json(self._graph_json_str)
@@ -164,6 +213,15 @@ class Executor:
         backend_name: str = ""
         torch_sync = None
 
+        # Set up torch sync for accurate E2E timing (needed regardless of GPU timer)
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch_sync = torch.cuda.synchronize
+        except ImportError:
+            torch_sync = None
+
         # Create GPU timer if requested and available
         if self._gpu_backend != "none":
             try:
@@ -174,15 +232,6 @@ class Executor:
                 raise ExecutionError(str(e)) from e
             kernel_timings = []
             backend_name = gpu_timer.backend_name
-        else:
-            # No GPU timer - need explicit sync for E2E timing
-            try:
-                import torch
-
-                if torch.cuda.is_available():
-                    torch_sync = torch.cuda.synchronize
-            except ImportError:
-                torch_sync = None
 
         for _ in range(self._config.benchmark_iters):
             with Timer() as t:
