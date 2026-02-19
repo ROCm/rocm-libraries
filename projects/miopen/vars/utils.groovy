@@ -218,7 +218,7 @@ def cmake_fin_build_cmd(prefixpath){
 def getDockerImageName(dockerArgs)
 {
     sh "echo ${dockerArgs} > ${env.WORKSPACE}/factors.txt"
-    def image = "${env.MIOPEN_DOCKER_IMAGE_URL}"
+    def image = "${env.MIOPEN_CI_DOCKER_URL}"
     // Note: The following files and directories from the CK repo are used to generate a hash for 
     // the docker image build. To ensure that we rebuild the docker image only when necessary.
     // Add any other files or directories that should trigger a rebuild of the docker image when changed.
@@ -263,7 +263,7 @@ def getDockerImage(Map conf=[:])
 
     def gpu_family = conf.get("gpu_family")
 
-    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache_${gpu_family}"
+    def cacheRef = "${env.MIOPEN_CI_DOCKER_CACHE_URL}:cache_${gpu_family}"
 
     def theRockHash = sh(
             script: """
@@ -280,7 +280,7 @@ def getDockerImage(Map conf=[:])
     // With the docker credentials check if the cacheRefFrom exists in the registry
     def cacheExists = ""
 
-    withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+    withDockerRegistry([ credentialsId: "miopen_image_creds", url: "" ]) {
         cacheExists = sh(
             script: """
                 if docker manifest inspect ${cacheRefFrom} > /dev/null 2>&1; then
@@ -365,7 +365,7 @@ def getDockerImage(Map conf=[:])
     try{
         echo "Pulling down image: ${image}"
         dockerImage = docker.image("${image}")
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+        withDockerRegistry([ credentialsId: "miopen_image_creds", url: "" ]) {
             dockerImage.pull()
         }
     }
@@ -381,7 +381,7 @@ def getDockerImage(Map conf=[:])
                               "--cache-from type=registry,ref=${cacheRefFrom} "
 
         try {
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            withDockerRegistry([ credentialsId: "miopen_image_creds", url: "" ]) {
                 sh """
                     docker buildx inspect ci-builder >/dev/null 2>&1 || \
                     docker buildx create --name ci-builder --driver docker-container --use
@@ -409,7 +409,7 @@ def getDockerImage(Map conf=[:])
         } catch (Exception bex) {
             echo "Buildx not available or failed, falling back to docker.build"
             dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            withDockerRegistry([ credentialsId: "miopen_image_creds", url: "" ]) {
                 dockerImage.push()
             }
         }
@@ -427,7 +427,7 @@ def getDockerImage(Map conf=[:])
         try{
             echo "Pulling down perf test image: ${image}"
             dockerImage = docker.image("${image}")
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            withDockerRegistry([ credentialsId: "miopen_image_creds", url: "" ]) {
                 dockerImage.pull()
             }
         }
@@ -438,7 +438,7 @@ def getDockerImage(Map conf=[:])
         catch(Exception ex)
         {
             dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            withDockerRegistry([ credentialsId: "miopen_image_creds", url: "" ]) {
                 dockerImage.push()
             }
         }
@@ -555,7 +555,7 @@ def RunPerfTest(Map conf=[:]){
         def docker_image = conf.get("docker_image")
         def miopen_install_path = conf.get("miopen_install_path", "/opt/rocm")
         def results_dir = conf.get("results_dir", "${env.WORKSPACE}/${env.MIOPEN_DIR}/results")
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+        withDockerRegistry([ credentialsId: "miopen_image_creds", url: "" ]) {
             docker_image.pull()
         }
         echo "docker image: ${docker_image}"
