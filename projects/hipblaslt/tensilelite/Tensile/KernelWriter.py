@@ -1669,7 +1669,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               iterCode.add(waitDsRead)
         else:
           if (kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"])) and not kernel["UseF32XEmulation"]:
-            if iteration == 0 and i == kernel["MIWaveTileA"]:
+            if iteration == 0 and i == (kernel["MIWaveTileA"] // kernel["numSubTiles"]):
               # add 1 more waitcnt before using ds read data
               waitCode2 = deepcopy(waitCode)
               waitCode2.dscnt = localReadsIssuedInThisIter
@@ -2153,7 +2153,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # some of localReads is interleaved after waitcnt in SIA3
         if scheduleIterAlg== 3 and self.states.numItersPLR and\
           (iteration < numReadsIterA or iteration < numReadsIterB or numPrefetchIter) and\
-          not kernel["ForceUnrollSubIter"]:
+          not kernel["UseF32XEmulation"]:
           if ((iteration < numReadsIterA and not dataAtIterA < max(dataAtIterA,dataAtIterB)) or numPrefetchIter) and (not kernel["DirectToVgprA"]):
             localReads -= self.states.numReadsPerIterA
           if ((iteration < numReadsIterB and not dataAtIterB < max(dataAtIterA,dataAtIterB)) or numPrefetchIter) and (not kernel["DirectToVgprB"]):
@@ -2167,7 +2167,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             localReadsNotWaited = self.states.numReadsPerIterB//kernel["InnerUnroll"] - self.states.numReadsPerUnrollB
             if localReadsNotWaited > 0:
               localReads += localReadsNotWaited
-        elif kernel["ForceUnrollSubIter"]:
+        elif kernel["UseF32XEmulation"]:
           localReads = 0
 
         dscnt += localReads
@@ -6027,15 +6027,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # reads Per Iteration
     ########################################
     if kernel["EnableMatrixInstruction"]:
+      factorSubIterA = kernel["numSubTiles"]
       if kernel["UnrollMajorLDSA"] or kernel["enableLDSTrA"]:
         self.states.numReadsPerUnrollA = ceil(tensorParametersA["bpe"] * kernel["MIInputPerThreadA"] / int(tensorParametersA["localReadInstruction"].blockWidth * 4))
       else:
         self.states.numReadsPerUnrollA = kernel["MIInputPerThreadA"]
-      if kernel["ForceUnrollSubIter"]:
-        self.states.numReadsPerUnrollA //= kernel["numSubTiles"]
+        if kernel["ForceUnrollSubIter"]:
+          self.states.numReadsPerUnrollA //= kernel["numSubTiles"]
+          factorSubIterA = 1
       numA = kernel["InnerUnroll"]*(kernel["MIWaveTile"][0] * self.states.numReadsPerUnrollA) // tensorParametersA["localReadInstruction"].numOffsets
       if self.states.lrvwTileA > 1:
         numA = numA // kernel["VectorWidthA"]
+      if kernel["ForceUnrollSubIter"]:
+        numA = numA // factorSubIterA
 
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
         if kernel["UnrollMajorLDSMetadata"]:
@@ -6047,15 +6051,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ForceUnrollSubIter"]:
         self.states.numReadsPerUnrollMetadata //= kernel["numSubTiles"]
 
+      factorSubIterB = kernel["numSubTiles"]
       if kernel["UnrollMajorLDSB"] or kernel["enableLDSTrB"]:
         self.states.numReadsPerUnrollB = ceil(tensorParametersB["bpe"] * kernel["MIInputPerThreadB"] / int(tensorParametersB["localReadInstruction"].blockWidth * 4))
       else:
         self.states.numReadsPerUnrollB = kernel["MIInputPerThreadB"]
-      if kernel["ForceUnrollSubIter"]:
-        self.states.numReadsPerUnrollB //= kernel["numSubTiles"]
+        if kernel["ForceUnrollSubIter"]:
+          self.states.numReadsPerUnrollB //= kernel["numSubTiles"]
+          factorSubIterB = 1
       numB = kernel["InnerUnroll"]*(kernel["MIWaveTile"][1] * self.states.numReadsPerUnrollB) // tensorParametersB["localReadInstruction"].numOffsets
       if self.states.lrvwTileB > 1:
         numB = numB // kernel["VectorWidthB"]
+      if kernel["ForceUnrollSubIter"]:
+        numB = numB // factorSubIterB
 
       # wider localread has 2 mode
       # 1. using larger IU to coalesced localread, only half of local reads in 1 iteration
