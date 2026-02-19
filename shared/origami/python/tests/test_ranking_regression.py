@@ -35,20 +35,10 @@ SUPPORTED_DTYPES = ["f16", "bf16", "f32"]
 
 
 def get_matrix_instructions(hardware: origami.hardware_t, dtype: str) -> list[tuple[int, int, int]]:
-    """Get valid matrix instructions from hardware for the given dtype.
-    
-    Filters out very small instructions (like 1x1x64 or 4x4x4) that are
-    not typically used for GEMM tiling.
-    """
+    """Get valid matrix instructions from hardware for the given dtype."""
     dtype_enum = origami.string_to_datatype(dtype)
     instructions = hardware.get_valid_matrix_instructions(dtype_enum)
-    
-    # Filter to reasonable GEMM tile sizes (skip dot product and very small instructions)
-    result = []
-    for mi in instructions:
-        if mi.m >= 16 and mi.n >= 16:
-            result.append((mi.m, mi.n, mi.k))
-    return result
+    return [(mi.m, mi.n, mi.k) for mi in instructions]
 
 
 def is_dtype_supported(arch_name: str, dtype: str) -> bool:
