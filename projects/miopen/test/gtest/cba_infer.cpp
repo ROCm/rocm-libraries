@@ -197,12 +197,24 @@ TEST_P(GPU_ConvBiasActivInfer_FP16, ConvWinoRageRxSf2x3Fused)
 
 TEST_P(GPU_ConvBiasActivInfer_FP16, ConvCKIgemmFwdBiasActivFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvCKIgemmFwdBiasActivFused test when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvCKIgemmFwdBiasActivFused>();
+#endif
 }
 
 TEST_P(GPU_ConvGrpBiasActivInfer_BFP16, ConvCKIgemmGrpFwdBiasActivFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvCKIgemmGrpFwdBiasActivFused test when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>();
+#endif
 }
 TEST_P(GPU_ConvGrpBiasActivInfer3D_BFP16, ConvCKIgemmGrpFwdBiasActivFused)
 {
