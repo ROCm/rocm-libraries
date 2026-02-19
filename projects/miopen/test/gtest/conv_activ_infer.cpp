@@ -167,27 +167,63 @@ using GPU_ConvGrpActivInfer3D_FP32  = CAInferBase<float, GroupConvTestConfig<3u>
 
 TEST_P(GPU_ConvGrpActivInfer_BFP16, ConvCKIgemmGrpFwdActivFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvCKIgemmGrpFwdActivFused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdActivFused>();
+#endif
 };
 TEST_P(GPU_ConvGrpActivInfer3D_BFP16, ConvCKIgemmGrpFwdActivFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvCKIgemmGrpFwdActivFused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdActivFused>();
+#endif
 };
 TEST_P(GPU_ConvGrpActivInfer_FP16, ConvCKIgemmGrpFwdActivFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvCKIgemmGrpFwdActivFused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdActivFused>();
+#endif
 };
 TEST_P(GPU_ConvGrpActivInfer3D_FP16, ConvCKIgemmGrpFwdActivFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvCKIgemmGrpFwdActivFused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdActivFused>();
+#endif
 };
 TEST_P(GPU_ConvGrpActivInfer_FP32, ConvCKIgemmGrpFwdActivFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvCKIgemmGrpFwdActivFused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdActivFused>();
+#endif
 };
 TEST_P(GPU_ConvGrpActivInfer3D_FP32, ConvCKIgemmGrpFwdActivFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvCKIgemmGrpFwdActivFused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdActivFused>();
+#endif
 };
 
 // Instantiate test suites for BFP16
