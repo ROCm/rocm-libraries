@@ -45,8 +45,17 @@ class MXDataGenFP4Test : public ::testing::TestWithParam<std::tuple<uint64_t, ui
 /**
  * @brief Verify that generateMXInput produces FP4 data with an acceptable zero frequency.
  *
- * Due to FP4 E2M1 nibble-pair packing statistics, the expected zero frequency is
- * approximately 12-13% (theoretical: 2/15 - 1/225 ≈ 12.89%).
+ * FP4 E2M1 has 16 possible nibble values (0x0–0xF), of which 2 decode to zero
+ * (0x0 = +0, 0x8 = -0). If nibbles were uniformly distributed the naive baseline
+ * would be 2/16 = 12.5% zeros.
+ *
+ * With MX block scaling the generator normalises each 32-element block so the
+ * largest absolute value maps to the maximum FP4 magnitude (±6.0), which means
+ * the block maximum is never zero. This introduces a small upward bias compared
+ * to the naive baseline: elements that are tiny relative to the block maximum
+ * are more likely to round to zero, while the block maximum itself cannot.
+ * The net empirically observed zero frequency is ~12.5–13%, converging to
+ * approximately 12.89% for large matrices with a bounded [-1, 1] uniform input.
  */
 TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
 {
@@ -81,7 +90,8 @@ TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
     size_t zeros       = countZerosFP4(dataBuffer.data(), numPacked);
     double zeroPercent = 100.0 * static_cast<double>(zeros) / static_cast<double>(numElements);
 
-    // Expected: ~12.89% zeros due to FP4 nibble-pair statistics (2/15 - 1/225).
+    // Empirically ~12.5–12.9% zeros; naive baseline is 2/16 = 12.5% (2 zero values
+    // out of 16 FP4 nibble values), slightly elevated by MX block scaling bias.
     EXPECT_LT(zeroPercent, 13.0)
         << "Zero frequency " << zeroPercent << "% exceeds 13% upper bound for "
         << rows << "x" << cols << " FP4 matrix (transpose=" << isTranspose << ")";
