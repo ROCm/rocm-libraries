@@ -2734,6 +2734,55 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
+    tile_config=TileConfig(352, 192, 64, 2, 1, 1, False, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
+    numMfma = 132
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    
+    if isTN(kernel) and TLDS==1:
+        syncTable = [
+            -1, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=5 newLW=0 newLR=5 for iteration == 0"),
+            10, SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
+            25, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            25, SBarrier(comment=""),
+            109, SWaitCnt(dscnt=-1, vlcnt=17, vscnt=-1, comment="wait for previous set of global reads"),
+            109, SBarrier(comment="")
+        ]
+        
+        optSchedule = {
+            'SYNC': [syncTable[::2]], # 6
+            'LRA0': [[0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]], # 11
+            'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]], # 9
+            'LRB0': [[1, 12, 13, 14, 15, 16]], # 6
+            'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]], # 9
+            'GRA': [[25, 25, 30, 30, 35, 35, 40, 40, 46, 46, 51, 51, 56, 56, 61, 61, 67, 67, 72, 72, 77, 77]], # 22
+            'LRSA': [[64]], # 1
+            'LRSB': [[64]], # 1
+            'GRB': [[82, 82, 88, 88, 93, 93, 98, 98, 103, 103, 109, 109]], # 12
+            'LWSA': [[109]], # 1
+            'LWSB': [[109]], # 1
+            'LRA1': [[110, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121]], # 11
+            'LRB1': [[111, 122, 123, 124, 125, 126]], # 6
+            'LCC': [[numMfma-1, numMfma-1]], # 2
+        }
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
+    else:
+        return False, None
+
+    kernel["MfmaInitCVgprs"] = True
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1.disableValidation()
+    return True, opt1
+        
+@RegisterSchedule(
     tile_config=TileConfig(240, 256, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[2, 8, 8],
