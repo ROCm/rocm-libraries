@@ -16,19 +16,19 @@ using namespace hipdnn_data_sdk::utilities;
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-static std::shared_ptr<TensorAttributes> makeTensor(std::vector<int64_t> dims)
+static std::shared_ptr<TensorAttributes> makeTensor(const std::vector<int64_t>& dims)
 {
     auto t = std::make_shared<TensorAttributes>();
-    t->set_dim(std::move(dims));
+    t->set_dim(dims);
     return t;
 }
 
-static std::shared_ptr<TensorAttributes> makeTensorWithStride(std::vector<int64_t> dims,
-                                                               std::vector<int64_t> strides)
+static std::shared_ptr<TensorAttributes> makeTensorWithStride(const std::vector<int64_t>& dims,
+                                                              const std::vector<int64_t>& strides)
 {
     auto t = std::make_shared<TensorAttributes>();
-    t->set_dim(std::move(dims));
-    t->set_stride(std::move(strides));
+    t->set_dim(dims);
+    t->set_stride(strides);
     return t;
 }
 
@@ -59,7 +59,7 @@ TEST(TestMatch, ExactDimMatchSingleRule)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
-    rule.engine_name = MIOPEN_ENGINE_NAME;
+    rule.engineName = MIOPEN_ENGINE_NAME;
     rule.tensors = {makePattern({1, 3, 224, 224}), makePattern({64, 3, 7, 7})};
 
     auto config = makeConfig({std::move(rule)});
@@ -78,12 +78,12 @@ TEST(TestMatch, FirstMatchingRuleWins)
 {
     OperationRule rule1;
     rule1.op = "conv_fprop";
-    rule1.engine_name = MIOPEN_ENGINE_NAME;
+    rule1.engineName = MIOPEN_ENGINE_NAME;
     rule1.tensors = {makePattern({1, 3, 224, 224})};
 
     OperationRule rule2;
     rule2.op = "conv_fprop";
-    rule2.engine_name = HIPBLASLT_ENGINE_NAME;
+    rule2.engineName = HIPBLASLT_ENGINE_NAME;
     rule2.tensors = {makePattern({1, 3, 224, 224})};
 
     auto config = makeConfig({std::move(rule1), std::move(rule2)});
@@ -101,7 +101,7 @@ TEST(TestMatch, NoRuleMatchesWrongDims)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
-    rule.engine_name = MIOPEN_ENGINE_NAME;
+    rule.engineName = MIOPEN_ENGINE_NAME;
     rule.tensors = {makePattern({1, 3, 224, 224})};
 
     auto config = makeConfig({std::move(rule)});
@@ -120,7 +120,7 @@ TEST(TestMatch, WildcardInOneDimension)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
-    rule.engine_name = HIPBLASLT_ENGINE_NAME;
+    rule.engineName = HIPBLASLT_ENGINE_NAME;
     rule.tensors = {makePattern({-1, 64, 56, 56})}; // batch dim is wildcard
 
     auto config = makeConfig({std::move(rule)});
@@ -144,7 +144,7 @@ TEST(TestMatch, AllWildcardRuleMatchesAnyShape)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
-    rule.engine_name = FUSILLI_ENGINE_NAME;
+    rule.engineName = FUSILLI_ENGINE_NAME;
     rule.tensors = {makePattern({-1, -1, -1, -1})};
 
     auto config = makeConfig({std::move(rule)});
@@ -165,7 +165,7 @@ TEST(TestMatch, WrongOpNameReturnsNullopt)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
-    rule.engine_name = MIOPEN_ENGINE_NAME;
+    rule.engineName = MIOPEN_ENGINE_NAME;
     rule.tensors = {makePattern({1, 3, 224, 224})};
 
     auto config = makeConfig({std::move(rule)});
@@ -183,7 +183,7 @@ TEST(TestMatch, WrongTensorCountReturnsNullopt)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
-    rule.engine_name = MIOPEN_ENGINE_NAME;
+    rule.engineName = MIOPEN_ENGINE_NAME;
     rule.tensors = {makePattern({1, 3, 224, 224}), makePattern({64, 3, 7, 7})}; // 2 patterns
 
     auto config = makeConfig({std::move(rule)});
@@ -208,12 +208,12 @@ TEST(TestMatch, WildcardBeforeExactBothMatch)
 {
     OperationRule wildcard;
     wildcard.op = "conv_fprop";
-    wildcard.engine_name = FUSILLI_ENGINE_NAME;
+    wildcard.engineName = FUSILLI_ENGINE_NAME;
     wildcard.tensors = {makePattern({-1, 3, 224, 224})}; // order 0, wildcard
 
     OperationRule exact;
     exact.op = "conv_fprop";
-    exact.engine_name = HIPBLASLT_ENGINE_NAME;
+    exact.engineName = HIPBLASLT_ENGINE_NAME;
     exact.tensors = {makePattern({1, 3, 224, 224})}; // order 1, exact
 
     auto config = makeConfig({std::move(wildcard), std::move(exact)});
@@ -229,12 +229,12 @@ TEST(TestMatch, ExactBeforeWildcardBothMatch)
 {
     OperationRule exact;
     exact.op = "conv_fprop";
-    exact.engine_name = HIPBLASLT_ENGINE_NAME;
+    exact.engineName = HIPBLASLT_ENGINE_NAME;
     exact.tensors = {makePattern({1, 3, 224, 224})}; // order 0, exact
 
     OperationRule wildcard;
     wildcard.op = "conv_fprop";
-    wildcard.engine_name = FUSILLI_ENGINE_NAME;
+    wildcard.engineName = FUSILLI_ENGINE_NAME;
     wildcard.tensors = {makePattern({-1, 3, 224, 224})}; // order 1, wildcard
 
     auto config = makeConfig({std::move(exact), std::move(wildcard)});
@@ -252,7 +252,7 @@ TEST(TestMatch, ExactStrideMatchSelectsEngine)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
-    rule.engine_name = MIOPEN_ENGINE_NAME;
+    rule.engineName = MIOPEN_ENGINE_NAME;
     rule.tensors = {makePatternWithStride({1, 3, 224, 224}, {150528, 50176, 224, 1})};
 
     auto config = makeConfig({std::move(rule)});
@@ -272,7 +272,7 @@ TEST(TestMatch, WildcardStrideElement)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
-    rule.engine_name = HIPBLASLT_ENGINE_NAME;
+    rule.engineName = HIPBLASLT_ENGINE_NAME;
     // Wildcard on last two stride slots
     rule.tensors = {makePatternWithStride({1, 3, 224, 224}, {150528, 50176, -1, -1})};
 
@@ -297,7 +297,7 @@ TEST(TestMatch, EmptyStridePatternMatchesAnyStride)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
-    rule.engine_name = FUSILLI_ENGINE_NAME;
+    rule.engineName = FUSILLI_ENGINE_NAME;
     rule.tensors = {makePattern({1, 3, 224, 224})}; // no stride field
 
     auto config = makeConfig({std::move(rule)});
@@ -321,10 +321,10 @@ TEST(TestMatch, EmptyStridePatternMatchesAnyStride)
 
 TEST(TestMatch, LoadFromValidJsonFile)
 {
-    constexpr const char* kPath = "/tmp/hipdnn_match_test_case8.json";
+    constexpr const char* PATH = "/tmp/hipdnn_match_test_case8.json";
 
     {
-        std::ofstream f(kPath);
+        std::ofstream f(PATH);
         f << R"({
   "engine_overrides": [
     {
@@ -349,7 +349,7 @@ TEST(TestMatch, LoadFromValidJsonFile)
 })";
     }
 
-    auto config = EngineOverrideConfig::load(kPath);
+    auto config = EngineOverrideConfig::load(PATH);
     ASSERT_TRUE(config.has_value());
 
     // Exact match hits the first rule
@@ -366,7 +366,7 @@ TEST(TestMatch, LoadFromValidJsonFile)
     ASSERT_TRUE(r2.has_value());
     EXPECT_EQ(*r2, FUSILLI_ENGINE_ID);
 
-    std::remove(kPath);
+    std::remove(PATH);
 }
 
 // Test 9: load from missing file → nullopt, no crash
@@ -392,10 +392,10 @@ TEST(TestMatch, EnvVarUnsetReturnsNullptr)
 // Test 16: JSON with stride constraint is parsed and matched correctly
 TEST(TestMatch, JsonWithStrideConstraint)
 {
-    constexpr const char* kPath = "/tmp/hipdnn_match_test_stride.json";
+    constexpr const char* PATH = "/tmp/hipdnn_match_test_stride.json";
 
     {
-        std::ofstream f(kPath);
+        std::ofstream f(PATH);
         f << R"({
   "engine_overrides": [
     {
@@ -410,7 +410,7 @@ TEST(TestMatch, JsonWithStrideConstraint)
 })";
     }
 
-    auto config = EngineOverrideConfig::load(kPath);
+    auto config = EngineOverrideConfig::load(PATH);
     ASSERT_TRUE(config.has_value());
 
     auto x = makeTensorWithStride({1, 3, 224, 224}, {150528, 50176, 224, 1});
@@ -424,7 +424,7 @@ TEST(TestMatch, JsonWithStrideConstraint)
     auto xWrong = makeTensorWithStride({1, 3, 224, 224}, {1, 224, 224 * 3, 224 * 3 * 224});
     EXPECT_FALSE(config->matchOperation("conv_fprop", {xWrong, w}).has_value());
 
-    std::remove(kPath);
+    std::remove(PATH);
 }
 
 #endif // HIPDNN_FRONTEND_SKIP_JSON_LIB

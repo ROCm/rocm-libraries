@@ -5859,8 +5859,8 @@ TEST_F(TestGraph, EngineOverrideDoesNotReplaceExplicitlySetEngineId)
     Graph graph;
     buildConvFpropGraph(graph);
 
-    constexpr int64_t kExplicitEngineId = 42;
-    graph.set_preferred_engine_id_ext(kExplicitEngineId);
+    constexpr int64_t EXPLICIT_ENGINE_ID = 42;
+    graph.set_preferred_engine_id_ext(EXPLICIT_ENGINE_ID);
 
     std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
     expectGraphSerializedToBackendDescriptor(deserializedGraph);
@@ -5868,7 +5868,7 @@ TEST_F(TestGraph, EngineOverrideDoesNotReplaceExplicitlySetEngineId)
     EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
 
     ASSERT_TRUE(graph.get_preferred_engine_id_ext().has_value());
-    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), kExplicitEngineId);
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), EXPLICIT_ENGINE_ID);
 }
 
 // Test 2: EngineOverrideConfig::matchOperation identifies conv_fprop tensors
@@ -5888,7 +5888,7 @@ TEST_F(TestGraph, EngineOverrideConfigMatchesConvFpropTensors)
     // Exact rule for this shape
     OperationRule exactRule;
     exactRule.op = "conv_fprop";
-    exactRule.engine_name = hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_NAME;
+    exactRule.engineName = hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_NAME;
     exactRule.tensors = {TensorPattern{{1, 3, 32, 32}, {}}, TensorPattern{{64, 3, 3, 3}, {}}};
 
     EngineOverrideConfig config({std::move(exactRule)});

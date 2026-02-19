@@ -21,8 +21,7 @@ namespace hipdnn_frontend::engine_override
 /// - no convolution node is present in the graph,
 /// - no rule in the config matches the convolution's tensors, or
 /// - JSON support is compiled out (HIPDNN_FRONTEND_SKIP_JSON_LIB defined).
-inline std::optional<int64_t>
-    getPreferredIdFromOverrideConfig(const graph::INode& root)
+inline std::optional<int64_t> getPreferredIdFromOverrideConfig(const graph::INode& root)
 {
     std::optional<int64_t> result;
 
@@ -38,13 +37,13 @@ inline std::optional<int64_t>
         }
         else if(const auto* dgrad = dynamic_cast<const graph::ConvolutionDgradNode*>(&node))
         {
-            result = checkEngineOverride(
-                "conv_dgrad", {dgrad->attributes.get_dy(), dgrad->attributes.get_w()});
+            result = checkEngineOverride("conv_dgrad",
+                                         {dgrad->attributes.get_dy(), dgrad->attributes.get_w()});
         }
         else if(const auto* wgrad = dynamic_cast<const graph::ConvolutionWgradNode*>(&node))
         {
-            result = checkEngineOverride(
-                "conv_wgrad", {wgrad->attributes.get_x(), wgrad->attributes.get_dy()});
+            result = checkEngineOverride("conv_wgrad",
+                                         {wgrad->attributes.get_x(), wgrad->attributes.get_dy()});
         }
     });
 

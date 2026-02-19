@@ -71,7 +71,7 @@ struct TensorPattern
 struct OperationRule
 {
     std::string op; ///< "conv_fprop" / "conv_dgrad" / "conv_wgrad"
-    std::string engine_name; ///< Engine name resolved to an ID via engineNameToId()
+    std::string engineName; ///< Engine name resolved to an ID via engineNameToId()
     std::vector<TensorPattern> tensors; ///< Ordered patterns for operation inputs
 
     /// Returns true iff every tensor in `tensors` matches the corresponding pattern.
@@ -207,9 +207,9 @@ public:
     /// Leading and trailing whitespace in the path value is ignored.
     static const EngineOverrideConfig* loadFromEnv()
     {
-        static constexpr const char* kEnvVar = "HIPDNN_ENGINE_OVERRIDE_FILE";
-        static const std::optional<EngineOverrideConfig> cached = []() {
-            std::string path = hipdnn_data_sdk::utilities::getEnv(kEnvVar, "");
+        static constexpr const char* ENV_VAR = "HIPDNN_ENGINE_OVERRIDE_FILE";
+        static const std::optional<EngineOverrideConfig> s_cached = []() {
+            std::string path = hipdnn_data_sdk::utilities::getEnv(ENV_VAR, "");
             const auto first = path.find_first_not_of(" \t\r\n");
             if(first == std::string::npos)
             {
@@ -218,10 +218,10 @@ public:
             path = path.substr(first, path.find_last_not_of(" \t\r\n") - first + 1);
             return load(path);
         }();
-        return cached ? &*cached : nullptr;
+        return s_cached ? &*s_cached : nullptr;
     }
 
-    /// Scan rules in declaration order; return the first matching engine_id or nullopt.
+    /// Scan rules in declaration order; return the first matching enginedId or nullopt.
     ///
     /// Strategy 1: only the bucket for `op` is examined (hash map lookup).
     /// Strategy 2: within the bucket, exact rules are probed in O(1) via hash map;
@@ -232,8 +232,8 @@ public:
                        const std::vector<std::shared_ptr<graph::TensorAttributes>>& tensors) const
     {
         // Strategy 1: find the op bucket
-        const auto opIt = index_.find(op);
-        if(opIt == index_.end())
+        const auto opIt = _index.find(op);
+        if(opIt == _index.end())
         {
             return std::nullopt;
         }
@@ -263,27 +263,26 @@ public:
             {
                 // This wildcard has lower or equal order to any exact hit (loop
                 // would have broken otherwise), so it is the first-match winner.
-                HIPDNN_FE_LOG_INFO("EngineOverrideConfig: matched op=" << op << " engine_id="
-                                                                       << entry.engine_id
-                                                                       << " (wildcard rule)");
-                return entry.engine_id;
+                HIPDNN_FE_LOG_INFO("EngineOverrideConfig: matched op="
+                                   << op << " enginedId=" << entry.enginedId << " (wildcard rule)");
+                return entry.enginedId;
             }
         }
 
         if(exactHit)
         {
             HIPDNN_FE_LOG_INFO("EngineOverrideConfig: matched op="
-                               << op << " engine_id=" << exactHit->engine_id << " (exact rule)");
-            return exactHit->engine_id;
+                               << op << " enginedId=" << exactHit->enginedId << " (exact rule)");
+            return exactHit->enginedId;
         }
         return std::nullopt;
     }
 
 private:
-    /// engine_id and declaration index for an exact-match rule.
+    /// enginedId and declaration index for an exact-match rule.
     struct ExactEntry
     {
-        int64_t engine_id;
+        int64_t enginedId;
         size_t order; ///< position in the original rule list (0 = first)
     };
 
@@ -291,7 +290,7 @@ private:
     struct WildcardEntry
     {
         OperationRule rule;
-        int64_t engine_id; ///< resolved from rule.engine_name at index time
+        int64_t enginedId; ///< resolved from rule.engineName at index time
         size_t order;
     };
 
@@ -307,7 +306,7 @@ private:
         std::vector<WildcardEntry> wildcards;
     };
 
-    std::unordered_map<std::string, OpBucket> index_;
+    std::unordered_map<std::string, OpBucket> _index;
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -350,7 +349,7 @@ private:
         {
             OperationRule rule;
             rule.op = entry.at("op").get<std::string>();
-            rule.engine_name = entry.at("engine_name").get<std::string>();
+            rule.engineName = entry.at("engine_name").get<std::string>();
             for(const auto& t : entry.at("tensors"))
             {
                 TensorPattern pat;
@@ -416,13 +415,12 @@ private:
         return key;
     }
 
-    /// Insert one rule into the appropriate bucket of index_.
-    /// Resolves engine_name to an int64_t ID via engineNameToId().
+    /// Insert one rule into the appropriate bucket of _index.
+    /// Resolves engineName to an int64_t ID via engineNameToId().
     void indexRule(OperationRule rule, size_t order)
     {
-        const int64_t resolvedId
-            = hipdnn_data_sdk::utilities::engineNameToId(rule.engine_name);
-        OpBucket& bucket = index_[rule.op]; // keyed by op (strategy 1)
+        const int64_t resolvedId = hipdnn_data_sdk::utilities::engineNameToId(rule.engineName);
+        OpBucket& bucket = _index[rule.op]; // keyed by op (strategy 1)
         if(hasWildcard(rule.tensors))
         {
             bucket.wildcards.push_back(WildcardEntry{std::move(rule), resolvedId, order});
@@ -439,7 +437,7 @@ private:
     size_t ruleCount() const
     {
         size_t n = 0;
-        for(const auto& [op, bucket] : index_)
+        for(const auto& [op, bucket] : _index)
         {
             n += bucket.exact.size() + bucket.wildcards.size();
         }
@@ -447,7 +445,7 @@ private:
     }
 };
 
-/// Match op/tensors against a config and return the first matching engine_id.
+/// Match op/tensors against a config and return the first matching enginedId.
 /// When `config` is null the process-lifetime config loaded from
 /// HIPDNN_ENGINE_OVERRIDE_FILE is used (read once on first call, thread-safe
 /// per C++11).  Passing an explicit config bypasses the env-var lookup entirely,
@@ -458,11 +456,11 @@ inline std::optional<int64_t>
                         const std::vector<std::shared_ptr<graph::TensorAttributes>>& tensors,
                         const EngineOverrideConfig* config = nullptr)
 {
-    if(!config)
+    if(config == nullptr)
     {
         config = EngineOverrideConfig::loadFromEnv();
     }
-    if(!config)
+    if(config == nullptr)
     {
         return std::nullopt;
     }
