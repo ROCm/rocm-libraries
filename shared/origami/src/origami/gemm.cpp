@@ -63,6 +63,7 @@ context_t::context_t(const problem_t& problem,
   // Hardware-derived values
   active_cus     = cus;
   mem_bw_limited = compute_mem_bw_from_occupancy(hardware, active_cus);
+  write_mem_bw_limited = compute_mem_bw_from_occupancy(hardware, num_tiles);
 
   // Tile-derived values
   tile_elements     = MT_M * MT_N;
@@ -83,8 +84,17 @@ context_t::context_t(const problem_t& problem,
   l2_tile_m = lm;
   l2_tile_n = ln;
 
+  bool debug = runtime_options::get().debug_enabled;
   if(debug)
   {
+    const size_t K     = problem.size.k;
+    const size_t MT_K  = config.mt.k;
+    const size_t MI_M  = config.mi.m;
+    const size_t MI_N  = config.mi.n;
+    const size_t MI_K  = config.mi.k;
+    const auto a_bits  = datatype_to_bits(problem.a_dtype);
+    const auto b_bits  = datatype_to_bits(problem.b_dtype);
+
     OLOG_DEBUG("======== Origami Debug Info ========");
     OLOG_DEBUG("Problem size: " << int(M) << "x" << int(N) << "x" << int(K));
     OLOG_DEBUG("batch: " << int(batch));
@@ -103,8 +113,8 @@ context_t::context_t(const problem_t& problem,
     OLOG_DEBUG("Reduction strategy: " << int(reduction_strategy));
     
     OLOG_DEBUG("Active CUs: " << int(active_cus));
-    OLOG_DEBUG("Read Mem BW limited: " << context.mem_bw_limited);
-    OLOG_DEBUG("Write Mem BW limited: " << context.write_mem_bw_limited);
+    OLOG_DEBUG("Read Mem BW limited: " << mem_bw_limited);
+    OLOG_DEBUG("Write Mem BW limited: " << write_mem_bw_limited);
 
     OLOG_DEBUG("CHUNKxXCCxWGM: " << int(wgm.wgmxccchunk) << "x" << int(wgm.wgmxcc) << "x" << int(wgm.wgm));
     OLOG_DEBUG("Mall tile: " << int(mm) << "x" << int(mn));
@@ -1114,12 +1124,11 @@ double compute_memory_latency(const problem_t& problem,
     OLOG_DEBUG("H_mem_l2: " << H_mem_l2);
     OLOG_DEBUG("Ld_CU_bytes: " << Ld_CU_bytes);
     OLOG_DEBUG("total_Ld: " << total_Ld);
-    OLOG_DEBUG("Ld_mem_dram: " << Ld_mem_dram);
-    OLOG_DEBUG("Ld_mem_mall: " << Ld_mem_mall);
+    OLOG_DEBUG("Ld_dram: " << Ld_dram);
+    OLOG_DEBUG("Ld_mall: " << Ld_mall);
     OLOG_DEBUG("L_mem_l2: " << L_mem_l2);
     OLOG_DEBUG("L_mem_mall: " << L_mem_mall);
     OLOG_DEBUG("L_mem_dram: " << L_mem_dram);
-    OLOG_DEBUG("L_mem: " << L_mem);
   }
 
   return L_mem;
@@ -1128,6 +1137,168 @@ double compute_memory_latency(const problem_t& problem,
 /* ---------------------------------------------------------------------------------------- */
 /* Tile-related functions                                                                   */
 /* ---------------------------------------------------------------------------------------- */
+// Determine the epilogue latency of a single tile
+double compute_epilogue_latency(const problem_t& problem,
+                                const hardware_t& hardware,
+                                const config_t& config,
+                                const context_t& context) {
+  bool debug = runtime_options::get().debug_enabled;
+
+  // In epilogue:
+  // 1. ACC -> VGPR
+  // 2. Alpha/beta scaling
+  // 3. Bias operations
+  // 4. Activation functions
+  // 5. Accumulator conversions
+  // 6. Global memory stores
+
+  // Items 2, 3, 4 are conditionally executed based on the problem.
+  // For instance, if Beta=0, we skip a bunch of operations.
+  // We skip bias and activation functions if they are not present.
+  // Herein, we consider the simplest case for now: Alpha=1, Beta=0, and no bias/activation functions.
+  // Skipping items 2, 3, 4, and 5 for now.
+
+  // Extract parameters
+  const size_t M = problem.size.m;
+  const size_t N = problem.size.n;
+
+  const size_t MT_M = config.mt.m;
+  const size_t MT_N = config.mt.n;
+  const size_t d_bytes = data_type_to_bytes(problem.d_dtype);
+
+  const reduction_t reduction_strategy = context.reduction_strategy;
+  const size_t num_active_cus = context.active_cus;
+  const size_t splitting_factor = context.splitting_factor;
+  const int grid_m = context.grid_m;
+  const int grid_n = context.grid_n;
+  const double read_bw  = std::max(hardware.mem3_perf_ratio * context.mem_bw_limited, 1e-12);
+  const double write_bw = std::max(hardware.mem3_perf_ratio * context.write_mem_bw_limited, 1e-12);
+
+  // Early return if there is no output dtype
+  if (d_bytes == 0) return 0.0;
+
+  // Constants
+  constexpr double cycles_per_acc_read = 8.0;
+  constexpr double acc_read_parallelism = 0.9;
+  constexpr double cycles_per_bounds_check = 6.0;
+  constexpr double scalar_store_penalty = 2.;
+  constexpr size_t threads_per_wave = 64;
+  constexpr size_t bytes_per_vectorized_store = 16; // buffer_store_dwordx4 = 16 bytes
+  constexpr size_t cache_line_bytes = 128;
+  constexpr double cycles_per_sync = 100.0;
+  constexpr double k_split_reduction_overhead = 5000.0;
+
+  // Common setup
+  const size_t total_mfmas = math::safe_ceil_div(MT_M, config.mi.m) * math::safe_ceil_div(MT_N, config.mi.n);
+  const size_t elements_per_vectorized_store = bytes_per_vectorized_store / d_bytes;
+  const size_t elements_per_cache_line = math::safe_ceil_div(cache_line_bytes, d_bytes);
+  const double alignment_penalty = (M % elements_per_cache_line != 0) ? 1.3 : 1.0;
+
+  // Number of CUs writing output simultaneously.
+  // For parallel reduction, all active CUs write (reduction is a separate kernel).
+  // For in-kernel reduction (spinlock/tree/atomic), only num_active_cus / splitting_factor write.
+  const bool is_parallel_reduction = (config.reduction_strategy == reduction_t::parallel);
+  const size_t num_writers = is_parallel_reduction ? num_active_cus : num_active_cus / splitting_factor;
+
+  // Check if we have edge tiles
+  bool has_interior = (M >= MT_M && N >= MT_N);
+  bool has_m_edge = (M % MT_M != 0);
+  bool has_n_edge = (N % MT_N != 0);
+  size_t m_remainder = has_m_edge ? (M % MT_M) : MT_M;
+  size_t n_remainder = has_n_edge ? (N % MT_N) : MT_N;
+
+  // Per-tile compute overhead (ACC transfer, bounds checking)
+  auto compute_per_tile_overhead = [&](size_t tile_m, size_t tile_n, bool is_scalar_path) -> double {
+    size_t acc_reads = is_scalar_path ? 2 * total_mfmas : total_mfmas;
+    double L_acc_transfer = acc_reads * cycles_per_acc_read * acc_read_parallelism;
+
+    double L_edge_check = 0.0;
+    size_t total_elements = tile_m * tile_n;
+    if (is_scalar_path) {
+      double store_instr = math::safe_ceil_div(total_elements, threads_per_wave);
+      L_edge_check = store_instr * cycles_per_bounds_check;
+    } else if (tile_m != MT_M || tile_n != MT_N) {
+      // Vectorized edge path
+      size_t store_instr = math::safe_ceil_div(total_elements,
+                                                threads_per_wave * elements_per_vectorized_store);
+      L_edge_check = store_instr * cycles_per_bounds_check;
+    }
+
+    return L_acc_transfer + L_edge_check;
+  };
+
+  // Per-tile compute overhead for the critical (worst-case) tile type
+  double L_per_tile = 0.0;
+  if (has_interior)
+    L_per_tile = std::max(L_per_tile, compute_per_tile_overhead(MT_M, MT_N, false));
+  if (has_n_edge)
+    L_per_tile = std::max(L_per_tile, compute_per_tile_overhead(MT_M, n_remainder, false));
+  if (has_m_edge)
+    L_per_tile = std::max(L_per_tile, compute_per_tile_overhead(m_remainder, MT_N, true));
+  if (has_m_edge && has_n_edge)
+    L_per_tile = std::max(L_per_tile, compute_per_tile_overhead(m_remainder, n_remainder, true));
+
+  // Global store bandwidth: ALL CUs writing simultaneously through shared bandwidth
+  const size_t full_m_tiles = M / MT_M;
+  const size_t full_n_tiles = N / MT_N;
+
+  // Interior tiles: full_m × full_n, each writing MT_M × MT_N × d_bytes
+  double total_store_bytes = static_cast<double>(full_m_tiles) * full_n_tiles *
+                             MT_M * MT_N * d_bytes;
+
+  // N-edge column: full_m tiles, each writing MT_M × n_remainder (vectorized path)
+  if (has_n_edge)
+    total_store_bytes += static_cast<double>(full_m_tiles) * MT_M * n_remainder * d_bytes;
+
+  // M-edge row: full_n tiles, each writing m_remainder × MT_N (scalar path with penalty)
+  if (has_m_edge)
+    total_store_bytes += static_cast<double>(full_n_tiles) * m_remainder * MT_N * d_bytes * scalar_store_penalty;
+
+  // Corner tile: 1 tile writing m_remainder × n_remainder (scalar path)
+  if (has_m_edge && has_n_edge)
+    total_store_bytes += m_remainder * n_remainder * d_bytes * scalar_store_penalty;
+
+  double L_global_store = (total_store_bytes * alignment_penalty) / write_bw;
+
+  // K-split reduction
+  double L_reduce = 0.0;
+  if (splitting_factor > 1 && config.reduction_strategy != reduction_t::parallel) {
+    size_t n_partials = splitting_factor - 1;
+
+    double partial_read_bytes =
+        static_cast<double>(grid_m) * grid_n * n_partials * MT_M * MT_N * d_bytes;
+    double partial_write_bytes =
+        static_cast<double>(grid_m) * grid_n * MT_M * MT_N * d_bytes;
+    double partial_readwrite_bytes = partial_read_bytes + partial_write_bytes;
+
+    double partial_adds =
+        (static_cast<double>(config.mt.mn()) * static_cast<double>(splitting_factor)) / threads_per_wave;
+
+    L_reduce = partial_readwrite_bytes / write_bw + partial_adds + k_split_reduction_overhead;
+  }
+
+  // Combine: per-tile overhead + global store + global reduction
+  double L_epilogue = L_per_tile + L_global_store + L_reduce;
+
+  if(debug)
+  {
+    OLOG_DEBUG("L_per_tile_overhead: " << L_per_tile);
+    OLOG_DEBUG("L_global_store: " << L_global_store);
+    OLOG_DEBUG("L_reduce: " << L_reduce);
+    OLOG_DEBUG("L_epilogue (before occupancy): " << L_epilogue);
+  }
+
+  // OCCUPANCY ADJUSTMENT: Higher occupancy reduces overhead (empirical)
+  // size_t batch = problem.batch;
+  // size_t real_occupancy =
+  //     std::min(std::max(config.occupancy, static_cast<int>(1)),
+  //              static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor,
+  //                                                   hardware.N_CU)));
+  // L_epilogue = L_epilogue * pow(0.95, real_occupancy);
+
+  return L_epilogue;
+}
+
 // Compute the latency to compute a tile
 double compute_tile_latency(const problem_t& problem,
                             const hardware_t& hardware,
@@ -1158,9 +1329,7 @@ double compute_tile_latency(const problem_t& problem,
 
   // 1) Compute per-tile latencies
   double L_compute = compute_mt_compute_latency(problem, hardware, config);
-
-  double L_mem =
-      compute_memory_latency(problem, hardware, config, context);
+  double L_mem = compute_memory_latency(problem, hardware, config, context);
 
   // TODO Does work utilization need to be 128-byte rounded for a cache line?
   double utilization        = calculate_work_utilization(problem, config);
@@ -1187,61 +1356,13 @@ double compute_tile_latency(const problem_t& problem,
   L_prologue *= effective_tile_penalty;
   L_prologue *= occupancy_factor;
 
-  // 3-2) Epilogue: writes from all active CUs with limited bandwidth
-  double mem_bw_occ_limited    = hardware.mem3_perf_ratio * mem_bw_occ;
-  size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, datatype_to_bits(problem.a_dtype));
-
-  // Each block can be independently calculated and reordered
-  epilogue_components_t epilogue_comp = {};
-
-  // Block 1: Initial memory write latency
-  epilogue_comp.initial_memory_write = (static_cast<double>(num_active_cus / splitting_factor) *
-                                        MT_M_rounded * MT_N * d_bytes) /
-                                       mem_bw_occ_limited;
-
-  // Block 2: One compute iteration in the epilogue
-  epilogue_comp.compute_iteration = L_compute * effective_tile_penalty;
-
-  // Block 3: K-split reduction (if applicable)
-  if (splitting_factor > 1) {
-    size_t n_partials = splitting_factor - 1;
-
-    // Only the reduction CU reads from all splits.
-    double partial_read_bytes =
-        grid_m * grid_n * n_partials * MT_M_rounded * MT_N * static_cast<double>(d_bytes);
-
-    // All CUs write (once for each partial, and once by the reduction CU for the output.)
-    double partial_write_bytes =
-        grid_m * grid_n * MT_M_rounded * MT_N * static_cast<double>(d_bytes);
-
-    double partial_readwrite_bytes = partial_read_bytes + partial_write_bytes;
-
-    // 64 Threads active in a SIMD. Exposed to at least latency of reducing splitting_factor
-    // tiles.
-    double partial_adds =
-        (static_cast<double>(config.mt.mn()) * static_cast<double>(splitting_factor)) / (64);
-
-    double L_reduce                      = partial_readwrite_bytes / (mem_bw_occ_limited);
-    epilogue_comp.k_split_reduction      = L_reduce + partial_adds;
-    epilogue_comp.k_split_overhead_const = heuristic.k_split_reduction_overhead;
-    if(debug)
-    {
-        OLOG_DEBUG("partial_read_bytes: " << partial_read_bytes);
-        OLOG_DEBUG("partial_write_bytes: " << partial_write_bytes);
-        OLOG_DEBUG("partial_readwrite_bytes: " << partial_readwrite_bytes);
-        OLOG_DEBUG("partial_adds: " << partial_adds);
-        OLOG_DEBUG("L_reduce: " << L_reduce);
-    }
-  }
+  // 3-2) Epilogue
+  double L_epilogue = compute_epilogue_latency(problem, hardware, config, context);
+  L_epilogue += L_compute;
 
   // Block 4: K-padding penalty (if applicable)
-  double problem_k_quant = 0.0;
-  if (K % MT_K != 0) {
-    problem_k_quant = static_cast<double>(K % MT_K) / static_cast<double>(K);
-    epilogue_comp.k_padding      = problem_k_quant * heuristic.k_padding_penalty;
-  }
-
-  double L_epilogue = compose_epilogue(epilogue_comp, heuristic, occupancy_factor);
+  double problem_k_quant = static_cast<double>(K % MT_K) / static_cast<double>(K);
+  L_epilogue += problem_k_quant * heuristic.k_padding_penalty;
 
   // 4) Single-tile latency (apply penalty after finding the bottleneck)
   // tf32 emu has some more overhead
@@ -1295,7 +1416,7 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("L_epilogue: " << L_epilogue);
     OLOG_DEBUG("L_tile_total: " << L_tile_total);
   }
-  
+
   return L_tile_total;
 }
 

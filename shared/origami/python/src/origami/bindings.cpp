@@ -192,6 +192,7 @@ NB_MODULE(origami, m) {
       .def_rw("num_timesteps", &origami::context_t::num_timesteps)
       .def_rw("active_cus", &origami::context_t::active_cus)
       .def_rw("mem_bw_limited", &origami::context_t::mem_bw_limited)
+      .def_rw("write_mem_bw_limited", &origami::context_t::write_mem_bw_limited)
       .def_rw("tile_elements", &origami::context_t::tile_elements)
       .def_rw("output_tile_bytes", &origami::context_t::output_tile_bytes)
       .def_rw("wgm", &origami::context_t::wgm);

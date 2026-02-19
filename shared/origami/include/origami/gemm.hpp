@@ -30,8 +30,9 @@ struct context_t {
   size_t num_timesteps           = 1;
 
   /// Hardware-derived values.
-  size_t active_cus     = 0;
-  double mem_bw_limited = 0.0;
+  size_t active_cus          = 0;
+  double mem_bw_limited      = 0.0;
+  double write_mem_bw_limited = 0.0;
 
   /// Tile-derived values.
   size_t tile_elements     = 0;
@@ -39,6 +40,12 @@ struct context_t {
 
   /// Workgroup mapping parameters.
   workgroup_mapping_t wgm{0, 8, 1};
+
+  /// Cache tile dimensions.
+  size_t mall_tile_m = 0;
+  size_t mall_tile_n = 0;
+  size_t l2_tile_m   = 0;
+  size_t l2_tile_n   = 0;
 
   /// Default constructor.
   context_t() = default;
