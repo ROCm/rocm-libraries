@@ -17,7 +17,6 @@ import re
 
 # Configuration
 CXX_COMPILER = "/opt/rocm/bin/hipcc"
-GPU_TARGET = "gfx950"
 CXX_STANDARD = "20"
 
 def get_include_dirs(project_root: Path) -> list[str]:
@@ -31,7 +30,7 @@ def get_include_dirs(project_root: Path) -> list[str]:
         str(project_root / "experimental" / "grouped_convolution_tile_instances" / "instances"),
     ]
 
-def compile_single_file(cpp_file: Path, project_root: Path, verbose: bool = False) -> tuple[bool, str]:
+def compile_single_file(cpp_file: Path, project_root: Path, gpu_target: str, verbose: bool) -> tuple[bool, str]:
     """
     Attempt to compile a single .cpp file.
     Returns (success, error_message).
@@ -47,7 +46,7 @@ def compile_single_file(cpp_file: Path, project_root: Path, verbose: bool = Fals
             CXX_COMPILER,
             "-c",  # Compile only, don't link
             f"-std=c++{CXX_STANDARD}",
-            f"--offload-arch={GPU_TARGET}",
+            f"--offload-arch={gpu_target}",
             "-D__HIP_PLATFORM_AMD__",
             "-D CK_EXPERIMENTAL_BUILDER=ON",
             "-O3",
@@ -56,8 +55,9 @@ def compile_single_file(cpp_file: Path, project_root: Path, verbose: bool = Fals
             "-o", str(output_file)
         ]
         
-        if verbose:
-            print(f"  Command: {' '.join(cmd)}")
+        # if verbose:
+        #     print()
+        #     print(f"  Command: {' '.join(cmd)}")
         
         try:
             result = subprocess.run(
@@ -135,6 +135,7 @@ def parse_args():
         default=1,
         help="Number of parallel compilation jobs (default: 1)",
     )
+    parser.add_argument("--gpu-target", type=str, default="gfx950", help="GPU target architecture (default: gfx950)")
     
     args = parser.parse_args()
 
@@ -157,7 +158,7 @@ def main():
     print(f"Project root: {project_root}")
     print(f"Instances directory: {instances_dir}")
     print(f"Compiler: {CXX_COMPILER}")
-    print(f"GPU Target: {GPU_TARGET}")
+    print(f"GPU Target: {args.gpu_target}")
     print(f"Direction: {args.direction}")
     if args.instance is not None:
         print(f"Checking only instance index: {args.instance}")
@@ -206,7 +207,7 @@ def main():
     
     checked = 0
     for subdir_name, cpp_files in sorted(files_by_subdir.items()):
-        print(f"\nChecking {subdir_name}...")
+        print(f"\nChecking {subdir_name}...", flush=True)
         
         files_to_check = cpp_files
         if args.max_files:
@@ -217,7 +218,7 @@ def main():
             with ThreadPoolExecutor(max_workers=args.parallel_jobs) as executor:
                 # Submit all compilation jobs
                 futures = {
-                    executor.submit(compile_single_file, cpp_file, project_root, args.verbose): cpp_file
+                    executor.submit(compile_single_file, cpp_file, project_root, args.gpu_target, args.verbose): cpp_file
                     for cpp_file in files_to_check
                 }
                 
@@ -229,11 +230,11 @@ def main():
                     success, error = future.result()
                     
                     if success:
-                        print(f"  [{checked}/{total_files}] {filename}... OK")
+                        print(f"  [{checked}/{total_files}] {filename}... OK", flush=True)
                         all_successes[subdir_name].append(filename)
                     else:
                         key_error = extract_key_error(error)
-                        print(f"  [{checked}/{total_files}] {filename}... FAILED")
+                        print(f"  [{checked}/{total_files}] {filename}... FAILED", flush=True)
                         if args.verbose:
                             print(f"    Error: {key_error}")
                         all_failures[subdir_name].append((filename, key_error))
@@ -250,7 +251,7 @@ def main():
                 else:
                     print(f"  [{checked}/{total_files}] {filename}...", end=" ", flush=True)
                 
-                success, error = compile_single_file(cpp_file, project_root, args.verbose)
+                success, error = compile_single_file(cpp_file, project_root, args.gpu_target, args.verbose)
                 
                 if success:
                     print("OK")
