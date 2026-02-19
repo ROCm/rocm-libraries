@@ -345,6 +345,12 @@ bool rocsparse_parse_data(int& argc, char** argv, const std::string& default_fil
                              "json file."
                           << std::endl;
                 std::cout << "" << std::endl;
+                std::cout << "Skipped test output options:" << std::endl;
+                std::cout << "--show-skipped    Force showing skipped test output (overrides "
+                             "default --yaml behavior)"
+                          << std::endl;
+                std::cout << "--hide-skipped    Force hiding skipped test output" << std::endl;
+                std::cout << "" << std::endl;
                 std::cout << "" << std::endl;
                 std::cout << "Specific environment variables:" << std::endl;
                 for(const auto v : rocsparse_clients_envariables::s_var_bool_all)
