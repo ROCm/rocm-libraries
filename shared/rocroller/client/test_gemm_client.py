@@ -275,7 +275,7 @@ types:
   scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
 tailLoops: true
 streamK: None
 loadScale_A: BufferToVGPR
@@ -339,7 +339,7 @@ types:
   scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -401,7 +401,7 @@ types:
   scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false

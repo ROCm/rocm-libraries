@@ -153,7 +153,18 @@ namespace rocRoller
 
                         auto scaleInputA = m_tagLoadScaleA;
 
-                        if(solutionParams.types.scaleSkipPermlane)
+                        if(solutionParams.types.scaleSkipPermlane
+                           == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                        {
+                            AssertFatal(
+                                not solutionParams.types.scalePretileA.empty()
+                                    && not solutionParams.types.scalePretileB.empty(),
+                                "PreSwizzleScaleGFX950 requires pretile scale (scalePretileA and "
+                                "scalePretileB non-empty).");
+                        }
+
+                        if(solutionParams.types.scaleSkipPermlane
+                           != rocRoller::ScaleSkipPermlaneMode::None)
                         {
                             AssertFatal(solutionParams.types.scaleShuffleTileA.size() == 3,
                                         ShowValue(solutionParams.types.scaleShuffleTileA));
@@ -210,7 +221,8 @@ namespace rocRoller
 
                         auto scaleInputB = m_tagLoadScaleB;
 
-                        if(solutionParams.types.scaleSkipPermlane)
+                        if(solutionParams.types.scaleSkipPermlane
+                           != rocRoller::ScaleSkipPermlaneMode::None)
                         {
                             AssertFatal(solutionParams.types.scaleShuffleTileB.size() == 3);
 

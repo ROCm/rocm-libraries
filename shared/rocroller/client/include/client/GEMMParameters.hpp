@@ -33,6 +33,7 @@
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>
 #include <rocRoller/Parameters/Solution/StoreOption.hpp>
 #include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -98,7 +99,7 @@ namespace rocRoller
 
                 int scaleBlockSize = -1;
 
-                bool scaleSkipPermlane = false;
+                ScaleSkipPermlaneMode scaleSkipPermlane = ScaleSkipPermlaneMode::None;
 
                 std::vector<size_t> scalePretileA;
                 std::vector<size_t> scalePretileB;

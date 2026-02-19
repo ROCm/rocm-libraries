@@ -454,7 +454,7 @@ namespace rocRoller
             auto scaleModeB = getScaleMode(info.loadBScale);
 
             {
-                auto expectedSkipValue = false;
+                bool expectedSkip = false;
 
                 auto contraction = graph.control.get<TensorContraction>(tag).value();
 
@@ -469,12 +469,14 @@ namespace rocRoller
                         ShowValue(scaleModeB),
                         ShowValue(contraction.scalePreShuffledTileB));
 
-                    expectedSkipValue = true;
+                    expectedSkip = true;
                 }
 
-                AssertFatal(context->kernelOptions()->scaleSkipPermlane == expectedSkipValue,
+                bool actualSkip = context->kernelOptions()->scaleSkipPermlane
+                                 != ScaleSkipPermlaneMode::None;
+                AssertFatal(expectedSkip == actualSkip,
                             ShowValue(context->kernelOptions()->scaleSkipPermlane),
-                            ShowValue(expectedSkipValue));
+                            ShowValue(expectedSkip));
             }
 
             auto accumulationCoordSize = getAccumulationLoopSize(graph, a, info.userA);

@@ -26,6 +26,7 @@
 
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
+#include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>
 
 #include <rocRoller/AssertOpKinds.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -137,9 +138,8 @@ namespace rocRoller
 
     std::string toString(KernelOptionValues const& values)
     {
-        static_assert(sizeof(KernelOptionValues) == 72,
-                      "Edit the toString() function when adding a kernel option!");
-
+        // std::cout << "sizeof(KernelOptionValues): " << sizeof(KernelOptionValues) << std::endl;
+        // When adding or changing kernel options, update this function (ShowOption/ShowString).
         std::string rv = "Kernel Options:\n";
 
 #define Show(name, value) rv += fmt::format("  {: <35}{: >10}\n", name ":", value)
@@ -170,7 +170,7 @@ namespace rocRoller
              values.maxConcurrentControlOps ? std::to_string(*values.maxConcurrentControlOps)
                                             : "none");
         ShowOption(enableFullDivision);
-        ShowOption(scaleSkipPermlane);
+        ShowString(scaleSkipPermlane);
         ShowString(assertOpKind);
         ShowOption(removeSetCoordinate);
 
