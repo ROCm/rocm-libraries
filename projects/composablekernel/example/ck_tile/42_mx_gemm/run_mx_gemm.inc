@@ -1,6 +1,19 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+// Calculate relative and absolute error thresholds for MX GEMM
+template <typename ADataType, typename BDataType, typename AccDataType, typename CDataType>
+auto calculate_rtol_atol(const ck_tile::index_t K, const float max_accumulated_value)
+{
+    using ComputeType =
+        std::conditional_t<sizeof(ADataType) < sizeof(BDataType), ADataType, BDataType>;
+    // Calculate thresholds
+    const auto rtol = ck_tile::get_relative_threshold<ComputeType, CDataType, AccDataType>(K);
+    const auto atol = ck_tile::get_absolute_threshold<ComputeType, CDataType, AccDataType>(
+        max_accumulated_value, K);
+    return ck_tile::make_tuple(rtol, atol);
+}
+
 // Use e8m0_t directly without packing - simpler and cleaner approach
 template <typename ADataType,
           typename BDataType,
@@ -148,8 +161,12 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
         ck_tile::reference_mx_gemm<ADataType, BDataType, ScaleType, AccDataType, CDataType>(
             a_host, b_host, c_m_n_host_ref, scale_a_host, scale_b_host);
 
-        double rtol = 0.01;
-        double atol = 0.01;
+        const float max_accumulated_value =
+            *std::max_element(c_m_n_host_ref.mData.begin(), c_m_n_host_ref.mData.end());
+        const auto rtol_atol = calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
+            K, max_accumulated_value);
+        const double rtol = rtol_atol.at(ck_tile::number<0>{});
+        const double atol = rtol_atol.at(ck_tile::number<1>{});
         pass = ck_tile::check_err(c_host, c_m_n_host_ref, "Error: Incorrect results!", rtol, atol);
 
         std::cout << "Relative error threshold: " << rtol << " Absolute error threshold: " << atol
