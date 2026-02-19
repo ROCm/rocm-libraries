@@ -374,7 +374,7 @@ bool batchnormFwdFusionCheckTensorsLogErrors(
 } // namespace
 
 bool MiopenBatchnormPlanBuilder::isApplicable(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     auto anyNodeIsNotF32Compute = [&]() {
@@ -598,19 +598,19 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 }
 
 size_t MiopenBatchnormPlanBuilder::getMaxWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const MiopenExecutionSettings& executionSettings) const
+    [[maybe_unused]] const HipdnnMiopenSettings& executionSettings) const
 {
-    //batchnorm plan builder does not require workspace size
+    // batchnorm plan builder does not require workspace size
     return 0u;
 }
 
 void MiopenBatchnormPlanBuilder::initializeExecutionSettings(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    [[maybe_unused]] MiopenExecutionSettings& executionSettings) const
+    [[maybe_unused]] HipdnnMiopenSettings& executionSettings) const
 {
 }
 
@@ -618,10 +618,10 @@ namespace
 {
 
 void buildPlanInferenceSingleNode(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
-    HipdnnEnginePluginExecutionContext& executionContext)
+    HipdnnMiopenContext& executionContext)
 {
     const auto& attr
         = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
@@ -633,10 +633,10 @@ void buildPlanInferenceSingleNode(
 }
 
 void buildPlanInferenceWithVarianceSingleNode(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
-    HipdnnEnginePluginExecutionContext& executionContext)
+    HipdnnMiopenContext& executionContext)
 {
     const auto& attr = nodeWrapper.attributesAs<
         hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
@@ -648,10 +648,10 @@ void buildPlanInferenceWithVarianceSingleNode(
 }
 
 void buildPlanFwdTrainingSingleNode(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
-    HipdnnEnginePluginExecutionContext& executionContext)
+    HipdnnMiopenContext& executionContext)
 {
     const auto& attr
         = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
@@ -662,10 +662,10 @@ void buildPlanFwdTrainingSingleNode(
     executionContext.setPlan(std::move(plan));
 }
 
-void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnMiopenHandle& handle,
                             const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                             const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
-                            HipdnnEnginePluginExecutionContext& executionContext)
+                            HipdnnMiopenContext& executionContext)
 {
     const auto& attr
         = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes>();
@@ -676,9 +676,9 @@ void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& han
     executionContext.setPlan(std::move(plan));
 }
 
-void buildPlanFusedBackwardsActivation([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+void buildPlanFusedBackwardsActivation([[maybe_unused]] const HipdnnMiopenHandle& handle,
                                        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                                       HipdnnEnginePluginExecutionContext& executionContext)
+                                       HipdnnMiopenContext& executionContext)
 {
     const auto [bnInfAttr, actAttr, bnBwdAttr] = getBatchnormBackwardFusionNodeAttrs(opGraph);
     batchnormBwdFusionCheckTensors(bnInfAttr, actAttr, bnBwdAttr, opGraph.getTensorMap());
@@ -690,9 +690,9 @@ void buildPlanFusedBackwardsActivation([[maybe_unused]] const HipdnnEnginePlugin
 }
 
 void buildPlanFusedFwdInferenceActivation(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    HipdnnEnginePluginExecutionContext& executionContext)
+    HipdnnMiopenContext& executionContext)
 {
     const auto& node0 = opGraph.getNodeWrapper(0);
     const auto& node1 = opGraph.getNodeWrapper(1);
@@ -709,9 +709,9 @@ void buildPlanFusedFwdInferenceActivation(
 }
 
 void buildPlanFusedFwdInferenceWithVarianceActivation(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    HipdnnEnginePluginExecutionContext& executionContext)
+    HipdnnMiopenContext& executionContext)
 {
     const auto& node0 = opGraph.getNodeWrapper(0);
     const auto& node1 = opGraph.getNodeWrapper(1);
@@ -731,9 +731,10 @@ void buildPlanFusedFwdInferenceWithVarianceActivation(
 } // namespace
 
 void MiopenBatchnormPlanBuilder::buildPlan(
-    const HipdnnEnginePluginHandle& handle,
+    const HipdnnMiopenHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    HipdnnEnginePluginExecutionContext& executionContext) const
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    HipdnnMiopenContext& executionContext) const
 {
     if(opGraph.nodeCount() == 2)
     {
@@ -794,7 +795,7 @@ void MiopenBatchnormPlanBuilder::buildPlan(
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenBatchnormPlanBuilder::getCustomKnobs(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return {};
