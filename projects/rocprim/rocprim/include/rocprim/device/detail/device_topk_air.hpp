@@ -950,7 +950,11 @@ struct device_topk_air_impl
 
         ROCPRIM_SHARED_MEMORY struct
         {
-            typename block_scan_t::storage_type scan;
+            union
+            {
+                bool                                is_last_block;
+                typename block_scan_t::storage_type scan;
+            } union_data;
             histogram_t<histogram_size>         block_local_histogram;
         } storage;
 
@@ -981,7 +985,10 @@ struct device_topk_air_impl
         const auto thread_id     = detail::block_thread_id<0>();
         const auto block_id      = detail::block_id<0>();
         const auto global_offset = items_per_thread * ((block_id * block_size) + thread_id);
-
+#ifndef __OPTIMIZE__
+        // If compile with "-O0", we use the shared memory as temporary workaround
+        storage.union_data.is_last_block = false;
+#endif
         init_histogram(storage.block_local_histogram, thread_id);
         // Sync to make sure all write operations are done
         ::rocprim::syncthreads();
@@ -1004,20 +1011,36 @@ struct device_topk_air_impl
         // Make sure this block has completed writing data into global histogram
         ::rocprim::syncthreads();
 
-        // Make sure all write operation to the global memory is finished
-        bool is_last_block = false;
-        if(thread_id == 0)
+        // Temporary fix for `__syncthreads_or`, which doesn't work when compiling with "-O0"
+        // So we use shared memory for broadcasting
+        auto syncdevice_and_is_last_block = [&]()
         {
-            const auto local_num_finished_blocks
-                = ::atomicAdd(&p_global_storage->num_finished_blocks, 1);
-            is_last_block = local_num_finished_blocks == (gridDim.x - 1);
-        }
+#ifdef __OPTIMIZE__
+            bool is_last_block = false;
+            if(thread_id == 0)
+            {
+                const auto local_num_finished_blocks
+                    = ::atomicAdd(&p_global_storage->num_finished_blocks, 1);
+                is_last_block = local_num_finished_blocks == (gridDim.x - 1);
+            }
+            // By using __syncthreads_or, all threads will communicate with each other
+            // and do "OR" operation for all values.
+            return __syncthreads_or(is_last_block);
+#else
+            if(thread_id == 0)
+            {
+                const auto local_num_finished_blocks
+                    = ::atomicAdd(&p_global_storage->num_finished_blocks, 1);
+                storage.union_data.is_last_block = local_num_finished_blocks == (gridDim.x - 1);
+            }
+            ::rocprim::syncthreads();
+            return storage.union_data.is_last_block;
+#endif
+        };
 
+        // Make sure all write operation to the global memory is finished
         // Filter
-
-        // By using __syncthreads_or, all threads will communicate with each other
-        // and do "OR" operation for all values.
-        if(__syncthreads_or(is_last_block))
+        if(syncdevice_and_is_last_block())
         {
             // Setup the buffer size of next iteration if needed
             if constexpr(Adaptive && Iteration >= 1)
@@ -1040,7 +1063,7 @@ struct device_topk_air_impl
             // Block scan
             block_scan_t{}.inclusive_scan(thread_bins,
                                           thread_bins,
-                                          storage.scan,
+                                          storage.union_data.scan,
                                           ::rocprim::plus<SizeOut>{});
             // Store data into shared memory
             block_store_direct_blocked(thread_id,
