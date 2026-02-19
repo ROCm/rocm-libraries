@@ -89,10 +89,23 @@ def runDockerBuild(String gpuFamily) {
     }
 }
 
-//launch develop branch nightly jobs
+def runDevDockerBuild() {
+    node(rocmnode("gfx90a")) {
+        try {
+            withWorkingDir {
+                utils.buildDevDockerImage()
+            }
+        } finally {
+            cleanWs()
+        }
+    }
+}
+
+//launch develop branch nightly/weekly jobs
 CRON_SETTINGS = BRANCH_NAME == "develop" ? '''
 0 0 * * * % RUN_NIGHTLY_TESTS=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=false;TARGET_GFX90A=true;TARGET_GFX942=true
 0 1 * * * % NONCRITICAL_HW_NIGHTLY=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=true;TARGET_NAVI35=true;TARGET_GFX90A=false;TARGET_GFX942=false
+0 0 * * 6 % BUILD_DEV_DOCKER=true;BUILD_DOCKER=false;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=true;TARGET_NAVI35=true;TARGET_GFX90A=false;TARGET_GFX942=false
 ''' : ""
 
 
@@ -111,6 +124,10 @@ pipeline {
         booleanParam(
             name: "BUILD_DOCKER",
             defaultValue: true,
+            description: "")
+        booleanParam(
+            name: "BUILD_DEV_DOCKER",
+            defaultValue: false,
             description: "")
         booleanParam(
             name: "BUILD_SMOKE_FP32",
@@ -233,6 +250,16 @@ pipeline {
         Build_timeout_minutes = 420
     }
     stages{
+        stage('Build DEV Docker') {
+            when {
+                expression { params.BUILD_DEV_DOCKER && params.TARGET_NOGPU && params.DATATYPE_NA }
+            }
+            steps {
+                script {
+                    runDevDockerBuild()
+                }
+            }
+        }
         stage('Build Docker'){
             when {
                 expression { params.BUILD_DOCKER && params.TARGET_NOGPU && params.DATATYPE_NA }
