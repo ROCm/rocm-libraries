@@ -1060,6 +1060,7 @@ if(NOT WIN32 AND NOT APPLE)
                     miopen::*;
                 };
             local:
+                *boost*;
                 extern \"C++\" {
                     std::*;
                 };
