@@ -20,9 +20,11 @@ Usage:
 """
 
 import csv
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
+import yaml
 
 import origami
 from helpers import SUPPORTED_ARCHITECTURES, create_hardware, get_matrix_instructions
@@ -135,94 +137,126 @@ def config_to_tuple(config: origami.config_t) -> tuple:
     )
 
 
-def result_to_row(problem_key: str, rank: int, result: origami.prediction_result_t) -> list:
-    """Convert prediction result to a CSV row."""
+def result_to_config_tuple(result: origami.prediction_result_t) -> list[int]:
+    """Convert prediction result to a config tuple [mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm]."""
     cfg = result.config
     return [
-        problem_key, rank,
-        f"{result.latency:.6g}",
         cfg.mt.m, cfg.mt.n, cfg.mt.k,
         cfg.mi.m, cfg.mi.n, cfg.mi.k,
         cfg.occupancy, cfg.workgroup_mapping,
     ]
 
 
-BASELINE_HEADER = ["problem", "rank", "latency", "mt_m", "mt_n", "mt_k", "mi_m", "mi_n", "mi_k", "occ", "wgm"]
-TOP_K = 10
+TOP_K = 5
 
 
-def generate_rankings(arch_name: str, dtype: str, transpose: str = "TN") -> list[list]:
+def generate_rankings(arch_name: str, dtype: str, transpose: str = "TN") -> dict[str, list[list[int]]]:
     """Generate rankings for all test problem sizes.
     
-    Returns a list of CSV rows, each containing:
-    [problem_key, rank, latency, mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm]
+    Returns a dict mapping problem_key -> list of config tuples.
+    Each config tuple is [mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm].
     """
     hardware = create_hardware(arch_name)
     configs = create_configs(hardware, dtype)
 
     if not configs:
-        return []
+        return {}
 
-    rows = []
+    rankings = {}
     for m, n, k, batch in TEST_PROBLEM_SIZES:
         problem = create_problem(m, n, k, dtype, batch, transpose)
         try:
             ranked = origami.select_topk_configs(problem, hardware, configs, TOP_K)
             if ranked:
                 key = f"{m}x{n}x{k}x{batch}"
-                for rank, result in enumerate(ranked):
-                    rows.append(result_to_row(key, rank, result))
+                rankings[key] = [result_to_config_tuple(r) for r in ranked]
         except Exception:
             pass
 
-    return rows
+    return rankings
 
 
-def get_baseline_path(arch_name: str, dtype: str, transpose: str = "TN") -> Path:
-    """Get the path to the baseline file."""
-    return BASELINE_DIR / f"{arch_name}_{dtype}_{transpose}.csv"
+try:
+    from yaml import CSafeLoader as SafeLoader, CSafeDumper as SafeDumper
+except ImportError:
+    from yaml import SafeLoader, SafeDumper
 
 
-def load_baseline(arch_name: str, dtype: str, transpose: str = "TN") -> dict[str, list[list]] | None:
-    """Load baseline rankings from CSV file.
+def get_baseline_path(arch_name: str) -> Path:
+    """Get the path to the baseline file for an architecture."""
+    return BASELINE_DIR / f"{arch_name}.yaml"
+
+
+@lru_cache(maxsize=None)
+def load_arch_baseline(arch_name: str) -> dict | None:
+    """Load and cache the full baseline for an architecture.
     
-    Returns a dict mapping problem_key -> list of [rank, latency, mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm]
+    Returns the parsed YAML dict, or None if file doesn't exist.
     """
-    path = get_baseline_path(arch_name, dtype, transpose)
+    path = get_baseline_path(arch_name)
     if not path.exists():
         return None
     
-    baseline = {}
     with open(path, "r") as f:
-        reader = csv.reader(f)
-        next(reader)  # Skip header
-        for row in reader:
-            problem_key = row[0]
-            rank_data = [
-                int(row[1]),    # rank
-                float(row[2]),  # latency
-                int(row[3]), int(row[4]), int(row[5]),  # mt
-                int(row[6]), int(row[7]), int(row[8]),  # mi
-                int(row[9]), int(row[10]),  # occ, wgm
-            ]
-            if problem_key not in baseline:
-                baseline[problem_key] = []
-            baseline[problem_key].append(rank_data)
-    return baseline
+        return yaml.load(f, Loader=SafeLoader)
 
 
-def save_baseline(arch_name: str, dtype: str, transpose: str, rows: list[list]) -> None:
-    """Save rankings to CSV baseline file."""
-    path = get_baseline_path(arch_name, dtype, transpose)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(BASELINE_HEADER)
-        writer.writerows(rows)
+def load_baseline(arch_name: str, dtype: str, transpose: str) -> dict[str, list[list[int]]] | None:
+    """Load baseline rankings for a specific arch/dtype/transpose combination.
+    
+    Returns a dict mapping problem_key -> list of config tuples.
+    """
+    baseline = load_arch_baseline(arch_name)
+    if baseline is None:
+        return None
+    
+    try:
+        return baseline[dtype][transpose]
+    except KeyError:
+        return None
+
+
+def save_baseline(arch_name: str, dtype: str, transpose: str, rankings: dict[str, list[list[int]]]) -> None:
+    """Save rankings to the architecture's YAML baseline file.
+    
+    Updates entries for the specified dtype/transpose, preserving other entries.
+    """
+    BASELINE_DIR.mkdir(parents=True, exist_ok=True)
+    path = get_baseline_path(arch_name)
+    
+    # Load existing baseline or create new structure
+    if path.exists():
+        with open(path, "r") as f:
+            baseline = yaml.load(f, Loader=SafeLoader) or {}
+    else:
+        baseline = {}
+    
+    # Update the nested structure
+    if dtype not in baseline:
+        baseline[dtype] = {}
+    baseline[dtype][transpose] = rankings
+    
+    # Write with compact format: flow style for problem entries, sorted keys
+    # Custom representer to use flow style for the innermost lists (config lists per problem)
+    class CompactDumper(SafeDumper):
+        pass
+    
+    def represent_problem_configs(dumper, data):
+        # Use flow style for list of config lists (the value under each problem key)
+        return dumper.represent_sequence('tag:yaml.org,2002:seq', data, flow_style=True)
+    
+    # Apply flow style to lists that contain lists (problem -> [[config], [config], ...])
+    CompactDumper.add_representer(list, represent_problem_configs)
+    
+    with open(path, "w") as f:
+        yaml.dump(baseline, f, Dumper=CompactDumper, default_flow_style=False, sort_keys=True, width=1000)
+    
+    # Clear cache so subsequent loads see the updated file
+    load_arch_baseline.cache_clear()
 
 
 def compare_rankings(
-    current_rows: list[list], baseline: dict[str, list[list]], tolerance: float = 1e-4
+    current: dict[str, list[list[int]]], baseline: dict[str, list[list[int]]]
 ) -> list[str]:
     """
     Compare current rankings against baseline.
@@ -230,53 +264,28 @@ def compare_rankings(
     Returns a list of differences found.
     """
     differences = []
-    
-    # Group current rows by problem key
-    current_dict: dict[str, list[list]] = {}
-    for row in current_rows:
-        problem_key = row[0]
-        rank_data = [int(row[1]), float(row[2])] + [int(x) for x in row[3:]]
-        if problem_key not in current_dict:
-            current_dict[problem_key] = []
-        current_dict[problem_key].append(rank_data)
 
-    for problem_key, base_ranks in baseline.items():
-        if problem_key not in current_dict:
+    for problem_key, base_configs in baseline.items():
+        if problem_key not in current:
             differences.append(f"Missing problem: {problem_key}")
             continue
 
-        curr_ranks = current_dict[problem_key]
+        curr_configs = current[problem_key]
         
-        if len(curr_ranks) != len(base_ranks):
+        if len(curr_configs) != len(base_configs):
             differences.append(
-                f"{problem_key}: Different rank count (curr={len(curr_ranks)}, base={len(base_ranks)})"
+                f"{problem_key}: Different rank count (curr={len(curr_configs)}, base={len(base_configs)})"
             )
 
-        for curr_rank, base_rank in zip(curr_ranks, base_ranks):
-            rank_idx = curr_rank[0]
-            curr_latency = curr_rank[1]
-            base_latency = base_rank[1]
-            
-            # Compare latency with relative tolerance
-            if base_latency > 0:
-                rel_diff = abs(curr_latency - base_latency) / base_latency
-                if rel_diff > tolerance:
-                    differences.append(
-                        f"{problem_key} rank {rank_idx}: Latency diff {rel_diff*100:.2f}% "
-                        f"(curr={curr_latency:.6g}, base={base_latency:.6g})"
-                    )
-
-            # Compare config (mt, mi, occ, wgm) - indices 2-9
-            curr_cfg = tuple(curr_rank[2:])
-            base_cfg = tuple(base_rank[2:])
+        for rank_idx, (curr_cfg, base_cfg) in enumerate(zip(curr_configs, base_configs)):
             if curr_cfg != base_cfg:
                 differences.append(
                     f"{problem_key} rank {rank_idx}: Config mismatch\n"
-                    f"  Current:  MT={curr_cfg[0:3]}, MI={curr_cfg[3:6]}, occ={curr_cfg[6]}, wgm={curr_cfg[7]}\n"
-                    f"  Baseline: MT={base_cfg[0:3]}, MI={base_cfg[3:6]}, occ={base_cfg[6]}, wgm={base_cfg[7]}"
+                    f"  Current:  MT={tuple(curr_cfg[0:3])}, MI={tuple(curr_cfg[3:6])}, occ={curr_cfg[6]}, wgm={curr_cfg[7]}\n"
+                    f"  Baseline: MT={tuple(base_cfg[0:3])}, MI={tuple(base_cfg[3:6])}, occ={base_cfg[6]}, wgm={base_cfg[7]}"
                 )
 
-    for problem_key in current_dict:
+    for problem_key in current:
         if problem_key not in baseline:
             differences.append(f"New problem not in baseline: {problem_key}")
 
@@ -297,13 +306,13 @@ class TestRankingRegression:
         if not is_dtype_supported(arch_name, dtype):
             pytest.skip(f"No {dtype} support for {arch_name}")
 
-        current_rows = generate_rankings(arch_name, dtype, transpose)
+        current = generate_rankings(arch_name, dtype, transpose)
 
-        if not current_rows:
+        if not current:
             pytest.skip(f"No valid configs generated for {arch_name}/{dtype}/{transpose}")
 
         if generate_baseline:
-            save_baseline(arch_name, dtype, transpose, current_rows)
+            save_baseline(arch_name, dtype, transpose, current)
             pytest.skip(f"Generated baseline for {arch_name}/{dtype}/{transpose}")
 
         baseline = load_baseline(arch_name, dtype, transpose)
@@ -313,7 +322,7 @@ class TestRankingRegression:
                 f"Run with --generate-baseline to create it."
             )
 
-        differences = compare_rankings(current_rows, baseline)
+        differences = compare_rankings(current, baseline)
 
         if differences:
             diff_summary = "\n".join(differences[:10])

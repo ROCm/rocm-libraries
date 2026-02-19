@@ -1,37 +1,34 @@
 # Ranking Regression Baselines
 
-This directory contains golden baseline files for the ranking regression tests.
+This directory contains golden baseline files for ranking regression tests.
 
-## Directory Structure
+## File Structure
 
 ```
 baselines/
 └── rankings/
-    ├── gfx90a_f16_TN.csv   # A=Transposed, B=Non-transposed
-    ├── gfx90a_f16_TT.csv   # A=Transposed, B=Transposed
-    ├── gfx90a_f16_NN.csv   # A=Non-transposed, B=Non-transposed
-    ├── gfx90a_f16_NT.csv   # A=Non-transposed, B=Transposed
-    ├── gfx90a_bf16_TN.csv
-    ├── gfx90a_bf16_TT.csv
-    ├── ...
-    └── gfx1201_bf16_NT.csv
+    ├── gfx90a.yaml
+    ├── gfx942.yaml
+    ├── gfx950.yaml
+    ├── gfx1100.yaml
+    └── gfx1201.yaml
 ```
 
-The filename format is `{arch}_{dtype}_{transpose}.csv` where transpose indicates
-the combination of A and B matrix transpose types (T=Transposed, N=Non-transposed).
+Each architecture has its own YAML file containing rankings for all dtype/transpose
+combinations.
 
 ## Generating Baselines
 
 Baselines should be generated from the `develop` branch to establish the expected
-ranking behavior. Run the following command:
+ranking behavior:
 
 ```bash
 # From the origami python directory
 pytest tests/test_ranking_regression.py -v --generate-baseline
 ```
 
-This will create CSV files containing the top-10 ranked configs for each
-architecture and data type combination.
+This creates/updates YAML files containing the top-5 ranked configs for each
+architecture, data type, and transpose combination.
 
 ## Updating Baselines
 
@@ -44,27 +41,32 @@ the heuristics), the baselines need to be updated:
 
 ## Baseline File Format
 
-Each baseline file is a CSV with the following columns:
+Each YAML file has a hierarchical structure:
 
-```csv
-problem,rank,latency,mt_m,mt_n,mt_k,mi_m,mi_n,mi_k,occ,wgm
+```yaml
+dtype:
+  transpose:
+    "MxNxKxBatch":
+      - [mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm]  # rank 0
+      - [mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm]  # rank 1
+      ...
 ```
 
 Where:
-- `problem`: Problem dimensions in format `MxNxKxBatch`
-- `rank`: Ranking position (0-9 for top-10)
-- `latency`: Predicted latency value
-- `mt_m`, `mt_n`, `mt_k`: Macro tile dimensions
-- `mi_m`, `mi_n`, `mi_k`: Matrix instruction dimensions
-- `occ`: Occupancy
-- `wgm`: Workgroup mapping
+- `dtype`: Data type (f16, bf16, f32)
+- `transpose`: Matrix transpose combination (TN, TT, NN, NT)
+  - T = Transposed, N = Non-transposed (first char = A, second = B)
+- Config tuple: `[mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm]`
+- Rank is implicit from list position (0-4 for top-5)
 
-Example:
+Example (gfx90a.yaml):
 
-```csv
-problem,rank,latency,mt_m,mt_n,mt_k,mi_m,mi_n,mi_k,occ,wgm
-36912x62832x4448x1,0,3.17424e+08,256,256,64,32,32,8,2,1
-36912x62832x4448x1,1,3.17424e+08,256,256,64,32,32,8,2,4
-36912x62832x4448x1,2,3.17424e+08,256,256,64,32,32,8,2,8
-...
+```yaml
+f16:
+  TN:
+    36912x62832x4448x1:
+      - [256, 256, 64, 16, 16, 16, 2, 1]
+      - [256, 256, 64, 16, 16, 16, 2, 4]
+      - [256, 256, 64, 16, 16, 16, 2, 8]
+      ...
 ```
