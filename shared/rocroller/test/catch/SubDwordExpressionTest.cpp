@@ -109,10 +109,10 @@ namespace SubDwordExpressionTest
 
             std::string expected = R"(
                 v_bfe_u32 v6, v0, 8, 8
-                v_bfe_u32 v7, v2, 8, 16
+                v_bfe_u32 v7, v3, 8, 16
                 v_add_u32 v8, v6, v7
-                v_bfe_u32 v7, v5, 16, 8
-                v_mul_lo_u32 v6, v8, v7
+                v_bfe_u32 v6, v5, 16, 8
+                v_mul_lo_u32 v7, v8, v6
             )";
 
             CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
