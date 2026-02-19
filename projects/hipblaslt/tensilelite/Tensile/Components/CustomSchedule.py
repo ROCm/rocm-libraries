@@ -726,8 +726,7 @@ class RegisterSchedule:
                     printWarning(
                         f"Layout probe failed for func '{func.__name__}' "
                         f"with layout={layout}, useLDSTr={useLDSTr}, TLDS={TLDS}\n"
-                        f"  Probe kernel: transA={transA}, transB={transB}, "
-                        f"MT0={probe['MacroTile0']}, MT1={probe['MacroTile1']}, DU={probe['DepthU']}\n"
+                        f"  Kernel: {probe['MacroTile0']}x{probe['MacroTile1']}x{probe['DepthU']} {layout}\n"
                         f"  Error: {e}"
                     )
                     continue
