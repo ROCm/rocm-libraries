@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -233,37 +233,29 @@ namespace GPUFastDivisionTest
                 commandArgs.setArgument(aTag, ArgumentType::Value, a);
                 commandArgs.setArgument(bTag, ArgumentType::Value, b);
 
-                if(dataTypeB == DataType::UInt32 && b == 1)
+                commandKernel.launchKernel(commandArgs.runtimeArguments());
+
+                R result;
+                ASSERT_THAT(hipMemcpy(&result,
+                                      d_result.get(),
+                                      CeilDivide(infoResult.elementBits, 8u),
+                                      hipMemcpyDefault),
+                            HasHipSuccess(0));
+
+                if(IsModulo)
                 {
-                    EXPECT_THROW(commandKernel.launchKernel(commandArgs.runtimeArguments()),
-                                 FatalError);
+                    EXPECT_EQ(result, a % b) << ShowValue(a) << ShowValue(dataTypeA) << ShowValue(b)
+                                             << ShowValue(dataTypeB);
                 }
                 else
                 {
-                    commandKernel.launchKernel(commandArgs.runtimeArguments());
+                    auto bLibDivide = libdivide::libdivide_s64_branchfree_gen(b);
+                    EXPECT_EQ(result, libdivide::libdivide_s64_branchfree_do(a, &bLibDivide))
+                        << ShowValue(a) << ShowValue(dataTypeA) << ShowValue(b)
+                        << ShowValue(dataTypeB);
 
-                    R result;
-                    ASSERT_THAT(hipMemcpy(&result,
-                                          d_result.get(),
-                                          CeilDivide(infoResult.elementBits, 8u),
-                                          hipMemcpyDefault),
-                                HasHipSuccess(0));
-
-                    if(IsModulo)
-                    {
-                        EXPECT_EQ(result, a % b) << ShowValue(a) << ShowValue(dataTypeA)
-                                                 << ShowValue(b) << ShowValue(dataTypeB);
-                    }
-                    else
-                    {
-                        auto bLibDivide = libdivide::libdivide_s64_branchfree_gen(b);
-                        EXPECT_EQ(result, libdivide::libdivide_s64_branchfree_do(a, &bLibDivide))
-                            << ShowValue(a) << ShowValue(dataTypeA) << ShowValue(b)
-                            << ShowValue(dataTypeB);
-
-                        // Sanity check
-                        EXPECT_EQ(a / b, libdivide::libdivide_s64_branchfree_do(a, &bLibDivide));
-                    }
+                    // Sanity check
+                    EXPECT_EQ(a / b, libdivide::libdivide_s64_branchfree_do(a, &bLibDivide));
                 }
             }
         }

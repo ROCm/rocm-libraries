@@ -29,7 +29,8 @@ inline int64_t getBatchCount(const std::vector<int64_t>& dims)
 }
 } // namespace
 
-hipblasOperation_t MatmulParams::getTrans(const hipdnn_plugin_sdk::TensorAttributesWrapper& t)
+hipblasOperation_t
+    MatmulParams::getTrans(const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& t)
 {
     const auto& strides = t.strides();
     PLUGIN_THROW_IF_FALSE(strides.size() > 1,
@@ -49,9 +50,9 @@ hipblasOperation_t MatmulParams::getTrans(const hipdnn_plugin_sdk::TensorAttribu
         HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported stride for input matrix: " + t.name());
 }
 
-hipblasComputeType_t
-    MatmulParams::getComputeDataType(const hipdnn_plugin_sdk::TensorAttributesWrapper& tA,
-                                     const hipdnn_plugin_sdk::TensorAttributesWrapper& tB)
+hipblasComputeType_t MatmulParams::getComputeDataType(
+    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
+    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB)
 {
     auto hipDataTypeA = hipblaslt_utils::tensorDataTypeToHipDataType(tA.dataType());
     auto hipDataTypeB = hipblaslt_utils::tensorDataTypeToHipDataType(tB.dataType());

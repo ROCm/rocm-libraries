@@ -4,9 +4,9 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 > [!NOTE]
 > 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements. The hipDNN team will endevor to keep the roadmap up to date but the further out the quarter, the more speculative our plans. 😅
-> 
+>
 > ✅ = Done
-> 
+>
 > ⏳ = In progress
 
 ## P0 ~ Q1 2026 (Current milestone)
@@ -95,7 +95,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### Normalization
 - **Distributed normalization support**
-  
+
 ### Core
 - Expanded performance and validation suites for hipDNN full install (using real user workloads and benchmarks to drive testing)
 - AOT graph compilation without devices present (Pre-compile graph support)

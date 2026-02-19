@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1118,7 +1118,7 @@ namespace rocRoller
             Generator<Instruction> operator()(Register::ValuePtr&              dest,
                                               AssemblyKernelArgumentPtr const& expr)
             {
-                co_yield m_context->argLoader()->getValue(expr->name, dest);
+                co_yield m_context->argLoader()->getValue(expr->getName(), dest);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr&         dest,
@@ -1198,6 +1198,7 @@ namespace rocRoller
 
             if(Log::getLogger()->should_log(LogLevel::Trace))
             {
+                co_yield Instruction::Comment("generateFromTree()");
                 co_yield Instruction::Comment(toDOT(tree));
                 co_yield Instruction::Comment(statistics(tree));
             }
@@ -1237,13 +1238,12 @@ namespace rocRoller
                 return options->maxConcurrentSubExpressions;
             };
 
-            auto comparePriorities = [&](int a, int b) {
-                auto const& nodeA = tree.at(a);
-                auto const& nodeB = tree.at(b);
-
-                return std::make_tuple(nodeA.distanceFromRoot, nodeA.deps.size(), -a)
-                       < std::make_tuple(nodeB.distanceFromRoot, nodeB.deps.size(), -b);
-            };
+            // Use Sethi-Ullman inspired priority order.
+            // Smaller order = earlier in traversal = higher priority.
+            // Used with std::priority_queue (max-heap), so returning a > b means
+            // smaller order values are popped first.
+            auto comparePriorities
+                = [&](int a, int b) { return tree.at(a).priorityOrder > tree.at(b).priorityOrder; };
 
             co_yield generateNodes<int, Register::Type>(scheduler,
                                                         nodes,

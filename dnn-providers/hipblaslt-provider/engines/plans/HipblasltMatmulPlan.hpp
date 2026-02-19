@@ -37,10 +37,11 @@ public:
     const HipblasltMatmulDesc& desc() const;
 
 private:
-    static hipblasOperation_t getTrans(const hipdnn_plugin_sdk::TensorAttributesWrapper& t);
-    static hipblasComputeType_t
-        getComputeDataType(const hipdnn_plugin_sdk::TensorAttributesWrapper& tA,
-                           const hipdnn_plugin_sdk::TensorAttributesWrapper& tB);
+    static hipblasOperation_t
+        getTrans(const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& t);
+    static hipblasComputeType_t getComputeDataType(
+        const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
+        const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB);
 
     HipblasltMatmulDesc _matmulDesc;
     HipblasltMatrixLayout _matrixLayoutA;

@@ -9,6 +9,18 @@ Documentation for rocFFT is available at
 
 * Allow plans to share hipModules if they use the same kernels.  This reduces time spent and memory used when 
   creating plans that exist concurrently.
+* Improved performance of unit-strided, complex-interleaved, forward/inverse FFTs on gfx1201, gfx90a, gfx942, and gfx950.
+  Single-precision lengths:
+  - (160,72,72)
+  - (160,80,72)
+  - (160,80,80)
+  - (72,72,72)
+  - (80,80,80)
+  - (84,84,72)
+  - (96,96,96)
+  - (108,108,80)
+  Double-precision length:
+  - (72,72,52)
 
 ### Changed
 
@@ -25,6 +37,7 @@ Documentation for rocFFT is available at
 * Fixed incorrect results on some strided real-complex FFTs on gfx90a.
 * Fixed incorrect results on some even-length real FFTs that have odd-length strides on higher dimensions.
 * Fixed callbacks on MPI transforms, when not all ranks have the same number of data bricks.
+* Fixed functional issues for multi-device, in-place real transforms.
 
 ## rocFFT 1.0.36 for ROCm 7.2.0
 

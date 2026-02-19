@@ -37,9 +37,9 @@
 
 namespace test_helpers {
 template <typename T>
-constexpr bool
-    is_floating_point_tensor = (std::is_same_v<typename T::value_type, half_float::half> ||
-                                std::is_floating_point_v<typename T::value_type>);
+constexpr bool is_floating_point_tensor =
+    (std::is_same_v<typename T::value_type, half_float::half> ||
+     std::is_floating_point_v<typename T::value_type>);
 
 template <class... Ts>
 constexpr bool any_float_tensors()

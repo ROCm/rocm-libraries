@@ -1,28 +1,5 @@
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include "gemm.hpp"
 #include "runtime_args_selection.hpp"
@@ -168,7 +145,7 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
         }
     }
 
-    if(gemm->streamK)
+    if(gemm->streamK != StreamKMode::None)
     {
         rv << "SK_";
     }
@@ -398,7 +375,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
     }
 
-    if(gemm->streamK)
+    if(gemm->streamK != StreamKMode::None)
     {
         tagSKGrid = command->allocateTag();
         command->allocateArgument(DataType::UInt32,
@@ -545,12 +522,11 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
              gemm->machineInstruction.n,
              gemm->machineInstruction.k,
              gemm->machineInstruction.b},
-            gemm->storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+            Parameters::Solution::IsLDSStore(gemm->storePath) ? MemoryType::WAVE_LDS
+                                                              : MemoryType::WAVE);
         params->setDimensionInfo(tagStoreD, macTileD);
     }
 
-    params->unrollX       = gemm->unrollX;
-    params->unrollY       = gemm->unrollY;
     params->swizzleScale  = gemm->swizzleScale;
     params->prefetchScale = gemm->prefetchScale;
     params->tailLoops     = gemm->tailLoops;
@@ -591,12 +567,9 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         params->workgroupRemapXCC = 8;
     }
 
-    if(gemm->streamK)
+    if(gemm->streamK != StreamKMode::None)
     {
-        StreamKMode streamKMode = StreamKMode::Standard;
-        if(gemm->streamKTwoTile)
-            streamKMode = StreamKMode::TwoTile;
-        params->streamK = streamKMode;
+        params->streamK = gemm->streamK;
 
         params->loopOverOutputTilesDimensions = {0, 1};
     }
@@ -671,9 +644,12 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 
 size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob)
 {
+    if (gemm->isCustomKernel())
+        return 0;
+
     CommandArguments commandArgs = gemm->command->createArguments();
 
-    if(gemm->params->streamK)
+    if(gemm->params->streamK != StreamKMode::None)
     {
         commandArgs.setArgument(
             gemm->tagSKGrid, ArgumentType::Value, chooseStreamKGridSize(gemm, prob));
@@ -683,6 +659,28 @@ size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContra
 
     // Only return scratch space for ScratchPolicy::None (uses prob.workspace)
     return gemm->commandKernel->scratchSpaceRequired(Operations::ScratchPolicy::None, runtimeArgs);
+}
+
+bool isSupportedProblem(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob)
+{
+    auto workSpaceRequired = workspaceRequired(gemm, prob);
+
+    if(workSpaceRequired > prob.workspaceSize)
+        return false;
+
+    if (gemm->isCustomKernel())
+    {
+        return (prob.m % gemm->params->workgroupTile.m == 0 &&
+                prob.n % gemm->params->workgroupTile.n == 0 &&
+                prob.k % gemm->params->workgroupTile.k == 0);
+    }
+    else
+    {
+        auto commandArgs = createCommandArguments(gemm, prob, DEFAULT_WGM);
+        auto runtimeArgs = commandArgs.runtimeArguments();
+
+        return gemm->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error);
+    }
 }
 
 CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
@@ -798,7 +796,7 @@ CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
         commandArgs.setArgument(gemm->tagWGM, ArgumentType::Value, wgm);
     }
 
-    if(gemm->params->streamK)
+    if(gemm->params->streamK != StreamKMode::None)
     {
         commandArgs.setArgument(
             gemm->tagSKGrid, ArgumentType::Value, chooseStreamKGridSize(gemm, prob));
@@ -826,7 +824,7 @@ rocblaslt_status runGemmKernel(std::shared_ptr<GemmKernel>        gemm,
     }
     auto commandArgs = createCommandArguments(gemm, prob, DEFAULT_WGM);
 
-    if(gemm->params->streamK)
+    if(gemm->params->streamK != StreamKMode::None)
     {
         auto runtimeArgs = commandArgs.runtimeArguments();
 

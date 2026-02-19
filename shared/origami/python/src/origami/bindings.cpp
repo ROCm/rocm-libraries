@@ -15,6 +15,7 @@
 #include "origami/types.hpp"
 
 using hardware_t = origami::hardware_t;
+using namespace nanobind::literals;
 
 NB_MODULE(origami, m) {
   nanobind::enum_<hardware_t::architecture_t>(m, "architecture_t")
@@ -26,6 +27,8 @@ NB_MODULE(origami, m) {
       .value("gfx1151", hardware_t::architecture_t::gfx1151)
       .export_values();
 
+
+      
   nanobind::enum_<origami::data_type_t>(m, "data_type_t")
       .value("Float", origami::data_type_t::Float)
       .value("ComplexFloat", origami::data_type_t::ComplexFloat)
@@ -95,7 +98,7 @@ NB_MODULE(origami, m) {
       .def(nanobind::init<>())
       .def_rw("mt", &origami::config_t::mt)
       .def_rw("mi", &origami::config_t::mi)
-      .def_rw("custom_mainloop_scheduling", &origami::config_t::custom_mainloop_scheduling)
+      .def_rw("hand_optimized_main_loop", &origami::config_t::hand_optimized_main_loop)
       .def_rw("occupancy", &origami::config_t::occupancy)
       .def_rw("workgroup_mapping", &origami::config_t::workgroup_mapping)
       .def_rw("cache_hints_a", &origami::config_t::cache_hints_a)
@@ -162,6 +165,16 @@ NB_MODULE(origami, m) {
         &hardware_t::get_hardware_for_device,
         "This gets a hardware object for a device.");
 
+  //Needs named arguments
+  m.def("get_hardware_for_arch",
+        &hardware_t::get_hardware_for_arch,
+        nanobind::arg("arch"),
+        nanobind::arg("N_CU"),
+        nanobind::arg("lds_capacity"),
+        nanobind::arg("L2_capacity"),
+        nanobind::arg("compute_clock_khz"),
+        "Create hardware object for a specific architecture with specified parameters.");
+
   m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
   m.def("string_to_datatype",
         &origami::string_to_datatype,
@@ -176,16 +189,9 @@ NB_MODULE(origami, m) {
   m.def("select_grid_size",
         &origami::streamk::select_grid_size,
         "Select best grid size for the given configuration");
-  m.def(
-      "select_workgroup_mapping",
-      [](const origami::problem_t& problem,
-         const origami::hardware_t& hardware,
-         const origami::config_t& config,
-         int sk_grid) {
-        const auto result = origami::select_workgroup_mapping(problem, hardware, config, sk_grid);
-        return nanobind::make_tuple(result.wgmxccchunk, result.wgmxcc, result.wgm);
-      },
-      "Select best workgroup mapping");
+  m.def("select_workgroup_mapping",
+        &origami::select_workgroup_mapping,
+        "Select best workgroup mapping");
   m.def("rank_configs", &origami::rank_configs, "Rank configurations by performance");
   m.def("select_config_mnk",
         &origami::select_config_mnk,

@@ -26,11 +26,7 @@ include: rocsparse_common.yaml
 
 
 Tests:
-- name: csr2gebsr_bad_arg
-  category: pre_checkin
-  function: csr2gebsr_bad_arg
-  precision: *single_double_precisions_complex_real
-
+# Quick
 - name: csr2gebsr
   category: quick
   function: csr2gebsr
@@ -110,7 +106,12 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1]
 
-
+# Pre-checkin
+- name: csr2gebsr_bad_arg
+  category: pre_checkin
+  function: csr2gebsr_bad_arg
+  precision: *single_double_precisions_complex_real
+  
 - name: csr2gebsr
   category: pre_checkin
   function: csr2gebsr
@@ -190,7 +191,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos2]
 
-
+# Nightly
 - name: csr2gebsr
   category: nightly
   function: csr2gebsr
