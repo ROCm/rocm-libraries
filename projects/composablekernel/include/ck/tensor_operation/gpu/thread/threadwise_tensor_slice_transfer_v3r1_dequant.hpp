@@ -13,38 +13,6 @@
 
 namespace ck {
 
-namespace detail {
-// TODO: How to fix this? It uses an struct instead of lambda because lambda
-// doesn't have constructor
-template <index_t SrcVectorDim,
-          index_t SrcScalarPerVector,
-          index_t DstVectorDim,
-          index_t DstScalarPerVector>
-struct lambda_scalar_per_access_for_src_and_dst_idle
-{
-    __host__ __device__ constexpr auto operator()(index_t i) const
-    {
-        if(i == SrcVectorDim && i == DstVectorDim)
-        {
-            return math::lcm(SrcScalarPerVector, DstScalarPerVector);
-        }
-        else if(i == SrcVectorDim)
-        {
-            return SrcScalarPerVector;
-        }
-        else if(i == DstVectorDim)
-        {
-            return DstScalarPerVector;
-        }
-        else
-        {
-            return 1;
-        }
-    }
-};
-
-} // namespace detail
-
 // Assume:
 //   1. src_desc and dst_desc are not known at compile-time
 //   2. SrcBuffer and DstBuffer are DynamicBuffer
@@ -335,10 +303,10 @@ struct ThreadwiseTensorSliceTransfer_v3r1_dequant
                 detail::lambda_scalar_step_in_vector<DstVectorDim>{}, Number<nDim>{});
 
             constexpr auto scalar_per_access = generate_sequence(
-                detail::lambda_scalar_per_access_for_src_and_dst_idle<SrcVectorDim,
-                                                                      SrcScalarPerVector,
-                                                                      DstVectorDim,
-                                                                      DstScalarPerVector>{},
+                detail::lambda_scalar_per_access_for_src_and_dst<SrcVectorDim,
+                                                                 SrcScalarPerVector,
+                                                                 DstVectorDim,
+                                                                 DstScalarPerVector>{},
                 Number<nDim>{});
 
             constexpr auto access_lengths = SliceLengths{} / scalar_per_access;
@@ -379,10 +347,10 @@ struct ThreadwiseTensorSliceTransfer_v3r1_dequant
 
         // Do fast numeric convert
         constexpr auto scalar_per_access = generate_sequence(
-            detail::lambda_scalar_per_access_for_src_and_dst_idle<SrcVectorDim,
-                                                                  SrcScalarPerVector,
-                                                                  DstVectorDim,
-                                                                  DstScalarPerVector>{},
+            detail::lambda_scalar_per_access_for_src_and_dst<SrcVectorDim,
+                                                             SrcScalarPerVector,
+                                                             DstVectorDim,
+                                                             DstScalarPerVector>{},
             Number<nDim>{});
 
         constexpr auto access_lengths = SliceLengths{} / scalar_per_access;
