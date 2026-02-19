@@ -114,7 +114,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         "Python: test_origami_bindings"
         PROPERTIES
             ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:${CMAKE_CURRENT_SOURCE_DIR}/tests:$ENV{PYTHONPATH}"
             DEPENDS _pyorigami
     )
 
@@ -129,9 +129,39 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         "Python: test_selector"
         PROPERTIES
             ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:${CMAKE_CURRENT_SOURCE_DIR}/tests:$ENV{PYTHONPATH}"
             DEPENDS _pyorigami
             SKIP_RETURN_CODE 5  # Allow skipping tests without emitting an error
+    )
+
+    # Run hardware tests
+    add_test(
+        NAME "Python: test_hardware"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_hardware.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_hardware"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:${CMAKE_CURRENT_SOURCE_DIR}/tests:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+    )
+
+    # Run ranking regression tests
+    add_test(
+        NAME "Python: test_ranking_regression"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_ranking_regression.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_ranking_regression"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:${CMAKE_CURRENT_SOURCE_DIR}/tests:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
     )
 
     # Install Python test files to bin/origami/tests for TheRock CI testing.
@@ -141,5 +171,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         COMPONENT tests
         FILES_MATCHING
         PATTERN "*.py"
+        PATTERN "*.csv"
+        PATTERN "*.md"
     )
 endif()
