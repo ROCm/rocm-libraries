@@ -434,6 +434,8 @@ inline hipError_t merge_sort_block_merge_impl(
     const unsigned int merge_mergepath_number_of_blocks
         = ceiling_div(size, merge_mergepath_items_per_block);
 
+    const bool use_fused_kernel = params.use_fused_kernel;
+
     // Use Merge Path for large data to utilize full grid parallelism;
     // fallback to Odd-Even for small data to avoid partition kernel overhead.
     const bool use_mergepath = size > params.merge_oddeven_config.size_limit;
@@ -494,7 +496,7 @@ inline hipError_t merge_sort_block_merge_impl(
         {
             if(use_mergepath)
             {
-                if constexpr(!UseFusedKernel)
+                if(!UseFusedKernel)
                 {
                     ROCPRIM_RETURN_ON_ERROR((launch_mergepath_fused_kernel<Config, selector>(
                         keys_input_,

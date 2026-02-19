@@ -143,7 +143,26 @@ using RocprimDeviceSortTestsParams = ::testing::Types<
                      ::rocprim::less<int>,
                      false,
                      false,
-                     rocprim::merge_sort_config<128, 64, 2, 128, 64, 2>>>;
+                     rocprim::merge_sort_config<128, 64, 2, 128, 64, 2>>,
+    // Test the fused kernel
+    DeviceSortParams<int, 
+                     int, 
+                     ::rocprim::less<int>, 
+                     false, 
+                     false, 
+                     rocprim::merge_sort_config<128, 64, 2, 128, 64, 2, true>>,
+    DeviceSortParams<float, 
+                     double, 
+                     ::rocprim::less<float>, 
+                     false, 
+                     false, 
+                     rocprim::merge_sort_config<256, 128, 4, 256, 128, 4, true>>,
+    DeviceSortParams<common::custom_type<int, int, true>, 
+                     common::custom_type<int, int, true>, 
+                     ::rocprim::less<common::custom_type<int, int, true>>, 
+                     false, 
+                     false, 
+                     rocprim::merge_sort_config<128, 64, 2, 128, 64, 2, true>>>;
 
 TYPED_TEST_SUITE(RocprimDeviceSortTests, RocprimDeviceSortTestsParams);
 

@@ -139,6 +139,8 @@ struct merge_sort_block_merge_config_params
     kernel_config_params merge_oddeven_config             = {0, 0, 0};
     kernel_config_params merge_mergepath_partition_config = {0, 0};
     kernel_config_params merge_mergepath_config           = {0, 0};
+
+    bool use_fused_kernel = false;
 };
 
 // Necessary to construct a parameterized type of `merge_sort_block_merge_config_params`.
