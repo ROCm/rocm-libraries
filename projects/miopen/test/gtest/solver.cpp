@@ -186,7 +186,7 @@ public:
 
         for(auto const& param : pre_check_param)
         {
-            ConstructTest(db_path, param.expected_kernel.c_str(), param.in, param.context_filter);
+            ConstructTest(db_path, param.expected_kernel, param.in, param.context_filter);
         }
 
         const auto& searchable_solver = StaticContainer<const SearchableTestSolver>::Instance();
@@ -196,7 +196,7 @@ public:
 
         for(auto const& param : post_check_param)
         {
-            ConstructTest(db_path, param.expected_kernel.c_str(), param.in, param.context_filter);
+            ConstructTest(db_path, param.expected_kernel, param.in, param.context_filter);
         }
 
         // Checking no more searches were done.
@@ -206,7 +206,7 @@ public:
 protected:
     void ConstructTest(
         const miopen::fs::path& db_path,
-        const char* expected_kernel,
+        const std::string& expected_kernel,
         const std::vector<size_t>& in,
         const std::function<void(miopen::ExecutionContext&)>& context_filler =
             [](miopen::ExecutionContext&) {}) const
