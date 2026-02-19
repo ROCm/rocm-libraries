@@ -32,7 +32,7 @@ void PluginBase::resolveSymbols()
     _funcGetLastErrorStr
         = _lib.getSymbol<decltype(_funcGetLastErrorStr)>("hipdnnPluginGetLastErrorString");
 
-    if(tryAssignSymbol(_funcGetApiVersion, "hipdnnPluginGetApiVersion"))
+    if(!tryAssignSymbol(_funcGetApiVersion, "hipdnnPluginGetApiVersion"))
     {
         HIPDNN_BACKEND_LOG_INFO("Plugin does not support returning plugin API version");
     }

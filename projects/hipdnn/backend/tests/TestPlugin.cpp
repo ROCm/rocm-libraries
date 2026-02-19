@@ -396,3 +396,17 @@ TEST(TestPluginCore, GetPluginSearchPathsWithEmptyEnvVar)
     ASSERT_EQ(result.size(), 3);
     EXPECT_EQ(result, defaultPaths);
 }
+
+TEST(TestPluginCore, GetVersion)
+{
+    Plugin plugin{plugin::SharedLibrary{PLUGIN_PATH1}};
+
+    EXPECT_EQ(plugin.version(), "1.0");
+}
+
+TEST(TestPluginCore, GetApiVersion)
+{
+    Plugin plugin{plugin::SharedLibrary{PLUGIN_PATH1}};
+
+    EXPECT_EQ(plugin.apiVersion(), "0.1.0");
+}

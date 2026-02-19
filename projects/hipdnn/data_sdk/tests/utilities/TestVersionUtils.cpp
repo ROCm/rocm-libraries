@@ -33,7 +33,7 @@ TEST(TestVersionUtils, VersionTupleInvalidInput)
     }
 }
 
-std::vector<Version> randomVersions(size_t numberGenerated, size_t seed = 0)
+std::vector<Version> randomVersions(size_t numberGenerated, unsigned int seed = 0)
 {
     std::mt19937 generator(seed);
     std::uniform_int_distribution<int> distribution(0, 100);
@@ -49,7 +49,7 @@ std::vector<Version> randomVersions(size_t numberGenerated, size_t seed = 0)
 }
 
 std::vector<std::pair<Version, Version>> randomVersionCartesianProduct(size_t numberGenerated,
-                                                                       size_t seed = 0)
+                                                                       unsigned int seed = 0)
 {
     auto versions = randomVersions(15, seed);
     std::vector<std::pair<Version, Version>> versionCartesianProducts(numberGenerated

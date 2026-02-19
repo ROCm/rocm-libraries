@@ -73,4 +73,4 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
 }
 
 } // namespace graph
-} // namespace frontend
+} // namespace hipdnn_frontend

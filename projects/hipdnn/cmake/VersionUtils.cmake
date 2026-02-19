@@ -39,9 +39,6 @@ function(hipdnn_setup_version COMPONENT_NAME)
     # Full version string
     set(${COMPONENT_NAME_UPPER}_VERSION_STRING "${${COMPONENT_NAME_UPPER}_VERSION}.${${COMPONENT_NAME_UPPER}_VERSION_TWEAK}")
 
-    # # Set project with version
-    # project(${COMPONENT_NAME} VERSION ${${COMPONENT_NAME_UPPER}_VERSION} LANGUAGES CXX)
-
     message(STATUS "${COMPONENT_NAME} version: ${${COMPONENT_NAME_UPPER}_VERSION_STRING}")
 
     # Propagate version variables to parent scope
