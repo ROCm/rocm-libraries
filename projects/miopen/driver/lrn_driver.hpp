@@ -279,7 +279,6 @@ int LRNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 template <typename Tgpu, typename Tref>
 int LRNDriver<Tgpu, Tref>::RunForwardGPU()
 {
-
     Tgpu alpha = static_cast<Tgpu>(1), beta = static_cast<Tgpu>(0);
 
     miopenLRNForward(GetHandle(),
@@ -467,6 +466,35 @@ int LRNDriver<Tgpu, Tref>::VerifyForward()
                   << "-threaded LRN verifies OK on CPU and GPU (err=" << error << ")" << std::endl;
     }
 
+    mloLRNForwardRunHost_opt<Tgpu, Tref>(do_backward,
+                                     v_mode,
+                                     pad,
+                                     v_lrnN,
+                                     alphaoverarea,
+                                     v_lrnAlpha,
+                                     v_lrnBeta,
+                                     v_lrnK,
+                                     nIn,        // batch_sz,
+                                     cOut,       // n_outputs,
+                                     cIn,        // n_inputs,
+                                     hIn,        // bot_height,
+                                     wIn,        // bot_width,
+                                     hInStride,  // bot_stride,
+                                     cInStride,  // bot_channel_stride,
+                                     nInStride,  // bot_batch_stride,
+                                     hOut,       // top_height,
+                                     wOut,       // top_width,
+                                     hOutStride, // top_v_stride,
+                                     cOutStride, // top_v_channel_stride,
+                                     nOutStride, // top_v_batch_stride,
+                                     hOutStride, // scale_v_stride,
+                                     cOutStride, // scale_v_channel_stride,
+                                     nOutStride, // scale_v_batch_stride,
+                                     in.data(),
+                                     scalehost.data(),
+                                     outhost.data(),
+                                     use_multithread);
+
     return 0;
 }
 
@@ -563,6 +591,42 @@ int LRNDriver<Tgpu, Tref>::VerifyBackward()
         std::cout << "Backward " << (use_multithread ? "multi" : "single")
                   << "-threaded LRN verifies OK on CPU and GPU (err=" << error << ")" << std::endl;
     }
+
+    mloLRNBackwardRunHost_opt<Tgpu, Tref>(static_cast<int>(v_mode),
+                                      pad,
+                                      v_lrnN,
+                                      alphaoverarea,
+                                      v_lrnAlpha,
+                                      v_lrnBeta,
+                                      v_lrnK,
+                                      nIn,         // batch_sz,
+                                      cOut,        // n_outputs,
+                                      cIn,         // n_inputs,
+                                      hIn,         // bot_height,
+                                      wIn,         // bot_width,
+                                      hInStride,   // bot_stride,
+                                      cInStride,   // bot_channel_stride,
+                                      nInStride,   // bot_batch_stride,
+                                      hdInStride,  // bot_df_v_stride,
+                                      cdInStride,  // bot_df_v_channel_stride,
+                                      ndInStride,  // bot_df_v_batch_stride,
+                                      hOut,        // top_height,
+                                      wOut,        // top_width,
+                                      hOutStride,  // top_stride,
+                                      cOutStride,  // top_channel_stride,
+                                      nOutStride,  // top_batch_stride,
+                                      hdOutStride, // top_df_stride,
+                                      cdOutStride, // top_df_channel_stride,
+                                      ndOutStride, // top_df_batch_stride,
+                                      hdOutStride, // scale_stride,
+                                      cdOutStride, // scale_channel_stride,
+                                      ndOutStride, // scale_batch_stride,
+                                      out.data(),
+                                      dout.data(),
+                                      scale.data(),
+                                      in.data(),
+                                      dinhost.data(),
+                                      use_multithread);
 
     return 0;
 }
