@@ -6,7 +6,6 @@
 # ============================================================================
 FROM ubuntu:24.04 AS base
 
-ARG PROJ="miopen"
 ARG CCACHE_SECONDARY_STORAGE=""
 ARG CCACHE_DIR="/tmp"
 ARG CCACHE_COMMIT=8c107aada09df2a40930d7064bbec8120ee76c91
@@ -82,7 +81,7 @@ RUN wget -O /tmp/ccache.tar.gz https://github.com/ccache/ccache/archive/${CCACHE
 RUN apt-get remove --purge -y python3-pyparsing python3-cryptography 
 
 # Add requirements files
-ADD ${PROJ}/docs/sphinx/requirements.txt /doc-requirements.txt
+ADD miopen/docs/sphinx/requirements.txt /doc-requirements.txt
 
 # Install doc requirements
 RUN pip3 install --break-system-packages -r /doc-requirements.txt && \
@@ -111,7 +110,6 @@ ARG BUILD_JOBS=0
 ARG ROCM_LIBRARIES_REF=default
 ARG ROCM_SYSTEMS_REF=default
 
-ARG PROJ="miopen"
 ARG USE_FIN="OFF"
 ARG PREFIX=/usr/local
 
@@ -226,18 +224,18 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
     fi && \
     cmake --install .
 
-# # ================================================================================
-# # Build and install other deps and CK
-# # ================================================================================
+# ================================================================================
+# Build and install other 3rd party deps 
+# ================================================================================
 FROM build_therock AS miopen_deps
-ARG PROJ="miopen"
 ARG PREFIX="/usr/local"
 ARG USE_FIN="OFF"
 
 # Add requirements files
-ADD ${PROJ}/rbuild.ini /rbuild.ini
-ADD ${PROJ}/requirements.txt /requirements.txt
-ADD ${PROJ}/dev-requirements.txt /dev-requirements.txt
+ADD miopen/rbuild.ini /rbuild.ini
+ADD miopen/requirements.txt /requirements.txt
+ADD miopen/dev-requirements.txt /dev-requirements.txt
+
 # rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
 # Composable Kernel install separated from rbuild 
 # Additionally remove components that are already installed by other compoenents as a part of the source build.
@@ -252,9 +250,8 @@ RUN cd / && \
 # ============================================================================
 # Build and install CK
 # ============================================================================
-
-ADD ${PROJ}/script/redis-cli.conf /redis-cli.conf
-ADD ${PROJ}/script/sccache_wrapper.sh /sccache_wrapper.sh
+ADD miopen/script/redis-cli.conf /redis-cli.conf
+ADD miopen/script/sccache_wrapper.sh /sccache_wrapper.sh
 
 ## Sccache binary built from source for ROCm, only install if MIOPEN_SCCACHE is defined
 ARG SCCACHE_REPO_URL=http://compute-artifactory.amd.com/artifactory/rocm-generic-experimental/rocm-sccache
@@ -275,26 +272,26 @@ COPY /composablekernel /composable_kernel
 RUN set -x && \
     echo Building for GPU Archs: ${THEROCK_ASIC} && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
-    mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
-    export SCCACHE_VERSION=$(curl -s "https://api.github.com/repos/mozilla/sccache/releases/latest" | grep -Po '"tag_name": "v\K[0-9.]+') && \
-    wget -qO sccache.tar.gz https://github.com/mozilla/sccache/releases/latest/download/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl.tar.gz && \
-    tar -xzf sccache.tar.gz --strip-components=1 -C ${SCCACHE_INSTALL_LOCATION} && \
-    chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache && \
-    export ROCM_PATH=/opt/rocm && \
-    export SCCACHE_ENABLED=true && \
-    export SCCACHE_LOG_LEVEL=debug && \
-    export SCCACHE_IDLE_TIMEOUT=14400 && \
-    export COMPILERS_HASH_DIR=/tmp/.sccache && \
-    export SCCACHE_BIN=${SCCACHE_INSTALL_LOCATION}/sccache && \
-    export SCCACHE_EXTRAFILES=/tmp/.sccache/rocm_compilers_hash_file && \
-    export SCCACHE_REDIS="redis://$MIOPEN_SCCACHE" && \
-    cd / && \
-    echo "connect = $MIOPEN_SCCACHE" >> redis-cli.conf && \
-    export SCCACHE_C_CUSTOM_CACHE_BUSTER="${MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER}" && \
-    echo $SCCACHE_C_CUSTOM_CACHE_BUSTER && \
-    stunnel redis-cli.conf && \
-    export PATH=$PATH:${SCCACHE_INSTALL_LOCATION} && \
-    ./sccache_wrapper.sh --enforce_redis; \
+        mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
+        export SCCACHE_VERSION=$(curl -s "https://api.github.com/repos/mozilla/sccache/releases/latest" | grep -Po '"tag_name": "v\K[0-9.]+') && \
+        wget -qO sccache.tar.gz https://github.com/mozilla/sccache/releases/latest/download/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl.tar.gz && \
+        tar -xzf sccache.tar.gz --strip-components=1 -C ${SCCACHE_INSTALL_LOCATION} && \
+        chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache && \
+        export ROCM_PATH=/opt/rocm && \
+        export SCCACHE_ENABLED=true && \
+        export SCCACHE_LOG_LEVEL=debug && \
+        export SCCACHE_IDLE_TIMEOUT=14400 && \
+        export COMPILERS_HASH_DIR=/tmp/.sccache && \
+        export SCCACHE_BIN=${SCCACHE_INSTALL_LOCATION}/sccache && \
+        export SCCACHE_EXTRAFILES=/tmp/.sccache/rocm_compilers_hash_file && \
+        export SCCACHE_REDIS="redis://$MIOPEN_SCCACHE" && \
+        cd / && \
+        echo "connect = $MIOPEN_SCCACHE" >> redis-cli.conf && \
+        export SCCACHE_C_CUSTOM_CACHE_BUSTER="${MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER}" && \
+        echo $SCCACHE_C_CUSTOM_CACHE_BUSTER && \
+        stunnel redis-cli.conf && \
+        export PATH=$PATH:${SCCACHE_INSTALL_LOCATION} && \
+        ./sccache_wrapper.sh --enforce_redis; \
     fi &&\
     # Clear the ROCM_PATH TheRock causes HIP errors
     unset ROCM_PATH && \
@@ -331,7 +328,7 @@ RUN set -x && \
     -D CMAKE_CXX_FLAGS=" -O3 " .. && \    
     ninja -j ${num_threads} install && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
-    sccache -s; \
+        sccache -s; \
     fi
 
 # ============================================================================
