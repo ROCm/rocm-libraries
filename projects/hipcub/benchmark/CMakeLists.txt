@@ -35,6 +35,11 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
       benchmark::benchmark
       hipcub
   )
+
+  if (WIN32)
+    target_compile_definitions(${BENCHMARK_TARGET} PRIVATE BENCHMARK_STATIC_DEFINE)
+  endif()
+
   if((HIP_COMPILER STREQUAL "nvcc"))
     set_property(TARGET ${BENCHMARK_TARGET} PROPERTY CUDA_STANDARD 17)
     set_source_files_properties(${BENCHMARK_SOURCE} PROPERTIES LANGUAGE CUDA)
