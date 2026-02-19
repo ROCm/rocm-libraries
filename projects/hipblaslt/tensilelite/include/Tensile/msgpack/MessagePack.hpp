@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include <iostream>
 #include <type_traits>
 
 #include <Tensile/ContractionLibrary.hpp>
@@ -132,75 +131,6 @@ namespace TensileLite
                 if(iterator != objectMap.end())
                 {
                     auto&            value  = iterator->second;
-
-                    if(TensileLite::Debug::Instance().printDataInit())
-                    {
-                        // Debug output: show msgpack type for 'value' field
-                        if(std::string(key) == "value")
-                        {
-                            std::cout << "mapRequired for key='value', msgpack type=";
-                            switch(value.type)
-                            {
-                                case msgpack::type::NIL:        std::cout << "NIL"; break;
-                                case msgpack::type::BOOLEAN:    std::cout << "BOOLEAN"; break;
-                                case msgpack::type::POSITIVE_INTEGER: std::cout << "POSITIVE_INTEGER"; break;
-                                case msgpack::type::NEGATIVE_INTEGER: std::cout << "NEGATIVE_INTEGER"; break;
-                                case msgpack::type::FLOAT32:    std::cout << "FLOAT32"; break;
-                                case msgpack::type::FLOAT64:    std::cout << "FLOAT64"; break;
-                                case msgpack::type::STR:        std::cout << "STRING"; break;
-                                case msgpack::type::BIN:        std::cout << "BINARY"; break;
-                                case msgpack::type::ARRAY:      std::cout << "ARRAY"; break;
-                                case msgpack::type::MAP:        std::cout << "MAP"; break;
-                                case msgpack::type::EXT:        std::cout << "EXT"; break;
-                                default:                        std::cout << "UNKNOWN(" << (int)value.type << ")"; break;
-                            }
-
-                            // Try to show the actual value
-                            try
-                            {
-                                if(value.type == msgpack::type::STR)
-                                {
-                                    std::string strVal;
-                                    value.convert(strVal);
-                                    std::cout << ", value=\"" << strVal << "\"";
-                                }
-                                else if(value.type == msgpack::type::POSITIVE_INTEGER ||
-                                        value.type == msgpack::type::NEGATIVE_INTEGER)
-                                {
-                                    int64_t intVal;
-                                    value.convert(intVal);
-                                    std::cout << ", value=" << intVal << " (0x" << std::hex << intVal << std::dec << ")";
-                                }
-                                else if(value.type == msgpack::type::ARRAY)
-                                {
-                                    auto arr = value.as<std::vector<msgpack::object>>();
-                                    std::cout << ", array_size=" << arr.size();
-                                    if(arr.size() > 0)
-                                    {
-                                        if(arr[0].type == msgpack::type::POSITIVE_INTEGER ||
-                                           arr[0].type == msgpack::type::NEGATIVE_INTEGER)
-                                        {
-                                            int64_t firstVal;
-                                            arr[0].convert(firstVal);
-                                            std::cout << ", first_element=" << firstVal;
-                                        }
-                                        else if(arr[0].type == msgpack::type::STR)
-                                        {
-                                            std::string firstVal;
-                                            arr[0].convert(firstVal);
-                                            std::cout << ", first_element=\"" << firstVal << "\"";
-                                        }
-                                    }
-                                }
-                            }
-                            catch(...)
-                            {
-                                std::cout << ", (could not extract value)";
-                            }
-                            std::cout << std::endl;
-                        }
-                    }
-
                     MessagePackInput subRef = createSubRef(value);
                     subRef.input(obj);
                     error.insert(error.end(), subRef.error.begin(), subRef.error.end());
@@ -342,37 +272,34 @@ namespace TensileLite
             template <typename T>
             void enumCase(T& member, const char* key, T value)
             {
-                // Handle both string-based and integer-based enum serialization
+                bool match = false;
                 if(object.type == msgpack::type::object_type::STR)
                 {
-                    // String-based: msgpack contains enum name like "Float", "Double"
                     std::string result;
                     object.convert(result);
 
                     if(result == key)
-                    {
-                        enumFound++;
-                        member = value;
-                    }
+                        match = true;
                 }
                 else if(object.type == msgpack::type::POSITIVE_INTEGER ||
                         object.type == msgpack::type::NEGATIVE_INTEGER)
                 {
-                    // Integer-based: msgpack contains enum value like 0, 4, 7
                     int64_t intValue;
                     object.convert(intValue);
 
                     if(static_cast<int64_t>(value) == intValue)
-                    {
-                        enumFound++;
-                        member = value;
-                    }
+                        match = true;
                 }
                 else
                 {
-                    // Unexpected type
                     addError(concatenate("Unexpected msgpack type for enum: ", (int)object.type,
                                        " (expected STRING or INTEGER)"));
+                }
+                    
+                if(match)
+                {
+                    enumFound++;
+                    member = value;
                 }
             }
         };

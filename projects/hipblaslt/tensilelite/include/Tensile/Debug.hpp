@@ -80,8 +80,6 @@ namespace TensileLite
 
         int getGridbasedTopSols() const;
 
-        bool debugEnabled() const;
-
         bool printStreamKGridInfo() const;
 
         bool gridBasedKDTree() const;

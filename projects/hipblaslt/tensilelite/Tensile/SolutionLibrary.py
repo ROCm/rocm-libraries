@@ -357,7 +357,6 @@ class MasterSolutionLibrary:
             devicePart = d["ArchitectureName"]
             cuCount = d["CUCount"]
 
-            # TODO: Read PCI Chip ID from solution data when available
             pciChipId = d.get("DeviceNames", None)
 
             newLib = PredicateLibrary(tag="Hardware")

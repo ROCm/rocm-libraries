@@ -12,6 +12,17 @@ Predicates are one of the essential integration points between the tensilelite b
 Predicates are built into master solution libraries, files that contain information about which kernels are available, 
 and their location. These files are loaded at runtime, and used in the kernel selection process.
 
+Chip ID Registry
+-----------------------
+
+The chip ID registry is a namespace in `Tensile/AMDGPUPredicates.hpp <../../tensilelite/include/Tensile/AMDGPUPredicates.hpp>` that
+contains the official mapping of supported PCI chip IDs and their fallback relationships.
+
+.. code-block:: yaml
+
+    - {PCIChipID: 0x75a3, DeviceName: AMD Instinct MI355X}
+    - {PCIChipID: 0x75a2, DeviceName: AMD Instinct MI355X}
+
 Hardware predicates
 -----------------------
 
@@ -82,4 +93,6 @@ that has the gfx1201 chip ID (7550) and another, random one:
     --------------------------------------------------------------------------------
     Result: NO MATCH
     --------------------------------------------------------------------------------
+
+Here we can see how different chip IDs are being selected against the known device properties.
 

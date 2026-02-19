@@ -121,10 +121,7 @@ namespace TensileLite
    * Default implementation returns false (no fallback).
    * Subclasses that support fallback matching should override this.
    */
-        virtual bool isFallbackMatch(Object const& object) const
-        {
-            return false;
-        }
+        virtual bool isFallbackMatch(Object const& object) const { return false; }
 
         /**
    * Retrieve the value from the specified object, while printing

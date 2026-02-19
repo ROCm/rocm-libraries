@@ -118,9 +118,7 @@ namespace TensileLite
 
         rv << deviceName << "(" << computeUnitCount << "-CU " << processor;
         if(_pciChipId.has_value())
-        {
             rv << " PCI ChipID: 0x" << std::hex << _pciChipId.value() << std::dec;
-        }
         rv << ")";
 
         return rv.str();

@@ -32,7 +32,3 @@ include(ROCMPackageConfigHelpers)
 include(ROCMInstallSymlinks)
 include(ROCMCheckTargetIds OPTIONAL)
 include(ROCMClients)
-<<<<<<< HEAD
-
-=======
->>>>>>> 4eae27c041 (style: clean-up build output and fix warnings)

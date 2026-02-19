@@ -460,73 +460,14 @@ namespace TensileLite
 
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::BiasDataTypeWhiteList, IO>
+            : public AutoMappingTraits<Predicates::Contraction::BiasDataTypeWhiteList, IO>
         {
-            using iot = IOTraits<IO>;
-
-            static void mapping(IO& io, Predicates::Contraction::BiasDataTypeWhiteList& obj)
-            {
-                if(!iot::outputting(io) && TensileLite::Debug::Instance().printDataInit())
-                {
-                    std::cout << "About to deserialize BiasDataTypeWhiteList 'value' field..." << std::endl;
-                }
-
-                try
-                {
-                    iot::mapRequired(io, "value", obj.value);
-
-                    if(!iot::outputting(io) && TensileLite::Debug::Instance().printDataInit())
-                    {
-                        std::cout << "Successfully deserialized BiasDataTypeWhiteList with "
-                                  << obj.value.size() << " data types" << std::endl;
-                    }
-                }
-                catch(const std::bad_cast& e)
-                {
-                    std::cerr << "[ERROR] bad_cast in BiasDataTypeWhiteList::mapping - expected array of DataType enums for 'value' field" << std::endl;
-                    std::cerr << "[ERROR] Exception message: " << e.what() << std::endl;
-                    std::cerr << "[ERROR] This likely means the msgpack file contains incompatible data" << std::endl;
-                    throw;
-                }
-                catch(const std::exception& e)
-                {
-                    std::cerr << "[ERROR] Exception in BiasDataTypeWhiteList::mapping: " << e.what() << std::endl;
-                    throw;
-                }
-            }
-
-            const static bool flow = false;
         };
 
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::BiasSrcWhiteList, IO>
+            : public AutoMappingTraits<Predicates::Contraction::BiasSrcWhiteList, IO>
         {
-            using iot = IOTraits<IO>;
-
-            static void mapping(IO& io, Predicates::Contraction::BiasSrcWhiteList& obj)
-            {
-                if(!iot::outputting(io) && TensileLite::Debug::Instance().printDataInit())
-                {
-                    std::cout << "About to deserialize BiasSrcWhiteList 'value' field..." << std::endl;
-                }
-
-                try
-                {
-                    iot::mapRequired(io, "value", obj.value);
-
-                    if(!iot::outputting(io) && TensileLite::Debug::Instance().printDataInit())
-                    {
-                        std::cout << "Successfully deserialized BiasSrcWhiteList with "
-                                  << obj.value.size() << " sources" << std::endl;
-                    }
-                }
-                catch(const std::exception& e)
-                {
-                    std::cerr << "[ERROR] Exception in BiasSrcWhiteList::mapping: " << e.what() << std::endl;
-                    throw;
-                }
-            }
-
-            const static bool flow = false;
         };
 
         template <typename IO>

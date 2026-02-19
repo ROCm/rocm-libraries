@@ -3977,10 +3977,8 @@ class Solution(collections.abc.Mapping):
   def __hash__(self):
     deviceNames = str(self._state.get("DeviceNames", ""))
     return hash(str(self) + self._state.get("codeObjectFile", "") + deviceNames)
-    #return hash(self.getAttributes())
 
   def __eq__(self, other):
-    #return isinstance(other, Solution) and self.getAttributes() == other.getAttributes()
     if not isinstance(other, Solution):
       return False
     if str(self) != str(other):

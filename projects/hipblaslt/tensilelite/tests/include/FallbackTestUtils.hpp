@@ -39,7 +39,7 @@ namespace testing
 
     inline bool dbgEnabled()
     {
-        return Debug::Instance().debugEnabled();
+        return Debug::Instance().printDeviceSelection();
     }
 
     inline void dbg(const std::string& msg)

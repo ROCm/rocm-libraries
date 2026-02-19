@@ -115,16 +115,11 @@ namespace TensileLite
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
-                if(Debug::Instance().printDeviceSelection())
-                {
-                    std::cout << "  Checking predicate: " << row.first.value->type() << "... ";
-                }
-
                 if(row.first(problem, hardware) && !isPredicateFallback(row.first, hardware))
                 {
                     if(Debug::Instance().printDeviceSelection())
                     {
-                        std::cout << "EXACT MATCH! Searching nested library." << std::endl;
+                        std::cout << "Exact match: Searching nested library." << std::endl;
                     }
 
                     rv = row.second->findBestSolution(problem, hardware, fitness);
