@@ -7,6 +7,7 @@ import os
 subtree_to_project_map = {
     "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
     "dnn-providers/miopen-provider": "miopen-provider",
+    "projects/composablekernel": "composablekernel",
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
     "projects/hipblaslt": "blas",
@@ -109,6 +110,14 @@ additional_options = {
         ],
         "projects_to_test": ["hipblaslt_plugin"],
         "project_to_add": "blas",
+    },
+    "composablekernel": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_ENABLE_MIOPEN=ON",
+        ],
+        "projects_to_test": ["miopen"],
+        "project_to_add": "miopen",
     },
 }
 
