@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -93,11 +93,23 @@ double get_time_us_no_sync()
     return double(sc::duration_cast<sc::microseconds>(t.time_since_epoch()).count());
 }
 
+// Helper function to synchronize device - aborts on failure
+static void synchronize_device()
+{
+    CHECK_HIP_ERROR(hipDeviceSynchronize());
+}
+
+// Helper function to synchronize stream - aborts on failure
+static void synchronize_stream(hipStream_t stream)
+{
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+}
+
 /* CPU Timer (in microseconds): synchronize with the default device and return wall time
  */
 double get_time_us()
 {
-    hipDeviceSynchronize();
+    synchronize_device();
     return get_time_us_no_sync();
 }
 
@@ -105,7 +117,7 @@ double get_time_us()
  */
 double get_time_us_sync(hipStream_t stream)
 {
-    hipStreamSynchronize(stream);
+    synchronize_stream(stream);
     return get_time_us_no_sync();
 }
 

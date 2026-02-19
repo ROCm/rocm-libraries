@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -66,6 +66,43 @@ public:
     }
 #endif
 
+#ifdef GOOGLE_TEST
+    // Helper function to setup guards - can use ASSERT_EQ to abort on failure
+    void setup_guards(T* d)
+    {
+        if(PAD > 0)
+        {
+            // Copy guard to device memory before allocated memory
+            ASSERT_EQ(hipMemcpy(d, guard, sizeof(guard), hipMemcpyHostToDevice), hipSuccess);
+
+            // Copy guard to device memory after allocated memory
+            ASSERT_EQ(hipMemcpy(d + PAD + size, guard, sizeof(guard), hipMemcpyHostToDevice),
+                      hipSuccess);
+        }
+    }
+
+    // Helper function to check guards - can use ASSERT_EQ to abort on failure
+    void check_guards(T* d)
+    {
+        if(PAD > 0)
+        {
+            U host[PAD];
+
+            // Copy device memory after allocated memory to host
+            ASSERT_EQ(hipMemcpy(host, d + size, sizeof(guard), hipMemcpyDeviceToHost), hipSuccess);
+
+            // Make sure no corruption has occurred
+            ASSERT_EQ(memcmp(host, guard, sizeof(guard)), 0);
+
+            // Copy device memory before allocated memory to host
+            ASSERT_EQ(hipMemcpy(host, d - PAD, sizeof(guard), hipMemcpyDeviceToHost), hipSuccess);
+
+            // Make sure no corruption has occurred
+            ASSERT_EQ(memcmp(host, guard, sizeof(guard)), 0);
+        }
+    }
+#endif
+
     T* device_vector_setup()
     {
         T* d;
@@ -78,17 +115,9 @@ public:
 #ifdef GOOGLE_TEST
         else
         {
+            setup_guards(d);
             if(PAD > 0)
-            {
-                // Copy guard to device memory before allocated memory
-                hipMemcpy(d, guard, sizeof(guard), hipMemcpyHostToDevice);
-
-                // Point to allocated block
-                d += PAD;
-
-                // Copy guard to device memory after allocated memory
-                hipMemcpy(d + size, guard, sizeof(guard), hipMemcpyHostToDevice);
-            }
+                d += PAD; // Point to allocated block
         }
 #endif
         return d;
@@ -97,25 +126,7 @@ public:
     void device_vector_check(T* d)
     {
 #ifdef GOOGLE_TEST
-        if(PAD > 0)
-        {
-            U host[PAD];
-
-            // Copy device memory after allocated memory to host
-            hipMemcpy(host, d + this->size, sizeof(guard), hipMemcpyDeviceToHost);
-
-            // Make sure no corruption has occurred
-            EXPECT_EQ(memcmp(host, guard, sizeof(guard)), 0);
-
-            // Point to guard before allocated memory
-            d -= PAD;
-
-            // Copy device memory after allocated memory to host
-            hipMemcpy(host, d, sizeof(guard), hipMemcpyDeviceToHost);
-
-            // Make sure no corruption has occurred
-            EXPECT_EQ(memcmp(host, guard, sizeof(guard)), 0);
-        }
+        check_guards(d);
 #endif
     }
 
@@ -124,25 +135,9 @@ public:
         if(d != nullptr)
         {
 #ifdef GOOGLE_TEST
+            check_guards(d);
             if(PAD > 0)
-            {
-                U host[PAD];
-
-                // Copy device memory after allocated memory to host
-                hipMemcpy(host, d + this->size, sizeof(guard), hipMemcpyDeviceToHost);
-
-                // Make sure no corruption has occurred
-                EXPECT_EQ(memcmp(host, guard, sizeof(guard)), 0);
-
-                // Point to guard before allocated memory
-                d -= PAD;
-
-                // Copy device memory after allocated memory to host
-                hipMemcpy(host, d, sizeof(guard), hipMemcpyDeviceToHost);
-
-                // Make sure no corruption has occurred
-                EXPECT_EQ(memcmp(host, guard, sizeof(guard)), 0);
-            }
+                d -= PAD; // Point to guard before allocated memory
 #endif
             // Free device memory
             CHECK_HIP_ERROR((hipFree)(d));
