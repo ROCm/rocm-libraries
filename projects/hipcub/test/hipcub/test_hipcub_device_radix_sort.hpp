@@ -228,14 +228,6 @@ auto invoke_sort_keys(void*       d_temporary_storage,
 template<typename TestFixture>
 void sort_keys()
 {
-
-#if defined(_WIN32) && defined(HIPCUB_ROCPRIM_API)
-    rocprim::detail::target_arch arch;
-    rocprim::detail::host_target_arch(stream, arch);
-    if (arch == rocprim::detail::target_arch::gfx1151)
-        GTEST_SKIP() << "Temporarily skipping test on gfx1151.";
-#endif
-
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
@@ -247,6 +239,14 @@ void sort_keys()
     constexpr bool         check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0; // default
+    
+#if defined(_WIN32) && defined(HIPCUB_ROCPRIM_API)
+    rocprim::detail::target_arch arch;
+    rocprim::detail::host_target_arch(stream, arch);
+    if (arch == rocprim::detail::target_arch::gfx1151)
+        GTEST_SKIP() << "Temporarily skipping test on gfx1151.";
+#endif
+
     if(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
@@ -1246,7 +1246,6 @@ inline void sort_keys_over_4g()
     constexpr size_t       size                    = (1ull << 32) + 32;
     constexpr size_t       number_of_possible_keys = 1ull << (8ull * sizeof(key_type));
     assert(std::is_unsigned<key_type>::value);
-
     hipDeviceProp_t dev_prop;
     HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
 
