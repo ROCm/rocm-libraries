@@ -1087,25 +1087,22 @@ class ProblemType(Mapping):
     macTypeStr = self["MacDataTypeA"].toChar()
     if self["MacDataTypeA"] != self["MacDataTypeB"]:
       macTypeStr = self["MacDataTypeA"].toChar() + self["MacDataTypeB"].toChar()
+
     if self["MacDataTypeA"] != self["DataTypeA"] or self["MacDataTypeB"] != self["DataTypeB"]:
-      name += "_"
-      name += self["DataTypeA"].toChar() + self["DataTypeB"].toChar()
-    name += "_"
-    name += macTypeStr # Type of A/B
+      name.append(self["DataTypeA"].toChar() + self["DataTypeB"].toChar())
 
     # Special condition for some newly supported kernels:
     #   HHS, HSS, BSS and I8II kernels, use a clearer naming _TiToTc_
     # TODO: Distinguish all kernels by _TiToTc_ to be more consistent with rocblas
+    dataTypeStr = macTypeStr
     gemmType = (self["MacDataTypeA"].toChar(), self["MacDataTypeB"].toChar(), self["DestDataType"].toChar(), self["ComputeDataType"].toChar() )
     if gemmType in _HPATypes:
-      name += self["DestDataType"].toChar()    # Type of C/D
-      name += self["ComputeDataType"].toChar() # Type of Alpha/Beta
-      name += "_"
+      dataTypeStr += self["DestDataType"].toChar()
+      dataTypeStr += self["ComputeDataType"].toChar()
+    name.append(dataTypeStr)
 
     if not self["F32XdlMathOp"].isSingle() and self["MacDataTypeA"].isSingle():
-      name += "_M"
-      name += self["F32XdlMathOp"].toChar()
-      name += "_"
+      name.append("".join(["M", self["F32XdlMathOp"].toChar()]))
 
     if self["SwizzleTensorA"]:
       name.append("STA")
@@ -1114,10 +1111,10 @@ class ProblemType(Mapping):
       name.append("STB")
 
     if self["MXBlockA"]:
-      name += f'MXA{self["MXBlockA"]}_'
+      name.append(f'MXA{self["MXBlockA"]}')
 
     if self["MXBlockB"]:
-      name += f'MXB{self["MXBlockB"]}_'
+      name.append(f'MXB{self["MXBlockB"]}')
 
     # Other
     other = ""
