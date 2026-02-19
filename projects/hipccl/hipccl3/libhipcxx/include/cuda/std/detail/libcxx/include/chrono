@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+// Modifications Copyright (c) 2024-2026 Advanced Micro Devices, Inc.
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -1769,7 +1769,7 @@ private:
 
 public:
   _CCCL_HIDE_FROM_ABI month() = default;
-  _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr month(unsigned __val) noexcept
+  __attribute__((host)) _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr month(unsigned __val) noexcept
       : __m(static_cast<unsigned char>(__val))
   {}
   _LIBCUDACXX_HIDE_FROM_ABI constexpr month& operator++() noexcept
@@ -2011,13 +2011,13 @@ private:
 
 public:
   _CCCL_HIDE_FROM_ABI weekday() = default;
-  _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr weekday(unsigned __val) noexcept
+  __attribute__((host)) _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr weekday(unsigned __val) noexcept
       : __wd(static_cast<unsigned char>(__val == 7 ? 0 : __val))
   {}
-  _LIBCUDACXX_HIDE_FROM_ABI constexpr weekday(const sys_days& __sysd) noexcept
+  __attribute__((host)) _LIBCUDACXX_HIDE_FROM_ABI constexpr weekday(const sys_days& __sysd) noexcept
       : __wd(__weekday_from_days(__sysd.time_since_epoch().count()))
   {}
-  _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr weekday(const local_days& __locd) noexcept
+  __attribute__((host)) _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr weekday(const local_days& __locd) noexcept
       : __wd(__weekday_from_days(__locd.time_since_epoch().count()))
   {}
 
