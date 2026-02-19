@@ -5756,6 +5756,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.defineSgpr("LocalWriteAddrA", 1)
     if kernel["LocalWriteUseSgprB"]:
         self.defineSgpr("LocalWriteAddrB", 1)
+    if kernel["ProblemType"]["MXBlockA"] and kernel["LocalWriteUseSgprMXSA"]:
+        self.defineSgpr("LocalWriteAddrMXSA", 1)
+    if kernel["ProblemType"]["MXBlockB"] and kernel["LocalWriteUseSgprMXSB"]:
+        self.defineSgpr("LocalWriteAddrMXSB", 1)
 
     # Allocate registers to swap between lds buffers
     if kernel["StoreSwapAddr"]:

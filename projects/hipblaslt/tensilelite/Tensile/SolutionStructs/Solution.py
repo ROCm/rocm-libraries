@@ -1240,11 +1240,10 @@ class Solution(collections.abc.Mapping):
     # set True for DTL 
     state["UseGeneralizedNLCOneA"] = state["DirectToLdsA"]
     state["UseGeneralizedNLCOneB"] = state["DirectToLdsB"]
-    # MX block does not use DTL, so set to False
     if state["ProblemType"]["MXBlockA"]:
-      state["UseGeneralizedNLCOneMXSA"] = False
+      state["UseGeneralizedNLCOneMXSA"] = False #state["DirectToLdsA"]
     if state["ProblemType"]["MXBlockB"]:
-      state["UseGeneralizedNLCOneMXSB"] = False
+      state["UseGeneralizedNLCOneMXSB"] = False #state["DirectToLdsB"]
 
     state["LocalWriteUseSgprA"] = False
     state["LocalWriteUseSgprB"] = False
@@ -1464,8 +1463,8 @@ class Solution(collections.abc.Mapping):
       state["WaveSeparateGlobalReadMXSA"] = state["WaveSeparateGlobalReadA"]
       state["NumLoadsCoalescedMXSA"] = state["NumLoadsCoalescedA"]
       Solution.checkAndAssignWaveSeparateGlobalRead(state, 'MXSA', printRejectionReason)
-      state["DirectToLdsMXSA"] = False
-      state["LocalWriteUseSgprMXSA"] = False
+      state["DirectToLdsMXSA"] = state["DirectToLdsA"]
+      state["LocalWriteUseSgprMXSA"] = state["DirectToLdsMXSA"]
       state["ProblemType"]["MirrorDimsMXSA"] = list(state["ProblemType"]["MirrorDimsA"])
       state["VectorWidthMXSA"] = state["VectorWidthA"]
       state["MIWaveTileMXSA"] = state["MIWaveTileA"]
@@ -1478,8 +1477,8 @@ class Solution(collections.abc.Mapping):
       state["WaveSeparateGlobalReadMXSB"] = state["WaveSeparateGlobalReadB"]
       state["NumLoadsCoalescedMXSB"] = state["NumLoadsCoalescedB"]
       Solution.checkAndAssignWaveSeparateGlobalRead(state, 'MXSB', printRejectionReason)
-      state["DirectToLdsMXSB"] = False
-      state["LocalWriteUseSgprMXSB"] = False
+      state["DirectToLdsMXSB"] = state["DirectToLdsB"]
+      state["LocalWriteUseSgprMXSB"] = state["DirectToLdsMXSB"]
       state["ProblemType"]["MirrorDimsMXSB"]  = list(state["ProblemType"]["MirrorDimsB"])
       state["VectorWidthMXSB"] = state["VectorWidthB"]
       state["MIWaveTileMXSB"] = state["MIWaveTileB"]
@@ -1758,10 +1757,10 @@ class Solution(collections.abc.Mapping):
                 else:
                   ldsPadA = state["VectorWidthA"]
             else:
-              ldsPadA = max(state["GlobalReadVectorWidthA"],optPadA)
-              ## turn-off padding for directToLds
               if state["DirectToLdsA"]:
-                ldsPadA = 0
+                ldsPadA = max(lrvwA, optPadA) if not state["ProblemType"]["TLUA"] else 0
+              else:
+                ldsPadA = max(state["GlobalReadVectorWidthA"],optPadA)
           assert(ldsPadA >= 0)
 
         if ldsPadB == -1:
@@ -1781,9 +1780,10 @@ class Solution(collections.abc.Mapping):
                 else:
                   ldsPadB = state["VectorWidthB"]
             else:
-              ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
               if state["DirectToLdsB"]:
-                ldsPadB = 0
+                ldsPadB = max(lrvwB, optPadB) if not state["ProblemType"]["TLUB"] else 0
+              else:
+                ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
           assert(ldsPadB >= 0)
 
         if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
