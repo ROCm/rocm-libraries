@@ -83,7 +83,16 @@ namespace rocRoller
         Generator<Instruction>
             loadRange(int offset, int sizeBytes, Register::ValuePtr& value) const;
 
-        Generator<Instruction> allocatePreloadedRegisters(int& offset, int& count);
+        /**
+         * Allocates the block of registers that will be preloaded with kernel arguments at the
+         * beginning of the kernel execution. This must be called at the correct time within 
+         * AllocateInitialRegisters as it is part of the initial register state.
+         *
+         * Returns the appropriate values for the kernel description fields
+         * kernarg_preload_offset and kernarg_preload_length through preloadOffset and
+         * preloadLength respectively.
+         */
+        Generator<Instruction> allocatePreloadedRegisters(int& preloadOffset, int& preloadLength);
 
         bool anyPreloadedArguments() const;
         bool anyManuallyLoadedArguments() const;

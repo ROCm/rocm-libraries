@@ -45,16 +45,17 @@ namespace rocRoller
         return m_kernel->argumentPointer();
     }
 
-    Generator<Instruction> ArgumentLoader::allocatePreloadedRegisters(int& offset, int& count)
+    Generator<Instruction> ArgumentLoader::allocatePreloadedRegisters(int& preloadOffset,
+                                                                      int& preloadLength)
     {
-        offset   = 0;
-        count    = 0;
-        auto ctx = m_context.lock();
+        preloadOffset = 0;
+        preloadLength = 0;
+        auto ctx      = m_context.lock();
 
         for(auto const& arg : m_kernel->arguments())
         {
             if(arg.getPreloaded())
-                count += std::max(1, arg.getSize() / 4);
+                preloadLength += std::max(1, arg.getSize() / 4);
             else
             {
                 m_manuallyLoadedOffset = arg.getOffset();
@@ -62,13 +63,13 @@ namespace rocRoller
             }
         }
 
-        if(count > 0)
+        if(preloadLength > 0)
         {
             m_preloadedBlock
                 = Register::Value::Placeholder(ctx,
                                                Register::Type::Scalar,
                                                DataType::Raw32,
-                                               count,
+                                               preloadLength,
                                                Register::AllocationOptions::FullyContiguous());
 
             m_preloadedBlock->setName("Preloaded argument block");
