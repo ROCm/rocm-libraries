@@ -187,7 +187,7 @@ class MiopenPlanBuilder
 public:
     // Public methods in camelCase
     void buildPlan();
-    size_t getWorkspaceSize() const;
+    size_t getMaxWorkspaceSize() const;
 
 private:
     // Private members prefixed with _

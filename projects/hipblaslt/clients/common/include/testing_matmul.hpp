@@ -4247,6 +4247,25 @@ void testing_matmul_with_bias(const Arguments& arg,
     if(d_userArgs != nullptr)
         CHECK_HIP_ERROR(hipFree(d_userArgs));
 
+    // Explicitly destroy opaque handles to avoid leaks.
+    for(auto& h : matA)
+        if(h)
+            (void)hipblasLtMatrixLayoutDestroy(h);
+    for(auto& h : matB)
+        if(h)
+            (void)hipblasLtMatrixLayoutDestroy(h);
+    for(auto& h : matC)
+        if(h)
+            (void)hipblasLtMatrixLayoutDestroy(h);
+    for(auto& h : matD)
+        if(h)
+            (void)hipblasLtMatrixLayoutDestroy(h);
+
+    for(auto& block : matmul)
+        for(auto& h : block)
+            if(h)
+                (void)hipblasLtMatmulDescDestroy(h);
+
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_end));
