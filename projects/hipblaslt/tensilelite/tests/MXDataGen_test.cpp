@@ -1,0 +1,127 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
+#include <gtest/gtest.h>
+
+#include <mxDataGen.hpp>
+
+#include <cstdint>
+#include <vector>
+
+/**
+ * @brief Unpack two FP4 nibbles from a packed byte.
+ *
+ * FP4 E2M1 values are packed two-per-byte (low nibble first).
+ * Zero is represented by nibble value 0x0 (+0) or 0x8 (-0).
+ */
+static bool isZeroNibble(uint8_t nibble)
+{
+    // FP4 E2M1: 0x0 = +0.0, 0x8 = -0.0
+    return (nibble == 0x0) || (nibble == 0x8);
+}
+
+/**
+ * @brief Count elements that decode to zero in a packed FP4 buffer.
+ */
+static size_t countZerosFP4(const uint8_t* packedData, size_t numPackedBytes)
+{
+    size_t zeros = 0;
+    for(size_t i = 0; i < numPackedBytes; ++i)
+    {
+        uint8_t lo = packedData[i] & 0x0F;
+        uint8_t hi = (packedData[i] >> 4) & 0x0F;
+        if(isZeroNibble(lo))
+            ++zeros;
+        if(isZeroNibble(hi))
+            ++zeros;
+    }
+    return zeros;
+}
+
+class MXDataGenFP4Test : public ::testing::TestWithParam<std::tuple<uint64_t, uint64_t, int, bool>>
+{
+};
+
+/**
+ * @brief Verify that generateMXInput produces FP4 data with an acceptable zero frequency.
+ *
+ * Due to FP4 E2M1 nibble-pair packing statistics, the expected zero frequency is
+ * approximately 12-13% (theoretical: 2/15 - 1/225 ≈ 12.89%).
+ */
+TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
+{
+    auto [rows, cols, mxBlock, isTranspose] = GetParam();
+
+    const uint64_t numElements  = rows * cols;
+    const uint64_t numPacked    = (numElements + 1) / 2;
+    const size_t   numScales    = ((rows + mxBlock - 1) / mxBlock) * cols;
+
+    std::vector<uint8_t> dataBuffer(numPacked, 0);
+    std::vector<uint8_t> scaleBuffer(numScales, 0);
+
+    std::vector<size_t> emptySwizzle;
+    std::vector<size_t> emptyTile;
+
+    generateMXInput((hipDataType)HIP_R_4F_E2M1_EXT,
+                    dataBuffer.data(),
+                    scaleBuffer.data(),
+                    rows,
+                    cols,
+                    rows, // stride = rows (column-major)
+                    isTranspose,
+                    emptySwizzle,
+                    emptyTile,
+                    mxBlock,
+                    1,
+                    true,
+                    "Bounded",
+                    -1.0f,
+                    1.0f);
+
+    size_t zeros       = countZerosFP4(dataBuffer.data(), numPacked);
+    double zeroPercent = 100.0 * static_cast<double>(zeros) / static_cast<double>(numElements);
+
+    // Expected: ~12.89% zeros due to FP4 nibble-pair statistics (2/15 - 1/225).
+    EXPECT_LT(zeroPercent, 13.0)
+        << "Zero frequency " << zeroPercent << "% exceeds 13% upper bound for "
+        << rows << "x" << cols << " FP4 matrix (transpose=" << isTranspose << ")";
+
+    // Ensure non-trivial data was actually generated (not all zeros)
+    EXPECT_GT(numElements - zeros, 0u)
+        << "All elements are zero for " << rows << "x" << cols << " FP4 matrix";
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    FP4ZeroFrequency,
+    MXDataGenFP4Test,
+    ::testing::Values(
+        // rows, cols, mxBlock, isTranspose
+        std::make_tuple(128u,  128u,  32, true),
+        std::make_tuple(256u,  256u,  32, true),
+        std::make_tuple(2048u, 1026u, 32, true),
+        std::make_tuple(2048u, 514u,  32, false)
+    )
+);
