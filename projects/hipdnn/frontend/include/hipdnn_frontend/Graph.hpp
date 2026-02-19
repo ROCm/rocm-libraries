@@ -51,7 +51,8 @@ private:
     static std::optional<int64_t> getDefaultEngineId()
     {
         static const std::optional<int64_t> s_defaultId = []() -> std::optional<int64_t> {
-            auto envStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DEFAULT_ENGINE");
+            auto envStr = hipdnn_data_sdk::utilities::trim(
+                hipdnn_data_sdk::utilities::getEnv("HIPDNN_DEFAULT_ENGINE"));
             if(envStr.empty())
             {
                 return std::nullopt;
