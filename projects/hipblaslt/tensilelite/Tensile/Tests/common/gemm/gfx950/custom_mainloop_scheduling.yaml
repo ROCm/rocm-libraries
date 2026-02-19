@@ -116,7 +116,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-           - [16, 16,32, 1,  1, 4, 16,  4,1 ]
+           - [16, 16, 32, 1, 1, 8, 8, 2, 2]  
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [64]
@@ -564,6 +564,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
         - TransposeLDS: [1] #0,1
+        - LDSTrInst: [1]
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
@@ -603,6 +604,7 @@ BenchmarkProblems:
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - StaggerU: [0]
+        - LDSTrInst: [1]
         # - WorkGroupMapping: [16]
         # - WorkGroupMappingXCC: [2]
         - 1LDSBuffer: [0]
@@ -2177,7 +2179,7 @@ BenchmarkProblems:
         - LDSTrInst: [1]
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
-        - GlobalReadVectorWidthB: [2]
+        - GlobalReadVectorWidthB: [8]  
         - DirectToLds: [1]
         - StreamK: [3]
         - LdsPadA: [-1]
@@ -2210,7 +2212,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
         - TransposeLDS: [0]
-        - LDSTrInst: [false,true]
+        - LDSTrInst: [true]
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [2]
         - GlobalReadVectorWidthB: [8]
