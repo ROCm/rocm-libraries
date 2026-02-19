@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 from therock_matrix import subtree_to_project_map, collect_projects_to_run
 import time
-from typing import Mapping, Optional, Iterable
+from typing import Mapping, Optional, Iterable, List
 import os
 from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
 from config_loader import load_repo_config
