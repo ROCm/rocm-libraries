@@ -3,9 +3,11 @@
 
 #include <string>
 
+#include <miopen/export.h>
+
 namespace miopen {
 
-std::string demangle(const char* name);
+MIOPEN_EXPORT std::string demangle(const char* name);
 
 } // namespace miopen
 

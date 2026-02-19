@@ -11,21 +11,24 @@
 #include <cxxabi.h>
 #endif
 
+#include <memory>
+
 #include <miopen/demangle.hpp>
 
 namespace miopen {
 
 #if defined(MIOPEN_HAS_CXXABI_H)
 
+using DemangledNamePtr = std::unique_ptr<char, decltype(&free)>;
+
 std::string demangle(const char* name)
 {
     std::string s;
-    char* demangled_name = abi::__cxa_demangle(name, nullptr, nullptr, nullptr);
+    DemangledNamePtr demangled_name(abi::__cxa_demangle(name, nullptr, nullptr, nullptr), free);
 
-    if(demangled_name != nullptr)
+    if(demangled_name)
     {
-        s = demangled_name;
-        free(demangled_name);
+        s = demangled_name.get();
     }
     else
     {
