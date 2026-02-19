@@ -3,6 +3,18 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND x.y.z for ROCm x.y.z
+
+### Added
+
+* Occupancy-based tooling for `benchmark_rocrand_device_api` workload increase.
+* New `provision` command-line parameter for `benchmark_rocrand_device_api` - a multiplier for automatic block computation.
+
+### Changed
+
+* Updated `benchmark_rocrand_device_api` to use occupancy-based tooling to increase benchmark workloads.
+* Changed input size for `benchmark_rocrand_host_api` to increase it's workload.
+
 ## rocRAND 4.2.0 for ROCm 7.2
 
 ### Removed
@@ -103,8 +115,8 @@ Documentation for rocRAND is available at
 
 * Added host generator for MT19937
 * Support for `rocrand_generate_poisson` in hipGraphs
-* Added engine, distribution, mode, throughput_gigabytes_per_second, and lambda columns for the csv format in 
-  `benchmark_rocrand_host_api` and `benchmark_rocrand_device_api`. To see these new columns, set `--benchmark_format=csv` 
+* Added engine, distribution, mode, throughput_gigabytes_per_second, and lambda columns for the csv format in
+  `benchmark_rocrand_host_api` and `benchmark_rocrand_device_api`. To see these new columns, set `--benchmark_format=csv`
   or `--benchmark_out_format=csv --benchmark_out="outName.csv"`.
 
 ### Changed

@@ -79,20 +79,11 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
 
 def runTestCommand (platform, project)
 {
-    String testExclude = platform.jenkinsLabel.contains('compile') ? '--gtest_filter=-*GPU*' : ''
-
-    def numCTest = 4
-
     def command = """#!/usr/bin/env bash
                 set -ex
                 cd ${project.paths.project_build_prefix}
-
                 # Run sharded tests (auto-detects ncores/2, respecting cgroups)
-                scripts/run-tests-sharded build "${testExclude}"
-
-                pushd build
-                OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 ctest --parallel ${numCTest} --output-on-failure -LE "GTEST|CATCH"
-                popd
+                scripts/run-tests-sharded precheckin-mci build
             """
 
     try

@@ -18,7 +18,7 @@ def run_matmul():
 
     # Create a handle and graph
     print("\nCreating hipdnn handle...")
-    handle = hipdnn.Handle()
+    handle = hipdnn.create_handle()
 
     graph = hipdnn.Graph()
     graph.set_name("matmul_graph")
