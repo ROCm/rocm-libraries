@@ -278,16 +278,20 @@ def getDockerImage(Map conf=[:])
     def cacheRefTo = "${cacheRef}_${theRockHash}"
 
     // With the docker credentials check if the cacheRefFrom exists in the registry
-    def cacheExists = sh(
-        script: """
-            if docker manifest inspect ${cacheRefFrom} > /dev/null 2>&1; then
-                echo "true"
-            else
-                echo "false"
-            fi
-        """.stripIndent(),
-        returnStdout: true
-    ).trim()
+    def cacheExists = ""
+
+    withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+        cacheExists = sh(
+            script: """
+                if docker manifest inspect ${cacheRefFrom} > /dev/null 2>&1; then
+                    echo "true"
+                else
+                    echo "false"
+                fi
+            """.stripIndent(),
+            returnStdout: true
+        ).trim()
+    }
 
     if (cacheExists != "true") {
         cacheRefFrom = "${cacheRef}"
