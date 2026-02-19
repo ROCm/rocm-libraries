@@ -33,6 +33,17 @@ PROBLEM_DATA_FILE = Path(__file__).parent / "data" / "problem_data.csv"
 
 SUPPORTED_DTYPES = ["f16", "bf16", "f32"]
 
+# Transpose combinations: (a_transpose, b_transpose)
+# T = Transposed, N = Non-transposed
+TRANSPOSE_COMBOS = ["TN", "TT", "NN", "NT"]
+
+
+def parse_transpose(combo: str) -> tuple[origami.transpose_t, origami.transpose_t]:
+    """Parse transpose combo string to origami transpose types."""
+    a_trans = origami.transpose_t.T if combo[0] == "T" else origami.transpose_t.N
+    b_trans = origami.transpose_t.T if combo[1] == "T" else origami.transpose_t.N
+    return a_trans, b_trans
+
 
 def is_dtype_supported(arch_name: str, dtype: str) -> bool:
     """Check if a dtype is supported for the given architecture."""
@@ -90,13 +101,21 @@ def create_configs(hardware: origami.hardware_t, dtype: str) -> list[origami.con
     return configs
 
 
-def create_problem(m: int, n: int, k: int, dtype: str, batch: int = 1) -> origami.problem_t:
+def create_problem(
+    m: int,
+    n: int,
+    k: int,
+    dtype: str,
+    batch: int = 1,
+    transpose: str = "TN",
+) -> origami.problem_t:
     """Create a problem specification."""
+    a_trans, b_trans = parse_transpose(transpose)
     problem = origami.problem_t()
     problem.size = origami.dim3_t(m, n, k)
     problem.batch = batch
-    problem.a_transpose = origami.transpose_t.T
-    problem.b_transpose = origami.transpose_t.N
+    problem.a_transpose = a_trans
+    problem.b_transpose = b_trans
     problem.a_dtype = origami.string_to_datatype(dtype)
     problem.b_dtype = origami.string_to_datatype(dtype)
     problem.d_dtype = origami.string_to_datatype(dtype)
@@ -132,7 +151,7 @@ BASELINE_HEADER = ["problem", "rank", "latency", "mt_m", "mt_n", "mt_k", "mi_m",
 TOP_K = 10
 
 
-def generate_rankings(arch_name: str, dtype: str) -> list[list]:
+def generate_rankings(arch_name: str, dtype: str, transpose: str = "TN") -> list[list]:
     """Generate rankings for all test problem sizes.
     
     Returns a list of CSV rows, each containing:
@@ -146,7 +165,7 @@ def generate_rankings(arch_name: str, dtype: str) -> list[list]:
 
     rows = []
     for m, n, k, batch in TEST_PROBLEM_SIZES:
-        problem = create_problem(m, n, k, dtype, batch)
+        problem = create_problem(m, n, k, dtype, batch, transpose)
         try:
             ranked = origami.select_topk_configs(problem, hardware, configs, TOP_K)
             if ranked:
@@ -159,17 +178,17 @@ def generate_rankings(arch_name: str, dtype: str) -> list[list]:
     return rows
 
 
-def get_baseline_path(arch_name: str, dtype: str) -> Path:
+def get_baseline_path(arch_name: str, dtype: str, transpose: str = "TN") -> Path:
     """Get the path to the baseline file."""
-    return BASELINE_DIR / f"{arch_name}_{dtype}.csv"
+    return BASELINE_DIR / f"{arch_name}_{dtype}_{transpose}.csv"
 
 
-def load_baseline(arch_name: str, dtype: str) -> dict[str, list[list]] | None:
+def load_baseline(arch_name: str, dtype: str, transpose: str = "TN") -> dict[str, list[list]] | None:
     """Load baseline rankings from CSV file.
     
     Returns a dict mapping problem_key -> list of [rank, latency, mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm]
     """
-    path = get_baseline_path(arch_name, dtype)
+    path = get_baseline_path(arch_name, dtype, transpose)
     if not path.exists():
         return None
     
@@ -192,9 +211,9 @@ def load_baseline(arch_name: str, dtype: str) -> dict[str, list[list]] | None:
     return baseline
 
 
-def save_baseline(arch_name: str, dtype: str, rows: list[list]) -> None:
+def save_baseline(arch_name: str, dtype: str, transpose: str, rows: list[list]) -> None:
     """Save rankings to CSV baseline file."""
-    path = get_baseline_path(arch_name, dtype)
+    path = get_baseline_path(arch_name, dtype, transpose)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -270,24 +289,27 @@ class TestRankingRegression:
 
     @pytest.mark.parametrize("arch_name", list(SUPPORTED_ARCHITECTURES.keys()))
     @pytest.mark.parametrize("dtype", SUPPORTED_DTYPES)
-    def test_ranking_stability(self, arch_name: str, dtype: str, generate_baseline: bool):
+    @pytest.mark.parametrize("transpose", TRANSPOSE_COMBOS)
+    def test_ranking_stability(
+        self, arch_name: str, dtype: str, transpose: str, generate_baseline: bool
+    ):
         """Test that rankings remain stable compared to baseline."""
         if not is_dtype_supported(arch_name, dtype):
             pytest.skip(f"No {dtype} support for {arch_name}")
 
-        current_rows = generate_rankings(arch_name, dtype)
+        current_rows = generate_rankings(arch_name, dtype, transpose)
 
         if not current_rows:
-            pytest.skip(f"No valid configs generated for {arch_name}/{dtype}")
+            pytest.skip(f"No valid configs generated for {arch_name}/{dtype}/{transpose}")
 
         if generate_baseline:
-            save_baseline(arch_name, dtype, current_rows)
-            pytest.skip(f"Generated baseline for {arch_name}/{dtype}")
+            save_baseline(arch_name, dtype, transpose, current_rows)
+            pytest.skip(f"Generated baseline for {arch_name}/{dtype}/{transpose}")
 
-        baseline = load_baseline(arch_name, dtype)
+        baseline = load_baseline(arch_name, dtype, transpose)
         if baseline is None:
             pytest.fail(
-                f"No baseline file found for {arch_name}/{dtype}. "
+                f"No baseline file found for {arch_name}/{dtype}/{transpose}. "
                 f"Run with --generate-baseline to create it."
             )
 
@@ -298,5 +320,5 @@ class TestRankingRegression:
             if len(differences) > 10:
                 diff_summary += f"\n... and {len(differences) - 10} more differences"
             pytest.fail(
-                f"Ranking regression detected for {arch_name}/{dtype}:\n{diff_summary}"
+                f"Ranking regression detected for {arch_name}/{dtype}/{transpose}:\n{diff_summary}"
             )

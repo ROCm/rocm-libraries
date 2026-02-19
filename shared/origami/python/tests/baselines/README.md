@@ -7,19 +7,18 @@ This directory contains golden baseline files for the ranking regression tests.
 ```
 baselines/
 └── rankings/
-    ├── gfx90a_f16.csv
-    ├── gfx90a_bf16.csv
-    ├── gfx90a_f32.csv
-    ├── gfx942_f16.csv
-    ├── gfx942_bf16.csv
-    ├── gfx942_f32.csv
-    ├── gfx950_f16.csv
-    ├── gfx950_bf16.csv
-    ├── gfx950_f32.csv
-    ├── gfx1201_f16.csv
-    ├── gfx1201_bf16.csv
-    └── ...
+    ├── gfx90a_f16_TN.csv   # A=Transposed, B=Non-transposed
+    ├── gfx90a_f16_TT.csv   # A=Transposed, B=Transposed
+    ├── gfx90a_f16_NN.csv   # A=Non-transposed, B=Non-transposed
+    ├── gfx90a_f16_NT.csv   # A=Non-transposed, B=Transposed
+    ├── gfx90a_bf16_TN.csv
+    ├── gfx90a_bf16_TT.csv
+    ├── ...
+    └── gfx1201_bf16_NT.csv
 ```
+
+The filename format is `{arch}_{dtype}_{transpose}.csv` where transpose indicates
+the combination of A and B matrix transpose types (T=Transposed, N=Non-transposed).
 
 ## Generating Baselines
 
