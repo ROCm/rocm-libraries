@@ -627,10 +627,11 @@ struct tile_window_with_static_distribution
                 const auto lds_coord =
                     make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
 
-                constexpr auto IMM_RANGE =
+                [[maybe_unused]] constexpr auto IMM_RANGE =
                     (1 << 12) / sizeof(typename Base::DataType) * Traits::PackedSize;
-                constexpr auto imm_total    = lds_ys_offset;
-                constexpr auto imm_valid    = imm_total % IMM_RANGE;
+                constexpr auto imm_total = lds_ys_offset;
+                constexpr auto imm_valid =
+                    0; // FIX: Avoid inconsistency between lds_ys_offset and dram_ys_offset
                 constexpr auto imm_overflow = imm_total - imm_valid;
 
                 // Calculate SMEM address using base pointer
