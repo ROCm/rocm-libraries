@@ -10,11 +10,11 @@ find_dependency(hip CONFIG REQUIRED)
 # Find required dependencies
 find_package(Threads REQUIRED)
 
-# Export HIPDNN_DATA_SDK_ENABLE_JSON setting for consumers
-set(HIPDNN_DATA_SDK_ENABLE_JSON @HIPDNN_DATA_SDK_ENABLE_JSON@ CACHE BOOL "Whether JSON support is enabled in hipDNN Data SDK")
+# Export HIPDNN_ENABLE_JSON setting for consumers
+set(HIPDNN_ENABLE_JSON @HIPDNN_ENABLE_JSON@ CACHE BOOL "Whether JSON support is enabled in hipDNN")
 
-# nlohmann_json is optional based on HIPDNN_DATA_SDK_ENABLE_JSON
-if(HIPDNN_DATA_SDK_ENABLE_JSON)
+# nlohmann_json is optional based on HIPDNN_ENABLE_JSON
+if(HIPDNN_ENABLE_JSON)
     find_dependency(nlohmann_json REQUIRED)
 endif()
 

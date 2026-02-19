@@ -47,11 +47,11 @@ find_dependency(hip CONFIG REQUIRED)
 
 find_dependency(flatbuffers REQUIRED)
 
-# Export HIPDNN_DATA_SDK_ENABLE_JSON setting for consumers
-set(HIPDNN_DATA_SDK_ENABLE_JSON @HIPDNN_DATA_SDK_ENABLE_JSON@ CACHE BOOL "Whether JSON support is enabled in hipDNN Data SDK")
+# Export HIPDNN_ENABLE_JSON setting for consumers
+set(HIPDNN_ENABLE_JSON @HIPDNN_ENABLE_JSON@ CACHE BOOL "Whether JSON support is enabled in hipDNN")
 
-# nlohmann_json is optional based on HIPDNN_DATA_SDK_ENABLE_JSON
-if(HIPDNN_DATA_SDK_ENABLE_JSON)
+# nlohmann_json is optional based on HIPDNN_ENABLE_JSON
+if(HIPDNN_ENABLE_JSON)
     find_dependency(nlohmann_json REQUIRED)
 endif()
 
@@ -65,7 +65,7 @@ set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR "@HIPDNN_RELATIVE_INSTALL_PLUGIN_E
 include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_data_sdkTargets.cmake")
 
 hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
-if(HIPDNN_DATA_SDK_ENABLE_JSON)
+if(HIPDNN_ENABLE_JSON)
     hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
 endif()
 
