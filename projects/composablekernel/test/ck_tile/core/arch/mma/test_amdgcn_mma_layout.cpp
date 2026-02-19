@@ -141,37 +141,6 @@ struct MmaLayoutTestKernel
     }
 };
 
-// host-side reference C=AB op
-template <typename MmaTraits>
-std::array<typename MmaTraits::CDataType, MmaTraits::BlockM * MmaTraits::BlockN>
-compute_reference_tensor(
-    const std::array<typename MmaTraits::ADataType, MmaTraits::BlockM * MmaTraits::BlockK>& a,
-    const std::array<typename MmaTraits::BDataType, MmaTraits::BlockK * MmaTraits::BlockN>& b)
-{
-    constexpr uint32_t TileM = MmaTraits::BlockM;
-    constexpr uint32_t TileN = MmaTraits::BlockN;
-    constexpr uint32_t TileK = MmaTraits::BlockK;
-
-    using AccType = typename MmaTraits::CDataType;
-    std::array<AccType, TileM * TileN> c{};
-
-    for(uint32_t row = 0; row < TileM; ++row)
-    {
-        for(uint32_t column = 0; column < TileN; ++column)
-        {
-            AccType accum = static_cast<AccType>(0);
-            for(uint32_t kk = 0; kk < TileK; ++kk)
-            {
-                accum += static_cast<AccType>(a[row * TileK + kk]) *
-                         static_cast<AccType>(b[kk * TileN + column]);
-            }
-            c[row * TileN + column] = accum;
-        }
-    }
-
-    return c;
-}
-
 struct CaseDim
 {
     uint32_t m;
@@ -319,12 +288,9 @@ bool run_mma_layout_test_case()
             hipMemcpyAsync(h_c_result.data(), d_c_ptr, d_c.GetBufferSize(), hipMemcpyDeviceToHost));
         HIP_CHECK_ERROR(hipStreamSynchronize(nullptr));
 
-        const auto h_c_reference = compute_reference_tensor<MmaTraits>(h_a, h_b);
-
         if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
         {
             std::printf("MMA tensors for m=%u k=%u n=%u\n", test_case.m, test_case.k, test_case.n);
-            print_tensor("  Host tensor C", h_c_reference, MmaTraits::BlockM, MmaTraits::BlockN);
             print_tensor("  Device tensor C", h_c_result, MmaTraits::BlockM, MmaTraits::BlockN);
         }
 
@@ -336,9 +302,10 @@ bool run_mma_layout_test_case()
         {
             for(uint32_t n = 0; n < MmaTraits::BlockN; ++n)
             {
-                EXPECT_NEAR(h_c_result[m * MmaTraits::BlockN + n],
-                            h_c_reference[m * MmaTraits::BlockN + n],
-                            tol)
+                const AccType expected = (m == test_case.m && n == test_case.n)
+                                             ? static_cast<AccType>(1)
+                                             : static_cast<AccType>(0);
+                EXPECT_NEAR(h_c_result[m * MmaTraits::BlockN + n], expected, tol)
                     << "Mismatch at C(" << m << "," << n << ")";
             }
         }
