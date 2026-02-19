@@ -165,7 +165,7 @@ def retrieve_projects(args):
             return [], test_type
 
         if "skip-therockci" in pr_labels:
-            logging.info("`skip-therock-ci` label was added, skipping CI")
+            logging.info("`skip-therockci` label was added, skipping CI")
             return [], test_type
 
     subtrees = get_changed_path_projects(modified_paths)
