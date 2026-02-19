@@ -6,7 +6,7 @@ if(GPU_TARGETS MATCHES "gfx9")
   if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/grouped_convolution_forward_tile_ndhwgc_fp32.inc)
     find_package(Python3 COMPONENTS Interpreter Development)
     execute_process(
-      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generate_instances.py --mode=tests
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generate_instances.py --mode=profiler
       RESULT_VARIABLE ret
       OUTPUT_VARIABLE output
       ERROR_VARIABLE error
