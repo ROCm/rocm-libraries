@@ -103,6 +103,9 @@ auto make_shared_device(std::ranges::range auto const& init, size_t padding = 0)
     return make_shared_device<T, T>(init, padding);
 }
 
+/**
+ * Return a new device array that contains the value stored in `arg`.
+ */
 std::shared_ptr<void> make_shared_device(rocRoller::CommandArgumentValue const& arg);
 
 template <typename T>

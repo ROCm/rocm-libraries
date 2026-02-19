@@ -44,22 +44,14 @@ namespace rocRoller
 
         static const std::vector<int> widths{16, 8, 4, 2, 1};
 
-        auto alignment = [](int width) {
-            if(width == 1)
-                return 1;
-            else if(width == 2)
-                return 2;
-
-            return 4;
-        };
-
         for(auto width : widths)
         {
             auto widthBytes = width * 4;
 
+            auto alignment = std::min(width, 4);
+
             if((offset % widthBytes == 0) && (offset + widthBytes) <= endOffset
-               && (*beginReg % alignment(width) == 0)
-               && IsContiguousRange(beginReg, beginReg + width))
+               && (*beginReg % alignment == 0) && IsContiguousRange(beginReg, beginReg + width))
             {
                 return widthBytes;
             }

@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-#include "rocRoller/GPUArchitecture/GPUInstructionInfo.hpp"
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
 
 #include <rocRoller/KernelOptions_detail.hpp>
@@ -328,7 +328,6 @@ namespace rocRoller
                 {
                     GPUWaitQueueType queueType = static_cast<GPUWaitQueueType>(i);
                     GPUWaitQueue     queue     = fromWaitQueueType(queueType);
-                    // auto queueIdx = static_cast<size_t>(queue);
 
                     if(queuesToEmpty[queueType])
                     {

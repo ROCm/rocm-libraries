@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2026 AMD ROCm(TM) Software
+ * Copyright 2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-#include "rocRoller/AssemblyKernelArgument.hpp"
+#include <rocRoller/AssemblyKernelArgument.hpp>
 #include <rocRoller/KernelGraph/Transforms/SortArguments.hpp>
 #include <rocRoller/KernelGraph/Transforms/SortArguments_detail.hpp>
 
