@@ -110,7 +110,7 @@ namespace rocRoller
         if(value == nullptr || value->registerCount() < totalRegisters)
         {
             auto options = Register::AllocationOptions::FullyContiguous();
-            if(totalRegisters > 4)
+            if(totalRegisters >= 4)
                 options.alignment = 4;
             else if(totalRegisters > 2)
                 options.alignment = 2;

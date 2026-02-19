@@ -567,8 +567,6 @@ namespace ArgumentLoaderGPUTest
             {
                 co_yield Instruction::Comment("No result expression");
             }
-
-            co_yield_(Instruction("s_endpgm", {}, {}, {}, "End program"));
         };
 
         m_context->schedule(k->preamble());
