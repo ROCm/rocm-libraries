@@ -52,7 +52,7 @@
 #include "CustomSections.hpp"
 #include "TestContext.hpp"
 
-namespace MemAddressingTest
+namespace ModelAddressesTest
 {
     using namespace rocRoller;
     using namespace rocRoller::KernelGraph;
