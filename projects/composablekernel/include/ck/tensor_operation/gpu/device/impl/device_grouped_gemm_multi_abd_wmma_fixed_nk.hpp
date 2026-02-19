@@ -21,6 +21,7 @@
 #include "ck/tensor_operation/gpu/device/device_grouped_gemm_multi_abd_fixed_nk.hpp"
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_abd_wmma_cshuffle_v3.hpp"
+#include "ck/tensor_operation/gpu/grid/epilogue_type.hpp"
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
 
@@ -56,12 +57,14 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                       const CDEElementwiseOperation cde_element_op)
 {
 #if defined(__gfx11__) || defined(__gfx12__)
-    using EpilogueType = typename std::conditional<GridwiseGemm::IsBWaveTransferApplicable &&
-                                                       GridwiseGemm::UseDirectStore,
-                                                   typename GridwiseGemm::EpilogueDirectStore,
-                                                   typename GridwiseGemm::EpilogueCShuffle>::type;
+    constexpr auto epilogue_type =
+        GridwiseGemm::IsBWaveTransferApplicable && GridwiseGemm::UseDirectStore
+            ? EpilogueType::DirectStore
+            : EpilogueType::CShuffle;
+    using SelectedEpilogue = get_epilogue_t<epilogue_type, GridwiseGemm>;
 
-    constexpr index_t LDS_size = GridwiseGemm::template GetSharedMemoryNumberOfByte<EpilogueType>();
+    constexpr index_t LDS_size =
+        GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>();
     __shared__ char p_shared[LDS_size];
 
     const index_t KBatch = 1;
@@ -138,13 +141,13 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             const auto block_2_etile_map =
                 GroupedGemmBlock2ETileMap(local_b2e_tile_map, BlockStart, id_off);
 
-            auto epilogue_args = EpilogueType{};
+            auto epilogue_args = SelectedEpilogue{};
 
             GridwiseGemm::template Run<HasMainKBlockLoop,
                                        EGlobalMemoryDataOperation,
                                        TailNum,
                                        decltype(block_2_etile_map),
-                                       EpilogueType,
+                                       SelectedEpilogue,
                                        1,
                                        2>(
                 p_as_grid_,
