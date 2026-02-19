@@ -133,7 +133,7 @@ It output this `results.json`:
 ```json
 {
     "context": {
-        "results_version": "1.0.0",
+        "results_version": "2.0.0",
         "general": {
             "algorithm": "copy",
             "specialization_count": 2,
