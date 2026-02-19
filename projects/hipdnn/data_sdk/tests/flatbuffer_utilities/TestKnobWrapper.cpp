@@ -13,10 +13,11 @@ using namespace hipdnn_data_sdk::flatbuffer_utilities;
 class TestKnobWrapper : public ::testing::Test
 {
 protected:
+    // Note: default_value is now required in the schema, so all knobs must have a default value
     static flatbuffers::DetachedBuffer createKnob(const std::string& knobIdStr,
                                                   const std::string& description,
                                                   bool deprecated = false,
-                                                  bool withDefaultValue = true,
+                                                  int64_t defaultValue = 100,
                                                   bool withConstraint = false)
     {
         flatbuffers::FlatBufferBuilder builder;
@@ -24,16 +25,8 @@ protected:
         auto knobIdStrOffset = builder.CreateString(knobIdStr);
         auto descOffset = builder.CreateString(description);
 
-        flatbuffers::Offset<void> defaultValueOffset;
-        hipdnn_data_sdk::data_objects::KnobValue defaultValueType
-            = hipdnn_data_sdk::data_objects::KnobValue::NONE;
-
-        if(withDefaultValue)
-        {
-            auto defaultVal = hipdnn_data_sdk::data_objects::CreateIntValue(builder, 100);
-            defaultValueOffset = defaultVal.Union();
-            defaultValueType = hipdnn_data_sdk::data_objects::KnobValue::IntValue;
-        }
+        // default_value is required - always create one
+        auto defaultVal = hipdnn_data_sdk::data_objects::CreateIntValue(builder, defaultValue);
 
         flatbuffers::Offset<void> constraintOffset;
         hipdnn_data_sdk::data_objects::KnobConstraint constraintType
@@ -53,11 +46,9 @@ protected:
         knobBuilder.add_description(descOffset);
         knobBuilder.add_deprecated(deprecated);
 
-        if(withDefaultValue)
-        {
-            knobBuilder.add_default_value_type(defaultValueType);
-            knobBuilder.add_default_value(defaultValueOffset);
-        }
+        // default_value is required - always set it
+        knobBuilder.add_default_value_type(hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+        knobBuilder.add_default_value(defaultVal.Union());
 
         if(withConstraint)
         {
@@ -167,7 +158,7 @@ TEST_F(TestKnobWrapper, ConstructFromFlatbufferPointer)
 
     KnobWrapper wrapper(knob);
     EXPECT_TRUE(wrapper.isValid());
-    EXPECT_EQ(wrapper.knobIdStr(), "KNOB_42");
+    EXPECT_EQ(wrapper.knobId(), "KNOB_42");
     EXPECT_EQ(wrapper.description(), "Test knob");
 }
 
@@ -177,7 +168,7 @@ TEST_F(TestKnobWrapper, ConstructFromBuffer)
 
     KnobWrapper wrapper(buffer.data(), buffer.size());
     EXPECT_TRUE(wrapper.isValid());
-    EXPECT_EQ(wrapper.knobIdStr(), "KNOB_42");
+    EXPECT_EQ(wrapper.knobId(), "KNOB_42");
     EXPECT_EQ(wrapper.description(), "Test knob");
 }
 
@@ -201,11 +192,11 @@ TEST_F(TestKnobWrapper, ConstructFromInvalidBuffer)
     EXPECT_FALSE(wrapper.isValid());
 }
 
-TEST_F(TestKnobWrapper, GetKnobIdStrFromValidWrapper)
+TEST_F(TestKnobWrapper, GetKnobIdFromValidWrapper)
 {
     auto buffer = createKnob("CUSTOM_KNOB_NAME", "Test");
     KnobWrapper wrapper(buffer.data(), buffer.size());
-    EXPECT_EQ(wrapper.knobIdStr(), "CUSTOM_KNOB_NAME");
+    EXPECT_EQ(wrapper.knobId(), "CUSTOM_KNOB_NAME");
 }
 
 TEST_F(TestKnobWrapper, GetDescriptionFromValidWrapper)
@@ -235,19 +226,16 @@ TEST_F(TestKnobWrapper, IsDeprecated)
 
 TEST_F(TestKnobWrapper, HasDefaultValue)
 {
-    auto buffer1 = createKnob("KNOB_42", "Test", false, true);
-    KnobWrapper wrapper1(buffer1.data(), buffer1.size());
-    EXPECT_TRUE(wrapper1.hasDefaultValue());
-    EXPECT_EQ(wrapper1.defaultValueType(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
-
-    auto buffer2 = createKnob("KNOB_42", "Test", false, false);
-    KnobWrapper wrapper2(buffer2.data(), buffer2.size());
-    EXPECT_FALSE(wrapper2.hasDefaultValue());
+    // default_value is now required, so all valid knobs have a default value
+    auto buffer = createKnob("KNOB_42", "Test", false);
+    KnobWrapper wrapper(buffer.data(), buffer.size());
+    EXPECT_TRUE(wrapper.hasDefaultValue());
+    EXPECT_EQ(wrapper.defaultValueType(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
 }
 
 TEST_F(TestKnobWrapper, DefaultValueAsIntValue)
 {
-    auto buffer = createKnob("KNOB_42", "Test", false, true, false);
+    auto buffer = createKnob("KNOB_42", "Test", false, 100, false);
     KnobWrapper wrapper(buffer.data(), buffer.size());
 
     EXPECT_TRUE(wrapper.hasDefaultValue());
@@ -268,7 +256,7 @@ TEST_F(TestKnobWrapper, DefaultValueAsFloatValue)
 
 TEST_F(TestKnobWrapper, DefaultValueAsTypeMismatchThrows)
 {
-    auto buffer = createKnob("KNOB_42", "Test", false, true, false);
+    auto buffer = createKnob("KNOB_42", "Test", false, 100, false);
     KnobWrapper wrapper(buffer.data(), buffer.size());
 
     // Default value is IntValue, trying to get as FloatValue should throw
@@ -280,20 +268,20 @@ TEST_F(TestKnobWrapper, DefaultValueAsTypeMismatchThrows)
 
 TEST_F(TestKnobWrapper, HasConstraints)
 {
-    auto buffer1 = createKnob("KNOB_42", "Test", false, true, true);
+    auto buffer1 = createKnob("KNOB_42", "Test", false, 100, true);
     KnobWrapper wrapper1(buffer1.data(), buffer1.size());
     EXPECT_TRUE(wrapper1.hasConstraint());
     EXPECT_EQ(wrapper1.constraintType(),
               hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint);
 
-    auto buffer2 = createKnob("KNOB_42", "Test", false, true, false);
+    auto buffer2 = createKnob("KNOB_42", "Test", false, 100, false);
     KnobWrapper wrapper2(buffer2.data(), buffer2.size());
     EXPECT_FALSE(wrapper2.hasConstraint());
 }
 
 TEST_F(TestKnobWrapper, ConstraintsAsIntConstraint)
 {
-    auto buffer = createKnob("KNOB_42", "Test", false, true, true);
+    auto buffer = createKnob("KNOB_42", "Test", false, 100, true);
     KnobWrapper wrapper(buffer.data(), buffer.size());
 
     EXPECT_TRUE(wrapper.hasConstraint());
@@ -306,7 +294,7 @@ TEST_F(TestKnobWrapper, ConstraintsAsIntConstraint)
 
 TEST_F(TestKnobWrapper, ConstraintsAsTypeMismatchThrows)
 {
-    auto buffer = createKnob("KNOB_42", "Test", false, true, true);
+    auto buffer = createKnob("KNOB_42", "Test", false, 100, true);
     KnobWrapper wrapper(buffer.data(), buffer.size());
 
     // Constraint is IntConstraint, trying to get as FloatConstraint should throw
@@ -331,7 +319,7 @@ TEST_F(TestKnobWrapper, AccessMethodsOnInvalidWrapperThrow)
     KnobWrapper wrapper(nullptr, 0);
     EXPECT_FALSE(wrapper.isValid());
 
-    EXPECT_THROW(wrapper.knobIdStr(), std::invalid_argument);
+    EXPECT_THROW(wrapper.knobId(), std::invalid_argument);
     EXPECT_THROW(wrapper.description(), std::invalid_argument);
     EXPECT_THROW(wrapper.defaultValueType(), std::invalid_argument);
     EXPECT_THROW(wrapper.isDeprecated(), std::invalid_argument);
@@ -348,32 +336,33 @@ TEST_F(TestKnobWrapper, EmptyStringsHandling)
     KnobWrapper wrapper(buffer.data(), buffer.size());
 
     EXPECT_TRUE(wrapper.isValid());
-    EXPECT_EQ(wrapper.knobIdStr(), "");
+    EXPECT_EQ(wrapper.knobId(), "");
     EXPECT_EQ(wrapper.description(), "");
 }
 
 TEST_F(TestKnobWrapper, MultipleDifferentKnobs)
 {
     // Test that wrapper correctly handles different knob configurations
-    auto buffer1 = createKnob("KNOB_1", "First", false, true, false);
-    auto buffer2 = createKnob("KNOB_2", "Second", true, false, false);
-    auto buffer3 = createKnob("KNOB_3", "Third", false, true, true);
+    // Note: default_value is now required, so all knobs have a default value
+    auto buffer1 = createKnob("KNOB_1", "First", false, 50, false);
+    auto buffer2 = createKnob("KNOB_2", "Second", true, 75, false);
+    auto buffer3 = createKnob("KNOB_3", "Third", false, 100, true);
 
     KnobWrapper wrapper1(buffer1.data(), buffer1.size());
     KnobWrapper wrapper2(buffer2.data(), buffer2.size());
     KnobWrapper wrapper3(buffer3.data(), buffer3.size());
 
-    EXPECT_EQ(wrapper1.knobIdStr(), "KNOB_1");
+    EXPECT_EQ(wrapper1.knobId(), "KNOB_1");
     EXPECT_TRUE(wrapper1.hasDefaultValue());
     EXPECT_FALSE(wrapper1.hasConstraint());
     EXPECT_FALSE(wrapper1.isDeprecated());
 
-    EXPECT_EQ(wrapper2.knobIdStr(), "KNOB_2");
-    EXPECT_FALSE(wrapper2.hasDefaultValue());
+    EXPECT_EQ(wrapper2.knobId(), "KNOB_2");
+    EXPECT_TRUE(wrapper2.hasDefaultValue());
     EXPECT_FALSE(wrapper2.hasConstraint());
     EXPECT_TRUE(wrapper2.isDeprecated());
 
-    EXPECT_EQ(wrapper3.knobIdStr(), "KNOB_3");
+    EXPECT_EQ(wrapper3.knobId(), "KNOB_3");
     EXPECT_TRUE(wrapper3.hasDefaultValue());
     EXPECT_TRUE(wrapper3.hasConstraint());
     EXPECT_FALSE(wrapper3.isDeprecated());

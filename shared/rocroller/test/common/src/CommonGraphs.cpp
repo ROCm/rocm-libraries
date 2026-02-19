@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@
 
 namespace rocRollerTest::Graphs
 {
+    namespace SolutionParams = rocRoller::Parameters::Solution;
     using namespace rocRoller;
 
     /*
@@ -159,7 +160,6 @@ namespace rocRollerTest::Graphs
                                            GetMemoryType(SolutionParams::LoadPath::BufferToVGPR));
             params->setDimensionInfo(m_tagScaleA, macTileScaleA);
         }
-
         {
             auto macTileB = MacroTile({m_macK, m_macN},
                                       LayoutType::MATRIX_B,
@@ -363,7 +363,8 @@ namespace rocRollerTest::Graphs
                                 : SolutionParams::LoadPath::BufferToVGPR;
         m_problem.loadPathB = b ? SolutionParams::LoadPath::BufferToLDSViaVGPR
                                 : SolutionParams::LoadPath::BufferToVGPR;
-        m_problem.storeLDSD = d;
+        m_problem.storePath = d ? SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer
+                                : SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
     }
 
     void GEMM::setPrefetch(bool prefetch,
@@ -379,10 +380,8 @@ namespace rocRollerTest::Graphs
         m_problem.unrollK = std::max(2, prefetchInFlight);
     }
 
-    void GEMM::setUnroll(unsigned int unrollX, unsigned int unrollY, unsigned int unrollK)
+    void GEMM::setUnroll(unsigned int unrollK)
     {
-        m_problem.unrollX = unrollX;
-        m_problem.unrollY = unrollY;
         m_problem.unrollK = unrollK;
     }
 
@@ -490,11 +489,13 @@ namespace rocRollerTest::Graphs
             = MacroTile({m_problem.macM, m_problem.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB});
-        auto macTileD
-            = MacroTile({m_problem.macM, m_problem.macN},
-                        LayoutType::MATRIX_ACCUMULATOR,
-                        {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB},
-                        m_problem.storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+        auto macTileD = MacroTile(
+            {m_problem.macM, m_problem.macN},
+            LayoutType::MATRIX_ACCUMULATOR,
+            {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB},
+            m_problem.storePath == SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer
+                ? MemoryType::WAVE_LDS
+                : MemoryType::WAVE);
 
         params->setDimensionInfo(m_tagA, macTileA);
 
@@ -615,8 +616,6 @@ namespace rocRollerTest::Graphs
         params->fuseLoops                     = m_problem.fuseLoops;
         params->tailLoops                     = m_problem.tailLoops;
         params->allowAmbiguousMemoryNodes     = m_problem.allowAmbiguousMemoryNodes;
-        params->unrollX                       = m_problem.unrollX;
-        params->unrollY                       = m_problem.unrollY;
         params->unrollK                       = m_problem.unrollK;
         params->packMultipleElementsInto1VGPR = m_problem.packMultipleElementsInto1VGPR;
         params->prefetch                      = m_problem.prefetch;

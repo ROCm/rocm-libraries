@@ -25,6 +25,14 @@ public:
         // Check and clear standard HIP error state
         auto hipError = hipGetLastError();
 
+        // Special case: hipErrorNoDevice cannot be cleared and persists even after
+        // hipGetLastError() is called. In non-GPU environments, we should not fail
+        // the test for this specific error.
+        if(hipError == hipErrorNoDevice)
+        {
+            return;
+        }
+
         // Check and clear extended HIP error state
         auto hipExtError = hipExtGetLastError();
 

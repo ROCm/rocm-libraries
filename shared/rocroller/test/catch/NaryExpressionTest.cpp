@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -128,14 +128,14 @@ namespace ExpressionTest
         {
             auto k = m_context->kernel();
 
-            k->addArgument({.name          = "result",
-                            .variableType  = {m_resultDataType, PointerType::PointerGlobal},
-                            .dataDirection = DataDirection::WriteOnly});
+            k->addArgument({"result",
+                            {m_resultDataType, PointerType::PointerGlobal},
+                            DataDirection::WriteOnly});
             for(int i = 0; i < m_operandNumber; ++i)
             {
-                k->addArgument({.name          = "operand" + std::to_string(i),
-                                .variableType  = {m_operandDataTypes[i], PointerType::Value},
-                                .dataDirection = DataDirection::ReadOnly});
+                k->addArgument({"operand" + std::to_string(i),
+                                {m_operandDataTypes[i], PointerType::Value},
+                                DataDirection::ReadOnly});
             }
 
             m_context->schedule(k->preamble());

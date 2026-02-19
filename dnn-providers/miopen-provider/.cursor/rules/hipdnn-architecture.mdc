@@ -37,7 +37,7 @@ FlatBuffer Graph → Engine Selection → Plan Creation → GPU Execution
 
 - **Plugin uses**: Plugin SDK (header-only), Data SDK (header-only), MIOpen library
 - **Plugin SDK uses**: Data SDK
-- **Data SDK uses**: FlatBuffers, spdlog
+- **Data SDK uses**: FlatBuffers
 - **No direct dependencies** on hipDNN Backend or Frontend
 
 ## Key Classes

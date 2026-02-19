@@ -16,11 +16,6 @@ add_library(hipdnn_test_sdk INTERFACE)
 # Generate version header
 hipdnn_generate_version_header(hipdnn_test_sdk)
 
-# Add generated include directory for build interface
-target_include_directories(
-    hipdnn_test_sdk INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-)
-
 target_link_libraries(hipdnn_test_sdk INTERFACE hipdnn_data_sdk hipdnn_frontend)
 
 set(HIP_DNN_TEST_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/test_sdk")

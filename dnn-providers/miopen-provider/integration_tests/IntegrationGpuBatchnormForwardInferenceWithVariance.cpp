@@ -15,6 +15,7 @@
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_plugin::test_utilities;
@@ -28,7 +29,7 @@ class BatchnormForwardInferenceWithVariance
     : public IntegrationGraphVerificationHarness<DataType, BatchnormTestCase>
 {
 protected:
-    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
+    void runGraphTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         const BatchnormTestCase& testCase = this->GetParam();
 
@@ -44,25 +45,25 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xAttr = graph::makeTensorAttributes(
+        auto xAttr = makeTensorAttributes(
             "X", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
-        auto meanAttr = graph::makeTensorAttributes(
+        auto meanAttr = makeTensorAttributes(
             "mean", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
-        auto varianceAttr = graph::makeTensorAttributes(
+        auto varianceAttr = makeTensorAttributes(
             "variance", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto varianceTensorAttr
             = std::make_shared<graph::TensorAttributes>(std::move(varianceAttr));
 
-        auto scaleAttr = graph::makeTensorAttributes(
+        auto scaleAttr = makeTensorAttributes(
             "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
-        auto biasAttr = graph::makeTensorAttributes(
+        auto biasAttr = makeTensorAttributes(
             "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
@@ -92,7 +93,7 @@ using IntegrationGpuBatchnormForwardInferenceWithVarianceNchwFp32
     = BatchnormForwardInferenceWithVariance<float, float>;
 
 using IntegrationGpuBatchnormForwardInferenceWithVarianceNchwBfp16
-    = BatchnormForwardInferenceWithVariance<hip_bfloat16, float>;
+    = BatchnormForwardInferenceWithVariance<bfloat16, float>;
 
 using IntegrationGpuBatchnormForwardInferenceWithVarianceNchwFp16
     = BatchnormForwardInferenceWithVariance<half, float>;
@@ -101,7 +102,7 @@ using IntegrationGpuBatchnormForwardInferenceWithVarianceNhwcFp32
     = BatchnormForwardInferenceWithVariance<float, float>;
 
 using IntegrationGpuBatchnormForwardInferenceWithVarianceNhwcBfp16
-    = BatchnormForwardInferenceWithVariance<hip_bfloat16, float>;
+    = BatchnormForwardInferenceWithVariance<bfloat16, float>;
 
 using IntegrationGpuBatchnormForwardInferenceWithVarianceNhwcFp16
     = BatchnormForwardInferenceWithVariance<half, float>;
@@ -110,7 +111,7 @@ using IntegrationGpuBatchnormForwardInferenceWithVarianceNcdhwFp32
     = BatchnormForwardInferenceWithVariance<float, float>;
 
 using IntegrationGpuBatchnormForwardInferenceWithVarianceNcdhwBfp16
-    = BatchnormForwardInferenceWithVariance<hip_bfloat16, float>;
+    = BatchnormForwardInferenceWithVariance<bfloat16, float>;
 
 using IntegrationGpuBatchnormForwardInferenceWithVarianceNcdhwFp16
     = BatchnormForwardInferenceWithVariance<half, float>;
@@ -119,7 +120,7 @@ using IntegrationGpuBatchnormForwardInferenceWithVarianceNdhwcFp32
     = BatchnormForwardInferenceWithVariance<float, float>;
 
 using IntegrationGpuBatchnormForwardInferenceWithVarianceNdhwcBfp16
-    = BatchnormForwardInferenceWithVariance<hip_bfloat16, float>;
+    = BatchnormForwardInferenceWithVariance<bfloat16, float>;
 
 using IntegrationGpuBatchnormForwardInferenceWithVarianceNdhwcFp16
     = BatchnormForwardInferenceWithVariance<half, float>;
@@ -141,7 +142,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceNchwBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NCHW);
+    runGraphTest(batchnorm::getToleranceInference<bfloat16>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -180,7 +181,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceNhwcBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NHWC);
+    runGraphTest(batchnorm::getToleranceInference<bfloat16>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -215,7 +216,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceNcdhwBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NCDHW);
+    runGraphTest(batchnorm::getToleranceInference<bfloat16>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -242,7 +243,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceNdhwcBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NDHWC);
+    runGraphTest(batchnorm::getToleranceInference<bfloat16>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,

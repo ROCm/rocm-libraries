@@ -182,7 +182,7 @@
     SolutionNameMin: Cijk_Alik_Bjlk_HHS_BH_Bias_BiasSrcD_Grad_HAH_SAV_MT128x256x32_MI32x32x8x1_SN_AFC1_AF0EM1_GSU1_MIWT2_4
     SourceSwap: 1
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: 1
     StoreRemapVectorWidth: 0
@@ -344,7 +344,7 @@
     SolutionNameMin: Cijk_Alik_Bjlk_HHS_BH_Bias_BiasSrcD_Grad_HAH_SAV_MT128x256x32_MI32x32x8x1_SN_AFC1_AF0EM8_GSU1_MIWT2_4
     SourceSwap: 1
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: 1
     StoreRemapVectorWidth: 0

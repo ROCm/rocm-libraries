@@ -14,6 +14,7 @@
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "MiopenExecutionSettings.hpp"
 
 namespace miopen_plugin
 {
@@ -24,22 +25,29 @@ public:
     virtual ~IPlanBuilder() = default;
 
     virtual bool isApplicable(const HipdnnEnginePluginHandle& handle,
-                              const hipdnn_plugin_sdk::IGraph& opGraph) const
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
-    virtual size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                    const hipdnn_plugin_sdk::IGraph& opGraph) const
+    virtual size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+                                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                                       const MiopenExecutionSettings& executionSettings) const
+        = 0;
+
+    virtual void initializeExecutionSettings(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        MiopenExecutionSettings& executionSettings) const
         = 0;
 
     virtual void buildPlan(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_plugin_sdk::IGraph& opGraph,
-                           [[maybe_unused]] const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                            HipdnnEnginePluginExecutionContext& executionContext) const
         = 0;
 
     virtual std::vector<hipdnn_data_sdk::data_objects::KnobT>
         getCustomKnobs(const HipdnnEnginePluginHandle& handle,
-                       const hipdnn_plugin_sdk::IGraph& opGraph) const
+                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 };
 }

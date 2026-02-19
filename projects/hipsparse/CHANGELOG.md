@@ -19,6 +19,7 @@ Documentation for hipSPARSE is available at
 * In `hipsparseSpSM_solve()`, the external buffer is passed as a parameter, which does not match the NVIDIA CUDA cuSPARSE API. The `hipsparseSpSM_solve_ex()` routine has been added to properly match the
 NVIDIA CUDA cuSPARSE `cusparseSpSM_solve()` API. The original `hipsparseSpSM_solve()` routine has been 
 deprecated and will be removed in a future release.
+* Fixed an issue where out-of-bounds memory reads can occur in the single precision bsrxmv kernels when `block_dim` equals `5` or `8`.
 
 ### Upcoming changes
 * The routine `hipsparseSpSM_solve()` has been deprecated and will be removed in a future release. 

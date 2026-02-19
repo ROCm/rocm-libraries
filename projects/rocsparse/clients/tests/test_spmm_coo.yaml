@@ -41,12 +41,6 @@ Definitions:
     - { alpha:   1.0, beta:  0.0, alphai:  0.0, betai:  0.0 }
 
 Tests:
-- name: spmm_coo_bad_arg
-  category: pre_checkin
-  function: spmm_coo_bad_arg
-  indextype: *i32_i64
-  precision: *single_double_precisions
-
 # ##############################
 # # Quick
 # ##############################
@@ -178,6 +172,9 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_segmented]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_coo
   category: quick
@@ -195,9 +192,12 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_segmented_atomic]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_coo
-  category: quickly
+  category: quick
   function: spmm_coo
   indextype: *i32
   precision: *float16_float16_float32_float32_abct_precision
@@ -233,6 +233,12 @@ Tests:
 ##############################
 # Precheckin
 ##############################
+- name: spmm_coo_bad_arg
+  category: pre_checkin
+  function: spmm_coo_bad_arg
+  indextype: *i32_i64
+  precision: *single_double_precisions
+
 - name: spmm_coo
   category: pre_checkin
   function: spmm_coo
@@ -256,7 +262,7 @@ Tests:
   indextype: *i32_i64
   precision: *single_double_precisions
   M: [2000]
-  N: [9, 10]
+  N: [9, 10, 13]
   K: [4441]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -293,7 +299,7 @@ Tests:
   indextype: *i32_i64
   precision: *double_only_precisions
   M: 1
-  N: [7]
+  N: [150, 200, 256]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -398,6 +404,9 @@ Tests:
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_column]
   filename: [mplate]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_coo
   category: pre_checkin
@@ -618,6 +627,9 @@ Tests:
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
   filename: [bmwcra_1]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_coo
   category: nightly
