@@ -867,10 +867,8 @@ void CheckFDBEntry(size_t thread_index,
                         bool found                  = false;
                         std::string compile_options = kern.comp_options;
                         auto program_file = miopen::make_object_file_name(kern.kernel_file);
-                        {
-                            auto& handle = ctx.GetStream();
-                            compile_options += " -mcpu=" + handle.GetDeviceName();
-                        }
+                        auto& handle      = ctx.GetStream();
+                        compile_options += " -mcpu=" + handle.GetDeviceName();
                         auto search           = checked_kdbs.find({program_file, compile_options});
                         bool reported_already = search != checked_kdbs.end();
                         if(!reported_already) // we have reported this object before, no need to
