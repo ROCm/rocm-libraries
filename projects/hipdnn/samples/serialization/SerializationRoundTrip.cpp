@@ -45,7 +45,7 @@ bool testJsonSerialization(const graph::Graph& originalGraph,
                            hipdnnHandle_t handle,
                            utilities::Tensor<InputType>& xTensor,
                            utilities::Tensor<InputType>& wTensor,
-                           const utilities::Tensor<InputType>& yOriginal,
+                           utilities::Tensor<InputType>& yOriginal,
                            TensorLayout layout)
 {
     std::cout << "\n--- Testing JSON serialization/deserialization ---\n";
@@ -88,7 +88,7 @@ bool testBinarySerialization(const graph::Graph& originalGraph,
                              hipdnnHandle_t handle,
                              utilities::Tensor<InputType>& xTensor,
                              utilities::Tensor<InputType>& wTensor,
-                             const utilities::Tensor<InputType>& yOriginal,
+                             utilities::Tensor<InputType>& yOriginal,
                              TensorLayout layout)
 {
     std::cout << "\n--- Testing binary serialization/deserialization ---\n";
