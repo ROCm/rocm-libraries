@@ -350,7 +350,7 @@ RUN apt-get update && apt-get install -y \
 
 # Use update-alternatives to set default versions
 RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
-RUN update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
+RUN update-alternatives --install /opt/rocm/llvm/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
 
 ENV HIP_PLATFORM=amd
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
