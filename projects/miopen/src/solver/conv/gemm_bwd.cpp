@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/conv/solvers.hpp>
 
@@ -36,7 +13,7 @@
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/gemm_common.hpp>
 
-#include <boost/range/adaptors.hpp>
+#include <ranges>
 
 namespace miopen {
 namespace solver {
@@ -118,7 +95,7 @@ float GemmBwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     std::size_t in_n, in_c;
     std::tie(in_n, in_c)    = tie_pick<0, 1>()(dxDesc.GetLengths());
     std::size_t spatial_dim = conv.GetSpatialDimension();
-    auto wei_spatial        = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
+    auto wei_spatial = wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     // 1x1 does not require col2im
     if(conv.GetSpatialDimension() == 2 &&
@@ -169,7 +146,7 @@ size_t GemmBwd1x1_stride2::GetWorkspaceSize(const ExecutionContext& context,
     const auto in_c = dxDesc.GetLengths()[1];
 
     const auto out_spatial =
-        boost::adaptors::slice(dyDesc.GetLengths(), 2, 2 + conv.GetSpatialDimension());
+        dyDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
 
     const auto dx_t_size = in_n * in_c *
                            std::accumulate(out_spatial.begin(),
@@ -207,7 +184,8 @@ bool GemmBwd1x1_stride2::IsApplicable(const ExecutionContext& context,
     const auto& wDesc = problem.GetWeights();
 
     const auto spatial_dim = conv.GetSpatialDimension();
-    const auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
+    const auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     return conv.GetSpatialDimension() == 2 &&
            miopen::all_of(wei_spatial, [](auto v) { return v == 1; }) &&
@@ -252,13 +230,15 @@ ConvSolution GemmBwd1x1_stride2::GetSolution(const ExecutionContext& context,
     std::size_t in_n, in_c;
     std::tie(in_n, in_c) = tie_pick<0, 1>()(dxDesc.GetLengths());
 
-    const auto wei_k        = wDesc.GetLengths()[0];
-    const auto spatial_dim  = conv.GetSpatialDimension();
-    const auto in_spatial_  = boost::adaptors::slice(dxDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto out_spatial_ = boost::adaptors::slice(dyDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto in_spatial   = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
-    const auto out_spatial  = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
-    const auto strides      = conv.GetConvStrides();
+    const auto wei_k       = wDesc.GetLengths()[0];
+    const auto spatial_dim = conv.GetSpatialDimension();
+    const auto in_spatial_ =
+        dxDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto out_spatial_ =
+        dyDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto in_spatial  = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
+    const auto out_spatial = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
+    const auto strides     = conv.GetConvStrides();
 
     const auto workspace_req = GetWorkspaceSize(context, problem);
 
@@ -408,7 +388,8 @@ bool GemmBwd1x1_stride1::IsApplicable(const ExecutionContext& context,
     const auto& wDesc = problem.GetWeights();
 
     const auto spatial_dim = conv.GetSpatialDimension();
-    const auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
+    const auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     return miopen::all_of(wei_spatial, [](auto v) { return v == 1; }) &&
            miopen::all_of(conv.GetConvPads(), [](auto v) { return v == 0; }) &&
@@ -464,9 +445,10 @@ ConvSolution GemmBwd1x1_stride1::GetSolution(const ExecutionContext&,
             const auto in_c  = dxDesc.GetLengths()[1];
             const auto wei_k = wDesc.GetLengths()[0];
 
-            const auto in_spatial = boost::adaptors::slice(dxDesc.GetLengths(), 2, 2 + spatial_dim);
+            const auto in_spatial =
+                dxDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
             const auto out_spatial =
-                boost::adaptors::slice(dyDesc.GetLengths(), 2, 2 + spatial_dim);
+                dyDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
             std::size_t out_spatial_size = std::accumulate(out_spatial.begin(),
                                                            out_spatial.end(),
@@ -552,8 +534,10 @@ size_t GemmBwdRest::GetWorkspaceSize(const ExecutionContext& context,
 
     const auto spatial_dim = conv.GetSpatialDimension();
 
-    const auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, 2 + spatial_dim);
+    const auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto out_spatial =
+        dyDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     const auto wei_c = wDesc.GetLengths()[1];
 
@@ -610,13 +594,16 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
 
     const auto group_count = conv.group_count;
 
-    const auto spatial_dim  = conv.GetSpatialDimension();
-    const auto in_spatial_  = boost::adaptors::slice(dxDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto wei_spatial_ = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto out_spatial_ = boost::adaptors::slice(dyDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto in_spatial   = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
-    const auto wei_spatial  = std::vector<std::size_t>(wei_spatial_.begin(), wei_spatial_.end());
-    const auto out_spatial  = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
+    const auto spatial_dim = conv.GetSpatialDimension();
+    const auto in_spatial_ =
+        dxDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto wei_spatial_ =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto out_spatial_ =
+        dyDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto in_spatial  = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
+    const auto wei_spatial = std::vector<std::size_t>(wei_spatial_.begin(), wei_spatial_.end());
+    const auto out_spatial = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
 
     // dx = transpose(w) * dy
     const auto tmp_gemm_desc = [&]() {
