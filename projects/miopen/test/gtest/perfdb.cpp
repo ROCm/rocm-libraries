@@ -61,6 +61,7 @@ using namespace miopen;
 using miopen::tests::g_argc;
 using miopen::tests::g_argv;
 
+#if MIOPEN_EMBED_DB
 struct TestRordbEmbedFsOverrideLock
 {
     TestRordbEmbedFsOverrideLock() : cached(debug::rordb_embed_fs_override())
@@ -73,6 +74,7 @@ struct TestRordbEmbedFsOverrideLock
 private:
     bool cached;
 };
+#endif
 
 static fs::path& exe_path()
 {
@@ -1408,8 +1410,6 @@ class DbMultiFileMultiThreadedTest : public DbMultiFileTest
 {
 public:
     DbMultiFileMultiThreadedTest(TempFile& temp_file_) : DbMultiFileTest(temp_file_) {}
-
-    static constexpr const char* logs_path_arg = "thread-logs-root";
 
     void Run() const
     {
