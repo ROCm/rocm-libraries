@@ -741,17 +741,14 @@ namespace TensileLite
                                   size_t                  totalElements,
                                   hipMemcpyKind           kind)
         {
-	    auto const info = DataTypeInfo::Get(descriptor.dataType());
+            auto const info = DataTypeInfo::Get(descriptor.dataType());
             HIP_CHECK_EXC(
                 hipMemcpy(dst,
                           src,
-			  totalElements * info.elementSize / info.packing,
-                          //multiplyElementSize(totalElements,
-                          //                    DataTypeInfo::Get(descriptor.dataType()).elementSize),
+                          totalElements * info.elementSize / info.packing,
                           kind));
             ptrdiff_t dPadding = totalElements - descriptor.totalAllocatedElements();
-            //dPadding           = multiplyElementSize(dPadding, descriptor.elementBytes());
-            dPadding           *= descriptor.elementBytes(); // multiplyElementSize(dPadding, descriptor.elementBytes());
+            dPadding           *= descriptor.elementBytes();
             void* dstOffset    = (void*)((uint8_t*)dst + dPadding / 2);
             TensileLite::hip::CopyTensorVoid(dstOffset, src, descriptor, kind);
             return dstOffset;
@@ -770,9 +767,7 @@ namespace TensileLite
             const size_t    numElementsToCopy
                 = (customPadding == -1) ? descriptor.totalAllocatedElements()
                                         : (descriptor.totalAllocatedElements() + customPadding);
-            uint8_t* dstOffset
-                = (uint8_t*)dst + dPadding * descriptor.elementBytes();
-                //= (uint8_t*)dst + multiplyElementSize(dPadding, descriptor.elementBytes());
+            uint8_t* dstOffset = (uint8_t*)dst + dPadding * descriptor.elementBytes();
             HIP_CHECK_EXC(
                 hipMemcpy(dstOffset,
                           src,

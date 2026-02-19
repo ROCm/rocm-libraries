@@ -90,7 +90,7 @@ namespace TensileLite
         std::string      name;
         std::string      abbrev;
 
-        size_t  elementSize;
+        size_t elementSize;
         size_t packing;
         size_t segmentSize;
 
@@ -133,8 +133,8 @@ namespace TensileLite
         /// Segments per element.
         constexpr static size_t Packing = T_Packing;
         /// Bytes per segment.
-	/// TODO: this needs to be enhanced as the value would be
-	///       0 for MX data type, FP4: ElementSize=1 byte, Packing=2.
+        /// TODO: this needs to be enhanced as the value would be
+        ///       0 for MX data type, FP4: ElementSize=1 byte, Packing=2.
         constexpr static size_t SegmentSize = ElementSize / Packing;
 
         constexpr static bool IsComplex  = T_IsComplex;
