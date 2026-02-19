@@ -226,20 +226,13 @@ namespace TensileLite
             {
                 // An Or predicate is a fallback match if ALL matching children are fallback matches
                 bool hasMatch = false;
-                bool allMatchesAreFallback = true;
-                for(auto const& pred : value)
-                {
-                    if((*pred)(obj))
-                    {
-                        hasMatch = true;
-                        if(!pred->isFallbackMatch(obj))
-                        {
-                            allMatchesAreFallback = false;
-                            break;
-                        }
-                    }
-                }
-                return hasMatch && allMatchesAreFallback;
+                bool allMatchesAreFallback = std::all_of(value.begin(), value.end(), [&obj, &hasMatch](auto const& pred) {
+                    if(!(*pred)(obj))
+                        return true;
+                    hasMatch = true;
+                    return pred->isFallbackMatch(obj);
+                });
+                return allMatchesAreFallback && hasMatch;
             }
 
             virtual bool debugEval(Object const& obj, std::ostream& stream) const override

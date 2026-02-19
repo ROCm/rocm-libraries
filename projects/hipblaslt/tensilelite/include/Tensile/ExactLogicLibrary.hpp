@@ -100,29 +100,21 @@ namespace TensileLite
                                                              double*          fitness
                                                              = nullptr) const override
         {
-            std::shared_ptr<MySolution> rv;
+            std::shared_ptr<MySolution> fallbackRv;
             const bool                  streamK = Debug::Instance().useExperimentalSelection() == 2;
 
-            if(Debug::Instance().printDeviceSelection())
-            {
-                std::cout << "=== ExactLogicLibrary: Evaluating " << rows.size()
-                          << " rows for hardware: " << hardware.description() << std::endl;
-            }
-
-            // PASS 1: Search for exact matches (no fallback)
+            // Return exact match immediately; otherwise keep first successful fallback.
             for(auto const& row : rows)
             {
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
-                if(row.first(problem, hardware) && !isPredicateFallback(row.first, hardware))
-                {
-                    if(Debug::Instance().printDeviceSelection())
-                    {
-                        std::cout << "Exact match: Searching nested library." << std::endl;
-                    }
+                if(!row.first(problem, hardware))
+                    continue;
 
-                    rv = row.second->findBestSolution(problem, hardware, fitness);
+                if(!isPredicateFallback(row.first, hardware))
+                {
+                    auto rv = row.second->findBestSolution(problem, hardware, fitness);
 
                     if(rv
                        && dynamic_cast<Predicates::Contraction::EqualityMatching*>(
@@ -139,48 +131,28 @@ namespace TensileLite
                         return rv;
                     }
                 }
-            }
-
-            // PASS 2: Search for fallback matches
-            for(auto const& row : rows)
-            {
-                if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
-                    continue;
-
-                row.first.setLibrary(row.second);
-
-                if(row.first(problem, hardware))
+                else if(!fallbackRv)
                 {
-                    if(Debug::Instance().printDeviceSelection())
-                    {
-                        std::cout << "FALLBACK MATCH! Searching nested library." << std::endl;
-                    }
+                    fallbackRv = row.second->findBestSolution(problem, hardware, fitness);
 
-                    rv = row.second->findBestSolution(problem, hardware, fitness);
-
-                    if(rv
+                    if(fallbackRv
                        && dynamic_cast<Predicates::Contraction::EqualityMatching*>(
                            row.first.value.get()))
-                        rv->tag = MySolution::MatchingTag::Equal;
-
-                    if(rv)
-                    {
-                        if(Debug::Instance().printDeviceSelection())
-                        {
-                            std::cout << "  Solution found (fallback): " << rv->name()
-                                      << " [MatchingTag: " << rv->matchingTag() << "]" << std::endl;
-                        }
-                        return rv;
-                    }
+                        fallbackRv->tag = MySolution::MatchingTag::Equal;
                 }
             }
 
-            return rv;
+            if(fallbackRv && Debug::Instance().printDeviceSelection())
+            {
+                std::cout << "  Solution found (fallback): " << fallbackRv->name()
+                          << " [MatchingTag: " << fallbackRv->matchingTag() << "]" << std::endl;
+            }
+
+            return fallbackRv;
         }
 
     private:
-        // Helper to check if a predicate match is a fallback match
-        // Uses SFINAE to handle predicates with and without isFallbackMatch method
+        // Use SFINAE to handle predicates with and without isFallbackMatch method
         template <typename Pred>
         auto isPredicateFallbackImpl(Pred const& pred, Hardware const& hardware, int) const
             -> decltype(pred.isFallbackMatch(hardware), bool())
@@ -414,7 +386,6 @@ namespace TensileLite
             return rv;
         }
 
-        // Check if this predicate match is a fallback match (e.g., via PCI Chip ID fallback)
         bool isFallbackMatch(Hardware const& hardware) const
         {
             return value->isFallbackMatch(hardware);
