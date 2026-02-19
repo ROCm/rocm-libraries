@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Tests for Validator."""
 
 import numpy as np
@@ -144,7 +147,9 @@ class TestValidatorValidate:
         class MockTensorInfo:
             pass
 
-        passed, message = validator.validate(output_data, MockTensorInfo(), reference_data)
+        passed, message = validator.validate(
+            output_data, MockTensorInfo(), reference_data
+        )
 
         assert passed is True
         assert "passed" in message.lower()
@@ -158,7 +163,9 @@ class TestValidatorValidate:
         class MockTensorInfo:
             pass
 
-        passed, message = validator.validate(output_data, MockTensorInfo(), reference_data)
+        passed, message = validator.validate(
+            output_data, MockTensorInfo(), reference_data
+        )
 
         assert passed is False
         assert "failed" in message.lower()
@@ -174,4 +181,4 @@ class TestValidatorStub:
         passed, message = validator.validate_stub()
 
         assert passed is True
-        assert "stubbed" in message.lower()
+        assert "not yet implemented" in message.lower()

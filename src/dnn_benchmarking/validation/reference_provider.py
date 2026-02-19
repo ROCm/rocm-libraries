@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Abstract base class and registry for reference computation providers.
 
 Reference providers compute expected outputs for hipDNN graph operations,

@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Tests for hipDNN executor E2E timing synchronization."""
 
 import sys
@@ -25,7 +28,9 @@ class DummyResult:
 class DummyGraph:
     """Minimal hipDNN graph stub."""
 
-    def execute(self, handle: Any, variant_pack: Dict[int, int], workspace_ptr: int) -> DummyResult:
+    def execute(
+        self, handle: Any, variant_pack: Dict[int, int], workspace_ptr: int
+    ) -> DummyResult:
         return DummyResult()
 
 
@@ -96,7 +101,9 @@ def test_gpu_timer_start_stop_inside_timed_region(monkeypatch) -> None:
             return 1.0
 
     monkeypatch.setattr(executor_module, "Timer", FakeTimer)
-    monkeypatch.setattr(executor_module, "create_gpu_timer", lambda backend: TrackingGpuTimer())
+    monkeypatch.setattr(
+        executor_module, "create_gpu_timer", lambda backend: TrackingGpuTimer()
+    )
 
     executor = _make_executor("torch")
     result = executor.benchmark(handle=None, variant_pack={})
@@ -154,9 +161,9 @@ def test_e2e_timing_at_least_as_long_as_kernel(monkeypatch) -> None:
     assert len(result.kernel_timings) == 5
 
     for i, (e2e, kernel) in enumerate(zip(result.e2e_timings, result.kernel_timings)):
-        assert e2e >= kernel, (
-            f"Iteration {i}: E2E ({e2e:.3f}ms) must be >= kernel ({kernel:.3f}ms)"
-        )
+        assert (
+            e2e >= kernel
+        ), f"Iteration {i}: E2E ({e2e:.3f}ms) must be >= kernel ({kernel:.3f}ms)"
 
 
 def test_e2e_timings_recorded_without_gpu_timing(monkeypatch) -> None:

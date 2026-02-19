@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Integration tests for PyTorch CUDA benchmark mode."""
 
 import json
@@ -14,7 +17,6 @@ from dnn_benchmarking.execution.pytorch_executor import (
 )
 from dnn_benchmarking.execution.timing import _is_torch_available
 from dnn_benchmarking.graph.loader import GraphLoader
-
 
 # Skip all tests in this module if CUDA is not available
 pytestmark = pytest.mark.gpu
@@ -136,7 +138,9 @@ class TestPyTorchCudaExecutor:
             pytest.skip("PyTorch GPU not available")
 
         graph_json, graph_path = sample_conv_graph
-        config = BenchmarkConfig(graph_path=graph_path, warmup_iters=1, benchmark_iters=1)
+        config = BenchmarkConfig(
+            graph_path=graph_path, warmup_iters=1, benchmark_iters=1
+        )
 
         executor = PyTorchCudaExecutor(graph_json, config)
         executor.prepare()  # Should not raise
@@ -289,7 +293,9 @@ class TestPyTorchCudaExecutor:
             pytest.skip("PyTorch GPU not available")
 
         graph_json, graph_path = sample_conv_graph
-        config = BenchmarkConfig(graph_path=graph_path, warmup_iters=1, benchmark_iters=1)
+        config = BenchmarkConfig(
+            graph_path=graph_path, warmup_iters=1, benchmark_iters=1
+        )
 
         executor = PyTorchCudaExecutor(graph_json, config)
 

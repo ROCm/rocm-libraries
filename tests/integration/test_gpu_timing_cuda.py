@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Integration tests for PyTorch GPU timing on NVIDIA devices."""
 
 from pathlib import Path
@@ -8,7 +11,6 @@ from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
 from dnn_benchmarking.execution.pytorch_buffer_manager import PyTorchCudaBufferManager
 from dnn_benchmarking.execution.pytorch_executor import PyTorchCudaExecutor
 from dnn_benchmarking.graph.loader import GraphLoader
-
 
 pytestmark = [pytest.mark.gpu, pytest.mark.nvidia]
 

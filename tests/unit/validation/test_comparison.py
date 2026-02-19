@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Tests for ArrayComparator and ComparisonResult."""
 
 import numpy as np

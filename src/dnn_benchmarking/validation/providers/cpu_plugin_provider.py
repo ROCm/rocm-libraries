@@ -1,7 +1,10 @@
-"""CPU reference plugin provider (STUBBED).
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+"""CPU reference plugin provider (not yet implemented).
 
 This provider will use the hipDNN CPU reference plugin when available.
-Currently stubbed as CPU reference is not yet available in Python bindings.
+CPU reference is not yet available in Python bindings.
 """
 
 from typing import Any, Dict
@@ -17,7 +20,7 @@ from ..reference_provider import (
 
 @ReferenceProviderRegistry.register("cpu_plugin")
 class CPUPluginReferenceProvider(ReferenceProvider):
-    """Reference provider using hipDNN CPU reference plugin (STUBBED).
+    """Reference provider using hipDNN CPU reference plugin (not yet implemented).
 
     When available, this provider will:
     1. Use a special CPU reference engine ID
@@ -42,7 +45,7 @@ class CPUPluginReferenceProvider(ReferenceProvider):
         Returns:
             False - CPU reference plugin not yet available in Python.
         """
-        # STUB: CPU reference plugin not yet available in Python bindings
+        # CPU reference plugin not yet available in Python bindings
         # When available, this would check:
         # 1. hipdnn_frontend is installed
         # 2. CPU reference plugin exists
@@ -75,12 +78,4 @@ class CPUPluginReferenceProvider(ReferenceProvider):
                 "Use 'pytorch' provider instead, or wait for CPU plugin support."
             )
 
-        # Future implementation would:
-        # 1. Create buffers from input_data
-        # 2. Set engine to CPU_ENGINE_ID
-        # 3. Execute graph through hipdnn
-        # 4. Return outputs as ReferenceOutput objects
-        #
-        # The implementation would be similar to ABRunner._run_single()
-        # but with CPU-specific configuration.
         raise NotImplementedError("CPU plugin execution not implemented")

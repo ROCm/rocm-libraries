@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Integration tests for graph execution (requires GPU)."""
 
 import json
@@ -150,7 +153,9 @@ class TestExecution:
     @pytest.mark.xfail(reason="MIOpen plugin doesn't support matmul operations yet")
     def test_matmul_execution_workflow(self, hipdnn) -> None:
         """Test execution workflow for matmul graph."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_matmul.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_matmul.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -189,12 +194,15 @@ class TestExecution:
             assert output_data.shape == (256, 1024)
 
             import numpy as np
+
             assert not np.allclose(output_data, 0)
 
     @pytest.mark.xfail(reason="MIOpen plugin doesn't support pointwise operations yet")
     def test_relu_execution_workflow(self, hipdnn) -> None:
         """Test execution workflow for ReLU activation graph."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_relu.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_relu.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -233,6 +241,7 @@ class TestExecution:
             assert output_data.shape == (64, 128, 56, 56)
 
             import numpy as np
+
             # ReLU: output should be non-negative
             assert np.all(output_data >= 0)
 
@@ -278,11 +287,14 @@ class TestExecution:
             assert output_data.shape == (128, 256, 14, 14)
 
             import numpy as np
+
             assert not np.allclose(output_data, 0)
 
     def test_batchnorm_execution_workflow(self, hipdnn) -> None:
         """Test execution workflow for batchnorm inference graph."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_batchnorm.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_batchnorm.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -321,6 +333,7 @@ class TestExecution:
             assert output_data.shape == (32, 64, 28, 28)
 
             import numpy as np
+
             assert not np.allclose(output_data, 0)
 
 
@@ -466,16 +479,20 @@ class TestPyTorchReferenceValidation:
 
             # Use relaxed tolerances for floating point comparison
             comparator = ArrayComparator(rtol=1e-3, atol=1e-5)
-            result = comparator.compare(output_data, reference_data, "hipDNN", "PyTorch")
-
-            assert result.passed, (
-                f"hipDNN output does not match PyTorch reference: {result.message}"
+            result = comparator.compare(
+                output_data, reference_data, "hipDNN", "PyTorch"
             )
+
+            assert (
+                result.passed
+            ), f"hipDNN output does not match PyTorch reference: {result.message}"
 
     @pytest.mark.xfail(reason="MIOpen plugin doesn't support pointwise operations yet")
     def test_relu_validates_against_pytorch(self, hipdnn, pytorch_provider) -> None:
         """Test that ReLU output matches PyTorch reference."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_relu.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_relu.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -519,18 +536,22 @@ class TestPyTorchReferenceValidation:
                         input_data[tensor_info.uid] = data
 
             # Compute PyTorch reference
-            reference_outputs = pytorch_provider.compute_reference(graph_json, input_data)
+            reference_outputs = pytorch_provider.compute_reference(
+                graph_json, input_data
+            )
 
             # Compare
             assert 2 in reference_outputs
             reference_data = reference_outputs[2].data
 
             comparator = ArrayComparator(rtol=1e-5, atol=1e-8)
-            result = comparator.compare(output_data, reference_data, "hipDNN", "PyTorch")
-
-            assert result.passed, (
-                f"hipDNN ReLU output does not match PyTorch: {result.message}"
+            result = comparator.compare(
+                output_data, reference_data, "hipDNN", "PyTorch"
             )
+
+            assert (
+                result.passed
+            ), f"hipDNN ReLU output does not match PyTorch: {result.message}"
 
     @pytest.mark.xfail(reason="MIOpen plugin doesn't support pointwise operations yet")
     def test_add_validates_against_pytorch(self, hipdnn, pytorch_provider) -> None:
@@ -579,15 +600,19 @@ class TestPyTorchReferenceValidation:
                         input_data[tensor_info.uid] = data
 
             # Compute PyTorch reference
-            reference_outputs = pytorch_provider.compute_reference(graph_json, input_data)
+            reference_outputs = pytorch_provider.compute_reference(
+                graph_json, input_data
+            )
 
             # Compare
             assert 3 in reference_outputs
             reference_data = reference_outputs[3].data
 
             comparator = ArrayComparator(rtol=1e-5, atol=1e-8)
-            result = comparator.compare(output_data, reference_data, "hipDNN", "PyTorch")
-
-            assert result.passed, (
-                f"hipDNN Add output does not match PyTorch: {result.message}"
+            result = comparator.compare(
+                output_data, reference_data, "hipDNN", "PyTorch"
             )
+
+            assert (
+                result.passed
+            ), f"hipDNN Add output does not match PyTorch: {result.message}"

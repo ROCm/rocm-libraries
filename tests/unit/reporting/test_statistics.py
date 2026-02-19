@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Tests for BenchmarkStats and BenchmarkResult."""
 
 import json
@@ -121,9 +124,7 @@ class TestBenchmarkResult:
 
     def test_has_kernel_timings_true(self) -> None:
         """Test has_kernel_timings is True when timings exist."""
-        result = BenchmarkResult(
-            e2e_timings=[1.0, 2.0], kernel_timings=[0.5, 0.6]
-        )
+        result = BenchmarkResult(e2e_timings=[1.0, 2.0], kernel_timings=[0.5, 0.6])
         assert result.has_kernel_timings is True
 
     def test_gpu_backend_from_metadata(self) -> None:
@@ -165,9 +166,7 @@ class TestBenchmarkResult:
 
     def test_to_json(self) -> None:
         """Test to_json produces valid JSON."""
-        result = BenchmarkResult(
-            e2e_timings=[1.0, 2.0], kernel_timings=[0.5, 0.6]
-        )
+        result = BenchmarkResult(e2e_timings=[1.0, 2.0], kernel_timings=[0.5, 0.6])
         json_str = result.to_json()
         # Should be valid JSON
         parsed = json.loads(json_str)

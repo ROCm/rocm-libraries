@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Tests for Reporter."""
 
 import io
@@ -102,7 +105,9 @@ class TestReporter:
         output = io.StringIO()
         reporter = Reporter(output=output)
 
-        reporter.print_validation(True, "Validation stubbed - CPU reference not available")
+        reporter.print_validation(
+            True, "Validation stubbed - CPU reference not available"
+        )
 
         result = output.getvalue()
         assert "SKIPPED" in result

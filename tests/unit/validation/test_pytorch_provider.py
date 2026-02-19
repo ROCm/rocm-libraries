@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Tests for PyTorchReferenceProvider.
 
 These tests verify the PyTorch reference provider works correctly
@@ -397,9 +400,7 @@ class TestPyTorchProviderErrors:
         """Test that unsupported operation raises ValueError."""
         provider = ReferenceProviderRegistry.get_provider("pytorch")
 
-        graph_json = {
-            "nodes": [{"type": "UnsupportedOperation"}]
-        }
+        graph_json = {"nodes": [{"type": "UnsupportedOperation"}]}
 
         with pytest.raises(ValueError) as exc_info:
             provider.compute_reference(graph_json, {})

@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Unified comparison logic for array validation.
 
 Extracts comparison logic used by both A/B testing and reference validation.

@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """PyTorch CUDA tensor management for graph execution."""
 
 from typing import Dict, List, Optional

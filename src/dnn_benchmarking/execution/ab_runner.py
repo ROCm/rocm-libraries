@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """A/B testing runner for comparing plugin/engine configurations."""
 
 import json
@@ -218,7 +221,10 @@ class ABRunner:
                 if ref_output is None:
                     continue
                 comparison = comparator.compare(
-                    output_data, ref_output.data, config_name, self._validation_config.provider
+                    output_data,
+                    ref_output.data,
+                    config_name,
+                    self._validation_config.provider,
                 )
                 if not comparison.passed:
                     all_passed = False
@@ -269,6 +275,7 @@ class ABRunner:
             # This prevents stream state contamination in timing measurements
             try:
                 import torch
+
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
             except ImportError:

@@ -1,9 +1,11 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Tensor information dataclass."""
 
 import warnings
 from dataclasses import dataclass, field
 from typing import List
-
 
 # Map data type strings to byte sizes
 DTYPE_SIZES = {
@@ -70,9 +72,7 @@ class TensorInfo:
         """
         if self.strides:
             # Memory footprint = max(dim_i * stride_i) * element_size
-            max_extent = max(
-                d * s for d, s in zip(self.dims, self.strides)
-            )
+            max_extent = max(d * s for d, s in zip(self.dims, self.strides))
             return max_extent * self.element_size
         return self.num_elements * self.element_size
 

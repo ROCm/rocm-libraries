@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Graph loading and validation module for dnn-benchmarking."""
 
 from .loader import GraphLoader

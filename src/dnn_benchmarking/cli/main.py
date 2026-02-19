@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Main entry point for dnn-benchmark CLI."""
 
 import json
@@ -183,7 +186,9 @@ def _run_reference_validation(
 
             actual_data = buffer_manager.get_output_data(tensor_info.uid)
             if actual_data is None:
-                reporter.print_error(f"Failed to get output data for tensor {tensor_info.uid}")
+                reporter.print_error(
+                    f"Failed to get output data for tensor {tensor_info.uid}"
+                )
                 all_passed = False
                 continue
 
@@ -268,7 +273,9 @@ def run_pytorch_benchmark(
                 )
                 return 1
         except ImportError:
-            reporter.print_error("PyTorch not available. Install with: pip install torch")
+            reporter.print_error(
+                "PyTorch not available. Install with: pip install torch"
+            )
             return 1
 
         # Create executor

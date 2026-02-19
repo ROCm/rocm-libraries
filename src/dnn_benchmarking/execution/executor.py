@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Graph execution with timing for benchmarks."""
 
 import json
@@ -7,7 +10,6 @@ from ..common.exceptions import ExecutionError
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
 from .timing import GpuTimerInterface, Timer, create_gpu_timer
-
 
 # Map graph JSON data type strings to hipdnn DataType enum names.
 # The hipdnn.DataType enum is only available when hipdnn_frontend is imported,
@@ -103,9 +105,7 @@ class Executor:
             except (json.JSONDecodeError, TypeError):
                 graph_dict = {}
 
-            io_dt = _resolve_data_type(
-                hipdnn, graph_dict.get("io_data_type", "FLOAT")
-            )
+            io_dt = _resolve_data_type(hipdnn, graph_dict.get("io_data_type", "FLOAT"))
             intermediate_dt = _resolve_data_type(
                 hipdnn, graph_dict.get("intermediate_data_type", "FLOAT")
             )
@@ -120,7 +120,9 @@ class Executor:
             # Deserialize from JSON
             result = self._graph.from_json(self._graph_json_str)
             if result.is_bad():
-                raise ExecutionError(f"Failed to deserialize graph: {result.get_message()}")
+                raise ExecutionError(
+                    f"Failed to deserialize graph: {result.get_message()}"
+                )
 
             # Set engine preference if specified
             if engine_id is not None:

@@ -8,5 +8,3 @@
 # Uses the gfx90X-dcgpu index for ROCm wheels
 --index-url https://rocm.nightlies.amd.com/v2/gfx90X-dcgpu/
 torch
-torchaudio
-torchvision

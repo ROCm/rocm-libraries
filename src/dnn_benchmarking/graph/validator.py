@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Graph validation for supported operations."""
 
 from typing import Any, Dict, List, Set

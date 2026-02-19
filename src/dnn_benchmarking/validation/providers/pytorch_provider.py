@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """PyTorch reference provider for hipDNN graph validation.
 
 Computes reference outputs by parsing graph JSON and executing

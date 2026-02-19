@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """PyTorch operation implementations for graph execution.
 
 These handlers execute on the device of the input tensors (CPU or CUDA).

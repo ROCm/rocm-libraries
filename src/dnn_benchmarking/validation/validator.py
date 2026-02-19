@@ -1,6 +1,9 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Validation module for comparing execution output against reference.
 
-Currently STUBBED - CPU reference plugin not available in Python.
+CPU reference validation is not yet implemented.
 """
 
 from typing import Optional, Tuple
@@ -14,7 +17,7 @@ from .comparison import ArrayComparator
 class Validator:
     """Validates execution output against a reference using allclose comparison.
 
-    Currently STUBBED - CPU reference plugin not available in Python.
+    CPU reference validation is not yet implemented.
     When implemented, this will:
     1. Copy output buffer to host
     2. Compare against reference data using np.allclose(rtol, atol)
@@ -72,12 +75,12 @@ class Validator:
     def validate_stub(self) -> Tuple[bool, str]:
         """Stubbed validation - returns success with message.
 
-        Use this when no reference data is available (MVP).
+        Use this when no reference data is available.
 
         Returns:
             Tuple of (True, stub message).
         """
-        return (True, "Validation stubbed - CPU reference not available in Python")
+        return (True, "Validation skipped - CPU reference not yet implemented")
 
     def compare_ab(
         self, output_a: np.ndarray, output_b: np.ndarray

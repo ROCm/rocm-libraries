@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Integration tests for graph loading."""
 
 import json
@@ -15,7 +18,9 @@ class TestGraphLoading:
 
     def test_load_sample_conv_fwd_json(self) -> None:
         """Test loading the sample conv fwd JSON file."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_conv_fwd.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_conv_fwd.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -29,7 +34,9 @@ class TestGraphLoading:
 
     def test_validate_sample_conv_fwd(self) -> None:
         """Test validating the sample conv fwd graph."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_conv_fwd.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_conv_fwd.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -57,7 +64,9 @@ class TestGraphLoading:
         assert len(output_tensors) == 1
         assert output_tensors[0].uid == 0
 
-    def test_tensor_info_size_calculation(self, sample_conv_fwd_json: Dict[str, Any]) -> None:
+    def test_tensor_info_size_calculation(
+        self, sample_conv_fwd_json: Dict[str, Any]
+    ) -> None:
         """Test tensor size calculation."""
         loader = GraphLoader()
         tensor_infos = loader.extract_tensor_info(sample_conv_fwd_json)
@@ -132,7 +141,9 @@ class TestGraphLoading:
 
     def test_load_sample_matmul_json(self) -> None:
         """Test loading the sample matmul JSON file."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_matmul.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_matmul.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -147,7 +158,9 @@ class TestGraphLoading:
 
     def test_validate_sample_matmul(self) -> None:
         """Test validating the sample matmul graph."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_matmul.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_matmul.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -160,7 +173,9 @@ class TestGraphLoading:
 
     def test_matmul_tensor_info(self) -> None:
         """Test tensor info extraction for matmul graph."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_matmul.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_matmul.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -187,7 +202,9 @@ class TestGraphLoading:
 
     def test_load_sample_relu_json(self) -> None:
         """Test loading the sample ReLU JSON file."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_relu.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_relu.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -202,7 +219,9 @@ class TestGraphLoading:
 
     def test_validate_sample_relu(self) -> None:
         """Test validating the sample ReLU graph."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_relu.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_relu.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -215,7 +234,9 @@ class TestGraphLoading:
 
     def test_relu_tensor_info(self) -> None:
         """Test tensor info extraction for ReLU graph."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_relu.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_relu.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -287,7 +308,9 @@ class TestGraphLoading:
 
     def test_load_sample_batchnorm_json(self) -> None:
         """Test loading the sample batchnorm JSON file."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_batchnorm.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_batchnorm.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -302,7 +325,9 @@ class TestGraphLoading:
 
     def test_validate_sample_batchnorm(self) -> None:
         """Test validating the sample batchnorm graph."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_batchnorm.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_batchnorm.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
@@ -315,7 +340,9 @@ class TestGraphLoading:
 
     def test_batchnorm_tensor_info(self) -> None:
         """Test tensor info extraction for batchnorm graph."""
-        sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_batchnorm.json"
+        sample_path = (
+            Path(__file__).parent.parent.parent / "graphs" / "sample_batchnorm.json"
+        )
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")

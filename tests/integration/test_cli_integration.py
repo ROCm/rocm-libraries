@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Integration tests for CLI."""
 
 import subprocess
@@ -115,17 +118,23 @@ class TestCLIIntegration:
             pytest.param(
                 "sample_matmul.json",
                 "sample_matmul_256x512x1024",
-                marks=pytest.mark.xfail(reason="MIOpen plugin doesn't support matmul operations yet"),
+                marks=pytest.mark.xfail(
+                    reason="MIOpen plugin doesn't support matmul operations yet"
+                ),
             ),
             pytest.param(
                 "sample_relu.json",
                 "sample_relu_activation_64x128x56x56",
-                marks=pytest.mark.xfail(reason="MIOpen plugin doesn't support pointwise operations yet"),
+                marks=pytest.mark.xfail(
+                    reason="MIOpen plugin doesn't support pointwise operations yet"
+                ),
             ),
             pytest.param(
                 "sample_add.json",
                 "sample_pointwise_add_128x256x14x14",
-                marks=pytest.mark.xfail(reason="MIOpen plugin doesn't support pointwise operations yet"),
+                marks=pytest.mark.xfail(
+                    reason="MIOpen plugin doesn't support pointwise operations yet"
+                ),
             ),
             ("sample_batchnorm.json", "sample_batchnorm_inference_32x64x28x28"),
         ],
@@ -220,7 +229,9 @@ class TestCLIParser:
         """Test parsing with short option names."""
         from dnn_benchmarking.cli.parser import parse_args
 
-        config = parse_args(["-g", "/test/graph.json", "-w", "5", "-i", "50", "-e", "3"])
+        config = parse_args(
+            ["-g", "/test/graph.json", "-w", "5", "-i", "50", "-e", "3"]
+        )
 
         assert config.graph_path == Path("/test/graph.json")
         assert config.warmup_iters == 5

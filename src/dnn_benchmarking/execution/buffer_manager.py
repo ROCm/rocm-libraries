@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Device buffer management for graph execution."""
 
 from typing import Dict, List, Optional, Union
@@ -19,7 +22,9 @@ DTYPE_MAP = {
 }
 
 
-def _generate_bfloat16_bytes(dims: List[int], rng: np.random.RandomState = None) -> bytes:
+def _generate_bfloat16_bytes(
+    dims: List[int], rng: np.random.RandomState = None
+) -> bytes:
     """Generate random data in bfloat16 format using torch.
 
     Args:

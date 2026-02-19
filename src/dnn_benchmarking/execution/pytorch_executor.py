@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """PyTorch GPU executor for graph benchmarking."""
 
 from typing import Any, Dict, List, Optional

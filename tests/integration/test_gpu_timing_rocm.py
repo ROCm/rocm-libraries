@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Integration tests for hipDNN GPU timing on AMD ROCm devices."""
 
 import json
@@ -9,7 +12,6 @@ from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
 from dnn_benchmarking.execution.buffer_manager import BufferManager
 from dnn_benchmarking.execution.executor import Executor
 from dnn_benchmarking.graph.loader import GraphLoader
-
 
 pytestmark = [pytest.mark.gpu, pytest.mark.amd]
 

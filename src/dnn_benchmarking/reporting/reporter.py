@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Console output formatting for benchmark results."""
 
 import sys
@@ -330,7 +333,12 @@ class Reporter:
         )
 
     def print_ab_comparison(
-        self, passed: bool, max_abs_diff: float, max_rel_diff: float, rtol: float, atol: float
+        self,
+        passed: bool,
+        max_abs_diff: float,
+        max_rel_diff: float,
+        rtol: float,
+        atol: float,
     ) -> None:
         """Print A/B accuracy comparison result.
 
