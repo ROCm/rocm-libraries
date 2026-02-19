@@ -23,14 +23,12 @@
  * ************************************************************************ */
 
 #include "rocsparse_clients_envariables.hpp"
-#include "rocsparse_data.hpp"
 #include "rocsparse_parse_data.hpp"
 #include "rocsparse_reproducibility.hpp"
 #include "rocsparse_test_listeners.hpp"
 #include "utility.hpp"
 
 #include <gtest/gtest.h>
-#include <vector>
 
 #include "test_check.hpp"
 
@@ -205,45 +203,6 @@ int main(int argc, char** argv)
 
     // Set data file path
     rocsparse_parse_data(argc, argv, datapath + "rocsparse_test.data");
-
-    // When --yaml is specified, exclude non-yaml tests (e.g., AtomicAdd) via gtest filter
-    static std::string        modified_filter;
-    static std::vector<char*> filtered_argv;
-    if(RocSPARSE_TestData::is_yaml_filter_active())
-    {
-        // Find existing --gtest_filter and append negative filter, or add new one
-        int filter_idx = -1;
-        for(int i = 1; i < argc; ++i)
-        {
-            if(strncmp(argv[i], "--gtest_filter=", 15) == 0)
-            {
-                filter_idx = i;
-                break;
-            }
-        }
-
-        // Copy all args
-        for(int i = 0; i < argc; ++i)
-        {
-            filtered_argv.push_back(argv[i]);
-        }
-
-        if(filter_idx >= 0)
-        {
-            // Append to existing filter
-            modified_filter           = std::string(argv[filter_idx]) + ":-*AtomicAdd*";
-            filtered_argv[filter_idx] = const_cast<char*>(modified_filter.c_str());
-        }
-        else
-        {
-            // Add new negative filter
-            modified_filter = "--gtest_filter=-*AtomicAdd*";
-            filtered_argv.push_back(const_cast<char*>(modified_filter.c_str()));
-            argc++;
-        }
-        filtered_argv.push_back(nullptr);
-        argv = filtered_argv.data();
-    }
 
     // Initialize google test
     testing::InitGoogleTest(&argc, argv);
