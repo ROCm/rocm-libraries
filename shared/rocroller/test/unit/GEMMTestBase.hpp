@@ -35,8 +35,8 @@
 
 namespace GEMMTests
 {
-    std::set<int> nonZeroDSReadOffsets(std::string const& instruction, std::string const& s);
-    std::set<int> direct2LDSWriteStrides(std::string const& s);
+    std::set<int> NonZeroDSReadOffsets(std::string const& instruction, std::string const& s);
+    std::set<int> Direct2LDSWriteStrides(std::string const& s);
 
     template <typename T>
     concept isF8 = std::is_same_v<T, rocRoller::FP8> || std::is_same_v<T, rocRoller::BF8>;

@@ -30,11 +30,14 @@ struct PluginLoadingConfig
 {
     std::set<std::filesystem::path> paths;
     hipdnnPluginLoadingMode_ext_t mode = HIPDNN_DEFAULT_PLUGIN_LOADING_MODE;
+    hipdnnPluginUnloadingMode_ext_t unloadingMode = HIPDNN_DEFAULT_PLUGIN_UNLOADING_MODE;
 };
 
 std::mutex pluginMutex;
 PluginLoadingConfig pluginConfig;
 std::weak_ptr<EnginePluginManager> pmPtr;
+// Keeps EnginePluginManager alive in lazy unloading mode
+std::shared_ptr<EnginePluginManager> persistentPmPtr;
 
 } // namespace
 
@@ -43,6 +46,17 @@ void EnginePluginResourceManager::setPluginPaths(
     hipdnnPluginLoadingMode_ext_t loadingMode)
 {
     std::lock_guard<std::mutex> lock(pluginMutex);
+
+    auto newPathsSet = std::set<std::filesystem::path>{pluginPaths.begin(), pluginPaths.end()};
+    if(pluginConfig.paths == newPathsSet && pluginConfig.mode == loadingMode)
+    {
+        return;
+    }
+
+    // Clear persistent pointer first to allow lazy mode check to work correctly.
+    // If only persistentPmPtr is keeping plugins alive (no active handles),
+    // then pmPtr will expire after this reset.
+    persistentPmPtr.reset();
 
     THROW_IF_FALSE(pmPtr.expired(),
                    HIPDNN_STATUS_NOT_SUPPORTED,
@@ -64,6 +78,34 @@ std::set<std::filesystem::path> EnginePluginResourceManager::getPluginPaths()
 {
     std::lock_guard<std::mutex> lock(pluginMutex);
     return pluginConfig.paths;
+}
+
+void EnginePluginResourceManager::setPluginUnloadingMode(hipdnnPluginUnloadingMode_ext_t mode)
+{
+    std::lock_guard<std::mutex> lock(pluginMutex);
+
+    switch(mode)
+    {
+    case HIPDNN_PLUGIN_UNLOAD_EAGER:
+        // Clear persistent pointer - if no handles exist, plugins will be unloaded
+        persistentPmPtr.reset();
+        break;
+
+    case HIPDNN_PLUGIN_UNLOAD_LAZY:
+        // If plugins are already loaded, keep them alive by storing in persistent pointer
+        if(auto pm = pmPtr.lock())
+        {
+            persistentPmPtr = pm;
+        }
+        // If no plugins loaded yet, persistentPmPtr will be set when create() is called
+        break;
+
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Invalid plugin unloading mode: " + std::to_string(mode));
+    }
+
+    pluginConfig.unloadingMode = mode;
 }
 
 void EnginePluginResourceManager::getLoadedPluginFiles(size_t* numPlugins,
@@ -127,6 +169,12 @@ std::shared_ptr<EnginePluginResourceManager> EnginePluginResourceManager::create
             pm = std::make_shared<EnginePluginManager>();
             pm->loadPlugins(pluginConfig.paths, pluginConfig.mode);
             pmPtr = pm;
+
+            // In lazy mode, keep the plugin manager alive by storing in persistent pointer
+            if(pluginConfig.unloadingMode == HIPDNN_PLUGIN_UNLOAD_LAZY)
+            {
+                persistentPmPtr = pm;
+            }
         }
     }
 
