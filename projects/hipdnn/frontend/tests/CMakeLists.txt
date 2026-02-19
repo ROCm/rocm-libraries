@@ -33,6 +33,7 @@ add_executable(
     TestError.cpp
     TestFrontendLogging.cpp
     TestGraph.cpp
+    TestHandle.cpp
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
     TestGraphSerialization.cpp
