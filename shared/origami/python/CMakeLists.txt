@@ -114,7 +114,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         "Python: test_origami_bindings"
         PROPERTIES
             ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:${CMAKE_CURRENT_SOURCE_DIR}/tests:$ENV{PYTHONPATH}"
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
             DEPENDS _pyorigami
     )
 
@@ -129,7 +129,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         "Python: test_selector"
         PROPERTIES
             ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:${CMAKE_CURRENT_SOURCE_DIR}/tests:$ENV{PYTHONPATH}"
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
             DEPENDS _pyorigami
             SKIP_RETURN_CODE 5  # Allow skipping tests without emitting an error
     )
@@ -145,7 +145,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         "Python: test_hardware"
         PROPERTIES
             ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:${CMAKE_CURRENT_SOURCE_DIR}/tests:$ENV{PYTHONPATH}"
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
             DEPENDS _pyorigami
     )
 
@@ -160,7 +160,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         "Python: test_ranking_regression"
         PROPERTIES
             ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:${CMAKE_CURRENT_SOURCE_DIR}/tests:$ENV{PYTHONPATH}"
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
             DEPENDS _pyorigami
     )
 

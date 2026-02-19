@@ -25,20 +25,13 @@ from pathlib import Path
 import pytest
 
 import origami
-from test_utils import SUPPORTED_ARCHITECTURES, create_hardware
+from helpers import SUPPORTED_ARCHITECTURES, create_hardware, get_matrix_instructions
 
 
 BASELINE_DIR = Path(__file__).parent / "baselines" / "rankings"
 PROBLEM_DATA_FILE = Path(__file__).parent / "data" / "problem_data.csv"
 
 SUPPORTED_DTYPES = ["f16", "bf16", "f32"]
-
-
-def get_matrix_instructions(hardware: origami.hardware_t, dtype: str) -> list[tuple[int, int, int]]:
-    """Get valid matrix instructions from hardware for the given dtype."""
-    dtype_enum = origami.string_to_datatype(dtype)
-    instructions = hardware.get_valid_matrix_instructions(dtype_enum)
-    return [(mi.m, mi.n, mi.k) for mi in instructions]
 
 
 def is_dtype_supported(arch_name: str, dtype: str) -> bool:
