@@ -273,7 +273,26 @@ def getDockerImage(Map conf=[:])
             """.stripIndent(),
             returnStdout: true
         ).trim()
-            
+
+    def cacheRefFrom = "${cacheRef}_${theRockHash}"
+    def cacheRefTo = "${cacheRef}_${theRockHash}"
+
+    // With the docker credentials check if the cacheRefFrom exists in the registry
+    def cacheExists = sh(
+        script: """
+            if docker manifest inspect ${cacheRefFrom} > /dev/null 2>&1; then
+                echo "true"
+            else
+                echo "false"
+            fi
+        """.stripIndent(),
+        returnStdout: true
+    ).trim()
+
+    if (cacheExists != "true") {
+        cacheRefFrom = "${cacheRef}"
+    }
+
     // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
     def gpu_arch
     if (gpu_family == "ci")
@@ -354,8 +373,8 @@ def getDockerImage(Map conf=[:])
     {
         echo "Building image..."
         def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max " +
-                              "--cache-from type=registry,ref=${cacheRef} "
+        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRefTo},compression=zstd,mode=max " +
+                              "--cache-from type=registry,ref=${cacheRefFrom} "
 
         try {
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
@@ -374,6 +393,17 @@ def getDockerImage(Map conf=[:])
                     ${dockerArgs} \
                     ${buildContext}
                 """.stripIndent()
+
+                // If the cache was pushed to the cacheRefTo successfully, tag it with cacheRef
+                if (cacheRefFrom != cacheRefTo) {
+                    // Check if cacheRefTo exists locally, pull if not
+                    def cacheRefToExists = sh(script: "docker images -q ${cacheRefTo}", returnStdout: true).trim()
+                    if (!cacheRefToExists) {
+                        sh "docker pull ${cacheRefTo}"
+                    }
+                    sh "docker tag ${cacheRefTo} ${cacheRef}"
+                    sh "docker push ${cacheRef}"
+                }
             }
             dockerImage = docker.image("${image}")
         } catch (Exception bex) {
