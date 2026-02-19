@@ -1067,6 +1067,3 @@ class TestCustomScheduleValidation:
         )
         assert status == False
 
-            
-
-        
