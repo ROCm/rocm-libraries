@@ -473,13 +473,15 @@ class hardware_t {
    * @param constants Architecture-specific constants
    * @param L2_capacity L2 cache capacity in bytes
    * @param compute_clock_ghz Compute clock frequency in GHz
+   * @param memory_clock_ghz Memory clock frequency in GHz
    */
   hardware_t(architecture_t arch,
              size_t N_CU,
              size_t lds_capacity,
              const architecture_constants& constants,
              size_t L2_capacity,
-             double compute_clock_ghz);
+             double compute_clock_ghz,
+             double memory_clock_ghz);
 
   /**
    * @brief Construct hardware_t from HIP device properties.
