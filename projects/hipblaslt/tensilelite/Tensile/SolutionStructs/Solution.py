@@ -918,16 +918,11 @@ class Solution(collections.abc.Mapping):
 
     # TODO: Currently DTL with input types of different size is not support. There are functional issues
     # This needs to be fixed.
-    # Should this be changed to? I think this is also needed as it might fail like line 931
-    #if state["ProblemType"]["DataType%s"%tc].numBytes() != state["ProblemType"]["MacDataType%s"%tc].numBytes():
     if state["ProblemType"]["DataType%s"%tc].numBytes() != state["ProblemType"]["MacDataTypeA"].numBytes():
       reject(state, printRejectionReason, "DirectToLds%s with conversion to different sized data types is not supported"%tc)
       return False
 
     # DTL + input type conversion
-    # This is required, otherwise it might compare DataTypesB to MacDataTypeA
-    # Should examine all places that hardcoding "MacDataTypeA"
-    #if state["ProblemType"]["DataType%s"%tc] != state["ProblemType"]["MacDataTypeA"]:
     if state["ProblemType"]["DataType%s"%tc] != state["ProblemType"]["MacDataType%s"%tc]:
       if not state["ConvertAfterDS"]:
         reject(state, printRejectionReason, "DirectToLds%s + input conversion + ConvertAfterDS=False not supported"%(tc))
@@ -2720,18 +2715,6 @@ class Solution(collections.abc.Mapping):
                 tvm = totalElementsM // glvwMlimit
                 if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, glvwMlimit, printRejectionReason):
                   validDepthU = False
-
-        # This was modified from develop branch, but it only looks at MacDataTypeA.
-        # Will be trigggered (rejected) during build. Comment out this for workaround.
-        #if validDepthU and state["KernelLanguage"] == "Assembly":
-        #  if isaInfoMap[isa].archCaps["HasEccHalf"]:
-        #    if state["ProblemType"]["MacDataTypeA"].numRegisters() == 0.5 and (not state["ProblemType"]["HighPrecisionAccumulate"]):
-        #        if state["GlobalReadVectorWidthA"] == 1 or state["GlobalReadVectorWidthB"] == 1:
-        #          print("Hello")
-        #          print(state["ProblemType"]["MacDataTypeA"])
-        #          print("Hello2")
-        #          reject(state, "HalfEcc requires HPA if glvw = 1")
-        #          break
 
         if state["ProblemType"]["Sparse"] and state["DirectToVgprSparseMetadata"]:
           if state["VectorWidthA"] > 1 or state["VectorWidthB"] > 1 :
