@@ -3378,6 +3378,14 @@ class Solution(collections.abc.Mapping):
       if state["LdsPad%s"%tc] == 0:
         state["LdsBlockSizePerPad%s"%tc] = 0
 
+    # Normalize lds block-size-per-pad fields to native Python int.
+    assert(int(state["LdsBlockSizePerPadA"]) == state["LdsBlockSizePerPadA"])
+    assert(int(state["LdsBlockSizePerPadB"]) == state["LdsBlockSizePerPadB"])
+    assert(int(state["LdsBlockSizePerPadMetadata"]) == state["LdsBlockSizePerPadMetadata"])
+    state["LdsBlockSizePerPadA"] = int(state["LdsBlockSizePerPadA"])
+    state["LdsBlockSizePerPadB"] = int(state["LdsBlockSizePerPadB"])
+    state["LdsBlockSizePerPadMetadata"] = int(state["LdsBlockSizePerPadMetadata"])
+
     if (state["UnrollMajorLDSA"] or state["UnrollMajorLDSB"]) and (not state["EnableMatrixInstruction"]) and (not state["UseDotInstruction"]):
         reject(state, printRejectionReason, "UnrollMajorLDS Supports only in EnableMatrixInstruction=1 or dot2 kernel")
 
