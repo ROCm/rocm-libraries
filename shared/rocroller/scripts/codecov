@@ -42,7 +42,6 @@ help() {
     echo "-b              Absolute path to build directory"
     echo "-g              GPU Identifier (for output file names)"
     echo "-u              Comparison archive URL"
-    echo "-R              Regular expression to filter tests."
     echo "-h              Print this help message"
     echo
 }
@@ -50,10 +49,8 @@ help() {
 skip_diff=false
 skip_zip=false
 skip_codecov=false
-ctest_re_flag=
-ctest_re=
 
-while getopts R:g:b:u:h:-: flag; do
+while getopts g:b:u:h:-: flag; do
     case "${flag}" in
     -)
       case "${OPTARG}" in
@@ -72,10 +69,6 @@ while getopts R:g:b:u:h:-: flag; do
           exit 1
           ;;
       esac
-      ;;
-    R)
-      ctest_re=${OPTARG}
-      ctest_re_flag="-R"
       ;;
     g) gpu=${OPTARG} ;;
     b) build_path=${OPTARG} ;; # Absolute path required
@@ -133,17 +126,7 @@ else
 
     echo Using sharded test runner with codecov profile.
     LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw \
-        ${script_path}/run-tests-sharded \
-        ${build_path} \
-        --profile codecov
-
-    # Now do pytests etc
-    OMP_NUM_THREADS=2 LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw ctest \
-        -j $(($(nproc)/2)) \
-        --test-dir ${build_path} \
-        --output-on-failure \
-        -LE "GTEST|CATCH" \
-        ${ctest_re_flag} "${ctest_re}"
+        ${script_path}/run-tests-sharded codecov-mci ${build_path}
 
     # this combines them back together.
     /opt/rocm/lib/llvm/bin/llvm-profdata merge \
