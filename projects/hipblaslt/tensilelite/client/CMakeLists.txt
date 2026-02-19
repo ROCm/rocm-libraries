@@ -15,7 +15,12 @@ target_link_libraries(tensilelite-client
 )
 
 target_link_libraries(tensilelite-client PRIVATE roc::mxDataGenerator)
-target_compile_features(tensilelite-client PRIVATE cxx_std_20)
+set_target_properties(tensilelite-client
+    PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
 
 if(NOT WIN32)
     find_package(rocm_smi REQUIRED)
