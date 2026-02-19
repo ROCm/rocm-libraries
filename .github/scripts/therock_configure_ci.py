@@ -50,6 +50,15 @@ def is_path_skippable(path: str) -> bool:
     return any(fnmatch.fnmatch(path, pattern) for pattern in SKIPPABLE_PATH_PATTERNS)
 
 
+def get_pr_labels(args) -> List[str]:
+    """Gets a list of labels applied to a pull request."""
+    data = json.loads(args.get("pr_labels", "{}"))
+    labels = []
+    for label in data.get("labels", []):
+        labels.append(label["name"])
+    return labels
+
+
 def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
     """Returns true if at least one path is not in the skippable set."""
     if paths is None:
@@ -148,10 +157,15 @@ def retrieve_projects(args):
     if args.get("is_push") or args.get("is_pull_request"):
         paths_set = set(modified_paths)
         contains_non_skippable_files = check_for_non_skippable_path(paths_set)
+        pr_labels = get_pr_labels(args)
 
         # If only skippable paths were modified, skip CI
         if not contains_non_skippable_files:
             logging.info("Only skippable paths were modified, skipping CI")
+            return [], test_type
+
+        if "skip-therockci" in pr_labels:
+            logging.info("`skip-therock-ci` label was added, skipping CI")
             return [], test_type
 
     subtrees = get_changed_path_projects(modified_paths)
@@ -198,6 +212,8 @@ if __name__ == "__main__":
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
     args["is_nightly"] = github_event_name == "schedule"
+
+    args["pr_labels"] = os.environ.get("PR_LABELS", '{"labels": []}')
 
     input_projects = os.getenv("PROJECTS", "")
     args["input_projects"] = input_projects
