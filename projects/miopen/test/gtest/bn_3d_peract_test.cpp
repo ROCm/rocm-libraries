@@ -8,7 +8,6 @@
 #include <limits>
 #include <string>
 #include <tuple>
-#include <utility>
 #include <vector>
 
 #include <miopen/activ.hpp>
