@@ -2752,24 +2752,42 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
             10, SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
             25, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             25, SBarrier(comment=""),
-            109, SWaitCnt(dscnt=-1, vlcnt=17, vscnt=-1, comment="wait for previous set of global reads"),
-            109, SBarrier(comment="")
+            # 82, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            # 82, SBarrier(comment=""),
+            # 30, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="LRB0"),
+            110, SWaitCnt(dscnt=-1, vlcnt=17, vscnt=-1, comment="wait for previous set of global reads"),
+            110, SBarrier(comment=""),
+            # 126, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait & barrier for prior LRB1s"),
+            # 126, SBarrier(comment=""), # slows
         ]
         
         optSchedule = {
             'SYNC': [syncTable[::2]], # 6
-            'LRA0': [[0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]], # 11
+            
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]], # 9
-            'LRB0': [[1, 12, 13, 14, 15, 16]], # 6
             'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]], # 9
+            
+            'LRA0': [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], # 11
+            # 'LRA0': [[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20]], # 11
+            
+            'LRB0': [[11, 12, 13, 14, 15, 16]], # 6
+            # 'LRB0': [[12, 14, 16, 18, 20, 22]], # 6
+            # 'LRB0': [[22, 23, 24, 25, 26, 27]], # 6
+            # 'LRB0': [[22, 24, 26, 28, 30, 32]], # 6
+
             'GRA': [[25, 25, 30, 30, 35, 35, 40, 40, 46, 46, 51, 51, 56, 56, 61, 61, 67, 67, 72, 72, 77, 77]], # 22
+            'GRB': [[82, 82, 88, 88, 93, 93, 98, 98, 103, 103, 109, 109]], # 12
+            # 'GRB': [[82, 82, 84, 84, 86, 86, 88, 88, 90, 90, 92, 92]], # 12
+
             'LRSA': [[64]], # 1
             'LRSB': [[64]], # 1
-            'GRB': [[82, 82, 88, 88, 93, 93, 98, 98, 103, 103, 109, 109]], # 12
+            
             'LWSA': [[109]], # 1
             'LWSB': [[109]], # 1
             'LRA1': [[110, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121]], # 11
             'LRB1': [[111, 122, 123, 124, 125, 126]], # 6
+            # 'LRA1': [[100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110]], # 11
+            # 'LRB1': [[111, 112, 113, 114, 115, 116]], # 6
             'LCC': [[numMfma-1, numMfma-1]], # 2
         }
         syncCode = syncTable[1::2]
@@ -2779,7 +2797,6 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
 
     kernel["MfmaInitCVgprs"] = True
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidation()
     return True, opt1
         
 @RegisterSchedule(
