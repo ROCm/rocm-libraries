@@ -533,14 +533,7 @@ class LocalReadMFMA(LocalRead):
             # (more instructions between mfma4x4 B and final conv A)
             # however, we still need nop in tail loop case (A, B scheduling is not interleaved in tail loop) and CMS
             # we still need s_nop in main loop, NGLL, NLL if number MIWaveTileA/B are different.
-            # s_nop insertion is handled in makeSubIterSchedule for main loop and NGLL/NLL
-            nopSrc = 0
-            if kernel["UseCustomMainLoopSchedule"]:
-                nopSrc = 4
-            # insert nop here for CMS only
-            if kernel["UseCustomMainLoopSchedule"] and kernel["UseMFMAF32XEmulation"] and nopSrc:
-                # 5 wait states needed before the following CVT instructions
-                packCodeT.add(SNop(waitState = nopSrc))
+            # s_nop insertion is handled in _interleavePackAB
             packCodeT.add(VCvtPkF32toBF16(dst=v7d, src0=v6, src1=v7, comment="pack final begin"))
             packCodeT.add(VCvtPkF32toBF16(dst=v6d, src0=v4, src1=v5))
             packCodeT.add(VCvtPkF32toBF16(dst=v5d, src0=v2, src1=v3))

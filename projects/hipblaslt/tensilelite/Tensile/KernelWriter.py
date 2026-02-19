@@ -3540,13 +3540,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self.lraAddressesInitFor3LDSBlk(kernel, tensorParametersA, True, False))
 
       # prefetch-local
+      print(f"DEBUG:KOJI:{self.states.numItersPLR=}")
       if self.states.numItersPLR:
         # not generate wait for local write if LDS write code is not generated
         if not kernel["NoLdsWriteCode"]:
           module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "0prefetch wait for local write"))
         module.add(self._syncThreads(kernel))
 
-        usePLRPack = self.states.doFullPackCodePrefetch or kernel["UseCustomMainLoopSchedule"]
+        usePLRPack = self.states.doFullPackCodePrefetch or (kernel["UseCustomMainLoopSchedule"] and kernel["UsePLRPack"])
         # in some cases need an extra copy of the LDS read with appropriate double buffer offsets
         for plrIdx in range(0, self.states.numItersPLR):
           packPre[plrIdx] = Module()
@@ -3562,7 +3563,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 module.addComment1("local read prefetch a")
                 localReadCodeA, packCodeA, packPreA = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadA, iui*self.states.numReadsIterCoalescedA, espi, tensorParametersA)
                 module.add(localReadCodeA)
-                if self.states.doPackPreSchedulingNextLoop or kernel["UseCustomMainLoopSchedule"]:
+                if self.states.doPackPreSchedulingNextLoop or usePLRPack:
                   packPrePrefetchA.add(packPreA)
                 else:
                   pack[plrIdx].add(packPreA)
@@ -3585,7 +3586,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 module.addComment1("local read prefetch b")
                 localReadCodeB, packCodeB, packPreB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadB, iui*self.states.numReadsIterCoalescedB, espi, tensorParametersB)
                 module.add(localReadCodeB)
-                if self.states.doPackPreSchedulingNextLoop or kernel["UseCustomMainLoopSchedule"]:
+                if self.states.doPackPreSchedulingNextLoop or usePLRPack:
                   packPrePrefetchB.add(packPreB)
                 else:
                   pack[plrIdx].add(packPreB)

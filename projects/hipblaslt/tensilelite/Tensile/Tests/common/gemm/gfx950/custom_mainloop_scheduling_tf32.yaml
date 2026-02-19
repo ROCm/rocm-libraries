@@ -185,7 +185,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1, 4, 4,  2,2 ]         
         - PrefetchGlobalRead: [2] 
-        - PrefetchLocalRead: [0]
+        - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
