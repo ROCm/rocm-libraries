@@ -352,8 +352,10 @@ RUN apt-get update && apt-get install -y \
 RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
 RUN update-alternatives --install /opt/rocm/llvm/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
 
+# Ensure the dynamic linker can find ROCm libraries by adding /opt/rocm/lib to the linker cache. 
+RUN printf '%s\n' /opt/rocm/lib > /etc/ld.so.conf.d/rocm.conf && ldconfig
+
 ENV HIP_PLATFORM=amd
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
-ENV LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH}"
 
 WORKDIR /workspace
