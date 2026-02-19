@@ -150,7 +150,7 @@ struct ThreadwiseTransferHelper_Base
     template <typename SliceLengths, index_t VectorDim, index_t ScalarPerVector_>
     __host__ __device__ static constexpr auto ComputeThreadScratchDescriptor()
     {
-        static constexpr index_t nDim    = SliceLengths::Size();
+        constexpr index_t nDim           = SliceLengths::Size();
         constexpr auto scalar_per_access = generate_sequence(
             detail::lambda_scalar_per_access<VectorDim, ScalarPerVector_>{}, Number<nDim>{});
 
@@ -209,7 +209,7 @@ struct ThreadwiseTransferHelper_Base
     __host__ __device__ static constexpr auto
     ComputeForwardSteps(const Desc& desc, const ScalarPerAccess& scalar_per_access)
     {
-        static constexpr index_t nDim = ScalarPerAccess::Size();
+        constexpr index_t nDim = ScalarPerAccess::Size();
         return generate_tuple(
             [&](auto i) {
                 MultiIndex<nDim> step_idx;
@@ -234,7 +234,7 @@ struct ThreadwiseTransferHelper_Base
     __host__ __device__ static constexpr auto
     ComputeBackwardSteps(const Desc& desc, const ScalarPerAccess& scalar_per_access)
     {
-        static constexpr index_t nDim = ScalarPerAccess::Size();
+        constexpr index_t nDim = ScalarPerAccess::Size();
         return generate_tuple(
             [&](auto i) {
                 MultiIndex<nDim> step_idx;
@@ -343,7 +343,7 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
     ComputeForwardSweep(const OrderedAccessIdx& ordered_access_idx,
                         const OrderedAccessLengths& ordered_access_lengths)
     {
-        static constexpr index_t nDim = OrderedAccessLengths::Size();
+        constexpr index_t nDim = OrderedAccessLengths::Size();
         static_assert(OrderedAccessIdx::Size() == nDim,
                       "ordered_access_idx and ordered_access_lengths must have same nDim");
         StaticallyIndexedArray_v2<bool, nDim> forward_sweep_;
@@ -377,7 +377,7 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
     ComputeMoveOnDim(const OrderedAccessIdx& ordered_access_idx,
                      const OrderedAccessLengths& ordered_access_lengths)
     {
-        static constexpr index_t nDim = OrderedAccessLengths::Size();
+        constexpr index_t nDim = OrderedAccessLengths::Size();
         static_assert(OrderedAccessIdx::Size() == nDim,
                       "ordered_access_idx and ordered_access_lengths must have same nDim");
         StaticallyIndexedArray_v2<bool, nDim> move_on_dim_;
@@ -415,7 +415,7 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
                      const DimAccessOrder& dim_access_order,
                      const ScalarPerAccess& scalar_per_access)
     {
-        static constexpr index_t nDim = ScalarPerAccess::Size();
+        constexpr index_t nDim = ScalarPerAccess::Size();
         static_assert(OrderedAccessIdx::Size() == nDim,
                       "all arguments to ComputeDataIndex must have same nDim");
         MultiIndex<nDim> ordered_idx;
@@ -447,7 +447,7 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
               typename DimAccessOrder>
     __host__ __device__ static constexpr auto ComputeCoordinateResetStep()
     {
-        static constexpr index_t nDim = SliceLengths::Size();
+        constexpr index_t nDim = SliceLengths::Size();
         static_assert(DimAccessOrder::Size() == nDim,
                       "SliceLengths and DimAccessOrder must have same nDim");
         constexpr auto scalar_per_access = generate_sequence(
