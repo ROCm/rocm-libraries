@@ -50,12 +50,16 @@
 #include <thread>
 #include <vector>
 
-namespace miopen {
-namespace tests {
-
+namespace miopen::tests {
 // Declared in main_hip.cpp - provides access to command-line arguments
 extern int g_argc;
 extern char** g_argv;
+} // namespace miopen::tests
+
+namespace {
+using namespace miopen;
+using miopen::tests::g_argc;
+using miopen::tests::g_argv;
 
 struct TestRordbEmbedFsOverrideLock
 {
@@ -102,6 +106,10 @@ struct ArgsHelper
     static constexpr const char* id_arg        = "mp-test-child";
     static constexpr const char* path_arg      = "mp-test-child-path";
     static constexpr const char* db_class_arg  = "mp-test-child-db-class";
+
+    // Exact gtest filter for spawning child worker processes.
+    // Must match: TEST_F(CPU_PerfDb_ChildWorker_NONE, ProcessWork)
+    static constexpr const char* child_worker_filter = "CPU_PerfDb_ChildWorker_NONE.ProcessWork";
 
     struct db_class
     {
@@ -993,7 +1001,7 @@ public:
             {
                 // Use --gtest_filter to run only the child worker test in spawned process
                 auto args =
-                    std::string{"--gtest_filter=*PerfDb_ChildWorker*"} +
+                    std::string{"--gtest_filter="} + ArgsHelper::child_worker_filter +
                     " --" + ArgsHelper::write_arg +
                     " --" + ArgsHelper::id_arg + " " + std::to_string(id++) +
                     " --" + ArgsHelper::path_arg + " " + temp_file.Path() +
@@ -1087,7 +1095,7 @@ public:
                 // Use --gtest_filter to run only the child worker test in spawned process
                 // Note: no --write flag for read test
                 auto args =
-                    std::string{"--gtest_filter=*PerfDb_ChildWorker*"} +
+                    std::string{"--gtest_filter="} + ArgsHelper::child_worker_filter +
                     " --" + ArgsHelper::id_arg + " " + std::to_string(id++) +
                     " --" + ArgsHelper::path_arg + " " + temp_file +
                     " --" + ArgsHelper::db_class_arg + " " + ArgsHelper::db_class::Get<TDb>();
@@ -1444,23 +1452,17 @@ public:
     }
 };
 
-} // namespace tests
-} // namespace miopen
-
-namespace {
-
 std::string GetArg(const std::string& name)
 {
-    if(miopen::tests::g_argv == nullptr || miopen::tests::g_argc < 2)
+    if(g_argv == nullptr || g_argc < 2)
         return "";
 
-    for(int i = 1; i < miopen::tests::g_argc - 1; ++i)
+    for(int i = 1; i < g_argc - 1; ++i)
     {
-        if(miopen::tests::g_argv[i] != nullptr &&
-           std::string(miopen::tests::g_argv[i]) == "--" + name)
+        if(g_argv[i] != nullptr && std::string(g_argv[i]) == "--" + name)
         {
-            if(miopen::tests::g_argv[i + 1] != nullptr)
-                return miopen::tests::g_argv[i + 1];
+            if(g_argv[i + 1] != nullptr)
+                return g_argv[i + 1];
         }
     }
     return "";
@@ -1468,21 +1470,18 @@ std::string GetArg(const std::string& name)
 
 bool HasFlag(const std::string& name)
 {
-    if(miopen::tests::g_argv == nullptr || miopen::tests::g_argc < 2)
+    if(g_argv == nullptr || g_argc < 2)
         return false;
 
-    for(int i = 1; i < miopen::tests::g_argc; ++i)
+    for(int i = 1; i < g_argc; ++i)
     {
-        if(miopen::tests::g_argv[i] != nullptr &&
-           std::string(miopen::tests::g_argv[i]) == "--" + name)
+        if(g_argv[i] != nullptr && std::string(g_argv[i]) == "--" + name)
             return true;
     }
     return false;
 }
 
-bool IsChildProcessMode() { return !GetArg(miopen::tests::ArgsHelper::id_arg).empty(); }
-
-} // anonymous namespace
+bool IsChildProcessMode() { return !GetArg(ArgsHelper::id_arg).empty(); }
 
 class CPU_PerfDb_ChildWorker_NONE : public ::testing::Test
 {
@@ -1491,16 +1490,13 @@ protected:
     {
         if(!IsChildProcessMode())
         {
-            GTEST_SKIP() << "Not in child process mode (no --" << miopen::tests::ArgsHelper::id_arg
-                         << " arg)";
+            GTEST_SKIP() << "Not in child process mode (no --" << ArgsHelper::id_arg << " arg)";
         }
     }
 };
 
 TEST_F(CPU_PerfDb_ChildWorker_NONE, ProcessWork)
 {
-    using namespace miopen::tests;
-
     std::string logs_root = GetArg(ArgsHelper::logs_path_arg);
     if(!logs_root.empty())
         thread_logs_root() = logs_root;
@@ -1520,62 +1516,64 @@ TEST_F(CPU_PerfDb_ChildWorker_NONE, ProcessWork)
 
     if(db_class == ArgsHelper::db_class::db)
     {
-        DbMultiProcessTest<miopen::PlainTextDb>::WorkItem(id, db_path, write);
+        DbMultiProcessTest<PlainTextDb>::WorkItem(id, db_path, write);
     }
     else if(db_class == ArgsHelper::db_class::ramdb)
     {
-        DbMultiProcessTest<miopen::RamDb>::WorkItem(id, db_path, write);
+        DbMultiProcessTest<RamDb>::WorkItem(id, db_path, write);
     }
 }
 
 class CPU_PerfDb_NONE : public ::testing::Test
 {
 protected:
-    miopen::TempFile temp_file{"miopen.tests.perfdb"};
+    TempFile temp_file{"miopen.tests.perfdb"};
 
     static void SetUpTestSuite()
     {
         // Save exe path for spawning child processes
-        if(miopen::tests::g_argc > 0)
+        if(g_argc > 0)
         {
-            miopen::tests::exe_path() = miopen::fs::absolute(miopen::tests::g_argv[0]);
+            exe_path() = fs::absolute(g_argv[0]);
         }
     }
 
     template <class TDb>
     void DbTests()
     {
-        miopen::tests::DbFindTest<TDb>{temp_file}.Run();
-        miopen::tests::DbStoreTest<TDb>{temp_file}.Run();
-        miopen::tests::DbUpdateTest<TDb>{temp_file}.Run();
-        miopen::tests::DbRemoveTest<TDb>{temp_file}.Run();
-        miopen::tests::DbReadTest<TDb>{temp_file}.Run();
-        miopen::tests::DbWriteTest<TDb>{temp_file}.Run();
-        miopen::tests::DbOperationsTest<TDb>{temp_file}.Run();
-        miopen::tests::DbParallelTest<TDb>{temp_file}.Run();
+        DbFindTest<TDb>{temp_file}.Run();
+        DbStoreTest<TDb>{temp_file}.Run();
+        DbUpdateTest<TDb>{temp_file}.Run();
+        DbRemoveTest<TDb>{temp_file}.Run();
+        DbReadTest<TDb>{temp_file}.Run();
+        DbWriteTest<TDb>{temp_file}.Run();
+        DbOperationsTest<TDb>{temp_file}.Run();
+        DbParallelTest<TDb>{temp_file}.Run();
 
-        miopen::tests::DbMultiThreadedReadTest<TDb>{temp_file}.Run();
-        miopen::tests::DbMultiProcessReadTest<TDb>{temp_file}.Run();
-        miopen::tests::DbMultiThreadedTest<TDb>{temp_file}.Run();
-        miopen::tests::DbMultiProcessTest<TDb>{temp_file}.Run();
+        DbMultiThreadedReadTest<TDb>{temp_file}.Run();
+        DbMultiProcessReadTest<TDb>{temp_file}.Run();
+        DbMultiThreadedTest<TDb>{temp_file}.Run();
+        DbMultiProcessTest<TDb>{temp_file}.Run();
     }
 
     void MultiFileDbTests()
     {
-        if(!miopen::DisableUserDbFileIO)
+        if(!DisableUserDbFileIO)
         {
-            miopen::tests::DbMultiFileReadTest<true>{temp_file}.Run();
-            miopen::tests::DbMultiFileReadTest<false>{temp_file}.Run();
-            miopen::tests::DbMultiFileWriteTest{temp_file}.Run();
+            DbMultiFileReadTest<true>{temp_file}.Run();
+            DbMultiFileReadTest<false>{temp_file}.Run();
+            DbMultiFileWriteTest{temp_file}.Run();
         }
-        miopen::tests::DbMultiFileOperationsTest{temp_file}.Run();
-        miopen::tests::DbMultiFileMultiThreadedReadTest{temp_file}.Run();
-        miopen::tests::DbMultiFileMultiThreadedTest{temp_file}.Run();
+        DbMultiFileOperationsTest{temp_file}.Run();
+        DbMultiFileMultiThreadedReadTest{temp_file}.Run();
+        DbMultiFileMultiThreadedTest{temp_file}.Run();
     }
 };
 
-TEST_F(CPU_PerfDb_NONE, RamDb_AllTests) { DbTests<miopen::RamDb>(); }
+TEST_F(CPU_PerfDb_NONE, RamDb_AllTests) { DbTests<RamDb>(); }
 
-TEST_F(CPU_PerfDb_NONE, PlainTextDb_AllTests) { DbTests<miopen::PlainTextDb>(); }
+TEST_F(CPU_PerfDb_NONE, PlainTextDb_AllTests) { DbTests<PlainTextDb>(); }
 
 TEST_F(CPU_PerfDb_NONE, MultiFileDb_AllTests) { MultiFileDbTests(); }
+
+} // anonymous namespace
