@@ -54,11 +54,11 @@ if(TARGET roc::mxDataGenerator)
     target_sources(tensilelite-tests
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/MXDataGen_test.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../clients/common/src/mxDataGen.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../clients/common/src/mxDataGen.cpp"
     )
     target_include_directories(tensilelite-tests
         PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../clients/common/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../clients/common/include"
     )
     target_link_libraries(tensilelite-tests PRIVATE roc::mxDataGenerator)
     target_compile_features(tensilelite-tests PRIVATE cxx_std_20)
