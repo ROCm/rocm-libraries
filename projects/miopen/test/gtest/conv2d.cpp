@@ -3,6 +3,7 @@
 
 #include "conv_common_gtest.hpp"
 
+<<<<<<< HEAD
 namespace {
 
 template <typename T>
@@ -122,6 +123,6 @@ struct conv2d_test : miopen::test::conv::conv_test_base<T>
 
 using GPU_conv_2d_FP32 = conv2d_test<float>;
 
-TEST_P(GPU_conv_2d_FP32, TestFP32) { this->Run(); }
+TEST_P(GPU_conv_2d_FP32, TestFP32) { Run(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_conv_2d_FP32, ::testing::ValuesIn(GetDataset()));
