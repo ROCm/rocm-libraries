@@ -22,6 +22,7 @@
 #include <vector>
 #include <cstddef>
 #include <string>
+#include <tuple>
 
 namespace ck  = ck_tile;
 namespace mma = ck_tile::core::arch::mma;
@@ -158,13 +159,6 @@ struct MmaLayoutTestKernel
     }
 };
 
-struct CaseDim
-{
-    uint32_t m;
-    uint32_t k;
-    uint32_t n;
-};
-
 // debug helper
 template <typename Array>
 void print_tensor(const char* label, const Array& tensor, uint32_t rows, uint32_t columns)
@@ -226,9 +220,10 @@ bool run_mma_layout_test_case()
         ck_tile::core::arch::hip_device_prop_gcn_arch_name_to_amdgcn_target_id(props.gcnArchName);
     const bool has_device = device_count > 0;
 
-    if(!has_device || runtime_target == ck_tile::core::arch::amdgcn_target_id::HOST ||
-       runtime_target != Config::CompilerTarget::TARGET_ID)
+    if(!has_device || runtime_target == ck_tile::core::arch::amdgcn_target_id::HOST || runtime_target != Config::CompilerTarget::TARGET_ID)
+    {
         return false;
+    }
 
     using Selector   = typename Config::Selector;
     using MmaOp      = typename Selector::SelectedOp;
@@ -252,9 +247,9 @@ bool run_mma_layout_test_case()
                                        Config::LaneGroupSize,
                                        Config::WaveSize>;
 
-    (void)hipGetLastError();
+    std::ignore = hipGetLastError();
 
-    (void)ck_tile::launch_kernel(
+    std::ignore = ck_tile::launch_kernel(
         ck_tile::stream_config{nullptr, false, 0, 0, 1},
         ck_tile::make_kernel(
             Kernel{}, dim3(total_cases), dim3(Config::WaveSize), 0, d_error_ptr));
