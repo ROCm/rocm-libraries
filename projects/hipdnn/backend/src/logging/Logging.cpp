@@ -17,7 +17,7 @@
 #include <spdlog/spdlog.h>
 
 #include <hip/hip_runtime.h>
-#include <mutex>
+#include <shared_mutex>
 
 namespace hipdnn_backend
 {
@@ -38,64 +38,34 @@ constexpr const char* BACKEND_LOGGER_PATTERN = "[%Y-%m-%d %H:%M:%S.%e] [tid %t] 
 // Global backend log output callback state
 struct BackendLogState
 {
-    // Single recursive mutex protects all logger state. Recursive is needed because
-    // sync callback logging may re-enter through globalCallbackWrapper() on the same thread.
-    std::recursive_mutex loggerStateMutex;
+    // Shared mutex protects all logger state. Using shared_mutex allows concurrent reads
+    // (multiple threads logging simultaneously) while still providing exclusive access
+    // for modifications (setting callbacks, shutdown).
+    std::shared_mutex loggerStateMutex;
     bool loggerInitialized = false;
-    bool programIsExiting = false;
-    // The loggers, once created, are retained until the hipdnn library is shutdown.
-    // This avoids a number of race conditions that can arise in dealing with shutting down
-    // and flushing the async thread pools for individual loggers when the user switches
-    // between enabling and disabling the global callback logger and switching between
-    // sync and async logging modes.
+    // The loggers are created on-demand and destroyed during shutdown or when replaced.
     std::shared_ptr<spdlog::logger> consoleFileLogger; // Default logger; when no global callback.
-    std::shared_ptr<spdlog::logger> callbackSyncLogger; // Sync global callback logger.
-    std::shared_ptr<spdlog::logger> callbackAsyncLogger; // Async global callback logger.
+    std::shared_ptr<spdlog::logger> callbackLogger; // Dynamic callback logger (sync or async).
     std::shared_ptr<spdlog::details::thread_pool> sharedThreadPool;
 
-    hipdnnBackendLogOutputCallback_t callbackFn = nullptr;
-    bool async = false; // tracks which mode is currently active
-};
-
-BackendLogState& getBackendLogState();
-
-struct ProgramIsExitingSentinel
-{
-    ~ProgramIsExitingSentinel()
+    // Destructor ensures loggers are properly shut down when last thread-local reference is released
+    ~BackendLogState()
     {
-        {
-            // System is shutting down -- prevent lazy init from re-initializing the logger.
-            auto& state = getBackendLogState();
-            std::lock_guard<std::recursive_mutex> lock(state.loggerStateMutex);
-            state.programIsExiting = true;
-        }
-
         loggerShutdown();
     }
 };
 
+BackendLogState& getBackendLogState();
+
 BackendLogState& getBackendLogState()
 {
-    // Never destroyed -- intentional leak -- to ensure threads won't access
-    // deallocated logger state details while the system is shutting down.
-    static auto s_state = new BackendLogState();
-    // ProgramIsExitingSentinel s_sentinel is used to notify BackendLogState when
-    // static objects are being cleaned-up -- the program is exiting. This
-    // allows the logger to put itself into a quiescent state so as not to interfere
-    // with appllication threads that attempt to use the logger while being closed.
-    static ProgramIsExitingSentinel s_sentinel;
+    // Thread-local shared_ptr ensures BackendLogState survives until all threads release references.
+    // LIMITATION: Threads must not call this function for the first time during static destruction,
+    // as the mutex may already be destroyed. Ensure all logging threads have logged at least once
+    // before program exit handlers run.
+    static auto s_state = std::make_shared<BackendLogState>();
+    thread_local auto s_tlRef = s_state; // Each thread holds a reference
     return *s_state;
-}
-
-// Wrapper callback that both sync and async global log callback sinks use
-void globalCallbackWrapper(hipdnnSeverity_t severity, const char* message)
-{
-    auto& state = getBackendLogState();
-    std::lock_guard<std::recursive_mutex> lock(state.loggerStateMutex);
-    if(state.callbackFn != nullptr)
-    {
-        state.callbackFn(severity, message);
-    }
 }
 
 } // namespace
@@ -133,10 +103,21 @@ void logHipDeviceInfo(hipStream_t stream)
 
 void initialize()
 {
+    // Fast path: check if already initialized with read lock (allows concurrent read access)
     {
         auto& state = getBackendLogState();
-        std::lock_guard<std::recursive_mutex> lock(state.loggerStateMutex);
-        if(state.loggerInitialized || state.programIsExiting)
+        std::shared_lock<std::shared_mutex> lock(state.loggerStateMutex);
+        if(state.loggerInitialized)
+        {
+            return;
+        }
+    }
+
+    // Slow path: actually initialize with write lock (first call only)
+    {
+        auto& state = getBackendLogState();
+        std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
+        if(state.loggerInitialized) // Check again - race protection
         {
             return;
         }
@@ -166,7 +147,7 @@ void initialize()
         }
 
         // Create the backend console/file logger (the specific type of sink -- console
-        // or file sink -- was  chosen above based on environment variable settings)
+        // or file sink -- was chosen above based on environment variable settings)
         state.consoleFileLogger
             = std::make_shared<spdlog::async_logger>(S_BACKEND_LOGGER_NAME,
                                                      sink,
@@ -185,32 +166,6 @@ void initialize()
             hipdnn_data_sdk::logging::detail::stringToSeverityOrOff(
                 hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off")));
 
-        // Create async global callback logger
-        sink = std::make_shared<BackendLogOutputSink>(globalCallbackWrapper);
-        sink->set_pattern(BACKEND_LOGGER_PATTERN);
-
-        state.callbackAsyncLogger
-            = std::make_shared<spdlog::async_logger>(S_GLOBAL_CALLBACK_ASYNC_LOGGER_NAME,
-                                                     sink,
-                                                     state.sharedThreadPool,
-                                                     spdlog::async_overflow_policy::block);
-
-        // Set spdlog to accept all messages (trace is most verbose)
-        // Filtering is done by data_sdk log level before calling hipdnnLoggingCallback()
-        state.callbackAsyncLogger->set_level(spdlog::level::trace);
-
-        // Create sync global callback logger
-        sink = std::make_shared<BackendLogOutputSink>(globalCallbackWrapper);
-        sink->set_pattern(BACKEND_LOGGER_PATTERN);
-
-        state.callbackSyncLogger
-            = std::make_shared<spdlog::logger>(S_GLOBAL_CALLBACK_SYNC_LOGGER_NAME, sink);
-
-        // Set spdlog to accept all messages (trace is most verbose)
-        // Filtering is done by data_sdk log level before calling hipdnnLoggingCallback()
-        state.callbackSyncLogger->set_level(spdlog::level::trace);
-
-        state.callbackFn = nullptr;
         state.loggerInitialized = true;
     }
 
@@ -222,14 +177,13 @@ void initialize()
 void loggerShutdown()
 {
     auto& state = getBackendLogState();
-    std::lock_guard<std::recursive_mutex> lock(state.loggerStateMutex);
+    std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
 
-    state.callbackFn = nullptr;
     state.consoleFileLogger.reset();
-    state.callbackSyncLogger.reset();
-    state.callbackAsyncLogger.reset();
-    // Do not destory state.sharedThreadPool to avoid race conditions where loggers
-    // could attempt to use the thread pool after the thread pool is destroyed.
+    state.callbackLogger.reset();
+    // Do not reset sharedThreadPool here - let it be destroyed when BackendLogState
+    // destructor runs. This ensures the thread pool remains alive as long as any
+    // thread that might hold a shared_ptr to a logger that uses it.
 
     state.loggerInitialized = false;
 }
@@ -269,27 +223,21 @@ void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg)
         return;
     }
 
-    auto& state = getBackendLogState();
-    std::lock_guard<std::recursive_mutex> lock(state.loggerStateMutex);
-    if(state.programIsExiting)
-    {
-        // For now, the policy is to drop logs that are generated while the program is exiting.
-        return;
-    }
-
+    // Copy logger shared_ptr under read lock, then release lock before logging.
+    // This prevents deadlock if the callback re-enters (sync mode) and allows
+    // concurrent readers. The copied shared_ptr keeps the shared logger alive.
     std::shared_ptr<spdlog::logger> logger;
-    if(state.callbackFn != nullptr)
     {
-        // Select the appropriate callback logger based on current sync / async mode
-        logger = state.async ? state.callbackAsyncLogger : state.callbackSyncLogger;
-    }
-    else
-    {
-        // Use the default file / console logger
-        logger = state.consoleFileLogger;
-    }
+        auto& state = getBackendLogState();
+        std::shared_lock<std::shared_mutex> lock(state.loggerStateMutex);
 
-    if(logger) // This check is technically not needed but kept for safety.
+        // Select logger: callback logger if set, otherwise console/file
+        logger = state.callbackLogger ? state.callbackLogger : state.consoleFileLogger;
+    } // Lock released here
+
+    // Safe to log outside lock (prevents re-entrance deadlock)
+    // Confirm logger is valid before using (since state.loggerInitialized was not checked above).
+    if(logger)
     {
         logger->log(toSpdlogLevel(severity), msg);
     }
@@ -300,20 +248,55 @@ hipdnnStatus_t initializeGlobalOutputCallbackLogger(hipdnnBackendLogOutputCallba
 {
     if(callback != nullptr)
     {
-        // Start the loggers if they aren't already running.
+        // Ensure base infrastructure is initialized
         initialize();
     }
 
     auto& state = getBackendLogState();
-    std::lock_guard<std::recursive_mutex> lock(state.loggerStateMutex);
-    if(callback != nullptr && (!state.loggerInitialized || state.programIsExiting))
+    std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
+
+    if(callback != nullptr && !state.loggerInitialized)
     {
         return HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
-    // Update callback pointer and current mode
-    state.callbackFn = callback;
-    state.async = async;
+    // Destroy existing callback logger if present
+    if(state.callbackLogger)
+    {
+        // Best-effort flush for async logger (non-blocking)
+        try
+        {
+            state.callbackLogger->flush();
+        }
+        catch(...)
+        {
+            // Ignore flush failures (callback may have thrown)
+        }
+        state.callbackLogger.reset();
+    }
+
+    // Create new callback logger if callback provided
+    if(callback != nullptr)
+    {
+        auto sink = std::make_shared<BackendLogOutputSink>(callback);
+        sink->set_pattern(BACKEND_LOGGER_PATTERN);
+
+        if(async)
+        {
+            state.callbackLogger
+                = std::make_shared<spdlog::async_logger>(S_GLOBAL_CALLBACK_ASYNC_LOGGER_NAME,
+                                                         sink,
+                                                         state.sharedThreadPool,
+                                                         spdlog::async_overflow_policy::block);
+        }
+        else
+        {
+            state.callbackLogger
+                = std::make_shared<spdlog::logger>(S_GLOBAL_CALLBACK_SYNC_LOGGER_NAME, sink);
+        }
+
+        state.callbackLogger->set_level(spdlog::level::trace);
+    }
 
     return HIPDNN_STATUS_SUCCESS;
 }
