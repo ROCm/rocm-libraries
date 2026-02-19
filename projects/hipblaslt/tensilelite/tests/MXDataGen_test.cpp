@@ -45,17 +45,10 @@ class MXDataGenFP4Test : public ::testing::TestWithParam<std::tuple<uint64_t, ui
 /**
  * @brief Verify that generateMXInput produces FP4 data with an acceptable zero frequency.
  *
- * FP4 E2M1 has 16 possible nibble values (0x0–0xF), of which 2 decode to zero
- * (0x0 = +0, 0x8 = -0). If nibbles were uniformly distributed the naive baseline
- * would be 2/16 = 12.5% zeros.
- *
- * With MX block scaling the generator normalises each 32-element block so the
- * largest absolute value maps to the maximum FP4 magnitude (±6.0), which means
- * the block maximum is never zero. This introduces a small upward bias compared
- * to the naive baseline: elements that are tiny relative to the block maximum
- * are more likely to round to zero, while the block maximum itself cannot.
- * The net empirically observed zero frequency is ~12.5–13%, converging to
- * approximately 12.89% for large matrices with a bounded [-1, 1] uniform input.
+ * FP4 E2M1 has 16 nibble values, 2 of which are zero (0x0 = +0, 0x8 = -0), giving a
+ * naive baseline of 2/16 = 12.5%. MX block scaling slightly elevates this: the block
+ * maximum is guaranteed non-zero, pushing small elements toward zero. Empirically the
+ * zero frequency converges to ~12.89% for large matrices with bounded [-1, 1] input.
  */
 TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
 {
