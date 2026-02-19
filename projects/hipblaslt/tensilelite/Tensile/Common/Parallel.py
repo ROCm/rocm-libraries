@@ -208,17 +208,19 @@ def ParallelMap2(
       multiArg: True if objects represent multiple arguments
                   (differentiates multi args vs single collection arg)
     """
-
     if return_as in ("generator", "generator_unordered") and not joblibParallelSupportsGenerator():
         return ParallelMapReturnAsGenerator(function, objects, message, enable, multiArg)
+
     from .GlobalParameters import globalParameters
 
     threadCount = procs if procs else CPUThreadCount(enable)
 
     threadCount = CPUThreadCount(enable)
+
     if threadCount <= 1 and globalParameters["ShowProgressBar"]:
         # Provide a progress bar for single-threaded operation.
         return [function(*args) if multiArg else function(args) for args in tqdm(objects, message)]
+
     countMessage = ""
     try:
         countMessage = " for {} tasks".format(len(objects))
