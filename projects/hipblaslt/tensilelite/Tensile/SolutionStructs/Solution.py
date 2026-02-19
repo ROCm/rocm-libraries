@@ -1458,33 +1458,31 @@ class Solution(collections.abc.Mapping):
 
     if state["ProblemType"]["MXBlockA"]:
       state["DirectToVgprMXSA"] = state["DirectToVgprA"]
-      if not state["DirectToVgprA"]:
-        state["ThreadTileMXSA"] = state["ThreadTileA"]
-        state["SubGroupMXSA"] = state["SubGroupA"]
-        state["MacroTileMXSA"] = state["MacroTileA"]
-        state["WaveSeparateGlobalReadMXSA"] = state["WaveSeparateGlobalReadA"]
-        state["NumLoadsCoalescedMXSA"] = state["NumLoadsCoalescedA"]
-        Solution.checkAndAssignWaveSeparateGlobalRead(state, 'MXSA', printRejectionReason)
-        state["DirectToLdsMXSA"] = False
-        state["LocalWriteUseSgprMXSA"] = False
-        state["ProblemType"]["MirrorDimsMXSA"] = list(state["ProblemType"]["MirrorDimsA"])
-        state["VectorWidthMXSA"] = state["VectorWidthA"]
-        state["MIWaveTileMXSA"] = state["MIWaveTileA"]
+      state["ThreadTileMXSA"] = state["ThreadTileA"]
+      state["SubGroupMXSA"] = state["SubGroupA"]
+      state["MacroTileMXSA"] = state["MacroTileA"]
+      state["WaveSeparateGlobalReadMXSA"] = state["WaveSeparateGlobalReadA"]
+      state["NumLoadsCoalescedMXSA"] = state["NumLoadsCoalescedA"]
+      Solution.checkAndAssignWaveSeparateGlobalRead(state, 'MXSA', printRejectionReason)
+      state["DirectToLdsMXSA"] = False
+      state["LocalWriteUseSgprMXSA"] = False
+      state["ProblemType"]["MirrorDimsMXSA"] = list(state["ProblemType"]["MirrorDimsA"])
+      state["VectorWidthMXSA"] = state["VectorWidthA"]
+      state["MIWaveTileMXSA"] = state["MIWaveTileA"]
 
     if state["ProblemType"]["MXBlockB"]:
       state["DirectToVgprMXSB"] = state["DirectToVgprB"]
-      if not state["DirectToVgprB"]:
-        state["ThreadTileMXSB"] = state["ThreadTileB"]
-        state["SubGroupMXSB"] = state["SubGroupB"]
-        state["MacroTileMXSB"] = state["MacroTileB"]
-        state["WaveSeparateGlobalReadMXSB"] = state["WaveSeparateGlobalReadB"]
-        state["NumLoadsCoalescedMXSB"] = state["NumLoadsCoalescedB"]
-        Solution.checkAndAssignWaveSeparateGlobalRead(state, 'MXSB', printRejectionReason)
-        state["DirectToLdsMXSB"] = False
-        state["LocalWriteUseSgprMXSB"] = False
-        state["ProblemType"]["MirrorDimsMXSB"]  = list(state["ProblemType"]["MirrorDimsB"])
-        state["VectorWidthMXSB"] = state["VectorWidthB"]
-        state["MIWaveTileMXSB"] = state["MIWaveTileB"]
+      state["ThreadTileMXSB"] = state["ThreadTileB"]
+      state["SubGroupMXSB"] = state["SubGroupB"]
+      state["MacroTileMXSB"] = state["MacroTileB"]
+      state["WaveSeparateGlobalReadMXSB"] = state["WaveSeparateGlobalReadB"]
+      state["NumLoadsCoalescedMXSB"] = state["NumLoadsCoalescedB"]
+      Solution.checkAndAssignWaveSeparateGlobalRead(state, 'MXSB', printRejectionReason)
+      state["DirectToLdsMXSB"] = False
+      state["LocalWriteUseSgprMXSB"] = False
+      state["ProblemType"]["MirrorDimsMXSB"]  = list(state["ProblemType"]["MirrorDimsB"])
+      state["VectorWidthMXSB"] = state["VectorWidthB"]
+      state["MIWaveTileMXSB"] = state["MIWaveTileB"]
 
 
     # Some restrictions for half:
@@ -1716,7 +1714,7 @@ class Solution(collections.abc.Mapping):
 
       state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeA), 2)))
 
-      def calcLdsPad(lrvw: int, isaInfoMap: Dict[str, IsaInfo]) -> int:
+      def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> int:
         lrvwA = state["LocalReadVectorWidthA"]
         lrvwB = state["LocalReadVectorWidthB"]
         ldsPadA = state["LdsPadA"]
@@ -2021,11 +2019,11 @@ class Solution(collections.abc.Mapping):
           wlrB = max(state["LocalReadVectorWidthB"] // state["MIInputPerThread"], 1)
 
           if (wlrA > 1) or (wlrB > 1):
-            padA, padB, padM = calcLdsPad()
+            padA, padB, padM = calcLdsPad(isaInfoMap)
             ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPad()
             ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, \
               ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
-            if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > globalParameters["MaxLDS"]:
+            if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > state["MaxLDS"]:
               if wlrA > 1:
                 state["LocalReadVectorWidthA"] //= 2
               if wlrB > 1:
@@ -2231,6 +2229,9 @@ class Solution(collections.abc.Mapping):
             sameLayout = state["ProblemType"]["TLU%s"%tc] != state["UnrollMajorLDS%s"%tc]
             state["UseGeneralizedNLCOne%s"%tc] = grwidth != 8 and sameLayout \
               and state["WaveSeparateGlobalRead%s"%tc] == 0 and not state["DirectToVgpr%s"%tc]
+            # workaround: disable UseGeneralizedNLCOne for MXBlock (TODO: enable it for MXBlock)
+            if state["ProblemType"]["MXBlock%s"%tc]:
+              state["UseGeneralizedNLCOne%s"%tc] = False
           else:
             state["UseGeneralizedNLCOne%s"%tc] = False
         state["UseGeneralizedNLCOneMetadata"] = False
@@ -3071,9 +3072,16 @@ class Solution(collections.abc.Mapping):
     state["NoLdsWriteCode"] = False
     if (state["DirectToVgprA"] or state["DirectToLdsA"]) and (state["DirectToVgprB"] or state["DirectToLdsB"]):
       state["NoLdsWriteCode"] = True
+    # MX case
+    if state["ProblemType"]["MXBlockA"]:
+      if not (state["DirectToVgprMXSA"] or state["DirectToLdsMXSA"]):
+        state["NoLdsWriteCode"] = False
+    if state["ProblemType"]["MXBlockB"]:
+      if not (state["DirectToVgprMXSB"] or state["DirectToLdsMXSB"]):
+        state["NoLdsWriteCode"] = False
 
     # calculate ldsPad
-    state["LdsPadA"], state["LdsPadB"], state["LdsPadMetadata"] = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
+    state["LdsPadA"], state["LdsPadB"], state["LdsPadMetadata"] = calcLdsPad(isaInfoMap)
 
     if state["GlobalReadVectorWidthA"] * state["ProblemType"]["MacDataTypeA"].numBytes() == 32 and state["LdsPadA"] == 16 // state["ProblemType"]["MacDataTypeA"].numBytes():
       if auto_LdsBlockSizePerPadA_for_mix:
