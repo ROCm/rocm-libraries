@@ -498,13 +498,13 @@ struct ThreadwiseTensorSliceTransfer_v7r3_scatter
     __device__ static constexpr auto GetSrcThreadScratchDescriptor()
     {
         return SFCHelper::
-            ComputeThreadScratchDescriptor<nDim, SliceLengths, SrcVectorDim, SrcScalarPerVector>();
+            ComputeThreadScratchDescriptor<SliceLengths, SrcVectorDim, SrcScalarPerVector>();
     }
 
     __device__ static constexpr auto GetDstThreadScratchDescriptor()
     {
         return SFCHelper::
-            ComputeThreadScratchDescriptor<nDim, SliceLengths, DstVectorDim, DstScalarPerVector>();
+            ComputeThreadScratchDescriptor<SliceLengths, DstVectorDim, DstScalarPerVector>();
     }
 
     // src_slice_origin_step_idx need to be known at compile-time, for performance reason

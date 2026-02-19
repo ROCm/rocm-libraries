@@ -142,15 +142,15 @@ struct ThreadwiseTransferHelper_Base
      * with an additional dimension of size ScalarPerVector, enabling vector-typed
      * access to the scratch buffer.
      *
-     * @tparam nDim              Number of tensor dimensions.
      * @tparam SliceLengths      Compile-time sequence of per-dimension slice lengths.
      * @tparam VectorDim         Which dimension is vectorized.
      * @tparam ScalarPerVector_  Number of scalars per vector load/store.
      * @return Transformed tensor descriptor for the thread scratch buffer.
      */
-    template <index_t nDim, typename SliceLengths, index_t VectorDim, index_t ScalarPerVector_>
+    template <typename SliceLengths, index_t VectorDim, index_t ScalarPerVector_>
     __host__ __device__ static constexpr auto ComputeThreadScratchDescriptor()
     {
+        static constexpr index_t nDim    = SliceLengths::Size();
         constexpr auto scalar_per_access = generate_sequence(
             detail::lambda_scalar_per_access<VectorDim, ScalarPerVector_>{}, Number<nDim>{});
 
@@ -202,14 +202,14 @@ struct ThreadwiseTransferHelper_Base
      * Returns a tuple of nDim coordinate steps, where step[i] moves by
      * +scalar_per_access[i] in dimension i and 0 in all other dimensions.
      *
-     * @tparam nDim  Number of tensor dimensions.
      * @param desc   Tensor descriptor.
      * @param scalar_per_access  Per-dimension access widths (Sequence type).
      */
-    template <index_t nDim, typename Desc, typename ScalarPerAccess>
+    template <typename Desc, typename ScalarPerAccess>
     __host__ __device__ static constexpr auto
     ComputeForwardSteps(const Desc& desc, const ScalarPerAccess& scalar_per_access)
     {
+        static constexpr index_t nDim = ScalarPerAccess::Size();
         return generate_tuple(
             [&](auto i) {
                 MultiIndex<nDim> step_idx;
@@ -227,14 +227,14 @@ struct ThreadwiseTransferHelper_Base
      *
      * Same as ComputeForwardSteps but with negated step values.
      *
-     * @tparam nDim  Number of tensor dimensions.
      * @param desc   Tensor descriptor.
      * @param scalar_per_access  Per-dimension access widths (Sequence type).
      */
-    template <index_t nDim, typename Desc, typename ScalarPerAccess>
+    template <typename Desc, typename ScalarPerAccess>
     __host__ __device__ static constexpr auto
     ComputeBackwardSteps(const Desc& desc, const ScalarPerAccess& scalar_per_access)
     {
+        static constexpr index_t nDim = ScalarPerAccess::Size();
         return generate_tuple(
             [&](auto i) {
                 MultiIndex<nDim> step_idx;
@@ -334,16 +334,18 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
      * based on the current position in the ordered access grid, implementing
      * a zigzag (serpentine) traversal pattern.
      *
-     * @tparam nDim  Number of tensor dimensions.
      * @param ordered_access_idx      Current position in the ordered access grid.
      * @param ordered_access_lengths  Size of the ordered access grid per dimension.
      * @return Array of booleans: true = forward, false = backward.
      */
-    template <index_t nDim, typename OrderedAccessIdx, typename OrderedAccessLengths>
+    template <typename OrderedAccessIdx, typename OrderedAccessLengths>
     __host__ __device__ static constexpr auto
     ComputeForwardSweep(const OrderedAccessIdx& ordered_access_idx,
                         const OrderedAccessLengths& ordered_access_lengths)
     {
+        static constexpr index_t nDim = OrderedAccessLengths::Size();
+        static_assert(OrderedAccessIdx::Size() == nDim,
+                      "ordered_access_idx and ordered_access_lengths must have same nDim");
         StaticallyIndexedArray_v2<bool, nDim> forward_sweep_;
 
         forward_sweep_(I0) = true;
@@ -366,16 +368,18 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
      * A dimension moves when it hasn't reached its end and all higher-priority
      * (faster-varying) dimensions have completed their ranges.
      *
-     * @tparam nDim  Number of tensor dimensions.
      * @param ordered_access_idx      Current position in the ordered access grid.
      * @param ordered_access_lengths  Size of the ordered access grid per dimension.
      * @return Array of booleans: true = move coordinate on this dimension.
      */
-    template <index_t nDim, typename OrderedAccessIdx, typename OrderedAccessLengths>
+    template <typename OrderedAccessIdx, typename OrderedAccessLengths>
     __host__ __device__ static constexpr auto
     ComputeMoveOnDim(const OrderedAccessIdx& ordered_access_idx,
                      const OrderedAccessLengths& ordered_access_lengths)
     {
+        static constexpr index_t nDim = OrderedAccessLengths::Size();
+        static_assert(OrderedAccessIdx::Size() == nDim,
+                      "ordered_access_idx and ordered_access_lengths must have same nDim");
         StaticallyIndexedArray_v2<bool, nDim> move_on_dim_;
 
         static_for<0, nDim, 1>{}([&](auto i) {
@@ -392,7 +396,6 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
     /**
      * @brief Convert ordered access index to natural dimension order and apply scaling.
      *
-     * @tparam nDim  Number of tensor dimensions.
      * @param ordered_access_idx      Current position in the ordered access grid.
      * @param ordered_access_lengths  Size of the ordered access grid per dimension.
      * @param forward_sweep           Per-dimension sweep direction.
@@ -400,8 +403,7 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
      * @param scalar_per_access       Per-dimension access widths.
      * @return MultiIndex in natural dimension order, scaled by scalar_per_access.
      */
-    template <index_t nDim,
-              typename OrderedAccessIdx,
+    template <typename OrderedAccessIdx,
               typename OrderedAccessLengths,
               typename ForwardSweep,
               typename DimAccessOrder,
@@ -413,6 +415,9 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
                      const DimAccessOrder& dim_access_order,
                      const ScalarPerAccess& scalar_per_access)
     {
+        static constexpr index_t nDim = ScalarPerAccess::Size();
+        static_assert(OrderedAccessIdx::Size() == nDim,
+                      "all arguments to ComputeDataIndex must have same nDim");
         MultiIndex<nDim> ordered_idx;
 
         static_for<0, nDim, 1>{}([&](auto i) {
@@ -430,20 +435,21 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
      * Determines where the coordinate ends up after a full serpentine traversal,
      * then returns the negated position as the reset step.
      *
-     * @tparam nDim              Number of tensor dimensions.
      * @tparam SliceLengths      Compile-time sequence of per-dimension slice lengths.
      * @tparam VectorDim         Which dimension is vectorized.
      * @tparam ScalarPerVector_  Number of scalars per vector load/store.
      * @tparam DimAccessOrder    Compile-time sequence mapping ordered to natural dims.
      * @return MultiIndex representing the step to reset the coordinate to the origin.
      */
-    template <index_t nDim,
-              typename SliceLengths,
+    template <typename SliceLengths,
               index_t VectorDim,
               index_t ScalarPerVector_,
               typename DimAccessOrder>
     __host__ __device__ static constexpr auto ComputeCoordinateResetStep()
     {
+        static constexpr index_t nDim = SliceLengths::Size();
+        static_assert(DimAccessOrder::Size() == nDim,
+                      "SliceLengths and DimAccessOrder must have same nDim");
         constexpr auto scalar_per_access = generate_sequence(
             detail::lambda_scalar_per_access<VectorDim, ScalarPerVector_>{}, Number<nDim>{});
 
@@ -457,7 +463,7 @@ struct ThreadwiseTransferHelper_Serpentine : ThreadwiseTransferHelper_Base
         constexpr auto ordered_access_lengths_minus_1 = generate_tuple(
             [&](auto i) { return Number<ordered_access_lengths.At(i) - 1>{}; }, Number<nDim>{});
         constexpr auto forward_sweep =
-            ComputeForwardSweep<nDim>(ordered_access_lengths_minus_1, ordered_access_lengths);
+            ComputeForwardSweep(ordered_access_lengths_minus_1, ordered_access_lengths);
 
         constexpr auto reset_step = [&]() {
             MultiIndex<nDim> ordered_idx;

@@ -140,23 +140,22 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
             container_reorder_given_new2old(src_access_lengths, src_dim_access_order);
 
         // make forward and backward steps
-        const auto src_forward_steps =
-            Helper::ComputeForwardSteps<nDim>(src_desc, src_scalar_per_access);
+        const auto src_forward_steps = Helper::ComputeForwardSteps(src_desc, src_scalar_per_access);
         const auto src_backward_steps =
-            Helper::ComputeBackwardSteps<nDim>(src_desc, src_scalar_per_access);
+            Helper::ComputeBackwardSteps(src_desc, src_scalar_per_access);
 
         // loop over tensor and copy
         static_ford<decltype(ordered_src_access_lengths)>{}([&](auto ordered_src_access_idx) {
             // judge move forward or move backward
-            constexpr auto forward_sweep = Helper::ComputeForwardSweep<nDim>(
-                ordered_src_access_idx, ordered_src_access_lengths);
+            constexpr auto forward_sweep =
+                Helper::ComputeForwardSweep(ordered_src_access_idx, ordered_src_access_lengths);
 
             // calculate src data index
-            constexpr auto src_data_idx = Helper::ComputeDataIndex<nDim>(ordered_src_access_idx,
-                                                                         ordered_src_access_lengths,
-                                                                         forward_sweep,
-                                                                         src_dim_access_order,
-                                                                         src_scalar_per_access);
+            constexpr auto src_data_idx = Helper::ComputeDataIndex(ordered_src_access_idx,
+                                                                   ordered_src_access_lengths,
+                                                                   forward_sweep,
+                                                                   src_dim_access_order,
+                                                                   src_scalar_per_access);
 
             constexpr auto src_data_idx_seq = generate_sequence_v2(
                 [&](auto i) { return Number<src_data_idx[i]>{}; }, Number<src_data_idx.Size()>{});
@@ -220,8 +219,8 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
 
             // Gather-specific: skip gather dimension during coordinate movement
             auto move_on_dim = [&]() constexpr {
-                auto move_on_dim_ = Helper::ComputeMoveOnDim<nDim>(ordered_src_access_idx,
-                                                                   ordered_src_access_lengths);
+                auto move_on_dim_ =
+                    Helper::ComputeMoveOnDim(ordered_src_access_idx, ordered_src_access_lengths);
 
                 static_for<0, nDim, 1>{}(
                     [&](auto i) { move_on_dim_(i) &= i.value != ordered_gather_dim; });
@@ -288,14 +287,14 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
 
         // loop over tensor and copy
         static_ford<decltype(ordered_src_access_lengths)>{}([&](auto ordered_src_access_idx) {
-            constexpr auto forward_sweep = Helper::ComputeForwardSweep<nDim>(
-                ordered_src_access_idx, ordered_src_access_lengths);
+            constexpr auto forward_sweep =
+                Helper::ComputeForwardSweep(ordered_src_access_idx, ordered_src_access_lengths);
 
-            constexpr auto src_data_idx = Helper::ComputeDataIndex<nDim>(ordered_src_access_idx,
-                                                                         ordered_src_access_lengths,
-                                                                         forward_sweep,
-                                                                         src_dim_access_order,
-                                                                         src_scalar_per_access);
+            constexpr auto src_data_idx = Helper::ComputeDataIndex(ordered_src_access_idx,
+                                                                   ordered_src_access_lengths,
+                                                                   forward_sweep,
+                                                                   src_dim_access_order,
+                                                                   src_scalar_per_access);
 
             constexpr auto src_data_idx_seq = generate_sequence_v2(
                 [&](auto i) { return Number<src_data_idx[i]>{}; }, Number<src_data_idx.Size()>{});
@@ -425,21 +424,20 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
             container_reorder_given_new2old(dst_access_lengths, dst_dim_access_order);
 
         // make forward and backward steps
-        const auto dst_forward_steps =
-            Helper::ComputeForwardSteps<nDim>(dst_desc, dst_scalar_per_access);
+        const auto dst_forward_steps = Helper::ComputeForwardSteps(dst_desc, dst_scalar_per_access);
         const auto dst_backward_steps =
-            Helper::ComputeBackwardSteps<nDim>(dst_desc, dst_scalar_per_access);
+            Helper::ComputeBackwardSteps(dst_desc, dst_scalar_per_access);
 
         // loop over tensor and copy
         static_ford<decltype(ordered_dst_access_lengths)>{}([&](auto ordered_dst_access_idx) {
-            constexpr auto forward_sweep = Helper::ComputeForwardSweep<nDim>(
-                ordered_dst_access_idx, ordered_dst_access_lengths);
+            constexpr auto forward_sweep =
+                Helper::ComputeForwardSweep(ordered_dst_access_idx, ordered_dst_access_lengths);
 
-            constexpr auto dst_data_idx = Helper::ComputeDataIndex<nDim>(ordered_dst_access_idx,
-                                                                         ordered_dst_access_lengths,
-                                                                         forward_sweep,
-                                                                         dst_dim_access_order,
-                                                                         dst_scalar_per_access);
+            constexpr auto dst_data_idx = Helper::ComputeDataIndex(ordered_dst_access_idx,
+                                                                   ordered_dst_access_lengths,
+                                                                   forward_sweep,
+                                                                   dst_dim_access_order,
+                                                                   dst_scalar_per_access);
 
             constexpr auto dst_data_idx_seq = generate_sequence_v2(
                 [&](auto i) { return Number<dst_data_idx[i]>{}; }, Number<dst_data_idx.Size()>{});
@@ -470,7 +468,7 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
                 dst_vector_container.template AsType<dst_vector_t>()[Helper::I0]);
 
             constexpr auto move_on_dim =
-                Helper::ComputeMoveOnDim<nDim>(ordered_dst_access_idx, ordered_dst_access_lengths);
+                Helper::ComputeMoveOnDim(ordered_dst_access_idx, ordered_dst_access_lengths);
 
             // move dst coord
             static_for<0, nDim, 1>{}([&](auto i) {
@@ -515,8 +513,8 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
 
         constexpr auto ordered_access_lengths_minus_1 = generate_tuple(
             [&](auto i) { return Number<ordered_src_access_lengths.At(i) - 1>{}; }, Number<nDim>{});
-        constexpr auto forward_sweep = Helper::ComputeForwardSweep<nDim>(
-            ordered_access_lengths_minus_1, ordered_src_access_lengths);
+        constexpr auto forward_sweep =
+            Helper::ComputeForwardSweep(ordered_access_lengths_minus_1, ordered_src_access_lengths);
 
         constexpr auto src_data_idx = [&]() {
             MultiIndex<nDim> ordered_idx;
@@ -544,8 +542,7 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
 
     __device__ static constexpr auto GetDstCoordinateResetStep()
     {
-        return Helper::ComputeCoordinateResetStep<nDim,
-                                                  SliceLengths,
+        return Helper::ComputeCoordinateResetStep<SliceLengths,
                                                   DstVectorDim,
                                                   DstScalarPerVector_,
                                                   DstDimAccessOrder>();
@@ -570,7 +567,7 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
     __device__ static constexpr auto GetSrcThreadScratchDescriptor()
     {
         return Helper::
-            ComputeThreadScratchDescriptor<nDim, SliceLengths, SrcVectorDim, SrcScalarPerVector_>();
+            ComputeThreadScratchDescriptor<SliceLengths, SrcVectorDim, SrcScalarPerVector_>();
     }
 
     __device__ static constexpr auto GetSrcOOBThreadScratchDescriptor()
@@ -586,7 +583,7 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
     __device__ static constexpr auto GetDstThreadScratchDescriptor()
     {
         return Helper::
-            ComputeThreadScratchDescriptor<nDim, SliceLengths, DstVectorDim, DstScalarPerVector_>();
+            ComputeThreadScratchDescriptor<SliceLengths, DstVectorDim, DstScalarPerVector_>();
     }
 
     private:

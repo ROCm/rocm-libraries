@@ -60,7 +60,7 @@ TEST(ThreadwiseTransferHelperSerpentine, ComputeForwardSweep_2D_EvenRow)
 
     constexpr auto idx     = make_tuple(Number<0>{}, Number<0>{});
     constexpr auto lengths = make_tuple(Number<4>{}, Number<4>{});
-    constexpr auto sweep   = Helper::ComputeForwardSweep<2>(idx, lengths);
+    constexpr auto sweep   = Helper::ComputeForwardSweep(idx, lengths);
 
     EXPECT_TRUE(sweep[Number<0>{}]); // dim 0: always forward (outermost)
     EXPECT_TRUE(sweep[Number<1>{}]); // dim 1: forward because dim0 position (0) is even
@@ -80,7 +80,7 @@ TEST(ThreadwiseTransferHelperSerpentine, ComputeForwardSweep_2D_OddRow)
 
     constexpr auto idx     = make_tuple(Number<1>{}, Number<0>{});
     constexpr auto lengths = make_tuple(Number<4>{}, Number<4>{});
-    constexpr auto sweep   = Helper::ComputeForwardSweep<2>(idx, lengths);
+    constexpr auto sweep   = Helper::ComputeForwardSweep(idx, lengths);
 
     EXPECT_TRUE(sweep[Number<0>{}]);  // dim 0: always forward
     EXPECT_FALSE(sweep[Number<1>{}]); // dim 1: backward (dim0 position 1 is odd)
@@ -97,7 +97,7 @@ TEST(ThreadwiseTransferHelperSerpentine, ComputeForwardSweep_1D)
 
     constexpr auto idx     = make_tuple(Number<3>{});
     constexpr auto lengths = make_tuple(Number<8>{});
-    constexpr auto sweep   = Helper::ComputeForwardSweep<1>(idx, lengths);
+    constexpr auto sweep   = Helper::ComputeForwardSweep(idx, lengths);
 
     EXPECT_TRUE(sweep[Number<0>{}]); // 1D: only dimension, always forward
 }
@@ -128,7 +128,7 @@ TEST(ThreadwiseTransferHelperSerpentine, ComputeMoveOnDim_InnerNotComplete)
 
     constexpr auto idx     = make_tuple(Number<0>{}, Number<0>{});
     constexpr auto lengths = make_tuple(Number<3>{}, Number<2>{});
-    constexpr auto move    = Helper::ComputeMoveOnDim<2>(idx, lengths);
+    constexpr auto move    = Helper::ComputeMoveOnDim(idx, lengths);
 
     EXPECT_FALSE(move[Number<0>{}]); // dim 0: inner dim NOT at end
     EXPECT_TRUE(move[Number<1>{}]);  // dim 1: can advance
@@ -153,7 +153,7 @@ TEST(ThreadwiseTransferHelperSerpentine, ComputeMoveOnDim_InnerComplete)
 
     constexpr auto idx     = make_tuple(Number<0>{}, Number<1>{});
     constexpr auto lengths = make_tuple(Number<3>{}, Number<2>{});
-    constexpr auto move    = Helper::ComputeMoveOnDim<2>(idx, lengths);
+    constexpr auto move    = Helper::ComputeMoveOnDim(idx, lengths);
 
     EXPECT_TRUE(move[Number<0>{}]);  // dim 0: inner dim at end, can advance
     EXPECT_FALSE(move[Number<1>{}]); // dim 1: at its limit, cannot advance
@@ -181,11 +181,11 @@ TEST(ThreadwiseTransferHelperSerpentine, ComputeDataIndex_ForwardSweep)
 
     constexpr auto idx     = make_tuple(Number<2>{}, Number<1>{});
     constexpr auto lengths = make_tuple(Number<4>{}, Number<3>{});
-    constexpr auto sweep   = Helper::ComputeForwardSweep<2>(idx, lengths);
+    constexpr auto sweep   = Helper::ComputeForwardSweep(idx, lengths);
     constexpr auto order   = Sequence<0, 1>{};
     constexpr auto spa     = Sequence<1, 1>{};
 
-    constexpr auto data_idx = Helper::ComputeDataIndex<2>(idx, lengths, sweep, order, spa);
+    constexpr auto data_idx = Helper::ComputeDataIndex(idx, lengths, sweep, order, spa);
 
     EXPECT_EQ(data_idx[Number<0>{}], 2);
     EXPECT_EQ(data_idx[Number<1>{}], 1);
@@ -217,7 +217,7 @@ TEST(ThreadwiseTransferHelperSerpentine, ComputeCoordinateResetStep_2D)
     using Helper = ThreadwiseTransferHelper_Serpentine;
 
     constexpr auto reset =
-        Helper::ComputeCoordinateResetStep<2, Sequence<4, 2>, 1, 2, Sequence<0, 1>>();
+        Helper::ComputeCoordinateResetStep<Sequence<4, 2>, 1, 2, Sequence<0, 1>>();
 
     EXPECT_EQ(reset[Number<0>{}], -3);
     EXPECT_EQ(reset[Number<1>{}], 0);
