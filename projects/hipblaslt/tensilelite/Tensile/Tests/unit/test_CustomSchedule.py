@@ -1204,7 +1204,6 @@ class TestLayoutAutoDetection:
 
         captured = capsys.readouterr()
 
-        "Layout probe failed for func '_fake_raises_on_nt' with layout=NT, useLDSTr=True, TLDS=1 Probe kernel: transA=False, transB=True, MT0=256, MT1=256, DU=64"
         assert "Layout probe failed for func '_fake_raises_on_nt'" in captured.out
         assert "Value error for NT layout" in captured.out
 
