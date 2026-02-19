@@ -313,15 +313,12 @@ RUN set -x && \
         fi; \
     fi && \
     echo Building CK with ${num_threads} threads && \
-    export HIPCXX=/opt/rocm/llvm/bin/amdclang++ && \
     CXX=/opt/rocm/llvm/bin/amdclang++ cmake \
     -G Ninja \
-    -D CMAKE_HIP_COMPILER_ROCM_ROOT=/opt/rocm \
     -D CMAKE_PREFIX_PATH=/opt/rocm \
-    -D CMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/amdclang++ \
-    -D CMAKE_CXX_COMPILER_LAUNCHER=sccache \
-    -D CMAKE_HIP_COMPILER_LAUNCHER=sccache \
-    -D CMAKE_C_COMPILER_LAUNCHER=sccache \
+    -D CMAKE_CXX_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
+    -D CMAKE_HIP_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
+    -D CMAKE_C_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
     -D CMAKE_BUILD_TYPE=Release \
     -D GPU_TARGETS="${THEROCK_ASIC}" \
     -D MIOPEN_REQ_LIBS_ONLY=ON \
