@@ -3540,7 +3540,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self.lraAddressesInitFor3LDSBlk(kernel, tensorParametersA, True, False))
 
       # prefetch-local
-      print(f"DEBUG:KOJI:{self.states.numItersPLR=}")
       if self.states.numItersPLR:
         # not generate wait for local write if LDS write code is not generated
         if not kernel["NoLdsWriteCode"]:
