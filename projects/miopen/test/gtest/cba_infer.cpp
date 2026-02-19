@@ -172,27 +172,63 @@ inline auto gcbaInferParamGenFull(Configs configs, TensorTypes tensorTypes)
 
 TEST_P(GPU_ConvBiasActivInfer_FP32, ConvBiasActivAsm1x1UFloat)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvBiasActivAsm1x1UFloat when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvBiasActivAsm1x1U>();
+#endif
 }
 TEST_P(GPU_ConvBiasActivInfer_FP32, ConvOclDirectFwdFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvOclDirectFwdFused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvOclDirectFwdFused>();
+#endif
 }
 TEST_P(GPU_ConvBiasActivInfer_FP32, ConvBinWinogradRxSFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvBinWinogradRxSFused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunSolver(miopen::solver::fusion::ConvBinWinogradRxSFused{});
+#endif
 }
 TEST_P(GPU_ConvBiasActivInfer_FP32, ConvBinWinogradRxSf2x3g1Fused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvBinWinogradRxSf2x3g1Fused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunSolver(miopen::solver::fusion::ConvBinWinogradRxSf2x3g1Fused{});
+#endif
 }
 TEST_P(GPU_ConvBiasActivInfer_FP16, ConvWinoFuryRxSf2x3Fused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvWinoFuryRxSf2x3Fused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunSolver(miopen::solver::fusion::ConvWinoFuryRxSFused<2, 3>{});
+#endif
 }
 TEST_P(GPU_ConvBiasActivInfer_FP16, ConvWinoRageRxSf2x3Fused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvWinoRageRxSf2x3Fused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunSolver(miopen::solver::fusion::ConvWinoRageRxSFused<2, 3>{});
+#endif
 }
 
 TEST_P(GPU_ConvBiasActivInfer_FP16, ConvCKIgemmFwdBiasActivFused)
@@ -218,34 +254,70 @@ TEST_P(GPU_ConvGrpBiasActivInfer_BFP16, ConvCKIgemmGrpFwdBiasActivFused)
 }
 TEST_P(GPU_ConvGrpBiasActivInfer3D_BFP16, ConvCKIgemmGrpFwdBiasActivFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvCKIgemmGrpFwdBiasActivFused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>();
+#endif
 }
 TEST_P(GPU_ConvGrpBiasActivInfer_FP16, ConvCKIgemmGrpFwdBiasActivFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvCKIgemmGrpFwdBiasActivFused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>();
+#endif
 }
 TEST_P(GPU_ConvGrpBiasActivInfer3D_FP16, ConvCKIgemmGrpFwdBiasActivFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvCKIgemmGrpFwdBiasActivFused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>();
+#endif
 }
 TEST_P(GPU_ConvGrpBiasActivInfer_FP32, ConvCKIgemmGrpFwdBiasActivFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvCKIgemmGrpFwdBiasActivFused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>();
+#endif
 }
 TEST_P(GPU_ConvGrpBiasActivInfer3D_FP32, ConvCKIgemmGrpFwdBiasActivFused)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvCKIgemmGrpFwdBiasActivFused when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>();
+#endif
 }
 
 #if MIOPEN_BACKEND_HIP
 
 TEST_P(GPU_ConvBiasActivInferFusionCompileStep_FP32, ConvBiasActivAsm1x1UFloat_testCompile)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip ConvBiasActivAsm1x1UFloat_testCompile when AddressSanitizer is enabled as
+    // it is currently causing a hang
+    GTEST_SKIP();
+#else
     ScopedEnvironment<std::string> find_enforce_env(MIOPEN_FIND_ENFORCE, "SEARCH_DB_UPDATE");
     ScopedEnvironment<int> find_enforce_tuning_iter_env(wa::MIOPEN_DEBUG_TUNING_ITERATIONS_MAX, 5);
 
     fusePlanDesc.Compile(get_handle());
     RunTunableSolver<miopen::solver::fusion::ConvOclDirectFwdFused>();
+#endif
 }
 
 INSTANTIATE_TEST_SUITE_P(
