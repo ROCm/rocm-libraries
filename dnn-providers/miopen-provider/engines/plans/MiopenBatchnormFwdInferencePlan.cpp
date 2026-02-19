@@ -84,26 +84,26 @@ const std::optional<MiopenTensor>& BatchnormFwdInferenceParams::activationOut() 
 }
 
 BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams,
-                                                     bool benchmarkingEnabled)
+                                                     const HipdnnMiopenSettings& executionSettings)
     : _inferenceParams(std::move(inferenceParams))
-    , _benchmarkingEnabled(benchmarkingEnabled)
+    , _executionSettings(executionSettings)
 {
 }
 
 size_t BatchnormFwdInferencePlan::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+    [[maybe_unused]] const HipdnnMiopenHandle& handle) const
 {
     // No workspace needed for batchnorm inference
     return 0;
 }
 
-void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
+void BatchnormFwdInferencePlan::execute(const HipdnnMiopenHandle& handle,
                                         const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                         uint32_t numDeviceBuffers,
                                         [[maybe_unused]] void* workspace) const
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
 
     // Hardcoded values from bn_driver in miopen
     auto alpha = static_cast<float>(1);
@@ -168,4 +168,4 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
     }
 }
 
-}
+} // namespace miopen_plugin
