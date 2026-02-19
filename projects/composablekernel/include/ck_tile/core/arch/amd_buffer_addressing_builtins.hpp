@@ -2404,6 +2404,9 @@ CK_TILE_DEVICE void amd_buffer_atomic_max_impl(const thread_buffer<T, N> src_thr
     }
 }
 
+template <typename T>
+using has_type = T::type;
+
 // buffer_load requires:
 //   1) p_src_wave must point to global memory space
 //   2) p_src_wave must be a wavewise pointer.
@@ -2434,23 +2437,27 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
     return amd_buffer_load_impl<T, N, coherence>(
         src_wave_buffer_resource, src_addr_shift + src_thread_addr_offset, 0);
 #else
+    // Use vector_t for not valid elements to avoid permute instructions.
+    thread_buffer<T, N> tmp =
+        amd_buffer_load_impl<T, N, coherence>(src_wave_buffer_resource, src_thread_addr_offset, 0);
     if constexpr(oob_conditional_check)
     {
-        if(src_thread_element_valid)
+        if(!src_thread_element_valid)
         {
-            return amd_buffer_load_impl<T, N, coherence>(
-                src_wave_buffer_resource, src_thread_addr_offset, 0);
-        }
-        else
-        {
-            return thread_buffer<T, N>{numeric<T>::zero()};
+            if constexpr(is_detected<has_type, T>::value)
+            {
+                using vector_t = T::type __attribute__((ext_vector_type(N)));
+                tmp.template set_as<vector_t>(number<0>{},
+                                              vector_t{numeric<typename T::type>::zero()});
+            }
+            else
+            {
+                using vector_t = T __attribute__((ext_vector_type(N)));
+                tmp.template set_as<vector_t>(number<0>{}, vector_t{numeric<T>::zero()});
+            }
         }
     }
-    else
-    {
-        return amd_buffer_load_impl<T, N, coherence>(
-            src_wave_buffer_resource, src_thread_addr_offset, 0);
-    }
+    return tmp;
 #endif
 }
 
@@ -2474,13 +2481,26 @@ amd_buffer_load_invalid_element_return_customized_value(const T* p_src_wave,
 
     index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
 
+    // Use vector_t for not valid elements to avoid permute instructions.
     thread_buffer<T, N> tmp =
         amd_buffer_load_impl<T, N, coherence>(src_wave_buffer_resource, src_thread_addr_offset, 0);
-
     if constexpr(oob_conditional_check)
-        return src_thread_element_valid ? tmp : thread_buffer<T, N>{customized_value};
-    else
-        return tmp;
+    {
+        if(!src_thread_element_valid)
+        {
+            if constexpr(is_detected<has_type, T>::value)
+            {
+                using vector_t = T::type __attribute__((ext_vector_type(N)));
+                tmp.template set_as<vector_t>(number<0>{}, vector_t{customized_value});
+            }
+            else
+            {
+                using vector_t = T __attribute__((ext_vector_type(N)));
+                tmp.template set_as<vector_t>(number<0>{}, vector_t{customized_value});
+            }
+        }
+    }
+    return tmp;
 }
 
 template <typename T,
