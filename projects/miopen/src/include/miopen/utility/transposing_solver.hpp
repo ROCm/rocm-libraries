@@ -267,31 +267,7 @@ struct BatchedTransposeSolverImpl : TransposePseudoSolver
     ConvSolution GetSolution(const ExecutionContext& ctx,
                              const TransposeProblem& problem) const override
     {
-        const auto& desc = problem.input;
-        const auto& lens = desc.GetLengths();
-
-        // Extract dimensions
-        const uint32_t n = static_cast<uint32_t>(lens[0]);
-        const uint32_t c = static_cast<uint32_t>(lens[1]);
-
-        // Create the transpose solution based on dimensionality
-        // Use if constexpr to ensure only the correct branch is instantiated
-        TransposeSolution transpose_sol = [&]() {
-            constexpr int expected_dims = BatchedTransposeTraits<TransposeSolution>::ndims;
-            if constexpr(expected_dims == 4)
-            {
-                const uint32_t h = static_cast<uint32_t>(lens[2]);
-                const uint32_t w = static_cast<uint32_t>(lens[3]);
-                return TransposeSolution(ctx, desc.GetType(), n, c, h, w);
-            }
-            else // expected_dims == 5
-            {
-                const uint32_t d = static_cast<uint32_t>(lens[2]);
-                const uint32_t h = static_cast<uint32_t>(lens[3]);
-                const uint32_t w = static_cast<uint32_t>(lens[4]);
-                return TransposeSolution(ctx, desc.GetType(), n, c, d, h, w);
-            }
-        }();
+        auto transpose_sol = CreateTransposeSolution(ctx, problem.input);
 
         auto sln = ConvSolution{};
         sln.construction_params.push_back(transpose_sol.GetKernelInfo());
@@ -313,6 +289,30 @@ struct BatchedTransposeSolverImpl : TransposePseudoSolver
         };
 
         return sln;
+    }
+
+private:
+    static TransposeSolution CreateTransposeSolution(const ExecutionContext& ctx,
+                                                     const TensorDescriptor& desc)
+    {
+        const auto& lens = desc.GetLengths();
+        const uint32_t n = static_cast<uint32_t>(lens[0]);
+        const uint32_t c = static_cast<uint32_t>(lens[1]);
+
+        constexpr int expected_dims = BatchedTransposeTraits<TransposeSolution>::ndims;
+        if constexpr(expected_dims == 4)
+        {
+            const uint32_t h = static_cast<uint32_t>(lens[2]);
+            const uint32_t w = static_cast<uint32_t>(lens[3]);
+            return TransposeSolution(ctx, desc.GetType(), n, c, h, w);
+        }
+        else // expected_dims == 5
+        {
+            const uint32_t d = static_cast<uint32_t>(lens[2]);
+            const uint32_t h = static_cast<uint32_t>(lens[3]);
+            const uint32_t w = static_cast<uint32_t>(lens[4]);
+            return TransposeSolution(ctx, desc.GetType(), n, c, d, h, w);
+        }
     }
 };
 
