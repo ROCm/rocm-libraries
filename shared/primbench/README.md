@@ -139,6 +139,7 @@ It output this `results.json`:
             "specialization_count": 2,
             "gpu_name": "AMD Instinct MI210",
             "gpu_arch": "gfx90a",
+            "gpu_pci_bus_id": "0000:83:00.0",
             "library_build_type": "debug",
             "temp_type": "edge",
             "host_name": "host",
