@@ -32,7 +32,7 @@ void add_device_grouped_conv3d_bwd_weight_xdl_bilinear_ndhwgc_gkzyxc_ndhwgk_bf16
             GKZYXC,
             NDHWGK,
             ConvBwdWeightDefault>{});
-    // // 2. Filter1x1Stride1Pad0
+    // 2. Filter1x1Stride1Pad0
     add_device_operation_instances(
         instances,
         device_grouped_conv_bwd_weight_xdl_c_shuffle_bf16_bilinear_instances<
