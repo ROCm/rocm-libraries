@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -119,8 +119,18 @@ namespace rocRoller
 
             /**
              * Implicitly set indexes for all Workgroup and Workitem dimensions in the graph.
+             *
+             * Uses Workgroups and Workitems from the context.
              */
             void fillExecutionCoordinates(ContextPtr context);
+
+            /**
+             * Implicitly set indexes for all Workgroup and Workitem dimensions in the graph.
+             */
+            void fillExecutionCoordinates(
+                ContextPtr                                      context,
+                std::array<Expression::ExpressionPtr, 3> const& kernelWorkgroupIndexes,
+                std::array<Expression::ExpressionPtr, 3> const& kernelWorkitemIndexes);
 
         private:
             Expression::ExpressionPtr transduce(Expression::ExpressionPtr exp) const;

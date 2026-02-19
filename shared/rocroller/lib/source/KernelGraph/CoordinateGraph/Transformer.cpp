@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -54,8 +54,28 @@ namespace rocRoller
 
         void Transformer::fillExecutionCoordinates(ContextPtr context)
         {
-            auto const& kernelWorkgroupIndexes = context->kernel()->workgroupIndex();
-            auto const& kernelWorkitemIndexes  = context->kernel()->workitemIndex();
+            if(context)
+            {
+                auto kernel = context->kernel();
+
+                std::array<Expression::ExpressionPtr, 3> kernelWorkgroupIndexes,
+                    kernelWorkitemIndexes;
+                for(int i = 0; i < kernel->kernelDimensions(); ++i)
+                {
+                    if(kernel->workgroupIndex().at(i) != nullptr)
+                        kernelWorkgroupIndexes[i] = kernel->workgroupIndex().at(i)->expression();
+                    if(kernel->workitemIndex().at(i) != nullptr)
+                        kernelWorkitemIndexes[i] = kernel->workitemIndex().at(i)->expression();
+                }
+                fillExecutionCoordinates(context, kernelWorkgroupIndexes, kernelWorkitemIndexes);
+            }
+        }
+
+        void Transformer::fillExecutionCoordinates(
+            ContextPtr                                      context,
+            std::array<Expression::ExpressionPtr, 3> const& kernelWorkgroupIndexes,
+            std::array<Expression::ExpressionPtr, 3> const& kernelWorkitemIndexes)
+        {
             for(auto const& tag : m_graph->getNodes())
             {
                 auto dimension = m_graph->getNode(tag);
@@ -69,10 +89,14 @@ namespace rocRoller
                                 ShowValue(toString(dimension)),
                                 ShowValue(dimensionWorkgroup.dim),
                                 ShowValue(kernelWorkgroupIndexes.size()));
-                    auto expr = kernelWorkgroupIndexes.at(dimensionWorkgroup.dim)->expression();
+
+                    auto expr = kernelWorkgroupIndexes.at(dimensionWorkgroup.dim);
+
                     // TODO Remove this when Workgroup removed from RegisterTagManager
-                    context->registerTagManager()->addRegister(
-                        tag, kernelWorkgroupIndexes.at(dimensionWorkgroup.dim));
+                    if(context)
+                        context->registerTagManager()->addExpression(
+                            tag, kernelWorkgroupIndexes.at(dimensionWorkgroup.dim), {});
+
                     setCoordinate(tag, expr);
                 }
                 if(std::holds_alternative<Workitem>(dimension))
@@ -84,9 +108,10 @@ namespace rocRoller
                                 ShowValue(toString(dimension)),
                                 ShowValue(dimensionWorkitem.dim),
                                 ShowValue(kernelWorkitemIndexes.size()));
-                    auto expr = kernelWorkitemIndexes.at(dimensionWorkitem.dim)->expression();
-                    context->registerTagManager()->addRegister(
-                        tag, kernelWorkitemIndexes.at(dimensionWorkitem.dim));
+                    auto expr = kernelWorkitemIndexes.at(dimensionWorkitem.dim);
+                    if(context)
+                        context->registerTagManager()->addExpression(
+                            tag, kernelWorkitemIndexes.at(dimensionWorkitem.dim), {});
                     setCoordinate(tag, expr);
                 }
             }

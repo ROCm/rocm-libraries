@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -343,6 +343,8 @@ namespace rocRoller
          */
         hipFunction_t getHipFunction() const;
 
+        void generateKernelGraph();
+
     private:
         CommandPtr  m_command;
         std::string m_name;
@@ -355,7 +357,6 @@ namespace rocRoller
         CommandParametersPtr              m_commandParameters;
         CommandLaunchParametersPtr        m_launchParameters;
 
-        void generateKernelGraph(std::string name);
         void generateKernelSource();
 
         /**

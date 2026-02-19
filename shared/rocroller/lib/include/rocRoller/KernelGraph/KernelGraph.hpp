@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -83,6 +83,8 @@ namespace rocRoller
             ControlGraph::ControlGraph       control;
             CoordinateGraph::CoordinateGraph coordinates;
             ControlToCoordinateMapper        mapper;
+
+            std::map<int, std::vector<size_t>> modelledAddresses;
 
             /**
             * Set up the coordinate graph and transducer for existing transformers.

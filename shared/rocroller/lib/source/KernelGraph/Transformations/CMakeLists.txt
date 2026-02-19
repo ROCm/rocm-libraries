@@ -32,6 +32,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/LowerLinear.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LowerTensorContraction.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LowerTile.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ModelAddresses.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/NopExtraScopes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/OrderEpilogueBlocks.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/OrderExchangeNodes.cpp"

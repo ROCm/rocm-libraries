@@ -32,6 +32,8 @@
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 
 #include <rocRoller/Expression_fwd.hpp>
+#include <string>
+#include <vector>
 
 namespace rocRoller
 {
@@ -142,7 +144,15 @@ namespace rocRoller
                 BufferInstructionOptions       bufOpts          = {};
                 bool                           isTransposedTile = false;
                 bool                           isPadded         = false;
+                // Optional extras for LDS loads
+                Register::ValuePtr ldsAllocation = nullptr;
+                std::string        comment;
             };
+
+            LoadStoreTileInfo getLoadLDSTileInfo(int tag, ControlGraph::LoadLDSTile const& load);
+            LoadStoreTileInfo getStoreLDSTileInfo(int                               tag,
+                                                  ControlGraph::StoreLDSTile const& store,
+                                                  std::vector<std::string>&         comments);
 
         private:
             ContextPtr                       m_context;
@@ -220,12 +230,6 @@ namespace rocRoller
             Generator<Instruction> loadMacroTileVGPR(int                            tag,
                                                      ControlGraph::LoadTiled const& load,
                                                      CoordinateGraph::Transformer   coords);
-            Generator<Instruction> loadMacroTileLDS(int                              tag,
-                                                    ControlGraph::LoadLDSTile const& load,
-                                                    CoordinateGraph::Transformer     coords);
-            Generator<Instruction> loadMacroTileWAVELDS(int                              tag,
-                                                        ControlGraph::LoadLDSTile const& load,
-                                                        CoordinateGraph::Transformer     coords);
             Generator<Instruction> loadMacroTileWAVE(int                            tag,
                                                      ControlGraph::LoadTiled const& load,
                                                      CoordinateGraph::Transformer   coords);
@@ -233,20 +237,23 @@ namespace rocRoller
                                                             ControlGraph::LoadTiled const& load,
                                                             CoordinateGraph::Transformer   coords);
             Generator<Instruction>
-                loadMacroTileDirect2LDS(int                                     tag,
-                                        ControlGraph::LoadTileDirect2LDS const& load,
-                                        CoordinateGraph::Transformer            coords);
+                              loadMacroTileDirect2LDS(int                                     tag,
+                                                      ControlGraph::LoadTileDirect2LDS const& load,
+                                                      CoordinateGraph::Transformer            coords);
+            LoadStoreTileInfo loadMacroTileLDSInfo(int tag, ControlGraph::LoadLDSTile const& load);
+            LoadStoreTileInfo loadMacroTileWAVELDSInfo(int                              tag,
+                                                       ControlGraph::LoadLDSTile const& load);
+            LoadStoreTileInfo storeMacroTileLDSInfo(int                               tag,
+                                                    ControlGraph::StoreLDSTile const& store,
+                                                    std::vector<std::string>&         comments);
+            LoadStoreTileInfo storeMacroTileWAVELDSInfo(int                               tag,
+                                                        ControlGraph::StoreLDSTile const& store,
+                                                        std::vector<std::string>&         comments);
 
             // Store Tile Helpers
-            Generator<Instruction> storeMacroTileLDS(int                               tag,
-                                                     ControlGraph::StoreLDSTile const& store,
-                                                     CoordinateGraph::Transformer      coords);
             Generator<Instruction> storeMacroTileVGPR(int                             tag,
                                                       ControlGraph::StoreTiled const& store,
                                                       CoordinateGraph::Transformer    coords);
-            Generator<Instruction> storeMacroTileWAVELDS(int                               tag,
-                                                         ControlGraph::StoreLDSTile const& store,
-                                                         CoordinateGraph::Transformer      coords);
             Generator<Instruction> storeMacroTileWAVE(int                             tag,
                                                       ControlGraph::StoreTiled const& store,
                                                       CoordinateGraph::Transformer    coords);
