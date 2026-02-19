@@ -24,6 +24,7 @@ add_executable(
     IntegrationGpuConvBackwardData.cpp
     IntegrationGpuConvBackwardWeights.cpp
     IntegrationGpuBenchmarkingKnob.cpp
+    IntegrationGpuDeterministic.cpp
 )
 
 target_compile_options(miopen_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
