@@ -72,41 +72,43 @@ auto GetDataset()
                         for(auto p : pads_strides_dilations)
                             for(auto pm : pad_modes)
                                 for(auto tp : trans_output_pads)
-                                for(auto il : in_layouts)
-                                    for(auto fl : fil_layouts)
-                                        for(auto ol : out_layouts)
-                                            for(auto d : deterministics)
-                                                for(auto tv : tensor_vects)
-                                                    for(auto vl : vector_lengths)
-                                                        for(auto ot : output_types)
-                                                            for(auto iv : int8_vectorizes)
-                                                            {
-                                                                miopen::test::conv::conv_test_input
-                                                                    input{};
-                                                                input.batch_size             = b;
-                                                                input.input_channels         = ic;
-                                                                input.output_channels        = oc;
-                                                                input.spatial_dim_elements   = s;
-                                                                input.filter_dims            = f;
-                                                                input.pads_strides_dilations = p;
-                                                                input.trans_output_pads      = tp;
-                                                                input.in_layout              = il;
-                                                                input.fil_layout             = fl;
-                                                                input.out_layout             = ol;
-                                                                input.pad_mode               = pm;
-                                                                input.deterministic          = d;
-                                                                input.tensor_vect            = tv;
-                                                                input.vector_length          = vl;
-                                                                input.output_type            = ot;
-                                                                input.int8_vectorize         = iv;
-                                                                input.do_forward             = true;
-                                                                input.do_backward_data       = true;
-                                                                input.do_backward_weights    = true;
-                                                                if(miopen::test::conv::
-                                                                       IsValidCtestStyleConfig(
-                                                                           input))
-                                                                    cases.push_back(input);
-                                                            }
+                                    for(auto il : in_layouts)
+                                        for(auto fl : fil_layouts)
+                                            for(auto ol : out_layouts)
+                                                for(auto d : deterministics)
+                                                    for(auto tv : tensor_vects)
+                                                        for(auto vl : vector_lengths)
+                                                            for(auto ot : output_types)
+                                                                for(auto iv : int8_vectorizes)
+                                                                {
+                                                                    miopen::test::conv::
+                                                                        conv_test_input input{};
+                                                                    input.batch_size           = b;
+                                                                    input.input_channels       = ic;
+                                                                    input.output_channels      = oc;
+                                                                    input.spatial_dim_elements = s;
+                                                                    input.filter_dims          = f;
+                                                                    input.pads_strides_dilations =
+                                                                        p;
+                                                                    input.trans_output_pads = tp;
+                                                                    input.in_layout         = il;
+                                                                    input.fil_layout        = fl;
+                                                                    input.out_layout        = ol;
+                                                                    input.pad_mode          = pm;
+                                                                    input.deterministic     = d;
+                                                                    input.tensor_vect       = tv;
+                                                                    input.vector_length     = vl;
+                                                                    input.output_type       = ot;
+                                                                    input.int8_vectorize    = iv;
+                                                                    input.do_forward        = true;
+                                                                    input.do_backward_data  = true;
+                                                                    input.do_backward_weights =
+                                                                        true;
+                                                                    if(miopen::test::conv::
+                                                                           IsValidCtestStyleConfig(
+                                                                               input))
+                                                                        cases.push_back(input);
+                                                                }
     return cases;
 }
 
