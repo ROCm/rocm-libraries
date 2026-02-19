@@ -215,15 +215,21 @@ namespace rocRoller
             // No more need for packed value.
             m_packedWorkitemIndex.reset();
 
-            if(ctx->kernelOptions()->lazyLoadKernelArguments)
+            for(auto& workitem : m_workitemIndex)
             {
-                m_argumentPointer->setReadOnly();
+                if(workitem)
+                    workitem->setReadOnly();
             }
-            else
-            {
-                // We're done loading kernel arguments so we don't need the pointer anymore.
-                m_argumentPointer.reset();
-            }
+        }
+
+        if(ctx->kernelOptions()->lazyLoadKernelArguments && m_argumentPointer)
+        {
+            m_argumentPointer->setReadOnly();
+        }
+        else
+        {
+            // We're done loading kernel arguments so we don't need the pointer anymore.
+            m_argumentPointer.reset();
         }
 
         for(auto& reg : m_workgroupIndex)
