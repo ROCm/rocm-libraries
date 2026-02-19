@@ -89,15 +89,6 @@ To use the deterministic engine, set it as the preferred engine on your graph be
 graph.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 ```
 
-### Supported Operations (Deterministic)
-
-| Operation | Datatypes | Layouts | Notes |
-|-----------|-----------|---------|-------|
-| Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only |
-| Convolution Dgrad | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only |
-| Convolution Wgrad | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only |
-| Convolution Forward + (Bias) + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph |
-
 > [!NOTE]
 > **Batchnorm Operations:** Batchnorm operations do not support deterministic execution in MIOpen and are only available through the default (non-deterministic) engine.
 
