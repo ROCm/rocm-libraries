@@ -7,16 +7,16 @@
 
 #include "mocks/MockPlan.hpp"
 
-#include "HipdnnEnginePluginExecutionContext.hpp"
+#include "HipdnnMiopenContext.hpp"
 
-struct MockHipdnnEnginePluginExecutionContext : public HipdnnEnginePluginExecutionContext
+struct MockHipdnnMiopenContext : public HipdnnMiopenContext
 {
-    MockHipdnnEnginePluginExecutionContext()
+    MockHipdnnMiopenContext()
         : mockPlan(std::make_unique<miopen_plugin::MockPlan>())
     {
     }
 
-    miopen_plugin::IPlan& plan() const override
+    hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>& plan() const override
     {
         return *mockPlan;
     }

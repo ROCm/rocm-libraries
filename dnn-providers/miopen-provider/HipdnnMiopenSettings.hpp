@@ -5,10 +5,13 @@
 
 #include <optional>
 
-namespace miopen_plugin
-{
-
-struct MiopenExecutionSettings
+/**
+ * @brief MIOpen plugin-specific execution settings.
+ *
+ * This structure holds settings that control MIOpen execution behavior,
+ * such as benchmarking mode and workspace size limits.
+ */
+struct HipdnnMiopenSettings
 {
     void setBenchmarkingEnabled(bool enabled)
     {
@@ -25,8 +28,7 @@ struct MiopenExecutionSettings
      *
      * Constrains GPU workspace memory (in bytes) used by MIOpen convolution algorithms.
      *
-     * @param limit Maximum workspace size in bytes. Must be within the range returned by
-     *              MiopenConvPlanBuilder::getWorkspaceSizeRange() for the specific operation.
+     * @param limit Maximum workspace size in bytes.
      *
      * @note If not set (std::nullopt), uses MIOpen's default workspace size.
      *       Smaller limits may reduce performance but save GPU memory.
@@ -50,5 +52,3 @@ private:
     bool _benchmarkingEnabled = false;
     std::optional<size_t> _workspaceSizeLimit;
 };
-
-} // namespace miopen_plugin

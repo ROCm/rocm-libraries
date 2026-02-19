@@ -6,8 +6,6 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-#include "HipdnnEnginePluginExecutionContext.hpp"
-#include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvWrwPlan.hpp"
 #include "MiopenUtils.hpp"
 
@@ -66,9 +64,9 @@ bool ConvWrwParams::validTensors() const
     return _tensorsValid;
 }
 
-ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
+ConvWrwPlan::ConvWrwPlan(const HipdnnMiopenHandle& handle,
                          ConvWrwParams&& params,
-                         const MiopenExecutionSettings& executionSettings)
+                         const HipdnnMiopenSettings& executionSettings)
     : _params(std::move(params))
     , _executionSettings(executionSettings)
 {
@@ -106,12 +104,12 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
     }
 }
 
-size_t ConvWrwPlan::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+size_t ConvWrwPlan::getWorkspaceSize([[maybe_unused]] const HipdnnMiopenHandle& handle) const
 {
     return _workspaceSize;
 }
 
-void ConvWrwPlan::execute(const HipdnnEnginePluginHandle& handle,
+void ConvWrwPlan::execute(const HipdnnMiopenHandle& handle,
                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                           uint32_t numDeviceBuffers,
                           void* workspace) const
