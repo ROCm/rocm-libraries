@@ -396,13 +396,9 @@ def getDockerImage(Map conf=[:])
 
                 // If the cache was pushed to the cacheRefTo successfully, tag it with cacheRef
                 if (cacheRefFrom != cacheRefTo) {
-                    // Check if cacheRefTo exists locally, pull if not
-                    def cacheRefToExists = sh(script: "docker images -q ${cacheRefTo}", returnStdout: true).trim()
-                    if (!cacheRefToExists) {
-                        sh "docker pull ${cacheRefTo}"
-                    }
-                    sh "docker tag ${cacheRefTo} ${cacheRef}"
-                    sh "docker push ${cacheRef}"
+                    sh """
+                        docker buildx imagetools create -t ${cacheRef} ${cacheRefTo}
+                    """.stripIndent()
                 }
             }
             dockerImage = docker.image("${image}")
