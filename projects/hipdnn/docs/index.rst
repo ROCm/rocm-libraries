@@ -21,29 +21,26 @@ The component public repository is located at `https://github.com/ROCm/rocm-libr
     * :doc:`hipDNN installation (Linux) <./install/hipdnn-install>`
     * :doc:`hipDNN installation (Windows) <./install/hipdnn-install-windows>`
 
-.. grid:: 2
-  :gutter: 3
-
   .. grid-item-card:: Conceptual
 
-    * :doc:`hipDNN high-level architecture <conceptual/architecture>`
+    * :doc:`High-level architecture <conceptual/architecture>`
     * :doc:`MIOpen Provider plugin architecture <conceptual/miopen-plugin>`
+    * :doc:`Backend architecture <conceptual/backend-architecture>`
   
   .. grid-item-card:: How to
 
-    * :doc:`Build and execute operation graphs in hipDNN <how-to/build-execute-hipdnn>`
+    * :doc:`Migrate a cudNN project to hipDNN <how-to/migrate-cudnn>`
+    * :doc:`Build and execute operation graphs <how-to/build-execute-hipdnn>`
+    * :doc:`Extend hipDNN functionality <how-to/extend-hipdnn>`
+    * :doc:`Develop plugins <how-to/develop-plugins>`
+    * :doc:`Get/set engine knob configurations <how-to/get-set-engine-knob>`
 
   .. grid-item-card:: Reference
 
-    * :doc:`hipDNN environment variables <reference/environment-variables>`
-    * :doc:`hipDNN coding style and naming guidelines <reference/naming-guidelines>`
+    * :doc:`Environment variables <reference/environment-variables>`
+    * :doc:`Coding style and naming guidelines <reference/naming-guidelines>`
     * :doc:`Glossary <reference/glossary>`
 
-  .. grid-item-card:: Advanced
-
-    * :doc:`hipDNN backend architecture <conceptual/backend-architecture>`
-    * :doc:`Extend hipDNN functionality <how-to/extend-hipdnn>`
-    * :doc:`Develop plugins for hipDNN <how-to/develop-plugins>`
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

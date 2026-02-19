@@ -21,9 +21,9 @@ Frontend file structure
 
 Here's the basic frontend file structure with links to the GitHub repository:
 
-- Library includes: `frontend/include/ <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/frontend/include>`_
-- Unit tests: `frontend/tests/ <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/frontend/tests>`_
-- Samples: `samples <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/samples>`_
+- `Library includes <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/frontend/include>`_
+- `Unit tests <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/frontend/tests>`_
+- `Samples <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/samples>`_
 
 Frontend architecture
 =====================

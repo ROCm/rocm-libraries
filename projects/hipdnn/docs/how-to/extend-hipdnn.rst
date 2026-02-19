@@ -10,6 +10,10 @@ Extend hipDNN functionality
 
 This section covers how to extend hipDNN with new functionality.
 
+.. important::
+
+   This page is for advanced users such as senior developers, engineers, and system administrators who are looking to add new functionality to hipDNN. Most users should use the default frontend functionality as referred in :ref:`build-execute`.
+
 Development workflow
 ====================
 

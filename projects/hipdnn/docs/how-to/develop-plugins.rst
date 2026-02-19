@@ -11,6 +11,10 @@ Develop plugins for hipDNN
 hipDNN supports a plugin architecture that allows for modular extensions to the framework. Plugins are designed to be separate projects that extend hipDNN's capabilities without being part of the core repository. 
 The backend discovers and manages these plugins, leveraging them for different aspects of deep learning routines. This architecture provides flexibility in implementation choices and enables optimizations for specific hardware or use cases.
 
+.. important::
+
+  This page is for advanced users such as senior developers, engineers, and system administrators who are looking to extend hipDNN with customized plugins. Most users should use the default plugins as referred in :ref:`build-execute`.
+
 Plugin Types
 ============
 

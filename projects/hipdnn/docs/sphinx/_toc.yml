@@ -23,20 +23,20 @@ subtrees:
   - file: conceptual/architecture.rst
     title: High-level architecture
   - file: conceptual/backend-architecture.rst
-    title: Backend architecture (Advanced)
+    title: Backend architecture
 
 - caption: How to
   entries:
   - file: how-to/get-set-engine-knob.rst
-    title: Migrate cuDNN to hipDNN
+    title: Migrate a cudNN project to hipDNN
   - file: how-to/build-execute-hipdnn.rst
     title: Build and execute operation graphs
-  - file: how-to/get-set-engine-knob.rst
-    title: Get/set engine knob configurations in hipDNN
   - file: how-to/extend-hipdnn.rst
-    title: Extend hipDNN functionality (Advanced)
+    title: Extend hipDNN functionality
   - file: how-to/develop-plugins.rst
-    title: Develop plugins for hipDNN (Advanced)
+    title: Develop plugins for hipDNN
+  - file: how-to/get-set-engine-knob.rst
+    title: Get/set engine knob configurations
 
 - caption: Reference
   entries:

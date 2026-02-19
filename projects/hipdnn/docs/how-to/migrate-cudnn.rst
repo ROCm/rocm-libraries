@@ -5,7 +5,7 @@
 .. _migrate-cudnn:
 
 *********************************
-Migrate code from cudNN to hipDNN
+Migrate a cudNN project to hipDNN
 *********************************
 
 This guide demonstrates how to migrate a cuDNN code project to hipDNN. 

@@ -4,13 +4,13 @@
 
 .. _backend-architecture:
 
-**************************************
-hipDNN backend architecture (Advanced)
-**************************************
+***************************
+hipDNN backend architecture
+***************************
 
-.. note::
+.. important::
 
-  See :ref:`architecture` for a high-level overview of the system architecture. This page is for advanced users who want a more granular breakdown of the system architecture and the backend API.
+  This page is for advanced users who want a more granular breakdown of the system architecture and the backend API. See :ref:`architecture` for a high-level overview of the system architecture. 
 
 The hipDNN framework consists of a frontend (C++ Graph API), a backend (core runtime), and a plugin system. The backend prepares and dispatches execution to dynamically loaded plugins via a C-API interface.
 
