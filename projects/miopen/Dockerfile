@@ -354,5 +354,6 @@ RUN update-alternatives --install /opt/rocm/llvm/bin/clang-tidy clang-tidy /usr/
 
 ENV HIP_PLATFORM=amd
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH}"
 
 WORKDIR /workspace
