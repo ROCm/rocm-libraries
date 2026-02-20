@@ -108,7 +108,7 @@ class GEBLTTRF_NPVT : public ::TestWithParam<geblttrf_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>
@@ -133,7 +133,7 @@ class GEBLTTRF_NPVT_INTERLEAVED : public ::TestWithParam<geblttrf_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <typename T>

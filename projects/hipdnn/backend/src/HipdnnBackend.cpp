@@ -328,6 +328,18 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
     });
 }
 
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetPluginUnloadMode_ext(hipdnnPluginUnloadingMode_ext_t unloadingMode)
+{
+    LOG_API_ENTRY("unloadingMode={}", unloadingMode);
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        hipdnn_backend::plugin::EnginePluginResourceManager::setPluginUnloadingMode(unloadingMode);
+        LOG_API_SUCCESS(apiName, "set_plugin_unloading_mode={}", unloadingMode);
+        return HIPDNN_STATUS_SUCCESS;
+    });
+}
+
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnnHandle_t handle,
                                                                           size_t* numPluginPaths,
                                                                           char** pluginPaths,
