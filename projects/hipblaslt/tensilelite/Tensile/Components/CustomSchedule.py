@@ -830,7 +830,7 @@ class RegisterSchedule:
         return func
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 96, 64, 2, 1, 1, False, 0, 0),
+    tile_config=TileConfig(256, 96, 64, 2, 1, 1, True, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -933,6 +933,38 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
 
             'LCC'    : [[47, 47]],
         }
+    elif isNT(kernel) and useLDSTr and TLDS == 0:
+        print("=== CMS ===")
+        syncTable = [
+            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write for iteration == 0"),
+            17, SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1, comment="wait for previous set of global reads"),
+            17, SBarrier(comment=""),
+            40, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
+            40, SBarrier(comment=""),
+        ]
+
+        optSchedule = {
+            'SYNC': [syncTable[::2]],
+            'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
+            'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
+
+            'LRA0': [[0, 0, 0, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 6, 7, 8]],
+            'LRB0': [[9, 9, 11, 11, 13, 13]],
+
+            'GRA': [[3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14]],
+            'GRB': [[27, 27, 28, 28, 29, 29]],
+
+            'LRA1': [[19, 19, 21, 21, 23, 23, 25, 25, 31, 31, 33, 33, 35, 35, 37, 37]],
+            'LRB1': [[41, 41, 43, 43, 45, 45]],
+
+            'LRSA': [[16, 16, 16, 16]],
+            'LRSB': [[22]],
+            'LWSA': [[39, 39, 39]],
+            'LWSB': [[]],
+            'LCC': [[47, 47]],
+        }
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 11
     else:
         return False, None
 
