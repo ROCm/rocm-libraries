@@ -98,7 +98,7 @@ int main(int argc, char* argv[])
             printHelp(argv[0]);
             return 0;
         }
-        else if(arg == "--plugin-dir")
+        if(arg == "--plugin-dir")
         {
             if(i + 1 >= argc)
             {
