@@ -172,30 +172,54 @@ struct RegisterMapTraits<ck_tile::core::arch::mma::amdgcn_mma<
     static constexpr index_t CVecSize =
         sizeof(typename MmaTraits::CVecType) / sizeof(typename MmaTraits::CDataType);
 
-    // TODO: express the encoding in terms of amdgcn constants
+    using kABPs2RHssMajor = sequence<2, 1>;
+    using kABPs2RHssMinor = sequence<1, 0>;
+    using kABYs2RHsMajor  = sequence<2, 2>;
+    using kABYs2RHsMinor  = sequence<0, 2>;
+    using kCPs2RHssMajor  = sequence<1, 2>;
+    using kCPs2RHssMinor  = sequence<1, 0>;
+    using kCYs2RHsMajor   = sequence<1, 1>;
+    using kCYs2RHsMinor   = sequence<0, 2>;
+
+    // TODO:  remove these and fix constants in amdgcn_mma
+    static constexpr index_t kAMBlock     = 1;
+    static constexpr index_t kBNBlock     = 1;
+    static constexpr index_t kAMLane      = 16;
+    static constexpr index_t kBNLane      = 16;
+    static constexpr index_t kABK0PerLane = 1;
+    static constexpr index_t kABKLane     = 2;
+    static constexpr index_t kABK1PerLane = 8;
+    static constexpr index_t kCMLane      = 2;
+    static constexpr index_t kCNLane      = 16;
+    static constexpr index_t kCM0PerLane  = 1;
+    static constexpr index_t kCM1PerLane  = 8;
+
     using AWarpDstrEncoding = tile_distribution_encoding<
         sequence<1>,
-        tuple<sequence<16>, sequence<4, 2, 2>>,
-        tuple<sequence<2, 1>>,
-        tuple<sequence<1, 0>>,
-        sequence<2, 2>,
-        sequence<2, 0>>;
+        tuple<sequence<kAMLane>,
+              sequence<kABK0PerLane, kABKLane, kABK1PerLane>>, // <16>, <1, 2, 8>
+        tuple<kABPs2RHssMajor>,
+        tuple<kABPs2RHssMinor>,
+        kABYs2RHsMajor,
+        kABYs2RHsMinor>;
 
     using BWarpDstrEncoding = tile_distribution_encoding<
         sequence<1>,
-        tuple<sequence<16>, sequence<4, 2, 2>>,
-        tuple<sequence<2, 1>>,
-        tuple<sequence<1, 0>>,
-        sequence<2, 2>,
-        sequence<2, 0>>;
+        tuple<sequence<kBNLane>,
+              sequence<kABK0PerLane, kABKLane, kABK1PerLane>>, // <16>, <1, 2, 8>
+        tuple<kABPs2RHssMajor>,
+        tuple<kABPs2RHssMinor>,
+        kABYs2RHsMajor,
+        kABYs2RHsMinor>;
 
     using CWarpDstrEncoding = tile_distribution_encoding<
         sequence<1>,
-        tuple<sequence<2, 8>, sequence<16>>,
-        tuple<sequence<1, 2>>,
-        tuple<sequence<0, 0>>,
-        sequence<1>,
-        sequence<1>>;
+        tuple<sequence<kCM0PerLane, kCMLane, kCM1PerLane>,
+              sequence<kCNLane>>, // <1, 2, 8>, <16>
+        tuple<kCPs2RHssMajor>,
+        tuple<kCPs2RHssMinor>,
+        kCYs2RHsMajor,
+        kCYs2RHsMinor>;
 };
 
 /**
@@ -234,30 +258,41 @@ struct RegisterMapTraits<ck_tile::core::arch::mma::amdgcn_mma<
     static constexpr index_t CVecSize =
         sizeof(typename MmaTraits::CVecType) / sizeof(typename MmaTraits::CDataType);
 
-    // TODO: express the encoding in terms of amdgcn constants
+    using kABPs2RHssMajor = sequence<2, 1>;
+    using kABPs2RHssMinor = sequence<0, 0>;
+    using kABYs2RHsMajor  = sequence<2>;
+    using kABYs2RHsMinor  = sequence<1>;
+    using kCPs2RHssMajor = sequence<1, 2>;
+    using kCPs2RHssMinor = sequence<0, 0>;
+    using kCYs2RHsMajor  = sequence<1>;
+    using kCYs2RHsMinor  = sequence<1>;
+
     using AWarpDstrEncoding = tile_distribution_encoding<
         sequence<1>,
-        tuple<sequence<16>, sequence<4, 4>>,
-        tuple<sequence<2, 1>>,
-        tuple<sequence<0, 0>>,
-        sequence<2>,
-        sequence<1>>;
+        tuple<sequence<MmaOp::kAMLane>,
+              sequence<MmaOp::kABKLane, MmaOp::kABKPerLane>>,
+        tuple<kABPs2RHssMajor>,
+        tuple<kABPs2RHssMinor>,
+        kABYs2RHsMajor,
+        kABYs2RHsMinor>;
 
     using BWarpDstrEncoding = tile_distribution_encoding<
         sequence<1>,
-        tuple<sequence<16>, sequence<4, 4>>,
-        tuple<sequence<2, 1>>,
-        tuple<sequence<0, 0>>,
-        sequence<2>,
-        sequence<1>>;
+        tuple<sequence<MmaOp::kBNLane>,
+              sequence<MmaOp::kABKLane, MmaOp::kABKPerLane>>,
+        tuple<kABPs2RHssMajor>,
+        tuple<kABPs2RHssMinor>,
+        kABYs2RHsMajor,
+        kABYs2RHsMinor>;
 
     using CWarpDstrEncoding = tile_distribution_encoding<
         sequence<1>,
-        tuple<sequence<4, 4>, sequence<16>>,
-        tuple<sequence<1, 2>>,
-        tuple<sequence<0, 0>>,
-        sequence<1>,
-        sequence<1>>;
+        tuple<sequence<MmaOp::kCMLane, MmaOp::kCM1PerLane>,
+              sequence<MmaOp::kCNLane>>,
+        tuple<kCPs2RHssMajor>,
+        tuple<kCPs2RHssMinor>,
+        kCYs2RHsMajor,
+        kCYs2RHsMinor>;
 };
 
 /**
@@ -296,30 +331,54 @@ struct RegisterMapTraits<ck_tile::core::arch::mma::amdgcn_mma<
     static constexpr index_t CVecSize =
         sizeof(typename MmaTraits::CVecType) / sizeof(typename MmaTraits::CDataType);
 
-    // TODO: express the encoding in terms of amdgcn constants
+    using kABPs2RHssMajor = sequence<0, 1>;
+    using kABPs2RHssMinor = sequence<0, 0>;
+    using kABYs2RHsMajor  = sequence<2>;
+    using kABYs2RHsMinor  = sequence<0>;
+    using kCPs2RHssMajor  = sequence<1, 2>;
+    using kCPs2RHssMinor  = sequence<1, 0>;
+    using kCYs2RHsMajor   = sequence<1>;
+    using kCYs2RHsMinor   = sequence<0>;
+
+    // TODO:  remove these and fix constants in amdgcn_mma
+    static constexpr index_t kAMBlock    = 1;
+    static constexpr index_t kBNBlock    = 1;
+    static constexpr index_t kAMLane     = 16;
+    static constexpr index_t kBNLane     = 16;
+    static constexpr index_t kABK0PerLane = 1;
+    static constexpr index_t kABKLane     = 1;
+    static constexpr index_t kABK1PerLane = 16;
+    static constexpr index_t kCMLane     = 2;
+    static constexpr index_t kCNLane     = 16;
+    static constexpr index_t kCM0PerLane = 8;
+    static constexpr index_t kCM1PerLane = 1;
+
     using AWarpDstrEncoding = tile_distribution_encoding<
-        sequence<2>,
-        tuple<sequence<16>, sequence<16>>,
-        tuple<sequence<0, 1>>,
-        tuple<sequence<0, 0>>,
-        sequence<2>,
-        sequence<0>>;
+        sequence<2>, // kRepeat
+        tuple<sequence<kAMLane>,
+              sequence<kABK1PerLane>>,
+        tuple<kABPs2RHssMajor>,
+        tuple<kABPs2RHssMinor>,
+        kABYs2RHsMajor,
+        kABYs2RHsMinor>;
 
     using BWarpDstrEncoding = tile_distribution_encoding<
-        sequence<2>,
-        tuple<sequence<16>, sequence<16>>,
-        tuple<sequence<0, 1>>,
-        tuple<sequence<0, 0>>,
-        sequence<2>,
-        sequence<0>>;
+        sequence<2>, // kRepeat
+        tuple<sequence<kBNLane>,
+              sequence<kABK1PerLane>>,
+        tuple<kABPs2RHssMajor>,
+        tuple<kABPs2RHssMinor>,
+        kABYs2RHsMajor,
+        kABYs2RHsMinor>;
 
     using CWarpDstrEncoding = tile_distribution_encoding<
         sequence<1>,
-        tuple<sequence<8, 2>, sequence<16>>,
-        tuple<sequence<1, 2>>,
-        tuple<sequence<1, 0>>,
-        sequence<1>,
-        sequence<0>>;
+        tuple<sequence<kCM0PerLane, kCMLane>,
+              sequence<kCNLane>>,
+        tuple<kCPs2RHssMajor>,
+        tuple<kCPs2RHssMinor>,
+        kCYs2RHsMajor,
+        kCYs2RHsMinor>;
 };
 
 // ========================================================================
