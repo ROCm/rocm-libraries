@@ -27,6 +27,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdlib>
 #include <numeric>
 #include <type_traits>
 #include <unordered_map>
@@ -34,6 +35,7 @@
 
 #include <ck/utility/data_type.hpp>
 #include <ck/utility/tuple.hpp>
+#include <data_types.hpp>
 #include <hiptensor/hiptensor.h>
 #include <hiptensor/internal/types.hpp>
 #include <logger.hpp>
@@ -48,6 +50,25 @@ namespace hiptensor
     {
         return (numerator + divisor - 1) / divisor;
     }
+
+    // Cross-platform safe environment variable access
+    inline const char* getEnvironmentVariable(const char* name)
+    {
+#ifdef _WIN32
+        // On Windows, use the thread-safe getenv_s approach
+        static thread_local char buffer[256];
+        size_t                   required_size;
+        if(getenv_s(&required_size, buffer, sizeof(buffer), name) == 0 && required_size > 0)
+        {
+            return buffer;
+        }
+        return nullptr;
+#else
+        // On Unix-like systems, getenv is safe for read-only access
+        return std::getenv(name);
+#endif
+    }
+
 
     template <typename T>
     static inline std::vector<T> stridesFromLengths(std::vector<T> const& lengths,

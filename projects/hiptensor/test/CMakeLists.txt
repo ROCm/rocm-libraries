@@ -104,8 +104,12 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
-    target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib"
-                          "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}" "-fno-rtlib-add-rpath")
+    # On Windows, use static library to access internal symbols; on other platforms use shared library
+    if(WIN32)
+        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor_static hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
+    else()
+        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib" "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}" "-fno-rtlib-add-rpath")
+    endif()
 
     target_include_directories(${BINARY_NAME} PRIVATE
                                ${CMAKE_CURRENT_SOURCE_DIR}
@@ -160,7 +164,12 @@ function(add_hiptensor_unit_test)
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
-    target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib" "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+    # On Windows, use static library to access internal symbols; on other platforms use shared library
+    if(WIN32)
+        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor_static hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
+    else()
+        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib" "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+    endif()
     target_include_directories(${BINARY_NAME} PRIVATE
                                ${CMAKE_CURRENT_SOURCE_DIR}
                                ${composable_kernel_INCLUDES}

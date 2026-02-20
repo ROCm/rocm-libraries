@@ -129,10 +129,123 @@ if (NOT BUILD_WITH_COMPILER STREQUAL "HIP-NVCC")
   rocm_set_soversion(hiptensor ${hiptensor_SOVERSION})
 endif()
 
-# Users of hiptensor will need HIP libs
-target_link_libraries(hiptensor INTERFACE hip::device hip::host)
+# HIP libs symbols are required by hipTensor and users of hipTensor
+target_link_libraries(hiptensor PUBLIC hip::device hip::host)
 target_link_libraries(hiptensor PRIVATE Threads::Threads)
 set_target_properties(hiptensor PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# TODO Review how to export the public API without listing every function.
+# On Windows, export public API functions from the DLL
+if(WIN32)
+    # Create a .def file with public API exports only
+    set(HIPTENSOR_DEF_FILE "${CMAKE_CURRENT_BINARY_DIR}/hiptensor_public_api.def")
+    file(WRITE ${HIPTENSOR_DEF_FILE} "EXPORTS\n")
+
+    # Export all public API functions (these are the C functions from hiptensor.h)
+    # Core API
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorCreate\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorDestroy\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorGetVersion\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorGetErrorString\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorGetHiprtVersion\n")
+
+    # Plan Cache API
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorHandleResizePlanCache\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorHandleWritePlanCacheToFile\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorHandleReadPlanCacheFromFile\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorWriteKernelCacheToFile\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorReadKernelCacheFromFile\n")
+
+    # Logger API
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorLoggerSetCallback\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorLoggerSetFile\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorLoggerOpenFile\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorLoggerSetLevel\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorLoggerSetMask\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorLoggerForceDisable\n")
+
+    # Tensor Descriptor API
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorCreateTensorDescriptor\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorDestroyTensorDescriptor\n")
+
+    # Contraction API
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorCreateContraction\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorDestroyOperationDescriptor\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorOperationDescriptorGetAttribute\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorOperationDescriptorSetAttribute\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorCreatePlanPreference\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorDestroyPlanPreference\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorPlanPreferenceSetAttribute\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorPlanGetAttribute\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorEstimateWorkspaceSize\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorCreatePlan\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorDestroyPlan\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorContract\n")
+
+    # Permutation API
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorCreatePermutation\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorPermute\n")
+
+    # Elementwise Binary API
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorCreateElementwiseBinary\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorElementwiseBinaryExecute\n")
+
+    # Elementwise Trinary API
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorCreateElementwiseTrinary\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorElementwiseTrinaryExecute\n")
+
+    # Reduction API
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorCreateReduction\n")
+    file(APPEND ${HIPTENSOR_DEF_FILE} "hiptensorReduce\n")
+
+    target_link_options(hiptensor PRIVATE "-Xlinker" "/DEF:${HIPTENSOR_DEF_FILE}")
+endif()
+
+# TODO Better if there was a workaround not requiring static lib
+# On Windows, create an additional static library target for tests
+# This allows tests to access internal symbols without DLL export issues
+if(WIN32)
+    add_library(hiptensor_static STATIC
+        $<TARGET_OBJECTS:hiptensor_core>
+        $<TARGET_OBJECTS:hiptensor_contraction>
+        $<TARGET_OBJECTS:hiptensor_contraction_instances>
+        $<TARGET_OBJECTS:hiptensor_elementwise>
+        $<TARGET_OBJECTS:hiptensor_reduction>
+        # $<TARGET_OBJECTS:hiptensor_reduction_instances>
+    )
+
+    # Copy properties from the shared library to the static library
+    target_link_libraries(hiptensor_static PUBLIC hip::device hip::host)
+    target_link_libraries(hiptensor_static PRIVATE Threads::Threads)
+    target_include_directories(hiptensor_static PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
+        $<INSTALL_INTERFACE:include>
+    )
+    target_include_directories(hiptensor_static PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${composable_kernel_INCLUDES}
+    )
+
+    # Copy compile options from shared library
+    target_compile_options(hiptensor_static PRIVATE ${CMAKE_CXX_FLAGS} ${CLANG_DRIVER_MODE})
+    target_link_options(hiptensor_static PRIVATE ${CLANG_DRIVER_MODE})
+
+    # Copy other compile flags
+    if(BUILD_OFFLOAD_COMPRESS AND CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+        target_compile_options(hiptensor_static PRIVATE "--offload-compress")
+    endif()
+
+    if(HIPTENSOR_BUILD_COMPRESSED_DBG)
+        target_compile_options(hiptensor_static PRIVATE
+            "$<$<CONFIG:Debug>:-gz>"
+            "$<$<CONFIG:RelWithDebInfo>:-gz>"
+        )
+    endif()
+
+    # Create an alias for tests to use
+    add_library(hiptensor::hiptensor_static ALIAS hiptensor_static)
+endif()
+
 
 rocm_install_targets(
     TARGETS hiptensor

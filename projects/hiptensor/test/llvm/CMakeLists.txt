@@ -25,6 +25,8 @@
  ###############################################################################
 
 # Find / configure LLVM
+find_package(ZLIB REQUIRED)
+find_package(zstd CONFIG REQUIRED)
 find_package(LLVM CONFIG HINTS ${ROCM_DIR}/../../..)
 
 if (NOT LLVM_DIR)

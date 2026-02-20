@@ -28,7 +28,11 @@
 
 #include "singleton.hpp"
 
+#include <cstdio>
 #include <mutex>
+
+// Cross-platform safe file opening function
+FILE* safeFopen(const char* filename, const char* mode);
 
 namespace hiptensor
 {

@@ -27,9 +27,12 @@
 
 // hiptensor includes
 #include "logger.hpp"
+#include "util.hpp"
 #include <hiptensor/hiptensor.h>
 #include <hiptensor/hiptensor_types.h>
 #include <hiptensor/internal/hiptensor_utility.hpp>
+
+#include "common.hpp"
 
 void printBool(bool in)
 {
@@ -77,10 +80,10 @@ bool hiptensorLoggerSetCallbackTest()
 
 bool hiptensorLoggerSetFileTest()
 {
-    std::string fname = std::tmpnam(nullptr);
+    std::string fname = hiptensor::generateTempFilename();
 
     // hiptensorLoggerSetFile should have filestream open in write mode.
-    FILE* fp = fopen(fname.c_str(), "r");
+    FILE* fp = safeFopen(fname.c_str(), "r");
     if(hiptensorLoggerSetFile(fp) == HIPTENSOR_STATUS_SUCCESS)
     {
         return false;
@@ -89,7 +92,7 @@ bool hiptensorLoggerSetFileTest()
     long fileSizeOrig = 0, fileSizeAfter = 0;
 
     // hiptensorLoggerSetFile with file in write mode.
-    fp = fopen(fname.c_str(), "w");
+    fp = safeFopen(fname.c_str(), "w");
     if(fp == NULL)
     {
         std::cout << " Failed to Open File. Check Permissions!";
@@ -130,12 +133,12 @@ bool hiptensorLoggerSetFileTest()
 
 bool hiptensorLoggerOpenFileTest()
 {
-    std::string fname   = std::tmpnam(nullptr);
+    std::string fname   = hiptensor::generateTempFilename();
     const char* fname_c = fname.c_str();
 
     long fileSizeOrig = 0, fileSizeAfter = 0;
 
-    FILE* fp = fopen(fname_c, "w");
+    FILE* fp = safeFopen(fname_c, "w");
     if(fp == NULL)
     {
         std::cout << " Failed to Open File. Check Permissions!";

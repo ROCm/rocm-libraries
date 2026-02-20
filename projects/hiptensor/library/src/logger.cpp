@@ -24,14 +24,35 @@
  *
  *******************************************************************************/
 
-#include "include/logger.hpp"
-
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+
+#ifdef _WIN32
+#include <process.h>
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <mutex>
+
+#include "include/logger.hpp"
+
+// Cross-platform safe file opening
+FILE* safeFopen(const char* filename, const char* mode)
+{
+#ifdef _WIN32
+    FILE* file = nullptr;
+    if(fopen_s(&file, filename, mode) == 0)
+    {
+        return file;
+    }
+    return nullptr;
+#else
+    return fopen(filename, mode);
+#endif
+}
 
 namespace hiptensor
 {
@@ -80,7 +101,7 @@ namespace hiptensor
                 fclose(mWriteStream);
                 mOwnsStream = false;
             }
-            mWriteStream = fopen(fileName, "w");
+            mWriteStream = safeFopen(fileName, "w");
             if(mWriteStream == nullptr)
             {
                 // Revert back to stdout
@@ -222,16 +243,30 @@ namespace hiptensor
         // Beware thread concurrency.
         static char buff[32];
 
-        time_t     t;
-        struct tm* tInfo;
+        time_t    t;
+        struct tm tmInfo;
 
         // Retrieve the time information
         time(&t);
-        tInfo = localtime(&t);
+
+        // Cross-platform safe localtime
+#ifdef _WIN32
+        if(localtime_s(&tmInfo, &t) != 0)
+        {
+            // If localtime_s fails, zero out the struct
+            memset(&tmInfo, 0, sizeof(tmInfo));
+        }
+#else
+        if(localtime_r(&t, &tmInfo) == nullptr)
+        {
+            // If localtime_r fails, zero out the struct
+            memset(&tmInfo, 0, sizeof(tmInfo));
+        }
+#endif
 
         // Format the timestamp string
         // YYYY-MM-DD HH:MM:SS
-        strftime(buff, 32, "%F %T", tInfo);
+        strftime(buff, 32, "%F %T", &tmInfo);
         return buff;
     }
 
@@ -263,7 +298,12 @@ namespace hiptensor
     int32_t Logger::appPid()
     {
         // App PID won't generally change
-        static int pid = getpid();
+        static int pid =
+#ifdef _WIN32
+            _getpid();
+#else
+            getpid();
+#endif
         return pid;
     }
 

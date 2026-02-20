@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "hiptensor_options.hpp"
+#include "util.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -48,7 +49,7 @@ namespace hiptensor
         , mLogFilename("")
     {
         // Override HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR with environment variable if present
-        if(const char* stride_env = std::getenv("HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR"))
+        if(const char* stride_env = getEnvironmentVariable("HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR"))
         {
             std::string upper = stride_env;
             std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);

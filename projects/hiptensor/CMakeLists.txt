@@ -29,25 +29,29 @@ message(STATUS "CMake version: ${CMAKE_VERSION}")
 
 # NOTE: This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
-if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
-  set( CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel." )
+if(NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel.")
 endif()
 message(STATUS "CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "" FORCE )
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "" FORCE)
 
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-  set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
+  if(NOT WIN32)
+    set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
+  else()
+    set(CMAKE_INSTALL_PREFIX "C:/dist/TheRock" CACHE PATH "Install path prefix, prepended onto install directories")
+  endif()
 endif()
-if( NOT DEFINED CPACK_PACKAGING_INSTALL_PREFIX )
+if(NOT DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
   set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" CACHE PATH "Install path prefix for packages.")
   set(CPACK_SET_DESTDIR OFF)
 endif()
 
 # This helps cmake properly find hip-config.cmake
-list( APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} ${ROCM_PATH} /opt/rocm )
+list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} ${ROCM_PATH} /opt/rocm)
 # Append our library helper cmake path and the cmake path for hip (for convenience).
 # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
-list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 # Build shared libs
 set(BUILD_SHARED_LIBS ON)
@@ -63,13 +67,13 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O1 -ggdb")           # c
 set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -O2 -DNDEBUG") # clang++ failed to build the project with the default -Os
 
 # Project options
-if( CMAKE_PROJECT_NAME STREQUAL "hiptensor" )
-  option( HIPTENSOR_BUILD_TESTS "Build hiptensor tests" ON )
-  option( HIPTENSOR_BUILD_SAMPLES "Build hiptensor samples" ON )
-  option( HIPTENSOR_BUILD_COMPRESSED_DBG "Enable compressed debug symbols" ON )
-  option( HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR "Set hiptensor default strides to column major" ON )
-  option( BUILD_OFFLOAD_COMPRESS "Build hiptensor with offload compression" ON )
-  option( HIPTENSOR_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF )
+if(CMAKE_PROJECT_NAME STREQUAL "hiptensor")
+  option(HIPTENSOR_BUILD_TESTS "Build hiptensor tests" ON)
+  option(HIPTENSOR_BUILD_SAMPLES "Build hiptensor samples" ON)
+  option(HIPTENSOR_BUILD_COMPRESSED_DBG "Enable compressed debug symbols" ON)
+  option(HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR "Set hiptensor default strides to column major" ON)
+  option(BUILD_OFFLOAD_COMPRESS "Build hiptensor with offload compression" ON)
+  option(HIPTENSOR_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
 endif()
 
 # Setup output paths
@@ -89,33 +93,36 @@ include(ROCMPackageConfigHelpers)
 include(ROCMInstallSymlinks)
 include(CheckCXXCompilerFlag)
 
-# check if ROCm supports `__hip_fp8_e5m2` and `__hip_fp8_e4m3`
-include(cmake/Macros/CheckF8.cmake)
-check_f8(F8_EXISTS)
-if(F8_EXISTS)
-    message( STATUS "Performing Test `__hip_fp8_e5m2` and `__hip_fp8_e4m3` - Success" )
-else()
+# TODO Review if this check is necessary since the lib doesn't support fp8 operations.
+if(NOT WIN32)
+  # check if ROCm supports `__hip_fp8_e5m2` and `__hip_fp8_e4m3`
+  include(cmake/Macros/CheckF8.cmake)
+  check_f8(F8_EXISTS)
+  if(F8_EXISTS)
+    message(STATUS "Performing Test `__hip_fp8_e5m2` and `__hip_fp8_e4m3` - Success")
+  else()
     message(FATAL_ERROR "The detected ROCm does not support data type `__hip_fp8_e5m2` or `__hip_fp8_e4m3`.")
+  endif()
 endif()
 
 # check if asan is enabled
 if (NOT DEFINED ADDRESS_SANITIZER AND DEFINED ENV{ADDRESS_SANITIZER})
-    set(ADDRESS_SANITIZER $ENV{ADDRESS_SANITIZER})
+  set(ADDRESS_SANITIZER $ENV{ADDRESS_SANITIZER})
 endif()
 if (ADDRESS_SANITIZER OR CMAKE_CXX_FLAGS MATCHES "-fsanitize=address")
-    set(ADDRESS_SANITIZER_ENABLED ON)
+  set(ADDRESS_SANITIZER_ENABLED ON)
 else()
-    set(ADDRESS_SANITIZER_ENABLED OFF)
+  set(ADDRESS_SANITIZER_ENABLED OFF)
 endif()
 
 include(cmake/Functions/hiptensorSupportedArchitectures.cmake)
 if (ADDRESS_SANITIZER_ENABLED)
-    rocm_check_target_ids(DEFAULT_GPU_TARGETS
-        TARGETS "gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+" )
+  rocm_check_target_ids(DEFAULT_GPU_TARGETS
+    TARGETS "gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+")
 else()
-    hiptensor_get_supported_architectures(SUPPORTED_ARCHS)
-    rocm_check_target_ids(DEFAULT_GPU_TARGETS
-        TARGETS ${SUPPORTED_ARCHS} )
+  hiptensor_get_default_architectures(DEFAULT_ARCHS)
+  rocm_check_target_ids(DEFAULT_GPU_TARGETS
+    TARGETS ${DEFAULT_ARCHS})
 endif()
 
 # Check if offload compression is supported
@@ -123,7 +130,7 @@ include(CheckCXXCompilerFlag)
 if (BUILD_OFFLOAD_COMPRESS)
   check_cxx_compiler_flag("--offload-compress" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
   if (NOT CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-    message(WARNING "BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option." )
+    message(WARNING "BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
     set(CMAKE_NO_BUILTIN_CHRPATH ON)
   else()
     set(CMAKE_NO_BUILTIN_CHRPATH OFF)
@@ -153,7 +160,7 @@ endif()
 message(STATUS "HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=${HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR}")
 
 # Setup HIP
-find_package(hip REQUIRED )
+find_package(hip REQUIRED)
 math(EXPR hip_VERSION_FLAT "(${hip_VERSION_MAJOR} * 1000 + ${hip_VERSION_MINOR}) * 100000 + ${hip_VERSION_PATCH}")
 message(STATUS "hip_version_flat=${hip_VERSION_FLAT}")
 
@@ -175,8 +182,8 @@ if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600241132)
 endif()
 
 if(HIPTENSOR_CODE_COVERAGE)
-    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
-    add_link_options(-fprofile-instr-generate)
+  add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+  add_link_options(-fprofile-instr-generate)
 endif()
 
 # disable warning about 'amdgpu-waves-per-eu'
@@ -207,37 +214,37 @@ if(HIPTENSOR_BUILD_SAMPLES)
 endif()
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "2.2.0" )
-rocm_setup_version( VERSION ${VERSION_STRING} )
+set (VERSION_STRING "2.2.0")
+rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Configure a header file to pass the CMake version settings to the source
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h.in"
-               "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h" )
+               "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h")
 
 # Define package dependencies for export
 set(PACKAGE_DEPENDS
-    PACKAGE hip
-    PACKAGE composable_kernel
+  PACKAGE hip
+  PACKAGE composable_kernel
 )
 
 set(PACKAGE_STATIC_DEPENDS
-    PACKAGE Threads
+  PACKAGE Threads
 )
 
 # Export targets using ROCm automation
 rocm_export_targets(
-    TARGETS hiptensor
-    DEPENDS
-        ${PACKAGE_DEPENDS}
-    STATIC_DEPENDS
-        ${PACKAGE_STATIC_DEPENDS}
+  TARGETS hiptensor
+  DEPENDS
+    ${PACKAGE_DEPENDS}
+  STATIC_DEPENDS
+    ${PACKAGE_STATIC_DEPENDS}
 )
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 
 rocm_create_package(
-    NAME hiptensor
-    DESCRIPTION "AMD high-performance HIP library for tensor primitives"
-    MAINTAINER "hiptensor Maintainer <hiptensor-maintainer@amd.com>"
-    LDCONFIG
+  NAME hiptensor
+  DESCRIPTION "AMD high-performance HIP library for tensor primitives"
+  MAINTAINER "hiptensor Maintainer <hiptensor-maintainer@amd.com>"
+  LDCONFIG
 )

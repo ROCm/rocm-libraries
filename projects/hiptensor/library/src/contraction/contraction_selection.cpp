@@ -179,7 +179,7 @@ namespace hiptensor
                     char msg[256];
                     snprintf(msg,
                              sizeof(msg),
-                             "KernelId: %lu, KernelName: %s, AvgTime: %0.3f ms",
+                             "KernelId: %zu, KernelName: %s, AvgTime: %0.3f ms",
                              solution->uid(),
                              solution->kernelName().c_str(),
                              time);
