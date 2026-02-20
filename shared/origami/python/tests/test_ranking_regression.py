@@ -27,7 +27,7 @@ import pytest
 import yaml
 
 import origami
-from helpers import SUPPORTED_ARCHITECTURES, create_hardware, get_matrix_instructions
+from helpers import SUPPORTED_ARCHITECTURES, create_hardware, create_config_list, get_matrix_instructions
 
 
 BASELINE_DIR = Path(__file__).parent / "baselines" / "rankings"
@@ -71,36 +71,6 @@ def load_problem_sizes() -> list[tuple[int, int, int, int]]:
 
 
 TEST_PROBLEM_SIZES = load_problem_sizes()
-
-
-def create_configs(hardware: origami.hardware_t, dtype: str) -> list[origami.config_t]:
-    """Generate a representative set of configs for testing."""
-    mi_list = get_matrix_instructions(hardware, dtype)
-    if not mi_list:
-        return []
-
-    configs = []
-
-    mt_sizes = [16, 32, 48, 96, 128, 192, 224, 256, 336, 448, 512]
-    depth_unroll_values = [16, 32, 64, 128, 512, 1024]
-    occupancy_values = [1, 2]
-    wgm_values = [1, 4, 8]
-
-    for mi in mi_list:
-        mi_m, mi_n, mi_k = mi
-        for mt_m in mt_sizes:
-            for mt_n in mt_sizes:
-                for mt_k in depth_unroll_values:
-                    for occ in occupancy_values:
-                        for wgm in wgm_values:
-                            config = origami.config_t()
-                            config.mt = origami.dim3_t(mt_m, mt_n, mt_k)
-                            config.mi = origami.dim3_t(mi_m, mi_n, mi_k)
-                            config.occupancy = occ
-                            config.workgroup_mapping = wgm
-                            configs.append(config)
-
-    return configs
 
 
 def create_problem(
@@ -157,7 +127,13 @@ def generate_rankings(arch_name: str, dtype: str, transpose: str = "TN") -> dict
     Each config tuple is [mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm].
     """
     hardware = create_hardware(arch_name)
-    configs = create_configs(hardware, dtype)
+    configs = create_config_list(
+        hardware, dtype,
+        mt_sizes=[16, 32, 48, 96, 128, 192, 224, 256, 336, 448, 512],
+        depth_unroll=[16, 32, 64, 128, 512, 1024],
+        occupancy_values=[1, 2],
+        wgm_values=[1, 4, 8],
+    )
 
     if not configs:
         return {}

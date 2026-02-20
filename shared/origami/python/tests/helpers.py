@@ -71,48 +71,95 @@ def get_matrix_instructions(
 
 
 def create_config_list(
-    hardware: origami.hardware_t, dtype: str
+    hardware: origami.hardware_t,
+    dtype: str,
+    *,
+    mt_sizes: list[int] | None = None,
+    depth_unroll: list[int] | None = None,
+    occupancy_values: list[int] | None = None,
+    wgm_values: list[int] | None = None,
+    waves: list[list[int]] | None = None,
+    max_mt: int = 512,
 ) -> list[origami.config_t]:
-    """Create a list of configurations for testing using dynamic MI discovery."""
+    """Create a list of configurations for testing using dynamic MI discovery.
+    
+    Args:
+        hardware: Hardware object for the target architecture.
+        dtype: Data type string (e.g., "f16", "bf16", "f32").
+        mt_sizes: If provided, use cartesian product of these MT sizes.
+                  If None, use wave-based calculation.
+        depth_unroll: Depth unroll values. Default: [16, 32, 64, 128, 256, 512, 1024].
+        occupancy_values: Occupancy values. Default: [1].
+        wgm_values: Workgroup mapping values. Default: [6].
+        waves: Wave configurations for wave-based mode. Default: [[4,1], [2,2], [1,4], [1,2], [2,1], [1,1]].
+        max_mt: Maximum macro tile size for wave-based mode. Default: 512.
+    """
     mi_list = get_matrix_instructions(hardware, dtype)
     if not mi_list:
         return []
 
-    list_of_waves_to_include = [[4, 1], [2, 2], [1, 4], [1, 2], [2, 1], [1, 1]]
-    min_mt0 = min_mt1 = 16
-    max_mt0 = max_mt1 = 512
+    if depth_unroll is None:
+        depth_unroll = [16, 32, 64, 128, 256, 512, 1024]
+    if occupancy_values is None:
+        occupancy_values = [1]
+    if wgm_values is None:
+        wgm_values = [6]
 
     configs = []
-    for mi in mi_list:
-        mi_m, mi_n, mi_k = mi
 
-        for wave in list_of_waves_to_include:
-            wave_tile_m = 0
+    if mt_sizes is not None:
+        # Cartesian product mode: explicit MT sizes
+        for mi in mi_list:
+            mi_m, mi_n, mi_k = mi
+            for mt_m in mt_sizes:
+                for mt_n in mt_sizes:
+                    for mt_k in depth_unroll:
+                        for occ in occupancy_values:
+                            for wgm in wgm_values:
+                                config = origami.config_t()
+                                config.mt = origami.dim3_t(mt_m, mt_n, mt_k)
+                                config.mi = origami.dim3_t(mi_m, mi_n, mi_k)
+                                config.occupancy = occ
+                                config.workgroup_mapping = wgm
+                                configs.append(config)
+    else:
+        # Wave-based mode: MT derived from MI × wave tile
+        if waves is None:
+            waves = [[4, 1], [2, 2], [1, 4], [1, 2], [2, 1], [1, 1]]
+        min_mt = 16
 
-            while True:
-                wave_tile_m += 1
-                mt0 = mi_m * wave_tile_m * wave[0]
-                if mt0 < min_mt0:
-                    continue
-                if mt0 > max_mt0:
-                    break
+        for mi in mi_list:
+            mi_m, mi_n, mi_k = mi
 
-                wave_tile_n = 0
+            for wave in waves:
+                wave_tile_m = 0
+
                 while True:
-                    wave_tile_n += 1
-                    mt1 = mi_n * wave_tile_n * wave[1]
-
-                    if mt1 < min_mt1:
+                    wave_tile_m += 1
+                    mt0 = mi_m * wave_tile_m * wave[0]
+                    if mt0 < min_mt:
                         continue
-                    if mt1 > max_mt1:
+                    if mt0 > max_mt:
                         break
 
-                    for du in [16, 32, 64, 128, 256, 512, 1024]:
-                        config = origami.config_t()
-                        config.mt = origami.dim3_t(mt0, mt1, du)
-                        config.mi = origami.dim3_t(mi_m, mi_n, mi_k)
-                        config.occupancy = 1
-                        config.workgroup_mapping = 6
-                        configs.append(config)
+                    wave_tile_n = 0
+                    while True:
+                        wave_tile_n += 1
+                        mt1 = mi_n * wave_tile_n * wave[1]
+
+                        if mt1 < min_mt:
+                            continue
+                        if mt1 > max_mt:
+                            break
+
+                        for du in depth_unroll:
+                            for occ in occupancy_values:
+                                for wgm in wgm_values:
+                                    config = origami.config_t()
+                                    config.mt = origami.dim3_t(mt0, mt1, du)
+                                    config.mi = origami.dim3_t(mi_m, mi_n, mi_k)
+                                    config.occupancy = occ
+                                    config.workgroup_mapping = wgm
+                                    configs.append(config)
 
     return configs
