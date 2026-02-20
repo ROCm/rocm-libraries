@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2026 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
@@ -51,16 +28,19 @@ namespace rocRoller
             auto dimTag        = graph.mapper.get(loopTag, NaryArgument::DEST);
             auto forLoopLength = getSize(graph.coordinates.getNode(dimTag));
             auto unrollK       = params->unrollK;
-            // Find the number of forLoops following this for loop.
+            // K-loop uses the unrollK parameter if specified
             if(name == rocRoller::KLOOP && unrollK > 0)
                 return unrollK;
-            // Use default behavior if the above isn't true
-            // If loop length is a constant, unroll the loop by that amount
-            if(Expression::evaluationTimes(forLoopLength)[Expression::EvaluationTime::Translate])
+            // X and Y loops always get fully unrolled if loop length is a constant
+            if(name == rocRoller::XLOOP || name == rocRoller::YLOOP)
             {
-                auto length = Expression::evaluate(forLoopLength);
-                if(isInteger(length))
-                    return std::max(1u, getUnsignedInt(length));
+                if(Expression::evaluationTimes(
+                       forLoopLength)[Expression::EvaluationTime::Translate])
+                {
+                    auto length = Expression::evaluate(forLoopLength);
+                    if(isInteger(length))
+                        return std::max(1u, getUnsignedInt(length));
+                }
             }
             return 1u;
         }
@@ -321,9 +301,8 @@ namespace rocRoller
                         [&](Tile const&) { insertUnrollBesideForLoop(Tile()); },
                         [&](Split const&) { insertUnrollBesideForLoop(Split()); },
                         [&](auto const&) {
-                            AssertFatal(false,
-                                        "Unhandled incoming edge while creating Unroll.",
-                                        ShowValue(input));
+                            Throw<FatalError>("Unhandled incoming edge while creating Unroll.",
+                                              ShowValue(input));
                         },
                     },
                     std::get<CoordinateTransformEdge>(edge));
@@ -362,9 +341,8 @@ namespace rocRoller
                         [&](Flatten const&) { insertUnrollBesideForLoop(Flatten()); },
                         [&](Join const&) { insertUnrollBesideForLoop(Join()); },
                         [&](auto const&) {
-                            AssertFatal(false,
-                                        "Unhandled outgoing edge while creating Unroll.",
-                                        ShowValue(output));
+                            Throw<FatalError>("Unhandled outgoing edge while creating Unroll.",
+                                              ShowValue(output));
                         },
                     },
                     std::get<CoordinateTransformEdge>(edge));

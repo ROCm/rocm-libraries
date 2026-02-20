@@ -27,6 +27,7 @@ add_library(
     plugin/EnginePluginResourceManager.cpp
     plugin/PluginCore.cpp
     plugin/SharedLibrary.cpp
+    utilities/EngineOrdering.cpp
     LastErrorManager.cpp
     $<$<BOOL:${WIN32}>:PlatformUtils.windows.cpp>
     $<$<BOOL:${UNIX}>:PlatformUtils.linux.cpp>
@@ -41,6 +42,10 @@ target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_O
 target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk)
 target_link_libraries(hipdnn_backend_private PRIVATE ${CMAKE_DL_LIBS})
 target_compile_definitions(hipdnn_backend_private PRIVATE HIPDNN_BACKEND_COMPILATION)
+
+# Enable spdlog support via shared cmake function
+hipdnn_add_dependency(spdlog VERSION ${HIPDNN_SPDLOG_VERSION})
+hipdnn_enable_spdlog(hipdnn_backend_private)
 
 clang_tidy_check(hipdnn_backend_private)
 
@@ -67,7 +72,9 @@ target_link_libraries(hipdnn_backend PRIVATE hipdnn_backend_private)
 # Export dependencies for consumers because backend public API needs HIP runtime dep
 target_link_libraries(hipdnn_backend INTERFACE hip::host)
 # HIDE symbols from linked static libs
-target_link_libraries(hipdnn_backend PRIVATE "-Xlinker --exclude-libs=ALL")
+if(NOT WIN32)
+    target_link_libraries(hipdnn_backend PRIVATE "-Xlinker --exclude-libs=ALL")
+endif()
 set_target_properties(hipdnn_backend PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
 clang_tidy_check(hipdnn_backend)

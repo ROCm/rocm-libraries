@@ -21,6 +21,14 @@ add_executable(
     flatbuffer_utilities/TestNodeWrapper.cpp
     flatbuffer_utilities/TestKnobWrapper.cpp
     flatbuffer_utilities/TestKnobSettingWrapper.cpp
+    types/TestBfloat16.cpp
+    types/TestCrossTypeConversion.cpp
+    types/TestForwardingFunctions.cpp
+    types/TestFp8E4M3.cpp
+    types/TestFp8E5M2.cpp
+    types/TestHalf.cpp
+    types/TestPortableTypes.cpp
+    types/TestUserDefinedLiterals.cpp
     utilities/TestAllocators.cpp
     utilities/TestCallbackLogger.cpp
     utilities/TestEngineNames.cpp
@@ -33,7 +41,6 @@ add_executable(
     utilities/TestShallowHostOnlyMigratableMemory.cpp
     utilities/TestShallowTensor.cpp
     utilities/TestShapeUtilities.cpp
-    utilities/TestStaticCast.cpp
     utilities/TestStringUtil.cpp
     utilities/TestTensor.cpp
     utilities/TestTensorIterator.cpp
@@ -42,6 +49,7 @@ add_executable(
 )
 
 target_compile_options(hipdnn_data_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+
 target_link_libraries(
     hipdnn_data_sdk_tests
     GTest::gtest

@@ -41,10 +41,6 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-#define ELL_IND_ROW(i, el, m, width) (el) * (m) + (i)
-#define ELL_IND_EL(i, el, m, width) (el) + (width) * (i)
-#define ELL_IND(i, el, m, width) ELL_IND_ROW(i, el, m, width)
-
 template <typename T>
 void testing_csr2hyb_bad_arg(const Arguments& argus)
 {
@@ -294,33 +290,18 @@ void testing_csr2hyb(Arguments argus)
     hhyb_coo_val_gold.resize(coo_nnz);
 
     // Fill HYB
-    int coo_idx = 0;
-    for(int i = 0; i < m; ++i)
-    {
-        int p = 0;
-        for(int j = hcsr_row_ptr[i] - idx_base; j < hcsr_row_ptr[i + 1] - idx_base; ++j)
-        {
-            if(p < ell_width)
-            {
-                int idx                    = ELL_IND(i, p++, m, ell_width);
-                hhyb_ell_col_ind_gold[idx] = hcsr_col_ind[j];
-                hhyb_ell_val_gold[idx]     = hcsr_val[j];
-            }
-            else
-            {
-                hhyb_coo_row_ind_gold[coo_idx] = i + idx_base;
-                hhyb_coo_col_ind_gold[coo_idx] = hcsr_col_ind[j];
-                hhyb_coo_val_gold[coo_idx]     = hcsr_val[j];
-                ++coo_idx;
-            }
-        }
-        for(int j = hcsr_row_ptr[i + 1] - hcsr_row_ptr[i]; j < ell_width; ++j)
-        {
-            int idx                    = ELL_IND(i, p++, m, ell_width);
-            hhyb_ell_col_ind_gold[idx] = -1;
-            hhyb_ell_val_gold[idx]     = make_DataType<T>(0.0);
-        }
-    }
+    host_csr2hyb(m,
+                 nnz,
+                 hcsr_row_ptr.data(),
+                 hcsr_col_ind.data(),
+                 hcsr_val.data(),
+                 ell_width,
+                 hhyb_ell_col_ind_gold.data(),
+                 hhyb_ell_val_gold.data(),
+                 hhyb_coo_row_ind_gold.data(),
+                 hhyb_coo_col_ind_gold.data(),
+                 hhyb_coo_val_gold.data(),
+                 idx_base);
 
     // Allocate verification structures
     std::vector<int> hhyb_ell_col_ind(ell_nnz);
