@@ -29,6 +29,18 @@ include(ConfigAutotuneSettings.cmake)
 option(BENCHMARK_TUNE_PARAM_NAMES "Tuning parameter names" "")
 option(BENCHMARK_TUNE_PARAMS "Tuning parameters" "")
 
+# Get the current branch, or fall back to DETACHED
+execute_process(
+  COMMAND ${GIT_EXECUTABLE} symbolic-ref -q --short HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  OUTPUT_VARIABLE BRANCH_NAME
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(BRANCH_NAME STREQUAL "")
+  set(BRANCH_NAME "DETACHED")
+endif()
+
+# Get the short commit hash
 execute_process(
   COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
@@ -83,6 +95,7 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
 
   target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../shared/primbench)
 
+  target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BRANCH_NAME="${BRANCH_NAME}")
   target_compile_definitions(${BENCHMARK_TARGET} PUBLIC COMMIT_HASH="${COMMIT_HASH}")
 
   if(BUILD_NAIVE_BENCHMARK)

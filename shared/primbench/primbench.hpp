@@ -1194,8 +1194,8 @@ private:
     /**
      * \brief Serializes general benchmark context info into JSON.
      *
-     * If the macro COMMIT_HASH is defined at compile time, the corresponding
-     * Git commit hash is also output as the JSON key "git_commit".
+     * If the macros BRANCH_NAME and/or COMMIT_HASH are defined at compile time,
+     * they are output as the JSON keys "branch_name" and "commit_hash" respectively.
      */
     std::string serialize_general(std::string_view algorithm,
                                   size_t           specialization_count,
@@ -1241,8 +1241,11 @@ private:
 
         ss << ",\"date\":\"" << date() << "\"";
 
+#ifdef BRANCH_NAME
+        ss << ",\"branch_name\":\"" << BRANCH_NAME << "\"";
+#endif
 #ifdef COMMIT_HASH
-        ss << ",\"git_commit\":\"" << COMMIT_HASH << "\"";
+        ss << ",\"commit_hash\":\"" << COMMIT_HASH << "\"";
 #endif
 
         ss << ",\"hip_version\":\"" << HIP_VERSION_MAJOR << "." << HIP_VERSION_MINOR << "."

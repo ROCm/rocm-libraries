@@ -400,12 +400,22 @@ If you only want CSV output and don't need the JSON file, pass `--json-out /dev/
 
 For benchmarks that modify input data in-place, `state.run_before_every_iteration(lambda)` allows you to restore inputs before each kernel call. This ensures every kernel call starts from a clean state, producing deterministic results. Note that this is **not** related to noise reduction; it only prevents mutated inputs from affecting subsequent kernel calls.
 
-## Outputting the Commit Hash
+## Outputting the Branch Name and Commit Hash
 
-If the macro `COMMIT_HASH` is defined at compile time, the corresponding Git commit hash is automatically included in `results.json` as `context.general.git_commit`:
+If the macros `BRANCH_NAME` and/or `COMMIT_HASH` are defined at compile time, they are included in `results.json` as:
+- `context.general.branch_name`
+- `context.general.commit_hash`
+
+The command below embeds the current branch and commit hash.
+If the repository is in a detached HEAD state (for example in CI or when checking out a specific commit), no branch is active and `BRANCH_NAME` is set to `DETACHED`.
 
 ```bash
-hipcc -o copy_benchmark copy_benchmark.cpp -lamd_smi -DCOMMIT_HASH=\"$(git rev-parse --short HEAD)\" && ./copy_benchmark
+hipcc -o copy_benchmark examples/copy_benchmark.cpp \
+  -I. \
+  -lamd_smi \
+  -DBRANCH_NAME=\"$(git symbolic-ref -q --short HEAD || echo DETACHED)\" \
+  -DCOMMIT_HASH=\"$(git rev-parse --short HEAD)\" \
+  && ./copy_benchmark
 ```
 
 ## CLI Colors
