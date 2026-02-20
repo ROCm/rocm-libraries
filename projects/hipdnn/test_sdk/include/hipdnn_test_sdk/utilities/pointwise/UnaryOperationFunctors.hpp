@@ -124,8 +124,8 @@ struct GeluForward
         using hipdnn_data_sdk::types::sqrt;
         auto xCompute = static_cast<ComputeType>(x);
         // GELU(x) = 0.5 * x * (1 + erf(x / sqrt(2)))
-        static const ComputeType kSqrt2 = sqrt(ComputeType{2});
-        auto result = ComputeType{0.5} * xCompute * (ComputeType{1} + erf(xCompute / kSqrt2));
+        static const ComputeType s_kSqrt2 = sqrt(ComputeType{2});
+        auto result = ComputeType{0.5} * xCompute * (ComputeType{1} + erf(xCompute / s_kSqrt2));
         return static_cast<OutputType>(result);
     }
 };
@@ -140,9 +140,9 @@ struct GeluApproxTanhForward
         using hipdnn_data_sdk::types::tanh;
         auto xCompute = static_cast<ComputeType>(x);
         // GELU_tanh(x) ~= 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
-        static const ComputeType kSqrt2OverPi = sqrt(ComputeType{2} / ComputeType{M_PI});
-        static const ComputeType kCoeff = ComputeType{0.044715};
-        auto inner = kSqrt2OverPi * (xCompute + kCoeff * xCompute * xCompute * xCompute);
+        static const ComputeType s_kSqrt2OverPi = sqrt(ComputeType{2} / ComputeType{M_PI});
+        static const auto s_kCoeff = ComputeType{0.044715};
+        auto inner = s_kSqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
         auto result = ComputeType{0.5} * xCompute * (ComputeType{1} + tanh(inner));
         return static_cast<OutputType>(result);
     }

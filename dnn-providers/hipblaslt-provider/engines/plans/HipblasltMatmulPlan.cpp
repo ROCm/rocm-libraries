@@ -342,6 +342,7 @@ void MatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
     auto cBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.c().uid(), deviceBuffers, numDeviceBuffers);
 
+    // Update bias pointer in the descriptor if they are present.
     if(_params.biasUid().has_value())
     {
         auto biasBuffer = hipblaslt_utils::findDeviceBuffer(

@@ -204,6 +204,27 @@ void checkNodeAttrsTensors(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Activation node input must be the bias node output tensor");
         }
+
+        const auto& biasInType
+            = biasAttr->in_0_tensor_uid() != matmulAttr.c_tensor_uid()
+                  ? hipblaslt_utils::findTensorAttributes(tensorMap,
+                                                          biasAttr->in_1_tensor_uid().value())
+                        .dataType()
+                  : hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->in_0_tensor_uid())
+                        .dataType();
+        const auto& biasOutType
+            = hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid())
+                  .dataType();
+
+        if(std::find(validDataTypes.begin(), validDataTypes.end(), biasInType)
+               == validDataTypes.end()
+           || std::find(validDataTypes.begin(), validDataTypes.end(), biasOutType)
+                  == validDataTypes.end())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Bias node input and output data types must be fp32, fp16 or bf16");
+        }
     }
     else if(activAttr != nullptr)
     {
@@ -217,13 +238,9 @@ void checkNodeAttrsTensors(
     }
 }
 
-void checkComputeTypes(
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
-    const hipdnn_data_sdk::data_objects::MatmulAttributes& matmulAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes* activAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
+void checkComputeTypes(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
+                       const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
+                       const hipdnn_data_sdk::data_objects::PointwiseAttributes* activAttr)
 {
     uint32_t matmulAttrIdx = 0;
     uint32_t biasAttrIdx = 1;
@@ -238,25 +255,23 @@ void checkComputeTypes(
 
     if(biasAttr != nullptr)
     {
-        int64_t biasIdx = matmulAttr.c_tensor_uid() != biasAttr->in_0_tensor_uid()
-                              ? biasAttr->in_0_tensor_uid()
-                              : biasAttr->in_1_tensor_uid().value();
-
-        if(tensorMap.at(biasIdx)->data_type() != graph.getNode(biasAttrIdx).compute_data_type())
+        if(graph.getNode(biasAttrIdx).compute_data_type()
+           != graph.getNode(biasAttrIdx).compute_data_type())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Bias node compute data type must be the same as the bias tensor type");
+                "Bias node compute data type must be equal to matmul node compute data type");
         }
     }
 
     if(activAttr != nullptr)
     {
         if(graph.getNode(activAttrIdx).compute_data_type()
-           != hipdnn_data_sdk::data_objects::DataType::FLOAT)
+           != graph.getNode(matmulAttrIdx).compute_data_type())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Activation node compute data type must be float");
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Activation node compute data type must be equal to matmul node compute data type");
         }
     }
 }
@@ -275,11 +290,7 @@ bool HipblasltMatmulPlanBuilder::isApplicable(
                               std::get<2>(nodeAttrs),
                               opGraph.getTensorMap());
 
-        checkComputeTypes(opGraph,
-                          std::get<0>(nodeAttrs),
-                          std::get<1>(nodeAttrs),
-                          std::get<2>(nodeAttrs),
-                          opGraph.getTensorMap());
+        checkComputeTypes(opGraph, std::get<1>(nodeAttrs), std::get<2>(nodeAttrs));
 
         MatmulParams params(std::get<0>(nodeAttrs),
                             std::get<1>(nodeAttrs),

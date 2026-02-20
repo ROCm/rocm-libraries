@@ -1239,7 +1239,7 @@ protected:
 
         // Create expected tensor: gelu_erf(x) = 0.5 * x * (1 + erf(x / sqrt(2)))
         auto geluErf = [](float x) {
-            ComputeType xCompute = static_cast<ComputeType>(static_cast<Input1Type>(x));
+            auto xCompute = static_cast<ComputeType>(static_cast<Input1Type>(x));
             ComputeType sqrt2 = hipdnn_data_sdk::types::sqrt(ComputeType{2});
             return ComputeType{0.5} * xCompute
                    * (ComputeType{1.0} + hipdnn_data_sdk::types::erf(xCompute / sqrt2));
@@ -1313,8 +1313,8 @@ protected:
             auto xCompute = static_cast<ComputeType>(static_cast<Input1Type>(x));
             auto sqrt2OverPi = static_cast<ComputeType>(
                 hipdnn_data_sdk::types::sqrt(ComputeType{2} / ComputeType{M_PI}));
-            static const ComputeType kCoeff = ComputeType{0.044715};
-            auto inner = sqrt2OverPi * (xCompute + kCoeff * xCompute * xCompute * xCompute);
+            static const auto s_kCoeff = ComputeType{0.044715};
+            auto inner = sqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
             return ComputeType{0.5} * xCompute
                    * (ComputeType{1.0} + hipdnn_data_sdk::types::tanh(inner));
         };
