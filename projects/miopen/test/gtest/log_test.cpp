@@ -40,7 +40,9 @@ TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogFindCmdOutput)
 
 TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogBufferOn) { TestLogBufferOn(); }
 
-TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogBufferOff) { TestLogBufferOff(); }
+TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogBufferOff1) { TestLogBufferOff1(); }
+
+TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogBufferOff2) { TestLogBufferOff2(); }
 
 TEST(CPU_LOG_TEST_FUSION_NONE, AssertTestLogCmdCBAFusionOutput)
 {

@@ -85,4 +85,6 @@ void TestLogCmdBNormFusion(std::function<void(const miopenFusionPlanDescriptor_t
 
 void TestLogBufferOn();
 
-void TestLogBufferOff();
+void TestLogBufferOff1();
+
+void TestLogBufferOff2();

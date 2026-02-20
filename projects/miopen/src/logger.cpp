@@ -72,19 +72,26 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LOGGING_QUIETING_DISABLE)
 
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_LOG_BUFFER_SIZE, 128);
 
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DISABLE_LOG_BUFFER);
+
 namespace miopen {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-static thread_local size_t log_buffer_size = env::value(MIOPEN_LOG_BUFFER_SIZE);
+static const size_t log_buffer_size = env::value(MIOPEN_LOG_BUFFER_SIZE);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 static thread_local size_t log_buffer_i = 0;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 static thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
 
+bool IsBufferLogOn()
+{
+    bool log_buffer_en = !env::enabled(MIOPEN_DISABLE_LOG_BUFFER);
+    return log_buffer_en;
+}
+
 void ClearBufferLog()
 {
     log_buffer_i = 0;
-    log_buffer   = std::vector<std::string>(miopen::log_buffer_size, "");
+    log_buffer   = std::vector<std::string>(log_buffer_size, "");
 }
 
 void BufferLog(std::string line)

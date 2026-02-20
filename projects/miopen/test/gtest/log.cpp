@@ -399,7 +399,30 @@ void TestLogBufferOn()
     fs::remove(filename);
 }
 
-void TestLogBufferOff()
+void TestLogBufferOff1()
+{
+    auto filename =
+        fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
+
+    fs::remove(filename);
+
+    ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
+                                                 "5"); // miopen::LoggingLevel::Info
+    ScopedEnvironment<std::string> log_buffer_off_env(MIOPEN_DISABLE_LOG_BUFFER,
+                                                      "1"); // disable logging
+
+    miopen::ClearBufferLog();
+    // log messages
+    MIOPEN_LOG_W("warn");
+    MIOPEN_LOG_I("info");
+    MIOPEN_LOG_I2("info2");
+    MIOPEN_LOG_T("trace");
+    // test log dump after error
+    MIOPEN_LOG_E("error");
+    ASSERT_FALSE(fs::exists(filename));
+}
+
+void TestLogBufferOff2()
 {
     auto filename =
         fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
