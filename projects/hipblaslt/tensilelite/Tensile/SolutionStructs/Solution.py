@@ -2055,63 +2055,11 @@ class Solution(collections.abc.Mapping):
 
         return LdsBlockSizePerPadA, LdsBlockSizePerPadB
 
-      def calcLdsNumBytesForNonMX(ldsPadA: int, LdsBlockSizePerPadA: int, ldsPadB: int, LdsBlockSizePerPadB: int) -> int:
-        bpeA = state["ProblemType"]["DataTypeA"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["DataType"].numBytes()
-        bpeB = state["ProblemType"]["DataTypeB"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["DataType"].numBytes()
-        bpeA = int(bpeA)
-        bpeB = int(bpeB)
+      def calcLdsNumBytes(ldsPadA: int, LdsBlockSizePerPadA: int, ldsPadB: int, LdsBlockSizePerPadB: int) -> int:
+        if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
+          assert state["ProblemType"]["MacDataTypeA"] == state["ProblemType"]["MacDataTypeB"], \
+              "Matrix A and B must have the same MX data types (mixed data types not supported yet)."
 
-        ldsAlign = int(64 / state["ProblemType"]["DataType"].numRegisters())
-
-        if state["UnrollMajorLDSA"]:
-          ldsNumBytesA = (state["_DepthUA"] + ldsPadA) * state["MacroTileA"] * bpeA
-        else:
-          ldsNumBytesA = state["_DepthUA"] * (state["MacroTileA"] + ldsPadA) * bpeA
-        padInterval = LdsBlockSizePerPadA
-
-        if padInterval != 0:
-          ldsNumBytesA = int((state["_DepthUA"] * state["MacroTileA"] * bpeA) / padInterval * (padInterval + ldsPadA * bpeA))
-        ldsNumBytesAlignedA = roundUpToNearestMultiple(ldsNumBytesA, ldsAlign)
-        # DirectToVgpr case, set 0 to lds related variables
-        if state["DirectToVgprA"]:
-          ldsNumBytesA = 0
-          ldsNumBytesAlignedA = 0
-
-        if state["UnrollMajorLDSB"]:
-          ldsNumBytesB = (state["_DepthUB"] + ldsPadB) * state["MacroTileB"] * bpeB
-        else:
-          ldsNumBytesB = state["_DepthUB"] * (state["MacroTileB"] + ldsPadB) * bpeB
-        padInterval = LdsBlockSizePerPadB
-        if padInterval != 0:
-          ldsNumBytesB = int((state["_DepthUB"] * state["MacroTileB"] * bpeB) / padInterval * (padInterval + ldsPadB * bpeB))
-
-        ldsNumBytesAlignedB = roundUpToNearestMultiple(ldsNumBytesB, ldsAlign)
-
-        # DirectToVgpr case, set 0 to lds related variables
-        if state["DirectToVgprB"]:
-          ldsNumBytesB = 0
-          ldsNumBytesAlignedB = 0
-
-        if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
-          bpeAB = state["ProblemType"]["DataType"].numBytes()
-          if state["UnrollMajorLDSMetadata"]:
-            ldsNumBytesMetadata = (state["_DepthUMetadata"] + state["LdsPadMetadata"]) * state["MacroTileMetadata"]
-          else:
-            ldsNumBytesMetadata = state["_DepthUMetadata"] * (state["MacroTileMetadata"] + state["LdsPadMetadata"])
-          ldsNumBytesMetadata = roundUp(ldsNumBytesMetadata / bpeAB) # metadata is in byte type. so divide ldsNumBytesMetadata by A,B's bpe
-          padInterval = state["LdsBlockSizePerPadMetadata"]
-          if padInterval != 0:
-            ldsNumBytesMetadata = int(roundUp(state["_DepthUMetadata"] * state["MacroTileMetadata"] / bpeAB) / padInterval * (padInterval + state["LdsPadMetadata"]))
-          ldsNumBytesAlignedMetadata = roundUpToNearestMultiple(ldsNumBytesMetadata, ldsAlign) * bpeAB
-          ldsNumBytesMetadata = ldsNumBytesMetadata * bpeAB
-        else:
-          ldsNumBytesMetadata = 0
-          ldsNumBytesAlignedMetadata = 0
-
-        return ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata      
-
-
-      def calcLdsNumBytesForMX(ldsPadA: int, LdsBlockSizePerPadA: int, ldsPadB: int, LdsBlockSizePerPadB: int) -> int:
         bpeA = state["ProblemType"]["DataTypeA"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataTypeA"].numBytes()
         bpeB = state["ProblemType"]["DataTypeB"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataTypeB"].numBytes()
         ldsAlign = int(64 / state["ProblemType"]["MacDataTypeA"].numRegisters())
@@ -2160,6 +2108,11 @@ class Solution(collections.abc.Mapping):
           ldsNumBytesMetadata = 0
           ldsNumBytesAlignedMetadata = 0
 
+        if not state["ProblemType"]["MXBlockA"]:
+          assert not state["ProblemType"]["MXBlockB"], \
+              "A and B must be both MX data types or non-MX data types."
+          return ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata
+
         if state["ProblemType"]["MXBlockA"]:
           ldsAlign = 64
           ldsNumBytesMXSA = state["_DepthUMXSA"] * state["MacroTileA"]
@@ -2178,6 +2131,10 @@ class Solution(collections.abc.Mapping):
 
         return ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, \
                ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB
+
+
+
+
 
 
       if state["LocalReadVectorWidthA"] == -1:
@@ -2247,7 +2204,7 @@ class Solution(collections.abc.Mapping):
             if (wlrA > 1) or (wlrB > 1):
               padA, padB, padM = calcLdsPadForMX()
               ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPadForMX()
-              ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytesForMX(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
+              ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
               if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > globalParameters["MaxLDS"]:
                 if wlrA > 1:
                   state["LocalReadVectorWidthA"] //= 2
@@ -2320,7 +2277,7 @@ class Solution(collections.abc.Mapping):
               ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPadForNonMX(state["LocalReadVectorWidth"])
               ldsBlockSizePerPadA = 0 if padA == 0 else ldsBlockSizePerPadA
               ldsBlockSizePerPadB = 0 if padB == 0 else ldsBlockSizePerPadB
-              ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytesForNonMX(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
+              ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
               if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > state["MaxLDS"]:
                 state["LocalReadVectorWidth"] //= 2
 
@@ -3399,10 +3356,10 @@ class Solution(collections.abc.Mapping):
 
     if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
       ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, \
-      ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytesForMX(state["LdsPadA"], state["LdsBlockSizePerPadA"], state["LdsPadB"], state["LdsBlockSizePerPadB"])
+      ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytes(state["LdsPadA"], state["LdsBlockSizePerPadA"], state["LdsPadB"], state["LdsBlockSizePerPadB"])
     else:
       ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, \
-       = calcLdsNumBytesForNonMX(state["LdsPadA"], state["LdsBlockSizePerPadA"], state["LdsPadB"], state["LdsBlockSizePerPadB"])
+       = calcLdsNumBytes(state["LdsPadA"], state["LdsBlockSizePerPadA"], state["LdsPadB"], state["LdsBlockSizePerPadB"])
        # This is just in case if subsequent code is checking these values
       ldsNumBytesMXSA = ldsNumBytesAlignedMXSA = ldsNumBytesMXSB = ldsNumBytesAlignedMXSB = 0
 
