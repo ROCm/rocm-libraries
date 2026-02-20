@@ -430,17 +430,12 @@ namespace rocRoller
             {
 
                 if (context->kernelOptions()->scaleSkipPermlane == ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                {
-                    std::cout << "LHS_SCALE" << std::endl;  
-                    std::cout << "Tile iWave0: " << "SIMDBlock: " << nSIMDBlock << ", SIMDIndex: " << nSIMDIndex << ", laneInSIMDBlock: " << nLanesInSIMDBlock << std::endl;
-                    std::cout << "Tile iWave1: " << "laneInSIMDIndex: " << nLanesInSIMDIndex << ", vgprBlock: " << nVgprBlock << ", vgprIndex: " << nVgprIndex << std::endl;
-    
+                {    
                     graph.coordinates.addElement(Tile(), {iWave0}, {SIMDBlock, SIMDIndex, laneInSIMDBlock});
                     graph.coordinates.addElement(Tile(), {iWave1}, {laneInSIMDIndex, vgprBlock, vgprIndex});
                 }
                 else
                 {
-                    std::cout << "Default" << std::endl;
                     graph.coordinates.addElement(Tile(), {iWave0}, {SIMDIndex, laneInSIMD});
                     graph.coordinates.addElement(
                         Tile(), {iWave1}, {block, SIMDBlock, vgprBlock, vgprIndex});
@@ -477,21 +472,13 @@ namespace rocRoller
 
             if(arg == NaryArgument::RHS_SCALE)
             {
-                // graph.coordinates.addElement(Tile(), {iWave1}, {SIMDIndex, laneInSIMD});
-                // graph.coordinates.addElement(
-                //     Tile(), {iWave0}, {block, SIMDBlock, vgprBlock, vgprIndex});
                 if (context->kernelOptions()->scaleSkipPermlane == ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                {
-                    std::cout << "RHS_SCALE" << std::endl;
-                    std::cout << "Tile iWave1: " << "SIMDBlock: " << nSIMDBlock << ", SIMDIndex: " << nSIMDIndex << ", laneInSIMDBlock: " << nLanesInSIMDBlock << std::endl;
-                    std::cout << "Tile iWave0: " << "laneInSIMDIndex: " << nLanesInSIMDIndex << ", vgprBlock: " << nVgprBlock << ", vgprIndex: " << nVgprIndex << std::endl;
-    
+                {    
                         graph.coordinates.addElement(Tile(), {iWave1}, {SIMDBlock, SIMDIndex, laneInSIMDBlock});
                         graph.coordinates.addElement(Tile(), {iWave0}, {laneInSIMDIndex, vgprBlock, vgprIndex});                    
                 }
                 else
                 {
-                    std::cout << "Default" << std::endl;
                     graph.coordinates.addElement(Tile(), {iWave1}, {SIMDIndex, laneInSIMD});
                     graph.coordinates.addElement(
                         Tile(), {iWave0}, {block, SIMDBlock, vgprBlock, vgprIndex});

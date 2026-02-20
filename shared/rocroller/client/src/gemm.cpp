@@ -227,21 +227,6 @@ namespace rocRoller::Client::GEMMClient
                       problemParams.initModeC);
         }
 
-        // When preSwizzleScalesGFX950 is used, fill scale A/B with a constant so the scale
-        // is unchanged after the permutation (every element stays the same).
-        // constexpr float kScaleConstantValue = 1.0f;
-
-        //     uint8_t const scaleConstantA
-        //         = floatToScale(problemParams.types.scaleTypeA, kScaleConstantValue);
-        //         std::cout << "set hostScaleA to " << kScaleConstantValue
-        //                   << " (raw " << static_cast<unsigned>(scaleConstantA) << ")" << std::endl;
-        //     std::fill(hostScaleA.begin(), hostScaleA.end(), scaleConstantA);
-
-        //     uint8_t const scaleConstantB
-        //         = floatToScale(problemParams.types.scaleTypeB, kScaleConstantValue);
-        //     std::cout << "set hostScaleB to " << kScaleConstantValue
-        //               << " (raw " << static_cast<unsigned>(scaleConstantB) << ")" << std::endl;
-        //     std::fill(hostScaleB.begin(), hostScaleB.end(), scaleConstantB);
 
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
 
