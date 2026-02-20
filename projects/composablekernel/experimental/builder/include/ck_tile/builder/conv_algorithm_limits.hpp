@@ -6,8 +6,8 @@
 #include <type_traits>
 #include <concepts>
 #include <utility>
-#include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/utility/type_traits.hpp"
 
 namespace ck_tile::builder {
 
@@ -174,13 +174,60 @@ constexpr auto get_mn_coverage()
     return mn;
 }
 
-template <size_t DataTypeSize>
-constexpr auto get_data_max_vec_size()
+template <size_t N, DataType Type>
+constexpr bool IsVectorSizeValid()
 {
-    constexpr auto max_vec_inst_size_bytes = get_max_mem_vec_inst_width();
-    static_assert(max_vec_inst_size_bytes % DataTypeSize == 0,
-                  "The max vec instruction size is not a multiple of given data type size.");
-    return max_vec_inst_size_bytes / DataTypeSize;
+    using enum builder::DataType;
+    // We have following type & VectorSize pair constraints.
+    //-----------------------------------------------------------------------------------
+    // (std::is_same_v<T, double> && (N == 1 || N == 2 || N == 4 || N == 8)) ||
+    // (std::is_same_v<T, float> && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
+    // (std::is_same_v<T, fp16_t> &&
+    //     (N == 1 || N == 2 || N == 4 || N == 6 || N == 8 || N == 16 || N == 32)) ||
+    // (std::is_same_v<T, bf16_t> &&
+    //     (N == 1 || N == 2 || N == 4 || N == 6 || N == 8 || N == 16 || N == 32)) ||
+    // (std::is_same_v<T, int32_t> &&
+    //     (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
+    // (std::is_same_v<T, fp8_t> && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
+    // (std::is_same_v<T, bf8_t> && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
+    // (std::is_same_v<T, int8_t> && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
+    // (std::is_same_v<T, e8m0_t> && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
+    // (std::is_same_v<T, pk_int4_t> &&
+    //     (N == 1 || N == 2 || N == 4 || N == 8 || N == 16 || N == 32)) ||
+    // (std::is_same_v<T, pk_fp4_raw_t> &&
+    //     (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
+    // (std::is_same_v<T, pk_fp4_t> && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16))
+    //-----------------------------------------------------------------------------------
+    // explicitly not using switch statement since we do not handle all possible data types
+    // in DataType structure yet, so that I could cover all of them in `else` branch.
+    if constexpr(Type == FP64)
+    {
+        return N == 1 || N == 2 || N == 4 || N == 8;
+    }
+    else if constexpr(Type == FP32)
+    {
+        return N == 1 || N == 2 || N == 4 || N == 8 || N == 16;
+    }
+    else if constexpr(Type == I32)
+    {
+        return N == 1 || N == 2 || N == 4 || N == 8 || N == 16;
+    }
+    else if constexpr(Type == FP16 || Type == BF16)
+    {
+        return N == 1 || N == 2 || N == 4 || N == 6 || N == 8 || N == 16 || N == 32;
+    }
+    else if constexpr(Type == FP8 || Type == BF8)
+    {
+        return N == 1 || N == 2 || N == 4 || N == 8 || N == 16;
+    }
+    else if constexpr(Type == I8)
+    {
+        return N == 1 || N == 2 || N == 4 || N == 8 || N == 16;
+    }
+    else
+    {
+        static_assert(always_false<void>, "Unsupported memory instruction data type!");
+    }
 }
 
 } // namespace detail
@@ -217,52 +264,37 @@ concept ThreadsCoverCTile = requires {
                            CBlockTransfer.scalar_per_vector) == 0;
 };
 
-template <size_t Value>
-concept IsPowerOf2 = (Value > 0) && ((Value & (Value - 1)) == 0);
-
-template <size_t ScalarPerVec, size_t DataTypeSize>
-concept IsVectorSizeValid =
-    IsPowerOf2<ScalarPerVec> && (ScalarPerVec <= detail::get_data_max_vec_size<DataTypeSize>());
+template <size_t N, DataType Type>
+concept IsVectorSizeValid = detail::IsVectorSizeValid<N, Type>();
 
 // Composite concept for input block transfer validation (A)
 // Includes all validations: vector transfer limits, access order, cluster size,
 // vector size validity, and tile coverage
-template <auto A_BLOCK_TRANSFER,
-          typename DataType,
-          size_t BLOCK_SIZE,
-          auto TILE_SIZE,
-          size_t DIMS = 3>
-concept ValidABlockTransfer =
-    InputVectorTransferLimits<A_BLOCK_TRANSFER> &&
-    AccessOrderLimits<A_BLOCK_TRANSFER.thread_cluster_order, DIMS> &&
-    AccessOrderLimits<A_BLOCK_TRANSFER.src_access_order, DIMS> &&
-    ValidBlockTransferClusterSize<A_BLOCK_TRANSFER, BLOCK_SIZE> &&
-    IsVectorSizeValid<A_BLOCK_TRANSFER.src_scalar_per_vector, sizeof(DataType)> &&
-    IsVectorSizeValid<A_BLOCK_TRANSFER.lds_dst_scalar_per_vector, sizeof(DataType)> &&
-    ThreadsCoverATile<A_BLOCK_TRANSFER, TILE_SIZE>;
+template <auto A_BLOCK_TRANSFER, DataType Type, size_t BLOCK_SIZE, auto TILE_SIZE, size_t DIMS = 3>
+concept ValidABlockTransfer = InputVectorTransferLimits<A_BLOCK_TRANSFER> &&
+                              AccessOrderLimits<A_BLOCK_TRANSFER.thread_cluster_order, DIMS> &&
+                              AccessOrderLimits<A_BLOCK_TRANSFER.src_access_order, DIMS> &&
+                              ValidBlockTransferClusterSize<A_BLOCK_TRANSFER, BLOCK_SIZE> &&
+                              IsVectorSizeValid<A_BLOCK_TRANSFER.src_scalar_per_vector, Type> &&
+                              IsVectorSizeValid<A_BLOCK_TRANSFER.lds_dst_scalar_per_vector, Type> &&
+                              ThreadsCoverATile<A_BLOCK_TRANSFER, TILE_SIZE>;
 
 // Composite concept for input block transfer validation (B)
-template <auto B_BLOCK_TRANSFER,
-          typename DataType,
-          size_t BLOCK_SIZE,
-          auto TILE_SIZE,
-          size_t DIMS = 3>
-concept ValidBBlockTransfer =
-    InputVectorTransferLimits<B_BLOCK_TRANSFER> &&
-    AccessOrderLimits<B_BLOCK_TRANSFER.thread_cluster_order, DIMS> &&
-    AccessOrderLimits<B_BLOCK_TRANSFER.src_access_order, DIMS> &&
-    ValidBlockTransferClusterSize<B_BLOCK_TRANSFER, BLOCK_SIZE> &&
-    IsVectorSizeValid<B_BLOCK_TRANSFER.src_scalar_per_vector, sizeof(DataType)> &&
-    IsVectorSizeValid<B_BLOCK_TRANSFER.lds_dst_scalar_per_vector, sizeof(DataType)> &&
-    ThreadsCoverBTile<B_BLOCK_TRANSFER, TILE_SIZE>;
+template <auto B_BLOCK_TRANSFER, DataType Type, size_t BLOCK_SIZE, auto TILE_SIZE, size_t DIMS = 3>
+concept ValidBBlockTransfer = InputVectorTransferLimits<B_BLOCK_TRANSFER> &&
+                              AccessOrderLimits<B_BLOCK_TRANSFER.thread_cluster_order, DIMS> &&
+                              AccessOrderLimits<B_BLOCK_TRANSFER.src_access_order, DIMS> &&
+                              ValidBlockTransferClusterSize<B_BLOCK_TRANSFER, BLOCK_SIZE> &&
+                              IsVectorSizeValid<B_BLOCK_TRANSFER.src_scalar_per_vector, Type> &&
+                              IsVectorSizeValid<B_BLOCK_TRANSFER.lds_dst_scalar_per_vector, Type> &&
+                              ThreadsCoverBTile<B_BLOCK_TRANSFER, TILE_SIZE>;
 
 // Composite concept for output block transfer validation (C)
-template <auto C_BLOCK_TRANSFER, typename DataType, size_t BLOCK_SIZE, auto TILE_SIZE>
-concept ValidCBlockTransfer =
-    OutputVectorTransferLimits<C_BLOCK_TRANSFER> &&
-    ValidBlockTransferClusterSize<C_BLOCK_TRANSFER, BLOCK_SIZE> &&
-    IsVectorSizeValid<C_BLOCK_TRANSFER.scalar_per_vector, sizeof(DataType)> &&
-    ThreadsCoverCTile<C_BLOCK_TRANSFER, TILE_SIZE>;
+template <auto C_BLOCK_TRANSFER, DataType Type, size_t BLOCK_SIZE, auto TILE_SIZE>
+concept ValidCBlockTransfer = OutputVectorTransferLimits<C_BLOCK_TRANSFER> &&
+                              ValidBlockTransferClusterSize<C_BLOCK_TRANSFER, BLOCK_SIZE> &&
+                              IsVectorSizeValid<C_BLOCK_TRANSFER.scalar_per_vector, Type> &&
+                              ThreadsCoverCTile<C_BLOCK_TRANSFER, TILE_SIZE>;
 
 // Usage: IsValidLayout<ACTUAL_LAYOUT, VALID_LAYOUT_1, VALID_LAYOUT_2, ...>
 template <auto ACTUAL_LAYOUT, auto... VALID_LAYOUTS>
