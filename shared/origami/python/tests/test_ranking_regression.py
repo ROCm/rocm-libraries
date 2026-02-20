@@ -34,17 +34,7 @@ BASELINE_DIR = Path(__file__).parent / "baselines" / "rankings"
 PROBLEM_DATA_FILE = Path(__file__).parent / "data" / "problem_data.csv"
 
 SUPPORTED_DTYPES = ["f16", "bf16", "f32"]
-
-# Transpose combinations: (a_transpose, b_transpose)
-# T = Transposed, N = Non-transposed
-TRANSPOSE_COMBOS = ["TN", "TT", "NN", "NT"]
-
-
-def parse_transpose(combo: str) -> tuple[origami.transpose_t, origami.transpose_t]:
-    """Parse transpose combo string to origami transpose types."""
-    a_trans = origami.transpose_t.T if combo[0] == "T" else origami.transpose_t.N
-    b_trans = origami.transpose_t.T if combo[1] == "T" else origami.transpose_t.N
-    return a_trans, b_trans
+TRANSPOSE_VALUES = [origami.transpose_t.T, origami.transpose_t.N]
 
 
 def is_dtype_supported(arch_name: str, dtype: str) -> bool:
@@ -79,15 +69,15 @@ def create_problem(
     k: int,
     dtype: str,
     batch: int = 1,
-    transpose: str = "TN",
+    transA: origami.transpose_t = origami.transpose_t.T,
+    transB: origami.transpose_t = origami.transpose_t.N,
 ) -> origami.problem_t:
     """Create a problem specification."""
-    a_trans, b_trans = parse_transpose(transpose)
     problem = origami.problem_t()
     problem.size = origami.dim3_t(m, n, k)
     problem.batch = batch
-    problem.a_transpose = a_trans
-    problem.b_transpose = b_trans
+    problem.a_transpose = transA
+    problem.b_transpose = transB
     problem.a_dtype = origami.string_to_datatype(dtype)
     problem.b_dtype = origami.string_to_datatype(dtype)
     problem.d_dtype = origami.string_to_datatype(dtype)
@@ -120,7 +110,12 @@ def result_to_config_tuple(result: origami.prediction_result_t) -> list[int]:
 TOP_K = 5
 
 
-def generate_rankings(arch_name: str, dtype: str, transpose: str = "TN") -> dict[str, list[list[int]]]:
+def generate_rankings(
+    arch_name: str,
+    dtype: str,
+    transA: origami.transpose_t = origami.transpose_t.T,
+    transB: origami.transpose_t = origami.transpose_t.N,
+) -> dict[str, list[list[int]]]:
     """Generate rankings for all test problem sizes.
     
     Returns a dict mapping problem_key -> list of config tuples.
@@ -140,7 +135,7 @@ def generate_rankings(arch_name: str, dtype: str, transpose: str = "TN") -> dict
 
     rankings = {}
     for m, n, k, batch in TEST_PROBLEM_SIZES:
-        problem = create_problem(m, n, k, dtype, batch, transpose)
+        problem = create_problem(m, n, k, dtype, batch, transA, transB)
         try:
             ranked = origami.select_topk_configs(problem, hardware, configs, TOP_K)
             if ranked:
@@ -177,40 +172,47 @@ def load_arch_baseline(arch_name: str) -> dict | None:
         return yaml.load(f, Loader=SafeLoader)
 
 
-def load_baseline(arch_name: str, dtype: str, transpose: str) -> dict[str, list[list[int]]] | None:
-    """Load baseline rankings for a specific arch/dtype/transpose combination.
-    
-    Returns a dict mapping problem_key -> list of config tuples.
-    """
+def transpose_key(transA: origami.transpose_t, transB: origami.transpose_t) -> str:
+    """Convert transpose values to a string key for baseline storage."""
+    a = "T" if transA == origami.transpose_t.T else "N"
+    b = "T" if transB == origami.transpose_t.T else "N"
+    return f"{a}{b}"
+
+
+def load_baseline(
+    arch_name: str, dtype: str, transA: origami.transpose_t, transB: origami.transpose_t
+) -> dict[str, list[list[int]]] | None:
+    """Load baseline rankings for a specific arch/dtype/transpose combination."""
     baseline = load_arch_baseline(arch_name)
     if baseline is None:
         return None
     
     try:
-        return baseline[dtype][transpose]
+        return baseline[dtype][transpose_key(transA, transB)]
     except KeyError:
         return None
 
 
-def save_baseline(arch_name: str, dtype: str, transpose: str, rankings: dict[str, list[list[int]]]) -> None:
-    """Save rankings to the architecture's YAML baseline file.
-    
-    Updates entries for the specified dtype/transpose, preserving other entries.
-    """
+def save_baseline(
+    arch_name: str,
+    dtype: str,
+    transA: origami.transpose_t,
+    transB: origami.transpose_t,
+    rankings: dict[str, list[list[int]]],
+) -> None:
+    """Save rankings to the architecture's YAML baseline file."""
     BASELINE_DIR.mkdir(parents=True, exist_ok=True)
     path = get_baseline_path(arch_name)
     
-    # Load existing baseline or create new structure
     if path.exists():
         with open(path, "r") as f:
             baseline = yaml.load(f, Loader=SafeLoader) or {}
     else:
         baseline = {}
     
-    # Update the nested structure
     if dtype not in baseline:
         baseline[dtype] = {}
-    baseline[dtype][transpose] = rankings
+    baseline[dtype][transpose_key(transA, transB)] = rankings
     
     # Write with compact format: flow style for problem entries, sorted keys
     # Custom representer to use flow style for the innermost lists (config lists per problem)
@@ -274,27 +276,35 @@ class TestRankingRegression:
 
     @pytest.mark.parametrize("arch_name", list(HARDWARE.keys()))
     @pytest.mark.parametrize("dtype", SUPPORTED_DTYPES)
-    @pytest.mark.parametrize("transpose", TRANSPOSE_COMBOS)
+    @pytest.mark.parametrize("transA", TRANSPOSE_VALUES)
+    @pytest.mark.parametrize("transB", TRANSPOSE_VALUES)
     def test_ranking_stability(
-        self, arch_name: str, dtype: str, transpose: str, generate_baseline: bool
+        self,
+        arch_name: str,
+        dtype: str,
+        transA: origami.transpose_t,
+        transB: origami.transpose_t,
+        generate_baseline: bool,
     ):
         """Test that rankings remain stable compared to baseline."""
+        trans_str = transpose_key(transA, transB)
+
         if not is_dtype_supported(arch_name, dtype):
             pytest.skip(f"No {dtype} support for {arch_name}")
 
-        current = generate_rankings(arch_name, dtype, transpose)
+        current = generate_rankings(arch_name, dtype, transA, transB)
 
         if not current:
-            pytest.skip(f"No valid configs generated for {arch_name}/{dtype}/{transpose}")
+            pytest.skip(f"No valid configs generated for {arch_name}/{dtype}/{trans_str}")
 
         if generate_baseline:
-            save_baseline(arch_name, dtype, transpose, current)
-            pytest.skip(f"Generated baseline for {arch_name}/{dtype}/{transpose}")
+            save_baseline(arch_name, dtype, transA, transB, current)
+            pytest.skip(f"Generated baseline for {arch_name}/{dtype}/{trans_str}")
 
-        baseline = load_baseline(arch_name, dtype, transpose)
+        baseline = load_baseline(arch_name, dtype, transA, transB)
         if baseline is None:
             pytest.fail(
-                f"No baseline file found for {arch_name}/{dtype}/{transpose}. "
+                f"No baseline file found for {arch_name}/{dtype}/{trans_str}. "
                 f"Run with --generate-baseline to create it."
             )
 
@@ -305,5 +315,5 @@ class TestRankingRegression:
             if len(differences) > 10:
                 diff_summary += f"\n... and {len(differences) - 10} more differences"
             pytest.fail(
-                f"Ranking regression detected for {arch_name}/{dtype}/{transpose}:\n{diff_summary}"
+                f"Ranking regression detected for {arch_name}/{dtype}/{trans_str}:\n{diff_summary}"
             )

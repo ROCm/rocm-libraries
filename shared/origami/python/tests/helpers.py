@@ -84,19 +84,7 @@ def create_config_list(
     waves: list[list[int]] | None = None,
     max_mt: int = 512,
 ) -> list[origami.config_t]:
-    """Create a list of configurations for testing using dynamic MI discovery.
-    
-    Args:
-        hardware: Hardware object for the target architecture.
-        dtype: Data type string (e.g., "f16", "bf16", "f32").
-        mt_sizes: If provided, use cartesian product of these MT sizes.
-                  If None, use wave-based calculation.
-        depth_unroll: Depth unroll values. Default: [16, 32, 64, 128, 256, 512, 1024].
-        occupancy_values: Occupancy values. Default: [1].
-        wgm_values: Workgroup mapping values. Default: [6].
-        waves: Wave configurations for wave-based mode. Default: [[4,1], [2,2], [1,4], [1,2], [2,1], [1,1]].
-        max_mt: Maximum macro tile size for wave-based mode. Default: 512.
-    """
+    """Create a list of configurations for testing using dynamic MI discovery."""
     mi_list = get_matrix_instructions(hardware, dtype)
     if not mi_list:
         return []
