@@ -57,4 +57,5 @@
 
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/Handle.hpp>
 #include <hipdnn_frontend/Types.hpp>

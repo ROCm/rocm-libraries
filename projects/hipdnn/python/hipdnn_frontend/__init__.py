@@ -47,5 +47,9 @@ __all__ = [
     "ActivationMode",
     "PoolingMode",
     "BatchnormMode",
-    # Add other exported symbols as needed
+    "Handle",
+    "create_handle",
+    "destroy_handle",
+    "set_stream",
+    "get_stream",
 ]
