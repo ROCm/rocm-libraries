@@ -196,6 +196,7 @@ void run_benchmark(benchmark_utils::state&& state)
                       run_benchmark<K, BS, WS, IPT, V, true>);
 
 // clang-format off
+#ifndef ROCPRIM_NAVI					    
 #define BENCHMARK_TYPE(type)                \
     CREATE_SORT_BENCHMARK(type, 64, 64, 1)  \
     CREATE_SORT_BENCHMARK(type, 64, 64, 2)  \
@@ -211,16 +212,34 @@ void run_benchmark(benchmark_utils::state&& state)
     CREATE_SORT_BENCHMARK(type, 64, 16, 1)  \
     CREATE_SORT_BENCHMARK(type, 64, 16, 2)  \
     CREATE_SORT_BENCHMARK(type, 64, 16, 4)
+#elif defined(_WIN32) // Currently, running a logical warpSize > hardware warpSize on Windows on Navi cards leads to a hang.
+#define BENCHMARK_TYPE(type)                \
+    CREATE_SORT_BENCHMARK(type, 64, 32, 1)  \
+    CREATE_SORT_BENCHMARK(type, 64, 32, 1)  \
+    CREATE_SORT_BENCHMARK(type, 64, 16, 2)  \
+    CREATE_SORT_BENCHMARK(type, 64, 16, 2)  \
+    CREATE_SORT_BENCHMARK(type, 64, 16, 4)	
+#endif
 // clang-format on
 
 // clang-format off
+#ifndef ROCPRIM_NAVI					    			
 #define BENCHMARK_KEY_TYPE(type, value)                 \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 1)  \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 2)  \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 4)  \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 1) \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 2) \
-    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 4)
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 4) 
+#elif defined(_WIN32) // Currently, running a logical warpSize > hardware warpSize on Windows on Navi cards leads to a hang.											    
+#define BENCHMARK_KEY_TYPE(type, value)                 \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 32, 1)  \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 32, 2)  \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 32, 4)  \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 32, 1) \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 32, 2) \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 32, 4) 
+#endif
 // clang-format on
 
 int main(int argc, char* argv[])
