@@ -32,10 +32,12 @@ add_executable(
     TestConvolutionWgradNode.cpp
     TestError.cpp
     TestGraph.cpp
+    TestHandle.cpp
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
     TestGraphSerialization.cpp
     TestINode.cpp
+    TestKnob.cpp
     TestMatmulAttributes.cpp
     TestMatmulNode.cpp
     TestNode.cpp
@@ -47,6 +49,7 @@ add_executable(
     TestTypes.cpp
     TestUtilities.cpp
     TestTopologicalSortingUtils.cpp
+    TestSdkLogging.cpp
 )
 
 target_compile_options(hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

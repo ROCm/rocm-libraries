@@ -204,7 +204,14 @@ def gpu_detect():
     global OS_info
     OS_info["GPU"] = ""
     if os.name == "nt":
-        cmd = "hipinfo.exe"
+        # Use full path to hipinfo.exe on Windows
+        # Prefer ROCM_PATH (modern), fall back to HIP_PATH (historical)
+        rocm_path = os.getenv('ROCM_PATH') or os.getenv('HIP_PATH')
+        if not rocm_path:
+            print("ERROR: ROCM_PATH or HIP_PATH environment variable not set.")
+            print("Please ensure ROCm is properly installed and the environment is configured.")
+            sys.exit(1)
+        cmd = os.path.join(rocm_path, "bin", "hipinfo.exe")
     else:
         cmd = "rocminfo"
     process = subprocess.run([cmd], stdout=subprocess.PIPE)
@@ -347,16 +354,21 @@ def config_cmd():
         generator = f"-G Ninja"
         cmake_options.append(generator)
 
-        # CMAKE_PREFIX_PATH set to rocm_path and HIP_PATH set BY SDK Installer
-        raw_rocm_path = cmake_path(os.getenv('HIP_PATH', "C:/hip"))
+        # CMAKE_PREFIX_PATH set to rocm_path (prefer ROCM_PATH, fall back to HIP_PATH)
+        raw_rocm_path_env = os.getenv('ROCM_PATH') or os.getenv('HIP_PATH')
+        if not raw_rocm_path_env:
+            print("ERROR: ROCM_PATH or HIP_PATH environment variable not set.")
+            print("Please ensure ROCm is properly installed and the environment is configured.")
+            sys.exit(1)
+        raw_rocm_path = cmake_path(raw_rocm_path_env)
         rocm_path = f'"{raw_rocm_path}"' # guard against spaces in path
         # CPACK_PACKAGING_INSTALL_PREFIX= defined as blank as it is appended to end of path for archive creation
         cmake_platform_opts.append(f"-DCPACK_PACKAGING_INSTALL_PREFIX=")
         cmake_platform_opts.append(f'-DCMAKE_INSTALL_PREFIX="C:/hipSDK"')
         toolchain = os.path.join(src_path, "toolchain-windows.cmake")
     else:
-        rocm_raw_path = os.getenv('ROCM_PATH', "/opt/rocm")
-        rocm_path = rocm_raw_path
+        raw_rocm_path = os.getenv('ROCM_PATH', "/opt/rocm")
+        rocm_path = raw_rocm_path
         if (args.ninja):
             cmake_platform_opts.append(f"-G Ninja")
         cmake_platform_opts.append(f"-DROCM_DIR:PATH={rocm_path} -DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}")
@@ -378,8 +390,26 @@ def config_cmd():
     if args.cmake_args:
         cmake_options.append(args.cmake_args)
 
-    cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path}"
+    # Add msgpack install directory to CMAKE_PREFIX_PATH on Windows
+    # Put msgpack FIRST to prioritize our Boost-free build over any vcpkg installation
+    prefix_paths = []
+    msgpack_install = None  # Initialize to avoid undefined variable
+    if os.name == "nt":
+        msgpack_install = os.path.join(src_path, args.build_dir, "deps", "msgpack-c", "install")
+        if os.path.exists(msgpack_install):
+            prefix_paths.append(cmake_path(msgpack_install))
+    prefix_paths.append(raw_rocm_path)  # Use raw_rocm_path (without quotes) for path list
+    
+    # Quote the CMAKE_PREFIX_PATH value to handle spaces in paths
+    prefix_path_value = os.pathsep.join(prefix_paths)
+    cmake_base_options = f'-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH="{prefix_path_value}"'
     cmake_options.append(cmake_base_options)
+    
+    # Explicitly tell CMake where to find our Boost-free msgpack (overrides any vcpkg version)
+    if os.name == "nt" and msgpack_install:
+        msgpack_config_dir = os.path.join(msgpack_install, "lib", "cmake", "msgpack-cxx")
+        if os.path.exists(msgpack_config_dir):
+            cmake_options.append(f"-Dmsgpackc-cxx_DIR={cmake_path(msgpack_config_dir)}")
 
     # packaging options
     cmake_pack_options = f"-DCPACK_SET_DESTDIR=OFF"

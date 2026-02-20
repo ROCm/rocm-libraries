@@ -31,6 +31,7 @@ The fastest way to get started with hipDNN is to follow the [quick start steps i
 
 ### User Guides
 - **[Building](./docs/Building.md)** - Prerequisites, build configurations, and platform-specific instructions
+- **[Consumer Quick Start](./docs/ConsumerQuickStart.md)** - Using an installed hipDNN in your CMake project
 - **[How-To](./docs/HowTo.md)** - Using hipDNN components and extending the framework
 - **[Environment Configuration](./docs/Environment.md)** - Runtime configuration and logging setup
 - **[Operation Support](./docs/OperationSupport.md)** - Currently supported operations and their status
@@ -60,9 +61,11 @@ hipDNN is organized into several key components. For detailed architecture descr
 | **[Frontend](./frontend/)** | Header-only C++ API wrapper around the backend |
 | **[Data SDK](./data_sdk/)** | Header-only library with data objects, utilities, and logging |
 | **[Plugin SDK](./plugin_sdk/)** | Header-only library for plugin development |
-| **[Plugins](./plugins/)** | Plugin implementations, including [MIOpen Legacy Plugin](../../../dnn-providers/miopen-provider/) |
 | **[Samples](./samples/)** | Example implementations demonstrating hipDNN usage |
 | **[Tests](./tests/)** | Tests for the public API (incl. frontend integration tests) |
+
+> [!NOTE]
+> Official hipDNN plugins can be found in the [dnn-providers](../../../dnn-providers/) folder (e.g., [MIOpen Plugin](../../../dnn-providers/miopen-provider/)).
 
 ### Docker Support
 See [Docker README](./dockerfiles/README.md) for containerized development environments.

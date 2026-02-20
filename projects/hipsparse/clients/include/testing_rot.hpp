@@ -183,16 +183,8 @@ void testing_rot(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * size, hipMemcpyDeviceToHost));
 
         // CPU
-        for(int64_t i = 0; i < nnz; ++i)
-        {
-            I idx = hx_ind[i] - idxBase;
-
-            T x = hx_val_gold[i];
-            T y = hy_gold[idx];
-
-            hx_val_gold[i] = testing_fma(hc_coeff, x, testing_mult(hs_coeff, y));
-            hy_gold[idx]   = testing_fma(hc_coeff, y, testing_mult(-hs_coeff, x));
-        }
+        host_rot(
+            nnz, hx_val_gold.data(), hx_ind.data(), hy_gold.data(), hc_coeff, hs_coeff, idxBase);
 
         // Verify results against host
         unit_check_general(1, nnz, 1, hx_val_gold.data(), hx_val_1.data());

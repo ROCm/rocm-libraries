@@ -3,16 +3,16 @@
 
 #include <string>
 
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnMiopenHandle.hpp"
 #include "MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 #include "MiopenUtils.hpp"
 #include "engines/plans/MiopenBatchnormApplicabilityChecks.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlan.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace
@@ -40,7 +40,7 @@ bool isNodeActivFwd(const hipdnn_data_sdk::data_objects::PointwiseAttributes& at
 }
 
 const hipdnn_data_sdk::data_objects::BatchnormAttributes&
-    checkBatchnormNode(const hipdnn_plugin_sdk::INodeWrapper& node)
+    checkBatchnormNode(const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& node)
 {
     if(node.attributesType() != hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes)
     {
@@ -54,7 +54,7 @@ const hipdnn_data_sdk::data_objects::BatchnormAttributes&
 }
 
 const hipdnn_data_sdk::data_objects::PointwiseAttributes&
-    checkActivationNode(const hipdnn_plugin_sdk::INodeWrapper& node,
+    checkActivationNode(const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& node,
                         const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr)
 {
     if(node.attributesType() != hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes)
@@ -247,8 +247,8 @@ void checkTensorVirtuality2Node(
 } // namespace
 
 bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph) const
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1 && opGraph.nodeCount() != 2)
     {
@@ -268,8 +268,9 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
                         opGraph.nodeWrappers().end(),
                         hasFloatComputeDataType))
         {
-            HIPDNN_LOG_ERROR("BatchnormFwdTraining plan builder only supports nodes with an fp32 "
-                             "compute_data_type");
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "BatchnormFwdTraining plan builder only supports nodes with an fp32 "
+                "compute_data_type");
             return false;
         }
 
@@ -280,10 +281,10 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
 
             // Since MIOpen does not provide an API to validate batchnorm applicability, we perform the
             // checks manually.
-            checkBatchnormTensorConfigSupported(bnAttr, opGraph.getTensorMap());
+            checkBatchnormFwdTrainingTensorConfigSupported(bnAttr, opGraph.getTensorMap());
 
-            HIPDNN_LOG_INFO("BatchnormFwdTraining plan builder applicable for single node "
-                            "batchnorm training");
+            HIPDNN_PLUGIN_LOG_INFO("BatchnormFwdTraining plan builder applicable for single node "
+                                   "batchnorm training");
             return true;
         }
 
@@ -291,34 +292,43 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
         const auto& activAttr = checkActivationNode(opGraph.getNodeWrapper(1), bnAttr);
         checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
 
-        // Since MIOpen does not provide an API to validate batchnorm applicability, we perform the
-        // checks manually.
-        checkBatchnormTensorConfigSupported(bnAttr, opGraph.getTensorMap());
+        checkBatchnormFwdTrainingActivationTensorConfigSupported(
+            bnAttr, activAttr, opGraph.getTensorMap());
         checkBatchnormFwdActivationModeSupported(activAttr);
 
-        HIPDNN_LOG_INFO(
+        HIPDNN_PLUGIN_LOG_INFO(
             "BatchnormFwdTraining plan builder applicable for training + activation fusion");
         return true;
     }
     catch(const std::exception& e)
     {
-        HIPDNN_LOG_INFO(e.what());
+        HIPDNN_PLUGIN_LOG_INFO(e.what());
         return false;
     }
 }
 
-size_t MiopenBatchnormFwdTrainingPlanBuilder::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const
+size_t MiopenBatchnormFwdTrainingPlanBuilder::getMaxWorkspaceSize(
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const HipdnnMiopenSettings& executionSettings) const
 {
     // No workspace needed for batchnorm forward training
     return 0;
 }
 
+void MiopenBatchnormFwdTrainingPlanBuilder::initializeExecutionSettings(
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] HipdnnMiopenSettings& executionSettings) const
+{
+}
+
 void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph,
-    HipdnnEnginePluginExecutionContext& executionContext) const
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    HipdnnMiopenContext& executionContext) const
 {
     if(opGraph.nodeCount() == 1)
     {
@@ -329,7 +339,7 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
 
         BatchnormFwdTrainingParams params(bnAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
-            std::move(params), executionContext.benchmarkingEnabled());
+            std::move(params), executionContext.executionSettings());
         executionContext.setPlan(std::move(plan));
     }
     else if(opGraph.nodeCount() == 2)
@@ -344,7 +354,7 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
 
         BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
-            std::move(params), executionContext.benchmarkingEnabled());
+            std::move(params), executionContext.executionSettings());
         executionContext.setPlan(std::move(plan));
     }
     else
@@ -355,4 +365,12 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     }
 }
 
-} // namespace miopen_legacy_plugin
+std::vector<hipdnn_data_sdk::data_objects::KnobT>
+    MiopenBatchnormFwdTrainingPlanBuilder::getCustomKnobs(
+        [[maybe_unused]] const HipdnnMiopenHandle& handle,
+        [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+{
+    return {};
+}
+
+} // namespace miopen_plugin

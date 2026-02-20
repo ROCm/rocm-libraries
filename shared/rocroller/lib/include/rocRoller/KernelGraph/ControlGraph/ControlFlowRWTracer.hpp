@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -60,6 +60,8 @@ namespace rocRoller::KernelGraph
         {
             int       control, coordinate;
             ReadWrite rw;
+
+            auto operator<=>(ReadWriteRecord const& other) const = default;
         };
 
         ControlFlowRWTracer(KernelGraph const& graph,
@@ -75,6 +77,8 @@ namespace rocRoller::KernelGraph
          * @brief Get trace records for a specific coordinate.
          */
         std::vector<ReadWriteRecord> coordinatesReadWrite(int coordinate) const;
+
+        std::vector<ReadWriteRecord> opReadWrite(int op) const;
 
         /**
          * @brief Build backward dependencies for all coordinates.
@@ -160,6 +164,21 @@ namespace rocRoller::KernelGraph
          */
         void trace(int start);
     };
+
+    inline constexpr ControlFlowRWTracer::ReadWrite combine(ControlFlowRWTracer::ReadWrite a,
+                                                            ControlFlowRWTracer::ReadWrite b)
+    {
+        if(a == b)
+            return a;
+
+        if(a == ControlFlowRWTracer::Count)
+            return b;
+
+        if(b == ControlFlowRWTracer::Count)
+            return a;
+
+        return ControlFlowRWTracer::READWRITE;
+    }
 
     std::string toString(ControlFlowRWTracer::ReadWrite rw);
 

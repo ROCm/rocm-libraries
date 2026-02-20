@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,23 +41,26 @@
 
 template<typename Runner,
          typename T,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         bool         WithTile,
-         unsigned int Trials>
+         unsigned int                                 BlockSize,
+         unsigned int                                 ItemsPerThread,
+         bool                                         WithTile,
+         rocprim::block_adjacent_difference_algorithm Algorithm,
+         unsigned int                                 Trials>
 __global__ __launch_bounds__(BlockSize)
 void kernel(const T* d_input, T* d_output)
 {
-    Runner::template run<T, BlockSize, ItemsPerThread, WithTile, Trials>(d_input, d_output);
+    Runner::template run<T, BlockSize, ItemsPerThread, WithTile, Algorithm, Trials>(d_input,
+                                                                                    d_output);
 }
 
 struct flag_heads
 {
     template<typename T,
-             unsigned int BlockSize,
-             unsigned int ItemsPerThread,
-             bool         WithTile,
-             unsigned int Trials>
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm,
+             unsigned int                                 Trials>
     __device__
     static void run(const T* d_input, T* d_output)
     {
@@ -70,7 +73,7 @@ struct flag_heads
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)
         {
-            rocprim::block_discontinuity<T, BlockSize> bdiscontinuity;
+            rocprim::block_discontinuity<T, BlockSize, 1, 1, Algorithm> bdiscontinuity;
             bool                                       head_flags[ItemsPerThread];
             if(WithTile)
             {
@@ -95,10 +98,11 @@ struct flag_heads
 struct flag_tails
 {
     template<typename T,
-             unsigned int BlockSize,
-             unsigned int ItemsPerThread,
-             bool         WithTile,
-             unsigned int Trials>
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm,
+             unsigned int                                 Trials>
     __device__
     static void run(const T* d_input, T* d_output)
     {
@@ -111,7 +115,7 @@ struct flag_tails
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)
         {
-            rocprim::block_discontinuity<T, BlockSize> bdiscontinuity;
+            rocprim::block_discontinuity<T, BlockSize, 1, 1, Algorithm> bdiscontinuity;
             bool                                       tail_flags[ItemsPerThread];
             if(WithTile)
             {
@@ -136,10 +140,11 @@ struct flag_tails
 struct flag_heads_and_tails
 {
     template<typename T,
-             unsigned int BlockSize,
-             unsigned int ItemsPerThread,
-             bool         WithTile,
-             unsigned int Trials>
+             unsigned int                                 BlockSize,
+             unsigned int                                 ItemsPerThread,
+             bool                                         WithTile,
+             rocprim::block_adjacent_difference_algorithm Algorithm,
+             unsigned int                                 Trials>
     __device__
     static void run(const T* d_input, T* d_output)
     {
@@ -152,7 +157,7 @@ struct flag_heads_and_tails
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)
         {
-            rocprim::block_discontinuity<T, BlockSize> bdiscontinuity;
+            rocprim::block_discontinuity<T, BlockSize, 1, 1, Algorithm> bdiscontinuity;
             bool                                       head_flags[ItemsPerThread];
             bool                                       tail_flags[ItemsPerThread];
             if(WithTile)
@@ -186,10 +191,11 @@ struct flag_heads_and_tails
 
 template<typename Benchmark,
          typename T,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         bool         WithTile,
-         unsigned int Trials = 100>
+         unsigned int                                 BlockSize,
+         unsigned int                                 ItemsPerThread,
+         bool                                         WithTile,
+         rocprim::block_adjacent_difference_algorithm Algorithm,
+         unsigned int                                 Trials = 100>
 void run_benchmark(benchmark_utils::state&& state)
 {
     const auto& bytes  = state.bytes;
@@ -215,7 +221,7 @@ void run_benchmark(benchmark_utils::state&& state)
     state.run(
         [&]
         {
-            kernel<Benchmark, T, BlockSize, ItemsPerThread, WithTile, Trials>
+            kernel<Benchmark, T, BlockSize, ItemsPerThread, WithTile, Algorithm, Trials>
                 <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input, d_output);
             HIP_CHECK(hipGetLastError());
         });
@@ -226,22 +232,25 @@ void run_benchmark(benchmark_utils::state&& state)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE)                                                 \
+#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, ALGO)                                           \
     executor.queue_fn(bench_naming::format_name("{lvl:block,algo:discontinuity,subalgo:" + name \
                                                 + ",key_type:" #T ",cfg:{bs:" #BS ",ipt:" #IPT  \
-                                                  ",with_tile:" #WITH_TILE "}}")                \
+                                                  ",with_tile:" #WITH_TILE                      \
+                                                + ",method:" + method_name + "}}")              \
                           .c_str(),                                                             \
-                      run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>);
+                      run_benchmark<Benchmark, T, BS, IPT, WITH_TILE, ALGO>);
 
-#define BENCHMARK_TYPE(type, block, bool)  \
-    CREATE_BENCHMARK(type, block, 1, bool) \
-    CREATE_BENCHMARK(type, block, 2, bool) \
-    CREATE_BENCHMARK(type, block, 3, bool) \
-    CREATE_BENCHMARK(type, block, 4, bool) \
-    CREATE_BENCHMARK(type, block, 8, bool)
+#define BENCHMARK_TYPE(type, block, bool)             \
+    CREATE_BENCHMARK(type, block, 1, bool, Algorithm) \
+    CREATE_BENCHMARK(type, block, 2, bool, Algorithm) \
+    CREATE_BENCHMARK(type, block, 3, bool, Algorithm) \
+    CREATE_BENCHMARK(type, block, 4, bool, Algorithm) \
+    CREATE_BENCHMARK(type, block, 8, bool, Algorithm)
 
-template<typename Benchmark>
-void add_benchmarks(const std::string& name, benchmark_utils::executor& executor)
+template<typename Benchmark, rocprim::block_adjacent_difference_algorithm Algorithm>
+void add_benchmarks(const std::string&         name,
+                    const std::string&         method_name,
+                    benchmark_utils::executor& executor)
 {
     BENCHMARK_TYPE(int, 256, false)
     BENCHMARK_TYPE(int, 256, true)
@@ -261,11 +270,22 @@ void add_benchmarks(const std::string& name, benchmark_utils::executor& executor
 
 int main(int argc, char* argv[])
 {
+    constexpr auto crosslane
+        = rocprim::block_adjacent_difference_algorithm::adjacent_difference_crosslane;
+    constexpr auto shared_mem
+        = rocprim::block_adjacent_difference_algorithm::adjacent_difference_shared_mem;
+
     benchmark_utils::executor executor(argc, argv, 512 * benchmark_utils::MiB, 1, 0);
 
-    add_benchmarks<flag_heads>("flag_heads", executor);
-    add_benchmarks<flag_tails>("flag_tails", executor);
-    add_benchmarks<flag_heads_and_tails>("flag_heads_and_tails", executor);
+    // clang-format off
+    add_benchmarks<flag_heads, shared_mem>("flag_heads", "shared_mem", executor);
+    add_benchmarks<flag_tails, shared_mem>("flag_tails", "shared_mem", executor);
+    add_benchmarks<flag_heads_and_tails, shared_mem>("flag_heads_and_tails", "shared_mem", executor);
+
+    add_benchmarks<flag_heads, crosslane>("flag_heads", "crosslane", executor);
+    add_benchmarks<flag_tails, crosslane>("flag_tails", "crosslane", executor);
+    add_benchmarks<flag_heads_and_tails, crosslane>("flag_heads_and_tails", "crosslane", executor);
+    // clang-format on
 
     executor.run();
 }

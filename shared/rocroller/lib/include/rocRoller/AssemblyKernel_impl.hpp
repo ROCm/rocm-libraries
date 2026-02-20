@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -145,7 +145,7 @@ namespace rocRoller
             return 0;
 
         auto const& lastArg = m_arguments.back();
-        return lastArg.offset + lastArg.size;
+        return lastArg.getOffset() + lastArg.getSize();
     }
 
     inline int AssemblyKernel::group_segment_fixed_size() const
@@ -168,7 +168,7 @@ namespace rocRoller
     {
         size_t rv = 8;
         for(auto const& arg : m_arguments)
-            rv = std::max(rv, DataTypeInfo::Get(arg.variableType).alignment);
+            rv = std::max(rv, DataTypeInfo::Get(arg.getVariableType()).alignment);
 
         return rv;
     }
