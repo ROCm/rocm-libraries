@@ -22,6 +22,15 @@
 
 namespace ck_tile {
 
+template <typename... Args>
+CK_TILE_HOST void LogInfo(Args&&... args) noexcept
+{
+    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+    {
+        CK_TILE_INFO(std::forward<Args>(args)...);
+    }
+}
+
 /// @brief The Grouped Convolution kernel device arguments.
 template <typename GroupedConvTraitsType_>
 struct GroupedConvBwdWeightKernelArgs
@@ -106,13 +115,9 @@ struct GroupedConvBwdWeightKernelArgs
 
         k_batch = args.k_batch;
 
-        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-        {
-            std::cout << "GemmM: " << GemmM << ", GemmN: " << GemmN << ", GemmK: " << GemmK
-                      << ", GemmBatch: " << GemmBatch
-                      << ", NumGroupsPerBatch: " << NumGroupsPerBatch << ", k_batch: " << k_batch
-                      << std::endl;
-        }
+        LogInfo("GemmM: ", GemmM, ", GemmN: ", GemmN, ", GemmK: ", GemmK,
+                ", GemmBatch: ", GemmBatch,
+                ", NumGroupsPerBatch: ", NumGroupsPerBatch, ", k_batch: ", k_batch);
     }
 
     template <
@@ -192,13 +197,9 @@ struct GroupedConvBwdWeightKernelArgs
 
         k_batch = args.k_batch;
 
-        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-        {
-            std::cout << "GemmM: " << GemmM << ", GemmN: " << GemmN << ", GemmK: " << GemmK
-                      << ", GemmBatch: " << GemmBatch
-                      << ", NumGroupsPerBatch: " << NumGroupsPerBatch << ", k_batch: " << k_batch
-                      << std::endl;
-        }
+        LogInfo("GemmM: ", GemmM, ", GemmN: ", GemmN, ", GemmK: ", GemmK,
+                ", GemmBatch: ", GemmBatch,
+                ", NumGroupsPerBatch: ", NumGroupsPerBatch, ", k_batch: ", k_batch);
     }
 
     template <
@@ -285,13 +286,9 @@ struct GroupedConvBwdWeightKernelArgs
 
         k_batch = args.k_batch;
 
-        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-        {
-            std::cout << "GemmM: " << GemmM << ", GemmN: " << GemmN << ", GemmK: " << GemmK
-                      << ", GemmBatch: " << GemmBatch
-                      << ", NumGroupsPerBatch: " << NumGroupsPerBatch << ", k_batch: " << k_batch
-                      << std::endl;
-        }
+        LogInfo("GemmM: ", GemmM, ", GemmN: ", GemmN, ", GemmK: ", GemmK,
+                ", GemmBatch: ", GemmBatch,
+                ", NumGroupsPerBatch: ", NumGroupsPerBatch, ", k_batch: ", k_batch);
     }
 
     using ABCGridDescs = remove_cvref_t<
@@ -474,12 +471,9 @@ struct GroupedConvolutionBackwardWeightKernel
     CK_TILE_HOST static constexpr GroupedConvBwdWeightKernelArgsSpecialized
     MakeKernelArgs(const GroupedConvBwdWeightHostArgs& hostArgs)
     {
-        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-        {
-            std::cout << "MPerBlock: " << number<TilePartitioner::MPerBlock>{} << std::endl;
-            std::cout << "NPerBlock: " << number<TilePartitioner::NPerBlock>{} << std::endl;
-            std::cout << "KPerBlock: " << number<TilePartitioner::KPerBlock>{} << std::endl;
-        }
+        LogInfo("MPerBlock: ", number<TilePartitioner::MPerBlock>{},
+                ", NPerBlock: ", number<TilePartitioner::NPerBlock>{},
+                ", KPerBlock: ", number<TilePartitioner::KPerBlock>{});
 
         auto kernel_args = GroupedConvBwdWeightKernelArgsSpecialized(hostArgs);
 
@@ -503,15 +497,6 @@ struct GroupedConvolutionBackwardWeightKernel
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         return max(GemmPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
-    }
-
-    template <typename... Args>
-    CK_TILE_HOST static void LogInfo(Args&&... args) noexcept
-    {
-        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-        {
-            CK_TILE_INFO(std::forward<Args>(args)...);
-        }
     }
 
     CK_TILE_HOST static bool
