@@ -1311,8 +1311,8 @@ protected:
         // gelu_tanh(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
         auto geluTanh = [](float x) {
             auto xCompute = static_cast<ComputeType>(static_cast<Input1Type>(x));
-            auto sqrt2OverPi = static_cast<ComputeType>(
-                hipdnn_data_sdk::types::sqrt(ComputeType{2} / ComputeType{M_PI}));
+            const auto sqrt2OverPi = static_cast<ComputeType>(
+                hipdnn_data_sdk::types::sqrt(ComputeType{2} / static_cast<ComputeType>(PI)));
             static const auto s_kCoeff = ComputeType{0.044715};
             auto inner = sqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
             return ComputeType{0.5} * xCompute

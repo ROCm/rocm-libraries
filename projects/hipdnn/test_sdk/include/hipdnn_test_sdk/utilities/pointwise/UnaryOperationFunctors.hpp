@@ -3,7 +3,6 @@
 
 #pragma once
 
-#define _USE_MATH_DEFINES
 #include <cmath>
 #include <cstdint>
 #include <hipdnn_data_sdk/types.hpp>
@@ -141,7 +140,7 @@ struct GeluApproxTanhForward
         using hipdnn_data_sdk::types::tanh;
         auto xCompute = static_cast<ComputeType>(x);
         // GELU_tanh(x) ~= 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
-        static const ComputeType s_kSqrt2OverPi = sqrt(ComputeType{2} / ComputeType{M_PI});
+        static const ComputeType s_kSqrt2OverPi = sqrt(ComputeType{2} / ComputeType{3.14159265});
         static const auto s_kCoeff = ComputeType{0.044715};
         auto inner = s_kSqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
         auto result = ComputeType{0.5} * xCompute * (ComputeType{1} + tanh(inner));
