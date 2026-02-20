@@ -7,6 +7,7 @@
 #include "HipdnnBackendAttributeType.h"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendPluginLoadingMode.h"
+#include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnStatus.h"
 
 namespace hipdnn_backend
@@ -281,6 +282,19 @@ inline const char* hipdnnGetPluginLoadingModeString(hipdnnPluginLoadingMode_ext_
         return "HIPDNN_PLUGIN_LOADING_ABSOLUTE";
     default:
         return "HIPDNN_PLUGIN_LOADING_UNKNOWN";
+    }
+}
+
+inline const char* hipdnnGetPluginUnloadingModeString(hipdnnPluginUnloadingMode_ext_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_PLUGIN_UNLOAD_LAZY:
+        return "HIPDNN_PLUGIN_UNLOAD_LAZY";
+    case HIPDNN_PLUGIN_UNLOAD_EAGER:
+        return "HIPDNN_PLUGIN_UNLOAD_EAGER";
+    default:
+        return "HIPDNN_PLUGIN_UNLOAD_UNKNOWN";
     }
 }
 

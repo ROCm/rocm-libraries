@@ -137,6 +137,34 @@ class ConfigureCITest(unittest.TestCase):
                 "shared/tensile/docs/sphinx/requirements.in"
             )
         )
+        # dnn-providers paths
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable(
+                "dnn-providers/miopen-provider/docs/OperationSupport.md"
+            )
+        )
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable(
+                "dnn-providers/miopen-provider/.gitignore"
+            )
+        )
+        # AI assistant config files
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable("projects/hipdnn/.clinerules")
+        )
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable(
+                "dnn-providers/miopen-provider/.clinerules"
+            )
+        )
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable("projects/rocblas/.cursorrules")
+        )
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable(
+                "projects/hipdnn/.cursor/rules/ai-rules.mdc"
+            )
+        )
         # Non-skippable paths
         self.assertFalse(
             therock_configure_ci.is_path_skippable("projects/rocprim/src/main.cpp")
@@ -200,6 +228,22 @@ class ConfigureCITest(unittest.TestCase):
 
         self.assertIn("rocprim", str(projects))
         self.assertIn("hipcub", str(projects))
+        self.assertEqual(test_type, "full")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_retrieve_projects_skips_ci_for_ai_config_files(self, mock_get_modified):
+        mock_get_modified.return_value = [
+            "projects/hipdnn/.clinerules",
+            "dnn-providers/miopen-provider/.clinerules",
+            "projects/rocblas/.cursorrules",
+            "projects/hipdnn/.cursor/rules/ai-rules.mdc",
+        ]
+
+        projects, test_type = therock_configure_ci.retrieve_projects(
+            {"is_pull_request": True, "base_ref": "HEAD^"}
+        )
+
+        self.assertEqual(projects, [])
         self.assertEqual(test_type, "full")
 
     @patch("therock_configure_ci.get_modified_paths")

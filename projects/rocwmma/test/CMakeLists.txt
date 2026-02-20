@@ -40,8 +40,12 @@ endif()
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" PROCESSOR_LOWER)
 if(NOT PROCESSOR_LOWER MATCHES "^(arm|aarch64)")
     add_compile_options(-mcmodel=large)
-    add_link_options(-mcmodel=large -Wl,--gc-sections)
+    add_link_options(-mcmodel=large)
+    if(NOT WIN32)
+        add_link_options(-Wl,--gc-sections)
+    endif()
 endif()
+
 
 
 # Test/benchmark requires additional dependencies
