@@ -20,7 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
                         StructuredModule, TextBlock, ValueEndif, ValueIf, ValueElseIf, ValueSet, SignatureBase
 from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
@@ -36,12 +36,15 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32
 from rocisa.instruction import SAddU32, SAddCU32, SCmpEQU32, SCSelectB32, SSubBU32
 from Tensile.Common import IsaVersion
+from Tensile.Common.Utilities import printWarning
 from Tensile.Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
 from typing import Callable, Optional, Union
 from enum import Enum, auto
 import Tensile.Components.CMSValidator as cmsv
+from typing import Callable
+from itertools import product
 
 # Enum to distinguish between different schedule matching outcomes
 class ScheduleMatchStatus(Enum):
@@ -52,13 +55,68 @@ class ScheduleMatchStatus(Enum):
 # Global registry for schedule functions
 _SCHEDULE_REGISTRY = []
 
+# Global registry for schedule metadata (parallel to _SCHEDULE_REGISTRY)
+_SCHEDULE_METADATA: list["CMSKernelInfo"] = []
+
+# Map dtype predicate functions to human-readable names
+_DTYPE_PREDICATE_NAMES: dict[Callable, str] = {}
+
+def _register_dtype_name(func: Callable, name: str) -> Callable:
+    """Helper to register a dtype predicate name mapping."""
+    _DTYPE_PREDICATE_NAMES[func] = name
+    return func
+
+@dataclass(frozen=True)
+class CMSKernelInfo:
+    """
+    Metadata about registered CMS kernels 
+    Contains the minimum combination of parameters needed to use the CMS kernel.
+    Important Note:
+    If you are adding new parameters to this list (of params use in CMS kernels), please make sure those names match Tensile names.
+    These names will be used by caller/tuning codes to set correct parameter/values.
+    """
+    name: str
+    dtype: str
+    supported_layouts: list[str]
+    MacroTile0: int
+    MacroTile1: int
+    DepthU: int
+    PrefetchGlobalRead: int
+    PrefetchLocalRead: int
+    DirectToLds: bool
+    DtlPlusLdsBuf: int
+    WaveSeparateGlobalReadA: int
+    WaveSeparateGlobalReadB: int
+    GlobalReadVectorWidthA: int
+    GlobalReadVectorWidthB: int
+    LocalReadVectorWidth: int
+    MatrixInstruction: list[int]
+    MIWaveGroup: list[int]
+
+    def matches(self, dtype: Optional[str] = None, layout: Optional[str] = None) -> bool:
+        """Check if this kernel info matches the given dtype and/or layout filter.
+
+        Args:
+            dtype:  Data type filter string (e.g. "16bit", "8bit", "TF32"), or None for any.
+            layout: Layout filter string (e.g. "TN", "NT", "NN", "TT"), or None for any.
+
+        Returns:
+            True if the kernel matches all provided filters.
+        """
+        if dtype is not None and self.dtype.lower() != dtype.lower():
+            return False
+        if layout is not None and layout.upper() not in (l.upper() for l in self.supported_layouts):
+            return False
+        return True
+
+
+
 @dataclass
 class SyncSchedule:
     schedule: list[tuple[int, Union[SWaitCnt, SBarrier]]] = field(default_factory=list)
 
     def add(self, idx: int, dscnt: int = -1, vlcnt: int = -1, vscnt: int = -1, comment: str = "", barrier: bool = False, barrier_idx: Optional[int] = None, barrier_comment: str = ""):
         """ Add a SWaitCnt (and optionally a SBarrier) to the schedule at the given index.
-
         Args:
             idx:             The index at which to add the SWaitCnt.
             dscnt:           The dscnt value for the SWaitCnt.
@@ -446,6 +504,74 @@ def hasCustomSchedule(kernel):
     return False, None
 
 
+def query_cms_kernels(dtype: Optional[str] = None, layout: Optional[str] = None) -> list[dict]:
+    """Query for available CMS kernels matching the given data type and/or layout.
+
+    This function searches the CMS kernel registry and returns the minimum
+    combination of parameters needed for each matching CMS kernel.
+
+    Args:
+        dtype:  Data type filter (case-insensitive).
+                Accepted values: "16bit", "8bit", "TF32", or None for all.
+        layout: Layout / transpose e.g. ("TN", "NT", "NN", "TT", or None for all)
+                
+
+    Returns:
+        A list of dicts, each containing the minimum parameter combination
+        needed for a matching CMS kernel. Each dict includes:
+            - name:                     Schedule function name
+            - dtype:                    Data type string
+            - supported_layouts:        List of all layouts this kernel supports
+            - MacroTile0, MacroTile1, DepthU
+            - PrefetchGlobalRead, PrefetchLocalRead, DirectToLds
+            - WaveSeparateGlobalReadA, WaveSeparateGlobalReadB
+            - GlobalReadVectorWidthA, GlobalReadVectorWidthB, LocalReadVectorWidth
+            - MatrixInstruction, MIWaveGroup
+
+    """
+    results = []
+    for info in _SCHEDULE_METADATA:
+        if info.matches(dtype=dtype, layout=layout):
+            results.append(asdict(info))
+    return results
+
+
+def get_cms_kernel_info_objects(dtype: Optional[str] = None, layout: Optional[str] = None) -> list[CMSKernelInfo]:
+    """Query for available CMS kernels and return CMSKernelInfo objects.
+
+    Same filtering as :func:`query_cms_kernels` but returns the raw
+    ``CMSKernelInfo`` dataclass instances instead of dicts.
+
+    Args:
+        dtype:  Data type filter (case-insensitive), or None for all.
+        layout: Layout filter (case-insensitive), or None for all.
+
+    Returns:
+        A list of CMSKernelInfo objects matching the filters.
+    """
+    return [info for info in _SCHEDULE_METADATA if info.matches(dtype=dtype, layout=layout)]
+
+
+def get_available_dtypes() -> list[str]:
+    """Return a sorted list of all data type strings that have at least one CMS kernel."""
+    return sorted({info.dtype for info in _SCHEDULE_METADATA})
+
+
+def get_available_layouts(dtype: Optional[str] = None) -> list[str]:
+    """Return a sorted list of all layout strings available for the given data type.
+
+    Args:
+        dtype: Optional data type filter, or None for all data types.
+
+    Returns:
+        Sorted list of unique layout strings (e.g. ["NN", "NT", "TN", "TT"]).
+    """
+    layouts: set[str] = set()
+    for info in _SCHEDULE_METADATA:
+        if dtype is None or info.dtype.lower() == dtype.lower():
+            layouts.update(info.supported_layouts)
+    return sorted(layouts)
+
 @CallableGuard
 def isNN(kernel):
     return not kernel["ProblemType"]["TransposeA"] and not kernel["ProblemType"]["TransposeB"]
@@ -465,10 +591,12 @@ def isTN(kernel):
 @CallableGuard
 def is16bit(kernel):
     return kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16()
+_register_dtype_name(is16bit, "16bit")
 
 @CallableGuard
 def is8bit(kernel):
     return kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()
+_register_dtype_name(is8bit, "8bit")
 
 @CallableGuard
 def isMixed(kernel):
@@ -477,6 +605,7 @@ def isMixed(kernel):
 @CallableGuard
 def isTF32(kernel):
     return kernel["UseF32XEmulation"]
+_register_dtype_name(isTF32, "TF32")
 
 @dataclass(frozen=True)
 class TileConfig:
@@ -490,11 +619,20 @@ class TileConfig:
     wave_separate_global_read_a: int
     wave_separate_global_read_b: int
 
+class _ProbeDataType:
+    """Minimal DataType stub for layout probing at registration time."""
+    def isHalf(self): return False
+    def isBFloat16(self): return False
+    def isInt8(self): return False
+    def is8bitFloat(self): return False
+    def numBytes(self): return 2
+
 class RegisterSchedule:
     """
     Decorator that registers a schedule function with its matching criteria.
     The function is wrapped with logic that checks if the kernel matches the criteria.
-    
+    Supported layouts are auto-detected by probing the inner function at registration time.
+
     Usage:
         @RegisterSchedule(
             tile_config=TileConfig(256, 96, 64, 2, 1, 1, False, 0, 0),
@@ -506,11 +644,11 @@ class RegisterSchedule:
         def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
             ...
     """
-    
+
     def __init__(self, tile_config: TileConfig, dtype_predicate: Callable, vector_widths: list[int], matrix_inst: list[int], mfma_wave_group: list[int]):
         """
         Initialize the registration decorator with matching criteria.
-        
+
         Args:
             tile_config:        TileConfig object
             dtype_predicate:    Callable that takes kernel and returns True if dtype matches
@@ -523,7 +661,78 @@ class RegisterSchedule:
         self.vector_widths = vector_widths
         self.matrix_inst = matrix_inst
         self.mfma_wave_group = mfma_wave_group
-    
+
+    def _make_probe_kernel(self, transA: bool, transB: bool, useLDSTr: bool, TLDS: int) -> dict:
+        """Build a synthetic kernel dict for probing layout support."""
+        tc = self.tile_config
+        mi = self.matrix_inst
+        miwg = self.mfma_wave_group
+        probe_dtype = _ProbeDataType()
+        return {
+            "ProblemType": {
+                "DataType": probe_dtype,
+                "DataTypeA": probe_dtype,
+                "DataTypeB": probe_dtype,
+                "TransposeA": transA,
+                "TransposeB": transB,
+            },
+            "MacroTile0": tc.macro_tile_size_0,
+            "MacroTile1": tc.macro_tile_size_1,
+            "DepthU": tc.depth_u,
+            "PrefetchGlobalRead": tc.prefetch_global_read,
+            "PrefetchLocalRead": tc.prefetch_local_read,
+            "DirectToLds": tc.direct_to_lds,
+            "WaveSeparateGlobalReadA": tc.wave_separate_global_read_a,
+            "WaveSeparateGlobalReadB": tc.wave_separate_global_read_b,
+            "GlobalReadVectorWidthA": self.vector_widths[0],
+            "GlobalReadVectorWidthB": self.vector_widths[1],
+            "LocalReadVectorWidth": self.vector_widths[2],
+            "MatrixInstruction": list(self.matrix_inst),
+            "MIWaveGroup": list(self.mfma_wave_group),
+            "LDSTrInst": useLDSTr,
+            "TransposeLDS": TLDS,
+            "MIWaveTileA": tc.macro_tile_size_0 // (mi[0] * miwg[0]),
+            "MIWaveTileB": tc.macro_tile_size_1 // (mi[1] * miwg[1]),
+            # Standard flags that inner functions may read/write
+            "UseCustomMainLoopSchedule": True,
+            "EnableMatrixInstruction": True,
+            "UnrollLoopSwapGlobalReadOrder": False,
+            "ISA": IsaVersion(9, 5, 0),
+            "WavefrontSize": 64,
+            "Use64bShadowLimit": 1,
+            "ForceUnrollSubIter": False,
+            "SwapGlobalReadOrder": False,
+            "UsePLRPack": False,
+            "UseF32XEmulation": False,
+            "UseDirect32XEmulation": False,
+            "MfmaInitCVgprs": False,
+        }
+
+    def _detect_supported_layouts(self, func: Callable) -> list[str]:
+        """Probe the inner function to discover which layouts it actually handles."""
+        def as_str(transpose: bool) -> str:
+            return "T" if transpose else "N"
+        
+        detected = set()
+        for transA, transB in product([True, False], repeat=2):
+            for useLDSTr, TLDS in product([True, False], [1, 0]):                
+                probe = self._make_probe_kernel(transA, transB, useLDSTr, TLDS)
+                try:
+                    found, _ = func(probe, useLDSTr, TLDS)
+                    if found:
+                        detected.add(as_str(transA) + as_str(transB))
+                except ValueError as e:
+                    layout = as_str(transA) + as_str(transB)
+                    printWarning(
+                        f"Layout probe failed for func '{func.__name__}' "
+                        f"with layout={layout}, useLDSTr={useLDSTr}, TLDS={TLDS}\n"
+                        f"  Kernel: {probe['MacroTile0']}x{probe['MacroTile1']}x{probe['DepthU']} {layout}\n"
+                        f"  Error: {e}"
+                    )
+                    continue
+
+        return list(detected)
+
     def __call__(self, func: Callable) -> Callable:
         """Wrap the function with matching logic and register it."""
         def wrapped_func(kernel: dict, useLDSTr: bool, TLDS: int) -> tuple[ScheduleMatchStatus, Optional[ScheduleInfo]]:
@@ -562,6 +771,32 @@ class RegisterSchedule:
             return ScheduleMatchStatus.UNSUPPORTED_VARIANT, None
                
         _SCHEDULE_REGISTRY.append(wrapped_func)
+
+        # Auto-detect supported layouts by probing the inner function
+        detected_layouts = self._detect_supported_layouts(func)
+
+        # Store metadata for query API
+        dtype_name = _DTYPE_PREDICATE_NAMES.get(self.dtype_predicate, str(self.dtype_predicate))
+        tc = self.tile_config
+        _SCHEDULE_METADATA.append(CMSKernelInfo(
+            name=func.__name__,
+            dtype=dtype_name,
+            supported_layouts=detected_layouts,
+            MacroTile0=tc.macro_tile_size_0,
+            MacroTile1=tc.macro_tile_size_1,
+            DepthU=tc.depth_u,
+            PrefetchGlobalRead=tc.prefetch_global_read,
+            PrefetchLocalRead=tc.prefetch_local_read,
+            DirectToLds=tc.direct_to_lds,
+            DtlPlusLdsBuf=tc.dtl_plus_lds_buf,
+            WaveSeparateGlobalReadA=tc.wave_separate_global_read_a,
+            WaveSeparateGlobalReadB=tc.wave_separate_global_read_b,
+            GlobalReadVectorWidthA=self.vector_widths[0],
+            GlobalReadVectorWidthB=self.vector_widths[1],
+            LocalReadVectorWidth=self.vector_widths[2],
+            MatrixInstruction=list(self.matrix_inst),
+            MIWaveGroup=list(self.mfma_wave_group),
+        ))
         
         # Return original function unchanged (so it can still be called directly)
         return func
