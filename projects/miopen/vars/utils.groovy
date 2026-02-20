@@ -467,8 +467,14 @@ def getDockerImage(Map conf=[:])
         try {
             withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
                 sh """
-                    docker buildx inspect ci-builder >/dev/null 2>&1 || \
-                    docker buildx create --name ci-builder --driver docker-container --use
+                    # Create buildkitd config to allow insecure registries
+                    cat <<EOF > /tmp/buildkitd.toml
+                    [registry."${env.MIOPEN_PRIVATE_DOCKER_URL}"]
+                      insecure = true
+                    EOF
+
+                    docker buildx inspect ci-builder >/dev/null 2>&1 || \\
+                    docker buildx create --name ci-builder --driver docker-container --use --config /tmp/buildkitd.toml
                     docker buildx use ci-builder
                     docker buildx inspect --bootstrap
                 """.stripIndent()
