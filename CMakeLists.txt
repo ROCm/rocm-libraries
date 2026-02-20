@@ -38,6 +38,7 @@ set(SUPPORTED_COMPONENTS
     rocrand
     # dnn-providers
     miopen-provider
+    hipblaslt-provider
 )
 
 set(UNSUPPORTED_COMPONENTS
@@ -162,6 +163,14 @@ if("miopen-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT miopen-provider
         PREFIX_PATH dnn-providers
         EXPECT_TARGET miopen_plugin
+    )
+endif()
+
+if("hipblaslt-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT hipblaslt-provider
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET hipblaslt_plugin
     )
 endif()
 

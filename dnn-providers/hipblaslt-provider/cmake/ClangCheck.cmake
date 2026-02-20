@@ -28,17 +28,27 @@ if(ENABLE_CLANG_FORMAT)
             -o
         )
         set(CLANG_FORMAT_REGEX ".*\\.\\(cpp\\|hpp\\|c\\|h\\)")
+
+        # Use prefixed target names in superbuild to avoid collisions
+        if(ROCM_LIBS_SUPERBUILD)
+            set(_CHECK_FORMAT_TARGET hipblaslt_provider_check_format)
+            set(_FORMAT_TARGET hipblaslt_provider_format)
+        else()
+            set(_CHECK_FORMAT_TARGET check_format)
+            set(_FORMAT_TARGET format)
+        endif()
+
         add_custom_target(
-            check_format
+            ${_CHECK_FORMAT_TARGET}
             COMMAND find ${CMAKE_CURRENT_SOURCE_DIR} ${CLANG_FORMAT_PRUNE} -regex
                     "${CLANG_FORMAT_REGEX}" -exec ${CLANG_FORMAT_BINARY}
                     -style=file --dry-run --Werror {} +
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-            COMMENT "Checking code style with clang-format"
+            COMMENT "Checking code style with clang-format (hipblaslt-provider)"
             VERBATIM
         )
         add_custom_target(
-            format
+            ${_FORMAT_TARGET}
             COMMAND find ${CMAKE_CURRENT_SOURCE_DIR} ${CLANG_FORMAT_PRUNE} -regex
                     "${CLANG_FORMAT_REGEX}" -exec ${CLANG_FORMAT_BINARY}
                     -style=file -i {} +
