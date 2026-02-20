@@ -8,17 +8,51 @@
 #include <miopen/miopen.h>
 #include <unordered_map>
 
+#include <hipdnn_plugin_sdk/EngineManager.hpp>
+#include <hipdnn_plugin_sdk/PluginBaseTypes.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-#include "MiopenContainer.hpp"
+#include "HipdnnMiopenContext.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "MiopenUtils.hpp"
 
+namespace miopen_plugin
+{
+class MiopenContainer;
+}
+
+/**
+ * @brief MIOpen plugin handle.
+ *
+ * Inherits from HipdnnEnginePluginHandle for opaque pointer compatibility.
+ * Manages the MIOpen library handle, HIP stream, and plugin container.
+ */
 // NOLINTBEGIN
-struct HipdnnEnginePluginHandle
+struct HipdnnMiopenHandle : HipdnnEnginePluginHandle
 {
 public:
-    virtual ~HipdnnEnginePluginHandle() = default;
+    HipdnnMiopenHandle()
+    {
+        miopenStatus_t status = miopenCreate(&miopenHandle);
+        if(status != miopenStatusSuccess)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                           "Failed to create MIOpen handle");
+        }
+    }
+
+    ~HipdnnMiopenHandle() override
+    {
+        if(miopenHandle != nullptr)
+        {
+            miopenStatus_t status = miopenDestroy(miopenHandle);
+            if(status != miopenStatusSuccess)
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("Failed to destroy MIOpen handle");
+            }
+        }
+    }
 
     miopenHandle_t miopenHandle = nullptr;
 
@@ -33,11 +67,11 @@ public:
         return _stream;
     }
 
-    std::shared_ptr<miopen_plugin::MiopenContainer> miopenContainer;
-    miopen_plugin::EngineManager& getEngineManager()
-    {
-        return miopenContainer->getEngineManager();
-    }
+    std::shared_ptr<miopen_plugin::MiopenContainer> container;
+
+    // Defined in HipdnnMiopenHandle.cpp to avoid circular dependency
+    hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>&
+        getEngineManager();
 
     void storeEngineDetailsDetachedBuffer(const void* ptr,
                                           std::unique_ptr<flatbuffers::DetachedBuffer> buffer)
