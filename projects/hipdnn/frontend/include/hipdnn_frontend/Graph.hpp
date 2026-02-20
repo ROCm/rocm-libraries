@@ -14,8 +14,7 @@
  * The Graph class provides a fluent API for:
  * - Creating tensors with specified dimensions and data types
  * - Adding operations (convolution, batch normalization, pointwise, matmul)
- * - Building execution plans with heuristic-based engine selection
- * - Executing the graph on GPU
+ * - Building and executing plans on GPU
  *
  * @section graph_workflow Typical Workflow
  *
@@ -107,7 +106,7 @@ namespace hipdnn_frontend::graph
  * Graph is the central class in hipDNN Frontend. It allows users to:
  * - Define tensors and their properties
  * - Add operation nodes (convolution, batchnorm, pointwise, matmul)
- * - Build execution plans using heuristics
+ * - Build execution plans
  * - Execute the graph on AMD GPUs
  *
  * The Graph class uses a fluent interface pattern, where setter methods return
@@ -618,7 +617,7 @@ public:
      * - All tensors have required attributes set
      * - No duplicate tensor UIDs exist
      * - Graph is a valid DAG (no cycles)
-     * - Graph is connected (single component)
+     * - Graph is connected (no orphaned nodes)
      */
     Error validate()
     {
