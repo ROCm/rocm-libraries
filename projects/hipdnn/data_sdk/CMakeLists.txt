@@ -116,6 +116,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         schemas/engine_details.fbs
         schemas/graph.fbs
         schemas/knob_value.fbs
+        schemas/layernorm_fprop_attributes.fbs
         schemas/matmul_attributes.fbs
         schemas/pointwise_attributes.fbs
         schemas/tensor_attributes.fbs

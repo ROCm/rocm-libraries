@@ -13,6 +13,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
@@ -27,6 +28,7 @@
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+#include <hipdnn_frontend/node/LayernormFpropNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
@@ -499,6 +501,18 @@ private:
                     }
                     _sub_nodes.emplace_back(
                         std::make_shared<MatmulNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::LayernormFpropAttributes:
+                {
+                    auto attr = LayernormFpropAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_LayernormFpropAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<LayernormFpropNode>(std::move(attr), graph_attributes));
                     break;
                 }
                 default:
@@ -1327,6 +1341,50 @@ public:
 
         _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNodeVarianceExt>(
             std::move(attributes), graph_attributes));
+
+        return y;
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> layernorm_fprop(std::shared_ptr<TensorAttributes> x,
+                                                      std::shared_ptr<TensorAttributes> scale,
+                                                      std::shared_ptr<TensorAttributes> bias,
+                                                      LayernormFpropAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("LayernormFprop_" + std::to_string(_sub_nodes.size()));
+        }
+
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        if(scale && scale->get_name().empty())
+        {
+            scale->set_name(attributes.get_name() + "::SCALE");
+        }
+        if(bias && bias->get_name().empty())
+        {
+            bias->set_name(attributes.get_name() + "::BIAS");
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        if(scale)
+        {
+            attributes.set_scale(std::move(scale));
+        }
+        if(bias)
+        {
+            attributes.set_bias(std::move(bias));
+        }
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<LayernormFpropNode>(std::move(attributes), graph_attributes));
 
         return y;
     }

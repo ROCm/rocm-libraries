@@ -37,6 +37,8 @@ add_executable(
     TestGraphSerialization.cpp
     TestINode.cpp
     TestKnob.cpp
+    TestLayernormFpropAttributes.cpp
+    TestLayernormFpropNode.cpp
     TestMatmulAttributes.cpp
     TestMatmulNode.cpp
     TestNode.cpp
