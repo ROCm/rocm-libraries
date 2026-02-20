@@ -3,7 +3,6 @@
 
 #include "conv_common_gtest.hpp"
 
-<<<<<<< HEAD
 namespace {
 
 template <typename T>

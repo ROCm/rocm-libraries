@@ -99,23 +99,4 @@ auto CompareResults(VerifyT&& verifier, double tolerance = 80.f)
 
     return std::make_pair(cpu_result, gpu_result);
 }
-
-<<<<<<< HEAD
-template <class VerifyT, class OnFailFunc>
-=======
-template<class VerifyT, class OnFailFunc>
->>>>>>> d4e4b00e3a (Resolve conflicts)
-auto CompareResults(VerifyT&& verifier, OnFailFunc&& on_fail, double tolerance = 80.f)
-    -> std::pair<decltype(verifier.cpu()), decltype(verifier.gpu())>
-{
-    const auto cpu_result = verifier.cpu();
-    const auto gpu_result = verifier.gpu();
-    if(!Compare(cpu_result, gpu_result, tolerance))
-    {
-        verifier.fail();
-        std::invoke(std::forward<OnFailFunc>(on_fail));
-    }
-
-    return std::make_pair(cpu_result, gpu_result);
-}
 } // namespace test_helpers
