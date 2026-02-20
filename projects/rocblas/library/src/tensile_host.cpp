@@ -232,7 +232,9 @@ namespace
     Tensile::LazyLoadingInit getLazyLoadingArch(int deviceID)
     {
         hipDeviceProp_t deviceProperties;
-        hipGetDeviceProperties(&deviceProperties, deviceID);
+        if(hipGetDeviceProperties(&deviceProperties, deviceID) != hipSuccess)
+            return Tensile::LazyLoadingInit::None;
+
         // strip out xnack/ecc from name
         std::string deviceFullString(deviceProperties.gcnArchName);
         std::string deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
@@ -916,7 +918,7 @@ namespace
                         // Skip experimental libraries
                         if(codeObjectFile.find("Experimental") != std::string::npos)
                             continue;
-                        adapter.loadCodeObjectFile(codeObjectFile.c_str());
+                        THROW_IF_HIP_ERROR(adapter.loadCodeObjectFile(codeObjectFile.c_str()));
                     } while(FindNextFileA(hfine, &finddata));
                 }
                 else
@@ -936,7 +938,7 @@ namespace
                             continue;
                         if(cofile.find("Experimental") != std::string::npos)
                             continue;
-                        adapter.loadCodeObjectFile(cofile);
+                        THROW_IF_HIP_ERROR(adapter.loadCodeObjectFile(cofile));
                     }
                 }
                 else if(g == GLOB_NOMATCH)
@@ -979,7 +981,7 @@ namespace
 
             {
                 // initialize adapter for lazy loading or experimental code objects
-                adapter.initializeLazyLoading(processor, path);
+                PRINT_IF_HIP_ERROR(adapter.initializeLazyLoading(processor, path));
 
                 static int once = [&] {
                     auto lib = ftr_lib.get();
@@ -1020,7 +1022,7 @@ namespace
         }
     };
 
-    // Return the library and adapter for the current HIP device
+    // Return the library and adapter for the device index passed or current HIP device if -1
     auto& get_library_and_adapter(
         std::shared_ptr<Tensile::MasterSolutionLibrary<Tensile::ContractionProblem>>* library
         = nullptr,
@@ -1032,7 +1034,9 @@ namespace
         static TensileHost host;
 
         if(device == -1)
-            hipGetDevice(&device);
+        {
+            PRINT_IF_HIP_ERROR(hipGetDevice(&device));
+        }
 
         // Adapter entry for the current HIP device ID
         auto& a       = host.get_adapters().at(device);
