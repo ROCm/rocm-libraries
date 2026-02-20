@@ -5431,7 +5431,7 @@ def _get_schedule_128x256x64_16bit(kernel, useLDSTr, TLDS):
     matrix_inst=[16, 16, 32, 1],
     mfma_wave_group=[2, 2]
 )
-def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
+def _get_schedule_224x320x64_16bit(kernel, useLDSTr, TLDS):
     numMfma = 140
     optSchedule = dict()
     syncCode = []
