@@ -46,6 +46,16 @@ include(CMakeFindDependencyMacro)
 find_dependency(hip CONFIG REQUIRED)
 
 find_dependency(flatbuffers REQUIRED)
+
+# Validate FlatBuffers version is supported by this build of hipdnn_data_sdk
+set(_hipdnn_supported_flatbuffers_versions "24.12.23" "25.9.23")
+if(flatbuffers_VERSION AND NOT flatbuffers_VERSION IN_LIST _hipdnn_supported_flatbuffers_versions)
+    message(FATAL_ERROR
+        "hipDNN Data SDK: Unsupported FlatBuffers version: ${flatbuffers_VERSION}. "
+        "Supported versions are: ${_hipdnn_supported_flatbuffers_versions}"
+    )
+endif()
+
 find_dependency(nlohmann_json REQUIRED)
 
 # Subdirectory path for hipDNN engine plugins (relative to lib)

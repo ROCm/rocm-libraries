@@ -12,6 +12,24 @@ set(HIP_DNN_DATA_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
 hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 
+# Supported FlatBuffers versions - update this list when adding new version support.
+# Each version must have pre-generated headers in include/generated/v<version_tag>/
+set(HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS "24.12.23" "25.9.23")
+
+if(NOT HIPDNN_FLATBUFFERS_VERSION IN_LIST HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS)
+    message(FATAL_ERROR
+        "Unsupported FlatBuffers version: ${HIPDNN_FLATBUFFERS_VERSION}. "
+        "Supported versions are: ${HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS}"
+    )
+endif()
+
+# Compute versioned directory name from version string (e.g., "25.9.23" -> "v25_9_23")
+string(REPLACE "." "_" _fb_version_tag "${HIPDNN_FLATBUFFERS_VERSION}")
+set(HIPDNN_FLATBUFFERS_VERSION_DIR "v${_fb_version_tag}")
+set(HIP_DNN_DATA_SDK_GENERATED_INCLUDE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/generated/${HIPDNN_FLATBUFFERS_VERSION_DIR}"
+)
+
 # For dependencies we are going to check if they weren't imported, and then install it along with
 # the SDK headers to allow it to work for local builds that want to install. If the dependecy is
 # imported, we will instead use find_package and not install the headers.
@@ -97,6 +115,7 @@ hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
 
 target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>
+                              $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_GENERATED_INCLUDE_DIR}>
                               $<INSTALL_INTERFACE:${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}>
 )
 
@@ -131,7 +150,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         "" # schema_include_dirs
         generate_hipdnn_data_sdk_headers # custom_target_name
         "" # additional_dependencies
-        ${HIP_DNN_DATA_SDK_INCLUDE_DIR}/hipdnn_data_sdk/data_objects # generated_includes_dir
+        ${HIP_DNN_DATA_SDK_GENERATED_INCLUDE_DIR}/hipdnn_data_sdk/data_objects # generated_includes_dir
         "" # binary_schemas_dir
         "" # copy_text_schemas_dir
     )
@@ -164,6 +183,17 @@ install(
     PATTERN "*.h"
     PATTERN "*.hpp"
     PATTERN "*.h.in" EXCLUDE
+    PATTERN "generated" EXCLUDE
+)
+
+# Install the selected version's generated FlatBuffer headers to the standard data_objects path
+# so consumers see them at <hipdnn_data_sdk/data_objects/*.h> without version subdirectories
+install(
+    DIRECTORY ${HIP_DNN_DATA_SDK_GENERATED_INCLUDE_DIR}/
+    DESTINATION ${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}
+    COMPONENT Development
+    FILES_MATCHING
+    PATTERN "*.h"
 )
 
 # Install generated version header
