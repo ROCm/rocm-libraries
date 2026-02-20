@@ -322,9 +322,6 @@ namespace rocRoller
         auto zero = std::make_shared<Expression::Expression>(0u);
         m_context->kernel()->setDynamicSharedMemBytes(zero);
 
-        if(!m_context->kernelOptions()->lazyAddArguments)
-            m_context->kernel()->addCommandArguments(m_command->getArguments());
-
         auto kernelGraph = KernelGraph::translate(m_command, m_commandParameters);
 
         if(Settings::getInstance()->get(Settings::LogGraphs))

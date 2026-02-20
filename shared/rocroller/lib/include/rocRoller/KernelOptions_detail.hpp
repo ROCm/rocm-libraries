@@ -78,13 +78,6 @@ namespace rocRoller
         bool deduplicateArguments = true;
 
         /**
-         * If enabled, command arguments are not necessarily added as kernel arguments.  We
-         * instead depend on the CleanArguments and other passes to add all necessary kernel
-         * arguments.
-         */
-        bool lazyAddArguments = true;
-
-        /**
          * The minimum complexity of an expression before we will add a kernel argument to
          * calculate its value on the CPU before launch.  This is a very rough heuristic for
          * now, and doesn't (yet) take into account different datatypes or different

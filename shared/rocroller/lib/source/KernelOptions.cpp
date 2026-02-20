@@ -164,7 +164,6 @@ namespace rocRoller
         ShowOption(assertWaitCntState);
         ShowOption(setNextFreeVGPRToMax);
         ShowOption(deduplicateArguments);
-        ShowOption(lazyAddArguments);
         ShowOption(minLaunchTimeExpressionComplexity);
         ShowOption(maxConcurrentSubExpressions);
         Show("maxConcurrentControlOps",
