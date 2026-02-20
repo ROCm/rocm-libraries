@@ -104,29 +104,31 @@ namespace rocRoller
 
                     if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
                     {
-                        if(not solutionParams.types.scalePretileA.empty())
+                        auto isPreTiled = not solutionParams.types.scalePretileA.empty();
+
+                        m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
+                            2,
+                            solutionParams.types.scaleTypeA,
+                            {},
+                            isPreTiled ? std::vector<size_t>{}
+                                       : unitStrides(solutionParams.types.transA)));
+
+                        auto loadInputA = m_tagTensorScaleA;
+
+                        if(isPreTiled)
                         {
-                            size_t stride = solutionParams.types.scalePretileA[1];
                             AssertFatal(solutionParams.types.transA == TransposeType::T);
-                            m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                                4,
-                                solutionParams.types.scaleTypeA,
-                                std::vector<size_t>{0ull,
-                                                    0ull,
-                                                    solutionParams.types.scalePretileA[0],
-                                                    solutionParams.types.scalePretileA[1]},
-                                std::vector<size_t>{0ull, 0ull, stride, 1ull}));
+                            AssertFatal(solutionParams.types.scalePretileA.size() == 2,
+                                        ShowValue(solutionParams.types.scalePretileA));
+                            loadInputA
+                                = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                                    loadInputA.value(),
+                                    solutionParams.types.scalePretileA,
+                                    solutionParams.types.transA == TransposeType::T));
                         }
-                        else
-                        {
-                            m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                                2,
-                                solutionParams.types.scaleTypeA,
-                                {},
-                                unitStrides(solutionParams.types.transA)));
-                        }
+
                         m_tagLoadScaleA = command->addOperation(
-                            rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleA.value()));
+                            rocRoller::Operations::T_Load_Tiled(loadInputA.value()));
 
                         auto scaleInputA = m_tagLoadScaleA;
 
@@ -148,9 +150,8 @@ namespace rocRoller
 
                             scaleInputA
                                 = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    *m_tagLoadScaleA, solutionParams.types.scaleShuffleTileA));
+                                    scaleInputA.value(), solutionParams.types.scaleShuffleTileA));
                         }
-
                         m_tagBlockScaleA = mulInputA
                             = command->addOperation(rocRoller::Operations::BlockScale(
                                 m_tagA,
@@ -171,30 +172,31 @@ namespace rocRoller
 
                     if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
                     {
-                        if(not solutionParams.types.scalePretileB.empty())
-                        {
-                            size_t stride = solutionParams.types.scalePretileB[0];
-                            AssertFatal(solutionParams.types.transB == TransposeType::N);
-                            m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                                4,
-                                solutionParams.types.scaleTypeB,
-                                std::vector<size_t>{0ull,
-                                                    0ull,
-                                                    solutionParams.types.scalePretileB[0],
-                                                    solutionParams.types.scalePretileB[1]},
+                        auto isPreTiled = not solutionParams.types.scalePretileB.empty();
 
-                                std::vector<size_t>{0ull, 0ull, 1ull, stride}));
-                        }
-                        else
+                        m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
+                            2,
+                            solutionParams.types.scaleTypeB,
+                            {},
+                            isPreTiled ? std::vector<size_t>{}
+                                       : unitStrides(solutionParams.types.transB)));
+
+                        auto loadInputB = m_tagTensorScaleB;
+
+                        if(isPreTiled)
                         {
-                            m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                                2,
-                                solutionParams.types.scaleTypeB,
-                                {},
-                                unitStrides(solutionParams.types.transB)));
+                            AssertFatal(solutionParams.types.transB == TransposeType::N);
+                            AssertFatal(solutionParams.types.scalePretileB.size() == 2,
+                                        ShowValue(solutionParams.types.scalePretileB));
+                            loadInputB
+                                = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                                    loadInputB.value(),
+                                    solutionParams.types.scalePretileB,
+                                    solutionParams.types.transB == TransposeType::T));
                         }
+
                         m_tagLoadScaleB = command->addOperation(
-                            rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleB.value()));
+                            rocRoller::Operations::T_Load_Tiled(loadInputB.value()));
 
                         auto scaleInputB = m_tagLoadScaleB;
 
@@ -205,7 +207,7 @@ namespace rocRoller
 
                             scaleInputB
                                 = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    *m_tagLoadScaleB, solutionParams.types.scaleShuffleTileB));
+                                    *scaleInputB, solutionParams.types.scaleShuffleTileB));
                         }
 
                         m_tagBlockScaleB = mulInputB

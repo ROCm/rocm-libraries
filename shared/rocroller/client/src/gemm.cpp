@@ -346,6 +346,8 @@ namespace rocRoller::Client::GEMMClient
                 //
                 //   tileM * ((K // T_K) * T_M * T_K) + tileK * (T_M * T_K) + m * T_K + k
                 //
+                // Note the strides.
+                //
 
                 // Only works for TranspostType::T for now
                 AssertFatal(problemParams.types.transA == TransposeType::T,
@@ -357,14 +359,9 @@ namespace rocRoller::Client::GEMMClient
                 auto const tileK = problemParams.types.scalePretileA[1];
 
                 descAScale = TensorDescriptor(problemParams.types.scaleTypeA,
-                                              {static_cast<size_t>(M / tileM),
-                                               static_cast<size_t>(K / tileK),
-                                               static_cast<size_t>(tileM),
-                                               static_cast<size_t>(tileK)},
+                                              {M, K},
                                               {static_cast<size_t>((K / tileK) * tileM * tileK),
-                                               static_cast<size_t>(tileM * tileK),
-                                               static_cast<size_t>(tileK),
-                                               static_cast<size_t>(1)});
+                                               static_cast<size_t>(tileM * tileK)});
             }
             else
             {
@@ -400,6 +397,8 @@ namespace rocRoller::Client::GEMMClient
                 //
                 //   tileN * ((K // T_N) * T_N * T_K) + tileK * (T_N * T_K) + n * T_K + k
                 //
+                // Note the strides.
+                //
 
                 // Only works for TranspostType::T for now
                 AssertFatal(problemParams.types.transB == TransposeType::N,
@@ -411,16 +410,9 @@ namespace rocRoller::Client::GEMMClient
                 auto const tileN = problemParams.types.scalePretileB[1];
 
                 descBScale = TensorDescriptor(problemParams.types.scaleTypeB,
-                                              {static_cast<size_t>(K / tileK),
-                                               static_cast<size_t>(N / tileN),
-                                               static_cast<size_t>(tileK),
-                                               static_cast<size_t>(tileN)},
-                                              {
-                                                  static_cast<size_t>(tileK * tileN),
-                                                  static_cast<size_t>((K / tileK) * tileK * tileN),
-                                                  static_cast<size_t>(1),
-                                                  static_cast<size_t>(tileK),
-                                              });
+                                              {K, N},
+                                              {static_cast<size_t>(tileK * tileN),
+                                               static_cast<size_t>((K / tileK) * tileK * tileN)});
             }
             else
             {
