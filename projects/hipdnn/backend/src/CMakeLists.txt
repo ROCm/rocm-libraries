@@ -72,7 +72,9 @@ target_link_libraries(hipdnn_backend PRIVATE hipdnn_backend_private)
 # Export dependencies for consumers because backend public API needs HIP runtime dep
 target_link_libraries(hipdnn_backend INTERFACE hip::host)
 # HIDE symbols from linked static libs
-target_link_libraries(hipdnn_backend PRIVATE "-Xlinker --exclude-libs=ALL")
+if(NOT WIN32)
+    target_link_libraries(hipdnn_backend PRIVATE "-Xlinker --exclude-libs=ALL")
+endif()
 set_target_properties(hipdnn_backend PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
 clang_tidy_check(hipdnn_backend)
