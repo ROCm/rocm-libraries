@@ -15,6 +15,7 @@ add_executable(
     hipdnn_frontend_tests
     main.cpp
     TestAttributes.cpp
+    TestBackendInterface.cpp
     TestBackendLoggingHelpers.cpp
     TestBatchnormAttributes.cpp
     TestBatchnormBackwardAttributes.cpp

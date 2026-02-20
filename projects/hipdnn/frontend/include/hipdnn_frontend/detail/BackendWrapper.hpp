@@ -11,6 +11,22 @@
 namespace hipdnn_frontend::detail
 {
 
+// Attempts to create a backend interface of type T, falling back to IncompatibleBackend if it fails to satisfy requirements
+template <class T>
+std::shared_ptr<IHipdnnBackend> tryToUseBackendInterface(std::shared_ptr<T> backendInterface)
+{
+    const char* version;
+    auto status = backendInterface->versionExt(&version);
+    // TODO: Also check for major version once frontend has versioning
+    if(status != hipdnnStatus_t::HIPDNN_STATUS_SUCCESS)
+    {
+        // HIPDNN_FE_LOG_ERROR("Failed to get hipdnn version. Hipdnn backend cannot be loaded");
+        return std::make_shared<detail::IncompatibleBackendWrapper>();
+    }
+
+    return backendInterface;
+}
+
 class HipdnnBackendWrapper : public IHipdnnBackend
 {
 public:
@@ -123,19 +139,8 @@ inline static std::shared_ptr<IHipdnnBackend> hipdnnBackend()
 {
     if(!IHipdnnBackend::getInstance())
     {
-        auto instance = std::make_shared<HipdnnBackendWrapper>();
-        const char* version;
-        auto status = instance->versionExt(&version);
-        // TODO: Also check for major version once frontend has versioning
-        if(status != hipdnnStatus_t::HIPDNN_STATUS_SUCCESS)
-        {
-            HIPDNN_FE_LOG_ERROR("Failed to get hipdnn version. Hipdnn backend cannot be loaded");
-            IHipdnnBackend::setInstance(std::make_shared<detail::IncompatibleBackendWrapper>());
-        }
-        else
-        {
-            IHipdnnBackend::setInstance(instance);
-        }
+        IHipdnnBackend::setInstance(
+            tryToUseBackendInterface(std::make_shared<HipdnnBackendWrapper>()));
     }
 
     return IHipdnnBackend::getInstance();
