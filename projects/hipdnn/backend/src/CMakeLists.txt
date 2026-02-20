@@ -11,10 +11,6 @@ project(hipdnn_backend VERSION ${HIPDNN_BACKEND_VERSION} LANGUAGES CXX)
 
 find_package(hip REQUIRED)
 
-# Read sdk versions for minimum requirement
-hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_PLUGIN_SDK_DATA_SDK_MIN_VERSION)
-hipdnn_get_component_version(hipdnn_plugin_sdk HIPDNN_PLUGIN_SDK_PLUGIN _SDK_MIN_VERSION)
-
 set(HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR "${PROJECT_BINARY_DIR}/backend/include/")
 set(HIP_DNN_BACKEND_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/backend")
 set(HIP_DNN_BACKEND_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
@@ -137,6 +133,8 @@ write_basic_package_version_file(
     COMPATIBILITY SameMajorVersion
 )
 
-install(FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfig.cmake"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend COMPONENT Development
+install(FILES
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfig.cmake"
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend COMPONENT Development
 )
