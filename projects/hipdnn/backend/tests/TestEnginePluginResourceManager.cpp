@@ -1399,10 +1399,7 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosNoPlugins)
 class TestableEnginePluginResourceManager : public EnginePluginResourceManager
 {
 public:
-    TestableEnginePluginResourceManager()
-        : EnginePluginResourceManager()
-    {
-    }
+    TestableEnginePluginResourceManager() = default;
 };
 
 TEST(TestEnginePluginResourceManager, GetEngineInfosNullPluginManager)

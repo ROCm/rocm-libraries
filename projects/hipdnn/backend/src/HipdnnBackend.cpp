@@ -418,16 +418,15 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
 
         size_t requiredEngineNameLen = info.engineName.size() + 1;
         size_t requiredPluginNameLen = info.pluginName.size() + 1;
-        size_t requiredVersionLen    = info.version.size() + 1;
-        size_t requiredTypeLen       = info.type.size() + 1;
+        size_t requiredVersionLen = info.version.size() + 1;
+        size_t requiredTypeLen = info.type.size() + 1;
 
-        if(engineName == nullptr || pluginName == nullptr || version == nullptr
-           || type == nullptr)
+        if(engineName == nullptr || pluginName == nullptr || version == nullptr || type == nullptr)
         {
             *engineNameLen = requiredEngineNameLen;
             *pluginNameLen = requiredPluginNameLen;
-            *versionLen    = requiredVersionLen;
-            *typeLen       = requiredTypeLen;
+            *versionLen = requiredVersionLen;
+            *typeLen = requiredTypeLen;
             return;
         }
 

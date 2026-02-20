@@ -22,11 +22,11 @@ void printHelp(const char* programName)
 bool printEngineInfo(hipdnnHandle_t handle, size_t engineIndex)
 {
     // Query required buffer sizes and engine ID
-    int64_t engineId      = 0;
-    size_t engineNameLen  = 0;
-    size_t pluginNameLen  = 0;
-    size_t versionLen     = 0;
-    size_t typeLen        = 0;
+    int64_t engineId = 0;
+    size_t engineNameLen = 0;
+    size_t pluginNameLen = 0;
+    size_t versionLen = 0;
+    size_t typeLen = 0;
     auto status = hipdnnGetEngineInfo_ext(handle,
                                           engineIndex,
                                           &engineId,
@@ -75,8 +75,8 @@ bool printEngineInfo(hipdnnHandle_t handle, size_t engineIndex)
         return false;
     }
 
-    std::cout << "  " << engineName.data() << " (0x" << std::hex << std::uppercase
-              << std::setw(16) << std::setfill('0') << engineId << std::dec << ")\n"
+    std::cout << "  " << engineName.data() << " (0x" << std::hex << std::uppercase << std::setw(16)
+              << std::setfill('0') << engineId << std::dec << ")\n"
               << "    Plugin:  " << pluginName.data() << "\n"
               << "    Version: " << version.data() << "\n"
               << "    Type:    " << type.data() << "\n";
