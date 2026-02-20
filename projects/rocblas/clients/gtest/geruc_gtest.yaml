@@ -1,0 +1,309 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+
+  - &tiny_matrix
+    - { M:   16, N:   16, lda:   16, stride_a:  256 }
+
+  - &small_matrix_size_range
+    - { M:   11, N:   12, lda:   13, stride_a:  156 }
+    - { M:   16, N:   16, lda:   16, stride_a:  256 }
+    - { M:   33, N:   32, lda:   33, stride_a: 1056 }
+    - { M:   10, N:   60, lda:   20, stride_a: 1200 }
+    - { M:   24, N:    1, lda:   24, stride_a: 24 }
+    - { M:    1, N:   11, lda:    4, stride_a: 44 }
+
+  - &special_case_range
+    # Quick return
+    - { M:    0, N:   1, lda:   1, incx: 1, incy: 1, batch_count: 1 }
+    - { M:    1, N:   0, lda:   1, incx: 1, incy: 1, batch_count: 1 }
+    - { M:    1, N:   1, lda:   1, incx: 1, incy: 1, batch_count: 0 }
+
+    # invalid arg checks
+    - { M:   -1, N:   0, lda:   1, incx: 1, incy: 1, batch_count:  0 }
+    - { M:    0, N:  -1, lda:   1, incx: 1, incy: 1, batch_count:  0 }
+    - { M:    5, N:   0, lda:   4, incx: 1, incy: 1, batch_count:  0 }
+    - { M:    0, N:   0, lda:   0, incx: 1, incy: 1, batch_count:  0 }
+    - { M:    0, N:   0, lda:   1, incx: 0, incy: 1, batch_count:  0 }
+    - { M:    0, N:   0, lda:   1, incx: 1, incy: 0, batch_count:  0 }
+    - { M:    0, N:   0, lda:   1, incx: 1, incy: 1, batch_count: -1 }
+
+  - &medium_matrix_size_range
+    - { M:  600, N:  500, lda:  600, stride_a:  300000 }
+    - { M:  500, N:  700, lda:  500, stride_a:  350000 }
+    - { M: 1000, N: 1000, lda: 1000, stride_a: 1000100 }
+
+  - &large_matrix_size_range
+    - { M: 1025, N: 4011, lda: 1025, stride_a:   4111275 }
+    - { M: 7000, N: 2000, lda: 7000, stride_a:   14000000 }
+
+  - &double_buffered_size_range
+    - { M:  2752, N:  2752, lda:  2760, stride_a:  7595520 }
+
+  - &incx_incy_range
+    - { incx:   1, incy:   1}
+    - { incx:  -1, incy:   1}
+    - { incx:   1, incy:  -1}
+    - { incx:  10, incy:  99}
+
+  - &incx_incy_range_small
+    - { incx:   1, incy:  -1 }
+
+Tests:
+- name: geruc_bad_arg
+  category: quick
+  function:
+  - geru_bad_arg
+  - geru_batched_bad_arg
+  - geru_strided_batched_bad_arg
+  - gerc_bad_arg
+  - gerc_batched_bad_arg
+  - gerc_strided_batched_bad_arg
+  precision: *single_double_precisions_complex
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: geruc_arg_check
+  category: quick
+  function:
+  - geru
+  - gerc
+  - geru_batched
+  - gerc_batched
+  - geru_strided_batched
+  - gerc_strided_batched
+  precision: *single_double_precisions
+  transA: N
+  matrix_size: *special_case_range
+
+# Regular geruc
+- name: geruc_fortran
+  category: quick
+  function:
+  - geru
+  - gerc
+  precision: *single_double_precisions_complex
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0 ]
+  alphai: [ -2.0 ]
+  api: FORTRAN
+
+- name: geruc_NaN
+  category: quick
+  function:
+  - geru
+  - gerc
+  precision: *single_double_precisions_complex
+  matrix_size: *tiny_matrix
+  incx_incy: *incx_incy_range_small
+  alpha: [ .NaN ]
+
+- name: geruc_small
+  category: quick
+  function:
+  - geru
+  - gerc
+  precision: *single_double_precisions_complex
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ -0.5, 2.0, 0.0 ]
+  alphai: [ -0.5, 0.0 ]
+
+- name: geruc_medium
+  category: pre_checkin
+  function:
+  - geru
+  - gerc
+  precision: *single_double_precisions_complex
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha: [ -0.5, 1.0 ]
+  alphai: [ -0.5 ]
+
+- name: geruc_medium
+  category: pre_checkin
+  function:
+  - geru
+  - gerc
+  precision: *single_precision_complex
+  matrix_size: *double_buffered_size_range
+  incx_incy: *incx_incy_range
+  alpha: [ -0.5 ]
+  alphai: [ -0.5 ]
+
+- name: geruc_large
+  category: nightly
+  function:
+  - geru
+  - gerc
+  precision: *single_double_precisions_complex
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0, 0.0 ]
+  alphai: [ -0.5, 0.0 ]
+
+# geruc_batched
+- name: geruc_batched_fortran
+  category: quick
+  function:
+  - geru_batched
+  - gerc_batched
+  precision: *single_double_precisions_complex
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0 ]
+  alphai: [ -2.0 ]
+  batch_count: [ 3 ]
+  api: FORTRAN
+
+- name: geruc_batched_NaN
+  category: quick
+  function:
+  - geru_batched
+  - gerc_batched
+  precision: *double_precision_complex
+  matrix_size: *tiny_matrix
+  incx_incy: *incx_incy_range_small
+  alpha: [ .NaN ]
+  alphai: [ .NaN ]
+  batch_count: [ 2 ]
+
+- name: geruc_batched_small
+  category: quick
+  function:
+  - geru_batched
+  - gerc_batched
+  precision: *single_double_precisions_complex
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ -0.5, 2.0, 0.0 ]
+  alphai: [ -0.5, 0.0 ]
+  batch_count: [ -5, 0, 3 ]
+
+- name: geruc_batched_medium
+  category: pre_checkin
+  function:
+  - geru_batched
+  - gerc_batched
+  precision: *single_double_precisions_complex
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha: [ -0.5, 2.0, 0.0 ]
+  alphai: [ -0.5, 0.0 ]
+  batch_count: [ 2 ]
+
+- name: geruc_batched_large
+  category: nightly
+  function:
+  - geru_batched
+  - gerc_batched
+  precision: *single_double_precisions_complex
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ -0.5 ]
+  alphai: [ -0.5 ]
+  batch_count: [ 5 ]
+
+# geruc_strided_batched
+- name: geruc_strided_batched_fortran
+  category: quick
+  function:
+  - geru_strided_batched
+  - gerc_strided_batched
+  precision: *single_double_precisions_complex
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0 ]
+  alphai: [ -2.0 ]
+  batch_count: [ -1, 0, 3 ]
+  stride_scale: [ 2 ]
+  api: FORTRAN
+
+- name: geruc_strided_batched_NaN
+  category: quick
+  function:
+  - geru_strided_batched
+  - gerc_strided_batched
+  precision: *single_precision_complex
+  matrix_size: *tiny_matrix
+  incx_incy: *incx_incy_range_small
+  alpha: [ .NaN ]
+  alphai: [ .NaN ]
+  batch_count: [ 2 ]
+  stride_scale: [ 2 ]
+
+- name: geruc_strided_batched_small
+  category: quick
+  function:
+  - geru_strided_batched
+  - gerc_strided_batched
+  precision: *single_double_precisions_complex
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ -0.5, 2.0, 0.0 ]
+  alphai: [ -0.5, 0.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ -5, 0, 5 ]
+
+- name: geruc_strided_batched_medium
+  category: pre_checkin
+  function:
+  - geru_strided_batched
+  - gerc_strided_batched
+  precision: *single_double_precisions_complex
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha: [ -0.5, 2.0, 0.0 ]
+  alphai: [ 1.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+
+- name: geruc_strided_batched_medium
+  category: pre_checkin
+  function:
+  - geru_strided_batched
+  - gerc_strided_batched
+  precision: *single_precision_complex
+  matrix_size: *double_buffered_size_range
+  incx_incy: *incx_incy_range
+  alpha: [ 2.0 ]
+  alphai: [ 1.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 7 ]
+
+- name: geruc_strided_batched_large
+  category: nightly
+  function:
+  - geru_strided_batched
+  - gerc_strided_batched
+  precision: *single_double_precisions_complex
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0 ]
+  alphai: [ 0.1 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 5 ]
+
+- name: geruc_ILP64
+  category: stress
+  arguments:
+    - { M: 2147483649, N: 1, lda: 2147483649, incx: 1, incy: 1, stride_x: 1, stride_y: 1,  batch_count: 1 }
+    - { M: 1, N: 2147483649, lda: 1, incx: 1, incy: 1, stride_x: 1, stride_y: 1,  batch_count: 1 }
+    - { M: 1, N: 2, lda: 1, stride_a: 2, incx: 1, incy: -1, stride_x: 2, stride_y: 2, batch_count: *c_grid_yz_require_passes }
+  alpha: [ 0.5 ]
+  alphai: [ -0.5 ]
+  stride_scale: [ 1 ]
+  pointer_mode_host: false
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - geru: *single_precision_complex
+    - gerc: *single_precision_complex
+    - geru_batched: *single_precision_complex
+    - gerc_batched: *single_precision_complex
+    - geru_strided_batched: *single_precision_complex
+    - gerc_strided_batched: *single_precision_complex
+
+...

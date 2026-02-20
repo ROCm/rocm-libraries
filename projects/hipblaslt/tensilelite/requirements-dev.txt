@@ -1,0 +1,4 @@
+-r ./requirements.txt
+./rocisa
+memory_profiler
+invoke

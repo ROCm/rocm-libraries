@@ -1,0 +1,61 @@
+Query device success: there are 8 devices
+-------------------------------------------------------------------------------
+Device ID 0 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 1 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 2 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 3 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 4 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 5 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 6 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 7 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+
+
+rocBLAS info: Time taken to complete rocBLAS library initialization is 2923 milliseconds.
+function,a_type,b_type,c_type,d_type,compute_type,uplo,transA,diag,N,incx,rocblas-Gflops,us
+tpsv,f32_r,f32_r,f32_r,f32_r,f32_r,L,N,N,2048,1, 1.25424, 3344.1
+function,a_type,b_type,c_type,d_type,compute_type,uplo,transA,diag,N,incx,rocblas-Gflops,us
+tpsv,f64_r,f64_r,f64_r,f64_r,f64_r,L,N,N,2048,1, 1.05105, 3990.6
+function,a_type,b_type,c_type,d_type,compute_type,uplo,transA,diag,N,incx,rocblas-Gflops,us
+tpsv,f32_c,f32_c,f32_c,f32_c,f32_c,L,N,N,2048,1, 3.82509, 4386.1
+function,a_type,b_type,c_type,d_type,compute_type,uplo,transA,diag,N,incx,rocblas-Gflops,us
+tpsv,f64_c,f64_c,f64_c,f64_c,f64_c,L,N,N,2048,1, 3.59478, 4667.1
+function,a_type,b_type,c_type,d_type,compute_type,uplo,transA,diag,N,incx,rocblas-Gflops,us
+tpsv,f32_r,f32_r,f32_r,f32_r,f32_r,L,N,N,3072,1, 1.25977, 7491.2
+function,a_type,b_type,c_type,d_type,compute_type,uplo,transA,diag,N,incx,rocblas-Gflops,us
+tpsv,f64_r,f64_r,f64_r,f64_r,f64_r,L,N,N,3072,1, 1.18198, 7984.2
+function,a_type,b_type,c_type,d_type,compute_type,uplo,transA,diag,N,incx,rocblas-Gflops,us
+tpsv,f32_c,f32_c,f32_c,f32_c,f32_c,L,N,N,3072,1, 4.41026, 8559.3
+function,a_type,b_type,c_type,d_type,compute_type,uplo,transA,diag,N,incx,rocblas-Gflops,us
+tpsv,f64_c,f64_c,f64_c,f64_c,f64_c,L,N,N,3072,1, 4.11493, 9173.6
+function,a_type,b_type,c_type,d_type,compute_type,uplo,transA,diag,N,incx,rocblas-Gflops,us
+tpsv,f32_r,f32_r,f32_r,f32_r,f32_r,L,N,N,4096,1, 1.35402, 12390.7
+function,a_type,b_type,c_type,d_type,compute_type,uplo,transA,diag,N,incx,rocblas-Gflops,us
+tpsv,f64_r,f64_r,f64_r,f64_r,f64_r,L,N,N,4096,1, 1.2806, 13101.1
+function,a_type,b_type,c_type,d_type,compute_type,uplo,transA,diag,N,incx,rocblas-Gflops,us
+tpsv,f32_c,f32_c,f32_c,f32_c,f32_c,L,N,N,4096,1, 4.80967, 13952.9
+function,a_type,b_type,c_type,d_type,compute_type,uplo,transA,diag,N,incx,rocblas-Gflops,us
+tpsv,f64_c,f64_c,f64_c,f64_c,f64_c,L,N,N,4096,1, 4.52122, 14843.1

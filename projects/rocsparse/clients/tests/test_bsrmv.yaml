@@ -1,0 +1,386 @@
+# ########################################################################
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+  - &alpha_beta_range_quick
+    - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
+
+
+  - &alpha_beta_range_checkin
+    - { alpha:   2.0, beta:  0.0,  alphai:  1.5, betai:  0.5 }
+
+  - &alpha_beta_range_1
+    - { alpha:   1.0, beta:  1.0,  alphai:  1.0, betai:  1.0 }
+
+  - &alpha_beta_range_nightly
+    - { alpha:   2.0, beta:  0.67, alphai:  0.0, betai:  1.5 }
+    - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
+
+  - &alpha_beta_range_stress
+    - { alpha:   1.7, beta:  0.45, alphai:  0.5, betai:  1.2 }
+
+Tests:
+# Quick
+- name: bsrmv
+  category: quick
+  function: bsrmv
+  precision: *single_double_precisions
+  M: [10]
+  N: [33]
+  block_dim: [2]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_zero]
+  storage: [rocsparse_storage_mode_sorted]
+
+- name: bsrmv_file
+  category: quick
+  function: bsrmv
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  block_dim: [1, 2, 3, 4, 5]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  storage: [rocsparse_storage_mode_sorted]
+  filename: [nos1]
+
+- name: bsrmv_file
+  category: quick
+  function: bsrmv
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  block_dim: [6, 7, 8, 9, 10]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  storage: [rocsparse_storage_mode_sorted]
+  filename: [nos2]
+
+- name: bsrmv_file
+  category: quick
+  function: bsrmv
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  block_dim: [11, 12, 13, 14, 15]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  storage: [rocsparse_storage_mode_sorted]
+  filename: [nos3]
+
+- name: bsrmv_file
+  category: quick
+  function: bsrmv
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  block_dim: [16, 17, 18, 19, 20]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  storage: [rocsparse_storage_mode_sorted]
+  filename: [nos4]
+
+# Pre-checkin
+- name: bsrmv_bad_arg
+  category: pre_checkin
+  function: bsrmv_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: bsrmv
+  category: pre_checkin
+  function: bsrmv
+  precision: *single_double_precisions
+  M: [32785]
+  N: [43671]
+  block_dim: [5]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  storage: [rocsparse_storage_mode_sorted]
+
+- name: bsrmv
+  category: pre_checkin
+  function: bsrmv
+  precision: *single_double_precisions
+  M: [1962]
+  N: [1521]
+  block_dim: [2, 4, 8, 16]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  storage: [rocsparse_storage_mode_sorted]
+  call_stage_analysis: [false]
+
+- name: bsrmv_file
+  category: pre_checkin
+  function: bsrmv
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  block_dim: [1, 5, 9, 13]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [scircuit]
+
+- name: bsrmv_file
+  category: pre_checkin
+  function: bsrmv
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  block_dim: [2, 6, 10, 14]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [shipsec1]
+
+- name: bsrmv_file
+  category: pre_checkin
+  function: bsrmv
+  precision: *single_only_precisions_complex
+  M: 1
+  N: 1
+  block_dim: [3, 7, 11, 15]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate]
+
+- name: bsrmv_file
+  category: pre_checkin
+  function: bsrmv
+  precision: *double_only_precisions_complex
+  M: 1
+  N: 1
+  block_dim: [4, 8, 12, 16]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534]
+
+- name: bsrmv
+  category: pre_checkin
+  function: bsrmv
+  precision: *single_double_precisions
+  M: [512]
+  N: [512, 1024]
+  block_dim: [3]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  storage: [rocsparse_storage_mode_sorted]
+
+- name: bsrmv
+  category: pre_checkin
+  function: bsrmv
+  precision: *single_double_precisions_complex_real
+  M: [4365]
+  N: [7621]
+  block_dim: [21, 22, 23, 24, 25]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  storage: [rocsparse_storage_mode_sorted]
+
+- name: bsrmv
+  category: pre_checkin
+  function: bsrmv
+  precision: *single_double_precisions_complex_real
+  M: [6400]
+  N: [6400]
+  block_dim: [50, 61, 72, 83, 94, 190]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  storage: [rocsparse_storage_mode_sorted]
+
+- name: bsrmv_file
+  category: pre_checkin
+  function: bsrmv
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  block_dim: [100, 101, 102, 103, 104]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  storage: [rocsparse_storage_mode_sorted]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
+
+- name: bsrmv_file
+  category: pre_checkin
+  function: bsrmv
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  block_dim: [15]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  storage: [rocsparse_storage_mode_sorted]
+  filename: [scircuit]
+
+- name: bsrmv_file
+  category: pre_checkin
+  function: bsrmv
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  block_dim: [45]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_order_row, rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  storage: [rocsparse_storage_mode_sorted]
+  filename: [bibd_22_8,
+             ASIC_320k,
+             Chebyshev4]
+
+- name: bsrmv_file
+  category: pre_checkin
+  function: bsrmv
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  block_dim: [7]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  storage: [rocsparse_storage_mode_sorted]
+  filename: [Chevron2]
+
+# Nightly
+- name: bsrmv
+  category: nightly
+  function: bsrmv
+  precision: *single_double_precisions_complex_real
+  M: [39385, 193482]
+  N: [29348, 340123]
+  block_dim: [1, 4, 11, 20]
+  alpha_beta: *alpha_beta_range_nightly
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  storage: [rocsparse_storage_mode_sorted]
+
+- name: bsrmv_file
+  category: nightly
+  function: bsrmv
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  block_dim: [2, 12]
+  alpha_beta: *alpha_beta_range_nightly
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  storage: [rocsparse_storage_mode_sorted]
+  filename: [amazon0312,
+             Chebyshev4,
+             sme3Dc,
+             shipsec1,
+             webbase-1M]
+
+- name: bsrmv_file
+  category: nightly
+  function: bsrmv
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  block_dim: [2, 13]
+  alpha_beta: *alpha_beta_range_nightly
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  storage: [rocsparse_storage_mode_sorted]
+  filename: [Chevron3]
+
+- name: bsrmv
+  category: stress
+  function: bsrmv
+  hardware: [gfx906, gfx90a]
+  precision: *single_only_precisions
+  M: [20000000]
+  N: [20000000]
+  block_dim: [2]
+  alpha_beta: *alpha_beta_range_stress
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_tridiagonal]
+  storage: [rocsparse_storage_mode_sorted]

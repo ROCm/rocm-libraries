@@ -594,7 +594,6 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
                       end(a_g_n_k_wos_lengths),
                       begin(output_spatial_lengths_));
 
-#if !DISABLE_SPLIT_K_AUTODEDUCE_FOR_ONE_STAGE_KERNELS
             if(split_k < 0)
             {
                 ck::index_t gemmM, gemmN, gemmK;
@@ -611,6 +610,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
                 const auto k_batch_max = static_cast<index_t>((gemmK - 1) / K0PerBlock);
                 k_batch_               = std::max(std::min(k_batch_, k_batch_max), 1);
 
+                // Cap k_batch_ to 128 to avoid accuracy issues
+                k_batch_ = std::min(k_batch_, 128);
+
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
                     std::cout << "[SPLIT-K AUTODEDUCE] k_batch max value: " << k_batch_max
@@ -620,7 +622,6 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
                 }
             }
             else
-#endif
             {
                 k_batch_ = split_k;
             }
@@ -1399,13 +1400,6 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-#if DISABLE_SPLIT_K_AUTODEDUCE_FOR_ONE_STAGE_KERNELS
-        if(arg.k_batch_ < 0)
-        {
-            return false;
-        }
-#endif
-
         // check device
         if constexpr(DirectLoad)
         {
@@ -1685,8 +1679,12 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         if constexpr(DirectLoad) {
             str << "_DirectLoad";
         }
+        
+        if constexpr(NumGroupsToMerge > 1) {
+            str << "_MergedGroups";
+        }
 
-        str    << "<"
+        str << "<"
             << BlockSize << ", "
             << MPerBlock << ", "
             << NPerBlock << ", "
@@ -1701,8 +1699,10 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
             << BBlockTransferDstScalarPerVector_K1 << ", "
             << CShuffleMXdlPerWavePerShuffle << ", "
             << CShuffleNXdlPerWavePerShuffle << ", "
-            << CBlockTransferScalarPerVector_NWaveNPerXdl
-            << ">";
+            << CBlockTransferScalarPerVector_NWaveNPerXdl;
+            if constexpr(NumGroupsToMerge > 1) 
+                str << ", " << NumGroupsToMerge;
+            str << ">";
         // clang-format on
 
         return str.str();

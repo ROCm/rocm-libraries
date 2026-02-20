@@ -1,0 +1,37 @@
+  ########################################
+  # Explore large number of ~10K solutions
+  ########################################
+    - # Benchmark Group
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - FractionalLoad: [1]
+        - PrefetchGlobalRead: [ False, True ]
+        - PrefetchLocalRead: [ True]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 5, 8 ]
+          - [ 8, 4 ]
+          - [ 8, 8 ]
+          - [ 10, 6 ]
+          - [ 6, 10 ]
+        - WorkGroup:
+          #- [ 16, 8, 2 ]
+          #- [ 16, 4, 4 ]
+          - [ 16,  8, 1 ]
+          - [ 8, 32, 1 ]
+          - [ 16, 16, 1 ]
+          - [ 32,  8, 1 ]
+        - WorkGroupMapping: [1,8,64]
+        - DepthU: [ 8,16,32 ]
+        - VectorWidth: [2,4] # 2 allows some additional tile sizes
+        - GlobalReadVectorWidth: [1,4] # 1 allows D2LDS
+        - LdsPadA: [0, -1 ]
+        - LdsPadB: [0, -1 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:

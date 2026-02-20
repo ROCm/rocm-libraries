@@ -1,0 +1,98 @@
+
+################################################################################
+#
+# MIT License
+#
+# Copyright 2024-2025 AMD ROCm(TM) Software
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+################################################################################
+
+# See here for image contents: https://github.com/devcontainers/images/tree/main/src/base-ubuntu
+
+# ubuntu-20.04 = focal
+# ubuntu-22.04 = jammy
+FROM mcr.microsoft.com/devcontainers/base:jammy
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Propagate the environment variable HTTP_PROXY into the apt config if it's set.
+RUN [ -z ${HTTP_PROXY} ] || (echo "Acquire::http::Proxy \"${HTTP_PROXY}\";" > /etc/apt/apt.conf.d/proxy)
+
+RUN apt-get update && apt-get install -y \
+   bc \
+   gdb \
+   m4 \
+   make \
+   nano \
+   ninja-build \
+   python3-dev \
+   vim \
+   wget \
+   xz-utils
+
+# cmake 3.22.1
+ RUN wget -O /tmp/cmake-install.sh https://github.com/Kitware/CMake/releases/download/v3.22.1/cmake-3.22.1-linux-x86_64.sh \
+   && sh /tmp/cmake-install.sh --prefix=/usr/local --skip-license \
+   && rm /tmp/cmake-install.sh
+
+# clang-format from ROCm 4.3.1
+ADD docker/install-clang-format /tmp
+RUN /tmp/install-clang-format && rm /tmp/install-clang-format
+ENV PATH="/opt/clang-format/bin:${PATH}"
+
+# cppcheck
+ADD docker/install-cppcheck /tmp
+RUN /tmp/install-cppcheck && rm /tmp/install-cppcheck
+
+# perf
+RUN apt-get update && apt-get install -y \
+      linux-tools-common linux-tools-generic
+
+# ccache
+RUN apt-get update && apt-get install -y \
+      libzstd-dev
+RUN wget -nv https://github.com/ccache/ccache/releases/download/v4.4.2/ccache-4.4.2.tar.gz -O ccache-4.4.2.tar.gz && \
+    tar xf ccache-4.4.2.tar.gz && \
+    cmake -Sccache-4.4.2 -Bbuild -GNinja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DENABLE_TESTING=OFF \
+      -DREDIS_STORAGE_BACKEND=OFF && \
+    ninja -C build && \
+    sudo ninja -C build install && \
+    rm -r ccache-4.4.2 ccache*.tar.gz build
+
+# g++-12
+RUN apt-get update && apt-get install -y g++-12
+
+# additional development libraries
+RUN apt-get update && apt-get install -y \
+      libc++-13-dev \
+      libunwind-13-dev
+
+RUN ( \
+    echo "base_image: ${base_image}" && \
+    echo "mxdatagen: gcc-12" \
+    ) > /.container_info.txt
+
+ENV CXX=/usr/bin/g++-12
+ENV CC=/usr/bin/gcc-12
+
+# Clean image
+RUN apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*

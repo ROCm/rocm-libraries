@@ -1,0 +1,51 @@
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+*.ipch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# vim tags
+tags
+.tags
+.*.swp
+
+# Editors
+.vscode
+*.log
+
+# build-in-source directory
+build*
+.nfs*
+
+# emacs temporary/backup files
+.\#*
+\#*\#
+*~
+
+# windows tools and deps
+.vs/
+vcpkg_installed/

@@ -1,0 +1,42 @@
+BenchmarkProblems:
+- - ConvolutionConfig:
+    - {TensorAFormat: NCHW}
+    - {TensorBFormat: KCYX}
+    - {UnrollOnChannel: 0}
+    - {Filter: 2x2}
+    DataType: s
+    OperationType: ConvolutionForward
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      #- Conv: {c: 64, h: 14, k: 64, n: 2, w: 7}
+      - Exact: { sizes: [64,32,1,8,2,2] }
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - PrefetchGlobalRead: [1]
+    - KernelLanguage: [Assembly]
+    - ThreadTile:
+      - [8, 4]
+    - WorkGroup:
+      - [8, 8, 1]
+    - DepthU: [8]
+    - GlobalReadVectorWidth: [-1]
+    - PackSummationDims: [0]
+    - VectorWidth: [ 4]
+    - FractionalLoad: [1]
+    - PackBatchDims: [1]
+    #- VectorStore: [0]
+    - OptNoLoadLoop: [0]
+    InitialSolutionParameters: null
+    JoinParameters: null
+GlobalParameters: {CMakeBuildType: Release, DataInitTypeAlpha: 1, DataInitTypeC: 4,
+  DataInitTypeD: 4, EnqueuesPerSync: 1, ForceRedoBenchmarkProblems: true, ForceRedoLibraryClient: true,
+  ForceRedoLibraryLogic: true, KernelTime: true, LibraryPrintDebug: false, MergeFiles: true,
+  MinimumRequiredVersion: 4.2.0, NumElementsToValidate: 1000, ShortNames: false,
+  SolutionSelectionAlg: 1, SyncsPerBenchmark: 1, ValidationMaxToPrint: 4, ValidationPrintValids: false}
+
+
+# could be bug with VectorStore==0 or general issue with PBD and TT>4?
+#

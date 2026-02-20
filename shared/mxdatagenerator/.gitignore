@@ -1,0 +1,9 @@
+build**
+doc_**
+.vscode
+.devcontainer
+*.pyc
+.coverage
+results*.txt
+a.out*
+.cache

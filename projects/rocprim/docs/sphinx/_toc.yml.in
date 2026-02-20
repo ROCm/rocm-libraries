@@ -1,0 +1,61 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+
+- caption: Installation
+  entries:
+  - file: install/rocPRIM-prerequisites.rst
+    title: Prerequisites
+  - file: install/rocPRIM-install-overview.rst
+    title: Installation overview
+  - file: install/rocPRIM-build-install-linux.rst
+    title: Installing on Linux
+  - file: install/rocPRIM-build-install-windows.rst
+    title: Building and installing from source
+
+- caption: Conceptual
+  entries:
+    - file: conceptual/rocPRIM-stripe-block.rst
+    - file: conceptual/rocPRIM-scope.rst
+    - file: conceptual/rocPRIM-operations.rst
+    - file: conceptual/rocPRIM-performance-tuning.rst
+
+- caption: How to
+  entries:
+    - file: how-to/rocPRIM-spir-v.rst
+      title: Use the SPIR-V target
+
+- caption: Reference
+  entries:
+    - file: reference/rocPRIM-glossary.rst
+      title: Glossary
+    - file: reference/data-type-support.rst
+      title: Data type support
+    - file: reference/reference.rst
+      title: API reference
+      subtrees:
+      - entries: 
+        - file: reference/iterators.rst
+          title: Iterators
+        - file: reference/intrinsics.rst
+          title: Intrinsics
+        - file: reference/types.rst
+          title: Utility types
+        - file: reference/rocPRIM-type-traits.rst
+          title: Custom type traits
+        - file: block_ops/data_mov_funcs.rst
+          title: Data movement functions
+        - file: device_ops/index.rst
+          title: Device-level operations
+        - file: block_ops/index.rst
+          title: Block-level operations
+        - file: warp_ops/index.rst
+          title: Warp-level operations
+        - file: thread_ops/index.rst
+          title: Thread-level operations
+
+- caption: About
+  entries:
+    - file: reference/developer.rst    
+    - file: license.rst

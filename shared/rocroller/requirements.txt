@@ -1,0 +1,27 @@
+black
+dash
+dash_bootstrap_components
+dash_svg
+flake8
+isort
+matplotlib
+msgpack
+pandas
+plotly
+pytest
+pytest-cmake
+pytest-cov
+pytest-mock
+scipy
+pyyaml
+joblib
+# codeql
+sarif-tools==1.0.0
+tabulate
+# docs
+docutils<0.17
+breathe==4.34.0
+myst-parser==0.18.0
+sphinx==5.2.0
+sphinx_rtd_theme==0.5.2
+sphinxcontrib-mermaid

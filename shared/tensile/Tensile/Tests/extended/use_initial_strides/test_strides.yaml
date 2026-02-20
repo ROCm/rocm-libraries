@@ -1,0 +1,57 @@
+# benchmark assembly and source kernels
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: 1000
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: False
+  KernelTime: True
+  LibraryPrintDebug: 0
+  PrintSolutionRejectionReason: 1
+  PrintConvolutionUsage: 0
+
+BenchmarkProblems:
+  -
+    -
+      OperationType: ConvolutionForward
+      DataType: s
+      ConvolutionConfig:
+      - Dilation: 1x1
+      - Filter: 1x1
+        #- Spatial: 8x8
+      - Stride: 2x2
+      - TensorAFormat: NCHW
+      - PackedSpatialDims: 0
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - KernelLanguage: ["Assembly"]
+        - ThreadTile:
+          - [ 2, 2 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [  8, 8, 1 ]
+          - [  16, 16, 1 ]
+        - DepthU: [8,-1]
+        - GlobalReadVectorWidth: [-1]
+        - VectorWidth: [1,-1]
+
+        - FractionalLoad: [0,1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [ -1, -1, 16, 16, 8]
+             - Exact: [ 4, 4, 16, 16, 8]
+             - Range: [ [127,1,129], [127,1,129,], [16], [16], [8]]

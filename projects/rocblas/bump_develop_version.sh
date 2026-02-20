@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# for the develop branch this script bumps the Tensile version and hash and the rocBLAS version
+
+OLD_TENSILE_VERSION="TENSILE_VERSION 4.44.0"
+NEW_TENSILE_VERSION="TENSILE_VERSION 4.45.0"
+
+OLD_ROCBLAS_VERSION="5.1.0"
+NEW_ROCBLAS_VERSION="5.2.0"
+
+OLD_SO_VERSION="rocblas_SOVERSION 5.1"
+NEW_SO_VERSION="rocblas_SOVERSION 5.2"
+
+OLD_HIPBLASLT_VERSION="HIPBLASLT_VERSION 1.0.0"
+NEW_HIPBLASLT_VERSION="HIPBLASLT_VERSION 1.2.0"
+
+sed -i "s/${OLD_TENSILE_VERSION}/${NEW_TENSILE_VERSION}/g" CMakeLists.txt
+
+sed -i "s/${OLD_ROCBLAS_VERSION}/${NEW_ROCBLAS_VERSION}/g" CMakeLists.txt
+
+sed -i "s/${OLD_SO_VERSION}/${NEW_SO_VERSION}/g" library/CMakeLists.txt
+
+sed -i "s/${OLD_HIPBLASLT_VERSION}/${NEW_HIPBLASLT_VERSION}/g" CMakeLists.txt

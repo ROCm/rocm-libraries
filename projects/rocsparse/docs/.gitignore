@@ -1,0 +1,7 @@
+# documentation artifacts
+_build/
+_toc.yml
+_doxygen/
+doxygen/Doxyfile.bak
+doxygen/html/
+doxygen/xml/

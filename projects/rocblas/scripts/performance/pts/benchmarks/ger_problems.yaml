@@ -1,0 +1,41 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+
+  - &double_buffered_loads_size_range
+    - { scan: [2048..8192..512], M: *c_scan_value, N: *c_scan_value, lda: *c_scan_value }
+    - { M: 2176, N: 2176,  lda: 2176 }
+
+  - &generic_ger_size_range  # non-fp32 will use generic kernel, fp32 will use special kernel
+    - { M: 2048, N: [2560..8192..512], lda: 2048 }
+    - { scan: [2048..8192..512], M: *c_scan_value, N: [32..128..32], lda: *c_scan_value }
+
+Tests:
+  - name: ger_double_buffered_bench
+    category: bench
+    function: ger
+    precision: *single_double_precisions
+    alpha: 1
+    incx: 1
+    incy: 1
+    matrix_size: *double_buffered_loads_size_range
+
+  - name: ger_generic_bench
+    category: bench
+    function: ger
+    precision: *single_double_precisions
+    alpha: 1
+    incx: 1
+    incy: 1
+    matrix_size: *generic_ger_size_range
+
+  - name: gerc_generic_bench
+    category: bench
+    function: gerc
+    precision: *single_double_precisions_complex
+    alpha: 1
+    incx: 1
+    incy: 1
+    matrix_size: *generic_ger_size_range
+...

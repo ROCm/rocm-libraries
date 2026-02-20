@@ -1,0 +1,747 @@
+# MIT License
+#
+# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+variables:
+  GIT_SUBMODULE_STRATEGY: normal # Fetch submodules before job start (non-recursively)
+
+include:
+  - project: amd/ci-templates
+    ref: main
+    file:
+      - /defaults.yaml
+      - /deps-cmake.yaml
+      - /deps-docs.yaml
+      - /deps-format.yaml
+      - /deps-rocm.yaml
+      - /deps-nvcc.yaml
+      - /deps-windows.yaml
+      - /deps-compiler-acceleration.yaml
+      - /gpus-rocm.yaml
+      - /gpus-nvcc.yaml
+      - /rules.yaml
+
+stages:
+  - lint
+  - build
+  - test
+  - benchmark
+
+clang-format:
+  extends:
+    - .lint:clang-format
+
+copyright-date:
+  extends:
+    - .deps:rocm
+  stage: lint
+  needs: []
+  tags:
+    - build
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - cd $CI_PROJECT_DIR
+    - git config --global --add safe.directory $CI_PROJECT_DIR
+    - scripts/copyright-date/check-copyright.sh -v -d $CI_MERGE_REQUEST_DIFF_BASE_SHA
+
+.rocm:cmake-minimum:
+  variables:
+    COMPILER: /opt/rocm/bin/amdclang++
+  extends:
+    - .deps:rocm
+    - .deps:cmake-minimum
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:rocm", before_script]
+    - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+
+.rocm:cmake-latest:
+  variables:
+    COMPILER: /opt/rocm/bin/amdclang++
+  extends:
+    - .deps:rocm
+    - .deps:cmake-latest
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:rocm", before_script]
+    - !reference [".deps:cmake-latest", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+
+.rocm-hipcc:cmake-minimum:
+  variables:
+    COMPILER: /opt/rocm/bin/hipcc
+  extends:
+    - .deps:rocm
+    - .deps:cmake-minimum
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:rocm", before_script]
+    - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+
+.nvcc:cmake-minimum:
+  variables:
+    COMPILER: /usr/bin/g++
+  extends:
+    - .deps:nvcc
+    - .deps:cmake-minimum
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:nvcc", before_script]
+    - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+
+.nvcc:cmake-latest:
+  variables:
+    COMPILER: /usr/bin/g++
+  extends:
+    - .deps:nvcc
+    - .deps:cmake-latest
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:nvcc", before_script]
+    - !reference [".deps:cmake-latest", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+
+.nvcc-clang:cmake-minimum:
+  variables:
+    COMPILER: /usr/local/bin/clang++
+  extends:
+    - .deps:nvcc
+    - .deps:cmake-latest
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:nvcc", before_script]
+    - !reference [".deps:cmake-latest", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+
+.rocm:build:
+  variables:
+    BUILD_BENCHMARK_TUNING: "OFF"
+  stage: build
+  extends:
+    - .gpus:rocm-gpus
+    - .rules:build
+  needs: []
+  script:
+    - cmake
+      -S $CI_PROJECT_DIR
+      -B $CI_PROJECT_DIR/build
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+      -D BUILD_TEST=ON
+      -D BUILD_BENCHMARK=ON
+      -D BUILD_BENCHMARK_TUNING=${BUILD_BENCHMARK_TUNING}
+      -D BENCHMARK_TUNING_MIN_GRID_SIZE=32768
+      -D BENCHMARK_TUNING_THREAD_OPTIONS="128, 256"
+      -D BENCHMARK_TUNING_BLOCK_OPTIONS="128, 256"
+      -D BUILD_FORTRAN_WRAPPER=ON
+      -D DEPENDENCIES_FORCE_DOWNLOAD=ON
+      -D BUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}
+      -D AMDGPU_TARGETS=${GPU_TARGETS}
+      -D DISABLE_WERROR=OFF
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CXX_STANDARD="$BUILD_VERSION"
+    - cmake --build $CI_PROJECT_DIR/build
+    - if [[ "${BUILD_SHARED_LIBS}" = "ON" ]]; then cmake --build $CI_PROJECT_DIR/build --target package; fi
+
+.nvcc:build:
+  stage: build
+  extends:
+    - .gpus:nvcc-gpus
+    - .rules:build
+  needs: []
+  script:
+    - cmake
+      -S $CI_PROJECT_DIR
+      -B $CI_PROJECT_DIR/build
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+      -D CMAKE_CUDA_HOST_COMPILER=${COMPILER}
+      -D BUILD_TEST=ON
+      -D BUILD_BENCHMARK=ON
+      -D BUILD_FORTRAN_WRAPPER=ON
+      -D DEPENDENCIES_FORCE_DOWNLOAD=ON
+      -D BUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}
+      -D NVGPU_TARGETS=${GPU_TARGETS}
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CUDA_COMPILER_LAUNCHER=phc_sccache_cuda
+      -D CMAKE_CXX_STANDARD=17
+    - cmake --build $CI_PROJECT_DIR/build
+    - if [[ "${BUILD_SHARED_LIBS}" = "ON" ]]; then cmake --build $CI_PROJECT_DIR/build --target package; fi
+
+# Build output is too big to upload in the case of the static library builds
+.save-artifacts:
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/build/lib/
+      - $CI_PROJECT_DIR/build/library/
+      - $CI_PROJECT_DIR/build/test/test_*
+      - $CI_PROJECT_DIR/build/**/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/benchmark/benchmark_*
+      - $CI_PROJECT_DIR/build/CMakeCache.txt
+      - $CI_PROJECT_DIR/build/*.deb
+      - $CI_PROJECT_DIR/build/*.zip
+
+build:rocm-cmake-minimum:
+  tags:
+    - build
+  needs: []
+  extends:
+    - .rocm:cmake-minimum
+    - .rocm:build
+    - .save-artifacts
+  variables:
+    BUILD_SHARED_LIBS: "ON"
+    BUILD_BENCHMARK_TUNING: "ON"
+    BUILD_VERSION: 17
+
+build:rocm-hipcc-cmake-minimum:
+  tags:
+    - build
+  needs: []
+  extends:
+    - .rocm-hipcc:cmake-minimum
+    - .rocm:build
+    - .save-artifacts
+  variables:
+    BUILD_SHARED_LIBS: "ON"
+    BUILD_VERSION: 17
+
+build:rocm-static-cmake-minimum:
+  tags:
+    - build
+  needs: []
+  extends:
+    - .rocm:cmake-minimum
+    - .rocm:build
+  variables:
+    BUILD_SHARED_LIBS: "OFF"
+    BUILD_VERSION: 17
+
+build:rocm-cmake-latest:
+  tags:
+    - build
+  needs: []
+  extends:
+    - .rocm:cmake-latest
+    - .rocm:build
+  variables:
+    BUILD_SHARED_LIBS: "ON"
+  parallel:
+    matrix:
+      - BUILD_VERSION: 17
+
+
+build:nvcc-cmake-minimum:
+  tags:
+    - build
+  needs: []
+  extends:
+    - .nvcc:cmake-minimum
+    - .nvcc:build
+    - .save-artifacts
+  variables:
+    BUILD_SHARED_LIBS: "ON"
+
+build:nvcc-clang-cmake-minimum:
+  tags:
+    - build
+  needs: []
+  extends:
+    - .nvcc-clang:cmake-minimum
+    - .nvcc:build
+    - .save-artifacts
+  variables:
+    BUILD_SHARED_LIBS: "ON"
+
+build:nvcc-static-cmake-minimum:
+  tags:
+    - build
+  needs: []
+  extends:
+    - .nvcc:cmake-minimum
+    - .nvcc:build
+  variables:
+    BUILD_SHARED_LIBS: "OFF"
+
+build:nvcc-cmake-latest:
+  tags:
+    - build
+  needs: []
+  extends:
+    - .nvcc:cmake-latest
+    - .nvcc:build
+  variables:
+    BUILD_SHARED_LIBS: "ON"
+
+benchmark:benchmark-tuning:
+  extends:
+    - .rules:manual
+    - .rocm:cmake-latest
+    - .gpus:rocm
+  stage: benchmark
+  needs: []
+  timeout: 12h
+  variables:
+    BENCHMARK_TUNING_MIN_GRID_SIZE: 32768
+    BENCHMARK_TUNING_THREAD_OPTIONS: "64, 128, 256, 512, 1024"
+  script:
+    # Build the appropriate benchmarks
+    - export BENCHMARK_TUNING_BLOCK_OPTIONS=`$CI_PROJECT_DIR/scripts/config-tuning/get_tuned_grid_sizes.py`
+    - cmake
+      -S $CI_PROJECT_DIR
+      -B $CI_PROJECT_DIR/build
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+      -D BUILD_TEST=OFF
+      -D BUILD_BENCHMARK=ON
+      -D BUILD_BENCHMARK_TUNING=ON
+      -D BUILD_FORTRAN_WRAPPER=OFF
+      -D DEPENDENCIES_FORCE_DOWNLOAD=ON
+      -D BUILD_SHARED_LIBS=ON
+      -D AMDGPU_TARGETS=${GPU_TARGET}
+      -D DISABLE_WERROR=OFF
+      -D BENCHMARK_TUNING_MIN_GRID_SIZE=${BENCHMARK_TUNING_MIN_GRID_SIZE}
+      -D BENCHMARK_TUNING_THREAD_OPTIONS="${BENCHMARK_TUNING_THREAD_OPTIONS}"
+      -D BENCHMARK_TUNING_BLOCK_OPTIONS="${BENCHMARK_TUNING_BLOCK_OPTIONS}"
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CXX_STANDARD=17
+    - cmake --build $CI_PROJECT_DIR/build --target benchmark_rocrand_tuning
+    - $CI_PROJECT_DIR/build/benchmark/tuning/benchmark_rocrand_tuning --benchmark_out_format=json --benchmark_out=$CI_PROJECT_DIR/build/rocrand_config_tuning_${GPU_TARGET}_${CI_JOB_ID}.json
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/build/library/
+      - $CI_PROJECT_DIR/build/benchmark/
+      - $CI_PROJECT_DIR/build/CMakeCache.txt
+      - $CI_PROJECT_DIR/build/*.json
+    expire_in: 2 weeks
+
+benchmark:benchmark-tuning-generate-results:
+  image: python:3.11
+  stage: benchmark
+  extends:
+    - .rules:manual
+  needs:
+    - benchmark:benchmark-tuning
+  script:
+    - mkdir $CI_PROJECT_DIR/config-tuning-out
+    - python -m pip install -r $CI_PROJECT_DIR/scripts/config-tuning/requirements.txt
+    - python $CI_PROJECT_DIR/scripts/config-tuning/select_best_config.py --out-dir $CI_PROJECT_DIR/config-tuning-out --plot-out $CI_PROJECT_DIR/config-tuning-out/rocrand-config-tuning.svg $CI_PROJECT_DIR/build/rocrand_config_tuning_*.json
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/config-tuning-out
+    expire_in: 2 weeks
+
+.test:ctest:
+  extends:
+    - .rules:test
+  stage: test
+  script:
+    - cd $CI_PROJECT_DIR/build
+    # Parallel execution (with other AMDGPU processes) can oversubscribe the SDMA queue.
+    # This causes the hipMemcpy to fail, which is not reported as an error by HIP.
+    # As a temporary workaround, disable the SDMA for test stability.
+    - HSA_ENABLE_SDMA=0 ctest --output-on-failure
+
+test:rocm:
+  needs:
+    - build:rocm-cmake-minimum
+  extends:
+    - .rocm:cmake-minimum
+    - .test:ctest
+    - .gpus:rocm
+
+test:nvcc:
+  needs:
+    - build:nvcc-cmake-minimum
+  extends:
+    - .nvcc:cmake-minimum
+    - .test:ctest
+    - .gpus:nvcc
+  before_script:
+    # This is only needed because of the legacy before_script in .gpus:nvcc
+    - !reference [".nvcc:cmake-minimum", before_script]
+
+.benchmark:
+  extends:
+    - .rules:manual
+  stage: benchmark
+  script:
+    - cd $CI_PROJECT_DIR/build
+    - ./benchmark/benchmark_rocrand_host_api
+      --size $[ 512*1024*1024 ]
+      --byte-size
+      --trials 5
+      --benchmark_out_format=json
+      --benchmark_out=rocrand_benchmarks_${GPU_TARGET}_${CI_JOB_ID}.json
+    - ./benchmark/benchmark_rocrand_kernel --dis all --engine all --trials 5
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/build/rocrand_benchmarks_*.json
+
+benchmark:rocm:
+  needs:
+    - build:rocm-cmake-minimum
+  extends:
+    - .rocm:cmake-minimum
+    - .benchmark
+    - .gpus:rocm
+
+benchmark:nvcc:
+  needs:
+    - build:nvcc-cmake-minimum
+  extends:
+    - .nvcc:cmake-minimum
+    - .benchmark
+    - .gpus:nvcc
+
+.test:python:
+  stage: test
+  extends:
+    - .rules:test
+  script:
+    - $SUDO_CMD apt-get update -qq
+    - $SUDO_CMD apt-get install -y -qq python3 python3-pip python3-venv
+    - export ROCRAND_PATH=$CI_PROJECT_DIR/build/library/
+    # rocRAND Wrapper with Python 3
+    - cd $CI_PROJECT_DIR/python/rocrand
+    - python3 -m venv rocrand-venv
+    - source rocrand-venv/bin/activate
+    - python3 -m pip install setuptools numpy
+    - python3 -m pip install .
+    - python3 tests/rocrand_test.py
+    - python3 -m pip uninstall --yes rocrand
+    - deactivate
+
+test:rocm-python:
+  tags:
+    - rocm
+  extends:
+    - .rocm:cmake-minimum
+    - .test:python
+  needs:
+    - build:rocm-cmake-minimum
+
+test:nvcc-python:
+  tags:
+    - nvcc
+  extends:
+    - .nvcc:cmake-minimum
+    - .test:python
+  needs:
+    - build:nvcc-cmake-minimum
+
+.test:package:
+  stage: test
+  extends:
+    - .rules:test
+  script:
+    - cd $CI_PROJECT_DIR/build
+    - $SUDO_CMD dpkg -i rocrand*.deb
+    - cmake
+      -S $CI_PROJECT_DIR/test/package/
+      -B $CI_PROJECT_DIR/build_package_test
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+    - cmake --build $CI_PROJECT_DIR/build_package_test
+    - cd $CI_PROJECT_DIR/build_package_test
+    - ctest --output-on-failure
+    - $SUDO_CMD dpkg -r rocrand-benchmarks rocrand-clients rocrand-dev rocrand-tests rocrand
+
+test:rocm-package:
+  tags:
+    - rocm
+  extends:
+    - .rocm:cmake-minimum
+    - .test:package
+  needs:
+    - build:rocm-cmake-minimum
+
+test:nvcc-package:
+  tags:
+    - nvcc
+  extends:
+    - .nvcc:cmake-minimum
+    - .test:package
+  needs:
+    - build:nvcc-cmake-minimum
+
+test:cpp-wrapper:
+  stage: test
+  extends:
+    - .rocm:cmake-minimum
+    - .rules:test
+  needs:
+    - build:rocm-cmake-minimum
+  script:
+    - cd $CI_PROJECT_DIR/build
+    - $SUDO_CMD dpkg -i rocrand*.deb
+    - cmake
+      -S $CI_PROJECT_DIR/test/cpp_wrapper/
+      -B $CI_PROJECT_DIR/build_cpp_wrapper_test
+    - cmake --build $CI_PROJECT_DIR/build_cpp_wrapper_test
+    - cd $CI_PROJECT_DIR/build_cpp_wrapper_test
+    - ctest --output-on-failure
+    - $SUDO_CMD dpkg -r rocrand-benchmarks rocrand-clients rocrand-dev rocrand-tests rocrand
+
+.test:install:
+  stage: test
+  extends:
+    - .rules:test
+  script:
+    - cmake
+      -S $CI_PROJECT_DIR
+      -B $CI_PROJECT_DIR/build_only_install
+      -D BUILD_TEST=OFF
+      -D BUILD_FORTRAN_WRAPPER=OFF
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CUDA_COMPILER_LAUNCHER=phc_sccache_cuda
+    # Preserve $PATH when sudoing
+    - $SUDO_CMD env PATH="$PATH" cmake --build $CI_PROJECT_DIR/build_only_install --target install
+    - cmake
+      -S $CI_PROJECT_DIR/test/package/
+      -B $CI_PROJECT_DIR/install_test
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+    - cmake --build $CI_PROJECT_DIR/install_test
+    - cd $CI_PROJECT_DIR/install_test
+    - ctest --output-on-failure
+
+test:rocm-install:
+  tags:
+    - rocm
+  extends:
+    - .rocm:cmake-minimum
+    - .test:install
+  needs: []
+
+test:nvcc-install:
+  tags:
+    - nvcc
+  extends:
+    - .nvcc:cmake-minimum
+    - .test:install
+  needs: []
+
+test:doc:
+  stage: test
+  variables:
+    SPHINX_DIR: $DOCS_DIR/sphinx
+  extends:
+    - .rules:test
+    - .build:docs
+  artifacts:
+    paths:
+      - $DOCS_DIR/_build/html/
+    expire_in: 2 weeks
+
+.test:parity:
+  stage: test
+  extends:
+    - .rules:test
+  script:
+    - cd $CI_PROJECT_DIR/build
+    - $SUDO_CMD dpkg -i rocrand*.deb
+    - cmake
+      -S $CI_PROJECT_DIR/test/parity
+      -B $CI_PROJECT_DIR/build_parity_test
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+    - cmake --build $CI_PROJECT_DIR/build_parity_test
+    - $CI_PROJECT_DIR/build_parity_test/test_rocrand_parity | tee $CI_PROJECT_DIR/build_parity_test/parity-test-results.csv
+    - $SUDO_CMD dpkg -r rocrand-benchmarks rocrand-clients rocrand-dev rocrand-tests rocrand
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/build_parity_test/parity-test-results.csv
+    expire_in: 2 weeks
+
+test:nvcc-parity:
+  tags:
+    - nvcc
+  extends:
+    - .nvcc:cmake-minimum
+    - .test:parity
+    - .gpus:nvcc
+  needs:
+    - build:nvcc-cmake-minimum
+  before_script:
+    - !reference [".nvcc:cmake-minimum", before_script]
+
+.build:windows:
+  extends:
+    - .rules:test
+    - .gpus:rocm-windows
+    - .deps:rocm-windows
+    - .deps:visual-studio-devshell
+  variables:
+    BUILD_SHARED_LIBS: "ON"
+  script:
+    # *>&1 redirects all streams to standard output
+    # otherwise the runner won't capture e.g. the compiler errors
+    # Configure rocRAND
+    - cmake
+      -S "$CI_PROJECT_DIR"
+      -B "$CI_PROJECT_DIR/build"
+      -G Ninja
+      -D AMDGPU_TARGETS=$GPU_TARGET
+      -D BUILD_BENCHMARK=ON
+      -D BUILD_FORTRAN_WRAPPER=OFF
+      -D BUILD_SHARED_LIBS="$BUILD_SHARED_LIBS"
+      -D BUILD_TEST=ON
+      -D CMAKE_BUILD_TYPE=Release
+      -D CMAKE_CXX_COMPILER:FILEPATH="${env:HIP_PATH}/bin/clang++.exe"
+      -D CMAKE_CXX_FLAGS="-Wno-ignored-attributes"
+      -D CMAKE_INSTALL_PREFIX:PATH="$CI_PROJECT_DIR/build/install"
+      -D CMAKE_PREFIX_PATH:PATH="${env:HIP_PATH}/lib/cmake"
+      -D DISABLE_WERROR=OFF
+      -D CMAKE_CXX_STANDARD=17 *>&1
+    # Building
+    - cmake --build "$CI_PROJECT_DIR/build" *>&1
+
+build:windows-static:
+  stage: build
+  needs: []
+  extends: .build:windows
+  variables:
+    BUILD_SHARED_LIBS: "OFF"
+
+test:windows:
+  stage: test
+  needs: []
+  extends: .build:windows
+  script:
+    - !reference [".build:windows", script]
+    # Running test suite
+    - ctest --test-dir "$CI_PROJECT_DIR/build" -C $CMAKE_BUILD_TYPE --output-on-failure *>&1
+    # Installing
+    - cmake --build "$CI_PROJECT_DIR/build" --target install *>&1
+    # Configure package test
+    - cmake
+      -S "$CI_PROJECT_DIR/test/package/"
+      -B "$CI_PROJECT_DIR/build_install_test"
+      -G Ninja
+      -D CMAKE_BUILD_TYPE=Release
+      -D CMAKE_CXX_COMPILER:FILEPATH="${env:HIP_PATH}/bin/clang++.exe"
+      -D CMAKE_PREFIX_PATH:FILEPATH="${env:HIP_PATH}/lib/cmake;$CI_PROJECT_DIR/build/install" *>&1
+      -D CMAKE_CXX_STANDARD=17
+    # Build package test
+    - cmake --build "$CI_PROJECT_DIR/build_install_test"
+    # Copy rocRAND.dll to the package test build directory
+    - cmake -E copy "$CI_PROJECT_DIR/build/install/bin/rocRAND.dll" "$CI_PROJECT_DIR/build_install_test" *>&1
+    - cmake -E copy "$CI_PROJECT_DIR/build/_deps/googlebenchmark-build/src/benchmark.dll" "$CI_PROJECT_DIR/build_install_test" *>&1
+    - cmake -E copy "$CI_PROJECT_DIR/build/_deps/googlebenchmark-build/src/benchmark_main.dll" "$CI_PROJECT_DIR/build_install_test" *>&1
+    # Run package test
+    - ctest --test-dir "$CI_PROJECT_DIR/build_install_test" -C $CMAKE_BUILD_TYPE --output-on-failure *>&1
+
+.statistical-test:
+  stage: test
+  needs:
+    - build:rocm-cmake-minimum
+  extends:
+    - .rocm:cmake-minimum
+  variables:
+    ROCRAND_STAT_TESTS_GIT_BRANCH: "develop_stream"
+    ROCRAND_STAT_TESTS_DIR: ${CI_PROJECT_DIR}/rocrand-statistical-tests
+    LOGS_DIR: ${CI_PROJECT_DIR}/logs
+  script:
+    - $SUDO_CMD apt-get update -qq
+    - $SUDO_CMD apt-get install -y -qq python3
+    - cd $CI_PROJECT_DIR/build
+    - $SUDO_CMD dpkg -i rocrand_*.deb rocrand-dev*.deb
+    - cd $CI_PROJECT_DIR
+    - git clone -b ${ROCRAND_STAT_TESTS_GIT_BRANCH} https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCRAND_STAT_TESTS_GIT_URL}
+    - cmake
+      -S ${ROCRAND_STAT_TESTS_DIR}
+      -B ${ROCRAND_STAT_TESTS_DIR}/build
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CXX_STANDARD=17
+    - cmake --build ${ROCRAND_STAT_TESTS_DIR}/build
+    - mkdir ${LOGS_DIR}
+    - cd ${ROCRAND_STAT_TESTS_DIR}/build
+    - nproc
+  artifacts:
+    paths:
+      - ${LOGS_DIR}/*
+    expire_in: 3 months
+
+# TestU01 SmallCrush, 10 tests, 15 statistics, takes about 5 seconds
+statistical-test:crush-small:
+  tags:
+    - rocm
+  extends:
+    - .statistical-test
+    - .rules:manual
+  script:
+    - !reference [".statistical-test", script]
+    - python3 -u run_crush.py --logs_dir ${LOGS_DIR} --battery small |& tee ${LOGS_DIR}/summary-crush-small.log
+
+# TestU01 Crush, 96 tests, 144 statistics, takes about 30 minutes
+statistical-test:crush-medium:
+  tags:
+    - rocm
+    - big-parallel
+  extends:
+    - .statistical-test
+    - .rules:manual
+  script:
+    - !reference [".statistical-test", script]
+    - python3 -u run_crush.py --logs_dir ${LOGS_DIR} --battery medium |& tee ${LOGS_DIR}/summary-crush-medium.log
+
+# TestU01 BigCrush, 116 tests, 160 statistics, takes about 3 hours
+statistical-test:crush-big:
+  tags:
+    - rocm
+    - big-parallel
+  extends:
+    - .statistical-test
+    - .rules:manual
+  timeout: 8h
+  script:
+    - !reference [".statistical-test", script]
+    - python3 -u run_crush.py --logs_dir ${LOGS_DIR} --battery big |& tee ${LOGS_DIR}/summary-crush-big.log
+
+# Dieharder, 114 tests, takes about 25 minutes
+statistical-test:dieharder:
+  extends:
+    - .statistical-test
+    - .rules:manual
+  script:
+    - !reference [".statistical-test", script]
+    - $SUDO_CMD apt-get install -y -qq dieharder
+    - python3 -u run_dieharder.py --logs_dir ${LOGS_DIR} |& tee ${LOGS_DIR}/summary-dieharder.log
+
+# Distribution tests: Pearson, Anderson-Darling, Kolmogorov-Smirnov
+statistical-test:distributions:
+  extends:
+    - .statistical-test
+    - .rules:test
+    - .gpus:rocm
+  script:
+    - !reference [".statistical-test", script]
+    - ./test_distributions_generate --engine all --dis all --runs 100 |& tee ${LOGS_DIR}/summary-distributions.log

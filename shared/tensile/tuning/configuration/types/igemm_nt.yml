@@ -1,0 +1,13 @@
+BenchmarkProblems:
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: 4xi8
+      DestDataType: I
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True

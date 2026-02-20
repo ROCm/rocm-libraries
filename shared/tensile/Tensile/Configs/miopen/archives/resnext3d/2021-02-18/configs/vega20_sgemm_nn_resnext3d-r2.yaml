@@ -1,0 +1,77 @@
+GlobalParameters: {CMakeBuildType: Release, DataInitTypeAB: 0, DataInitTypeBeta: 0, Device: 0, EnqueuesPerSync: 1, ForceRedoBenchmarkProblems: true, ForceRedoLibraryClient: true, ForceRedoLibraryLogic: true, KernelTime: true, LibraryPrintDebug: false, MergeFiles: true, MinimumRequiredVersion: 4.2.0, NewClient: 2, NumElementsToValidate: 0, PinClocks: false, Platform: 0, PrintSolutionRejectionReason: true, PrintWinnersOnly: 1, ShortNames: false, SleepPercent: 50, SolutionSelectionAlg: 1, SyncsPerBenchmark: 1, ValidationMaxToPrint: 4, ValidationPrintValids: false}
+BenchmarkProblems:
+- - {Batched: true, DataType: s, OperationType: GEMM, TransposeA: false, TransposeB: false,
+    UseBeta: true}
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    - KernelLanguage: [Assembly]
+    - LoopTail: [true]
+    - VectorWidth: [-1]
+    - FractionalLoad: [1]
+    - PrefetchLocalRead: [true]
+    - PrefetchGlobalRead: [true]
+    - TransposeLDS: [0]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [392, 256, 1, 3456, 392, 392, 392, 3456]
+      - Exact: [704, 256, 1, 6912, 704, 704, 704, 6912]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - WorkGroupMapping: [1, 8]
+    - DepthU: [8, 16, 24, 32]
+    - GlobalSplitU: [1, 8, 16]
+    - ThreadTile:
+      - [4, 4]
+      - [4, 6]
+      - [6, 4]
+      - [4, 8]
+      - [8, 4]
+      - [8, 8]
+    - WorkGroup:
+      - [16, 16, 1]
+      - [8, 16, 2]
+      - [16, 8, 2]
+      - [8, 8, 4]
+    InitialSolutionParameters: null
+    JoinParameters: null
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    - KernelLanguage: [Assembly]
+    - LoopTail: [true]
+    - VectorWidth: [-1]
+    - FractionalLoad: [1]
+    - PrefetchLocalRead: [true]
+    - PrefetchGlobalRead: [true]
+    - TransposeLDS: [0]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [43520, 64, 1, 441, 43520, 43520, 43520, 441]
+      - Exact: [43520, 64, 1, 1728, 43520, 43520, 43520, 1728]
+      - Exact: [5504, 128, 1, 1728, 5504, 5504, 5504, 1728]
+      - Exact: [25088, 64, 1, 441, 25088, 25088, 25088, 441]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - WorkGroupMapping: [1, 8]
+    - DepthU: [8, 16, 24, 32]
+    - GlobalSplitU: [1, 2]
+    - ThreadTile:
+      - [4, 4]
+      - [6, 4]
+      - [4, 6]
+      - [4, 8]
+      - [8, 4]
+      - [8, 8]
+    - WorkGroup:
+      - [16, 16, 1]
+      - [16, 8, 2]
+      - [8, 16, 2]
+      - [8, 8, 4]
+    InitialSolutionParameters: null
+    JoinParameters: null
+LibraryLogic:
+  ArchitectureName: gfx906
+  DeviceNames: [Device 66a0, Device 66a1, Device 66a7, Device 66af, Vega 20]
+  ScheduleName: vega20
+LibraryClient:

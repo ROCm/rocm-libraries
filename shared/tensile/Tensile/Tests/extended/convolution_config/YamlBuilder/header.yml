@@ -1,0 +1,16 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  #CMakeBuildType: Debug
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 1000
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  KernelTime: True
+  SolutionSelectionAlg: 1

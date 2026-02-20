@@ -1,0 +1,107 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &small_N_incx_incy_range
+    - { incx: [1,8], incy: [1,3] }
+  - &large_N_incx_incy_range
+    - { incx: [1,2], incy: [1,2] }
+
+  - &small_N_size_t_incx_incy
+    # these had failed on async due to hipMemcpy2DAsync pitch limit, added back as fixed
+    - { N: 3, incx: *c_pos_x2_overflow_int32, incy: 1 }
+    - { N: 3, incy: *c_pos_x2_overflow_int32, incx: 1 }
+
+  - &size_t_N_incx_incy
+    - { N: *c_pos_x32_overflow_int32, incx: 32, incy: 1 }
+    - { N: *c_pos_x32_overflow_int32, incx: 1, incy: 32 }
+
+Tests:
+- name: set_get_vector_bad_dev_ptr
+  category: quick
+  precision: *single_precision
+  algo: 1
+  arguments:
+    - { N: 1, incx: 1, incy: 1 }
+  function:
+  - set_get_vector
+  - set_get_vector_async
+
+- name: set_get_vector_bad_args
+  category: quick
+  precision: *single_precision
+  arguments:
+    - { N:  0, incx: 1, incy: 1 }
+    - { N: -1, incx: 1, incy: 1 }
+    - { N:  1, incx: 0, incy: 1 }
+    - { N:  1, incx: 1, incy: 0 }
+  function:
+  - set_get_vector
+  - set_get_vector_async
+
+- name: auxiliary_1
+  category: quick
+  precision: *single_double_precisions
+  N: [ 4, 601 ]
+  incx_incy: *small_N_incx_incy_range
+  ldd:  1..3 # used for device memory layout of intermediate test results
+  function:
+  - set_get_vector
+  - set_get_vector_async
+
+- name: auxiliary_2
+  category: pre_checkin
+  precision: *single_double_precisions
+  N: [ 50003 ]
+  incx_incy: *large_N_incx_incy_range
+  ldd: [1,3]
+  function:
+  - set_get_vector
+  - set_get_vector_async
+
+- name: auxiliary
+  category: nightly
+  precision: *single_double_precisions
+  N: [ 100000, 600000 ]
+  incx_incy: *large_N_incx_incy_range
+  ldd: [1,3]
+  function:
+  - set_get_vector
+  - set_get_vector_async
+  os_flags: LINUX # windows TODO perf tickets
+
+- name: auxiliary_size_t
+  category: stress
+  precision: *single_precision
+  incx_incy: *small_N_size_t_incx_incy
+  ldd: [3, *c_pos_x2_overflow_int32]
+  function:
+  - set_get_vector
+  - set_get_vector_async
+
+- name: auxiliary_size_t
+  category: stress
+  precision: *single_precision
+  incx_incy: *size_t_N_incx_incy
+  ldd: [1, 32]
+  function:
+  - set_get_vector
+  - set_get_vector_async
+  os_flags: LINUX
+
+- name: auxiliary_ILP64
+  category: stress
+  precision: *single_precision
+  arguments:
+    - { N: 2147483649, incx: 1, incy: 1, ldd: 1 }
+    - { N: 2, incx: 2147483649, incy: 2147483649, ldd: 1 }
+    - { N: 2, incx: 1, incy: 2147483649, ldd: 2147483649 }
+    - { N: 2, incx: 1, incy: 1, ldd: 2147483649 }
+  function:
+    - set_get_vector
+    - set_get_vector_async
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+
+...

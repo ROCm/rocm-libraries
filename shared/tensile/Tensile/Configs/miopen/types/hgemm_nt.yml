@@ -1,0 +1,12 @@
+BenchmarkProblems:
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True

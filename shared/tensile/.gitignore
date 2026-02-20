@@ -1,0 +1,69 @@
+*.pyc
+*.sw*
+*.xml
+*.vscode
+Tensile.egg-info
+build*
+dist
+.cache
+/*.yaml
+/*.txt
+/*log*
+
+0_Build
+1_BenchmarkProblems
+2_BenchmarkData
+3_LibraryLogic
+4_LibraryClient
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# vim tags
+tags
+.tags
+.*.swp
+
+# Editors
+.vscode
+
+# emacs temporary/backup files
+.\#*
+\#*\#
+*~
+
+# tox virtual environments
+.tox
+
+# Profiling files
+*.prof
+
+# Uncompressed HostLibraryTest libraries
+HostLibraryTests/configs/SolutionLibraries/*.dat
+HostLibraryTests/configs/SolutionLibraries/*.yaml

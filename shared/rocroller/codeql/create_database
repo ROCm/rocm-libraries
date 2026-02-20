@@ -1,0 +1,57 @@
+#!/bin/bash -ex
+
+################################################################################
+#
+# MIT License
+#
+# Copyright 2024-2025 AMD ROCm(TM) Software
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+################################################################################
+
+
+# export PATH=$PATH:/opt/codeql/codeql
+
+# Creates a CodeQL database based on our code in build/rr-database.
+# Unfortunately the DB cannot be incrementally rebuilt so the build dir should just be deleted if you want to
+# re-run based on code changes.
+
+DIR="codeql/build/"
+rm -rf "${DIR}rr-database-new/"
+rm -rf "${DIR}rr-build-new/"
+
+export CCACHE_DISABLE=1
+
+mkdir -p "${DIR}rr-database-new"
+mkdir -p "${DIR}rr-build-new"
+cmake --preset codeql -G Ninja -S . -B "${DIR}rr-build-new"
+
+codeql database create "${DIR}rr-database-new" --source-root="$(readlink -f .)" \
+  --codescanning-config=codeql/scanning.yml \
+  --language=cpp \
+  -j$(nproc) \
+  --search-path="${DIR}codeql-cli" \
+  --command="ninja" \
+  --working-dir="${DIR}rr-build-new"
+
+# Only overwrite old dirs at end
+rm -rf "${DIR}rr-database"
+rm -rf "${DIR}rr-build"
+mv -f "${DIR}rr-database-new" "${DIR}rr-database"
+mv -f "${DIR}rr-build-new" "${DIR}rr-build"

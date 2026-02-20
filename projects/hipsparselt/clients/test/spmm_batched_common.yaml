@@ -1,0 +1,88 @@
+Spmm Matrix Batched Sizes:
+  - &batched_algorithm_coverage_matrix_size_range
+    - { M:   128, N:    64, K:     8, lda:    64, ldb:    64, ldc:   129, ldd:   129 }
+    - { M:    64, N:    32, K:     8, lda:    64, ldb:    65, ldc:    66, ldd:    66 }
+    - { M:    32, N:    64, K:    16, lda:    65, ldb:    66, ldc:    67, ldd:    67 }
+
+  - &batched_small_matrix_size_range
+    - { M:     8, N:     8, K:     8, lda:     8, ldb:     8, ldc:     8, ldd:     8 }
+    - { M:    16, N:    16, K:    16, lda:    16, ldb:    16, ldc:    16, ldd:    16 }
+    - { M:    64, N:    64, K:    64, lda:    64, ldb:    64, ldc:    64, ldd:    64 }
+    - { M:   128, N:   128, K:   128, lda:   128, ldb:   128, ldc:   128, ldd:   128 }
+
+  - &batched_medium_matrix_size_range
+    - { M:   256, N:   256, K:   256, lda:   256, ldb:   256, ldc:   256, ldd:   256 }
+
+  - &batched_large_matrix_size_range
+    - { M:   512, N:   512, K:   512, lda:   512, ldb:   512, ldc:   512, ldd:   512 }
+
+  - &batched_deepbench_vec
+    - { M: 12544, N:    64, K:    64, lda: 12544, ldb:    64, ldc: 12544, ldd: 12544 }
+    - { M:  3136, N:   256, K:    64, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136 }
+    - { M:  3136, N:    64, K:   256, lda:  3136, ldb:   256, ldc:  3136, ldd:  3136 }
+    - { M:   784, N:   128, K:   512, lda:   784, ldb:   512, ldc:   784, ldd:   784 }
+    - { M:   784, N:   512, K:   128, lda:   784, ldb:   128, ldc:   784, ldd:   784 }
+    - { M:   784, N:    64, K:   192, lda:   784, ldb:   192, ldc:   784, ldd:   784 }
+    - { M:   192, N:  1024, K:   256, lda:   192, ldb:  1024, ldc:   192, ldd:   192 }
+    - { M:   192, N:   256, K:  1024, lda:   192, ldb:   256, ldc:   192, ldd:   192 }
+    - { M:   192, N:   256, K:   256, lda:   192, ldb:   256, ldc:   192, ldd:   192 }
+    - { M:   192, N:   512, K:   192, lda:   192, ldb:   512, ldc:   192, ldd:   192 }
+    - { M:  3136, N:   256, K:    64, lda:  3136, ldb:   256, ldc:  3136, ldd:  3136 }
+    - { M:  3136, N:    64, K:   256, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136 }
+    - { M:    48, N:  2048, K:   512, lda:    48, ldb:  2048, ldc:    48, ldd:    48 }
+    - { M:    48, N:   512, K:  2048, lda:    48, ldb:   512, ldc:    48, ldd:    48 }
+    - { M:    48, N:   512, K:   512, lda:    48, ldb:   512, ldc:    48, ldd:    48 }
+    - { M:    48, N:   832, K:   256, lda:    48, ldb:   832, ldc:    48, ldd:    48 }
+    - { M:   784, N:   128, K:   512, lda:   784, ldb:   128, ldc:   784, ldd:   784 }
+    - { M:   784, N:   192, K:    64, lda:   784, ldb:   192, ldc:   784, ldd:   784 }
+    - { M:   784, N:   512, K:   128, lda:   784, ldb:   512, ldc:   784, ldd:   784 }
+
+  - &batched_conv_resnet50_fwd
+    - { M:  3024, N:    64, K:   256, lda:  3024, ldb:   256, ldc:  3024, ldd:  3024 }
+    - { M:  3024, N:   256, K:    64, lda:  3024, ldb:    64, ldc:  3024, ldd:  3024 }
+
+  - &batched_conv_resnet50_bwddata
+    - { M:  3024, N:   256, K:    64, lda:  3024, ldb:   256, ldc:  3024, ldd:  3024 }
+    - { M:  3024, N:    64, K:   256, lda:  3024, ldb:    64, ldc:  3024, ldd:  3024 }
+    - { M:  3024, N:    64, K:    64, lda:  3024, ldb:    64, ldc:  3024, ldd:  3024 }
+    - { M:  3136, N:    64, K:    64, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136 }
+
+  - &batched_conv_inception4_fwd
+    - { M:  1224, N:   192, K:   384, lda:  1224, ldb:   384, ldc:  1224, ldd:  1224 }
+    - { M:  1224, N:    64, K:   384, lda:  1224, ldb:   384, ldc:  1224, ldd:  1224 }
+    - { M:  1224, N:    96, K:   384, lda:  1224, ldb:   384, ldc:  1224, ldd:  1224 }
+    - { M:   288, N:   128, K:  1024, lda:   288, ldb:  1024, ldc:   288, ldd:   288 }
+    - { M:   288, N:   192, K:  1024, lda:   288, ldb:  1024, ldc:   288, ldd:   288 }
+    - { M:   288, N:   256, K:  1024, lda:   288, ldb:  1024, ldc:   288, ldd:   288 }
+    - { M:   288, N:   384, K:  1024, lda:   288, ldb:  1024, ldc:   288, ldd:   288 }
+    - { M:  5328, N:    64, K:   160, lda:  5328, ldb:   160, ldc:  5328, ldd:  5328 }
+
+  - &batched_conv_inception4_bwddata
+    - { M:  1224, N:   384, K:   192, lda:  1224, ldb:   384, ldc:  1224, ldd:  1224 }
+    - { M:  1224, N:   384, K:    64, lda:  1224, ldb:   384, ldc:  1224, ldd:  1224 }
+    - { M:  1224, N:   384, K:    96, lda:  1224, ldb:   384, ldc:  1224, ldd:  1224 }
+    - { M:   288, N:  1024, K:   128, lda:   288, ldb:  1024, ldc:   288, ldd:   288 }
+    - { M:   288, N:  1024, K:   192, lda:   288, ldb:  1024, ldc:   288, ldd:   288 }
+    - { M:   288, N:  1024, K:   256, lda:   288, ldb:  1024, ldc:   288, ldd:   288 }
+    - { M:   288, N:  1024, K:   384, lda:   288, ldb:  1024, ldc:   288, ldd:   288 }
+    - { M:  5328, N:   160, K:    64, lda:  5328, ldb:   160, ldc:  5328, ldd:  5328 }
+    - { M:    64, N:  1536, K:   256, lda:    64, ldb:  1536, ldc:    64, ldd:    64 }
+    - { M:    64, N:  1536, K:   384, lda:    64, ldb:  1536, ldc:    64, ldd:    64 }
+
+  - &batched_conv_ctest_fwd
+    - { M: 12544, N:     8, K:    64, lda: 12544, ldb:    64, ldc: 12544, ldd: 12544 }
+    - { M:  3136, N:     8, K:   128, lda:  3136, ldb:   128, ldc:  3136, ldd:  3136 }
+    - { M:  3136, N:     8, K:   256, lda:  3136, ldb:   256, ldc:  3136, ldd:  3136 }
+    - { M:  3136, N:     8, K:    64, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136 }
+    - { M: 32768, N:     8, K:   480, lda: 32768, ldb:   480, ldc: 32768, ldd: 32768 }
+    - { M:   728, N:     8, K:    64, lda:   728, ldb:    64, ldc:   728, ldd:   728 }
+    - { M:   784, N:     8, K:   128, lda:   784, ldb:   128, ldc:   784, ldd:   784 }
+    - { M:   784, N:     8, K:   192, lda:   784, ldb:   192, ldc:   784, ldd:   784 }
+    - { M:   784, N:     8, K:   256, lda:   784, ldb:   256, ldc:   784, ldd:   784 }
+    - { M:   784, N:     8, K:   320, lda:   784, ldb:   320, ldc:   784, ldd:   784 }
+    - { M:   784, N:     8, K:   512, lda:   784, ldb:   512, ldc:   784, ldd:   784 }
+    - { M:   784, N:     8, K:    64, lda:   784, ldb:    64, ldc:   784, ldd:   784 }
+    - { M:  8192, N:     8, K:   480, lda:  8192, ldb:   480, ldc:  8192, ldd:  8192 }
+    - { M:  8192, N:     8, K:   512, lda:  8192, ldb:   512, ldc:  8192, ldd:  8192 }
+    - { M:  8192, N:     8, K:   528, lda:  8192, ldb:   528, ldc:  8192, ldd:  8192 }
+    - { M:  8192, N:     8, K:   832, lda:  8192, ldb:   832, ldc:  8192, ldd:  8192 }

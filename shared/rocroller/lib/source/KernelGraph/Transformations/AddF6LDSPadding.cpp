@@ -1,0 +1,155 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright 2024-2025 AMD ROCm(TM) Software
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
+#include <rocRoller/CodeGen/Utils.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddF6LDSPadding.hpp>
+#include <rocRoller/KernelGraph/Visitors.hpp>
+
+namespace rocRoller
+{
+    namespace KernelGraph
+    {
+        inline bool isMatrixA(CoordinateGraph::MacroTile const& macTile)
+        {
+            return macTile.layoutType == LayoutType::MATRIX_A;
+        }
+
+        inline bool isMatrixB(CoordinateGraph::MacroTile const& macTile)
+        {
+            return macTile.layoutType == LayoutType::MATRIX_B;
+        }
+
+        CoordinateGraph::MacroTile paddedMacroTile(CoordinateGraph::MacroTile& macroTile,
+                                                   uint                        paddingBytes)
+        {
+            uint const elementBits = 6;
+            uint const packing     = 16;
+
+            auto fastMovingDim = isMatrixA(macroTile) ? 0 : 1;
+            auto padElements   = macroTile.sizes[fastMovingDim] / packing;
+
+            std::vector<uint> padBytesA = {padElements * paddingBytes, 0};
+            std::vector<uint> padBytesB = {0, padElements * paddingBytes};
+
+            return CoordinateGraph::MacroTile(macroTile,
+                                              isMatrixA(macroTile) ? padBytesA : padBytesB);
+        }
+
+        auto findCandidates(KernelGraph const& graph)
+        {
+            auto isLoadLDSTileOfTransposedTile = [&](int tag) {
+                auto load = graph.control.get<ControlGraph::LoadLDSTile>(tag);
+                if(!load)
+                    return false;
+
+                auto [macTileTag, macTile] = graph.getDimension<CoordinateGraph::MacroTile>(tag);
+                auto elementBits           = DataTypeInfo::Get(load->varType).elementBits;
+
+                return elementBits == 6 && load->isTransposedTile
+                       && (isMatrixA(macTile) || isMatrixB(macTile));
+            };
+
+            return graph.control.findElements(isLoadLDSTileOfTransposedTile)
+                .to<std::unordered_set>();
+        }
+
+        KernelGraph AddF6LDSPadding::apply(KernelGraph const& graph)
+        {
+            auto const& arch = m_context->targetArchitecture();
+
+            auto candidates = findCandidates(graph);
+
+            // Return unchanged graph if padding is not needed or if no LoadLDSTile of transposed tile found.
+            if(!arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes)
+               || std::ranges::empty(candidates))
+            {
+                return graph;
+            }
+
+            const auto paddingBytes
+                = arch.GetCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
+
+            auto kgraph{graph};
+
+            std::unordered_set<int> visitedCoordinates;
+            for(auto tag : candidates)
+            {
+                auto connections = graph.mapper.getConnections(tag);
+                for(auto conn : connections)
+                {
+                    auto coordTag = conn.coordinate;
+
+                    if(visitedCoordinates.contains(coordTag))
+                        continue;
+                    visitedCoordinates.insert(coordTag);
+
+                    auto maybeLDS = graph.coordinates.get<CoordinateGraph::LDS>(coordTag);
+                    if(maybeLDS)
+                    {
+                        auto ldsTag = coordTag;
+
+                        for(auto conn : graph.mapper.getCoordinateConnections(ldsTag))
+                        {
+                            auto coordTag   = conn.coordinate;
+                            auto controlTag = conn.control;
+
+                            auto storeLDSTile
+                                = graph.control.get<ControlGraph::StoreLDSTile>(controlTag);
+                            if(storeLDSTile)
+                            {
+                                auto storeLDSTileTag{controlTag};
+                                auto [macroTileTag, macroTile]
+                                    = graph.getDimension<CoordinateGraph::MacroTile>(
+                                        storeLDSTileTag);
+
+                                Log::debug("Padding Tile {}", macroTileTag);
+                                kgraph.coordinates.setElement(
+                                    macroTileTag, paddedMacroTile(macroTile, paddingBytes));
+
+                                for(auto conn : graph.mapper.getConnections(storeLDSTileTag))
+                                {
+                                    auto maybeMacroTile
+                                        = graph.coordinates.get<CoordinateGraph::MacroTile>(
+                                            conn.coordinate);
+                                    if(maybeMacroTile)
+                                    {
+                                        Log::debug("Padding Tile {}", conn.coordinate);
+
+                                        kgraph.coordinates.setElement(
+                                            conn.coordinate,
+                                            paddedMacroTile(*maybeMacroTile, paddingBytes));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return kgraph;
+        }
+    }
+}

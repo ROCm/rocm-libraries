@@ -1,0 +1,377 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  NumWarmups: 0
+  NumBenchmarks: 1
+  SyncsPerBenchmark: 1
+  EnqueuesPerSync: 1
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  # DataInitTypeBias: 0
+  # DataInitTypeScaleAlphaVec: 1
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+  UseUserArgs: True
+
+BenchmarkProblems:
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataTypeA: f8n
+      DataTypeB: h
+      UseScaleAB: "Scalar"
+
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+
+      UseBias: 1
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 1
+
+      GroupedGemm: True
+      SupportUserArgs: True
+    - # BenchmarkProblemSizeGroup - Standard
+      CustomKernels:
+        [
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname0_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname1_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname2_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname3_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname4_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname5_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname6_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname7_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname8_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname9_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname10_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname11_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname12_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname13_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname14_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname15_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname16_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname17_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname18_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname19_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname20_gfx942",
+        ]
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   8, 8,  2,2 ] # 256x256 (Occupancy 1)
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - 1LDSBuffer: [-1]
+        - StoreRemapVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+        - NumElementsPerBatchStore: [16]
+        - ClusterLocalRead: [1]
+        - PreloadKernArgs: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [240, 256, 1, 256]
+          - Exact: [272, 256, 1, 256]
+          - Exact: [256, 255, 1, 256]
+          - Exact: [256, 257, 1, 256]
+          - Exact: [256, 383, 1, 256]
+          - Exact: [256, 384, 1, 256]
+          - Exact: [256, 385, 1, 256]
+          - Exact: [256, 351, 1, 256]
+          - Exact: [256, 352, 1, 256]
+          - Exact: [256, 353, 1, 256]
+          - Exact: [256, 319, 1, 256]
+          - Exact: [256, 320, 1, 256]
+          - Exact: [256, 321, 1, 256]
+          # - Exact: [256, 512, 1, 255]
+          # - Exact: [256, 768, 1, 257]
+        - BiasTypeArgs: ['s']
+
+        - ActivationArgs:
+          # - [Enum: none]
+          - [Enum: Relu]
+          # - [Enum: Gelu]
+
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataTypeA: f8n
+      DataTypeB: h
+      UseScaleAB: "Scalar"
+
+      DataType: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+
+      UseBias: 1
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 1
+
+      GroupedGemm: True
+      SupportUserArgs: True
+    - # BenchmarkProblemSizeGroup - Standard
+      CustomKernels:
+        [
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname0_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname1_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname2_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname3_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname4_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname5_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname6_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname7_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname8_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname9_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname10_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname11_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname12_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname13_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname14_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname15_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname16_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname17_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname18_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname19_gfx942",
+          "Custom_Cijk_Ailk_Bljk_F8NH_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname20_gfx942",
+        ]
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   8, 8,  2,2 ] # 256x256 (Occupancy 1)
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - 1LDSBuffer: [-1]
+        - StoreRemapVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+        - NumElementsPerBatchStore: [16]
+        - ClusterLocalRead: [1]
+        - PreloadKernArgs: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [240, 256, 1, 256]
+          - Exact: [272, 256, 1, 256]
+          - Exact: [256, 255, 1, 256]
+          - Exact: [256, 257, 1, 256]
+          - Exact: [256, 383, 1, 256]
+          - Exact: [256, 384, 1, 256]
+          - Exact: [256, 385, 1, 256]
+          - Exact: [256, 351, 1, 256]
+          - Exact: [256, 352, 1, 256]
+          - Exact: [256, 353, 1, 256]
+          - Exact: [256, 319, 1, 256]
+          - Exact: [256, 320, 1, 256]
+          - Exact: [256, 321, 1, 256]
+          # - Exact: [256, 512, 1, 255]
+          # - Exact: [256, 768, 1, 257]
+        - BiasTypeArgs: ['s']
+
+        - ActivationArgs:
+          # - [Enum: none]
+          - [Enum: Relu]
+          # - [Enum: Gelu]
+  -
+    - # ProblemType
+      OperationType: GEMM
+
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+
+      UseBias: 1
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 1
+
+      GroupedGemm: True
+      SupportUserArgs: True
+    - # BenchmarkProblemSizeGroup - Standard
+      CustomKernels:
+        [
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname0_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname1_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname2_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname3_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname4_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname5_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname6_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname7_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname8_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname9_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname10_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname11_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname12_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname13_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname14_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname15_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname16_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname17_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname18_gfx942",
+        ]
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   8, 8,  2,2 ] # 256x256 (Occupancy 1)
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - 1LDSBuffer: [-1]
+        - StoreRemapVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+        - NumElementsPerBatchStore: [16]
+        - ClusterLocalRead: [1]
+        - PreloadKernArgs: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [240, 256, 1, 256]
+          - Exact: [272, 256, 1, 256]
+          - Exact: [256, 255, 1, 256]
+          - Exact: [256, 257, 1, 256]
+          - Exact: [256, 383, 1, 256]
+          - Exact: [256, 384, 1, 256]
+          - Exact: [256, 385, 1, 256]
+          - Exact: [256, 351, 1, 256]
+          - Exact: [256, 352, 1, 256]
+          - Exact: [256, 353, 1, 256]
+          - Exact: [256, 319, 1, 256]
+          - Exact: [256, 320, 1, 256]
+          - Exact: [256, 321, 1, 256]
+          # - Exact: [256, 512, 1, 255]
+          # - Exact: [256, 768, 1, 257]
+        - BiasTypeArgs: ['s']
+
+        - ActivationArgs:
+          # - [Enum: none]
+          - [Enum: Relu]
+          # - [Enum: Gelu]
+
+  -
+    - # ProblemType
+      OperationType: GEMM
+
+      DataType: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+
+      UseBias: 1
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 1
+
+      GroupedGemm: True
+      SupportUserArgs: True
+    - # BenchmarkProblemSizeGroup - Standard
+      CustomKernels:
+        [
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname0_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname1_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname2_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname3_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname4_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname5_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname6_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname7_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname8_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname9_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname10_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname11_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname12_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname13_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname14_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname15_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname16_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname17_gfx942",
+          "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname18_gfx942",
+        ]
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   8, 8,  2,2 ] # 256x256 (Occupancy 1)
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - 1LDSBuffer: [-1]
+        - StoreRemapVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+        - NumElementsPerBatchStore: [16]
+        - ClusterLocalRead: [1]
+        - PreloadKernArgs: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [240, 256, 1, 256]
+          - Exact: [272, 256, 1, 256]
+          - Exact: [256, 255, 1, 256]
+          - Exact: [256, 257, 1, 256]
+          - Exact: [256, 383, 1, 256]
+          - Exact: [256, 384, 1, 256]
+          - Exact: [256, 385, 1, 256]
+          - Exact: [256, 351, 1, 256]
+          - Exact: [256, 352, 1, 256]
+          - Exact: [256, 353, 1, 256]
+          - Exact: [256, 319, 1, 256]
+          - Exact: [256, 320, 1, 256]
+          - Exact: [256, 321, 1, 256]
+          # - Exact: [256, 512, 1, 255]
+          # - Exact: [256, 768, 1, 257]
+        - BiasTypeArgs: ['s']
+
+        - ActivationArgs:
+          # - [Enum: none]
+          - [Enum: Relu]
+          # - [Enum: Gelu]
+
+LibraryLogic:
+    ScheduleName: "aquavanjaram"
+    DeviceNames: ["Device 0049", "Device 0050"]
+    ArchitectureName: "gfx942"

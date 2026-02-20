@@ -1,0 +1,198 @@
+# ########################################################################
+# Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+# Quick
+- name: gtsv
+  category: quick
+  function: gtsv
+  precision: *single_double_precisions_complex_real
+  M: [8, 16]
+  N: [4, 5]
+  denseld: [16, 32, 64, 128, 256, 512]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv
+  category: quick
+  function: gtsv
+  precision: *single_double_precisions_complex_real
+  M: [7, 18]
+  N: [4, 5]
+  denseld: [18, 39, 61, 122, 253, 514]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv
+  category: quick
+  function: gtsv
+  precision: *single_double_precisions_complex_real
+  M: [8, 11]
+  N: [4, 5]
+  denseld: [32, 230, 768]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv
+  category: quick
+  function: gtsv
+  precision: *single_double_precisions_complex_real
+  M: [300]
+  N: [54, 78]
+  denseld: [800]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv
+  category: quick
+  function: gtsv
+  precision: *single_double_precisions_complex_real
+  M: [2, 4, 8, 16]
+  N: [300]
+  denseld: [800]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv
+  category: quick
+  function: gtsv
+  precision: *single_double_precisions_complex_real
+  M: [3, 5, 11, 20]
+  N: [300]
+  denseld: [800, 2000, 2600]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv
+  category: quick
+  function: gtsv
+  precision: *single_double_precisions_complex_real
+  M: [300, 556, 1068, 2092, 4140, 8236]
+  N: [8]
+  denseld: [8236]
+  matrix: [rocsparse_matrix_random]
+
+# Pre-checkin
+- name: gtsv_bad_arg
+  category: pre_checkin
+  function: gtsv_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: gtsv
+  category: pre_checkin
+  function: gtsv
+  precision: *single_double_precisions
+  M: [2, 720]
+  N: [1, 8]
+  denseld: [1000, 2000, 3000]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv
+  category: pre_checkin
+  function: gtsv
+  precision: *single_double_precisions
+  M: [1720, 2000]
+  N: [2, 4]
+  denseld: [2000, 4000, 6000]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv
+  category: pre_checkin
+  function: gtsv
+  precision: *double_only_precisions
+  M: [2000, 2048]
+  N: [2, 4]
+  denseld: [131072, 262144, 524288, 1048576]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv
+  category: pre_checkin
+  function: gtsv
+  precision: *double_only_precisions
+  M: [131072]
+  N: [2, 4]
+  denseld: [131079, 262148, 524287, 1048575]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_graph_test
+  category: pre_checkin
+  function: gtsv
+  precision: *single_double_precisions
+  M: [7, 18]
+  N: [4, 5]
+  denseld: [18, 39, 61, 122, 253, 514]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+
+- name: gtsv
+  category: pre_checkin
+  function: gtsv
+  precision: *single_double_precisions_complex_real
+  M: [16940, 32812, 65580, 131116, 262188]
+  N: [20]
+  denseld: [262188]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv
+  category: pre_checkin
+  function: gtsv
+  precision: *single_double_precisions_complex_real
+  M: [524288, 1048576, 2097152, 4194304, 8388608]
+  N: [3]
+  denseld: [8388608]
+  matrix: [rocsparse_matrix_random]
+
+# Nightly
+- name: gtsv
+  category: nightly
+  function: gtsv
+  precision: *single_double_precisions
+  M: [3452, 4787]
+  N: [3, 5]
+  denseld: [30000, 50000, 90000]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv
+  category: nightly
+  function: gtsv
+  precision: *single_double_precisions
+  M: [3276, 4789]
+  N: [1, 2]
+  denseld: [30000, 40000, 50000]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv
+  category: nightly
+  function: gtsv
+  precision: *double_only_precisions
+  M: [5000]
+  N: [3, 4]
+  denseld: [300000, 500000, 900000]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv
+  category: nightly
+  function: gtsv
+  precision: *double_only_precisions
+  M: [5000]
+  N: [3, 7]
+  denseld: [300000, 500000, 900000]
+  matrix: [rocsparse_matrix_random]

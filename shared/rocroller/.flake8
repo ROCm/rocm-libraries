@@ -1,0 +1,16 @@
+[flake8]
+filename = *.py,
+    **/scripts/benchmark_tensile,
+    **/scripts/fix-format,
+    **/scripts/rrperf
+    **/scripts/show_matrix,
+    **/docker/user-image/start_user_container
+
+exclude = scripts/build*, build*, extern, .git, .pytest_cache, __pycache__, .venv
+ignore = W503
+max-line-length = 127
+max-complexity = 10
+extend-ignore = E203,E701
+count = true
+show-source = true
+statistics = true

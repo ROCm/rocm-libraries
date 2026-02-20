@@ -1,0 +1,9 @@
+/CHANGELOG.md merge=union
+*.pdf binary
+*.doc binary
+*.docx binary
+*.ppt binary
+*.pptx binary
+*.xls binary
+*.xlsx binary
+*.xps binary

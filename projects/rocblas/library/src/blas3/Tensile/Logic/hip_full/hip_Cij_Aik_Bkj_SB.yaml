@@ -1,0 +1,66 @@
+- {MinimumRequiredVersion: 4.40.0}
+- hip
+- fallback
+- [Device 0000]
+- AllowNoFreeDims: false
+  AssignedDerivedParameters: true
+  Batched: false
+  ComplexConjugateA: false
+  ComplexConjugateB: false
+  ComputeDataType: 0
+  ConvolutionConfig: []
+  DataType: 0
+  DestDataType: 0
+  F32XdlMathOp: 0
+  Fp16AltImpl: false
+  Fp16AltImplRound: false
+  Fp32toFp8SWClip: true
+  Fp8NoPackUpConversion: false
+  HighPrecisionAccumulate: false
+  Index0: 0
+  Index01A: 0
+  Index01B: 1
+  Index1: 1
+  IndexAssignmentsA: [0, 2]
+  IndexAssignmentsB: [2, 1]
+  IndexAssignmentsLD: [3, 4, 5, 6]
+  IndexUnroll: 2
+  IndexUnrollA: 1
+  IndexUnrollB: 0
+  IndicesBatch: []
+  IndicesFree: [0, 1]
+  IndicesSummation: [2]
+  MirrorDimsA: []
+  MirrorDimsB: []
+  NumIndicesBatch: 0
+  NumIndicesC: 2
+  NumIndicesFree: 2
+  NumIndicesLD: 4
+  NumIndicesSummation: 1
+  OperationType: GEMM
+  SetConstStrideA: []
+  SetConstStrideB: []
+  SilentHighPrecisionAccumulate: false
+  StochasticRounding: false
+  StridedBatched: true
+  TLUA: true
+  TLUB: false
+  Tensor0: 0
+  Tensor1: 1
+  TileA: 0
+  TileAwareSelection: false
+  TileB: 1
+  TotalIndices: 3
+  TransposeA: false
+  TransposeB: false
+  UseBeta: true
+  UseInitialStridesAB: false
+  UseInitialStridesCD: false
+  ZeroPadA: []
+  ZeroPadB: []
+- []
+- [2, 0, 1]
+- []
+- null
+- null
+- DeviceEfficiency

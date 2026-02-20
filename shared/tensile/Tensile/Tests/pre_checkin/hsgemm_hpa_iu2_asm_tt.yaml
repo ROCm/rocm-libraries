@@ -1,0 +1,76 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  NumElementsToValidate: -1
+  BoundsCheck: True
+  KernelTime: True
+
+BenchmarkProblems:
+  - # hgemm TT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+        - InnerUnroll: [2]
+      ForkParameters:
+        - LocalDotLayout: [1, 2]
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [False]
+        - ThreadTile:
+          - [ 16, 4 ]
+          - [ 16, 8 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+          - [  8,  8,  1 ]
+        - DepthU: [32]
+        - VectorWidth: [-1]
+        - AssertSummationElementMultiple: [1,2]
+        - AssertFree0ElementMultiple: [1,2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [126,1,130], 0, [2], [62,1,66] ]
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+        - InnerUnroll: [2]
+      ForkParameters:
+        - LocalDotLayout: [1, 2]
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [False]
+        - ThreadTile:
+          - [ 8, 2 ]
+          - [ 2, 2 ]
+          - [ 4, 2 ]
+          - [ 8, 4 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+          - [  8,  8,  1 ]
+        - DepthU: [16]
+        - VectorWidth: [-1]
+        - AssertSummationElementMultiple: [1,2]
+        - AssertFree0ElementMultiple: [1,2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [126,1,130], 0, [2], [62,1,66] ]

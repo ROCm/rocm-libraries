@@ -1,0 +1,5 @@
+
+include: blas1_gtest.yaml
+include: blas2_gtest.yaml
+include: blas3_gtest.yaml
+include: aux_gtest.yaml

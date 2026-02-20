@@ -1,0 +1,51 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+- caption: Install
+  entries:
+  - file: installation/install.rst
+    title: Installation guide
+
+- caption: How to
+  entries:
+  - file: howto/usage.rst
+    title: Use hipSOLVER
+
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsolver/clients/samples
+    title: Client samples
+
+- caption: Reference
+  entries:
+  - file: reference/intro.rst
+  - file: reference/precision.rst
+  - file: reference/api/index.rst
+    entries:
+    - file: reference/api/types.rst
+    - file: reference/api/helpers.rst
+    - file: reference/api/auxiliary.rst
+    - file: reference/api/lapack.rst
+    - file: reference/api/lapacklike.rst
+  - file: reference/dense-api/index.rst
+    entries:
+    - file: reference/dense-api/types.rst
+    - file: reference/dense-api/helpers.rst
+    - file: reference/dense-api/auxiliary.rst
+    - file: reference/dense-api/lapack.rst
+    - file: reference/dense-api/lapacklike.rst
+  - file: reference/sparse-api/index.rst
+    entries:
+    - file: reference/sparse-api/types.rst
+    - file: reference/sparse-api/helpers.rst
+    - file: reference/sparse-api/sparse.rst
+  - file: reference/refactor-api/index.rst
+    entries:
+    - file: reference/refactor-api/types.rst
+    - file: reference/refactor-api/helpers.rst
+    - file: reference/refactor-api/refactor.rst
+
+- caption: About
+  entries:
+  - file: license.rst

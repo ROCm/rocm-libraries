@@ -1,0 +1,97 @@
+# Pre-commit (https://pre-commit.com) configuration for assorted lint checks.
+#
+# See https://pre-commit.com/hooks.html for more hooks.
+
+# Top level exclusions from all hooks. Some of these could be moved into more
+# specific exclusions like check-yaml and clang-format, but for large generated
+# files even simple hooks like trailing-whitespace can be expensive.
+#
+# Note the yaml multiline literal and (?x) regex flag used here, see
+# https://pre-commit.com/#regular-expressions.
+exclude: |
+  (?x)
+    # ==========================================================================
+    # Opted-out projects
+    # To opt-in, remove your project from the exclusions.
+    # See CONTRIBUTING.md for detailed instructions.
+    # ==========================================================================
+    projects/composablekernel/.*|
+    projects/hipblas/.*|
+    projects/hipblaslt/.*|
+    projects/hipblas-common/.*|
+    projects/hipcub/.*|
+    projects/hipfft/.*|
+    projects/hiprand/.*|
+    projects/hipsolver/.*|
+    projects/hipsparse/.*|
+    projects/hipsparselt/.*|
+    projects/hiptensor/.*|
+    projects/miopen/.*|
+    projects/rocblas/.*|
+    projects/rocfft/.*|
+    projects/rocprim/.*|
+    projects/rocsolver/.*|
+    projects/rocsparse/.*|
+    projects/rocthrust/.*|
+    projects/rocwmma/.*|
+    shared/mxdatagenerator/.*|
+    shared/origami/.*|
+    shared/rocroller/.*|
+    shared/tensile/.*|
+    # ==========================================================================
+    # Permanent exclusions
+    # ==========================================================================
+    # Binary files
+    projects/hipdnn/.*\.bin$|
+    # Generated hipDNN FlatBuffers headers
+    projects/hipdnn/data_sdk/include/hipdnn_data_sdk/data_objects/.*_generated\.h|
+    # Reference data
+    projects/hipdnn/hipdnn_reference_data/.*|
+    # Generated files (see rocrand/tools/ _generator.cpp files)
+    projects/rocrand/library/.*constants\.(cpp|h)|
+    projects/rocrand/library/.*precomputed\.(cpp|h)
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v3.2.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: |
+          (?x)
+          ^projects/hipdnn/\.clang-format$|
+          ^dnn-providers/miopen-provider/\.clang-format$|
+          ^dnn-providers/hipblaslt-provider/\.clang-format$
+      - id: check-added-large-files
+
+  - repo: https://github.com/psf/black
+    rev: 25.12.0
+    hooks:
+      - id: black
+        language_version: python3
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v18.1.4
+    hooks:
+      - id: clang-format
+        name: clang-format (C/C++/ObjC)
+        entry: clang-format -i -style=file
+        files: '\.(c|cpp|cc|h|hpp|m|mm)$'
+
+  - repo: local
+    hooks:
+      - id: flatc-hipdnn
+        name: flatc (hipDNN)
+        entry: python projects/hipdnn/scripts/run_flatc.py
+        language: python
+        files: ^projects/hipdnn/data_sdk/schemas/.*\.fbs$
+        pass_filenames: true
+
+  - repo: https://github.com/cheshirekow/cmake-format-precommit
+    rev: v0.6.10
+    hooks:
+      - id: cmake-lint
+      # cmake-format is disabled due to undesirable formatting.
+      # We can investigate changing the configuration before re-enabling or using an alternative tool.
+      # - id: cmake-format

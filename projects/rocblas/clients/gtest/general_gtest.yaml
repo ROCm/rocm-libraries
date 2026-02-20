@@ -1,0 +1,97 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+
+Half bfloat: &half_bfloat_precisions
+- *half_precision
+- *bf16_precision
+
+Tests:
+
+- name: half_operators
+  category: quick
+  function: half_operators
+  precision: *half_bfloat_precisions
+
+- name: complex_operators
+  category: quick
+  function: complex_operators
+  precision: *single_double_precisions_complex
+
+- name: helper_utilities
+  category: quick
+  function: helper_utilities
+  precision: *half_bfloat_single_double_complex_real_precisions
+
+- name : check_numerics_vector
+  category : quick
+  function : check_numerics_vector
+  N : [ 5 ]
+  incx : [ 1, 0, -2 ]
+  batch_count : [ 5 ]
+  stride_x : [ 0 ]
+  precision : *half_bfloat_single_double_complex_real_precisions
+
+- name : check_numerics_vector_ILP64
+  category : stress
+  function : check_numerics_vector
+  N : [ -1, 2147486720 ]
+  incx : [ 1 ]
+  batch_count : [ 1 ]
+  stride_x : [ 0 ]
+  precision : *half_precision
+  os_flags: [ LINUX ]
+
+- name : check_numerics_vector_ILP64
+  category : stress
+  function : check_numerics_vector
+  N : [ 1 ]
+  incx : [ 1 ]
+  batch_count : [ -1, *c_grid_yz_require_passes ]
+  stride_x : [ 0 ]
+  precision : *half_precision
+  os_flags: [ LINUX ]
+
+- name : check_numerics_matrix
+  category: quick
+  function:
+      - check_numerics_matrix
+      - check_numerics_matrix_batched
+  M : [ 5 ]
+  N : [ 3 ]
+  lda: 5
+  batch_count : [ 3 ]
+  stride_x : [ 0 ]
+  uplo: [ U, L ]
+  transA: [ T, N, C ]
+  precision : *half_bfloat_single_double_complex_real_precisions
+
+- name : check_numerics_matrix_ILP64
+  category : stress
+  function : check_numerics_matrix
+  M : [ *c_grid_x_require_passes ]
+  N : [ 1 ]
+  lda: *c_grid_x_require_passes
+  batch_count : [ 1 ]
+  stride_x : [ 0 ]
+  uplo: [ U ]
+  transA: [ N ]
+  precision : *half_precision
+  os_flags: [ LINUX ]
+
+- name : check_numerics_matrix_batched_ILP64
+  category : stress
+  function : check_numerics_matrix_batched
+  M : [ 3 ]
+  N : [ 3 ]
+  lda: 3
+  batch_count : [ *c_grid_yz_require_passes ]
+  stride_x : [ 0 ]
+  uplo: [ U ]
+  transA: [ T ]
+  precision : *half_precision
+  os_flags: [ LINUX ]
+
+...

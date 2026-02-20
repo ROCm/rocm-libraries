@@ -1,0 +1,78 @@
+################################################################################
+#
+# Copyright (C) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+################################################################################
+
+# This dockerfile is meant to be personalized, and serves as a template and demonstration.
+# Modify it directly, but it is recommended to copy this dockerfile into a new build context (directory),
+# modify to taste and modify docker-compose.yml.template to build and run it.
+
+# It is recommended to control docker containers through 'docker-compose' https://docs.docker.com/compose/
+# Docker compose depends on a .yml file to control container sets
+# rocm-setup.sh can generate a useful docker-compose .yml file
+# `docker-compose run --rm <rocm-terminal>`
+
+# If it is desired to run the container manually through the docker command-line, the following is an example
+# 'docker run -it --rm -v [host/directory]:[container/directory]:ro <user-name>/<project-name>'.
+
+FROM ubuntu:16.04
+MAINTAINER rocm-terminal-maintainer@amd.com
+
+# Initialize the image
+# Modify to pre-install dev tools and ROCm packages
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl && \
+  curl -sL http://repo.radeon.com/rocm/apt/debian/rocm.gpg.key | apt-key add - && \
+  sh -c 'echo deb [arch=amd64] http://repo.radeon.com/rocm/apt/debian/ xenial main > /etc/apt/sources.list.d/rocm.list' && \
+  apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+  sudo \
+  libelf1 \
+  libnuma-dev \
+  build-essential \
+  git \
+  vim-nox \
+  cmake-curses-gui \
+  rocm-dev && \
+  apt-get clean
+
+# Grant members of 'sudo' group passwordless privileges
+# Comment out to require sudo
+COPY sudo-nopasswd /etc/sudoers.d/sudo-nopasswd
+
+# This is meant to be used as an interactive developer container
+# Create user rocm-user as member of sudo group
+# Append /opt/rocm/bin to the system PATH variable
+#RUN useradd --create-home -G sudo --shell /bin/bash rocm-user
+#    sed --in-place=.rocm-backup 's|^\(PATH=.*\)"$|\1:/opt/rocm/bin"|' /etc/environment
+
+USER rocm-user
+WORKDIR /home/rocm-user
+ENV PATH "${PATH}:/opt/rocm/bin"
+
+# The following are optional enhancements for the command-line experience
+# Uncomment the following to install a pre-configured vim environment based on http://vim.spf13.com/
+# 1.  Sets up an enhanced command line dev environment within VIM
+# 2.  Aliases GDB to enable TUI mode by default
+#RUN curl -sL https://j.mp/spf13-vim3 | bash && \
+#    echo "alias gdb='gdb --tui'\n" >> ~/.bashrc
+
+# Default to a login shell
+CMD ["bash", "-l"]
