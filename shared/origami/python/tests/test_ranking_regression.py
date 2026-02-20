@@ -33,7 +33,7 @@ from helpers import HARDWARE, create_config_list, get_matrix_instructions
 BASELINE_DIR = Path(__file__).parent / "baselines" / "rankings"
 PROBLEM_DATA_FILE = Path(__file__).parent / "data" / "problem_data.csv"
 
-SUPPORTED_DTYPES = ["f16", "bf16", "f32"]
+SUPPORTED_DTYPES = ["f16", "bf16", "f32", "xf32", "f8"]
 TRANSPOSE_VALUES = [origami.transpose_t.T, origami.transpose_t.N]
 
 TOP_K = 5
