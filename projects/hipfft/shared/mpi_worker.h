@@ -23,7 +23,6 @@
 #include "fft_params.h"
 
 #include "CLI11.hpp"
-#include "environment.h"
 #include "fft_enums.h"
 #include "gpubuf.h"
 #include "hostbuf.h"
@@ -32,7 +31,6 @@
 #include "rocfft_hip.h"
 #include "test_callbacks.h"
 #include <chrono>
-#include <iostream>
 #include <mpi.h>
 #include <optional>
 #include <stdexcept>
@@ -818,15 +816,6 @@ int mpi_worker_main(const char*                                               de
 
     MPI_Comm_rank(mpi_comm, &mpi_rank);
     MPI_Comm_size(mpi_comm, &mp_size);
-
-    rocfft_setenv("ROCR_VISIBLE_DEVICES", std::to_string(mpi_rank).c_str());
-
-    int  num_dev = -1;
-    auto hip_ret = hipGetDeviceCount(&num_dev);
-    if(hip_ret != hipSuccess || num_dev <= 0)
-        throw std::runtime_error("Number of devices cannot be fetched (or no device is seen)");
-    if(num_dev > 1)
-        std::cerr << "WARNING: " << num_dev << " devices seen by rank " << mpi_rank << std::endl;
 
     CLI::App    app{description};
     size_t      ntrial = 1;
