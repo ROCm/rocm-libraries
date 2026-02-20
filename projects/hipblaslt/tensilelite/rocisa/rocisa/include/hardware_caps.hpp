@@ -446,10 +446,10 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
             // Code path for gfx115X
             if(isaVersion[2] == 0 || isaVersion[2] == 2 || isaVersion[2] == 3)
                 // gfx1150, gfx1152, gfx1153
-                rv["PhysicalMaxVgprCU"] = 1024 * 32;
+                rv["PhysicalMaxVgprCU"] = 2 /*two SIMDs per CU*/ * 1024 * 32;
             if(isaVersion[2] == 1)
                 // gfx1151
-                rv["PhysicalMaxVgprCU"] = 1536 * 32;
+                rv["PhysicalMaxVgprCU"] = 2 /*two SIMDs per CU*/ * 1536 * 32;
         }
         else if(isaVersion[2] == 2)
             rv["PhysicalMaxVgprCU"] = 1024 * 32;
