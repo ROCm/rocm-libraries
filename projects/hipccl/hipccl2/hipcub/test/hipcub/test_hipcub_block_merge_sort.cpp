@@ -155,6 +155,7 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeys)
                            0,
                            device_keys_output,
                            compare_function());
+        HIP_CHECK(hipGetLastError());
 
         // Getting results to host
         HIP_CHECK(hipMemcpy(keys_output.data(),
@@ -279,6 +280,7 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeysWithValidItems)
             compare_op,
             valid_items,
             default_val);
+        HIP_CHECK(hipGetLastError());
 
         HIP_CHECK(hipMemcpy(host_keys_output,
                             device_keys_input,
@@ -411,6 +413,7 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeysValues)
             device_keys_output,
             device_values_output,
             compare_op);
+        HIP_CHECK(hipGetLastError());
 
         // Getting results to host
         HIP_CHECK(hipMemcpy(keys_output.data(),
@@ -517,6 +520,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSort)
         0,
         device_input,
         compare_op);
+    HIP_CHECK(hipGetLastError());
 
     HIP_CHECK(
         hipMemcpy(host_input, device_input, sizeof(custom_type) * size, hipMemcpyDeviceToHost));
@@ -655,6 +659,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValues)
             device_keys_output,
             device_values_output,
             compare_op);
+        HIP_CHECK(hipGetLastError());
 
         // Getting results to host
         HIP_CHECK(hipMemcpy(keys_output.data(),
@@ -799,6 +804,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysWithValidItems)
             compare_op,
             valid_items,
             default_val);
+        HIP_CHECK(hipGetLastError());
 
         HIP_CHECK(hipMemcpy(host_keys_output,
                             device_keys_input,
@@ -964,6 +970,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValuesWithValidItems)
             compare_op,
             valid_items,
             default_val);
+        HIP_CHECK(hipGetLastError());
 
         HIP_CHECK(
             hipMemcpy(host_keys_input, device_keys_input, sizeof(T) * size, hipMemcpyDeviceToHost));

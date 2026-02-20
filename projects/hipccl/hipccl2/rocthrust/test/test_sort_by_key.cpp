@@ -246,6 +246,7 @@ TEST(SortByKeyTests, TestSortByKeyDevice)
         size,
         thrust::raw_pointer_cast(&d_keys[0]),
         thrust::raw_pointer_cast(&d_values[0]));
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(h_keys, d_keys);
       // Only keys are compared here, the sequential stable_merge_sort that's used in

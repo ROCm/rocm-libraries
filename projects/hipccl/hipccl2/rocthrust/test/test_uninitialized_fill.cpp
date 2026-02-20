@@ -304,6 +304,7 @@ TEST(UninitializedFillTests, TestUninitializedFillDevice)
         size,
         thrust::raw_pointer_cast(&d_data[0]),
         fill_value);
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(h_data, d_data);
     }

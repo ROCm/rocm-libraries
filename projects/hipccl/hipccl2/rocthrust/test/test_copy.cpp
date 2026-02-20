@@ -1043,6 +1043,7 @@ TEST(CopyTests, TestCopyDevice)
         size,
         thrust::raw_pointer_cast(&d_data[0]),
         thrust::raw_pointer_cast(&d_output[0]));
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(h_data, d_output);
     }
@@ -1092,6 +1093,7 @@ TEST(CopyTests, TestCopyIfDevice)
         thrust::raw_pointer_cast(&d_data[0]),
         thrust::raw_pointer_cast(&d_output[0]),
         thrust::raw_pointer_cast(&d_output_size[0]));
+      HIP_CHECK(hipGetLastError());
 
       h_output.resize(host_output_last - h_output.begin());
       d_output.resize(d_output_size[0]);
