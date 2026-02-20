@@ -2873,7 +2873,7 @@ def _get_schedule_128x192x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 192, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(128, 192, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
