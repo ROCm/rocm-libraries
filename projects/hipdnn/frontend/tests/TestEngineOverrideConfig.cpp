@@ -55,7 +55,7 @@ static EngineOverrideConfig makeConfig(std::vector<OperationRule> rules)
 
 // ── Test 1: exact dim match, single rule ────────────────────────────────────
 
-TEST(TestMatch, ExactDimMatchSingleRule)
+TEST(TestEngineOverrideConfig, ExactDimMatchSingleRule)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
@@ -74,7 +74,7 @@ TEST(TestMatch, ExactDimMatchSingleRule)
 
 // ── Test 2: first matching rule wins ────────────────────────────────────────
 
-TEST(TestMatch, FirstMatchingRuleWins)
+TEST(TestEngineOverrideConfig, FirstMatchingRuleWins)
 {
     OperationRule rule1;
     rule1.op = "conv_fprop";
@@ -97,7 +97,7 @@ TEST(TestMatch, FirstMatchingRuleWins)
 
 // ── Test 3: no rule matches (wrong dims) ────────────────────────────────────
 
-TEST(TestMatch, NoRuleMatchesWrongDims)
+TEST(TestEngineOverrideConfig, NoRuleMatchesWrongDims)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
@@ -116,7 +116,7 @@ TEST(TestMatch, NoRuleMatchesWrongDims)
 
 // ── Test 4: wildcard (-1) in one dimension ──────────────────────────────────
 
-TEST(TestMatch, WildcardInOneDimension)
+TEST(TestEngineOverrideConfig, WildcardInOneDimension)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
@@ -140,7 +140,7 @@ TEST(TestMatch, WildcardInOneDimension)
 
 // ── Test 5: all-wildcard rule matches any shape ─────────────────────────────
 
-TEST(TestMatch, AllWildcardRuleMatchesAnyShape)
+TEST(TestEngineOverrideConfig, AllWildcardRuleMatchesAnyShape)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
@@ -161,7 +161,7 @@ TEST(TestMatch, AllWildcardRuleMatchesAnyShape)
 
 // ── Test 6: wrong op name → nullopt ─────────────────────────────────────────
 
-TEST(TestMatch, WrongOpNameReturnsNullopt)
+TEST(TestEngineOverrideConfig, WrongOpNameReturnsNullopt)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
@@ -179,7 +179,7 @@ TEST(TestMatch, WrongOpNameReturnsNullopt)
 
 // ── Test 7: wrong tensor count in rule → nullopt ────────────────────────────
 
-TEST(TestMatch, WrongTensorCountReturnsNullopt)
+TEST(TestEngineOverrideConfig, WrongTensorCountReturnsNullopt)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
@@ -204,7 +204,7 @@ TEST(TestMatch, WrongTensorCountReturnsNullopt)
 // exact rule and a wildcard rule sit in different partitions.
 
 // Test 11: wildcard declared before exact — wildcard must win
-TEST(TestMatch, WildcardBeforeExactBothMatch)
+TEST(TestEngineOverrideConfig, WildcardBeforeExactBothMatch)
 {
     OperationRule wildcard;
     wildcard.op = "conv_fprop";
@@ -225,7 +225,7 @@ TEST(TestMatch, WildcardBeforeExactBothMatch)
 }
 
 // Test 12: exact declared before wildcard — exact must win
-TEST(TestMatch, ExactBeforeWildcardBothMatch)
+TEST(TestEngineOverrideConfig, ExactBeforeWildcardBothMatch)
 {
     OperationRule exact;
     exact.op = "conv_fprop";
@@ -248,7 +248,7 @@ TEST(TestMatch, ExactBeforeWildcardBothMatch)
 // ── Stride matching tests ────────────────────────────────────────────────────
 
 // Test 13: exact stride match selects the correct engine
-TEST(TestMatch, ExactStrideMatchSelectsEngine)
+TEST(TestEngineOverrideConfig, ExactStrideMatchSelectsEngine)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
@@ -268,7 +268,7 @@ TEST(TestMatch, ExactStrideMatchSelectsEngine)
 }
 
 // Test 14: wildcard stride element (-1) matches any value in that slot
-TEST(TestMatch, WildcardStrideElement)
+TEST(TestEngineOverrideConfig, WildcardStrideElement)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
@@ -293,7 +293,7 @@ TEST(TestMatch, WildcardStrideElement)
 }
 
 // Test 15: empty stride in pattern matches any tensor stride (no constraint)
-TEST(TestMatch, EmptyStridePatternMatchesAnyStride)
+TEST(TestEngineOverrideConfig, EmptyStridePatternMatchesAnyStride)
 {
     OperationRule rule;
     rule.op = "conv_fprop";
@@ -319,13 +319,9 @@ TEST(TestMatch, EmptyStridePatternMatchesAnyStride)
 
 // Test 8: load from valid JSON file → parses rules, matches correctly
 
-TEST(TestMatch, LoadFromValidJsonFile)
+TEST(TestEngineOverrideConfig, LoadFromValidJsonFile)
 {
-    constexpr const char* PATH = "/tmp/hipdnn_match_test_case8.json";
-
-    {
-        std::ofstream f(PATH);
-        f << R"({
+    constexpr const char* CONTENTS = R"({
   "engine_overrides": [
     {
       "comment": "test rule for ResNet first conv",
@@ -347,9 +343,8 @@ TEST(TestMatch, LoadFromValidJsonFile)
     }
   ]
 })";
-    }
 
-    auto config = EngineOverrideConfig::load(PATH);
+    auto config = EngineOverrideConfig::loadFromContent(CONTENTS);
     ASSERT_TRUE(config.has_value());
 
     // Exact match hits the first rule
@@ -365,13 +360,11 @@ TEST(TestMatch, LoadFromValidJsonFile)
     auto r2 = config->matchOperation("conv_fprop", other);
     ASSERT_TRUE(r2.has_value());
     EXPECT_EQ(*r2, FUSILLI_ENGINE_ID);
-
-    std::remove(PATH);
 }
 
 // Test 9: load from missing file → nullopt, no crash
 
-TEST(TestMatch, LoadFromMissingFileReturnsNullopt)
+TEST(TestEngineOverrideConfig, LoadFromMissingFileReturnsNullopt)
 {
     auto config = EngineOverrideConfig::load("/nonexistent/path/hipdnn_no_such_file.json");
     EXPECT_FALSE(config.has_value());
@@ -379,7 +372,7 @@ TEST(TestMatch, LoadFromMissingFileReturnsNullopt)
 
 // Test 10: HIPDNN_ENGINE_OVERRIDE_FILE unset → loadFromEnv() returns nullptr
 
-TEST(TestMatch, EnvVarUnsetReturnsNullptr)
+TEST(TestEngineOverrideConfig, EnvVarUnsetReturnsNullptr)
 {
     // HIPDNN_ENGINE_OVERRIDE_FILE is not set in the unit-test environment.
     // loadFromEnv() caches on first call, so this also verifies the pointer
@@ -390,13 +383,9 @@ TEST(TestMatch, EnvVarUnsetReturnsNullptr)
 }
 
 // Test 16: JSON with stride constraint is parsed and matched correctly
-TEST(TestMatch, JsonWithStrideConstraint)
+TEST(TestEngineOverrideConfig, JsonWithStrideConstraint)
 {
-    constexpr const char* PATH = "/tmp/hipdnn_match_test_stride.json";
-
-    {
-        std::ofstream f(PATH);
-        f << R"({
+    constexpr const char* CONTENTS = R"({
   "engine_overrides": [
     {
       "op": "conv_fprop",
@@ -408,9 +397,8 @@ TEST(TestMatch, JsonWithStrideConstraint)
     }
   ]
 })";
-    }
 
-    auto config = EngineOverrideConfig::load(PATH);
+    auto config = EngineOverrideConfig::loadFromContent(CONTENTS);
     ASSERT_TRUE(config.has_value());
 
     auto x = makeTensorWithStride({1, 3, 224, 224}, {150528, 50176, 224, 1});
@@ -423,8 +411,6 @@ TEST(TestMatch, JsonWithStrideConstraint)
     // Wrong stride must not match
     auto xWrong = makeTensorWithStride({1, 3, 224, 224}, {1, 224, 224 * 3, 224 * 3 * 224});
     EXPECT_FALSE(config->matchOperation("conv_fprop", {xWrong, w}).has_value());
-
-    std::remove(PATH);
 }
 
 #endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
