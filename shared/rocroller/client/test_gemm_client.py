@@ -648,6 +648,41 @@ def test_gemm_options(tmp_path):
             check=True,
         )
 
+    # PreSwizzleScaleGFX950 requires pretileScale; client must assert and exit non-zero
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--scaleSkipPermlane=PreSwizzleScaleGFX950",
+                "--scale_A=Separate",
+                "--scale_B=Separate",
+                "--scaleBlockSize=32",
+                "--sts=32x8/32x8",
+            ],
+            check=True,
+        )
+
+    # PreSwizzleScaleGFX950 requires swizzleTileSize (m=32, n=32, k=8); wrong sts must fail
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--scaleSkipPermlane=PreSwizzleScaleGFX950",
+                "--scale_A=Separate",
+                "--scale_B=Separate",
+                "--scaleBlockSize=32",
+                "--sts=64x8/64x8",
+                "--pretileScale",
+            ],
+            check=True,
+        )
+
     # setting tile size via shortcut
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--wgts=1024x2048x4096"]

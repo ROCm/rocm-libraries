@@ -138,8 +138,9 @@ namespace rocRoller
 
     std::string toString(KernelOptionValues const& values)
     {
-        // std::cout << "sizeof(KernelOptionValues): " << sizeof(KernelOptionValues) << std::endl;
-        // When adding or changing kernel options, update this function (ShowOption/ShowString).
+        static_assert(sizeof(KernelOptionValues) == 76,
+                      "Edit the toString() function when adding a kernel option!");
+
         std::string rv = "Kernel Options:\n";
 
 #define Show(name, value) rv += fmt::format("  {: <35}{: >10}\n", name ":", value)
