@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
@@ -44,14 +45,14 @@ GemmBenchmark = _import_gemm_benchmark()
 benchmark_utils = _import_benchmark_utils()
 
 
-class GemmMultiDBenchmark(GemmBenchmark):
+class GemmUniversalBenchmark(GemmBenchmark):
     def __init__(self, build_dir: str, verbose: bool = False):
-        super().__init__(build_dir, verbose, name="benchmark_gemm_multi_d_")
+        super().__init__(build_dir, verbose, name="benchmark_gemm_universal_")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="GEMM Multi D Kernel Benchmarking Tool"
+        description="Universal GEMM Kernel Benchmarking Tool"
     )
     parser.add_argument(
         "build_dir", help="Build directory containing kernel executables"
@@ -68,7 +69,7 @@ def main():
     parser.add_argument("--verify", action="store_true", help="Enable verification")
     parser.add_argument(
         "--csv",
-        default="gemm_multi_d_benchmark_results.csv",
+        default="gemm_universal_benchmark_results.csv",
         help="CSV output filename",
     )
     parser.add_argument(
@@ -114,10 +115,10 @@ def main():
             return 1
 
     # Create benchmark instance
-    benchmark = GemmMultiDBenchmark(args.build_dir, verbose=args.verbose)
+    benchmark = GemmUniversalBenchmark(args.build_dir, verbose=args.verbose)
 
     # Run benchmark sweep
-    print("Starting GEMM Multi D kernel benchmark sweep...")
+    print("Starting Universal GEMM kernel benchmark sweep...")
     start_time = time.time()
 
     best_kernels = benchmark.benchmark_sweep(
