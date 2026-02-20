@@ -335,7 +335,12 @@ namespace GPUArchitectureGenerator
             }
 
             {
-                auto tryUserSGPRs = [hipcc, isaVersion](int n, bool accumOffset) -> bool {
+                /**
+                 * Try to assemble a kernel that requests the given number of preloaded kernel
+                 * arguments. Some architectures require the amdhsa_accum_offset directive and
+                 * some don't support it so we try both.
+                 */
+                auto tryPreloadedArgs = [hipcc, isaVersion](int n, bool accumOffset) -> bool {
                     std::ostringstream kernel;
                     kernel << ".amdhsa_kernel hello_world" << std::endl;
                     kernel << ".amdhsa_next_free_vgpr .amdgcn.next_free_vgpr" << std::endl;
@@ -353,12 +358,12 @@ namespace GPUArchitectureGenerator
                     return TryAssembler(hipcc, isaVersion, kernel.str(), "");
                 };
 
+                // Binary search for the max number of preloaded kernel arguments.
                 int minVal = 0, maxVal = 108;
-
                 while((minVal + 1) < maxVal)
                 {
                     int n = (minVal + maxVal) / 2;
-                    if(tryUserSGPRs(n, true) || tryUserSGPRs(n, false))
+                    if(tryPreloadedArgs(n, true) || tryPreloadedArgs(n, false))
                     {
                         minVal = n;
                     }
