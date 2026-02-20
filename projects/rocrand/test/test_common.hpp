@@ -33,25 +33,25 @@
 // GoogleTest-compatible HIP_CHECK macro. FAIL is called to log the Google Test trace.
 // The lambda is invoked immediately as assertions that generate a fatal failure can
 // only be used in void-returning functions.
-#define HIP_CHECK(condition)                                                                \
-    {                                                                                       \
-        hipError_t error = condition;                                                       \
-        if(error != hipSuccess)                                                             \
-        {                                                                                   \
-            [error]()                                                                       \
-                { FAIL() << "HIP error " << error << ": " << hipGetErrorString(error); }(); \
-            exit(error);                                                                    \
-        }                                                                                   \
+#define HIP_CHECK(condition)                                                                      \
+    {                                                                                             \
+        hipError_t error = condition;                                                             \
+        if(error != hipSuccess)                                                                   \
+        {                                                                                         \
+            [error]() { FAIL() << "HIP error " << error << ": " << hipGetErrorString(error); }(); \
+            exit(error);                                                                          \
+        }                                                                                         \
     }
 
-#define HIP_CHECK_NON_VOID(condition)         \
-{                                    \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-}
+#define HIP_CHECK_NON_VOID(condition)                                                  \
+    {                                                                                  \
+        hipError_t error = condition;                                                  \
+        if(error != hipSuccess)                                                        \
+        {                                                                              \
+            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+            exit(error);                                                               \
+        }                                                                              \
+    }
 
 #ifdef __HIP_PLATFORM_NVCC__
     #include <cuda/std/cmath>
@@ -109,10 +109,10 @@ inline bool use_hmm()
 
 // Helper for HMM allocations: if HMM is requested through
 // setting environment variable ROCRAND_USE_HMM=1
-template <class T>
+template<class T>
 hipError_t hipMallocHelper(T** devPtr, size_t size)
 {
-    if (use_hmm())
+    if(use_hmm())
     {
         return hipMallocManaged(devPtr, size);
     }
@@ -159,8 +159,7 @@ testing::AssertionResult verify_vec_eq(const char*           a_str,
         if(a_val != b_val)
         {
             return testing::AssertionFailure()
-                   << "Expected equality of these values:"
-                   << "\n  " << a_str << "[" << i << "]"
+                   << "Expected equality of these values:" << "\n  " << a_str << "[" << i << "]"
                    << "\n    Which is: " << a_val << "\n  " << b_str << "[" << i << "]"
                    << "\n    Which is: " << b_val;
         }
@@ -206,9 +205,8 @@ testing::AssertionResult verify_near_element(
     return testing::AssertionFailure()
            << "Expected " << a_str << "[" << index << "] and " << b_str << "[" << index
            << "] to be within epsilon " << abs_error << ", but difference is " << diff << ":"
-           << "\n  " << a_str << "[" << index << "]"
-           << "\n    Which is: " << a << " (" << a_hex.str() << ")"
-           << "\n  " << b_str << "[" << index << "]"
+           << "\n  " << a_str << "[" << index << "]" << "\n    Which is: " << a << " ("
+           << a_hex.str() << ")" << "\n  " << b_str << "[" << index << "]"
            << "\n    Which is: " << b << " (" << b_hex.str() << ")";
 }
 
@@ -266,26 +264,32 @@ double get_variance(const std::vector<T>& values, double mean)
     return variance / values.size();
 }
 
-// struct to represent a Emperical Distribution Function (EDF) 
+// struct to represent an Emperical Distribution Function (EDF)
 // of some sample
-struct EDF{
+struct EDF
+{
     std::vector<double> sample;
-    double n;
-    EDF(const std::vector<double> & x){
+    double              n;
+    EDF(const std::vector<double>& x)
+    {
         sample = x;
         std::sort(sample.begin(), sample.end());
         n = static_cast<double>(sample.size());
     }
 
-    double operator()(double x) const{
-        auto it = std::upper_bound(sample.begin(), sample.end(), x);
+    double operator()(double x) const
+    {
+        auto   it  = std::upper_bound(sample.begin(), sample.end(), x);
         double pos = static_cast<double>(it - sample.begin());
         return pos / n;
     }
 };
 
 // Perform Two-Sample Kolmogorov-Smirnov Test
-bool ks_test_2(const std::vector<double> & expected, const std::vector<double> & actual, double alpha = 0.1){
+bool ks_test_2(const std::vector<double>& expected,
+               const std::vector<double>& actual,
+               double                     alpha = 0.1)
+{
     EDF aEDF(expected);
     EDF eEDF(actual);
 
@@ -295,17 +299,19 @@ bool ks_test_2(const std::vector<double> & expected, const std::vector<double> &
     double max_diff = std::numeric_limits<double>::min();
 
     // Calculate the statistical value: the maximum difference between the two EDF.
-    for(const double & x : aEDF.sample){
+    for(const double& x : aEDF.sample)
+    {
         max_diff = std::max(max_diff, std::abs(aEDF(x) - eEDF(x)));
     }
 
-    for(const double & x : eEDF.sample){
+    for(const double& x : eEDF.sample)
+    {
         max_diff = std::max(max_diff, std::abs(aEDF(x) - eEDF(x)));
     }
 
     // calculating the critical value
     double c_alpha = std::sqrt(-std::log(alpha / 2) * 0.5);
-    double cv = std::sqrt((n + m) / ( n * m)) * c_alpha;
+    double cv      = std::sqrt((n + m) / (n * m)) * c_alpha;
 
     return max_diff <= cv; // <= because we reject if d > cv
 }

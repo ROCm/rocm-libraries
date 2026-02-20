@@ -54,8 +54,8 @@ struct host_test_params
 
     friend std::ostream& operator<<(std::ostream& os, const host_test_params& params)
     {
-        os << "{ "
-           << "rng_type: " << params.rng_type << ", blocking: " << params.blocking_host_generator
+        os << "{ " << "rng_type: " << params.rng_type
+           << ", blocking: " << params.blocking_host_generator
            << ", default_stream: " << params.use_default_stream << " }";
         return os;
     }
