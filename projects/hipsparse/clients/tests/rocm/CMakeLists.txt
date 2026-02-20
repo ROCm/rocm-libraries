@@ -128,6 +128,7 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_sctr.yaml
     # Level 2    
     rocm/test_bsrmv.yaml
+    rocm/test_bsrxmv.yaml
     rocm/test_bsrsv2.yaml
     rocm/test_csrmv.yaml
     rocm/test_csrsv2.yaml

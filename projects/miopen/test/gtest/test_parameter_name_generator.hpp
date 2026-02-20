@@ -39,17 +39,11 @@ namespace {
 
 // Concept for printable objets which support the << operator.
 template <typename T>
-concept Printable = requires(std::ostream& os, T t)
-{
-    os << t;
-};
+concept Printable = requires(std::ostream& os, T t) { os << t; };
 
 // Concept for printable containers, elements of which support the << operator.
 template <typename T>
-concept PrintableElement = requires(std::ostream& os, T t)
-{
-    os << t[0];
-};
+concept PrintableElement = requires(std::ostream& os, T t) { os << t[0]; };
 
 // Concept for iterable containers.
 template <typename T>
@@ -63,7 +57,7 @@ concept NotContainer = !Container<T>;
 // It defines the << operator as required by GTest, and the cast operator that returns the wrapped
 // parameter. If you need to wrap a container, use the 'NamedContainer' template wrapper.
 template <typename T>
-requires Printable<T> && std::is_move_constructible_v<T>
+    requires Printable<T> && std::is_move_constructible_v<T>
 struct NamedParameter
 {
     NamedParameter(std::string parameterName, T parameterValue) noexcept
@@ -91,7 +85,7 @@ struct NamedParameter
 // container. If you need to wrap a parameter which is not a container, use the 'NamedParameter'
 // template wrapper.
 template <typename T>
-requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
+    requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
 struct NamedContainer
 {
     NamedContainer(std::string containerName,
@@ -150,7 +144,7 @@ static auto MakeNamedParameterValues(const std::string& name, T... values)
     return testing::Values(NamedParameter<T>{name, values}...);
 }
 
-// Template function that creates a GTest ValueArray of 'NamedContainer' each one with the
+// Variadic template function that creates a GTest ValueArray of 'NamedContainer' each one with the
 // name and value supplied. An optional separator for each value in each containers can be supplied.
 // The result can be directly fed to the GTest instantiated test suite.
 //
@@ -167,7 +161,7 @@ static auto MakeNamedParameterValues(const std::string& name, T... values)
 // NamedContainer<std::vector<int>>, and then fed into 'testing::Combine()'.
 //
 template <typename T>
-requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
+    requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
 static auto MakeNamedParameterCollectionValues(const std::string& name,
                                                const std::ranges::range auto& collection,
                                                const std::string& separator = " ")
@@ -184,24 +178,8 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
     return testing::ValuesIn(v);
 }
 
-// Template function that creates a GTest ValueArray of 'NamedParameter' each one with the
-// name and value supplied.
-// The result can be directly fed to the GTest instantiated test suite.
-//
-// Example:
-//
-//      std::set<int> values = ...
-//
-//      testing::Combine(
-//          MakeNamedParameterCollectionValues<int>("TestValues", values),
-//          MakeNamedParameterValues<int>("TestInteger", 1, 2, 3)
-//      );
-//
-// The 'values' collection of int's is turned into a collection of
-// NamedParameter<int>, and then fed into 'testing::Combine()'.
-//
 template <typename T>
-requires NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>
+    requires NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>
 static auto MakeNamedParameterCollectionValues(const std::string& name,
                                                const std::ranges::range auto& collection)
 {

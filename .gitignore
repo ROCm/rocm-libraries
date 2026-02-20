@@ -7,5 +7,5 @@ build/
 #VsCode settings
 .vscode/
 
-# Cline Seetings
+# Miscellanous tools
 .cline_storage/

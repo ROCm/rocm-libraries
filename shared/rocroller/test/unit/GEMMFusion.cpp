@@ -56,7 +56,14 @@
 
 namespace GEMMDriverTest
 {
-    struct GEMMFusionGPU : public CurrentGPUContextFixture
+    using namespace rocRoller;
+    namespace SolutionParams = rocRoller::Parameters::Solution;
+
+    // ========================================================================
+    // GEMMFusionTestSuite
+    // ========================================================================
+
+    struct GEMMFusionTestSuite : public CurrentGPUContextFixture
     {
         template <typename T>
         void basicGEMMRelu(ContextPtr&        m_context,
@@ -293,7 +300,9 @@ namespace GEMMDriverTest
                 {gemm.macM, gemm.macN},
                 LayoutType::MATRIX_ACCUMULATOR,
                 {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
-                gemm.storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                (gemm.storePath == SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer)
+                    ? MemoryType::WAVE_LDS
+                    : MemoryType::WAVE);
 
             params->setDimensionInfo(tagLoadA, macTileA);
             params->setDimensionInfo(tagLoadB, macTileB);
@@ -446,7 +455,7 @@ namespace GEMMDriverTest
         }
     };
 
-    TEST_F(GEMMFusionGPU, GPU_GEMMRelu)
+    TEST_F(GEMMFusionTestSuite, GPU_GEMM_Fusion_Relu)
     {
         GEMMProblem gemm;
         basicGEMMRelu<float>(m_context, gemm);

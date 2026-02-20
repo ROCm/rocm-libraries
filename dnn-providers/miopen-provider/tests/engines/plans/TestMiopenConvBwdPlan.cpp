@@ -7,7 +7,8 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "engines/plans/MiopenConvBwdPlan.hpp"
 
 using namespace miopen_plugin;
@@ -18,25 +19,17 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
-        ASSERT_EQ(miopenCreate(&_handle.miopenHandle), miopenStatusSuccess);
     }
 
-    void TearDown() override
-    {
-        if(_handle.miopenHandle != nullptr)
-        {
-            EXPECT_EQ(miopenDestroy(_handle.miopenHandle), miopenStatusSuccess);
-        }
-    }
-
-    HipdnnEnginePluginHandle _handle;
+    HipdnnMiopenHandle _handle;
 };
 
 TEST(TestConvBwdParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid convolution graph
     auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -75,7 +68,8 @@ TEST(TestConvBwdParams, ThrowsOnAssymetricPadding)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -109,7 +103,8 @@ TEST(TestConvBwdParams, ThrowsOnInvalidPostPaddingVectorSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -144,7 +139,8 @@ TEST(TestConvBwdParams, ThrowsOnInvalidPaddingVectorsSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -178,7 +174,8 @@ TEST(TestConvBwdParams, ThrowsOnInvalidStrideVectorSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -212,7 +209,8 @@ TEST(TestConvBwdParams, ThrowsOnInvalidDilationVectorSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -228,7 +226,8 @@ TEST_F(TestGpuConvBwdPlan, CreatesPlanWithValidGraph)
 {
     // Create a valid convolution graph
     auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -239,7 +238,8 @@ TEST_F(TestGpuConvBwdPlan, CreatesPlanWithValidGraph)
     ConvBwdParams params(*attrs, graph.getTensorMap());
 
     // Create plan
-    ConvBwdPlan(_handle, std::move(params));
+    HipdnnMiopenSettings executionSettings;
+    ConvBwdPlan(_handle, std::move(params), executionSettings);
 }
 
 TEST_F(TestGpuConvBwdPlan, ThrowsOnInvalidDims)
@@ -265,7 +265,8 @@ TEST_F(TestGpuConvBwdPlan, ThrowsOnInvalidDims)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -276,5 +277,7 @@ TEST_F(TestGpuConvBwdPlan, ThrowsOnInvalidDims)
     ConvBwdParams params(*attrs, graph.getTensorMap());
 
     // Create plan and expect exception
-    EXPECT_THROW(ConvBwdPlan(_handle, std::move(params)), hipdnn_plugin_sdk::HipdnnPluginException);
+    HipdnnMiopenSettings executionSettings;
+    EXPECT_THROW(ConvBwdPlan(_handle, std::move(params), executionSettings),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }

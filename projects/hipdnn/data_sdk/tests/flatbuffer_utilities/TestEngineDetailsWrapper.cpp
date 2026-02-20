@@ -8,7 +8,7 @@
 #include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
-using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_data_sdk::flatbuffer_utilities;
 
 flatbuffers::FlatBufferBuilder buildValidEngineDetailsBuffer(int64_t engineId)
 {
@@ -31,9 +31,15 @@ flatbuffers::FlatBufferBuilder
         auto knobIdStrOffset = builder.CreateString(knobIdStr);
         auto descOffset = builder.CreateString("Description for " + knobIdStr);
 
+        // Create a default int value (required field)
+        auto defaultValueOffset
+            = hipdnn_data_sdk::data_objects::CreateIntValue(builder, int64_t{0});
+
         hipdnn_data_sdk::data_objects::KnobBuilder knobBuilder(builder);
         knobBuilder.add_knob_id(knobIdStrOffset);
         knobBuilder.add_description(descOffset);
+        knobBuilder.add_default_value_type(hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+        knobBuilder.add_default_value(defaultValueOffset.Union());
         knobs.push_back(knobBuilder.Finish());
     }
 
@@ -100,8 +106,8 @@ TEST(TestEngineDetailsWrapper, KnobWrappersPopulated)
     EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     const auto& wrappers = wrapper.knobWrappers();
     EXPECT_EQ(wrappers.size(), 2u);
-    EXPECT_EQ(wrappers[0]->knobIdStr(), "KNOB_A");
-    EXPECT_EQ(wrappers[1]->knobIdStr(), "KNOB_B");
+    EXPECT_EQ(wrappers[0]->knobId(), "KNOB_A");
+    EXPECT_EQ(wrappers[1]->knobId(), "KNOB_B");
 }
 
 TEST(TestEngineDetailsWrapper, GetKnobByNameFound)
@@ -110,10 +116,10 @@ TEST(TestEngineDetailsWrapper, GetKnobByNameFound)
     EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& knob = wrapper.getKnobByName("FIRST_KNOB");
-    EXPECT_EQ(knob.knobIdStr(), "FIRST_KNOB");
+    EXPECT_EQ(knob.knobId(), "FIRST_KNOB");
 
     const auto& knob2 = wrapper.getKnobByName("SECOND_KNOB");
-    EXPECT_EQ(knob2.knobIdStr(), "SECOND_KNOB");
+    EXPECT_EQ(knob2.knobId(), "SECOND_KNOB");
 }
 
 TEST(TestEngineDetailsWrapper, GetKnobByNameNotFound)

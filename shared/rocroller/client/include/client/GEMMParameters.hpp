@@ -33,6 +33,9 @@
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/StoreOption.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 #include "client/BenchmarkSolution.hpp"
 #include <mxDataGenerator/DataGenerator.hpp>
@@ -177,7 +180,8 @@ namespace rocRoller
                     Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
                 Parameters::Solution::LoadPath loadPathB{
                     Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
-                bool storeLDSD = true;
+                Parameters::Solution::StorePath storePath{
+                    Parameters::Solution::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer};
 
                 std::pair<int, int> padLDSA = {0, 0};
                 std::pair<int, int> padLDSB = {0, 0};
@@ -188,20 +192,12 @@ namespace rocRoller
                 bool prefetchMixMemOps = false;
                 bool betaInFma         = true;
 
-                // Unroll Options
-                unsigned int unrollX = 0;
-                unsigned int unrollY = 0;
-
                 std::string scheduler;
                 std::string schedulerCost;
-                bool        matchMemoryAccess;
 
                 bool tailLoops = true;
 
-                // TODO Use StreamKConfig
-                bool streamK               = false;
-                bool streamKTwoTile        = false;
-                bool streamKTwoTileDPFirst = false;
+                StreamKMode streamK = StreamKMode::None;
 
                 std::string version;
 

@@ -21,15 +21,16 @@ public:
     int64_t id() const override;
 
     bool isApplicable(HipdnnEnginePluginHandle& handle,
-                      const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
     void getDetails(HipdnnEnginePluginHandle& handle,
                     hipdnnPluginConstData_t& detailsOut) const override;
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                            const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+    size_t getWorkspaceSize(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
     void initializeExecutionContext(
         const HipdnnEnginePluginHandle& handle,
-        const hipdnn_plugin_sdk::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
         HipdnnEnginePluginExecutionContext& executionContext) const override;
 
     void addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder);

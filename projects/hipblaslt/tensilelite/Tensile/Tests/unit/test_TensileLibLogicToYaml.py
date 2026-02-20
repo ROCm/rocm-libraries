@@ -307,7 +307,7 @@ VALID_LIBLOGIC_FILE_CONTENT = """
     ThreadTileA: 12
     ThreadTileB: 3
     TransposeLDS: 2
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: 1
@@ -433,6 +433,7 @@ BenchmarkProblems:
     - StreamKXCCMapping: [8]
     - ThreadTile: [[1, 1]]
     - TransposeLDS: [2]
+    - TransposeLDSMetadata: [1]
     - UseCustomMainLoopSchedule: [0]
     - UseSgprForGRO: [1]
     - VectorWidthA: [1]

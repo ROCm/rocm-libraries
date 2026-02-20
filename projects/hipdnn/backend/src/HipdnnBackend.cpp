@@ -18,10 +18,10 @@
 using namespace hipdnn_backend;
 
 #define LOG_API_ENTRY(format, ...) \
-    HIPDNN_LOG_INFO("API called: [{}] " format, __func__, __VA_ARGS__)
+    HIPDNN_BACKEND_LOG_INFO("API called: [{}] " format, __func__, __VA_ARGS__)
 
 #define LOG_API_SUCCESS(func_name, format, ...) \
-    HIPDNN_LOG_INFO("API success: [{}] " format, func_name, __VA_ARGS__)
+    HIPDNN_BACKEND_LOG_INFO("API success: [{}] " format, func_name, __VA_ARGS__)
 
 namespace
 {
@@ -324,6 +324,18 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
 
         hipdnn_backend::plugin::EnginePluginResourceManager::setPluginPaths(pathsVec, loadingMode);
         LOG_API_SUCCESS(apiName, "set_plugin_paths={}", loadingMode);
+        return HIPDNN_STATUS_SUCCESS;
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetPluginUnloadMode_ext(hipdnnPluginUnloadingMode_ext_t unloadingMode)
+{
+    LOG_API_ENTRY("unloadingMode={}", unloadingMode);
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        hipdnn_backend::plugin::EnginePluginResourceManager::setPluginUnloadingMode(unloadingMode);
+        LOG_API_SUCCESS(apiName, "set_plugin_unloading_mode={}", unloadingMode);
         return HIPDNN_STATUS_SUCCESS;
     });
 }
