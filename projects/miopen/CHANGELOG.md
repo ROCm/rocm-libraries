@@ -2,13 +2,10 @@
 # Change Log for MIOpen
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
-## MIOpen 3.6.0 for ROCm 7.13.0
+## MIOpen 3.6.0 for ROCm 7.12.0
 ### Removed
 * Removed MLIR compilation backend (`MIOPEN_USE_MLIR`) and all MLIR-based solvers
 * Removed GraphAPI experimental feature and related code
-
-### Changed
-* Cleaned up CMake configuration and dependencies after MLIR/GraphAPI removal
 
 ## MIOpen 3.5.1 for ROCm 7.12.0
 ### Added
