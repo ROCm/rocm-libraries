@@ -1663,7 +1663,7 @@ private:
 
 public:
   _CCCL_HIDE_FROM_ABI day() = default;
-  _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr day(unsigned __val) noexcept
+  _CCCL_HOST _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr day(unsigned __val) noexcept
       : __d(static_cast<unsigned char>(__val))
   {}
   _LIBCUDACXX_HIDE_FROM_ABI constexpr day& operator++() noexcept
@@ -1769,7 +1769,7 @@ private:
 
 public:
   _CCCL_HIDE_FROM_ABI month() = default;
-  __attribute__((host)) _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr month(unsigned __val) noexcept
+  _CCCL_HOST _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr month(unsigned __val) noexcept
       : __m(static_cast<unsigned char>(__val))
   {}
   _LIBCUDACXX_HIDE_FROM_ABI constexpr month& operator++() noexcept
@@ -1878,7 +1878,7 @@ private:
 
 public:
   _CCCL_HIDE_FROM_ABI year() = default;
-  _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr year(int __val) noexcept
+  _CCCL_HOST _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr year(int __val) noexcept
       : __y(static_cast<short>(__val))
   {}
 
@@ -2011,13 +2011,13 @@ private:
 
 public:
   _CCCL_HIDE_FROM_ABI weekday() = default;
-  __attribute__((host)) _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr weekday(unsigned __val) noexcept
+  _CCCL_HOST _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr weekday(unsigned __val) noexcept
       : __wd(static_cast<unsigned char>(__val == 7 ? 0 : __val))
   {}
-  __attribute__((host)) _LIBCUDACXX_HIDE_FROM_ABI constexpr weekday(const sys_days& __sysd) noexcept
+  _CCCL_HOST _LIBCUDACXX_HIDE_FROM_ABI constexpr weekday(const sys_days& __sysd) noexcept
       : __wd(__weekday_from_days(__sysd.time_since_epoch().count()))
   {}
-  __attribute__((host)) _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr weekday(const local_days& __locd) noexcept
+  _CCCL_HOST _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr weekday(const local_days& __locd) noexcept
       : __wd(__weekday_from_days(__locd.time_since_epoch().count()))
   {}
 
