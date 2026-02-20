@@ -70,6 +70,44 @@ def get_matrix_instructions(
     return [(mi.m, mi.n, mi.k) for mi in instructions]
 
 
+def _generate_mt_pairs(
+    mi: tuple[int, int, int],
+    mt_sizes: list[int] | None,
+    waves: list[list[int]],
+    max_mt: int,
+) -> list[tuple[int, int]]:
+    """Generate (mt_m, mt_n) pairs for a given matrix instruction."""
+    if mt_sizes is not None:
+        return [(mt_m, mt_n) for mt_m in mt_sizes for mt_n in mt_sizes]
+
+    # Wave-based: MT = MI × wave_tile × wave
+    mi_m, mi_n, _ = mi
+    min_mt = 16
+    pairs = []
+
+    for wave in waves:
+        wave_tile_m = 0
+        while True:
+            wave_tile_m += 1
+            mt_m = mi_m * wave_tile_m * wave[0]
+            if mt_m < min_mt:
+                continue
+            if mt_m > max_mt:
+                break
+
+            wave_tile_n = 0
+            while True:
+                wave_tile_n += 1
+                mt_n = mi_n * wave_tile_n * wave[1]
+                if mt_n < min_mt:
+                    continue
+                if mt_n > max_mt:
+                    break
+                pairs.append((mt_m, mt_n))
+
+    return pairs
+
+
 def create_config_list(
     hardware: origami.hardware_t,
     dtype: str,
@@ -104,62 +142,23 @@ def create_config_list(
         occupancy_values = [1]
     if wgm_values is None:
         wgm_values = [6]
+    if waves is None:
+        waves = [[4, 1], [2, 2], [1, 4], [1, 2], [2, 1], [1, 1]]
 
     configs = []
+    for mi in mi_list:
+        mi_m, mi_n, mi_k = mi
+        mt_pairs = _generate_mt_pairs(mi, mt_sizes, waves, max_mt)
 
-    if mt_sizes is not None:
-        # Cartesian product mode: explicit MT sizes
-        for mi in mi_list:
-            mi_m, mi_n, mi_k = mi
-            for mt_m in mt_sizes:
-                for mt_n in mt_sizes:
-                    for mt_k in depth_unroll:
-                        for occ in occupancy_values:
-                            for wgm in wgm_values:
-                                config = origami.config_t()
-                                config.mt = origami.dim3_t(mt_m, mt_n, mt_k)
-                                config.mi = origami.dim3_t(mi_m, mi_n, mi_k)
-                                config.occupancy = occ
-                                config.workgroup_mapping = wgm
-                                configs.append(config)
-    else:
-        # Wave-based mode: MT derived from MI × wave tile
-        if waves is None:
-            waves = [[4, 1], [2, 2], [1, 4], [1, 2], [2, 1], [1, 1]]
-        min_mt = 16
-
-        for mi in mi_list:
-            mi_m, mi_n, mi_k = mi
-
-            for wave in waves:
-                wave_tile_m = 0
-
-                while True:
-                    wave_tile_m += 1
-                    mt0 = mi_m * wave_tile_m * wave[0]
-                    if mt0 < min_mt:
-                        continue
-                    if mt0 > max_mt:
-                        break
-
-                    wave_tile_n = 0
-                    while True:
-                        wave_tile_n += 1
-                        mt1 = mi_n * wave_tile_n * wave[1]
-
-                        if mt1 < min_mt:
-                            continue
-                        if mt1 > max_mt:
-                            break
-
-                        for du in depth_unroll:
-                            for occ in occupancy_values:
-                                for wgm in wgm_values:
-                                    config = origami.config_t()
-                                    config.mt = origami.dim3_t(mt0, mt1, du)
-                                    config.mi = origami.dim3_t(mi_m, mi_n, mi_k)
-                                    config.occupancy = occ
-                                    config.workgroup_mapping = wgm
-                                    configs.append(config)
+        for mt_m, mt_n in mt_pairs:
+            for mt_k in depth_unroll:
+                for occ in occupancy_values:
+                    for wgm in wgm_values:
+                        config = origami.config_t()
+                        config.mt = origami.dim3_t(mt_m, mt_n, mt_k)
+                        config.mi = origami.dim3_t(mi_m, mi_n, mi_k)
+                        config.occupancy = occ
+                        config.workgroup_mapping = wgm
+                        configs.append(config)
 
     return configs
