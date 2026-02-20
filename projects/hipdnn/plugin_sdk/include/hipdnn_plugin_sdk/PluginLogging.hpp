@@ -142,3 +142,25 @@ inline void initializeCallbackLogging(const std::string& componentName,
 }
 
 } // namespace hipdnn_plugin_sdk::logging
+
+// ============================================================================
+// Log Level Check Macros (HIPDNN_PLUGIN_LOG_IS_*_ENABLED)
+// ============================================================================
+// These macros provide a convenient way to check if a log level is enabled.
+// Useful for conditional logic that should only execute at certain log levels.
+// Usage: if(HIPDNN_PLUGIN_LOG_IS_TRACE_ENABLED()) { /* verbose logic */ }
+
+#define HIPDNN_PLUGIN_LOG_IS_TRACE_ENABLED() \
+    ::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO)
+
+#define HIPDNN_PLUGIN_LOG_IS_INFO_ENABLED() \
+    ::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO)
+
+#define HIPDNN_PLUGIN_LOG_IS_WARN_ENABLED() \
+    ::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN)
+
+#define HIPDNN_PLUGIN_LOG_IS_ERROR_ENABLED() \
+    ::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_ERROR)
+
+#define HIPDNN_PLUGIN_LOG_IS_FATAL_ENABLED() \
+    ::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_FATAL)
