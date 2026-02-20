@@ -81,8 +81,8 @@ namespace ckp = ck_tile::builder::profiling;
 template <auto SIGNATURE>
 int call_profiler(const ckt::Args<SIGNATURE>& args, bool time_kernel)
 {
-    auto inputs  = alloc_inputs(args);
-    auto outputs = alloc_outputs(args);
+    auto inputs  = ckt::alloc_inputs(args);
+    auto outputs = ckt::alloc_outputs(args);
     ckt::init_inputs(args, inputs.get());
 
     std::cout << args.make_input_descriptor() << std::endl;
@@ -114,9 +114,9 @@ int profile_grouped_conv_bwd_weight_tile(int argc, char* argv[])
 
     const auto data_type       = static_cast<ConvDataType>(std::stoi(argv[2]));
     const auto layout          = static_cast<ConvLayout>(std::stoi(argv[3]));
-    const bool do_verification = std::stoi(argv[4]);
-    const int init_method      = std::stoi(argv[5]);
-    const bool do_log          = std::stoi(argv[6]);
+    // const bool do_verification = std::stoi(argv[4]);
+    // const int init_method      = std::stoi(argv[5]);
+    // const bool do_log          = std::stoi(argv[6]);
     const bool time_kernel     = std::stoi(argv[7]);
     const int num_dim_spatial  = std::stoi(argv[8]);
 
@@ -134,23 +134,12 @@ int profile_grouped_conv_bwd_weight_tile(int argc, char* argv[])
     const auto params = ck::utils::conv::parse_conv_param(num_dim_spatial, 9, argv);
 
     const auto& split_k = std::string(argv[8 + 1 + 4 + 6 * num_dim_spatial]);
-    if(index_type == IndexType::LONG_INDEX_T)
-    {
-        std::cout << "this indexing data type is not implemented" << std::endl;
-        return 1;
-    }
 
     if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
     {
         if(num_dim_spatial == 2)
         {
-            if(data_type == ConvDataType::F32_F32_F32)
-            {
-                constexpr auto SIGNATURE = ckp::SIGNATURE_NHWGC_FP32_BWD_WEIGHT;
-                return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
-                                                time_kernel);
-            }
-            else if(data_type == ConvDataType::F16_F16_F16)
+            if(data_type == ConvDataType::F16_F16_F16)
             {
                 constexpr auto SIGNATURE = ckp::SIGNATURE_NHWGC_FP16_BWD_WEIGHT;
                 return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
@@ -165,13 +154,7 @@ int profile_grouped_conv_bwd_weight_tile(int argc, char* argv[])
         }
         else if(num_dim_spatial == 3)
         {
-            if(data_type == ConvDataType::F32_F32_F32)
-            {
-                constexpr auto SIGNATURE = ckp::SIGNATURE_NDHWGC_FP32_BWD_WEIGHT;
-                return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
-                                                time_kernel);
-            }
-            else if(data_type == ConvDataType::F16_F16_F16)
+            if(data_type == ConvDataType::F16_F16_F16)
             {
                 constexpr auto SIGNATURE = ckp::SIGNATURE_NDHWGC_FP16_BWD_WEIGHT;
                 return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
