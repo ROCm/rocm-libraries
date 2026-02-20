@@ -7,7 +7,7 @@
 
 // Ensure the included flatbuffers.h is the same version as when this file was
 // generated, otherwise it may not be compatible.
-static_assert(FLATBUFFERS_VERSION_MAJOR == 25 && FLATBUFFERS_VERSION_MINOR == 9
+static_assert(FLATBUFFERS_VERSION_MAJOR == 24 && FLATBUFFERS_VERSION_MINOR == 12
                   && FLATBUFFERS_VERSION_REVISION == 23,
               "Non-compatible flatbuffers version included");
 
@@ -1216,7 +1216,7 @@ inline void Graph::UnPackTo(GraphT* _o, const ::flatbuffers::resolver_function_t
                     _o->tensors[_i]
                         = std::unique_ptr<hipdnn_data_sdk::data_objects::TensorAttributesT>(
                             _e->Get(_i)->UnPack(_resolver));
-                }
+                };
             }
         }
         else
@@ -1239,7 +1239,7 @@ inline void Graph::UnPackTo(GraphT* _o, const ::flatbuffers::resolver_function_t
                 {
                     _o->nodes[_i] = std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>(
                         _e->Get(_i)->UnPack(_resolver));
-                }
+                };
             }
         }
         else

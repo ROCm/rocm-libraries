@@ -119,51 +119,36 @@ target_include_directories(
                               $<INSTALL_INTERFACE:${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}>
 )
 
-# Automatically generate the flatbuffer headers from the schema files during build
+# Automatically generate the flatbuffer headers from the schema files during build.
+# When enabled, headers are regenerated for ALL supported FlatBuffers versions so that
+# schema changes are reflected across every version directory.
 if(HIPDNN_GENERATE_SDK_HEADERS)
-    set(SCHEMA_FILES
-        schemas/batchnorm_attributes.fbs
-        schemas/batchnorm_backward_attributes.fbs
-        schemas/batchnorm_inference_attributes.fbs
-        schemas/batchnorm_inference_attributes_variance_ext.fbs
-        schemas/convolution_common.fbs
-        schemas/convolution_fwd_attributes.fbs
-        schemas/convolution_bwd_attributes.fbs
-        schemas/convolution_wrw_attributes.fbs
-        schemas/data_types.fbs
-        schemas/engine_config.fbs
-        schemas/engine_details.fbs
-        schemas/graph.fbs
-        schemas/knob_value.fbs
-        schemas/matmul_attributes.fbs
-        schemas/pointwise_attributes.fbs
-        schemas/tensor_attributes.fbs
+    include(../cmake/FlatBuffersGenerate.cmake)
+
+    hipdnn_generate_flatbuffer_headers(
+        TARGET hipdnn_data_sdk
+        SCHEMAS
+            schemas/batchnorm_attributes.fbs
+            schemas/batchnorm_backward_attributes.fbs
+            schemas/batchnorm_inference_attributes.fbs
+            schemas/batchnorm_inference_attributes_variance_ext.fbs
+            schemas/convolution_common.fbs
+            schemas/convolution_fwd_attributes.fbs
+            schemas/convolution_bwd_attributes.fbs
+            schemas/convolution_wrw_attributes.fbs
+            schemas/data_types.fbs
+            schemas/engine_config.fbs
+            schemas/engine_details.fbs
+            schemas/graph.fbs
+            schemas/knob_value.fbs
+            schemas/matmul_attributes.fbs
+            schemas/pointwise_attributes.fbs
+            schemas/tensor_attributes.fbs
+        SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
+        PRIMARY_VERSION ${HIPDNN_FLATBUFFERS_VERSION}
+        SUPPORTED_VERSIONS ${HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS}
+        GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/generated"
     )
-
-    _save_var(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS)
-
-    set(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS
-        "--gen-object-api;--gen-mutable;--gen-compare;--defaults-json;--scoped-enums"
-    )
-    build_flatbuffers(
-        "${SCHEMA_FILES}" # flatbuffers_schemas
-        "" # schema_include_dirs
-        generate_hipdnn_data_sdk_headers # custom_target_name
-        "" # additional_dependencies
-        ${HIP_DNN_DATA_SDK_GENERATED_INCLUDE_DIR}/hipdnn_data_sdk/data_objects # generated_includes_dir
-        "" # binary_schemas_dir
-        "" # copy_text_schemas_dir
-    )
-
-    # Flatc build has some warnings that trigger and print to the console.  Since we dont want these
-    # we can suppress all warnings by using the -w compile flag.  This command prepends -w to the
-    # compile flats for the flatc target.
-    if(TARGET flatc)
-        set_target_properties(flatc PROPERTIES COMPILE_FLAGS "-w")
-    endif()
-    _restore_var(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS)
-
-    add_dependencies(hipdnn_data_sdk generate_hipdnn_data_sdk_headers)
 endif()
 
 export(TARGETS hipdnn_data_sdk ${_hipdnn_data_sdk_local_export_targets}
