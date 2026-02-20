@@ -23,6 +23,9 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <cstdio>
+#include <cstdlib>
+
 #include "log.hpp"
 #include "tensor_util.hpp"
 #include "get_handle.hpp"
@@ -109,7 +112,15 @@ struct Tensor
         clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
         data = clCreateBuffer(ctx, CL_MEM_READ_WRITE, data_size, nullptr, nullptr);
 #elif MIOPEN_BACKEND_HIP
-        EXPECT_EQ(hipMalloc(&data, data_size), hipSuccess);
+        // ASSERT_* cannot be used in constructors (generates illegal
+        // return-void). Use hard abort on allocation failure instead.
+        auto err = hipMalloc(&data, data_size);
+        if(err != hipSuccess)
+        {
+            fprintf(stderr, "hipMalloc failed: %s at %s:%d\n",
+                    hipGetErrorString(err), __FILE__, __LINE__);
+            abort();
+        }
 #endif
     }
 
