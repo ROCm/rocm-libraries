@@ -15,9 +15,9 @@ namespace ck {
  *
  * Provides a three-tier inheritance structure:
  *
- * - @ref ThreadwiseTransferHelper_Base — generic coordinate/descriptor utilities
- *   - @ref ThreadwiseTransferHelper_Serpentine — serpentine (snake/zigzag) traversal
- *   - @ref ThreadwiseTransferHelper_SFC — SpaceFillingCurve traversal
+ * - @ref ThreadwiseTransferHelper_Base -- generic coordinate/descriptor utilities
+ *   - @ref ThreadwiseTransferHelper_Serpentine -- serpentine (snake/zigzag) traversal
+ *   - @ref ThreadwiseTransferHelper_SFC -- SpaceFillingCurve traversal
  */
 
 namespace detail {
