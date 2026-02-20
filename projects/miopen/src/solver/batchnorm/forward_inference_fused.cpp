@@ -76,7 +76,7 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext&,
     auto result = ConvSolution{miopenStatusSuccess};
     auto kernel = KernelInfo{};
 
-    kernel.kernel_file = "MIOpenBatchNormActivInferHIP.cpp";
+    kernel.kernel_file = "MIOpenBatchNormActivInfer.cpp";
     kernel.kernel_name = "MIOpenBatchNormActivInfer";
     const auto mode    = bn_problem.GetMode();
     if(mode == miopenBNSpatial)
