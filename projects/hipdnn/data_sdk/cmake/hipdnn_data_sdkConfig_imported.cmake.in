@@ -56,6 +56,14 @@ if(flatbuffers_VERSION AND NOT flatbuffers_VERSION IN_LIST _hipdnn_supported_fla
     )
 endif()
 
+# Add the correct versioned generated headers to the include path based on detected FlatBuffers version
+if(flatbuffers_VERSION)
+    string(REPLACE "." "_" _hipdnn_fb_version_tag "${flatbuffers_VERSION}")
+    target_include_directories(hipdnn_data_sdk INTERFACE
+        "${PACKAGE_PREFIX_DIR}/@HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR@/generated/v${_hipdnn_fb_version_tag}")
+    message(STATUS "hipDNN Data SDK: Using FlatBuffers ${flatbuffers_VERSION} headers (v${_hipdnn_fb_version_tag})")
+endif()
+
 find_dependency(nlohmann_json REQUIRED)
 
 # Subdirectory path for hipDNN engine plugins (relative to lib)

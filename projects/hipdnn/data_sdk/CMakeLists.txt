@@ -171,11 +171,11 @@ install(
     PATTERN "generated" EXCLUDE
 )
 
-# Install the selected version's generated FlatBuffer headers to the standard data_objects path
-# so consumers see them at <hipdnn_data_sdk/data_objects/*.h> without version subdirectories
+# Install ALL versions of generated FlatBuffer headers
+# The Config file will select the correct version based on detected FlatBuffers version
 install(
-    DIRECTORY ${HIP_DNN_DATA_SDK_GENERATED_INCLUDE_DIR}/
-    DESTINATION ${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}
+    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/generated/"
+    DESTINATION ${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}/generated
     COMPONENT Development
     FILES_MATCHING
     PATTERN "*.h"
