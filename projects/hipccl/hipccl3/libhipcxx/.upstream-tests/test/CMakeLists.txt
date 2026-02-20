@@ -299,4 +299,7 @@ elseif(LIBCUDACXX_ENABLE_HIP)
   endif()
 endif()
 
-add_subdirectory(atomic_codegen)
+# atomic_codegen tests require CUDA-specific tools (cuobjdump) and are not supported with HIP
+if(LIBCUDACXX_ENABLE_CUDA)
+  add_subdirectory(atomic_codegen)
+endif()
