@@ -635,8 +635,7 @@ struct tile_window_with_static_distribution
                     if constexpr(static_move_ys)
                     {
                         const auto coord_ys_offset = make_tensor_coordinate(
-                            this->get_bottom_tensor_view().get_tensor_descriptor(),
-                            idx_ys_offset);
+                            this->get_bottom_tensor_view().get_tensor_descriptor(), idx_ys_offset);
                         return coord_ys_offset.get_offset();
                     }
                     else
