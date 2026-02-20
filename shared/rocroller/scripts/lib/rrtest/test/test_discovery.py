@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for test discovery functions.
 
@@ -5,13 +8,13 @@ These tests verify that we can discover tests from executables
 and parse their output correctly.
 """
 
-import pytest
 from pathlib import Path
 
+import pytest
 from rrtest.core import (
-    discover_gtest_tests,
     discover_catch2_tests,
     discover_ctest_tests,
+    discover_gtest_tests,
 )
 
 
