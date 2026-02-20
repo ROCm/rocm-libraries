@@ -35,8 +35,8 @@
 
 namespace GEMMTests
 {
-    std::set<int> nonZeroDSReadOffsets(std::string const& instruction, std::string const& s);
-    std::set<int> direct2LDSWriteStrides(std::string const& s);
+    std::set<int> NonZeroDSReadOffsets(std::string const& instruction, std::string const& s);
+    std::set<int> Direct2LDSWriteStrides(std::string const& s);
 
     template <typename T>
     concept isF8 = std::is_same_v<T, rocRoller::FP8> || std::is_same_v<T, rocRoller::BF8>;
@@ -503,8 +503,6 @@ namespace GEMMTests
             params->fuseLoops                     = gemm.fuseLoops;
             params->tailLoops                     = gemm.tailLoops;
             params->allowAmbiguousMemoryNodes     = gemm.allowAmbiguousMemoryNodes;
-            params->unrollX                       = gemm.unrollX;
-            params->unrollY                       = gemm.unrollY;
             params->unrollK                       = gemm.unrollK;
             params->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
             params->prefetch                      = gemm.prefetch;
@@ -617,7 +615,9 @@ namespace GEMMTests
                     {gemm.macM, gemm.macN},
                     LayoutType::MATRIX_ACCUMULATOR,
                     {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
-                    gemm.storeLDSD ? MemoryType::LDS : MemoryType::WAVE);
+                    gemm.storePath == SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer
+                        ? MemoryType::WAVE_LDS
+                        : MemoryType::WAVE);
                 params->setDimensionInfo(tagStoreD, macTileD);
             }
 
