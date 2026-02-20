@@ -202,8 +202,8 @@ add_custom_target( rocblas-test-files DEPENDS "${ROCBLAS_SMOKE}" "${ROCBLAS_EXTR
 
 add_dependencies( rocblas-test rocblas-test-data rocblas-test-files rocblas-common )
 
-# YAML-based test categories for CTest (smoke/quick, standard, comprehensive)
-# Working dir: staging (test binary and rocblas_gtest.data live there)
+# CTest categories: quick (= smoke, *quick*), standard (= precheckin), comprehensive (= extended), stress (= weekly)
+# Working dir: staging (test binary, rocblas_gtest.data)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
   enable_testing()
   message(STATUS "rocBLAS: YAML-based test categorization")
