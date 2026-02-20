@@ -22,25 +22,25 @@ Review this table to see a high-level overview of the differences between cuDNN 
    * - Aspect
      - cuDNN frontend
      - hipDNN frontend
-   * - **Namespace**
+   * - Namespace
      - ``cudnn_frontend``
      - ``hipdnn_frontend``
-   * - **Handle Creation**
+   * - Handle creation
      - ``cudnnCreate(&handle)``
      - ``hipdnnCreate(&handle``
-   * - **Handle Destruction**
+   * - Handle destruction
      - ``cudnnDestroy(handle)``
      - ``hipdnnDestroy(handle)``
-   * - **Heuristics Modes**
+   * - Heuristics modes
      - All cuDNN heuristic modes
      - Currently only ``HeurMode_t::FALLBACK``
-   * - **Operation Support**
+   * - Operation support
      - All cuDNN operations
      - See `Operation support <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/OperationSupport.md>`_ for more information.
-   * - **Device Memory Utility**
+   * - Device memory utility
      - ``Surface<type>``
      - ``MigratableMemory<type>``
-   * - **Device Memory Access**
+   * - Device memory access
      - ``Surface<type>::devPtr``
      - ``MigratableMemory<type>::deviceData()``
 
@@ -73,7 +73,7 @@ See :ref:`install` for more information. Here's an MVP (minimum viable product) 
       hipdnn_frontend
   )
 
-Build 
+Build commands:
 
 .. code:: bash
 

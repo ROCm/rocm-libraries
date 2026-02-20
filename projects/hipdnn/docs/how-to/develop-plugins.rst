@@ -13,7 +13,7 @@ The backend discovers and manages these plugins, leveraging them for different a
 
 .. important::
 
-  This page is for advanced users such as senior developers, engineers, and system administrators who are looking to extend hipDNN with customized plugins. Most users should use the default plugins as referred in :ref:`build-execute`.
+  This page is for advanced users such as senior developers, engineers, and system administrators who are looking to extend hipDNN with customized plugins. Most users should use the default plugins described in :ref:`build-execute`.
 
 Plugin Types
 ============
