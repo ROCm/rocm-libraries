@@ -3967,8 +3967,9 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
         optSchedule = {
-            'SYNC': [[9, 18, 55, 73, 95, 95, 114, 164]],
+            'SYNC': [[9, 18, 32, 55, 73, 95, 95, 114, 164]],
             'GRIncA': [[0,1,2,3, 5,6,7,8, 11]],
+            # 'GRIncA': [[0,1,2,3, 9,10,11,12, 15]],
             # 'GRIncB': [[47, 47, 47, 48, 48, 48, 49, 49, 49]],
             'GRIncB': [[38, 39, 40, 41, 45, 46, 47, 50, 51]],
             # 'LRA0': [[0, 1, 2, 3, 7, 8, 9, 10]],
@@ -3985,14 +3986,16 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
                         26,26,27,27, 28,28, 34,35,36,36,
                         ]],
             'PackB0': [[
-                        55,55,55,55,55,55,55,55,55,55,55,55,
-                        55,55,55,55, 63,63, 64,64,64,64,
-                        56,56,56,56, 63,63, 65,65,65,65,
-                        57,57,57,57, 63,63, 66,66,66,66,
-                        58,58,58,58, 63,63, 67,67,67,67,
+                        # 55,55,55,55,55,55,55,55,55,55,55,55,
+                        38,39,40,41,42,43,44,45,46,47,48,49,
+                        55,55,56,56, 63,63, 64,64,65,65,
+                        57,57,58,58, 63,63, 66,66,67,67,
+                        59,59,60,60, 63,63, 68,68,69,69,
+                        61,61,62,62, 63,63, 70,70,71,71,
                         ]],
 
-            'GRA': [[73, 73, 75, 75, 77, 77, 79, 79, 107, 107, 109, 109, 111, 111, 113, 113]],
+            'GRA': [[73, 73, 75, 75, 77, 77, 79, 79, 
+                    107, 107, 109, 109, 111, 111, 113, 113]],
             'GRB': [[132, 132, 134, 134, 136, 136, 138, 138, 182, 182, 184, 184, 186, 186, 188, 188]],
             'LRSA': [[50]],
             'LRSB': [[51]],
@@ -4020,6 +4023,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
         syncCode = [                    
             SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),
             SBarrier(comment="Barrier before GRA&GRB"),
             SWaitCnt(dscnt=-1, vlcnt=4, vscnt=-1, comment="Wait for previous GRA&B"),
