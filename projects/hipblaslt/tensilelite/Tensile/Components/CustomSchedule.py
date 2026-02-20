@@ -5425,7 +5425,7 @@ def _get_schedule_128x256x64_16bit(kernel, useLDSTr, TLDS):
 
 
 @RegisterSchedule(
-    tile_config=TileConfig(224, 320, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(224, 320, 64, 2, 1, 1, True, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -5447,12 +5447,11 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
             25, SBarrier(comment=""),
             78, SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="wait for prev iter GR before LRA1 and LRB1"),
             78, SBarrier(comment=""),
-            119, SBarrier(comment="wave sync before LRB1"),
         ]
         optSchedule = {
             'SYNC': [syncTable[::2]],
-            'GRIncA': [[0,0,0, 1,1,1, 2,2,2]], # 9
-            'GRIncB': [[3,3,3, 4,4,4, 5,5,5]], # 9
+            'GRIncA': [[0, 1, 2, 3, 4, 5, 6, 7, 8]], # 9
+            'GRIncB': [[0, 1, 2, 3, 4, 5, 6, 7, 8]], # 9
 
             'LRA0': [[0, 3, 6, 9, 12, 15, 18]], # 7
             'LRB0': [[1, 2, 4, 5, 7, 8, 10, 11, 13, 17]], # 10
@@ -5467,7 +5466,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
             'LRSB': [[66]], # 1
             'LWSA': [[118]], # 1
             'LWSB': [[118]], # 1
-            'LCC': [[139, 139]], # 2
+            'LCC': [[138, 138]], # 2
         }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 17
