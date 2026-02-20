@@ -472,6 +472,7 @@ void test_radix_rank()
                            d_ranks_output,
                            start_bit,
                            radix_bits);
+        HIP_CHECK(hipGetLastError());
 
         // Getting results to host
         std::vector<int> ranks_output(expected.size());
@@ -762,6 +763,7 @@ void test_radix_rank_with_prefix_sum_output()
                                d_ranks_output,
                                d_prefix_sum_output,
                                start_bit);
+            HIP_CHECK(hipGetLastError());
 
             // Getting results to host
             std::vector<int> ranks_output(expected.size());

@@ -514,6 +514,7 @@ TEST(UniqueIntegralTests, TestUniqueDevice)
         thrust::raw_pointer_cast(&d_data[0]),
         thrust::raw_pointer_cast(&d_keys[0]),
         thrust::raw_pointer_cast(&d_output_size[0]));
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(h_values_last - h_data.begin(), d_output_size[0]);
       ASSERT_EQ(h_values_keys - h_keys.begin(), d_output_size[1]);

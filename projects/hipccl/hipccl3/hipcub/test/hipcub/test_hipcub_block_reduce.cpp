@@ -205,6 +205,7 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, Reduce)
                            0,
                            device_output,
                            device_output_reductions);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_reductions.data(),
@@ -306,6 +307,7 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, Sum)
                            0,
                            device_output,
                            device_output_reductions);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_reductions.data(),
@@ -416,6 +418,7 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, ReduceValid)
                            device_output,
                            device_output_reductions,
                            valid_items);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_reductions.data(),
@@ -522,6 +525,7 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, SumValid)
                            device_output,
                            device_output_reductions,
                            valid_items);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_reductions.data(),
@@ -692,6 +696,7 @@ TYPED_TEST(HipcubBlockReduceInputArrayTests, Reduce)
             0,
             device_output,
             device_output_reductions);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_reductions.data(),
@@ -818,6 +823,7 @@ TYPED_TEST(HipcubBlockReduceInputArrayTests, Sum)
             0,
             device_output,
             device_output_reductions);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_reductions.data(),

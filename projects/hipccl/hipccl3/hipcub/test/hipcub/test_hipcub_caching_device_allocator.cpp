@@ -87,6 +87,7 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
         HIP_KERNEL_NAME(EmptyKernel),
         dim3(32000), dim3(256), 1024 * 8, 0
     );
+    HIP_CHECK(hipGetLastError());
 
     // Free d_999B_stream0_a
     HIP_CHECK(allocator.DeviceFree(d_999B_stream0_a));
@@ -105,6 +106,7 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
         HIP_KERNEL_NAME(EmptyKernel),
         dim3(32000), dim3(256), 1024 * 8, 0
     );
+    HIP_CHECK(hipGetLastError());
 
     // Free d_999B_stream0_b
     HIP_CHECK(allocator.DeviceFree(d_999B_stream0_b));
@@ -125,6 +127,7 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
         HIP_KERNEL_NAME(EmptyKernel),
         dim3(32000), dim3(256), 1024 * 8, other_stream
     );
+    HIP_CHECK(hipGetLastError());
 
     // Free d_999B_stream_other
     HIP_CHECK(allocator.DeviceFree(d_999B_stream_other_a));
@@ -160,6 +163,7 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
         HIP_KERNEL_NAME(EmptyKernel),
         dim3(32000), dim3(256), 1024 * 8, other_stream
     );
+    HIP_CHECK(hipGetLastError());
 
     // Free d_999B_stream_other_a and d_999B_stream_other_b
     HIP_CHECK(allocator.DeviceFree(d_999B_stream_other_a));

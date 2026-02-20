@@ -201,6 +201,7 @@ TYPED_TEST(HipcubBlockHistogramInputArrayTests, Histogram)
             dim3(grid_size), dim3(block_size), 0, 0,
             device_output, device_output_bin
         );
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(

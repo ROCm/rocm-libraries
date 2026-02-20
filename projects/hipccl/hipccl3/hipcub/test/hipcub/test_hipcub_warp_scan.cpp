@@ -225,6 +225,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScan)
                 dim3(grid_size), dim3(block_size_ws32), 0, 0,
                 device_input, device_output
             );
+            HIP_CHECK(hipGetLastError());
         }
         if (current_device_warp_size == ws64)
         {
@@ -389,6 +390,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanInitialValue)
                 device_input,
                 device_output,
                 initial_value);
+            HIP_CHECK(hipGetLastError());
         }
         if(current_device_warp_size == ws64)
         {
@@ -568,6 +570,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduce)
                 dim3(grid_size), dim3(block_size_ws32), 0, 0,
                 device_input, device_output, device_output_reductions
             );
+            HIP_CHECK(hipGetLastError());
         }
         else if (current_device_warp_size == ws64)
         {
@@ -757,6 +760,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduceInitialValue)
                 device_output,
                 device_output_reductions,
                 initial_value);
+            HIP_CHECK(hipGetLastError());
         }
         else if(current_device_warp_size == ws64)
         {
@@ -920,6 +924,7 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveScan)
                 dim3(grid_size), dim3(block_size_ws32), 0, 0,
                 device_input, device_output, init
             );
+            HIP_CHECK(hipGetLastError());
         }
         else if (current_device_warp_size == ws64)
         {
@@ -1101,6 +1106,7 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveReduceScan)
               dim3(grid_size), dim3(block_size_ws32), 0, 0,
               device_input, device_output, device_output_reductions, init
             );
+            HIP_CHECK(hipGetLastError());
         }
         else if (current_device_warp_size == ws64)
         {
@@ -1294,6 +1300,7 @@ TYPED_TEST(HipcubWarpScanTests, Scan)
                 dim3(grid_size), dim3(block_size_ws32), 0, 0,
                 device_input, device_inclusive_output, device_exclusive_output, init
             );
+            HIP_CHECK(hipGetLastError());
         }
         else if (current_device_warp_size == ws64)
         {
@@ -1445,6 +1452,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanCustomType)
                 dim3(grid_size), dim3(block_size_ws32), 0, 0,
                 device_input, device_output
             );
+            HIP_CHECK(hipGetLastError());
         }
         else if (current_device_warp_size == ws64)
         {

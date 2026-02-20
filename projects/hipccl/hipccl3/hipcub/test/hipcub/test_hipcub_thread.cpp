@@ -167,6 +167,7 @@ TYPED_TEST(HipcubThreadOperationTests, Load)
         );
 
         thread_load_kernel<T><<<grid_size, block_size>>>(device_input, device_output);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(
@@ -365,6 +366,7 @@ TYPED_TEST(HipcubThreadOperationTests, Store)
         );
 
         thread_store_kernel<T><<<grid_size, block_size>>>(device_input, device_output);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(
@@ -450,6 +452,7 @@ TYPED_TEST(HipcubThreadOperationTests, IterateStore)
             hipMemcpy(device_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
 
         iterate_thread_kernel<T, ipt><<<grid_size, block_size>>>(device_input, device_output);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output.data(),
@@ -548,6 +551,7 @@ TYPED_TEST(HipcubThreadOperationTests, Reduction)
         );
 
         thread_reduce_kernel<T, length><<<grid_size, block_size>>>(device_input, device_output);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(
@@ -645,6 +649,7 @@ TYPED_TEST(HipcubThreadOperationTests, Scan)
         );
 
         thread_scan_kernel<T, length><<<grid_size, block_size>>>(device_input, device_output);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(
@@ -786,6 +791,7 @@ TYPED_TEST(HipcubThreadOperationTests, Bounds)
         thread_search_kernel<T>
             <<<grid_size, block_size>>>
                 (device_input, device_lower_bound_output, device_upper_bound_output, val, num_items);
+            HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(
