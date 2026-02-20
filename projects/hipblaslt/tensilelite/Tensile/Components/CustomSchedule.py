@@ -3874,11 +3874,11 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
 def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     n_mfma = 128//2//32 * 128//2//32 * 3 * 2    # 128 MT0 / 2 WT0 / 32 mfma dim  * 128/2/32 * 3 bf16 MFMAs per tf32 mfma * 2 PLR=1
 
-    optSchedule = dict()
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     syncs = SyncSchedule()
-    syncCode = []   
     gr_inc_step = 0
+    disable_validation = False
+    num_code_paths = 1
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         lra0   = [0,1,2,3]
@@ -3919,62 +3919,71 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         lwsa   = [                                                                          20] # use delay before mfma4x4x4
         lwsb   = [                                                                          20]
         
-    elif isNN(kernel) and TLDS==1:
+    elif isNN(kernel) and TLDS==1  and kernel["VectorWidthA"] == 2:
+        disable_validation = True # swap instructions included in pack are not supported yet
+
         lra0   = [0,0,0,0,
-                   1,1,1,1,
-                    2,2,2,2,
-                     3,3,3,3]
-        lrb0   = [          4,5,6,7]
+                    1,1,1,1]
+        lrb0   = [     3,  4,6,6]
         #                wait then read
-        syncs.add(          4, dscnt=8, comment="wait for the first 2x4 LRAs before packing")
-        syncs.add(            5, dscnt=1, comment="wait for the rest of LRAs")
-        pack_a0 = [         4,4,4,4, 6,6, 7,7,7,7,
-                              5,5,6,6, 6,6, 8,8,8,8]
+        syncs.add(     3, dscnt=4, comment="wait for the first 2x2 LRAs before packing")
+        syncs.add(         4, dscnt=1, comment="wait for the rest of LRAs")
+        pack_a0 = [    3,3,4,4, # swap instructions, must come after LR and before other packs
+                             4,5,5,5, 6,6, 7,7,7,7, 
+                             5,5,6,6, 6,6, 8,8,8,8]
         # because of GR starting at 10, we need barrier at 9, will use that for sync too.
         syncs.add(                               9, dscnt=0, comment="wait for LRBs before the packing them",
                                                  barrier=True, barrier_comment="make sure all LRs are done before starting GR")
-        pack_b0= [                               9,9,9,9, 10,10, 11,11,11,11,
-                                                 9,9,9,9, 10,10, 11,11,11,11]
-
-        grinca = [0,0,0,1,1,1,2,2,2]
-        grincb = [4,4,4,6,6,6,6,6,6]
+        pack_b0= [                               10,10,10,10, 10,10, 11,11,11,11,
+                                                 9,9,9,9,     10,10, 10,10,11,11]
+        grinca = [0,0,1, 1,2,2, 2,2,2]
+        grincb = [2,2,6, 7,7,7, 8,8,8]
         lrsa   = [10]
         lrsb   = [10]   
         
-        gra    = [                                 10,10,11,11] # one index for two instructions
-        grb    = [                                              13,14,  15,16] # one index for two instructions
+        num_code_paths = 2
+        gra   = [                                9,9,   11,11]
+        gra2  = [                                 10,10,11,11]
+        grb    = [                                              13,        14,14,16] # one index for two instructions
+        grb2   = [                                              13,         15,15,17] # one index for two instructions
         num_gr = len(gra) + len(grb)
         syncs.add(                                             12, vlcnt=8, barrier=True, comment="wait for the previous GRAs")
 
         lra1   = [                                             12,12,12,12,
-                                                                13,13,13,13,
-                                                                 14,14,14,14,
-                                                                  15,15,15,15]
-        lrb1   = [                                                           16,16,17,17]
-        #                                                                    wait then read
-        syncs.add(                                                           16, dscnt=12, vlcnt=7, comment="wait for the first LRA before packing and also wait for GRBs",
-                                                                                 barrier=True, barrier_comment="make sure GRBs are done before starting LRBs"  )
-        syncs.add(                                                              17, dscnt=2, comment="wait for the rest of LRAs")
-        pack_a1 =[                                                             16,16,17,17, 20,20, 21,21,21,21,
-                                                                                17,17,17,17, 20,20, 21,21,21,21]
+                                                                13,13,13,13]
+        lrb1   = [                                                         14,15,16,16]
+        #                                                                  wait then read
+        syncs.add(                                                         14, dscnt=4, vlcnt=4+1, comment="wait for the first LRA before packing and also wait for GRBs",
+                                                                               barrier=True, barrier_comment="make sure GRBs are done before starting LRBs"  )
+        syncs.add(                                                                  17, dscnt=4, comment="wait for the rest of LRAs")
+        pack_a1 =[                                                            15,15,17,17, # swap instructions, must come after LR and before other packs
+                                                                                16,16,16,16, 20,20, 21,21,21,21,
+                                                                                 18,18,18,18, 20,20, 21,21,21,21]
         syncs.add(                                                               18, dscnt=3, comment="wait for the first LRB before the packing them")
-        syncs.add(                                                                19, dscnt=1, comment="wait for the 2nd and 3rd LRB")
-        syncs.add(                                                                      20, dscnt=0, comment="wait for the 4th LRB")
+        syncs.add(                                                                19, dscnt=0, comment="wait for the 2nd and 3rd LRB")
         pack_b1= [                                                               18,18,19,19, 20,20, 22,22,22,22,
-                                                                                  19,19,20,20, 20,20, 22,22,23,23]
-        lwsa   = [                                                                           20] # use delay before mfma4x4x4
-        lwsb   = [                                                                           20]    
+                                                                                  19,19,19,19, 20,20, 22,22,22,22]
+        lwsa   = [                                                                            20] # use delay before mfma4x4x4
+        lwsb   = [                                                                            20]    
     else:
         return False, None  
     
+    final_gra = [duplicate_list_items(gra, 2, gr_inc_step)]
+    if num_code_paths == 2:
+        final_gra += [duplicate_list_items(gra2, 2, gr_inc_step)]
+    
+    final_grb = [duplicate_list_items(grb, 2, gr_inc_step)]
+    if num_code_paths == 2:
+        final_grb += [duplicate_list_items(grb2, 2, gr_inc_step)]
+
     optSchedule = {
         'SYNC':   [syncs.get_indicies()],
         'GRIncA': [grinca],
         'GRIncB': [grincb],
         'LRA0':   [lra0],
         'LRB0':   [lrb0],
-        'GRA':    [duplicate_list_items(gra, 2, gr_inc_step)],
-        'GRB':    [duplicate_list_items(grb, 2, gr_inc_step)],
+        'GRA':    final_gra,
+        'GRB':    final_grb,
         'LRSA':   [lrsa],
         'LRSB':   [lrsb],
         'LWSA':   [lwsa],
@@ -3994,7 +4003,9 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     kernel["UsePLRPack"] = True
     kernel["UseMFMAF32XEmulation"] = True
-    opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1 = ScheduleInfo(num_code_paths, n_mfma, optSchedule, syncCode, nglshift, nllshift)
+    if disable_validation:
+        opt1.disableValidation()
     return True, opt1
 
 @RegisterSchedule(
@@ -4012,6 +4023,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     syncs = SyncSchedule()
     syncCode = []   
     gr_inc_step = 1
+    disable_validation = False
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
@@ -4047,13 +4059,59 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
 
         syncs.add(                                                 48, vlcnt=7, barrier=True, comment="wait for the previous GRs")
 
-        lra1   = [                                                 48,49,50,51,52,53,54,55]
+        lra1   =[[                                                 48,49,50,51,52,53,54,55]]
         lrb1   = [                                                    56,57,  59,60,61,62,63,64]
         syncs.add(                                                          58, dscnt=6, comment="wait for the first two LRAs before packing")
         syncs.add(                                                          63, dscnt=6, comment="wait for the rest of LRAs before packing them")
         pack_a1 = [                                                           i+59 for i in offset] # last at 75
         syncs.add(                                                                                 76, dscnt=0, comment="wait for LRBs before the packing them")
         pack_b1 =[                                                                                 i+77 for i in offset] # last at 93
+
+    elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 4:
+        disable_validation = True
+
+        kernel["UseMFMAF32XEmulation"] = True
+        kernel["UseDot2F32XEmulation"] = False
+        kernel["UsePLRPack"] = True
+
+        offset=[0,0,1,1, 8,8,  9, 9,10,10, 
+                2,2,3,3, 8,8, 11,11,12,12,
+                4,4,5,5, 8,8, 13,13,14,14, 
+                6,6,7,7, 8,8, 15,15,16,16]
+        
+        lra0   = [ 0,0,2,2,4,4,6,6]
+        lrb0   = [                                       11,11,13,13,15,15,17,17]
+        #                wait then read
+        syncs.add(             6, dscnt=2, comment="wait for the first 4 LRAs before swapping/packing")
+        syncs.add(                     9, dscnt=2, comment="wait for the rest of LRAs before swapping/packing them")
+        pack_a0= [              7,7,7, 9,9,9, 8,8, 10,10, 8, 10] # swap instructions
+        pack_a0+=[                                       i+11 for i in offset] # last at 27
+        # because of GR starting at 22, we need barrier at 21, will use that for sync too.
+        syncs.add(                                                                21, dscnt=0, comment="wait for LRBs before the packing them",
+                                                                                  barrier=True, barrier_comment="barrier before GR")
+        pack_b0= [                                                                  i+28 for i in offset] # last at 44
+
+        grinca = [0,1,1,1,2,3,3,3,4]
+        grincb = [5,5,5,7,8,9,10,19,19]
+        lrsa   = [45]
+        lrsb   = [45]
+        lwsa   = [72]
+        lwsb   = [72]        
+        
+        gra    = [                            22,25,29,33, 37,41,45,49] # one index for two instructions
+        grb    = [                                                    53,57,61, 64,69,75,79,84] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+
+        syncs.add(                                                 47, vlcnt=7, barrier=True, comment="wait for the previous GRs")
+        lra1   =[[                                                 48,48,50,50,52,52,54,54],
+                                                                   [49,49,51,51,53,53,54,54]]
+        lrb1   = [                                                                                  59,59,  61,61,63,63,65,65]
+        syncs.add(                                                                   54, dscnt=2, comment="wait for the first two LRAs before packing")
+        syncs.add(                                                                             57, dscnt=0, comment="wait for the rest of LRAs before packing them")
+        pack_a1 =[                                                                    55,55,55, 57,57,57, 55,55, 57,57, 56, 58] # swap instructions
+        pack_a1+= [                                                                                 i+59 for i in offset] # last at 75
+        syncs.add(                                                                                     76, dscnt=0, comment="wait for LRBs before the packing them")
+        pack_b1 =[                                                                                     i+77 for i in offset] # last at 93
 
     else:
         return False, None  
@@ -4064,8 +4122,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         'GRIncB': [grincb],
         'LRA0':   [lra0],
         'LRB0':   [lrb0],
-        'PackA0': [pack_a0],
-        'PackB0': [pack_b0],
         'GRA':    [duplicate_list_items(gra,                2, gr_inc_step),
                    duplicate_list_items([i+1 for i in gra], 2, gr_inc_step)],
         'GRB':    [duplicate_list_items(grb,                2, gr_inc_step),
@@ -4074,11 +4130,13 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         'LRSB':   [lrsb],
         'LWSA':   [lwsa],
         'LWSB':   [lwsb],
-        'LRA1':   [lra1],
+        'PackA0': [pack_a0],
+        'PackB0': [pack_b0],
+        'LRA1':   lra1,
         'LRB1':   [lrb1],
         'PackB1': [pack_b1],
         'PackA1': [pack_a1],
-        'LCC':    [[n_mfma-2, n_mfma-1]],
+        'LCC':    [[n_mfma-2, n_mfma-2]],
     }
 
     syncCode = syncs.get_code()
@@ -4088,6 +4146,8 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     kernel["UseMFMAF32XEmulation"] = True
     kernel["UsePLRPack"] = True
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
+    if disable_validation:
+        opt1.disableValidation()
     return True, opt1
 
 
