@@ -379,7 +379,8 @@ def parseLibraryLogicData(
         printIndexAssignmentInfo,
         assembler,
         isaInfoMap,
-        lazyLibraryLoading
+        lazyLibraryLoading,
+        logicFile=srcFile
     )
 
     return LibraryLogic(data["ScheduleName"], data["ArchitectureName"], problemType, solutions, \

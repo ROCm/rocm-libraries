@@ -28,7 +28,7 @@ from subprocess import run, PIPE
 from typing import List, Optional, Set, Tuple, Union, NamedTuple, Dict
 
 from .Types import IsaVersion
-from .Utilities import print2
+from .Utilities import print1
 
 import rocisa
 
@@ -332,35 +332,9 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
         gfx, cu = l2(f.readline())
         deviceIds = l3(f.readline())
 
-    # Check for placeholder/invalid device IDs and warn
-    placeholderIds = {"id=0000", "id=ffff", "id=0"}
-    hasOnlyPlaceholders = all(devId in placeholderIds for devId in deviceIds)
-    hasNoRegisteredIds = not any(devId in SUPPORTED_BUILD_CHIP_IDS for devId in deviceIds)
-
-    if supportsChipIdPredicate(gfx) and (hasOnlyPlaceholders or hasNoRegisteredIds):
-        expectedIds = GFX_CHIP_IDS.get(gfx, [])
-        if expectedIds:
-            print2(f"")
-            print2(f"********************************************************************************")
-            print2(f"* WARNING: Logic file has no valid chip IDs specified!")
-            print2(f"*")
-            print2(f"* File: {file}")
-            print2(f"* Architecture: {gfx}")
-            print2(f"* Found device IDs: {deviceIds}")
-            print2(f"*")
-            print2(f"* Expected device IDs for {gfx}: {', '.join(expectedIds)}")
-            print2(f"*")
-            print2(f"* This logic file will be used as a fallback for all {gfx} devices.")
-            print2(f"* For optimal kernel selection, specify explicit device IDs like:")
-            print2(f"*   - [Device {expectedIds[0]}]")
-            print2(f"********************************************************************************")
-            print2(f"")
-
     try:
         for id in deviceIds:
-            # Skip verification for placeholder IDs
-            if id not in placeholderIds:
-                _verifyPredicate(id, gfx)
+            _verifyPredicate(id, gfx)
     except ValueError as e:
         raise LogicFileError(f"Invalid device ID found while parsing {file}: {e}")
 

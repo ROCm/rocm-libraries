@@ -22,21 +22,23 @@
 #
 ################################################################################
 
-from typing import Optional
+from typing import List, Optional
 
 from . import Properties
-from Tensile.Common.Architectures import SUPPORTED_CHIP_ID_FALLBACKS, isaToGfx
+from Tensile.Common.Architectures import \
+    SUPPORTED_CHIP_ID_FALLBACKS, SUPPORTED_BUILD_CHIP_IDS, GFX_CHIP_IDS, \
+    isaToGfx, supportsChipIdPredicate, print1
 
 import copy
 import re
 
 
-def parseDeviceNameToInt(deviceName: Optional[str]) -> Optional[int]:
-    """Parse 'Device 75a3' into 30115 (hex to decimal).
+def parseDeviceNameToHex(deviceName: Optional[str]) -> Optional[str]:
+    """Parse 'Device 75a3' into 75a3 (hex).
     Args:
-        deviceName: Of format 'Device 7aa7`
+        deviceName: Of format 'Device XXXX'
     Returns:
-        Decimal formated integer to be serialized into solution library
+        Hex-formatted chip ID string (without "id=" prefix), e.g. "75a3"
     Raise:
         SystemExit if format is invalid, enforces library logic at build time.
     """
@@ -44,10 +46,10 @@ def parseDeviceNameToInt(deviceName: Optional[str]) -> Optional[int]:
         return None
     match = re.match(r'^Device\s+([0-9a-fA-F]+)$', deviceName.strip())
     if match:
-        return int(match.group(1), 16)
+        return match.group(1)
+        #return int(match.group(1), 16)
 
-    raise ValueError(f"Invalid device name format: '{
-                     deviceName}', expected 'Device XXXX'")
+    raise ValueError(f"Invalid device name format: '{deviceName}', expected 'Device XXXX'")
 
 
 def _extractPciChipIds(pred: Optional[Properties.Predicate]) -> frozenset[int]:
@@ -120,7 +122,7 @@ class HardwarePredicate(Properties.Predicate):
         return cls("AMDGPU", value=cls("Processor", value=gfxArch))
 
     @classmethod
-    def FromHardware(cls, isa, cuCount=None, deviceNames=None):
+    def FromHardware(cls, isa, cuCount=None, deviceNames=None, logicFile=None):
         """Create a HardwarePredicate from hardware specifications.
 
         Args:
@@ -128,15 +130,18 @@ class HardwarePredicate(Properties.Predicate):
             cuCount: Optional compute unit count
             deviceNames: Optional list of device name strings like ["Device 75a0", "Device 75a2"],
                          or a single string, or None
+            logicFile: Optional source logic file path used only for diagnostics
         """
         gfxArch = isaToGfx(tuple(isa))
         props = [cls("Processor", value=gfxArch)]
+
         if cuCount is not None:
             props.append(cls("CUCount", value=cuCount))
 
-        pciChipIdPred = cls._createPciChipIdPredicate(deviceNames)
-        if pciChipIdPred is not None:
-            props.append(pciChipIdPred)
+        if supportsChipIdPredicate(gfxArch):
+            pciChipIdPred = cls._createPciChipIdPredicate(deviceNames, gfxArch, logicFile)
+            if pciChipIdPred is not None:
+                props.append(pciChipIdPred)
 
         if len(props) == 1:
             return cls("AMDGPU", value=props[0])
@@ -144,7 +149,7 @@ class HardwarePredicate(Properties.Predicate):
             return cls("AMDGPU", value=cls.And(props))
 
     @classmethod
-    def _createPciChipIdPredicate(cls, deviceNames):
+    def _createPciChipIdPredicate(cls, deviceNames, gfx: str, logicFile=None):
         """Create PciChipId predicate(s) from device names.
 
         Args:
@@ -157,14 +162,13 @@ class HardwarePredicate(Properties.Predicate):
         Returns:
             A HardwarePredicate of type "PciChipId"
         """
-        if deviceNames is None:
-            return None
         if isinstance(deviceNames, str):
             deviceNames = [deviceNames]
 
+        supportedChipIds = cls._collectSupportedChipIds(deviceNames, gfx, logicFile)
+
         pciChipIds = []
-        for name in deviceNames:
-            chipId = parseDeviceNameToInt(name)
+        for chipId in supportedChipIds:
             if chipId is not None:
                 pciChipIds.append(chipId)
 
@@ -176,6 +180,38 @@ class HardwarePredicate(Properties.Predicate):
         pciChipIdPredicates = [cls("PciChipId", value=chipId)
                                for chipId in pciChipIds]
         return cls.Or(pciChipIdPredicates)
+
+    @classmethod
+    def _collectSupportedChipIds(
+        cls, deviceNames: Optional[List[str]], gfx: str, logicFile: Optional[str] = None
+    ) -> List[str]:
+        chipIdsRaw = [parseDeviceNameToHex(name) for name in deviceNames] if deviceNames else []
+        chipIds = [chipId for chipId in chipIdsRaw if chipId is not None]
+        expectedIds = GFX_CHIP_IDS.get(gfx, [])
+        supportedChipIds = [chipId for chipId in chipIds if f"id={chipId.lower()}" in SUPPORTED_BUILD_CHIP_IDS]
+        unsupportedChipIds = [chipId for chipId in chipIds if f"id={chipId.lower()}" not in SUPPORTED_BUILD_CHIP_IDS]
+
+        if expectedIds and (not supportedChipIds or unsupportedChipIds):
+            print1("")
+            print1("********************************************************************************")
+            print1("* WARNING: Logic file has invalid or unsupported chip IDs")
+            print1(f"*   File: {logicFile if logicFile else '<unknown>'}")
+            print1(f"*   Architecture: {gfx}")
+            print1(f"*   Found chip IDs: {', '.join(chipIds) if chipIds else '<none>'}")
+            print1(f"*   Supported chip IDs: {', '.join(expectedIds)}")
+
+            if supportedChipIds:
+                print1("* This logic file will still be used for the supported chip-ID variant(s)")
+                print1(f"*   Using chip IDs: {', '.join(supportedChipIds)}")
+                print1(f"*   Ignoring chip IDs: {', '.join(unsupportedChipIds)}")
+            else:
+                print1(f"* No supported chip IDs found; using this file as fallback for all {gfx} devices")
+                print1(f"* For optimal kernel selection, specify IDs like: `[Device {expectedIds[0]}]`")
+
+            print1("********************************************************************************")
+            print1("")
+
+        return supportedChipIds
 
     def __lt__(self, other):
         # Use superclass logic for TruePreds
