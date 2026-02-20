@@ -52,15 +52,24 @@ struct PerformanceConfigLayernorm : PerfConfigBase<PerformanceConfigLayernorm>
     bool separate_stride;
     bool stride_in_local_size;
     bool initialized = false;
-    PerformanceConfigLayernorm(int _local_size, bool _vectorized, bool _separate_stride, bool _stride_in_local_size)
-        : local_size(_local_size), vectorized(_vectorized), separate_stride(_separate_stride), stride_in_local_size(_stride_in_local_size)
+    PerformanceConfigLayernorm(int _local_size,
+                               bool _vectorized,
+                               bool _separate_stride,
+                               bool _stride_in_local_size)
+        : local_size(_local_size),
+          vectorized(_vectorized),
+          separate_stride(_separate_stride),
+          stride_in_local_size(_stride_in_local_size)
     {
     }
-    PerformanceConfigLayernorm() : PerformanceConfigLayernorm(start_local_size, start_vectorized, start_separate_stride, start_stride_in_local_size)
+    PerformanceConfigLayernorm()
+        : PerformanceConfigLayernorm(
+              start_local_size, start_vectorized, start_separate_stride, start_stride_in_local_size)
     {
     }
     PerformanceConfigLayernorm(bool)
-        : PerformanceConfigLayernorm(start_local_size, start_vectorized, start_separate_stride, start_stride_in_local_size)
+        : PerformanceConfigLayernorm(
+              start_local_size, start_vectorized, start_separate_stride, start_stride_in_local_size)
     {
     }
     void HeuristicInit(const miopen::layernorm::ProblemDescription& problem);
@@ -88,17 +97,15 @@ public:
     {
         switch(problem.GetDirection())
         {
-        case miopen::layernorm::Direction::Forward:
-            return false;
-        case miopen::layernorm::Direction::Backward:
-            return true;
+        case miopen::layernorm::Direction::Forward: return false;
+        case miopen::layernorm::Direction::Backward: return true;
         }
     };
-    static constexpr auto start_vectorized = false;
-    static constexpr auto default_separate_stride = false;
-    static constexpr auto start_separate_stride = false;
+    static constexpr auto start_vectorized             = false;
+    static constexpr auto default_separate_stride      = false;
+    static constexpr auto start_separate_stride        = false;
     static constexpr auto default_stride_in_local_size = false;
-    static constexpr auto start_stride_in_local_size = false;
+    static constexpr auto start_stride_in_local_size   = false;
 
 private:
     bool CheckParallelKernelBounds(const ExecutionContext& context,

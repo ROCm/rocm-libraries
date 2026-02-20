@@ -592,7 +592,7 @@ int LayerNormDriver<T>::VerifyForward()
     const double tolerance  = GetTolerance();
     auto error              = miopen::rms_range(outhost, out);
     std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
-    int status             = miopenStatusSuccess;
+    int status              = miopenStatusSuccess;
 
     if(!std::isfinite(error) || error > tolerance)
     {
@@ -642,7 +642,7 @@ int LayerNormDriver<T>::VerifyBackward()
     const double tolerance  = GetTolerance();
     auto error              = miopen::rms_range(dxhost, dx);
     std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
-    int status             = miopenStatusSuccess;
+    int status              = miopenStatusSuccess;
 
     if(!std::isfinite(error) || error > tolerance)
     {

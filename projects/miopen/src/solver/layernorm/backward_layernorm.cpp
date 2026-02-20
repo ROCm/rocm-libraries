@@ -58,18 +58,20 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
         if(config.separate_stride)
         {
             xlocalsize = problem.stride <= config.local_size && config.stride_in_local_size
-                                    ? config.local_size >> mloLg2(problem.stride)
-                                    : config.local_size;
+                             ? config.local_size >> mloLg2(problem.stride)
+                             : config.local_size;
             xgridsize  = problem.outer_size * xlocalsize;
-            ylocalsize = problem.stride <= config.local_size && config.stride_in_local_size ? problem.stride : 1;
+            ylocalsize = problem.stride <= config.local_size && config.stride_in_local_size
+                             ? problem.stride
+                             : 1;
             ygridsize  = problem.stride;
         }
         else
         {
             xlocalsize = config.local_size;
-            xgridsize = problem.outer_size * problem.stride * xlocalsize;
+            xgridsize  = problem.outer_size * problem.stride * xlocalsize;
             ylocalsize = 1;
-            ygridsize = 1;
+            ygridsize  = 1;
         }
         size_t zlocalsize = 1;
         size_t zgridsize  = 1;

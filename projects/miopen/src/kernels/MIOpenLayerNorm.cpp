@@ -69,26 +69,25 @@ template <typename T>
 using vec_t = array<T, load_factor<T>>;
 
 template <typename T, unsigned int BOUND = INNER_SIZE, unsigned int I_STRIDE = STRIDE>
-__forceinline__ __device__ static auto
-load(unsigned long i, const unsigned long i_offset, const T* __restrict__ src)
+__forceinline__ __device__ static vec_t<T>
+load(unsigned int i, const unsigned int i_offset, const T* __restrict__ src)
 {
     if(I_STRIDE == 1 && i + load_factor<T> < BOUND)
     {
-        const unsigned long idx = i * I_STRIDE + i_offset;
-        const load_t value      = *reinterpret_cast<const load_t*>(&src[idx]);
-        const auto values       = *reinterpret_cast<const vec_t<T>*>(&value);
+        const load_t value = *reinterpret_cast<const load_t*>(&src[i + i_offset]);
+        const auto values  = *reinterpret_cast<const vec_t<T>*>(&value);
         return values;
     }
     else
     {
+        __builtin_amdgcn_sched_barrier(1);
         vec_t<T> values{{}};
 #pragma unroll
         for(int k = 0; k < load_factor<T>; ++k)
         {
             if(i + k < BOUND)
             {
-                unsigned long idx = (i + k) * I_STRIDE + i_offset;
-                values.data[k]    = src[idx];
+                values.data[k] = src[(i + k) * I_STRIDE + i_offset];
             }
         }
         return values;
@@ -96,8 +95,8 @@ load(unsigned long i, const unsigned long i_offset, const T* __restrict__ src)
 }
 
 template <typename T, unsigned int BOUND = INNER_SIZE, bool USE_DEFAULT = false>
-__forceinline__ __device__ static auto load_contiguous(
-    unsigned long i, const T* __restrict__ src, const T default_value = CVT_FP32_2FLOAT(0.0f))
+__forceinline__ __device__ static vec_t<T> load_contiguous(
+    unsigned int i, const T* __restrict__ src, const T default_value = CVT_FP32_2FLOAT(0.0f))
 {
     if(!USE_DEFAULT && i + load_factor<T> < BOUND)
     {
@@ -107,6 +106,7 @@ __forceinline__ __device__ static auto load_contiguous(
     }
     else
     {
+        __builtin_amdgcn_sched_barrier(1);
         vec_t<T> values = {{}};
 #pragma unroll
         for(int k = 0; k < load_factor<T>; ++k)
@@ -128,13 +128,12 @@ __forceinline__ __device__ static auto load_contiguous(
 }
 
 template <typename T>
-__forceinline__ __device__ static auto
-store(unsigned long i, const unsigned long i_offset, T* __restrict__ dst, vec_t<T>& data)
+__forceinline__ __device__ static void
+store(unsigned int i, const unsigned int i_offset, T* __restrict__ dst, vec_t<T>& data)
 {
     if(STRIDE == 1 && i + load_factor<T> < INNER_SIZE)
     {
-        const unsigned long idx               = i * STRIDE + i_offset;
-        *reinterpret_cast<load_t*>(&dst[idx]) = *reinterpret_cast<load_t*>(&data);
+        *reinterpret_cast<load_t*>(&dst[i * STRIDE + i_offset]) = *reinterpret_cast<load_t*>(&data);
     }
     else
     {
@@ -143,8 +142,7 @@ store(unsigned long i, const unsigned long i_offset, T* __restrict__ dst, vec_t<
         {
             if(i + k < INNER_SIZE)
             {
-                unsigned long idx = (i + k) * STRIDE + i_offset;
-                dst[idx]          = data.data[k];
+                dst[(i + k) * STRIDE + i_offset] = data.data[k];
             }
         }
     }
@@ -168,8 +166,8 @@ __forceinline__ __device__ void get_indices(unsigned int& gid, unsigned int& o, 
     else
     {
         gid = blockIdx.x;
-        o = blockIdx.x / STRIDE;
-        s = blockIdx.x % STRIDE;
+        o   = blockIdx.x / STRIDE;
+        s   = blockIdx.x % STRIDE;
     }
 }
 
@@ -209,17 +207,17 @@ __forceinline__ __device__ void layernormfwd(const T* __restrict__ x,
     // reduce sum for mean and var
     unsigned int gid, o, s;
     get_indices(gid, o, s);
-    const unsigned long offset = o * INNER_SIZE * STRIDE + s;
-    const unsigned int lid     = threadIdx.x;
+    const unsigned int offset = o * INNER_SIZE * STRIDE + s;
+    const unsigned int lid    = threadIdx.x;
     if constexpr(VECTORIZED)
     {
-        unsigned long i = lid * load_factor<T>;
-        auto tmpx       = load(i, offset, x);
+        unsigned int i = lid * load_factor<T>;
+        auto tmpx      = load(i, offset, x);
         i += LOCAL_SIZE_X * load_factor<T>;
         for(; i < INNER_SIZE; i += LOCAL_SIZE_X * load_factor<T>)
         {
             auto tmp = load(i, offset, x);
-            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_sched_barrier(1);
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
             {
@@ -227,7 +225,7 @@ __forceinline__ __device__ void layernormfwd(const T* __restrict__ x,
                 pmean += px;
                 pvar += px * px;
             }
-            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_sched_barrier(1);
             tmpx = tmp;
         }
 #pragma unroll
@@ -242,7 +240,7 @@ __forceinline__ __device__ void layernormfwd(const T* __restrict__ x,
     {
         for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE_X)
         {
-            unsigned long idx = i * STRIDE + offset;
+            unsigned int idx = i * STRIDE + offset;
 
             FLOAT_ACCUM tmp = CVT_FLOAT2ACCUM(x[idx]);
             pmean += tmp;
@@ -276,7 +274,7 @@ __forceinline__ __device__ void layernormfwd(const T* __restrict__ x,
             {
                 pmean = ltmp1[0] * CVT_FP32_2ACCUM(1.0f / INNER_SIZE);
                 pvar  = ltmp2[0] * CVT_FP32_2ACCUM(1.0f / INNER_SIZE) - pmean * pmean;
-                prstd = rsqrtf(pvar + CVT_FP32_2ACCUM(epsilon)); // TODO miopen_math.hpp
+                prstd = rsqrtf(pvar + CVT_FP32_2ACCUM(epsilon));
 
                 if(lid == 0)
                 {
@@ -309,7 +307,7 @@ __forceinline__ __device__ void layernormfwd(const T* __restrict__ x,
         }
         pmean = ltmp1[0] * CVT_FP32_2ACCUM(1.0f / INNER_SIZE);
         pvar  = ltmp2[0] * CVT_FP32_2ACCUM(1.0f / INNER_SIZE) - pmean * pmean;
-        prstd = rsqrtf(pvar + CVT_FP32_2ACCUM(epsilon)); // TODO miopen_math.hpp
+        prstd = rsqrtf(pvar + CVT_FP32_2ACCUM(epsilon));
 
         if(lid == 0)
         {
@@ -327,9 +325,9 @@ __forceinline__ __device__ void layernormfwd(const T* __restrict__ x,
     // forward calculation
     if constexpr(VECTORIZED)
     {
-        unsigned long i = lid * load_factor<T>;
-        auto tmpx       = load(i, offset, x);
-        auto tmpweight  = load_contiguous<T, INNER_SIZE, MODE == MIOPEN_ELEMENTWISE_AFFINE>(
+        unsigned int i = lid * load_factor<T>;
+        auto tmpx      = load(i, offset, x);
+        auto tmpweight = load_contiguous<T, INNER_SIZE, MODE == MIOPEN_ELEMENTWISE_AFFINE>(
             i, weight, CVT_FP32_2FLOAT(1.0f));
         auto tmpbias = load_contiguous<T, INNER_SIZE, MODE == MIOPEN_ELEMENTWISE_AFFINE>(
             i, bias, CVT_FP32_2FLOAT(0.0f));
@@ -343,7 +341,7 @@ __forceinline__ __device__ void layernormfwd(const T* __restrict__ x,
             auto tmp3 = load_contiguous<T, INNER_SIZE, MODE == MIOPEN_ELEMENTWISE_AFFINE>(
                 i, bias, CVT_FP32_2FLOAT(0.0f));
             vec_t<T> tmp4{{}};
-            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_sched_barrier(1);
 #pragma unroll
             for(unsigned int k = 0; k < load_factor<T>; ++k)
             {
@@ -353,7 +351,7 @@ __forceinline__ __device__ void layernormfwd(const T* __restrict__ x,
 
                 tmp4.data[k] = CVT_ACCUM2FLOAT((px - pmean) * prstd * pweight + pbias);
             }
-            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_sched_barrier(1);
             tmpx      = tmp1;
             tmpweight = tmp2;
             tmpbias   = tmp3;
@@ -376,7 +374,7 @@ __forceinline__ __device__ void layernormfwd(const T* __restrict__ x,
     {
         for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE_X)
         {
-            unsigned long idx = i * STRIDE + offset;
+            unsigned int idx = i * STRIDE + offset;
 
             FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(x[idx]);
             FLOAT_ACCUM pweight = (MODE == MIOPEN_ELEMENTWISE_AFFINE) ? CVT_FP32_2ACCUM(1.0f)
@@ -403,8 +401,8 @@ __forceinline__ __device__ void layernormbwd(const T* __restrict__ dy,
     // Reduce sums
     unsigned int gid, o, s;
     get_indices(gid, o, s);
-    const unsigned long offset = o * INNER_SIZE * STRIDE + s;
-    const unsigned int lid     = threadIdx.x;
+    const unsigned int offset = o * INNER_SIZE * STRIDE + s;
+    const unsigned int lid    = threadIdx.x;
     if(dy)
     {
         if constexpr(VECTORIZED)
@@ -421,7 +419,7 @@ __forceinline__ __device__ void layernormbwd(const T* __restrict__ dy,
                 auto tmp2 = load_contiguous<T, INNER_SIZE, MODE == MIOPEN_ELEMENTWISE_AFFINE>(
                     i, weight, CVT_FP32_2FLOAT(1.0f));
                 auto tmp3 = load(i, offset, x);
-                __builtin_amdgcn_sched_barrier(0);
+                __builtin_amdgcn_sched_barrier(1);
 #pragma unroll
                 for(unsigned int k = 0; k < load_factor<T>; ++k)
                 {
@@ -432,7 +430,7 @@ __forceinline__ __device__ void layernormbwd(const T* __restrict__ dy,
                     sum_dy_weight += pdy * pweight;
                     sum_dy_weight_x += pdy * pweight * px;
                 }
-                __builtin_amdgcn_sched_barrier(0);
+                __builtin_amdgcn_sched_barrier(1);
                 tmpdy     = tmp1;
                 tmpweight = tmp2;
                 tmpx      = tmp3;
@@ -452,7 +450,7 @@ __forceinline__ __device__ void layernormbwd(const T* __restrict__ dy,
         {
             for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE_X)
             {
-                unsigned long idx = i * STRIDE + offset;
+                unsigned int idx = i * STRIDE + offset;
 
                 FLOAT_ACCUM px = CVT_FLOAT2ACCUM(x[idx]);
                 FLOAT_ACCUM pdy_weight =
@@ -536,7 +534,7 @@ __forceinline__ __device__ void layernormbwd(const T* __restrict__ dy,
                 i, weight, CVT_FP32_2FLOAT(1.0f));
             auto tmp3 = load(i, offset, x);
             vec_t<T> tmp4{{}};
-            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_sched_barrier(1);
 #pragma unroll
             for(unsigned int k = 0; k < load_factor<T>; ++k)
             {
@@ -546,7 +544,7 @@ __forceinline__ __device__ void layernormbwd(const T* __restrict__ dy,
 
                 tmp4.data[k] = CVT_ACCUM2FLOAT(prstd * pdy * pweight - a * px - b);
             }
-            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_sched_barrier(1);
             tmpdy     = tmp1;
             tmpweight = tmp2;
             tmpx      = tmp3;
@@ -569,7 +567,7 @@ __forceinline__ __device__ void layernormbwd(const T* __restrict__ dy,
     {
         for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE_X)
         {
-            unsigned long idx = i * STRIDE + offset;
+            unsigned int idx = i * STRIDE + offset;
 
             FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(x[idx]);
             FLOAT_ACCUM pdy     = dy ? CVT_FLOAT2ACCUM(dy[idx]) : 0;
@@ -603,7 +601,7 @@ __forceinline__ __device__ void layernormbwdweightbias(const T* __restrict__ dy,
             {
                 for(unsigned int o = 0; o < OUTER_SIZE; ++o)
                 {
-                    unsigned long s = 0;
+                    unsigned int s = 0;
                     auto tmpdy = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + gid * STRIDE, dy);
                     auto tmpx  = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + gid * STRIDE, x);
                     auto tmprstd = load<T, STRIDE, 1>(s, o * STRIDE, rstd);
@@ -617,7 +615,7 @@ __forceinline__ __device__ void layernormbwdweightbias(const T* __restrict__ dy,
                             load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + gid * STRIDE, x);
                         auto tmp3 = load<T, STRIDE, 1>(s, o * STRIDE, rstd);
                         auto tmp4 = load<T, STRIDE, 1>(s, o * STRIDE, mean);
-                        __builtin_amdgcn_sched_barrier(0);
+                        __builtin_amdgcn_sched_barrier(1);
 #pragma unroll
                         for(unsigned int k = 0; k < load_factor<T>; ++k)
                         {
@@ -629,7 +627,7 @@ __forceinline__ __device__ void layernormbwdweightbias(const T* __restrict__ dy,
                             sum_dw += prstd * pdy * (px - pmean);
                             sum_db += pdy;
                         }
-                        __builtin_amdgcn_sched_barrier(0);
+                        __builtin_amdgcn_sched_barrier(1);
                         tmpdy   = tmp1;
                         tmpx    = tmp2;
                         tmprstd = tmp3;
@@ -654,7 +652,7 @@ __forceinline__ __device__ void layernormbwdweightbias(const T* __restrict__ dy,
                 {
                     for(unsigned int s = 0; s < STRIDE; ++s)
                     {
-                        unsigned long idx = o * INNER_SIZE * STRIDE + gid * STRIDE + s;
+                        unsigned int idx = o * INNER_SIZE * STRIDE + gid * STRIDE + s;
 
                         FLOAT_ACCUM px    = CVT_FLOAT2ACCUM(x[idx]);
                         FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(rstd[o * STRIDE + s]);
@@ -704,11 +702,11 @@ __forceinline__ __device__ void layernormbwdweightbiasparallel(const T* __restri
         {
             for(unsigned int o = pid; o < OUTER_SIZE; o += PARALLEL_SIZE)
             {
-                unsigned long s = 0;
-                auto tmpdy      = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + s_lid, dy);
-                auto tmpx       = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + s_lid, x);
-                auto tmprstd    = load<T, STRIDE, 1>(s, o * STRIDE, rstd);
-                auto tmpmean    = load<T, STRIDE, 1>(s, o * STRIDE, mean);
+                unsigned int s = 0;
+                auto tmpdy     = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + s_lid, dy);
+                auto tmpx      = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + s_lid, x);
+                auto tmprstd   = load<T, STRIDE, 1>(s, o * STRIDE, rstd);
+                auto tmpmean   = load<T, STRIDE, 1>(s, o * STRIDE, mean);
                 s += load_factor<T>;
                 for(; s < STRIDE; s += load_factor<T>)
                 {
@@ -716,7 +714,7 @@ __forceinline__ __device__ void layernormbwdweightbiasparallel(const T* __restri
                     auto tmp2 = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + s_lid, x);
                     auto tmp3 = load<T, STRIDE, 1>(s, o * STRIDE, rstd);
                     auto tmp4 = load<T, STRIDE, 1>(s, o * STRIDE, mean);
-                    __builtin_amdgcn_sched_barrier(0);
+                    __builtin_amdgcn_sched_barrier(1);
 #pragma unroll
                     for(unsigned int k = 0; k < load_factor<T>; ++k)
                     {
@@ -728,7 +726,7 @@ __forceinline__ __device__ void layernormbwdweightbiasparallel(const T* __restri
                         sum_dw += prstd * pdy * (px - pmean);
                         sum_db += pdy;
                     }
-                    __builtin_amdgcn_sched_barrier(0);
+                    __builtin_amdgcn_sched_barrier(1);
                     tmpdy   = tmp1;
                     tmpx    = tmp2;
                     tmprstd = tmp3;
@@ -751,9 +749,9 @@ __forceinline__ __device__ void layernormbwdweightbiasparallel(const T* __restri
         {
             for(unsigned int i = pid; i < OUTER_SIZE * STRIDE; i += PARALLEL_SIZE)
             {
-                unsigned int o    = i / STRIDE;
-                unsigned int s    = i % STRIDE;
-                unsigned long idx = o * INNER_SIZE * STRIDE + s_lid + s;
+                unsigned int o   = i / STRIDE;
+                unsigned int s   = i % STRIDE;
+                unsigned int idx = o * INNER_SIZE * STRIDE + s_lid + s;
 
                 FLOAT_ACCUM px    = CVT_FLOAT2ACCUM(x[idx]);
                 FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(rstd[i]);
@@ -786,7 +784,7 @@ layernormbwdreducesum(const T* __restrict__ workspace, T* __restrict__ dw, T* __
 
         for(unsigned int i = 0; i < PARALLEL_SIZE; ++i)
         {
-            unsigned long idx = i * INNER_SIZE + gid;
+            unsigned int idx = i * INNER_SIZE + gid;
             sum_dw += CVT_FLOAT2ACCUM(workspace[idx]);
             sum_db += CVT_FLOAT2ACCUM(workspace[idx + PARALLEL_SIZE * INNER_SIZE]);
         }
@@ -802,49 +800,53 @@ layernormbwdreducesum(const T* __restrict__ workspace, T* __restrict__ dw, T* __
     }
 }
 
-extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X * LOCAL_SIZE_Y) void LayernormFwd(const DATA_TYPE* __restrict__ x,
-                                        const DATA_TYPE* __restrict__ weight,
-                                        const DATA_TYPE* __restrict__ bias,
-                                        DATA_TYPE* __restrict__ y,
-                                        DATA_TYPE* __restrict__ mean,
-                                        DATA_TYPE* __restrict__ rstd,
-                                        const float epsilon)
+extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) void LayernormFwd(
+    const DATA_TYPE* __restrict__ x,
+    const DATA_TYPE* __restrict__ weight,
+    const DATA_TYPE* __restrict__ bias,
+    DATA_TYPE* __restrict__ y,
+    DATA_TYPE* __restrict__ mean,
+    DATA_TYPE* __restrict__ rstd,
+    const float epsilon)
 {
     layernormfwd<DATA_TYPE>(x, weight, bias, y, mean, rstd, epsilon);
 }
 
-extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X * LOCAL_SIZE_Y) void LayernormBwd(const DATA_TYPE* __restrict__ dy,
-                                        const DATA_TYPE* __restrict__ x,
-                                        const DATA_TYPE* __restrict__ weight,
-                                        const DATA_TYPE* __restrict__ mean,
-                                        const DATA_TYPE* __restrict__ rstd,
-                                        DATA_TYPE* __restrict__ dx)
+extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) void LayernormBwd(
+    const DATA_TYPE* __restrict__ dy,
+    const DATA_TYPE* __restrict__ x,
+    const DATA_TYPE* __restrict__ weight,
+    const DATA_TYPE* __restrict__ mean,
+    const DATA_TYPE* __restrict__ rstd,
+    DATA_TYPE* __restrict__ dx)
 {
     layernormbwd<DATA_TYPE>(dy, x, weight, mean, rstd, dx);
 }
 
-extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X * LOCAL_SIZE_Y) void LayernormBwdWeightBias(const DATA_TYPE* __restrict__ dy,
-                                                  const DATA_TYPE* __restrict__ x,
-                                                  const DATA_TYPE* __restrict__ mean,
-                                                  const DATA_TYPE* __restrict__ rstd,
-                                                  DATA_TYPE* __restrict__ dw,
-                                                  DATA_TYPE* __restrict__ db)
+extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) void LayernormBwdWeightBias(
+    const DATA_TYPE* __restrict__ dy,
+    const DATA_TYPE* __restrict__ x,
+    const DATA_TYPE* __restrict__ mean,
+    const DATA_TYPE* __restrict__ rstd,
+    DATA_TYPE* __restrict__ dw,
+    DATA_TYPE* __restrict__ db)
 {
     layernormbwdweightbias<DATA_TYPE>(dy, x, mean, rstd, dw, db);
 }
 
-extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X * LOCAL_SIZE_Y) void LayernormBwdWeightBiasParallel(const DATA_TYPE* __restrict__ dy,
-                                                          const DATA_TYPE* __restrict__ x,
-                                                          const DATA_TYPE* __restrict__ mean,
-                                                          const DATA_TYPE* __restrict__ rstd,
-                                                          DATA_TYPE* __restrict__ workspace)
+extern "C" __global__
+__launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) void LayernormBwdWeightBiasParallel(
+    const DATA_TYPE* __restrict__ dy,
+    const DATA_TYPE* __restrict__ x,
+    const DATA_TYPE* __restrict__ mean,
+    const DATA_TYPE* __restrict__ rstd,
+    DATA_TYPE* __restrict__ workspace)
 {
     layernormbwdweightbiasparallel<DATA_TYPE>(dy, x, mean, rstd, workspace);
 }
 
-extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X * LOCAL_SIZE_Y) void LayernormBwdReduceSum(const DATA_TYPE* __restrict__ workspace,
-                                                 DATA_TYPE* __restrict__ dw,
-                                                 DATA_TYPE* __restrict__ db)
+extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) void LayernormBwdReduceSum(
+    const DATA_TYPE* __restrict__ workspace, DATA_TYPE* __restrict__ dw, DATA_TYPE* __restrict__ db)
 {
     layernormbwdreducesum<DATA_TYPE>(workspace, dw, db);
 }
