@@ -406,7 +406,7 @@ def generate_instances_bwd_weight(instances, problem_name, config, filter_patter
     )
 
 def generate_instances_bwd_data(instances, problem_name, config, filter_pattern):
-    direction = "backward_weight"
+    direction = "backward_data"
     signature_name = f"SIGNATURE_{config.upper()}_BWD_DATA"
     instances = parse_bwd_data_instances(instances, problem_name)
     generate_calls_inc(instances, problem_name, direction, filter_pattern)
@@ -434,7 +434,7 @@ def process_direction(configs, direction, generate_func, configs_prefix, filter_
         if direction == "forward":
             problem_name = f"grouped_convolution_forward_tile_{config}"
         elif direction == "backward_weight":
-            problem_name = f"grouped_convolution_backward_tile_{config}"
+            problem_name = f"grouped_convolution_backward_weight_tile_{config}"
         elif direction == "backward_data":
             problem_name = f"grouped_convolution_backward_data_tile_{config}"
         else:

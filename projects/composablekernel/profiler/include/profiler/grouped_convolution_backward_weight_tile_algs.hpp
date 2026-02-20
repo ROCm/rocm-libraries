@@ -23,12 +23,13 @@ namespace ck_tile::builder::profiling {
 namespace ckb = ck_tile::builder;
 namespace ckt = ck_tile::builder::test;
 
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_fp32.inc"
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_bf16.inc"
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_fp16.inc"
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_fp32.inc"
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_bf16.inc"
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_fp16.inc"
+// TODO: FP32 is not yet supported on bwd weight
+//#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_fp32.inc"
+//#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_fp32.inc"
+#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_bf16.inc"
+#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_fp16.inc"
+#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_bf16.inc"
+#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_fp16.inc"
 
 template <auto SIGNATURE>
 auto parse_conv_args(int arg_idx, char* const argv[])
