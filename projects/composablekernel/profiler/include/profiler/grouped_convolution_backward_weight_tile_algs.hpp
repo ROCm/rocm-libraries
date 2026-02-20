@@ -122,64 +122,68 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
         typename ckb::ConvBuilder<SIGNATURE, ckt::ConvAlgorithm_Reference{}>::Instance;
     auto ref_conv                    = ReferenceInstance{};
     [[maybe_unused]] auto ref_result = ckt::run(ref_conv, args, inputs, reference.get());
-    std::cout << "Reference result calculated." << std::endl;
 
-// #if ENABLE_BUILDER_VALIDATE == 0
-//     using DataType =
-//         std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP32,
-//                            float,
-//                            std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP16,
-//                                               ck_tile::half_t,
-//                                               ck_tile::bfloat16_t>>;
-//     const auto conv_param = args.to_ck_tile_conv_param();
+#if ENABLE_BUILDER_VALIDATE == 0
+    using DataType =
+        std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP32,
+                           float,
+                           std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP16,
+                                              ck_tile::half_t,
+                                              ck_tile::bfloat16_t>>;
+    const auto conv_param = args.to_ck_tile_conv_param();
 
-//     const std::size_t output_bytes_num = conv_param.template GetOutputByte<DataType>();
-//     std::vector<DataType> out(output_bytes_num / sizeof(DataType));
-//     std::vector<DataType> ref(output_bytes_num / sizeof(DataType));
-//     HIP_CHECK_ERROR(
-//         hipMemcpy(&ref.data()[0], reference.get().weight, output_bytes_num, hipMemcpyDeviceToHost));
+    const std::size_t weight_bytes_num = conv_param.template GetWeightByte<DataType>();
+    std::vector<DataType> out(weight_bytes_num / sizeof(DataType));
+    std::vector<DataType> ref(weight_bytes_num / sizeof(DataType));
+    HIP_CHECK_ERROR(
+        hipMemcpy(&ref.data()[0], reference.get().weight, weight_bytes_num, hipMemcpyDeviceToHost));
 
-//     const ck_tile::index_t GemmK = std::accumulate(conv_param.filter_spatial_lengths_.cbegin(),
-//                                                    conv_param.filter_spatial_lengths_.cend(),
-//                                                    1,
-//                                                    std::multiplies<ck_tile::index_t>()) *
-//                                    conv_param.C_;
-//     float max_accumulated_value = *std::max_element(ref.begin(), ref.end());
-//     const auto rtol             = ck_tile::get_relative_threshold<DataType, DataType, float>(GemmK);
-//     const auto atol =
-//         ck_tile::get_absolute_threshold<DataType, DataType, float>(max_accumulated_value, GemmK);
-// #endif
+    const ck_tile::index_t GemmK = std::accumulate(conv_param.filter_spatial_lengths_.cbegin(),
+                                                   conv_param.filter_spatial_lengths_.cend(),
+                                                   1,
+                                                   std::multiplies<ck_tile::index_t>()) *
+                                   conv_param.C_;
+    float max_accumulated_value = *std::max_element(ref.begin(), ref.end());
+    const auto rtol             = ck_tile::get_relative_threshold<DataType, DataType, float>(GemmK);
+    const auto atol =
+        ck_tile::get_absolute_threshold<DataType, DataType, float>(max_accumulated_value, GemmK);
+#endif
 
     [[maybe_unused]] auto run_alg = [&](auto&& run_alg_func) {
         std::tie(is_supported, avg_time, op_name) = run_alg_func(args, inputs, outputs, s_conf);
         if(is_supported)
         {
-            best_avg_time = std::min(best_avg_time, avg_time);
-            best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
-            std::cout << "Perf: " << std::setw(10) << avg_time << " ms," << " " << op_name
-                      << std::endl;
+#if ENABLE_BUILDER_VALIDATE
+            const auto errors = ckt::validate(args, outputs, reference.get()).get_errors();
+            for(const auto& error : errors)
+            {
+                valid = false;
+                std::cout << "Number of incorrect values: " << error.wrong_elements
+                          << " Is all zero:" << error.is_all_zero()
+                          << " max err: " << error.max_error << std::endl;
+            }
+#else
+            HIP_CHECK_ERROR(
+                hipMemcpy(&out.data()[0], outputs.weight, weight_bytes_num, hipMemcpyDeviceToHost));
 
-// #if ENABLE_BUILDER_VALIDATE
-//             const auto errors = ckt::validate(args, outputs, reference.get()).get_errors();
-//             for(const auto& error : errors)
-//             {
-//                 valid = false;
-//                 std::cout << "Number of incorrect values: " << error.wrong_elements
-//                           << " Is all zero:" << error.is_all_zero()
-//                           << " max err: " << error.max_error << std::endl;
-//             }
-// #else
-//             HIP_CHECK_ERROR(
-//                 hipMemcpy(&out.data()[0], outputs.weight, output_bytes_num, hipMemcpyDeviceToHost));
-//             valid = ck_tile::check_err(out, ref, "Error: Incorrect results!", rtol, atol);
-// #endif
-
-            // std::cout << "Relative error threshold: " << rtol
-            //           << " Absolute error threshold: " << atol << std::endl;
+            std::cout << op_name << std::endl;
+            valid = ck_tile::check_err(out, ref, "\tError: Incorrect results!", rtol, atol);
+#endif
+            if (valid)
+            {
+                best_avg_time = std::min(best_avg_time, avg_time);
+                best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
+                std::cout << "\tPerf: " << std::setw(5) << avg_time << " ms" << std::endl;
+            }
+            else 
+            {
+                std::cout << "Relative error threshold: " << rtol
+                      << " Absolute error threshold: " << atol << std::endl;
+            }
         }
         else
         {
-            std::cout << " " << op_name << std::endl;
+            std::cout << "[NOT_SUPPORTED] " << op_name << std::endl;
         }
     };
 
@@ -199,15 +203,6 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
     {
 #include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_bf16_calls.inc"
     }
-    // TODO: Enable FP32 when we have FP32 bwd weight support
-//     else if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP32_BWD_WEIGHT)
-//     {
-// #include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_fp32_calls.inc"
-//     }
-//     else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_FP32_BWD_WEIGHT)
-//     {
-// #include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_fp32_calls.inc"
-//     }
     else
     {
         std::cout << "Signature not supported" << std::endl;
