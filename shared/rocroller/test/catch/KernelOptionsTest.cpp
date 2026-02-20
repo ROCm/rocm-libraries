@@ -22,13 +22,13 @@ TEST_CASE("KernelOptions ToString", "[kernel-options]")
     REQUIRE_THAT(output, Catch::Matchers::ContainsSubstring("scaleSkipPermlane:"));
 }
 
-TEST_CASE("KernelOptions scaleSkipPermlane default is None", "[kernel-options]")
+TEST_CASE("KernelOptions scaleSkipPermlane default is None", "[kernel-options][scale-skip-permlane]")
 {
     KernelOptions opts;
     REQUIRE(opts->scaleSkipPermlane == ScaleSkipPermlaneMode::None);
 }
 
-TEST_CASE("KernelOptions scaleSkipPermlane PreSwizzleScaleGFX950 in ToString", "[kernel-options]")
+TEST_CASE("KernelOptions scaleSkipPermlane PreSwizzleScaleGFX950 in ToString", "[kernel-options][scale-skip-permlane]")
 {
     KernelOptionValues values;
     values.scaleSkipPermlane = ScaleSkipPermlaneMode::PreSwizzleScaleGFX950;
@@ -36,7 +36,7 @@ TEST_CASE("KernelOptions scaleSkipPermlane PreSwizzleScaleGFX950 in ToString", "
     REQUIRE_THAT(opts.toString(), Catch::Matchers::ContainsSubstring("PreSwizzleScaleGFX950"));
 }
 
-TEST_CASE("KernelOptions scaleSkipPermlane PreSwizzleScale in ToString", "[kernel-options]")
+TEST_CASE("KernelOptions scaleSkipPermlane PreSwizzleScale in ToString", "[kernel-options][scale-skip-permlane]")
 {
     KernelOptionValues values;
     values.scaleSkipPermlane = ScaleSkipPermlaneMode::PreSwizzleScale;
