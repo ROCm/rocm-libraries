@@ -467,37 +467,34 @@ def getDockerImage(Map conf=[:])
         try {
             withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
                 
-                def registryWithoutProtocol = "${env.MIOPEN_PRIVATE_DOCKER_URL}".replace("https://", "").replace("http://", "")
+                // Keep only host[:port], remove scheme and any path
+                def registryHost = "${env.MIOPEN_PRIVATE_DOCKER_URL}"
+                    .trim()
+                    .replaceFirst('^https?://', '')
+                    .replaceFirst('/.*$', '')
+
                 sh """
                     # Create buildkitd config to allow insecure registries
                     cat <<EOF > /tmp/buildkitd.toml
-                    [registry."${registryWithoutProtocol}"]
+                    [registry."${registryHost}"]
                       insecure = true
                     EOF
 
-                    # Remove existing builder to ensure new config is applied
+                    # Recreate builder with config
                     docker buildx rm ci-builder || true
-
                     docker buildx create --name ci-builder --driver docker-container --use --config /tmp/buildkitd.toml
-                    docker buildx inspect --bootstrap
+                    docker buildx inspect ci-builder --bootstrap
                 """.stripIndent()
             
                 sh """
                     DOCKER_BUILDKIT=1 docker buildx build \
+                    --builder ci-builder \
                     --push \
                     --tag ${image} \
                     ${dockerCacheArgs} \
                     ${dockerArgs} \
                     ${buildContext}
                 """.stripIndent()
-
-                // If the cache was pushed to the cacheRefTo successfully, tag it with cacheRef
-                if (cacheRefFrom != cacheRefTo) {
-                    sh """
-                        docker buildx imagetools create -t ${cacheRef} ${cacheRefTo}
-                    """.stripIndent()
-                }
-            }
             dockerImage = docker.image("${image}")
         } catch (Exception bex) {
             echo "Buildx not available or failed, falling back to docker.build"
