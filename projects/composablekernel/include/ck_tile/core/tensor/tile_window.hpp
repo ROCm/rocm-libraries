@@ -635,7 +635,8 @@ struct tile_window_with_static_distribution
                     if constexpr(static_move_ys)
                     {
                         const auto coord_ys_offset = make_tensor_coordinate(
-                            this->get_bottom_tensor_view().get_tensor_descriptor(), idx_ys_offset);
+                            this->get_bottom_tensor_view().get_tensor_descriptor(),
+                            idx_ys_offset);
                         return coord_ys_offset.get_offset();
                     }
                     else
@@ -650,18 +651,11 @@ struct tile_window_with_static_distribution
                         bool_constant<oob_conditional_check>{});
                 else
                 {
-                    using Tsrc =
-                        remove_cvref_t<typename decltype(this->get_bottom_tensor_view())::DataType>;
-                    constexpr index_t imm_max_elems = ((1 << 12) - 1) / sizeof(Tsrc);
-                    constexpr index_t align         = Traits::PackedSize;
-                    constexpr index_t imm_valid     = (dram_ys_offset <= imm_max_elems)
-                                                          ? (dram_ys_offset / align) * align
-                                                          : (imm_max_elems / align) * align;
                     this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
                         smem,
                         bottom_tensor_thread_coord.get_offset() + offset,
-                        dram_ys_offset - imm_valid,
-                        number<imm_valid>{},
+                        dram_ys_offset,
+                        number<0>{},
                         bool_constant<oob_conditional_check>{});
                 }
                 // Move thread coordinate if not last access
