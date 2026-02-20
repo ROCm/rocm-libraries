@@ -24,7 +24,7 @@
 
 from . import Properties
 from Tensile.Common.Utilities import printExit
-from Tensile.Common.Architectures import isaToGfx
+from Tensile.Common.Architectures import SUPPORTED_CHIP_ID_FALLBACKS, isaToGfx
 import copy
 import re
 import sys
@@ -53,18 +53,61 @@ def _extractPciChipIds(pred: Properties.Predicate):
     """Extract chip ID(s) from PciChipId or the 'Or' predicate.
 
     Returns:
-        - Single int if pred is PciChipId
-        - First int from list if pred is Or with PciChipId children (TODO: isn't this a problem since I should be able to match against multiple chip IDs)
-        - None if pred is None or has no PciChipId values
+        A frozenset of chip IDs. Empty set means no chip IDs were found.
     """
     if pred is None:
-        return None
+        return frozenset()
     if pred.tag == "PciChipId":
-        return pred.value
+        return frozenset([pred.value])
     if pred.tag == "Or":
         ids = [p.value for p in pred.value if p.tag == "PciChipId"]
-        return ids[0] if ids else None
-    return None
+        return frozenset(ids)
+    return frozenset()
+
+
+def _buildChipIdFallbackGraph():
+    """Build source->fallback-target graph using configured chip ID fallbacks."""
+    graph = {}
+    for sourceKey, fallbackKeys in SUPPORTED_CHIP_ID_FALLBACKS.items():
+        sourceId = int(sourceKey.split("=", 1)[1], 16)
+        sourceFallbacks = graph.setdefault(sourceId, set())
+        for fallbackKey in fallbackKeys:
+            fallbackId = int(fallbackKey.split("=", 1)[1], 16)
+            sourceFallbacks.add(fallbackId)
+            graph.setdefault(fallbackId, set())
+    return graph
+
+
+_CHIP_ID_FALLBACK_GRAPH = _buildChipIdFallbackGraph()
+_CHIP_ID_TOPO_RANK_CACHE = {}
+
+
+def _chipIdTopologicalRank(chipId: int, visiting=None):
+    """Higher rank means farther away from fallback roots (more specific/source-like)."""
+    if chipId in _CHIP_ID_TOPO_RANK_CACHE:
+        return _CHIP_ID_TOPO_RANK_CACHE[chipId]
+
+    if visiting is None:
+        visiting = set()
+
+    # Defensive cycle handling: break cycles by treating the back-edge as depth 0.
+    if chipId in visiting:
+        return 0
+
+    visiting.add(chipId)
+    fallbackIds = _CHIP_ID_FALLBACK_GRAPH.get(chipId, set())
+    rank = 0 if not fallbackIds else 1 + max(_chipIdTopologicalRank(x, visiting) for x in fallbackIds)
+    visiting.remove(chipId)
+
+    _CHIP_ID_TOPO_RANK_CACHE[chipId] = rank
+    return rank
+
+
+def _chipIdSetSortKey(chipIds: frozenset):
+    """Sort key for a chip-ID set using fallback-aware topological rank."""
+    return tuple(
+        sorted(((_chipIdTopologicalRank(chipId), chipId) for chipId in chipIds), reverse=True)
+    )
 
 
 class HardwarePredicate(Properties.Predicate):
@@ -149,11 +192,11 @@ class HardwarePredicate(Properties.Predicate):
             myPciChipIdPred = next(
                 iter(x for x in myAndPred.value if x.tag in ("PciChipId", "Or")), None)
             myCUCount = myCUPred.value if myCUPred is not None else None
-            myPciChipId = _extractPciChipIds(myPciChipIdPred)
+            myPciChipIds = _extractPciChipIds(myPciChipIdPred)
         else:
             myProcPred = self.value
             myCUCount = None
-            myPciChipId = None
+            myPciChipIds = frozenset()
 
         if other.value.tag == 'And':
             otherAndPred = other.value
@@ -164,32 +207,27 @@ class HardwarePredicate(Properties.Predicate):
             otherPciChipIdPred = next(
                 iter(x for x in otherAndPred.value if x.tag in ("PciChipId", "Or")), None)
             otherCUCount = otherCUPred.value if otherCUPred is not None else None
-            otherPciChipId = _extractPciChipIds(otherPciChipIdPred)
+            otherPciChipIds = _extractPciChipIds(otherPciChipIdPred)
         else:
             otherProcPred = other.value
             otherCUCount = None
-            otherPciChipId = None
+            otherPciChipIds = frozenset()
 
         # Prioritize ChipId (more specific match first)
         # A predicate with a chip ID set is more specific than one without
-        if myPciChipId is not None and otherPciChipId is None:
+        if myPciChipIds and not otherPciChipIds:
             return True
-        if myPciChipId is None and otherPciChipId is not None:
+        if not myPciChipIds and otherPciChipIds:
             return False
-        if myPciChipId is not None and otherPciChipId is not None and myPciChipId != otherPciChipId:
-            # Sort descending so that fallback-source devices (higher chip IDs,
-            # e.g. mi355=0x75a3) appear before fallback-target devices (lower
-            # chip IDs, e.g. mi350=0x75a0).  At runtime PciChipIdEqual uses
-            # one-directional fallback (mi355->mi350 but NOT mi350->mi355), so
-            # mi350 will skip the mi355 row and reach its own.  If no mi355-
-            # specific row exists, mi355 naturally falls through to the mi350
-            # row via the built-in fallback.
-            #
-            # NOTE: This is a fragile pattern, it will not necessarily be the
-            # case whereby higher values (or logical greater than) for chip IDs,
-            # but we make this assumption now based on historical observation of
-            # chip IDs by variant.
-            return myPciChipId > otherPciChipId
+        if myPciChipIds and otherPciChipIds and myPciChipIds != otherPciChipIds:
+            # Prefer exact/smaller chip sets first, then use fallback-aware
+            # topological rank (source-like IDs before fallback targets).
+            if len(myPciChipIds) != len(otherPciChipIds):
+                return len(myPciChipIds) < len(otherPciChipIds)
+
+            myChipKey = _chipIdSetSortKey(myPciChipIds)
+            otherChipKey = _chipIdSetSortKey(otherPciChipIds)
+            return myChipKey > otherChipKey
 
         # If CU properties are empty, then compare processor predicates
         if myCUCount is None and otherCUCount is None:

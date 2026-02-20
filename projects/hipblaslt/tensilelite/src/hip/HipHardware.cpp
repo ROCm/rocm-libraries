@@ -78,24 +78,19 @@ namespace TensileLite
             const auto processor = AMDGPU::toProcessor(prop.gcnArchName);
             if(!ChipIdRegistry::supportsChipIdPredicate(processor))
             {
-                // For processors that don't support PCI Chip ID predicates
-                // these are intentionally ignored at runtime
                 return std::make_shared<HipAMDGPU>(prop, std::nullopt);
             }
 
-            // Query the PCI Chip ID (the actual hardware identifier, e.g., 0x7550)
-            // This is distinct from prop.pciDeviceID which is the PCIe bus slot number
             int pciChipId = 0;
             hipError_t chipIdResult = hipDeviceGetAttribute(&pciChipId, hipDeviceAttributePciChipId, deviceId);
 
-            // Check if the attribute is supported by this HIP runtime version
+            // Check hip runtime support for PCI Chip ID attribute
             if(chipIdResult == hipErrorInvalidValue)
                 throw std::runtime_error(pciChipIdUnsupportedErrorMessage(prop));
 
             // For any other error, use standard error checking
             HIP_CHECK_EXC(chipIdResult);
 
-            // Warn if the chip ID is not registered in the known chip ID registry
             if(!ChipIdRegistry::isKnownChipId(pciChipId))
                 std::cerr << unregisteredPciChipIdWarningMessage(prop, pciChipId) << std::endl;
 

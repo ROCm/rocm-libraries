@@ -96,3 +96,49 @@ that has the gfx1201 chip ID (7550) and another, random one:
 
 Here we can see how different chip IDs are being selected against the known device properties.
 
+
+Build-Time Row Ordering (Fallback-Aware)
+----------------------------------------
+
+When a logic file declares multiple device IDs, ``tensilelite`` treats them as a **set**
+for ordering purposes (not "first ID wins"). This matters because runtime selection is
+``first-match-wins``, and ``PciChipId`` supports one-way fallback.
+
+Fallback graph (example for ``gfx950`` variants):
+
+.. code-block:: text
+
+    75a3  ---> 75a0
+    75a2  ---> 75a0
+
+Interpretation:
+
+- Arrow direction means "may fallback to".
+- Source-like IDs (left) are more specific than fallback targets (right).
+- Rows must be ordered so source-like exact rows are considered first.
+
+The build-time comparator for hardware rows applies chip-ID precedence as follows:
+
+#. **Chip-set present vs absent**: rows with chip IDs sort before rows without chip IDs.
+#. **Exactness first**: smaller chip-ID sets sort first (for example,
+   ``{75a3}`` before ``{75a3,75a0}``).
+#. **Fallback-aware rank**: for equal-size sets, compare IDs by fallback-topology rank
+   (farther from fallback roots first), then by chip ID value for deterministic tie-breaks.
+#. **Then CU count**: if chip precedence does not decide order, higher ``CUCount`` sorts first.
+
+Minimal ordering example (same processor):
+
+.. code-block:: text
+
+    1) {75a3}, CU=256
+    2) {75a3}, CU=64
+    3) {75a0}, CU=256
+    4) {75a0}, CU=64
+    5) {75a3,75a0}, CU=*
+    6) {no chip id}, CU=*
+
+Why this matters:
+
+- Device ``75a3`` can still use ``75a0`` fallback kernels at runtime.
+- But exact ``75a3`` rows are evaluated first, preventing broad/mixed rows from
+  accidentally shadowing more specific rows.
