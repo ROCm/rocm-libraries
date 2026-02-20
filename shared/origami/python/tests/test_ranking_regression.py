@@ -27,7 +27,7 @@ import pytest
 import yaml
 
 import origami
-from helpers import SUPPORTED_ARCHITECTURES, create_hardware, create_config_list, get_matrix_instructions
+from helpers import HARDWARE, create_config_list, get_matrix_instructions
 
 
 BASELINE_DIR = Path(__file__).parent / "baselines" / "rankings"
@@ -49,7 +49,7 @@ def parse_transpose(combo: str) -> tuple[origami.transpose_t, origami.transpose_
 
 def is_dtype_supported(arch_name: str, dtype: str) -> bool:
     """Check if a dtype is supported for the given architecture."""
-    hardware = create_hardware(arch_name)
+    hardware = HARDWARE[arch_name]
     return len(get_matrix_instructions(hardware, dtype)) > 0
 
 def load_problem_sizes() -> list[tuple[int, int, int, int]]:
@@ -126,7 +126,7 @@ def generate_rankings(arch_name: str, dtype: str, transpose: str = "TN") -> dict
     Returns a dict mapping problem_key -> list of config tuples.
     Each config tuple is [mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm].
     """
-    hardware = create_hardware(arch_name)
+    hardware = HARDWARE[arch_name]
     configs = create_config_list(
         hardware, dtype,
         mt_sizes=[16, 32, 48, 96, 128, 192, 224, 256, 336, 448, 512],
@@ -272,7 +272,7 @@ def compare_rankings(
 class TestRankingRegression:
     """Test suite for ranking regression tests."""
 
-    @pytest.mark.parametrize("arch_name", list(SUPPORTED_ARCHITECTURES.keys()))
+    @pytest.mark.parametrize("arch_name", list(HARDWARE.keys()))
     @pytest.mark.parametrize("dtype", SUPPORTED_DTYPES)
     @pytest.mark.parametrize("transpose", TRANSPOSE_COMBOS)
     def test_ranking_stability(

@@ -12,7 +12,7 @@ except ImportError:
     pass
 import origami
 
-from helpers import create_hardware
+from helpers import HARDWARE
 
 
 def pytest_addoption(parser):
@@ -43,5 +43,5 @@ def hardware():
         # Try to get real hardware from device 0
         return origami.get_hardware_for_device(0)
     except RuntimeError:
-        # No ROCm device available, create mock gfx942 hardware for testing
-        return create_hardware("gfx942")
+        # No ROCm device available, use mock gfx942 hardware for testing
+        return HARDWARE["gfx942"]
