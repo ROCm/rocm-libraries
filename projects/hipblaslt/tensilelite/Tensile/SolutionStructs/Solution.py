@@ -1867,10 +1867,10 @@ class Solution(collections.abc.Mapping):
                 else:
                   ldsPadA = state["VectorWidthA"]
             else:
-              ldsPadA = max(state["GlobalReadVectorWidthA"],optPadA)
-              ## turn-off padding for directToLds
               if state["DirectToLdsA"]:
-                ldsPadA = 0
+                ldsPadA = max(lrvwA, optPadA) if not state["ProblemType"]["TLUA"] else 0
+              else:
+                ldsPadA = max(state["GlobalReadVectorWidthA"], optPadA)
           assert(ldsPadA >= 0)
 
         if ldsPadB == -1:
@@ -1890,9 +1890,10 @@ class Solution(collections.abc.Mapping):
                 else:
                   ldsPadB = state["VectorWidthB"]
             else:
-              ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
               if state["DirectToLdsB"]:
-                ldsPadB = 0
+                ldsPadB = max(lrvwB, optPadB) if not state["ProblemType"]["TLUB"] else 0
+              else:
+                ldsPadB = max(state["GlobalReadVectorWidthB"], optPadB)
           assert(ldsPadB >= 0)
 
         if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
