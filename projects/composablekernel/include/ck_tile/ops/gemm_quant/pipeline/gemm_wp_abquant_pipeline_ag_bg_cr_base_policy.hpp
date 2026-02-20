@@ -95,20 +95,18 @@ struct GemmWPABQuantPipelineAgBgCrPolicy : public UniversalWeightPreshufflePipel
         using BlockWarps = typename Problem::BlockGemmShape::BlockWarps;
         using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
 
-        using BTypeToUse =
-            std::conditional_t<std::is_same_v<typename Problem::BDataType, ck_tile::pk_int4_t>,
-                               typename Problem::ADataType,
-                               typename Problem::BDataType>;
-
         constexpr index_t WaveSize = get_warp_size();
         constexpr index_t KLane    = WarpTile::at(I2) * WarpTile::at(I0) / WaveSize;
-        using BDataType            = typename Problem::BDataType;
-        constexpr index_t KLaneBytes =
-            KLane / numeric_traits<BDataType>::PackedSize * sizeof(BDataType);
-        constexpr auto NumAccess = static_cast<WGAttrNumAccessEnum>(max(1, KLaneBytes / 16));
 
-        using WarpGemm = WarpGemmDispatcher<typename Problem::ADataType,
-                                            BTypeToUse,
+        // When BDataType is pk_int4_t, it is internally converted to fp8 for computation.
+        using BTypeToUse = mixed_prec_compute_type_from_input_t<typename Problem::BDataType,
+                                                                typename Problem::ADataType,
+                                                                typename Problem::ComputeDataType>;
+        constexpr index_t KLaneBytes = KLane * sizeof(BTypeToUse);
+        constexpr auto NumAccess     = static_cast<WGAttrNumAccessEnum>(max(1, KLaneBytes / 16));
+
+        using WarpGemm = WarpGemmDispatcher<typename Problem::ComputeDataType,
+                                            typename Problem::ComputeDataType,
                                             typename Problem::CDataType,
                                             WarpTile::at(I0),
                                             WarpTile::at(I1),

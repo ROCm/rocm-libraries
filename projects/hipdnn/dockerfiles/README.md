@@ -37,19 +37,50 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 #### 📦 Prebuilt-Only Arguments
 
 > [!NOTE]
-> Prebuilt mode downloads pre-compiled binaries from TheRock nightly builds (much faster)
+> Prebuilt mode downloads pre-compiled binaries from TheRock nightly builds using `install_rocm_from_artifacts.py` (much faster than building from source)
 
 > [!NOTE]
 > There is currently an issue with using the prebuilt binaries with the gfx90X ASIC family. Refer to this GitHub issue for more details:
 https://github.com/ROCm/TheRock/issues/2179
 
-
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `THEROCK_GIT_TAG`<br>_(deprecated)_ | `7.0.0rc20250909` | Build tag for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/). Used to create the precompiled binaries download filename key: `therock-dist-linux-$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG.tar.gz`.<br>Alternatively, specify the full prebuilt ID using `THEROCK_PREBUILT_ID`, or the full tarball name using `THEROCK_TARBALL`, below. |
-| `THEROCK_ASIC`<br>_(deprecated)_ | `gfx94X` for prebuilt | GPU (dcgpu) architecture target. The values for THEROCK_ASIC for prebuilt mode can be found [here](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#index-page-listing) or parsed directly from the tarball filename keys listed [here](https://therock-nightly-tarball.s3.amazonaws.com/).<br>Future support [here](https://github.com/ROCm/TheRock/blob/main/ROADMAP.md#rocm-on-linux).<br>Note: For prebuilt mode, ensure that the specified dcgpu asic is supported by the prebuilt artifacts as set in `THEROCK_GIT_TAG` described above. |
-| `THEROCK_PREBUILT_ID`<br>_(recommended)_ | `$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG` | GPU architecture family and build tag. The values for `$THEROCK_ASIC-dcgpu` for prebuilt mode can be found in the _GFX family_ column from the table [here](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#index-page-listing) or parsed directly from the tarball filename keys listed [here](https://therock-nightly-tarball.s3.amazonaws.com/).<br>Future support [here](https://github.com/ROCm/TheRock/blob/main/ROADMAP.md#rocm-on-linux)<br>The resulting tarball filename key will be  `therock-dist-linux-$THEROCK_PREBUILT_ID.tar.gz` |
-| `THEROCK_TARBALL` | `therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz` | Overrides the full tarball path for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/) (setting this will ignore THEROCK_ASIC, THEROCK_GIT_TAG, and THEROCK_PREBUILT_ID). |
+| `THEROCK_RELEASE` | `latest` | Release version to install. Use `latest` to automatically fetch the newest nightly build, or specify a version like `7.12.0a20260202`. Available versions can be found at [TheRock nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/). |
+| `THEROCK_ASIC` | `gfx94X` | GPU architecture family prefix. Combined with `THEROCK_ASIC_VARIANT` to form the artifact group. |
+| `THEROCK_ASIC_VARIANT` | `dcgpu` | GPU variant suffix (e.g., `dcgpu`, `all`, `dgpu`). Combined with `THEROCK_ASIC` to form the artifact group. |
+| `THEROCK_ARTIFACT_GROUP` | `$THEROCK_ASIC-$THEROCK_ASIC_VARIANT` | Full artifact group override. Available groups: `gfx90X-dcgpu`, `gfx94X-dcgpu`, `gfx950-dcgpu`, `gfx110X-all`, `gfx110X-dgpu`, `gfx120X-all`, etc. See [TheRock releases](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#index-page-listing) for the full list. |
+
+#### Version Logging
+
+The prebuilt stage writes the installed TheRock version to `/opt/rocm/THEROCK_VERSION` inside the image. For pinned releases, this contains the exact version string. For `latest` builds, it captures version information from the install output.
+
+#### ⚠️ Deprecated Prebuilt Arguments
+
+> [!CAUTION]
+> The following build args are **deprecated** and will be removed in a future release. When any of these args are set, the build uses the original wget/tar download method instead of `install_rocm_from_artifacts.py`. A deprecation warning is printed during the build.
+
+| Deprecated Argument | Replacement | Behavior |
+|---------------------|-------------|----------|
+| `THEROCK_TARBALL` | `THEROCK_ARTIFACT_GROUP` + `THEROCK_RELEASE` | Used as-is as the tarball filename for wget download |
+| `THEROCK_PREBUILT_ID` | `THEROCK_ARTIFACT_GROUP` + `THEROCK_RELEASE` | Prefixed with `therock-dist-linux-` and suffixed with `.tar.gz` for wget download |
+| `THEROCK_GIT_TAG` | `THEROCK_RELEASE` | Combined with `THEROCK_ARTIFACT_GROUP` to construct the tarball filename |
+
+Priority when multiple legacy args are set: `THEROCK_TARBALL` > `THEROCK_PREBUILT_ID` > `THEROCK_GIT_TAG`.
+
+**Migration examples:**
+```bash
+# Old: --build-arg THEROCK_GIT_TAG=7.0.0rc20250909
+# New:
+--build-arg THEROCK_RELEASE=7.0.0rc20250909
+
+# Old: --build-arg THEROCK_PREBUILT_ID=gfx94X-dcgpu-7.0.0rc20250909
+# New:
+--build-arg THEROCK_ARTIFACT_GROUP=gfx94X-dcgpu --build-arg THEROCK_RELEASE=7.0.0rc20250909
+
+# Old: --build-arg THEROCK_TARBALL=therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz
+# New:
+--build-arg THEROCK_ARTIFACT_GROUP=gfx94X-dcgpu --build-arg THEROCK_RELEASE=7.0.0rc20250909
+```
 
 #### 🏗️ Fullbuild-Only Arguments
 
@@ -60,7 +91,7 @@ https://github.com/ROCm/TheRock/issues/2179
 |----------|---------|-------------|
 | `THEROCK_GIT_HASH` | `default` | Specific git commit hash to checkout (uses default branch if not specified). |
 | `ROCM_LIBRARIES_REF` | `default` | Specific git commit hash for rocm-libraries submodule to checkout (uses default branch if not specified). |
-| `THEROCK_ASIC` | `gfx90a` for fullbuild | GPU architecture target. The values for THEROCK_ASIC for fullbuild mode can be found in the LLVM Target column of the Supported GPU table [here](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html). |
+| `THEROCK_ASIC` | `gfx94X` | GPU architecture target. The values for THEROCK_ASIC for fullbuild mode can be found in the LLVM Target column of the Supported GPU table [here](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html). |
 | `THEROCK_BUILD_MODE` | `Release` | Build mode: `Preset` (uses TheRock presets), `Debug`, or `Release` (uses CMake build types). |
 | `THEROCK_BUILD_PRESET` | `linux-release-package` | Specify which build preset to use when THEROCK_BUILD_MODE=Preset. |
 | `BUILD_JOBS` | `0` | Number of parallel build jobs. 0 uses all available CPU cores. |
@@ -68,43 +99,56 @@ https://github.com/ROCm/TheRock/issues/2179
 ### Build Examples
 
 #### 📦 Prebuilt Mode (Recommended)
-The list of latest precompiled tarballs is available [here](https://therock-nightly-tarball.s3.amazonaws.com/)..
 
-**Default prebuilt** (gfx94X, tag 7.0.0rc20250909):
+**Default prebuilt** (latest nightly for gfx94X-dcgpu):
 ```bash
 docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
 ```
 
-This will download and install prebuilt binaries using the filename `therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz` and tags the image as `hipdnn:prebuilt`.
+This will automatically download and install the latest nightly build for gfx94X-dcgpu.
 
-**Override ASIC and Git Tag** (gfx950, tag 7.0.0rc20250908):
-
+**Specific release version**:
 ```bash
-docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_TAG=7.0.0rc20250908 -t hipdnn:prebuilt_gfx950 .
+docker build -f Dockerfile.ubuntu24 \
+    --build-arg THEROCK_RELEASE=7.12.0a20260202 \
+    -t hipdnn:prebuilt .
 ```
 
-This will download and install prebuilt artifacts using the filename `therock-dist-linux-gfx950-dcgpu-7.0.0rc20250908.tar.gz` and tags the image as `hipdnn:prebuilt_gfx950`.
+**Different ASIC family** (MI100/MI200 series):
+```bash
+docker build -f Dockerfile.ubuntu24 \
+    --build-arg THEROCK_ASIC=gfx90X \
+    --build-arg THEROCK_ASIC_VARIANT=dcgpu \
+    -t hipdnn:prebuilt_gfx90X .
+```
+
+**Full artifact group override** (RDNA3):
+```bash
+docker build -f Dockerfile.ubuntu24 \
+    --build-arg THEROCK_ARTIFACT_GROUP=gfx110X-all \
+    -t hipdnn:prebuilt_rdna3 .
+```
 
 #### 🏗️ Fullbuild Mode
 
 Note that the full build can take several hours to complete.
 
-**Default fullbuild** (gfx90a, default branch):
+**Default fullbuild** (gfx94X, default branch):
 ```bash
 docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild -t hipdnn:fullbuild .
 ```
 
-**Debug build** (gfx90a, debug mode):
+**Debug build** (gfx94X, debug mode):
 ```bash
 docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_BUILD_MODE=Debug -t hipdnn:debug .
 ```
 
-**Release build with limited cores** (gfx90a, release mode, 4 cores):
+**Release build with limited cores** (gfx94X, release mode, 4 cores):
 ```bash
 docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_BUILD_MODE=Release --build-arg BUILD_JOBS=4 -t hipdnn:release .
 ```
 
-**Custom preset with all cores** (gfx90a, custom preset):
+**Custom preset with all cores** (gfx94X, custom preset):
 ```bash
 docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_BUILD_MODE=Preset --build-arg THEROCK_BUILD_PRESET=linux-debug-package -t hipdnn:custom-preset .
 ```

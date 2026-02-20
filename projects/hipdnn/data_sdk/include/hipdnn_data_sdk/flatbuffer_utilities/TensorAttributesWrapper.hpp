@@ -7,7 +7,7 @@
 
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
-namespace hipdnn_plugin_sdk
+namespace hipdnn_data_sdk::flatbuffer_utilities
 {
 
 class ITensorAttributesWrapper
@@ -159,4 +159,13 @@ private:
 
     const hipdnn_data_sdk::data_objects::TensorAttributes* _shallowTensor = nullptr;
 };
+} // namespace hipdnn_data_sdk::flatbuffer_utilities
+
+// Backward compatibility aliases - DEPRECATED
+// These aliases are deprecated and will be removed in a future release.
+// Use hipdnn_data_sdk::flatbuffer_utilities::<TypeName> instead.
+namespace hipdnn_plugin_sdk
+{
+using ITensorAttributesWrapper = hipdnn_data_sdk::flatbuffer_utilities::ITensorAttributesWrapper;
+using TensorAttributesWrapper = hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper;
 } // namespace hipdnn_plugin_sdk

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/Transforms/AddPrefetch.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddPrefetch_detail.hpp>
@@ -330,11 +307,14 @@ namespace rocRoller
             {
             }
 
-            void commitForLoop(KernelGraph& graph, int forLoop, int numUnroll);
+            void commitForLoop(KernelGraph&                 graph,
+                               NaryArgumentColouring const& colouring,
+                               int                          forLoop,
+                               int                          numUnroll);
             void orderLoadsBeforeMultiplies(KernelGraph& graph, int forLoop, int numUnroll);
 
             void stage(KernelGraph const& graph);
-            void commit(KernelGraph&);
+            void commit(KernelGraph&, NaryArgumentColouring const&);
 
         private:
             // Keys are: ForLoop tag, Unroll value/segment, LDS tag
@@ -364,12 +344,14 @@ namespace rocRoller
             removeRedundantBodyEdges(graph);
             removeRedundantNOPs(graph);
 
+            auto colouring = colourByNaryArgument(graph);
+
             if(m_params->prefetch)
             {
                 auto visitor = AddPrefetchVisitor(m_params, m_context);
                 AssertFatal(m_params->unrollK > 1, "KLoop must be unrolled when prefetching.");
                 visitor.stage(graph);
-                visitor.commit(graph);
+                visitor.commit(graph, colouring);
             }
 
             removeRedundantSequenceEdges(graph);
@@ -377,13 +359,13 @@ namespace rocRoller
             return graph;
         }
 
-        void AddPrefetchVisitor::commit(KernelGraph& k)
+        void AddPrefetchVisitor::commit(KernelGraph& k, NaryArgumentColouring const& colouring)
         {
             Log::debug("KernelGraph::AddPrefetch()::commit()");
 
             for(auto [forLoop, numUnroll] : m_prefetchLoops)
             {
-                commitForLoop(k, forLoop, numUnroll);
+                commitForLoop(k, colouring, forLoop, numUnroll);
             }
 
             removeRedundantSequenceEdges(k);
@@ -505,7 +487,10 @@ namespace rocRoller
             }
         }
 
-        void AddPrefetchVisitor::commitForLoop(KernelGraph& graph, int forLoop, int numUnroll)
+        void AddPrefetchVisitor::commitForLoop(KernelGraph&                 graph,
+                                               NaryArgumentColouring const& colouring,
+                                               int                          forLoop,
+                                               int                          numUnroll)
         {
             auto logger = rocRoller::Log::getLogger();
             logger->debug("KernelGraph::AddPrefetch()::commitForLoop({})", forLoop);
@@ -514,6 +499,24 @@ namespace rocRoller
 
             auto forLoopCoord = getForLoopCoords(forLoop, graph).first;
             auto unrollCoord  = findUnrollNeighbour(graph, forLoopCoord).value();
+
+            std::vector<NaryArgument> argumentOrder = {NaryArgument::RHS,
+                                                       NaryArgument::RHS_SCALE,
+                                                       NaryArgument::LHS,
+                                                       NaryArgument::LHS_SCALE};
+
+            auto sortBy = [&](auto& container, auto const& order, auto getter) {
+                std::stable_sort(
+                    container.begin(), container.end(), [&](const auto& a, const auto& b) {
+                        auto itA = std::find(
+                            order.begin(), order.end(), colouring.coordinateColour.at(getter(a)));
+                        AssertFatal(itA != order.end(), ShowValue(getter(a)));
+                        auto itB = std::find(
+                            order.begin(), order.end(), colouring.coordinateColour.at(getter(b)));
+                        AssertFatal(itB != order.end(), ShowValue(getter(b)));
+                        return itA < itB;
+                    });
+            };
 
             //
             // Delete connecting edges
@@ -532,6 +535,7 @@ namespace rocRoller
             {
                 for(auto [target, info] : m_info[forLoop][u])
                     loadsByUnroll[u].push_back(info);
+                sortBy(loadsByUnroll[u], argumentOrder, [](const auto& info) { return info.user; });
             }
 
             AssertFatal(loadsByUnroll.size() == numUnroll);
@@ -606,11 +610,71 @@ namespace rocRoller
 
             auto addLDSPrefetchChains = [&](int u, int pre, int post, bool duplicate) -> int {
                 std::vector<int> prefetchChain;
-                for(auto [_ignore1, _ignore2, chain] : m_prefetchFromLDSChains[forLoop][u])
+
+                std::map<std::tuple<NaryArgument, int>, std::vector<int>> ldsByArgAndSmallK;
+                std::map<NaryArgument, std::set<int>>                     ldsPrefetchValues;
+                for(auto [target, smallk, chain] : m_prefetchFromLDSChains[forLoop][u])
                 {
                     int dchain = duplicate ? duplicateChain(graph, {chain}) : chain;
-                    prefetchChain.push_back(dchain);
+                    AssertFatal(colouring.operationColour.contains(chain), ShowValue(chain));
+                    auto argument = colouring.operationColour.at(chain);
+                    ldsByArgAndSmallK[{argument, smallk}].push_back(dchain);
+                    ldsPrefetchValues[argument].insert(smallk);
                 }
+
+                /*
+                 */
+                auto mixDataAndScale = [&](auto dataArgument, auto scaleArgument) {
+                    // Count unique lds-prefetch unroll (small-k) values
+                    int numDataPrefetchValues  = ldsPrefetchValues[dataArgument].size();
+                    int numScalePrefetchValues = ldsPrefetchValues[scaleArgument].size();
+
+                    // Get number of data/scale chains (grows with number of jammed wavetiles)
+                    size_t numDataChains = 0;
+                    if(numDataPrefetchValues > 0)
+                    {
+                        int minDataK  = *ldsPrefetchValues[dataArgument].begin();
+                        numDataChains = ldsByArgAndSmallK.at({dataArgument, minDataK}).size();
+                    }
+
+                    size_t numScaleChains = 0;
+                    if(numScalePrefetchValues > 0)
+                    {
+                        int minScaleK  = *ldsPrefetchValues[scaleArgument].begin();
+                        numScaleChains = ldsByArgAndSmallK.at({scaleArgument, minScaleK}).size();
+                    }
+
+                    if(numScaleChains > 0)
+                    {
+                        auto numDataPerScale = numDataChains / numScaleChains;
+
+                        for(int idxScale = 0; idxScale < numScaleChains; ++idxScale)
+                        {
+                            for(int idxData = 0; idxData < numDataPerScale; ++idxData)
+                            {
+                                for(int k = 0; k < numDataPrefetchValues; ++k)
+                                    prefetchChain.push_back(
+                                        ldsByArgAndSmallK.at({dataArgument, k})
+                                            .at(idxScale * numDataPerScale + idxData));
+                            }
+
+                            for(int k = 0; k < numScalePrefetchValues; ++k)
+                                prefetchChain.push_back(
+                                    ldsByArgAndSmallK.at({scaleArgument, k}).at(idxScale));
+                        }
+                    }
+                    else
+                    {
+                        for(int idxData = 0; idxData < numDataChains; ++idxData)
+                        {
+                            for(int k = 0; k < numDataPrefetchValues; ++k)
+                                prefetchChain.push_back(
+                                    ldsByArgAndSmallK.at({dataArgument, k}).at(idxData));
+                        }
+                    }
+                };
+                mixDataAndScale(NaryArgument::RHS, NaryArgument::RHS_SCALE);
+                mixDataAndScale(NaryArgument::LHS, NaryArgument::LHS_SCALE);
 
                 AssertFatal(!prefetchChain.empty());
 
@@ -825,7 +889,7 @@ namespace rocRoller
                                       barrier);
                     }
 
-                    auto successor = (u == numUnroll - 1) ? barrier : segmentBoundaries[u + 1];
+                    auto successor = segmentBoundaries[u + 1];
 
                     Log::debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
                                "ordering {} to {}",
@@ -1297,7 +1361,7 @@ namespace rocRoller
                                loadLDSTileTag,
                                prefetchLDSUnrollValue);
 
-                    auto target = getLDSOperationTarget(k, loadLDSTileTag);
+                    auto [target, direction] = getOperationTarget(loadLDSTileTag, k);
                     m_prefetchFromLDSChains[forLoop][u].insert(
                         {target, prefetchLDSUnrollValue, loadLDSTileChain});
                     m_prefetchUnrollBodyStarts[forLoop][u].erase(loadLDSTileChain);

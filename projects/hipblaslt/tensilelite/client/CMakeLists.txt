@@ -19,13 +19,13 @@ set(COMMON_CLIENT_LIBS
 )
 
 if(NOT WIN32)
-    find_package(rocm_smi REQUIRED)
+    find_package(amd_smi REQUIRED)
 else()
-    find_package(rocm_smi)
+    find_package(amd_smi)
 endif()
 
-if(rocm_smi_FOUND)
-    list(APPEND COMMON_CLIENT_LIBS rocm_smi64)
+if(amd_smi_FOUND)
+    list(APPEND COMMON_CLIENT_LIBS amd_smi)
 endif()
 
 foreach(target tensilelite-client cpu-gemm-driver)

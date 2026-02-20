@@ -28,7 +28,7 @@
 #include "../elementwise_solution_instances.hpp"
 
 // Ensure access to
-#include "../device/hiptensor_ck_types.hpp"
+#include "hiptensor_ck_types.hpp"
 #include "../device/hiptensor_elementwise_scale_instances.hpp"
 
 namespace hiptensor

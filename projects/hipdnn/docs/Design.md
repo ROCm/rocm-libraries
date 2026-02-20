@@ -59,7 +59,7 @@ hipDNN provides three header-only SDK libraries that serve as the foundation for
 
 The Data SDK contains FlatBuffers schemas and data structures for graph representation.
 
-- **Dependencies**: FlatBuffers and spdlog
+- **Dependencies**: FlatBuffers
 - **Purpose**: Provides data structures and serialization for graphs, tensors, and configurations
 - **Expected Usage**: Consumed by Frontend, Backend, and Plugins for graph data handling
 - **Core Functionality**:
