@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,8 +51,7 @@ TEST_CASE("KernelOptions scaleSkipPermlane default is None", "[kernel-options]")
     REQUIRE(opts->scaleSkipPermlane == ScaleSkipPermlaneMode::None);
 }
 
-TEST_CASE("KernelOptions scaleSkipPermlane PreSwizzleScaleGFX950 in ToString",
-          "[kernel-options]")
+TEST_CASE("KernelOptions scaleSkipPermlane PreSwizzleScaleGFX950 in ToString", "[kernel-options]")
 {
     KernelOptionValues values;
     values.scaleSkipPermlane = ScaleSkipPermlaneMode::PreSwizzleScaleGFX950;
@@ -60,8 +59,7 @@ TEST_CASE("KernelOptions scaleSkipPermlane PreSwizzleScaleGFX950 in ToString",
     REQUIRE_THAT(opts.toString(), Catch::Matchers::ContainsSubstring("PreSwizzleScaleGFX950"));
 }
 
-TEST_CASE("KernelOptions scaleSkipPermlane PreSwizzleScale in ToString",
-          "[kernel-options]")
+TEST_CASE("KernelOptions scaleSkipPermlane PreSwizzleScale in ToString", "[kernel-options]")
 {
     KernelOptionValues values;
     values.scaleSkipPermlane = ScaleSkipPermlaneMode::PreSwizzleScale;

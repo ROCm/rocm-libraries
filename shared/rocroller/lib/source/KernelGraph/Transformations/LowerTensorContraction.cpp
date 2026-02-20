@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -472,8 +472,8 @@ namespace rocRoller
                     expectedSkip = true;
                 }
 
-                bool actualSkip = context->kernelOptions()->scaleSkipPermlane
-                                 != ScaleSkipPermlaneMode::None;
+                bool actualSkip
+                    = context->kernelOptions()->scaleSkipPermlane != ScaleSkipPermlaneMode::None;
                 AssertFatal(expectedSkip == actualSkip,
                             ShowValue(context->kernelOptions()->scaleSkipPermlane),
                             ShowValue(expectedSkip));

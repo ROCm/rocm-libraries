@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -227,7 +227,6 @@ namespace rocRoller::Client::GEMMClient
                       problemParams.initModeC);
         }
 
-
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
 
         RotatingBuffer<PackedTypeA> rotatingA(hostA, rotatingSize);
@@ -281,13 +280,13 @@ namespace rocRoller::Client::GEMMClient
                 }
 
                 auto tmpScaleA = [&]() {
-                if(problemParams.types.scaleSkipPermlane
-                   == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                    return DGen::preSwizzleScalesGFX950(
-                        hostScaleA, {descScaleA.sizes()[1], descScaleA.sizes()[0]});
-                else
-                    return DGen::preSwizzle(
-                        hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
+                    if(problemParams.types.scaleSkipPermlane
+                       == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                        return DGen::preSwizzleScalesGFX950(
+                            hostScaleA, {descScaleA.sizes()[1], descScaleA.sizes()[0]});
+                    else
+                        return DGen::preSwizzle(
+                            hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
                 }();
                 deviceScaleA = make_shared_device(tmpScaleA);
             }
@@ -331,13 +330,13 @@ namespace rocRoller::Client::GEMMClient
                 };
 
                 auto tmpScaleB = [&]() {
-                if(problemParams.types.scaleSkipPermlane
-                   == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                    return DGen::preSwizzleScalesGFX950(
-                        hostScaleB, {descScaleB.sizes()[1], descScaleB.sizes()[0]});
-                else
-                    return DGen::preSwizzle(
-                        hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
+                    if(problemParams.types.scaleSkipPermlane
+                       == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                        return DGen::preSwizzleScalesGFX950(
+                            hostScaleB, {descScaleB.sizes()[1], descScaleB.sizes()[0]});
+                    else
+                        return DGen::preSwizzle(
+                            hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
                 }();
                 deviceScaleB = make_shared_device(tmpScaleB);
             }

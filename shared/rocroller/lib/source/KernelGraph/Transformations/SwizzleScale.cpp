@@ -367,16 +367,19 @@ namespace rocRoller
             connections.push_back(DC<WaveTileNumber>(nWave0, 0));
             connections.push_back(DC<WaveTileNumber>(nWave1, 1));
 
-            uint const nLanesInSIMD   = 16;
+            uint const nLanesInSIMD      = 16;
             uint const numElements       = waveTile.elements();
             uint const activeLanesInWave = static_cast<uint>(wavefrontSize);
             uint const numVgpr           = numElements / activeLanesInWave;
 
-            uint const nLanesInSIMDIndex  = macTile.subTileSizes.at(2) / numVgpr; // k dimension
+            uint const nLanesInSIMDIndex = macTile.subTileSizes.at(2) / numVgpr; // k dimension
             uint const nLanesInSIMDBlock = nLanesInSIMD / nLanesInSIMDIndex;
-            auto laneInSIMD = graph.coordinates.addElement(Lane(literal(nLanesInSIMD), literal(1u)));
-            auto laneInSIMDIndex = graph.coordinates.addElement(Lane(literal(nLanesInSIMDIndex), literal(1u)));
-            auto laneInSIMDBlock = graph.coordinates.addElement(Lane(literal(nLanesInSIMDBlock), literal(1u)));
+            auto       laneInSIMD
+                = graph.coordinates.addElement(Lane(literal(nLanesInSIMD), literal(1u)));
+            auto laneInSIMDIndex
+                = graph.coordinates.addElement(Lane(literal(nLanesInSIMDIndex), literal(1u)));
+            auto laneInSIMDBlock
+                = graph.coordinates.addElement(Lane(literal(nLanesInSIMDBlock), literal(1u)));
 
             uint const nSIMDsPerWave = wavefrontSize / nLanesInSIMD;
             uint const nSIMDIndex    = macTile.subTileSizes.at(0) / nLanesInSIMD;
@@ -386,7 +389,6 @@ namespace rocRoller
             uint const nSIMDBlock = nSIMDsPerWave / nSIMDIndex;
             auto       SIMDBlock
                 = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
-
 
             uint const nVgprIndex
                 = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
@@ -418,7 +420,8 @@ namespace rocRoller
             auto lane = graph.coordinates.addElement(Lane(activeLanesInWaveLiteral, literal(1u)));
             graph.coordinates.addElement(Flatten(), {wave, lane}, {workitem});
             graph.coordinates.addElement(Flatten(), {SIMDBlock, SIMDIndex, laneInSIMD}, {lane});
-            graph.coordinates.addElement(Flatten(), {laneInSIMDBlock, laneInSIMDIndex}, {laneInSIMD});
+            graph.coordinates.addElement(
+                Flatten(), {laneInSIMDBlock, laneInSIMDIndex}, {laneInSIMD});
 
             std::map<int, int> unrolls;
 
@@ -429,10 +432,13 @@ namespace rocRoller
             if(arg == NaryArgument::LHS_SCALE)
             {
 
-                if (context->kernelOptions()->scaleSkipPermlane == ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                {    
-                    graph.coordinates.addElement(Tile(), {iWave0}, {SIMDBlock, SIMDIndex, laneInSIMDBlock});
-                    graph.coordinates.addElement(Tile(), {iWave1}, {laneInSIMDIndex, vgprBlock, vgprIndex});
+                if(context->kernelOptions()->scaleSkipPermlane
+                   == ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                {
+                    graph.coordinates.addElement(
+                        Tile(), {iWave0}, {SIMDBlock, SIMDIndex, laneInSIMDBlock});
+                    graph.coordinates.addElement(
+                        Tile(), {iWave1}, {laneInSIMDIndex, vgprBlock, vgprIndex});
                 }
                 else
                 {
@@ -472,10 +478,13 @@ namespace rocRoller
 
             if(arg == NaryArgument::RHS_SCALE)
             {
-                if (context->kernelOptions()->scaleSkipPermlane == ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                {    
-                        graph.coordinates.addElement(Tile(), {iWave1}, {SIMDBlock, SIMDIndex, laneInSIMDBlock});
-                        graph.coordinates.addElement(Tile(), {iWave0}, {laneInSIMDIndex, vgprBlock, vgprIndex});                    
+                if(context->kernelOptions()->scaleSkipPermlane
+                   == ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                {
+                    graph.coordinates.addElement(
+                        Tile(), {iWave1}, {SIMDBlock, SIMDIndex, laneInSIMDBlock});
+                    graph.coordinates.addElement(
+                        Tile(), {iWave0}, {laneInSIMDIndex, vgprBlock, vgprIndex});
                 }
                 else
                 {
@@ -864,17 +873,16 @@ namespace rocRoller
                 graph.coordinates.addElement(Index(0), {exchangeTileTag}, {tileTag});
                 graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
 
-                auto destMacTileTag = context->kernelOptions()->scaleSkipPermlane
-                                          != ScaleSkipPermlaneMode::None
-                                          ? exchangeTileTag
-                                          : graph.coordinates.addElement(MacroTile());
+                auto destMacTileTag
+                    = context->kernelOptions()->scaleSkipPermlane != ScaleSkipPermlaneMode::None
+                          ? exchangeTileTag
+                          : graph.coordinates.addElement(MacroTile());
 
                 graph.mapper.connect(exchange, destMacTileTag, NaryArgument::DEST);
 
                 auto createNode
                     = [&context](int idx) -> rocRoller::KernelGraph::CoordinateGraph::Edge {
-                    if(context->kernelOptions()->scaleSkipPermlane
-                       != ScaleSkipPermlaneMode::None)
+                    if(context->kernelOptions()->scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                         return Segment(idx);
 
                     return Index(idx);
@@ -916,7 +924,7 @@ namespace rocRoller
                         graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
 
                         destMacTileTag = context->kernelOptions()->scaleSkipPermlane
-                                             != ScaleSkipPermlaneMode::None
+                                                 != ScaleSkipPermlaneMode::None
                                              ? exchangeTileTag
                                              : graph.coordinates.addElement(MacroTile());
                         graph.mapper.connect(exchange, destMacTileTag, NaryArgument::DEST);
