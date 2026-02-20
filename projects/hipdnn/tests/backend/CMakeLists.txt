@@ -21,6 +21,7 @@ add_executable(
     IntegrationLoggingPipeline.cpp
     IntegrationPluginLoading.cpp
     IntegrationSetPluginPathsExt.cpp
+    IntegrationSetPluginUnloadingModeExt.cpp
     IntegrationVariantPackApi.cpp
     TestUtil.cpp
 )

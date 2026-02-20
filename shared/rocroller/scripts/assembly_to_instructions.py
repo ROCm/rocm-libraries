@@ -1,30 +1,7 @@
 #!/usr/bin/env python
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
-
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 import argparse
 import re
@@ -54,7 +31,7 @@ special_registers = {
 def initialize_registers(registers):
     retval = ""
     for register in registers.values():
-        (name, index, register_type, children) = register
+        name, index, register_type, children = register
         if index is not None:
             continue
         retval += """auto {} = std::make_shared<Register::Value>(m_context,
@@ -70,7 +47,7 @@ def initialize_registers(registers):
 def declare_registers(registers):
     retval = ""
     for register in registers.values():
-        (name, index, register_type, children) = register
+        name, index, register_type, children = register
         if index is not None:
             continue
         retval += "Register::ValuePtr {};\n".format(name)
@@ -81,7 +58,7 @@ def declare_registers(registers):
 def define_registers(registers):
     retval = ""
     for register in registers.values():
-        (name, index, register_type, children) = register
+        name, index, register_type, children = register
         if index is not None:
             continue
         retval += """{} = std::make_shared<Register::Value>(m_context,
@@ -95,7 +72,7 @@ def define_registers(registers):
 def allocate_registers(struct_name, registers):
     retval = ""
     for register in registers.values():
-        (name, index, register_type, children) = register
+        name, index, register_type, children = register
         if index is not None:
             continue
         if children > 1:
@@ -205,7 +182,7 @@ def convert_arg(arg, registers, labels):
     if arg in special_registers:
         return special_registers[arg]
     elif arg in registers:
-        (name, index, register_type, children) = registers[arg]
+        name, index, register_type, children = registers[arg]
         if index is None:
             return name
         else:
@@ -240,9 +217,7 @@ namespace rocRollerTest
     struct {name}
     {{
         ContextPtr m_context;
-""".format(
-        name=cli_args.function_name
-    )
+""".format(name=cli_args.function_name)
 
     result += declare_labels(labels)
     result += declare_registers(registers)
@@ -252,9 +227,7 @@ namespace rocRollerTest
         {name}(ContextPtr context)
             : m_context(context)
         {{
-""".format(
-        name=cli_args.function_name
-    )
+""".format(name=cli_args.function_name)
 
     result += define_labels(labels)
     result += define_registers(registers)
@@ -268,9 +241,7 @@ namespace rocRollerTest
 
             // clang-format off
 return {{
-""".format(
-        block_count
-    )
+""".format(block_count)
 
     line_count = 0
     in_macro = False
@@ -291,9 +262,7 @@ return {{
         {{
             // clang-format off
 return {{
-""".format(
-                block_count
-            )
+""".format(block_count)
 
     result += """
 }};
@@ -304,9 +273,7 @@ return {{
     Generator<Instruction> {name}_Program(ContextPtr context)
     {{
         {name} gen(context);
-""".format(
-        name=cli_args.function_name
-    )
+""".format(name=cli_args.function_name)
 
     result += allocate_registers(cli_args.function_name, registers)
 
