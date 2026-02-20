@@ -22,6 +22,8 @@ using CompV3    = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType:
 using CompV4    = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompV4>;
 using CompV6    = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompV6>;
 using CompAsync = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsync>;
+using CompAsyncEightWarps =
+    ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsyncEightWarps>;
 
 using Persistent    = std::true_type;
 using NonPersistent = std::false_type;
@@ -30,6 +32,7 @@ using I16  = ck_tile::number<16>;
 using I32  = ck_tile::number<32>;
 using I64  = ck_tile::number<64>;
 using I128 = ck_tile::number<128>;
+using I192 = ck_tile::number<192>;
 using I256 = ck_tile::number<256>;
 
 // clang-format off
@@ -242,6 +245,23 @@ using CompAsyncConfig16x16x128 = std::tuple<ALayout,
                                             Intrawave,
                                             CompAsync>;
 
+template <typename ALayout, typename BLayout, typename CLayout, typename InputType>
+using CompAsyncEightWarpsConfig = std::tuple<ALayout,
+                                             BLayout,
+                                             CLayout,
+                                             InputType, // AType
+                                             InputType, // BType
+                                             F32,       // AccType
+                                             F16,       // OutputType
+                                             I192,      // MBlockTileSize
+                                             I256,      // NBlockTileSize
+                                             I128,      // KBlockTileSize
+                                             I16,       // MWarpTileSize
+                                             I16,       // NWarpTileSize
+                                             I128,      // KWarpTileSize
+                                             Intrawave,
+                                             CompAsyncEightWarps>;
+
 using KernelTypesCompAsync = ::testing::Types<CompAsyncConfig<Row, Row, Row, F16>,
                                               CompAsyncConfig<Row, Col, Row, F16>,
                                               CompAsyncConfig<Col, Row, Row, F16>,
@@ -251,9 +271,14 @@ using KernelTypesCompAsync = ::testing::Types<CompAsyncConfig<Row, Row, Row, F16
                                               CompAsyncConfig<Col, Row, Row, F8>,
                                               CompAsyncConfig<Col, Col, Row, F8>>;
 
+<<<<<<< HEAD
 using KernelTypesCompAsync16x16x128 = ::testing::Types<CompAsyncConfig16x16x128<Row, Col, Row, F4>,
                                                        CompAsyncConfig16x16x128<Row, Col, Row, F8>>;
 
+=======
+using KernelTypesCompAsyncEightWarps =
+    ::testing::Types<CompAsyncEightWarpsConfig<Row, Col, Row, F8>>;
+>>>>>>> 75a1ff7ec5 (Add tests)
 // clang-format off
 
 using KernelTypesCompV6 = ::testing::Types<
