@@ -70,7 +70,7 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation
  *
- * @note The version returned by this function must be the a version for which all plugin API functions have been
+ * @note The version returned by this function must be a version for which all plugin API functions have been
  * implemented for your class of plugin:
  * - Engine plugins need to implement PluginApi.h and EnginePluginApi.h
  * - Heuristic plugins need to implement PluginApi.h and HeuristicsPluginApi.h (once it exists)

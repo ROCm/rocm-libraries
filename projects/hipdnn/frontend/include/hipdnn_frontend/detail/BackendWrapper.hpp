@@ -134,7 +134,7 @@ inline static std::shared_ptr<IHipdnnBackend> hipdnnBackend()
         }
         else
         {
-            IHipdnnBackend::setInstance(std::make_shared<HipdnnBackendWrapper>());
+            IHipdnnBackend::setInstance(instance);
         }
     }
 

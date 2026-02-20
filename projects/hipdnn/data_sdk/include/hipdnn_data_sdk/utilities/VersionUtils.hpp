@@ -29,14 +29,19 @@ struct Version
     {
     }
 
-    Version(std::string_view versionStr)
+    Version(const std::string& versionStr)
     {
-        if(std::sscanf(versionStr.data(), "%d.%d.%d", &major, &minor, &patch) != 3)
+        if(std::sscanf(versionStr.c_str(), "%d.%d.%d", &major, &minor, &patch) != 3)
         {
             throw std::invalid_argument("Version string does not match required format. String = "
                                         + std::string(versionStr)
                                         + " Required format: \"MAJOR.MINOR.PATCH\"");
         }
+    }
+
+    Version(std::string_view versionStr)
+        : Version(std::string(versionStr))
+    {
     }
 
     std::string str() const

@@ -81,19 +81,3 @@ function(hipdnn_get_component_version COMPONENT_NAME OUTPUT_VAR)
         message(FATAL_ERROR "Could not find ${COMPONENT_NAME} version file at ${_${COMPONENT_NAME}_version_file}")
     endif()
 endfunction()
-
-# Function to read data_sdk version for minimum requirement
-function(hipdnn_get_data_sdk_version OUTPUT_VAR)
-    # Determine path to data_sdk/version.json relative to this file location
-    # This makes it resilient to where the macro is called from
-    set(_data_sdk_version_file "${HIPDNN_CMAKE_UTILS_DIR}/../data_sdk/version.json")
-
-    if(EXISTS "${_data_sdk_version_file}")
-        file(READ "${_data_sdk_version_file}" _data_sdk_version_json)
-        string(JSON _version_value GET ${_data_sdk_version_json} "hipdnn_data_sdk_version")
-        # Propagate OUTPUT_VAR to parent scope
-        set(${OUTPUT_VAR} ${_version_value} PARENT_SCOPE)
-    else()
-        message(FATAL_ERROR "Could not find data_sdk version file at ${_data_sdk_version_file}")
-    endif()
-endfunction()
