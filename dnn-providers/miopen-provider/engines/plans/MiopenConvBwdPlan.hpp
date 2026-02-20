@@ -10,10 +10,12 @@
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <miopen/miopen.h>
 
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "MiopenConvDescriptor.hpp"
-#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
-#include "PlanInterface.hpp"
 
 namespace miopen_plugin
 {
@@ -49,12 +51,12 @@ private:
     bool _tensorsValid;
 };
 
-class ConvBwdPlan : public IPlan
+class ConvBwdPlan : public hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>
 {
 public:
-    ConvBwdPlan(const HipdnnEnginePluginHandle& handle,
+    ConvBwdPlan(const HipdnnMiopenHandle& handle,
                 ConvBwdParams&& params,
-                const MiopenExecutionSettings& executionSettings);
+                const HipdnnMiopenSettings& executionSettings);
     ~ConvBwdPlan() override = default;
 
     ConvBwdPlan(const ConvBwdPlan&) = delete;
@@ -63,9 +65,9 @@ public:
     ConvBwdPlan(ConvBwdPlan&& other) = delete;
     ConvBwdPlan& operator=(ConvBwdPlan&& other) = delete;
 
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
+    size_t getWorkspaceSize(const HipdnnMiopenHandle& handle) const override;
 
-    void execute(const HipdnnEnginePluginHandle& handle,
+    void execute(const HipdnnMiopenHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
@@ -75,7 +77,7 @@ private:
     mutable std::mutex _algorithmMutex;
     mutable std::optional<miopenConvBwdDataAlgorithm_t> _algorithm;
     mutable size_t _workspaceSize = 0;
-    MiopenExecutionSettings _executionSettings;
+    HipdnnMiopenSettings _executionSettings;
 };
 
 } // namespace miopen_plugin

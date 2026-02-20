@@ -1609,6 +1609,8 @@ class Solution(collections.abc.Mapping):
     # Check if CMS is available for this solution
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       hasCMS,_ = hasCustomSchedule(state)
+      if state["UseCustomMainLoopSchedule"] == 1 and not hasCMS:
+        reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 but CMS is not supported")
       state["UseCustomMainLoopSchedule"] = 1 if hasCMS else 0
 
     # 0: Normal mode. Hardware applies all of the normal data dependency checks

@@ -898,7 +898,6 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     {
         gpu_input_data = allocate_host_buffer(params.precision, params.itype, ibuffer_sizes_elems);
 
-#ifdef USE_HIPRAND
         if(!is_host_gen)
         {
             // generate the input directly on the gpu
@@ -974,7 +973,6 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
             }
         }
 
-#endif
         if(is_host_gen)
         {
             params.compute_input(gpu_input_data);
