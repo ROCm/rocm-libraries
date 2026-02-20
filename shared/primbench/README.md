@@ -22,7 +22,7 @@ primbench has the following dependencies:
 
 ## Example
 
-`copy_benchmark.cpp` ([here](./examples/copy_benchmark.cpp)) provides an example of how to use primbench:
+[`examples/copy_benchmark.cpp`](./examples/copy_benchmark.cpp) shows how to use primbench:
 
 ```cpp
 #include "primbench.hpp"
@@ -123,13 +123,13 @@ int main(int argc, char* argv[])
 }
 ```
 
-After putting `primbench.hpp` next to it, the benchmark can be compiled and run:
+The benchmark is compiled and run like so:
 
 ```bash
-hipcc -o copy_benchmark copy_benchmark.cpp -lamd_smi && ./copy_benchmark
+hipcc -o copy_benchmark examples/copy_benchmark.cpp -I. -lamd_smi && ./copy_benchmark
 ```
 
-It output this `results.json`:
+It outputs this `results.json`:
 ```json
 {
     "context": {
