@@ -9,21 +9,33 @@
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 
+/**
+ * @file conv_algorithm_limits.hpp
+ * @brief Compile-time validation concepts and helpers for convolution algorithm configurations
+ *
+ * This file provides C++20 concepts and compile-time validation functions for validating
+ * block transfer configurations, memory access patterns, and hardware instruction constraints
+ * in convolution algorithms.
+ *
+ * Key features:
+ * - Vector transfer size validation for VMEM and LDS operations
+ * - Access order permutation validation
+ * - Thread cluster dimension validation
+ * - Tile coverage validation for block transfers
+ */
+
 namespace ck_tile::builder {
 
-// Limits for input vector transfer.
 template <auto Value>
 concept InputVectorTransferLimits = requires {
     requires Value.src_vector_dim > 0 && Value.src_scalar_per_vector > 0 &&
                      Value.lds_dst_scalar_per_vector > 0;
 };
 
-// Limits for input and output vector transfer (CK Tile).
 template <auto Value>
 concept TileInputOutputVectorTransferLimits =
     requires { requires Value.a > 0 && Value.b > 0 && Value.c > 0; };
 
-// Limits for output vector transfer.
 template <auto Value>
 concept OutputVectorTransferLimits = requires {
     requires Value.scalar_per_vector > 0 && Value.m_xdl_per_wave_per_shuffle > 0 &&
@@ -175,7 +187,7 @@ constexpr auto get_mn_coverage()
 }
 
 template <size_t N, DataType Type>
-constexpr bool IsVectorSizeValid()
+constexpr bool IsVmemVectorSizeValid()
 {
     using enum builder::DataType;
     // We have following type & VectorSize pair constraints.
@@ -230,6 +242,33 @@ constexpr bool IsVectorSizeValid()
     }
 }
 
+// Valid LDS instruction bit sizes based on supported DS_READ/DS_WRITE operations
+// DS_READ_{B32,B64,B96,B128,U8,I8,U16,I16}
+// DS_WRITE_{B32,B64,B96,B128,B8,B16}
+template <size_t... Sizes>
+using size_sequence = std::integer_sequence<size_t, Sizes...>;
+
+using valid_lds_bit_sizes = size_sequence<8, 16, 32, 64, 96, 128>;
+
+// Helper to unfold a sequence and check if a value is in it
+template <typename Seq>
+struct unfold_and_check;
+
+template <size_t... Sizes>
+struct unfold_and_check<std::integer_sequence<size_t, Sizes...>>
+{
+    static constexpr bool contains(size_t value)
+    {
+        return ck_tile::is_any_value_of(value, Sizes...);
+    }
+};
+
+template <size_t N, size_t DataTypeSize>
+constexpr bool IsLDSVectorSizeValid()
+{
+    return unfold_and_check<valid_lds_bit_sizes>::contains(N * DataTypeSize * 8);
+}
+
 } // namespace detail
 
 // product of thread cluster lengths must be <= workgroup size
@@ -265,36 +304,51 @@ concept ThreadsCoverCTile = requires {
 };
 
 template <size_t N, DataType Type>
-concept IsVectorSizeValid = detail::IsVectorSizeValid<N, Type>();
+concept IsVmemVectorSizeValid = detail::IsVmemVectorSizeValid<N, Type>();
+
+template <size_t N, size_t DataTypeSize>
+concept IsLDSVectorSizeValid = detail::IsLDSVectorSizeValid<N, DataTypeSize>();
 
 // Composite concept for input block transfer validation (A)
 // Includes all validations: vector transfer limits, access order, cluster size,
 // vector size validity, and tile coverage
-template <auto A_BLOCK_TRANSFER, DataType Type, size_t BLOCK_SIZE, auto TILE_SIZE, size_t DIMS = 3>
-concept ValidABlockTransfer = InputVectorTransferLimits<A_BLOCK_TRANSFER> &&
-                              AccessOrderLimits<A_BLOCK_TRANSFER.thread_cluster_order, DIMS> &&
-                              AccessOrderLimits<A_BLOCK_TRANSFER.src_access_order, DIMS> &&
-                              ValidBlockTransferClusterSize<A_BLOCK_TRANSFER, BLOCK_SIZE> &&
-                              IsVectorSizeValid<A_BLOCK_TRANSFER.src_scalar_per_vector, Type> &&
-                              IsVectorSizeValid<A_BLOCK_TRANSFER.lds_dst_scalar_per_vector, Type> &&
-                              ThreadsCoverATile<A_BLOCK_TRANSFER, TILE_SIZE>;
+template <auto A_BlockTransfer,
+          DataType Type,
+          size_t TypeSize,
+          size_t BlockSize,
+          auto TileSize,
+          size_t ThreadClusterRank = 3>
+concept ValidABlockTransfer =
+    InputVectorTransferLimits<A_BlockTransfer> &&
+    AccessOrderLimits<A_BlockTransfer.thread_cluster_order, ThreadClusterRank> &&
+    AccessOrderLimits<A_BlockTransfer.src_access_order, ThreadClusterRank> &&
+    ValidBlockTransferClusterSize<A_BlockTransfer, BlockSize> &&
+    IsVmemVectorSizeValid<A_BlockTransfer.src_scalar_per_vector, Type> &&
+    IsLDSVectorSizeValid<A_BlockTransfer.lds_dst_scalar_per_vector, TypeSize> &&
+    ThreadsCoverATile<A_BlockTransfer, TileSize>;
 
 // Composite concept for input block transfer validation (B)
-template <auto B_BLOCK_TRANSFER, DataType Type, size_t BLOCK_SIZE, auto TILE_SIZE, size_t DIMS = 3>
-concept ValidBBlockTransfer = InputVectorTransferLimits<B_BLOCK_TRANSFER> &&
-                              AccessOrderLimits<B_BLOCK_TRANSFER.thread_cluster_order, DIMS> &&
-                              AccessOrderLimits<B_BLOCK_TRANSFER.src_access_order, DIMS> &&
-                              ValidBlockTransferClusterSize<B_BLOCK_TRANSFER, BLOCK_SIZE> &&
-                              IsVectorSizeValid<B_BLOCK_TRANSFER.src_scalar_per_vector, Type> &&
-                              IsVectorSizeValid<B_BLOCK_TRANSFER.lds_dst_scalar_per_vector, Type> &&
-                              ThreadsCoverBTile<B_BLOCK_TRANSFER, TILE_SIZE>;
+template <auto B_BlockTransfer,
+          DataType Type,
+          size_t TypeSize,
+          size_t BlockSize,
+          auto TileSize,
+          size_t ThreadClusterRank = 3>
+concept ValidBBlockTransfer =
+    InputVectorTransferLimits<B_BlockTransfer> &&
+    AccessOrderLimits<B_BlockTransfer.thread_cluster_order, ThreadClusterRank> &&
+    AccessOrderLimits<B_BlockTransfer.src_access_order, ThreadClusterRank> &&
+    ValidBlockTransferClusterSize<B_BlockTransfer, BlockSize> &&
+    IsVmemVectorSizeValid<B_BlockTransfer.src_scalar_per_vector, Type> &&
+    IsLDSVectorSizeValid<B_BlockTransfer.lds_dst_scalar_per_vector, TypeSize> &&
+    ThreadsCoverBTile<B_BlockTransfer, TileSize>;
 
 // Composite concept for output block transfer validation (C)
-template <auto C_BLOCK_TRANSFER, DataType Type, size_t BLOCK_SIZE, auto TILE_SIZE>
-concept ValidCBlockTransfer = OutputVectorTransferLimits<C_BLOCK_TRANSFER> &&
-                              ValidBlockTransferClusterSize<C_BLOCK_TRANSFER, BLOCK_SIZE> &&
-                              IsVectorSizeValid<C_BLOCK_TRANSFER.scalar_per_vector, Type> &&
-                              ThreadsCoverCTile<C_BLOCK_TRANSFER, TILE_SIZE>;
+template <auto C_BlockTransfer, DataType Type, size_t BlockSize, auto TileSize>
+concept ValidCBlockTransfer = OutputVectorTransferLimits<C_BlockTransfer> &&
+                              ValidBlockTransferClusterSize<C_BlockTransfer, BlockSize> &&
+                              IsVmemVectorSizeValid<C_BlockTransfer.scalar_per_vector, Type> &&
+                              ThreadsCoverCTile<C_BlockTransfer, TileSize>;
 
 // Usage: IsValidLayout<ACTUAL_LAYOUT, VALID_LAYOUT_1, VALID_LAYOUT_2, ...>
 template <auto ACTUAL_LAYOUT, auto... VALID_LAYOUTS>

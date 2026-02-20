@@ -50,10 +50,12 @@ struct ConvFwdWmmaFactory
     // Check limits for the algorithm parameters.
     static_assert(ValidABlockTransfer<A_BLOCK_TRANSFER,
                                       Types::input_types.first,
+                                      sizeof(typename Types::InDataType),
                                       BLOCK.block_size,
                                       BLOCK.per_block>);
     static_assert(ValidBBlockTransfer<B_BLOCK_TRANSFER,
                                       Types::weight_types.first,
+                                      sizeof(typename Types::WeiDataType),
                                       BLOCK.block_size,
                                       BLOCK.per_block>);
     static_assert(ValidCBlockTransfer<C_BLOCK_TRANSFER,
