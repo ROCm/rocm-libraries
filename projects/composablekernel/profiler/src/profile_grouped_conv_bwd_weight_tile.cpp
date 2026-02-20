@@ -132,8 +132,8 @@ int call_profiler(const ckt::Args<SIGNATURE>& args, bool time_kernel)
         args, inputs.get(), outputs.get(), ck_tile::stream_config{nullptr, time_kernel});
     if(time_kernel)
     {
-        std::cout << "Best configuration parameters:" << "\nname: " << op_name
-                  << "\navg_time: " << avg_time << std::endl;
+        std::cout << "\nBest configuration parameters:" << "\n\tname: " << op_name
+                  << "\n\tavg_time: " << avg_time << std::endl;
     }
     return !valid;
 }
