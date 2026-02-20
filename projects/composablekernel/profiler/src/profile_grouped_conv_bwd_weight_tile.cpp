@@ -16,30 +16,67 @@ namespace {
 
 enum struct ConvLayout
 {
-    GNHWC_GKYXC_GNHWK, // 0
-    NHWGC_GKYXC_NHWGK, // 1
-    NGCHW_GKYXC_NGKHW, // 2
-    NGCHW_GKCYX_NGKHW, // 3
+    GNCHW_GKCYX_GNKHW, // 0
+    GNHWC_GKYXC_GNHWK, // 1
+    NHWGC_GKYXC_NHWGK, // 2
+    NGCHW_GKYXC_NGKHW, // 3
+    NGCHW_GKCYX_NGKHW, // 4
 };
+
+std::ostream& operator<<(std::ostream& os, const ConvLayout& layout)
+{
+    using ck::operator<<;
+    switch (layout)
+    {    
+        case ConvLayout::GNCHW_GKCYX_GNKHW:
+            os << "Input[G, N, C, Hi, Wi], Weight[G, K, C, Y, X], Output[G, N, K, Ho, Wo]";
+            break;
+        case ConvLayout::GNHWC_GKYXC_GNHWK:
+            os << "Input[G, N, Hi, Wi, C], Weight[G, K, Y, X, C], Output[G, N, Ho, Wo, K]";
+            break;
+        case ConvLayout::NHWGC_GKYXC_NHWGK:
+            os << "Input[N, Hi, Wi, G, C], Weight[G, K, Y, X, C], Output[N, Ho, Wo, G, K]";
+            break;
+        case ConvLayout::NGCHW_GKYXC_NGKHW:
+            os << "Input[N, G, C, Hi, Wi], Weight[G, K, Y, X, C], Output[N, G, K, Ho, Wo]";
+            break;
+        case ConvLayout::NGCHW_GKCYX_NGKHW:
+            os << "Input[N, G, C, Hi, Wi], Weight[G, K, C, Y, X], Output[N, G, K, Ho, Wo]";
+            break;
+        default: os << "unknown layout";
+    }
+
+    return os;
+}
 
 enum struct ConvDataType
 {
     F32_F32_F32,      // 0
     F16_F16_F16,      // 1
-    BF16_BF16_BF16,   // 2
-    INT8_INT8_INT8,   // 3
-    F8_F8_F8,         // 4
-    BF8_BF8_F8,       // 5
-    F8_BF8_F8,        // 6
-    BF8_F8_F8,        // 7
-    F32_F32_F32_TF32, // 8
+    BF16_FP32_BF16,   // 2
+    F16_F16_F16_GEMM_BF8, // 3
+    INT8_INT8_INT8,   // 4
+    BF16_BF16_BF16,   // 5
+    F32_F32_F32_COMP_TF32 // 6
 };
 
-enum struct IndexType
+std::ostream& operator<<(std::ostream& os, const ConvDataType& data_type)
 {
-    INDEX_T,      // 0
-    LONG_INDEX_T, // 1
-};
+    using ck::operator<<;
+    switch (data_type)
+    {
+        case ConvDataType::F32_F32_F32: os << "Input fp32, Weight fp32, Output fp32"; break;
+        case ConvDataType::F16_F16_F16: os << "Input fp16, Weight fp16, Output fp16"; break;
+        case ConvDataType::BF16_FP32_BF16: os << "Input bf16, Weight fp32, Output bf16"; break;
+        case ConvDataType::F16_F16_F16_GEMM_BF8: os << "Input fp16, Weight fp16, Output fp16, Gemm bf8@fp8"; break;
+        case ConvDataType::INT8_INT8_INT8: os << "Input int8, Weight int8, Output int8"; break;
+        case ConvDataType::BF16_BF16_BF16: os << "Input bf16, Weight bf16, Output bf16"; break;
+        case ConvDataType::F32_F32_F32_COMP_TF32: os << "Input fp32, Weight fp32, Output fp32, Compute tf32"; break;
+        default: os << "unknown data type";
+    }
+
+    return os;
+}
 
 #define OP_NAME "grouped_conv_bwd_weight_tile"
 #define OP_DESC "Grouped Convolution Backward Weight (CK Tile)"
@@ -114,9 +151,6 @@ int profile_grouped_conv_bwd_weight_tile(int argc, char* argv[])
 
     const auto data_type       = static_cast<ConvDataType>(std::stoi(argv[2]));
     const auto layout          = static_cast<ConvLayout>(std::stoi(argv[3]));
-    // const bool do_verification = std::stoi(argv[4]);
-    // const int init_method      = std::stoi(argv[5]);
-    // const bool do_log          = std::stoi(argv[6]);
     const bool time_kernel     = std::stoi(argv[7]);
     const int num_dim_spatial  = std::stoi(argv[8]);
 
@@ -131,9 +165,13 @@ int profile_grouped_conv_bwd_weight_tile(int argc, char* argv[])
                  "experimental/builder/src/generate_instances.py --mode=profiler and rerun cmake"
               << std::endl;
 
+    std::cout << "Data type: " << data_type << std::endl;
+    std::cout << "Layout: " << layout << std::endl;
     const auto params = ck::utils::conv::parse_conv_param(num_dim_spatial, 9, argv);
+    std::cout << params << std::endl;
 
     const auto& split_k = std::string(argv[8 + 1 + 4 + 6 * num_dim_spatial]);
+    std::cout << "Split-K: " << split_k << std::endl;
 
     if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
     {
