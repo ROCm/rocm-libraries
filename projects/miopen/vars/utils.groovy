@@ -475,9 +475,10 @@ def getDockerImage(Map conf=[:])
                       insecure = true
                     EOF
 
-                    docker buildx inspect ci-builder >/dev/null 2>&1 || \\
+                    # Remove existing builder to ensure new config is applied
+                    docker buildx rm ci-builder || true
+
                     docker buildx create --name ci-builder --driver docker-container --use --config /tmp/buildkitd.toml
-                    docker buildx use ci-builder
                     docker buildx inspect --bootstrap
                 """.stripIndent()
             
