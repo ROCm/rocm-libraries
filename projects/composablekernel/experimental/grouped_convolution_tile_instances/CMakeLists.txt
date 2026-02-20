@@ -2,11 +2,14 @@
 # SPDX-License-Identifier: MIT
 
 if(GPU_TARGETS MATCHES "gfx9")
-  # Generate instances using python script (empty to just generate empty instance list)
-  if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/grouped_convolution_forward_tile_ndhwgc_fp32.inc)
+  # Generate instances using python script if instance directories don't exist
+  set(INSTANCES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/instances)
+  if(NOT EXISTS ${INSTANCES_DIR}/forward OR
+     NOT EXISTS ${INSTANCES_DIR}/backward_weight OR
+     NOT EXISTS ${INSTANCES_DIR}/backward_data)
     find_package(Python3 COMPONENTS Interpreter Development)
     execute_process(
-      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generate_instances.py --mode=profiler
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generate_instances.py
       RESULT_VARIABLE ret
       OUTPUT_VARIABLE output
       ERROR_VARIABLE error
