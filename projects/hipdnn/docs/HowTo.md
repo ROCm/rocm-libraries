@@ -21,6 +21,9 @@ This guide provides practical information for both using hipDNN components and e
 
 ## Consuming hipDNN
 
+> [!TIP]
+> For a minimal end-to-end example of using hipDNN in a CMake project, see the [Consumer Quick Start](./ConsumerQuickStart.md).
+
 This section covers how to use the various components of hipDNN in your applications.
 
 ### Using the Frontend
