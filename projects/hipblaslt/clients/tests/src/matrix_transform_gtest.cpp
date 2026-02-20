@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -60,12 +61,29 @@ namespace
             const auto            bufSize   = m * n * b * sizeof(DType);
             const auto            res       = bufSize % alignment;
             const auto            allocSize = bufSize + (res ? (alignment - res) : 0);
-            auto                  err       = hipMalloc(&this->aBase, allocSize);
-            EXPECT_EQ(err, hipSuccess);
+            // ASSERT_* cannot be used in constructors (generates illegal
+            // return-void). Use hard abort on allocation failure instead.
+            auto err = hipMalloc(&this->aBase, allocSize);
+            if(err != hipSuccess)
+            {
+                fprintf(stderr, "hipMalloc failed: %s at %s:%d\n",
+                        hipGetErrorString(err), __FILE__, __LINE__);
+                abort();
+            }
             err = hipMalloc(&this->bBase, allocSize);
-            EXPECT_EQ(err, hipSuccess);
+            if(err != hipSuccess)
+            {
+                fprintf(stderr, "hipMalloc failed: %s at %s:%d\n",
+                        hipGetErrorString(err), __FILE__, __LINE__);
+                abort();
+            }
             err = hipMalloc(&this->cBase, allocSize);
-            EXPECT_EQ(err, hipSuccess);
+            if(err != hipSuccess)
+            {
+                fprintf(stderr, "hipMalloc failed: %s at %s:%d\n",
+                        hipGetErrorString(err), __FILE__, __LINE__);
+                abort();
+            }
             this->a = reinterpret_cast<DType*>(aBase + (allocSize - bufSize));
             this->b = reinterpret_cast<DType*>(bBase + (allocSize - bufSize));
             this->c = reinterpret_cast<DType*>(cBase + (allocSize - bufSize));
@@ -81,7 +99,12 @@ namespace
             aBase    = nullptr;
             bBase    = nullptr;
             cBase    = nullptr;
-            EXPECT_EQ(err, hipSuccess);
+            if(err != hipSuccess)
+            {
+                fprintf(stderr, "hipFree failed: %s at %s:%d\n",
+                        hipGetErrorString(err), __FILE__, __LINE__);
+                abort();
+            }
         }
 
         void* getBuf(size_t i) override

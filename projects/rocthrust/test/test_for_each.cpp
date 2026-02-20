@@ -128,6 +128,7 @@ TYPED_TEST(ForEachTests, DevicePathSimpleTest)
   size_t end = 375;
   hipLaunchKernelGGL(
     HIP_KERNEL_NAME(simple_test_kernel<mark_processed_functor<T>>), dim3(1), dim3(1), 0, 0, func, static_cast<int>(end));
+  HIP_CHECK(hipGetLastError());
 
   std::vector<T> output(size);
   HIP_CHECK(hipMemcpy(output.data(), raw_ptr, size * sizeof(T), hipMemcpyDeviceToHost));

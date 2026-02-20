@@ -23,6 +23,7 @@ add_executable(
     IntegrationGpuConvFwdBiasActiv.cpp
     IntegrationGpuConvBackwardData.cpp
     IntegrationGpuConvBackwardWeights.cpp
+    IntegrationGpuBenchmarkingKnob.cpp
 )
 
 target_compile_options(miopen_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -39,14 +40,9 @@ target_link_libraries(
     miopen_plugin_integration_tests PUBLIC GTest::gtest hip::host hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
 )
 
-# Enable spdlog support for fmt-style logging
-hipdnn_enable_spdlog(miopen_plugin_integration_tests)
-
 # Ensure that the miopen_plugin is built before the integration tests
 add_dependencies(miopen_plugin_integration_tests miopen_plugin)
 
-if(BUILD_PLUGIN_AS_DEPENDENCY)
-    clang_tidy_check(miopen_plugin_integration_tests)
-endif()
+clang_tidy_check(miopen_plugin_integration_tests)
 
 add_integration_test_target(miopen_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR})
