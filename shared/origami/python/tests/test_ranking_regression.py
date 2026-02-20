@@ -36,6 +36,8 @@ PROBLEM_DATA_FILE = Path(__file__).parent / "data" / "problem_data.csv"
 SUPPORTED_DTYPES = ["f16", "bf16", "f32"]
 TRANSPOSE_VALUES = [origami.transpose_t.T, origami.transpose_t.N]
 
+TOP_K = 5
+
 
 def is_dtype_supported(arch_name: str, dtype: str) -> bool:
     """Check if a dtype is supported for the given architecture."""
@@ -107,9 +109,6 @@ def result_to_config_tuple(result: origami.prediction_result_t) -> list[int]:
     ]
 
 
-TOP_K = 5
-
-
 def generate_rankings(
     arch_name: str,
     dtype: str,
@@ -148,9 +147,9 @@ def generate_rankings(
 
 
 try:
-    from yaml import CSafeLoader as SafeLoader, CSafeDumper as SafeDumper
+    from yaml import CSafeDumper as SafeDumper, CSafeLoader as SafeLoader
 except ImportError:
-    from yaml import SafeLoader, SafeDumper
+    from yaml import SafeDumper, SafeLoader
 
 
 def get_baseline_path(arch_name: str) -> Path:
