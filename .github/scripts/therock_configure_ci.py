@@ -43,6 +43,7 @@ SKIPPABLE_PATH_PATTERNS = [
     "*.clinerules",
     "*.cursorrules",
     "*.mdc",
+    "tools/*",
 ]
 
 

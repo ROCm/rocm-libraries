@@ -63,7 +63,7 @@
 
 "project: none":
 - changed-files:
-  - all-globs-to-all-files: ['!dnn-providers/**/*', '!projects/**/*', '!shared/**/*']
+  - all-globs-to-all-files: ['!dnn-providers/**/*', '!projects/**/*', '!shared/**/*', '!tools/**/*']
 
 "project: rocblas":
 - changed-files:
@@ -121,6 +121,10 @@
 "project: hiptensor":
 - changed-files:
   - any-glob-to-any-file: 'projects/hiptensor/**/*'
+
+"tool: dnn-benchmarking":
+- changed-files:
+  - any-glob-to-any-file: 'tools/dnn-benchmarking/**/*'
 
 documentation:
 - changed-files:
