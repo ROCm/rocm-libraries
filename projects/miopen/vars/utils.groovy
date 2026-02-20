@@ -466,10 +466,12 @@ def getDockerImage(Map conf=[:])
 
         try {
             withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+                
+                def registryWithoutProtocol = "${env.MIOPEN_PRIVATE_DOCKER_URL}".replace("https://", "").replace("http://", "")
                 sh """
                     # Create buildkitd config to allow insecure registries
                     cat <<EOF > /tmp/buildkitd.toml
-                    [registry."${env.MIOPEN_PRIVATE_DOCKER_URL}"]
+                    [registry."${registryWithoutProtocol}"]
                       insecure = true
                     EOF
 
