@@ -48,14 +48,26 @@ struct BackendLogState
     std::shared_ptr<spdlog::logger> callbackLogger; // Dynamic callback logger (sync or async).
     std::shared_ptr<spdlog::details::thread_pool> sharedThreadPool;
 
-    // Destructor ensures loggers are properly shut down when last thread-local reference is released
+    BackendLogState()
+    {
+        // Register atexit handler to disable logging before static destruction.
+        // This prevents log messages during cleanup, avoiding potential issues
+        // with accessing the logger infrastructure after mutexes are destroyed.
+        std::atexit([]() { hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_OFF); });
+    }
+
     ~BackendLogState()
     {
-        loggerShutdown();
+        // This destructor will only be called after all shared pointers from
+        // threads' local storage are destroyed (see getBackendLogState()).
+
+        // Use explicit shutdown ordering; remove all loggers first.
+        consoleFileLogger.reset();
+        callbackLogger.reset();
+        // Remove thread pool last (thread pool is used by loggers).
+        sharedThreadPool.reset();
     }
 };
-
-BackendLogState& getBackendLogState();
 
 BackendLogState& getBackendLogState()
 {
@@ -103,9 +115,9 @@ void logHipDeviceInfo(hipStream_t stream)
 
 void initialize()
 {
+    auto& state = getBackendLogState();
     // Fast path: check if already initialized with read lock (allows concurrent read access)
     {
-        auto& state = getBackendLogState();
         std::shared_lock<std::shared_mutex> lock(state.loggerStateMutex);
         if(state.loggerInitialized)
         {
@@ -115,7 +127,6 @@ void initialize()
 
     // Slow path: actually initialize with write lock (first call only)
     {
-        auto& state = getBackendLogState();
         std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
         if(state.loggerInitialized) // Check again - race protection
         {
@@ -182,8 +193,8 @@ void loggerShutdown()
     state.consoleFileLogger.reset();
     state.callbackLogger.reset();
     // Do not reset sharedThreadPool here - let it be destroyed when BackendLogState
-    // destructor runs. This ensures the thread pool remains alive as long as any
-    // thread that might hold a shared_ptr to a logger that uses it.
+    // destructor runs. This ensures the thread pool remains alive until all threads
+    // that have attempted to use the logger have exited.
 
     state.loggerInitialized = false;
 }
