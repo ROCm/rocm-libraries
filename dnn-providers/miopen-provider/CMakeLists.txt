@@ -170,7 +170,11 @@ add_library(miopen_legacy_plugin_private ALIAS miopen_plugin_private)
 # miopen_legacy_plugin - REAL target for current TheRock compatibility
 add_library(miopen_legacy_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
 target_link_libraries(miopen_legacy_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
-target_link_libraries(miopen_legacy_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
+
+if(NOT WIN32)
+    target_link_libraries(miopen_legacy_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
+endif()
+
 target_compile_options(miopen_legacy_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(
     miopen_legacy_plugin
@@ -186,7 +190,11 @@ set_target_properties(
 # miopen_plugin - REAL target for updated TheRock
 add_library(miopen_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
 target_link_libraries(miopen_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
-target_link_libraries(miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
+
+if(NOT WIN32)
+    target_link_libraries(miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
+endif()
+
 target_compile_options(miopen_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(
     miopen_plugin
