@@ -19,6 +19,14 @@ void CK_TILE_ERROR(Args&&... args) noexcept
     std::cerr << "[ERROR] " << oss.str() << std::endl;
 }
 
+template <typename... Args>
+void CK_TILE_INFO(Args&&... args) noexcept
+{
+    std::ostringstream oss;
+    (oss << ... << args);
+    std::cout << "[INFO] " << oss.str() << std::endl;
+}
+
 namespace internal {
 
 template <size_t N>

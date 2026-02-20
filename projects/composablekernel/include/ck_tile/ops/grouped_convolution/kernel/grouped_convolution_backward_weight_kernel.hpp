@@ -505,16 +505,21 @@ struct GroupedConvolutionBackwardWeightKernel
         return max(GemmPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
     }
 
+    template <typename... Args>
+    CK_TILE_HOST static void LogInfo(Args&&... args) noexcept
+    {
+        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+        {
+            CK_TILE_INFO(std::forward<Args>(args)...);
+        }
+    }
+
     CK_TILE_HOST static bool
     IsSupportedArgument(const GroupedConvBwdWeightKernelArgsSpecialized& kargs)
     {
         if(kargs.k_batch < 1)
         {
-            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-            {
-                CK_TILE_ERROR(
-                    "k_batch must be at least one. Ensure argument is created via MakeKernelArgs.");
-            }
+            LogInfo("k_batch must be at least one. Ensure argument is created via MakeKernelArgs.");
             return false;
         }
 
@@ -526,12 +531,7 @@ struct GroupedConvolutionBackwardWeightKernel
             // accuracy issues. Hence, we limit the maximum split-K value to 128 in such cases.
             if(kargs.k_batch > 128)
             {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR(
-                        "For epilogue output data type that is not float/double, we must have "
-                        "k_batch <= 128.");
-                }
+                LogInfo("For epilogue output data type that is not float/double, we must have k_batch <= 128.");
                 return false;
             }
         }
@@ -541,20 +541,16 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             if(kargs.k_batch != 1)
             {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR("Conditions not met for K_batch > 1!");
-                }
+                LogInfo("Conditions not met for K_batch > 1: VectorSizeC must be a multiple of 2 for fp16/bf16 when K_batch > 1.", 
+                    "Now k_batch is ", kargs.k_batch, ", VectorSizeC is ", GroupedConvTraitsType_::VectorSizeC);
                 return false;
             }
         }
 
         if(kargs.GemmK < TilePartitioner::BlockGemmShape::WarpTile::at(number<2>{}) * kargs.k_batch)
         {
-            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-            {
-                CK_TILE_ERROR("KBatch is too large, part of GPU wouldn't be utilized!");
-            }
+            LogInfo("KBatch is too large, part of GPU wouldn't be utilized! GemmK: ", kargs.GemmK, ", BlockGemmShape K: ",
+                TilePartitioner::BlockGemmShape::WarpTile::at(number<2>{}), ", k_batch: ", kargs.k_batch);
             return false;
         }
 
@@ -574,6 +570,8 @@ struct GroupedConvolutionBackwardWeightKernel
 
                 if(!(SpatialDim == 1 && ConvStride == 1 && LeftPad == 0 && RightPad == 0))
                 {
+                    LogInfo("For Filter1x1Stride1Pad0 specialization, all spatial dimensions must be 1, stride must be 1, and padding must be 0. Now for dimension ", i,
+                        ": SpatialDim is ", SpatialDim, ", ConvStride is ", ConvStride, ", LeftPad is ", LeftPad, ", RightPad is ", RightPad);
                     return false;
                 }
             }
@@ -589,6 +587,8 @@ struct GroupedConvolutionBackwardWeightKernel
 
                 if(!(SpatialDim == 1 && LeftPad == 0 && RightPad == 0))
                 {
+                    LogInfo("For Filter1x1Pad0 specialization, all spatial dimensions must be 1 and padding must be 0. Now for dimension ", i,
+                        ": SpatialDim is ", SpatialDim, ", LeftPad is ", LeftPad, ", RightPad is ", RightPad);
                     return false;
                 }
             }
@@ -597,6 +597,7 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             if(ConvC != 1)
             {
+                LogInfo("For Filter3x3 specialization, ConvC must be 1. Now ConvC is ", ConvC);
                 return false;
             }
             for(index_t i = 0; i < NDimSpatial; ++i)
@@ -605,6 +606,8 @@ struct GroupedConvolutionBackwardWeightKernel
 
                 if(filter_spatial_dim != I3)
                 {
+                    LogInfo("For Filter3x3 specialization, all spatial dimensions of the filter must be 3. Now for dimension ", 
+                                i, ", filter_spatial_dim is ", filter_spatial_dim);
                     return false;
                 }
             }
@@ -613,8 +616,7 @@ struct GroupedConvolutionBackwardWeightKernel
         if constexpr(GroupedConvTraitsType_::ExplicitGemm &&
                      ConvSpecialization != ConvolutionSpecialization::Filter1x1Stride1Pad0)
         {
-            CK_TILE_ERROR(
-                "Explicit Gemm is supported only for Filter1x1Stride1Pad0 specialization!");
+            LogInfo("ExplicitGemm is only supported for Filter1x1Stride1Pad0 specialization.");
             return false;
         }
 
@@ -626,14 +628,13 @@ struct GroupedConvolutionBackwardWeightKernel
             // Check access per C
             if(ConvC % GroupedConvTraitsType_::VectorSizeB != 0)
             {
-                CK_TILE_ERROR("Conv C is not a multiple of vector load size for "
-                              "input image!");
+                LogInfo("Conv C is not a multiple of vector load size for input! ConvC: ", ConvC, ", VectorSizeB: ", GroupedConvTraitsType_::VectorSizeB);
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported input layout!");
+            LogInfo("Not supported input layout! Now InLayout is ", InLayout::name);
             return false;
         }
 
@@ -643,13 +644,13 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             if(ConvC % GroupedConvTraitsType_::VectorSizeC != 0)
             {
-                CK_TILE_ERROR("Conv C is not a multiple of vector load size for weight!");
+                LogInfo("Conv C is not a multiple of vector load size for weight! ConvC: ", ConvC, ", VectorSizeC: ", GroupedConvTraitsType_::VectorSizeC);
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported weight layout!");
+            LogInfo("Not supported weight layout! Now WeiLayout is ", WeiLayout::name);
             return false;
         }
 
@@ -659,14 +660,13 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             if(ConvK % GroupedConvTraitsType_::VectorSizeA != 0)
             {
-                CK_TILE_ERROR("Conv K is not a multiple of vector store size "
-                              "for output image!");
+                LogInfo("Conv K is not a multiple of vector load size for output! ConvK: ", ConvK, ", VectorSizeA: ", GroupedConvTraitsType_::VectorSizeA);
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported output layout!");
+            LogInfo("Not supported output layout! Now OutLayout is ", OutLayout::name);
             return false;
         }
 
@@ -675,7 +675,7 @@ struct GroupedConvolutionBackwardWeightKernel
             const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
             if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0)
             {
-                CK_TILE_ERROR("ConvG must be a multiple of NumGroupsToMerge!");
+                LogInfo("Number of groups must be divisible by NumGroupsToMerge! ConvG: ", ConvG, ", NumGroupsToMerge: ", GroupedConvTraitsType_::NumGroupsToMerge);
                 return false;
             }
         }
