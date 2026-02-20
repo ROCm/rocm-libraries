@@ -161,13 +161,15 @@ int profile_grouped_conv_bwd_weight_tile(int argc, char* argv[])
         return 1;
     }
 
+    constexpr ck_tile::index_t conv_params_start_idx = 9;
+
     std::cout << "IMPORTANT: Generate instances using: python "
                  "experimental/builder/src/generate_instances.py --mode=profiler and rerun cmake"
               << std::endl;
 
     std::cout << "Data type: " << data_type << std::endl;
     std::cout << "Layout: " << layout << std::endl;
-    const auto params = ck::utils::conv::parse_conv_param(num_dim_spatial, 9, argv);
+    const auto params = ck::utils::conv::parse_conv_param(num_dim_spatial, conv_params_start_idx, argv);
     std::cout << params << std::endl;
 
     const auto& split_k = std::string(argv[8 + 1 + 4 + 6 * num_dim_spatial]);
@@ -180,13 +182,13 @@ int profile_grouped_conv_bwd_weight_tile(int argc, char* argv[])
             if(data_type == ConvDataType::F16_F16_F16)
             {
                 constexpr auto SIGNATURE = ckp::SIGNATURE_NHWGC_FP16_BWD_WEIGHT;
-                return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
+                return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
                                                 time_kernel);
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
                 constexpr auto SIGNATURE = ckp::SIGNATURE_NHWGC_BF16_BWD_WEIGHT;
-                return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
+                return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
                                                 time_kernel);
             }
         }
@@ -195,13 +197,13 @@ int profile_grouped_conv_bwd_weight_tile(int argc, char* argv[])
             if(data_type == ConvDataType::F16_F16_F16)
             {
                 constexpr auto SIGNATURE = ckp::SIGNATURE_NDHWGC_FP16_BWD_WEIGHT;
-                return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
+                return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
                                                 time_kernel);
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
                 constexpr auto SIGNATURE = ckp::SIGNATURE_NDHWGC_BF16_BWD_WEIGHT;
-                return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(10, argv),
+                return call_profiler<SIGNATURE>(ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
                                                 time_kernel);
             }
         }
