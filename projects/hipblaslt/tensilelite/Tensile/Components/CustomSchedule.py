@@ -3966,7 +3966,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
         kernel["MfmaInitCVgprs"] = True
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
-        swap_idxb3 = [1,2,3, # depend on DS1 
+        swap_idx =   [1,2,3, # depend on DS1 
                         7,8, # depend on DS2
                          11, # depend on DS3
                       4,5,6, # depend on DS5
@@ -3974,65 +3974,60 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
                          12, # depend on DS7
                         ]
         optSchedule = {
-            'SYNC': [[9, 14, 38, 43, 73, 95, 95, 106, 111, 164]],
+            'SYNC': [[9, 14, 38, 43, 73, 95, 95, 106, 111, 157, 162]],
             'GRIncA': [[0,1,2,3, 5,6,7,8, 11]],
             'GRIncB': [[38, 39, 40, 41, 45, 46, 47, 50, 51]],
             'LRA0': [[0,1,2,3, 5,6,7,8]],
             'LRB0': [[28, 30, 31, 32, 34, 35, 36, 37]],
 
-            'PackA0': [[
-                *[x + 8 for x in swap_idxb3],
+            'PackA0': [[*[x + 8 for x in swap_idx],
                         20,20,21,21, 28,28, 29,29,30,30,
                         22,22,23,23, 28,28, 31,31,32,32, 
                         24,24,25,25, 28,28, 33,33,34,34, 
-                        26,26,27,27, 28,28, 34,35,36,36,
-                        ]],
-            'PackB0': [[
-                        *[x + 37 for x in swap_idxb3],
+                        26,26,27,27, 28,28, 34,35,36,36]],
+            'PackB0': [[*[x + 37 for x in swap_idx],
                         55,55,56,56, 63,63, 64,64,65,65,
                         57,57,58,58, 63,63, 66,66,67,67,
                         59,59,60,60, 63,63, 68,68,69,69,
-                        61,61,62,62, 63,63, 70,70,71,71,
-                        ]],
+                        61,61,62,62, 63,63, 70,70,71,71]],
             'LRSA': [[50]],
             'LRSB': [[51]],
-            'LRA3': [[144, 145, 146, 147, 151, 152, 153, 154]],
-            'LRB3': [[96,96,98,98,    103,103,105,105],
-                    [97,97,99,99, 102,102,104,104]],                    
+            'LRB3': [[96,96,98,98, 103,103,105,105],
+                    [97,97,99,99,  102,102,104,104]],                    
             'GRA': [[75,75,80,80,85,85,90,90, 107,107,109,109,111,111,113,113],
                     [77,77,82,82,87,87,92,92, 108,108,110,110,112,112,114,114]],
-            'GRB': [[132, 132, 134, 134, 136, 136, 138, 138, 182, 182, 184, 184, 186, 186, 188, 188]],
+            'LRA3': [[138, 138, 144, 144, 150, 150, 154, 154],
+                     [139, 139, 146, 146, 152, 152, 156, 156]],
+            'GRB': [[130,130,135,135,140,140,145,145, 165,165,170,170,175,175,180,180],
+                    [132,132,137,137,142,142,147,147, 167,167,172,172,177,177,182,182]],
             
-            'PackB3': [[
-                    *[x + 105 for x in swap_idxb3],
-                        119,119,119,119, 124,124, 125,125,125,125,
-                        120,120,120,120, 124,124, 126,126,126,126,
-                        121,121,121,121, 124,124, 127,127,127,127,
-                        122,122,122,122, 124,124, 128,128,128,128,
-                        ]], 
-            
-            'PackA3': [[
-                164,164,164,164,164,164,164,164,164,164,164,164,
-                        164,164,164,164, 172,172, 173,173,173,173,
-                        165,165,165,165, 172,172, 174,174,174,174,
-                        166,166,166,166, 172,172, 175,175,175,175,
-                        167,167,167,167, 172,172, 176,176,176,176,]],
-            'LWSA': [[190]],
-            'LWSB': [[190]],
-            'LCC': [[191, 191]],
+            'PackB3': [[*[x + 105 for x in swap_idx],
+                        119,119,120,120, 128,128, 129,129,130,130,
+                        121,121,122,122, 128,128, 131,131,132,132,
+                        123,123,124,124, 128,128, 133,133,134,134,
+                        125,125,126,126, 128,128, 135,135,136,136]], 
+            'PackA3': [[*[x + 156 for x in swap_idx],
+                        169,169,170,170, 177,177, 178,178,179,179,
+                        171,171,172,172, 177,177, 180,180,181,181,
+                        173,173,174,174, 177,177, 182,182,183,183,
+                        175,175,176,176, 177,177, 184,184,185,185]],
+            'LWSA': [[187]],
+            'LWSB': [[188]],
+            'LCC': [[189, 190]],
         }
 
         syncCode = [                    
             SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
-            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),
             SBarrier(comment="Barrier before GRA&GRB"),
             SWaitCnt(dscnt=-1, vlcnt=4, vscnt=-1, comment="Wait for previous GRA&B"),
             SBarrier(comment=""),
-            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRA3 to complete"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3 to complete"),
+            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRB3 to complete"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3 to complete"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3 to complete"),                    
         ]
         nglshift = nllshift = 16 # vmcnt shift for ngl and nll
 
