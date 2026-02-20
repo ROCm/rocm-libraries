@@ -230,7 +230,11 @@ __device__ void run_stebz_splitting(const int tid,
     // thus, this thread offset is:
     rocblas_int offset = 0;
     for(int i = 0; i < tid; ++i)
+    {
         offset += sidx[i];
+    }
+    __syncthreads();
+
 
     // local helper variables
     T tmp, tmp2, vl, vu;

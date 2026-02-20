@@ -16,6 +16,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 ### Resolved issues
 
+* Fixed synchronization issue in STEBZ and downstream functions such as SYEVX and SYEVDX
 * Fixed synchronization issue in GETF2.
 
 ### Known issues
