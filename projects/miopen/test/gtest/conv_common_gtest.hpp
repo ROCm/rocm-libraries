@@ -620,7 +620,7 @@ struct verify_forward_conv : conv_base<T, Tout>
                 if(count == 0)
                 {
                     std::cout << "FAILED: Using immediate mode error in GetSolutionCount."
-                                 << std::endl;
+                              << std::endl;
                     fail(); // TODO:
                     return {};
                 }
@@ -632,7 +632,7 @@ struct verify_forward_conv : conv_base<T, Tout>
                 if(count == 0)
                 {
                     std::cout << "FAILED: Immediate mode has no fallback for this configuration."
-                                 << " Solution count: " << count << std::endl;
+                              << " Solution count: " << count << std::endl;
                     fail(); // TODO:
                     return {};
                 }
@@ -690,7 +690,7 @@ struct verify_forward_conv : conv_base<T, Tout>
                 if(count == 0)
                 {
                     std::cout << "FAILED: Using immediate mode error in GetSolutionCount."
-                                 << std::endl;
+                              << std::endl;
                     return {}; // TODO:
                 }
 
@@ -701,7 +701,7 @@ struct verify_forward_conv : conv_base<T, Tout>
                 if(count == 0)
                 {
                     std::cout << "FAILED: Immediate mode has no fallback for this configuration."
-                                 << " Solution count: " << count << std::endl;
+                              << " Solution count: " << count << std::endl;
                     return {}; // TODO:
                 }
                 selected = std::move(solutions.front());
@@ -1103,7 +1103,7 @@ struct verify_backward_conv : conv_base<T>
                 if(count == 0)
                 {
                     std::cout << "FAILED: Using immediate mode error in GetSolutionCount."
-                                 << std::endl;
+                              << std::endl;
                     return {}; // TODO:
                 }
 
@@ -1115,7 +1115,7 @@ struct verify_backward_conv : conv_base<T>
                 if(count == 0)
                 {
                     std::cout << "FAILED: Immediate mode has no fallback for this configuration."
-                                 << " Solution count: " << count << std::endl;
+                              << " Solution count: " << count << std::endl;
                     return {}; // TODO:
                 }
                 std::sort(solutions.begin(), solutions.end(), [](const auto& l, const auto& r) {
@@ -1167,7 +1167,7 @@ struct verify_backward_conv : conv_base<T>
                 if(count == 0)
                 {
                     std::cout << "FAILED: Using immediate mode error in GetSolutionCount."
-                                 << std::endl;
+                              << std::endl;
                     return {}; // TODO:
                 }
 
@@ -1178,7 +1178,7 @@ struct verify_backward_conv : conv_base<T>
                 if(count == 0)
                 {
                     std::cout << "FAILED: Immediate mode has no fallback for this configuration."
-                                 << " Solution count: " << count << std::endl;
+                              << " Solution count: " << count << std::endl;
                     return {}; // TODO:
                 }
                 std::sort(solutions.begin(), solutions.end(), [](const auto& l, const auto& r) {
@@ -1457,8 +1457,7 @@ struct verify_backward_weights_conv : conv_base<T>
 
             if(count == 0)
             {
-                std::cout << "FAILED: Using immediate mode error in GetSolutionCount."
-                             << std::endl;
+                std::cout << "FAILED: Using immediate mode error in GetSolutionCount." << std::endl;
             }
 
             // std::cout << "Backward weights conv solutions available: " << count << std::endl;
@@ -1468,7 +1467,7 @@ struct verify_backward_weights_conv : conv_base<T>
             if(count == 0)
             {
                 std::cout << "FAILED: Immediate mode has no fallback for this configuration."
-                             << " Solution count: " << count << std::endl;
+                          << " Solution count: " << count << std::endl;
             }
             std::sort(solutions.begin(), solutions.end(), [](const auto& l, const auto& r) {
                 return l.time < r.time;
@@ -1732,7 +1731,7 @@ struct verify_forward_conv_int8 : conv_base<T>
         if(count == 0)
         {
             std::cout << "FAILED: Immediate mode has no fallback for this configuration."
-                         << " Solution count: " << count << std::endl;
+                      << " Solution count: " << count << std::endl;
             fail();
         }
         std::sort(solutions.begin(), solutions.end(), [](const auto& l, const auto& r) {
@@ -1934,32 +1933,24 @@ struct conv_test_base : public ::testing::TestWithParam<conv_test_input>
     tensor<T> input;
     tensor<T> weights;
 
-    void SetUp() override
-    {
-        param = GetParam();
-    }
+    void SetUp() override { param = GetParam(); }
 
     int get_spatial_dim() const
     {
         for(int i = 2; i < 4; i++)
         {
             if(param.input_dims.size() == i + 2 and param.weight_tensor_dims.size() == i + 2 and
-               param.pads_strides_dilations.size() == i * 3ULL and param.trans_output_pads.size() == i)
+               param.pads_strides_dilations.size() == i * 3ULL and
+               param.trans_output_pads.size() == i)
                 return i;
         }
         std::cout << "FAILED: get_spatial_dim() can't calculate dims count." << std::endl;
         return -1;
     }
 
-    void fail() const
-    {
-        GTEST_FAIL();
-    }
+    void fail() const { GTEST_FAIL(); }
 
-    void skip() const
-    {
-        GTEST_SKIP();
-    }
+    void skip() const { GTEST_SKIP(); }
 
     void Run()
     {
@@ -1981,10 +1972,13 @@ struct conv_test_base : public ::testing::TestWithParam<conv_test_input>
 
         if(!param.input_dims.empty())
         {
-            input = tensor<T>{input_layout_t, param.input_dims}.generate(tensor_elem_gen_integer{17});
+            input =
+                tensor<T>{input_layout_t, param.input_dims}.generate(tensor_elem_gen_integer{17});
             param.batch_size     = param.input_dims.at(0);
             param.input_channels = param.input_dims.at(1);
-            std::copy(param.input_dims.begin() + 2, param.input_dims.end(), param.spatial_dim_elements.begin());
+            std::copy(param.input_dims.begin() + 2,
+                      param.input_dims.end(),
+                      param.spatial_dim_elements.begin());
         }
         else if(spatial_dim == 2)
         {
@@ -2023,8 +2017,9 @@ struct conv_test_base : public ::testing::TestWithParam<conv_test_input>
                 weights = tensor<T>{weight_layout_t, param.weight_tensor_dims}.generate(
                     tensor_elem_gen_integer{17});
                 param.output_channels = param.weight_tensor_dims.at(0);
-                std::copy(
-                    param.weight_tensor_dims.begin() + 2, param.weight_tensor_dims.end(), param.filter_dims.begin());
+                std::copy(param.weight_tensor_dims.begin() + 2,
+                          param.weight_tensor_dims.end(),
+                          param.filter_dims.begin());
             }
         }
         else if(spatial_dim == 2)
@@ -2123,8 +2118,9 @@ struct conv_test_base : public ::testing::TestWithParam<conv_test_input>
             filter.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
 
         std::copy_n(param.pads_strides_dilations.begin(), spatial_dim, filter.pads.begin());
-        std::copy_n(
-            param.pads_strides_dilations.begin() + spatial_dim, spatial_dim, filter.strides.begin());
+        std::copy_n(param.pads_strides_dilations.begin() + spatial_dim,
+                    spatial_dim,
+                    filter.strides.begin());
         std::copy_n(param.pads_strides_dilations.begin() + 2 * spatial_dim,
                     spatial_dim,
                     filter.dilations.begin());
@@ -2267,15 +2263,15 @@ struct conv_test_base : public ::testing::TestWithParam<conv_test_input>
                     auto data_type = input.desc.GetType();
                     int v_max      = is_int8 ? 16 : (data_type == miopenHalf) ? 4 : 17;
                     return param.gen_float ? prng::gen_canonical<double>()
-                                     : static_cast<double>(prng::gen_A_to_B(1, v_max));
+                                           : static_cast<double>(prng::gen_A_to_B(1, v_max));
                 };
 
                 auto gen_sign_value = [=](auto... is) {
                     auto data_type = input.desc.GetType();
                     int v_max      = is_int8 ? 16 : (data_type == miopenHalf) ? 4 : 17;
                     return param.gen_float ? prng::gen_A_to_B(-1.0, 1.0)
-                                     : static_cast<double>(prng::gen_A_to_B(1, v_max)) *
-                                           tensor_elem_gen_checkboard_sign{}(is...);
+                                           : static_cast<double>(prng::gen_A_to_B(1, v_max)) *
+                                                 tensor_elem_gen_checkboard_sign{}(is...);
                 };
 
                 auto ctx = miopen::ExecutionContext{&get_handle()};
@@ -2391,42 +2387,51 @@ struct conv_test_base : public ::testing::TestWithParam<conv_test_input>
                     {
                         if(param.output_type == "float")
                         {
-                            test_helpers::CompareResults(verify_forward_conv<api, T, float>{
-                                input,
-                                weights,
-                                get_output_tensor<T, float>(filter, input, weights, param.out_layout),
-                                filter,
-                                stats,
-                                param.preallocate,
-                                0,
-                                param.search,
-                                param.int8_vectorize}, [this](){ fail(); });
+                            test_helpers::CompareResults(
+                                verify_forward_conv<api, T, float>{
+                                    input,
+                                    weights,
+                                    get_output_tensor<T, float>(
+                                        filter, input, weights, param.out_layout),
+                                    filter,
+                                    stats,
+                                    param.preallocate,
+                                    0,
+                                    param.search,
+                                    param.int8_vectorize},
+                                [this]() { fail(); });
                         }
                         else if(param.output_type == "int32")
                         {
-                            test_helpers::CompareResults(verify_forward_conv<api, T, int>{
-                                input,
-                                weights,
-                                get_output_tensor<T, int>(filter, input, weights, param.out_layout),
-                                filter,
-                                stats,
-                                param.preallocate,
-                                0,
-                                param.search,
-                                param.int8_vectorize}, [this](){ fail(); });
+                            test_helpers::CompareResults(
+                                verify_forward_conv<api, T, int>{
+                                    input,
+                                    weights,
+                                    get_output_tensor<T, int>(
+                                        filter, input, weights, param.out_layout),
+                                    filter,
+                                    stats,
+                                    param.preallocate,
+                                    0,
+                                    param.search,
+                                    param.int8_vectorize},
+                                [this]() { fail(); });
                         }
                         else if(param.output_type == "int8")
                         {
-                            test_helpers::CompareResults(verify_forward_conv<api, T, int8_t>{
-                                input,
-                                weights,
-                                get_output_tensor<T, int8_t>(filter, input, weights, param.out_layout),
-                                filter,
-                                stats,
-                                param.preallocate,
-                                0,
-                                param.search,
-                                param.int8_vectorize}, [this](){ fail(); });
+                            test_helpers::CompareResults(
+                                verify_forward_conv<api, T, int8_t>{
+                                    input,
+                                    weights,
+                                    get_output_tensor<T, int8_t>(
+                                        filter, input, weights, param.out_layout),
+                                    filter,
+                                    stats,
+                                    param.preallocate,
+                                    0,
+                                    param.search,
+                                    param.int8_vectorize},
+                                [this]() { fail(); });
                         }
                         else
                         {
@@ -2437,23 +2442,46 @@ struct conv_test_base : public ::testing::TestWithParam<conv_test_input>
                     }
                     else
                     {
-                        test_helpers::CompareResults(verify_forward_conv<api, T>{
-                            input, weights, output, filter, stats, param.preallocate, 0, param.search, false}, [this](){ fail(); });
+                        test_helpers::CompareResults(verify_forward_conv<api, T>{input,
+                                                                                 weights,
+                                                                                 output,
+                                                                                 filter,
+                                                                                 stats,
+                                                                                 param.preallocate,
+                                                                                 0,
+                                                                                 param.search,
+                                                                                 false},
+                                                     [this]() { fail(); });
                     }
                 }
 
                 if(param.do_backward_data && !skip_backward_data)
                 {
-                    test_helpers::CompareResults(verify_backward_conv<api, T>{
-                        input, weights, output, filter, stats, param.preallocate, 0, param.search}, [this](){ fail(); });
+                    test_helpers::CompareResults(verify_backward_conv<api, T>{input,
+                                                                              weights,
+                                                                              output,
+                                                                              filter,
+                                                                              stats,
+                                                                              param.preallocate,
+                                                                              0,
+                                                                              param.search},
+                                                 [this]() { fail(); });
                 }
 
                 if(param.do_backward_weights && !skip_backward_weights)
                 {
                     output.generate(gen_sign_value);
 
-                    test_helpers::CompareResults(verify_backward_weights_conv<api, T>{
-                        input, weights, output, filter, stats, param.preallocate, 0, param.search}, [this](){ fail(); });
+                    test_helpers::CompareResults(
+                        verify_backward_weights_conv<api, T>{input,
+                                                             weights,
+                                                             output,
+                                                             filter,
+                                                             stats,
+                                                             param.preallocate,
+                                                             0,
+                                                             param.search},
+                        [this]() { fail(); });
                 }
             }
         }
