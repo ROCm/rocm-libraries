@@ -22,15 +22,16 @@
 #
 ################################################################################
 
+from typing import Optional
+
 from . import Properties
-from Tensile.Common.Utilities import printExit
 from Tensile.Common.Architectures import SUPPORTED_CHIP_ID_FALLBACKS, isaToGfx
+
 import copy
 import re
-import sys
 
 
-def parseDeviceNameToInt(deviceName: str):
+def parseDeviceNameToInt(deviceName: Optional[str]) -> Optional[int]:
     """Parse 'Device 75a3' into 30115 (hex to decimal).
     Args:
         deviceName: Of format 'Device 7aa7`
@@ -49,7 +50,7 @@ def parseDeviceNameToInt(deviceName: str):
                      deviceName}', expected 'Device XXXX'")
 
 
-def _extractPciChipIds(pred: Properties.Predicate):
+def _extractPciChipIds(pred: Optional[Properties.Predicate]) -> frozenset[int]:
     """Extract chip ID(s) from PciChipId or the 'Or' predicate.
 
     Returns:
