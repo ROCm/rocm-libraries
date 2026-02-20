@@ -1050,6 +1050,9 @@ endif()
 target_link_libraries(MIOpen PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 
+target_internal_library(MIOpen Boost::filesystem)
+list(APPEND PACKAGE_STATIC_DEPENDS PACKAGE Boost COMPONENTS filesystem)
+
 if(NOT WIN32 AND NOT APPLE)
     file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/lib.def "
         MIOPEN_${MIOPEN_BACKEND}_1
@@ -1076,6 +1079,15 @@ if(MIOPEN_ENABLE_SQLITE)
     # MIOpen depends on SQLite
     target_link_libraries(MIOpen PRIVATE SQLite::SQLite3)
     target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite::SQLite3>)
+endif()
+############################################################
+# MIOpen depends on librt for Boost.Interprocess
+if(NOT WIN32 AND NOT APPLE)
+    find_library(LIBRT rt)
+    if(LIBRT)
+        message(STATUS "Librt: " ${LIBRT})
+        target_internal_library(MIOpen ${LIBRT})
+    endif()
 endif()
 
 if(MIOPEN_USE_ROCTRACER)
