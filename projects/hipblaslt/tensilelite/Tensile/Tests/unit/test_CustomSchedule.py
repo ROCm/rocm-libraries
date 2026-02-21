@@ -742,7 +742,7 @@ class TestCustomScheduleBF16:
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
-        assert schedule_info.numMfma == 132
+        assert schedule_info.numMfma == TestCustomScheduleBF16.get_num_mfma(kernel)
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 
