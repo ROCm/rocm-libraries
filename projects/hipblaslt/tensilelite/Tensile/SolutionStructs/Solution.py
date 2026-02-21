@@ -1615,6 +1615,10 @@ class Solution(collections.abc.Mapping):
       if state["UseCustomMainLoopSchedule"] == 1 and not hasCMS:
         reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 but CMS is not supported")
       state["UseCustomMainLoopSchedule"] = 1 if hasCMS else 0
+      # reject CMS + TailloopInNll
+      if state["TailloopInNll"] and state["UseCustomMainLoopSchedule"] == 1:
+        reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with TailloopInNll=True")
+        return
 
     # additional setting for non CMS
     if state["UseCustomMainLoopSchedule"] == 0:
@@ -2691,8 +2695,6 @@ class Solution(collections.abc.Mapping):
         state["StaggerUStride"] = 0
         # need to disable SuppressNoLoadLoop
         state["SuppressNoLoadLoop"] = False
-        # disable UseCustomMainLoopSchedule
-        state["UseCustomMainLoopSchedule"] = 0
         state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for TailloopInNll
 
     # Determine if we can load directly-to-Vgpr
