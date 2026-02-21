@@ -473,18 +473,23 @@ def getDockerImage(Map conf=[:])
                     .replaceFirst('^https?://', '')
                     .replaceFirst('/.*$', '')
 
-                sh """
-                    # Create buildkitd config to allow insecure registries
-                    cat <<EOF > /tmp/buildkitd.toml
-                    [registry."${registryHost}"]
-                      insecure = true
-                    EOF
+                withCredentials([file(credentialsId: 'harbor_ca_cert', variable: 'HARBOR_CA_CERT')]) {
+                    sh """
+                        # Copy CA cert to a known location
+                        install -m 600 "\$HARBOR_CA_CERT" /tmp/harbor-ca.crt
 
-                    # Recreate builder with config
-                    docker buildx rm ci-builder || true
-                    docker buildx create --name ci-builder --driver docker-container --use --config /tmp/buildkitd.toml
-                    docker buildx inspect ci-builder --bootstrap
-                """.stripIndent()
+                        # Create buildkitd config to use the CA certificate
+                        cat <<EOF > /tmp/buildkitd.toml
+                        [registry."${registryHost}"]
+                        ca = ["/tmp/harbor-ca.crt"]
+                        EOF
+
+                        # Recreate builder with config
+                        docker buildx rm ci-builder || true
+                        docker buildx create --name ci-builder --driver docker-container --use --config /tmp/buildkitd.toml
+                        docker buildx inspect ci-builder --bootstrap
+                    """.stripIndent()
+                }
             
                 sh """
                     DOCKER_BUILDKIT=1 docker buildx build \
