@@ -72,7 +72,7 @@ class ErrorExtractor:
         else:
             return (
                 "Error details not found in logs. Check the GitHub Actions run for full output.",
-                f"{self.failure_type.title()} Failure"
+                f"{self.failure_type.title()} Failure",
             )
 
     def _extract_from_directory(self) -> Tuple[str, str]:
@@ -92,7 +92,7 @@ class ErrorExtractor:
                         "3",
                         "-B",
                         "2",
-                        "--max-count=5"
+                        "--max-count=5",
                     ],
                     capture_output=True,
                     text=True,
@@ -114,8 +114,8 @@ class ErrorExtractor:
         issue_type = self._categorize_error(error_log)
 
         # Then limit to 7 lines for the error context
-        error_lines = error_log.split('\n')[:7]
-        error_log_limited = '\n'.join(error_lines)
+        error_lines = error_log.split("\n")[:7]
+        error_log_limited = "\n".join(error_lines)
 
         return (error_log_limited, issue_type)
 
@@ -136,7 +136,7 @@ class ErrorExtractor:
                         if re.search(
                             r"(error|failed|fatal|exception|assertion)",
                             line,
-                            re.IGNORECASE
+                            re.IGNORECASE,
                         ):
                             # Include context: 2 lines before and 3 lines after
                             start = max(0, i - 2)
@@ -145,7 +145,7 @@ class ErrorExtractor:
                             if len(error_lines) >= self.MAX_CONTEXT_LINES:
                                 break
 
-                    error_log = "".join(error_lines[:self.MAX_CONTEXT_LINES])
+                    error_log = "".join(error_lines[: self.MAX_CONTEXT_LINES])
             except (IOError, UnicodeDecodeError):
                 error_log = f"Test failed: Could not read log file at {self.log_path}"
         elif self.log_path.exists():
@@ -195,7 +195,7 @@ class ErrorExtractor:
     def _categorize_error(self, error_log: str) -> str:
         """Categorize the error based on patterns in the log"""
         patterns = (
-            self.TEST_ERROR_PATTERNS 
+            self.TEST_ERROR_PATTERNS
             if self.failure_type == "test"
             else self.BUILD_ERROR_PATTERNS
         )
@@ -209,7 +209,7 @@ class ErrorExtractor:
 
     def _limit_output(self, error_log: str) -> str:
         """Limit error output to MAX_OUTPUT_LINES"""
-        error_lines = error_log.split("\n")[:self.MAX_OUTPUT_LINES]
+        error_lines = error_log.split("\n")[: self.MAX_OUTPUT_LINES]
         return "\n".join(error_lines)
 
 
@@ -273,7 +273,7 @@ class TeamsNotifier:
             req = urllib.request.Request(
                 self.webhook_url,
                 data=data,
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": "application/json"},
             )
 
             with urllib.request.urlopen(req, timeout=30) as response:
@@ -375,9 +375,7 @@ def main():
     parser.add_argument(
         "--pr-number", default="", help="Pull request number (optional)"
     )
-    parser.add_argument(
-        "--pr-title", default="", help="Pull request title (optional)"
-    )
+    parser.add_argument("--pr-title", default="", help="Pull request title (optional)")
     parser.add_argument(
         "--job-name", default="", help="Job/test name (optional, for test failures)"
     )
