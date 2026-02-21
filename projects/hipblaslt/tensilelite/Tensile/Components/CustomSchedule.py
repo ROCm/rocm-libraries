@@ -2749,13 +2749,20 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
     if isTN(kernel) and TLDS==1:
         syncTable = [
             -1, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=5 newLW=0 newLR=5 for iteration == 0"),
-            10, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
-            30, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
-            30, SBarrier(comment=""),
-            90, SWaitCnt(dscnt=-1, vlcnt=17, vscnt=-1, comment="wait for previous set of global reads"),
-            90, SBarrier(comment=""),
-            120, SWaitCnt(dscnt=-1, vlcnt=12, vscnt=-1, comment="wait for previous set of global reads"),
-            120, SBarrier(comment=""),
+            10, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prev iter LRB1s to complete"),
+            29, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for 5 LRA0s to complete"),
+            
+            30, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRA0s to complete"),
+            30, SBarrier(comment="Barrier before GRA"),
+            
+            46, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for 3 LRB0s to complete"),
+            86, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0s to complete"),
+            86, SBarrier(comment="Barrier before GRB"),
+            
+            90, SWaitCnt(dscnt=-1, vlcnt=17, vscnt=-1, comment="wait for previous GRA to complete"),
+            90, SBarrier(comment="Barrier before LRA1"),
+            120, SWaitCnt(dscnt=-1, vlcnt=12, vscnt=-1, comment="wait for previous GRB to complete"),
+            120, SBarrier(comment="Barrier before LRB1"),
         ]
         
         optSchedule = {
@@ -2764,10 +2771,11 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]], # 9
             'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]], # 9
             
-            'LRA0': [[0, 1, 2, 4, 5, 7, 10, 12, 14, 16, 18]], # 11
+            'LRA0': [[2, 4, 6, 8 , 10, 18, 20, 22, 24, 26, 28],
+                     [3, 5, 7, 9, 11, 17, 19, 23, 25, 27, 29]], # 11
             
-            'LRB0': [[3, 6, 9, 13, 15, 18]], # 6
-
+            'LRB0': [[31, 33, 36, 39, 41, 44],
+                     [32, 34, 37, 40, 42, 45]], # 6
 
             'GRA': [[30, 30, 35, 35, 40, 40, 46, 46, 51, 51, 56, 56, 61, 61, 67, 67, 72, 72, 77, 77, 82, 82]], # 22
             'GRB': [[88, 88, 93, 93, 98, 98, 103, 103, 109, 109, 114, 114]], # 12
