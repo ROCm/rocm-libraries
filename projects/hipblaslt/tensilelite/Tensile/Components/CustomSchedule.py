@@ -2749,7 +2749,7 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
     if isTN(kernel) and TLDS==1:
         syncTable = [
             -1, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=5 newLW=0 newLR=5 for iteration == 0"),
-            10, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prev iter LRB1s to complete"),
+            18, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prev  LRA0s to complete"),
             29, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for 5 LRA0s to complete"),
             
             30, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRA0s to complete"),
@@ -2763,6 +2763,7 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
             90, SBarrier(comment="Barrier before LRA1"),
             120, SWaitCnt(dscnt=-1, vlcnt=12, vscnt=-1, comment="wait for previous GRB to complete"),
             120, SBarrier(comment="Barrier before LRB1"),
+            131, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prev LRB1s to complete"),
         ]
         
         optSchedule = {
@@ -2785,7 +2786,7 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
             
             'LWSA': [[109]], # 1
             'LWSB': [[109]], # 1
-            'LRA1': [[90, 92, 94, 96, 98, 100, 102, 104, 106, 108, 110]], # 11
+            'LRA1': [[90, 92, 94, 96, 98, 100, 102, 106, 110, 114, 118]], # 11
             'LRB1': [[120, 122, 124, 126, 128, 130]], # 6
  
             'LCC': [[numMfma-1, numMfma-1]], # 2
