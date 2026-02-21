@@ -11,6 +11,7 @@ This guide provides practical information for both using hipDNN components and e
   - [CMake Integration](#cmake-integration)
   - [Logging Setup](#logging-setup)
   - [Working with Schemas](#working-with-schemas)
+  - [Configuring Engine Knobs](#configuring-engine-knobs)
 - [Extending hipDNN](#extending-hipdnn)
   - [Adding a New Plugin](#adding-a-new-plugin)
   - [Adding a New Operation](#adding-a-new-operation)
@@ -19,6 +20,9 @@ This guide provides practical information for both using hipDNN components and e
 ---
 
 ## Consuming hipDNN
+
+> [!TIP]
+> For a minimal end-to-end example of using hipDNN in a CMake project, see the [Consumer Quick Start](./ConsumerQuickStart.md).
 
 This section covers how to use the various components of hipDNN in your applications.
 
@@ -118,6 +122,14 @@ hipDNN uses FlatBuffers for schema-based data objects to describe graphs and ope
 - Graphs and operations are defined using `.fbs` schema files
 - Attributes marked as `long` types in graphs are foreign keys to the `uid` in `tensor_attributes`
 - Schema files are located in [`data_sdk/schemas/`](../data_sdk/schemas/)
+
+### Configuring Engine Knobs
+
+hipDNN engines support runtime configuration through **knobs** - configurable parameters that control engine behavior, performance tuning, and feature selection.
+
+> [!TIP]
+> For comprehensive knobs documentation including all available knobs, constraints, validation, and advanced usage, see the [Knobs Documentation](./Knobs.md).
+
 ---
 
 ## Extending hipDNN
@@ -126,7 +138,13 @@ This section covers how to extend hipDNN with new functionality.
 
 ### Adding a New Plugin
 
-Plugins extend hipDNN to support new or additional implementations of kernel engines, benchmarking, and heuristics. For comprehensive guidance on plugin development, including architecture details, implementation steps, and examples, see the [Plugin Development Guide](./PluginDevelopment.md).
+Plugins extend hipDNN to support new or additional implementations of kernel engines, benchmarking, and heuristics. The Plugin SDK provides interfaces and utilities to simplify plugin development:
+
+- **Engine interfaces**: `IEngine`, `IPlanBuilder`, `IPlan` templates for building plugin components
+- **Engine management**: `EngineManager` template for managing multiple engines
+- **Knob utilities**: `KnobFactory`, `KnobSettingFactory`, and `GlobalKnobDefines` for implementing runtime-configurable knobs
+
+For comprehensive guidance on plugin development, including architecture details, implementation steps, and examples, see the [Plugin Development Guide](./PluginDevelopment.md).
 
 ### Adding a New Operation
 
