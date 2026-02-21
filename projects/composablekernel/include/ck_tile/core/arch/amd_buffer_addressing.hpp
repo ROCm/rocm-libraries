@@ -2611,7 +2611,6 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
     return amd_buffer_load_impl<T, N, coherence>(
         src_wave_buffer_resource, src_addr_shift + src_thread_addr_offset, 0);
 #else
-    // Use vector_t for not valid elements to avoid permute instructions.
     thread_buffer<T, N> tmp =
         amd_buffer_load_impl<T, N, coherence>(src_wave_buffer_resource, src_thread_addr_offset, 0);
     if constexpr(oob_conditional_check)
@@ -2620,14 +2619,33 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
         {
             if constexpr(is_detected<has_type, T>::value)
             {
+                // Use vector_t for not valid elements to avoid permute instructions.
+                // Get raw type from structure
                 using vector_t = T::type __attribute__((ext_vector_type(N)));
-                tmp.template set_as<vector_t>(number<0>{},
-                                              vector_t{numeric<typename T::type>::zero()});
+                if constexpr(sizeof(vector_t) != sizeof(T::type) * N)
+                {
+                    // Not possible to use set_as
+                    return thread_buffer<T, N>{numeric<T>::zero()};
+                }
+                else
+                {
+                    tmp.template set_as<vector_t>(number<0>{},
+                                                  vector_t{numeric<typename T::type>::zero()});
+                }
             }
             else
             {
+                // Use vector_t for not valid elements to avoid permute instructions.
                 using vector_t = T __attribute__((ext_vector_type(N)));
-                tmp.template set_as<vector_t>(number<0>{}, vector_t{numeric<T>::zero()});
+                if constexpr(sizeof(vector_t) != sizeof(T) * N)
+                {
+                    // Not possible to use set_as
+                    return thread_buffer<T, N>{numeric<T>::zero()};
+                }
+                else
+                {
+                    tmp.template set_as<vector_t>(number<0>{}, vector_t{numeric<T>::zero()});
+                }
             }
         }
     }
@@ -2655,7 +2673,6 @@ amd_buffer_load_invalid_element_return_customized_value(const T* p_src_wave,
 
     index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
 
-    // Use vector_t for not valid elements to avoid permute instructions.
     thread_buffer<T, N> tmp =
         amd_buffer_load_impl<T, N, coherence>(src_wave_buffer_resource, src_thread_addr_offset, 0);
     if constexpr(oob_conditional_check)
@@ -2664,13 +2681,32 @@ amd_buffer_load_invalid_element_return_customized_value(const T* p_src_wave,
         {
             if constexpr(is_detected<has_type, T>::value)
             {
+                // Use vector_t for not valid elements to avoid permute instructions.
+                // Get raw type from structure
                 using vector_t = T::type __attribute__((ext_vector_type(N)));
-                tmp.template set_as<vector_t>(number<0>{}, vector_t{customized_value});
+                if constexpr(sizeof(vector_t) != sizeof(T::type) * N)
+                {
+                    // Not possible to use set_as
+                    return thread_buffer<T, N>{customized_value};
+                }
+                else
+                {
+                    tmp.template set_as<vector_t>(number<0>{}, vector_t{customized_value});
+                }
             }
             else
             {
+                // Use vector_t for not valid elements to avoid permute instructions.
                 using vector_t = T __attribute__((ext_vector_type(N)));
-                tmp.template set_as<vector_t>(number<0>{}, vector_t{customized_value});
+                if constexpr(sizeof(vector_t) != sizeof(T) * N)
+                {
+                    // Not possible to use set_as
+                    return thread_buffer<T, N>{customized_value};
+                }
+                else
+                {
+                    tmp.template set_as<vector_t>(number<0>{}, vector_t{customized_value});
+                }
             }
         }
     }
