@@ -1213,7 +1213,6 @@ namespace TensileLite
                 std::cout << "Tensor name " << m_vdata[i].name << " init mode "
                           << ToString(m_vdata[i].init) << std::endl;
             }
-
             // Init contants
             for(size_t i = 0; i < m_cdata.size(); i++)
             {
@@ -1269,6 +1268,13 @@ namespace TensileLite
             m_problemDependentData
                 |= (m_sparse
                     | (args["bias-type-args"].as<std::vector<rocisa::DataType>>().size() > 1));
+
+            // Force problem-dependent initialization for MX FP4 to enable mxDataGenerator
+            if(args.count("mx-block-a") && args["mx-block-a"].as<int>() > 0)
+                m_problemDependentData = true;
+            if(args.count("mx-block-b") && args["mx-block-b"].as<int>() > 0)
+                m_problemDependentData = true;
+
             allocNewCPUInputs();
             allocNewGPUInputs();
 
@@ -1692,11 +1698,19 @@ namespace TensileLite
 
         void DataInitialization::initializeCPUInputs(ContractionProblemGemm const& problem)
         {
+            bool useMXGenerator = (problem.a().dataType() == rocisa::DataType::Float4 && problem.mxBlockA() > 0)
+                                  || (problem.b().dataType() == rocisa::DataType::Float4 && problem.mxBlockB() > 0);
+            if(useMXGenerator)
+                initializeMXDataForFP4(problem);
+
             auto& tensors = problem.tensors();
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
                 if(i == ContractionProblemGemm::TENSOR::COMPRESSED
                    or i == ContractionProblemGemm::TENSOR::METADATA)
+                    continue;
+
+                if(useMXGenerator && (i == ContractionProblemGemm::TENSOR::A || i == ContractionProblemGemm::TENSOR::B))
                     continue;
 
                 if(m_problemDependentData)
@@ -1753,6 +1767,70 @@ namespace TensileLite
                         }
                     }
                 }
+            }
+        }
+
+        void DataInitialization::initializeMXDataForFP4(ContractionProblemGemm const& problem)
+        {
+            std::vector<size_t> emptySwizzle;
+            std::vector<size_t> emptyTile;
+
+            if(problem.mxBlockA() > 0 && problem.a().dataType() == rocisa::DataType::Float4)
+            {
+                auto const& tensorA = problem.a();
+                auto        rows    = tensorA.sizes()[0];
+                auto        cols    = tensorA.sizes()[1];
+                auto        stride  = tensorA.strides()[1];
+
+                auto& pristineA
+                    = m_vdata[ContractionProblemGemm::TENSOR::A].pristine[rocisa::DataType::Float4];
+                auto& pristineMXScaleA
+                    = m_vdata[ContractionProblemGemm::TENSOR::MXSA].pristine[problem.mxsa().dataType()];
+
+                generateMXInput((hipDataType)HIP_R_4F_E2M1_EXT,
+                                pristineA.cpuInput.valid.get(),
+                                pristineMXScaleA.cpuInput.valid.get(),
+                                rows,
+                                cols,
+                                stride,
+                                problem.transA(),
+                                emptySwizzle,
+                                emptyTile,
+                                problem.mxBlockA(),
+                                1,
+                                true,
+                                "Bounded",
+                                -1.0f,
+                                1.0f);
+            }
+
+            if(problem.mxBlockB() > 0 && problem.b().dataType() == rocisa::DataType::Float4)
+            {
+                auto const& tensorB = problem.b();
+                auto        rows    = tensorB.sizes()[0];
+                auto        cols    = tensorB.sizes()[1];
+                auto        stride  = tensorB.strides()[1];
+
+                auto& pristineB
+                    = m_vdata[ContractionProblemGemm::TENSOR::B].pristine[rocisa::DataType::Float4];
+                auto& pristineMXScaleB
+                    = m_vdata[ContractionProblemGemm::TENSOR::MXSB].pristine[problem.mxsb().dataType()];
+
+                generateMXInput((hipDataType)HIP_R_4F_E2M1_EXT,
+                                pristineB.cpuInput.valid.get(),
+                                pristineMXScaleB.cpuInput.valid.get(),
+                                rows,
+                                cols,
+                                stride,
+                                problem.transB(),
+                                emptySwizzle,
+                                emptyTile,
+                                problem.mxBlockB(),
+                                1,
+                                false,
+                                "Bounded",
+                                -1.0f,
+                                1.0f);
             }
         }
 

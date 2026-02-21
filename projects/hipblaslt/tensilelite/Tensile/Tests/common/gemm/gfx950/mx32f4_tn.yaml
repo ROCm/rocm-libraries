@@ -145,6 +145,36 @@ BenchmarkProblems:
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: none]
+    - # BenchmarkProblemSizeGroup - DTL
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 8,8, 2,2]  # 64x64
+          - [16, 16, 128, 1, 1, 8,2, 2,2]  # 128x64
+          - [16, 16, 128, 1, 1, 2,8, 2,2]  # 64x128
+          - [32, 32, 64, 1, 1, 4,4, 2,2]  # 128x128
+        - DepthU: [128]
+        - AssertSummationElementMultiple: [32]
+        - LocalReadVectorWidth: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - 1LDSBuffer: [0]
+        - DirectToLds: [1,2,3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 16, 1, 1024]
+          - Exact: [256, 256, 1, 128]
+          - Exact: [1025, 513, 1, 2048]
+          - Exact: [127, 127, 1, 640] #special cleanup case
+          - Exact: [129, 129, 1, 640]
+          - Exact: [128, 128, 1, 512]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
 
 # LibraryLogic:
 #     ScheduleName: "aquavanjaram"

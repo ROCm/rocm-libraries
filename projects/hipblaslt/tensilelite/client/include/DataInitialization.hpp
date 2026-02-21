@@ -39,6 +39,8 @@
 
 #include "RunListener.hpp"
 
+#include <mxDataGen.hpp>
+
 namespace po = boost::program_options;
 
 namespace TensileLite
@@ -943,6 +945,8 @@ namespace TensileLite
             void initializeCPUInputs(ContractionProblemGemm const& problem);
 
             void initializeConstantInputs(ContractionProblemGemm const& problem);
+
+            void initializeMXDataForFP4(ContractionProblemGemm const& problem);
 
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,

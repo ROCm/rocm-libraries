@@ -402,6 +402,8 @@ class ProblemType:
             predicates.append(ProblemPredicate("SupportDeviceUserArguments", value=self.supportDeviceUserArguments))
             predicates.append(ProblemPredicate("SwizzleTensorA", value=self.swizzleTensorA))
             predicates.append(ProblemPredicate("SwizzleTensorB", value=self.swizzleTensorB))
+            predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
+            predicates.append(ProblemPredicate("MXBlockB", value=self.mxBlockB))
 
         return predicates
 

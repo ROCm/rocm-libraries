@@ -829,15 +829,11 @@ class Solution(collections.abc.Mapping):
     #TN
     # use for all precisions with TransposeLDS=1
 
-    numBytesAB = state["ProblemType"]["DataType%s"%tc].numBytes()
+    if tc in ["MXSA", "MXSB"]:
+      numBytesAB = 1
+    else:
+      numBytesAB = state["ProblemType"]["DataType%s"%tc].numBytes()
     numBytesPerLoad = state["GlobalReadVectorWidth%s"%tc] * numBytesAB
-
-    MT = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
-
-    if (MT & (MT-1)) != 0 and not state["UseGeneralizedNLCOne%s"%tc]: # Check of MT not power of 2
-      # so far, numBytesAB<=4 case, TLU=False only (continue with False)
-      if (numBytesAB <= 4) and state["ProblemType"]["TLU%c"%tc]:
-        return False
 
     # x2 DTL is not supported
     if numBytesPerLoad == 8:
@@ -851,6 +847,17 @@ class Solution(collections.abc.Mapping):
     if numBytesPerLoad < 4:
       reject(state, printRejectionReason, "DirectToLds not supported for loads less than 32bits")
       return False
+
+    if tc in ["MXSA", "MXSB"]:
+      # MXSA/B case, check numBytesPerLoad only
+      return True
+
+    MT = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
+
+    if (MT & (MT-1)) != 0 and not state["UseGeneralizedNLCOne%s"%tc]: # Check of MT not power of 2
+      # so far, numBytesAB<=4 case, TLU=False only (continue with False)
+      if (numBytesAB <= 4) and state["ProblemType"]["TLU%c"%tc]:
+        return False
 
     # so far MFMA only (TODO: enable non MFMA case)
     if not state["EnableMatrixInstruction"]:
@@ -1240,11 +1247,10 @@ class Solution(collections.abc.Mapping):
     # set True for DTL 
     state["UseGeneralizedNLCOneA"] = state["DirectToLdsA"]
     state["UseGeneralizedNLCOneB"] = state["DirectToLdsB"]
-    # MX block does not use DTL, so set to False
     if state["ProblemType"]["MXBlockA"]:
-      state["UseGeneralizedNLCOneMXSA"] = False
+      state["UseGeneralizedNLCOneMXSA"] = False #state["DirectToLdsA"]
     if state["ProblemType"]["MXBlockB"]:
-      state["UseGeneralizedNLCOneMXSB"] = False
+      state["UseGeneralizedNLCOneMXSB"] = False #state["DirectToLdsB"]
 
     state["LocalWriteUseSgprA"] = False
     state["LocalWriteUseSgprB"] = False
@@ -1464,8 +1470,8 @@ class Solution(collections.abc.Mapping):
       state["WaveSeparateGlobalReadMXSA"] = state["WaveSeparateGlobalReadA"]
       state["NumLoadsCoalescedMXSA"] = state["NumLoadsCoalescedA"]
       Solution.checkAndAssignWaveSeparateGlobalRead(state, 'MXSA', printRejectionReason)
-      state["DirectToLdsMXSA"] = False
-      state["LocalWriteUseSgprMXSA"] = False
+      state["DirectToLdsMXSA"] = state["DirectToLdsA"]
+      state["LocalWriteUseSgprMXSA"] = state["DirectToLdsMXSA"]
       state["ProblemType"]["MirrorDimsMXSA"] = list(state["ProblemType"]["MirrorDimsA"])
       state["VectorWidthMXSA"] = state["VectorWidthA"]
       state["MIWaveTileMXSA"] = state["MIWaveTileA"]
@@ -1478,8 +1484,8 @@ class Solution(collections.abc.Mapping):
       state["WaveSeparateGlobalReadMXSB"] = state["WaveSeparateGlobalReadB"]
       state["NumLoadsCoalescedMXSB"] = state["NumLoadsCoalescedB"]
       Solution.checkAndAssignWaveSeparateGlobalRead(state, 'MXSB', printRejectionReason)
-      state["DirectToLdsMXSB"] = False
-      state["LocalWriteUseSgprMXSB"] = False
+      state["DirectToLdsMXSB"] = state["DirectToLdsB"]
+      state["LocalWriteUseSgprMXSB"] = state["DirectToLdsMXSB"]
       state["ProblemType"]["MirrorDimsMXSB"]  = list(state["ProblemType"]["MirrorDimsB"])
       state["VectorWidthMXSB"] = state["VectorWidthB"]
       state["MIWaveTileMXSB"] = state["MIWaveTileB"]
@@ -1758,10 +1764,10 @@ class Solution(collections.abc.Mapping):
                 else:
                   ldsPadA = state["VectorWidthA"]
             else:
-              ldsPadA = max(state["GlobalReadVectorWidthA"],optPadA)
-              ## turn-off padding for directToLds
               if state["DirectToLdsA"]:
-                ldsPadA = 0
+                ldsPadA = max(lrvwA, optPadA) if not state["ProblemType"]["TLUA"] else 0
+              else:
+                ldsPadA = max(state["GlobalReadVectorWidthA"],optPadA)
           assert(ldsPadA >= 0)
 
         if ldsPadB == -1:
@@ -1781,9 +1787,10 @@ class Solution(collections.abc.Mapping):
                 else:
                   ldsPadB = state["VectorWidthB"]
             else:
-              ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
               if state["DirectToLdsB"]:
-                ldsPadB = 0
+                ldsPadB = max(lrvwB, optPadB) if not state["ProblemType"]["TLUB"] else 0
+              else:
+                ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
           assert(ldsPadB >= 0)
 
         if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
@@ -2817,13 +2824,21 @@ class Solution(collections.abc.Mapping):
     # LDS (load size coalesced) * LSPA must load some multiple of 256 bytes.
     # No longer support loadX2/loadx4 .
     for tc in ['A', 'B']:
+      tcmx = "MXS%s"%tc
       if state["DirectToLds%s"%tc]:
         isDtlDoable = Solution.isDirectToLdsDoable(state, tc, isaInfoMap, printRejectionReason)
         if (not state["DirectToVgpr%s"%tc]) and isDtlDoable:
           state["DirectToLds%s"%tc] = True
           state["LocalWriteUseSgpr%s"%tc] = True
+          # MX case
+          if state["ProblemType"]["MXBlock%s"%tc]:
+            isDtlMxDoable = Solution.isDirectToLdsDoable(state, tcmx, isaInfoMap, printRejectionReason)
+            state["DirectToLds%s"%tcmx] = isDtlMxDoable
         else:
           state["DirectToLds%s"%tc] = False
+          # MX case
+          if state["ProblemType"]["MXBlock%s"%tc]:
+            state["DirectToLds%s"%tcmx] = False
           if not isDtlDoable:
             if state["UseGeneralizedNLCOne%s"%tc]:
               reject(state, printRejectionReason, "DirectToLds%s not doable, but GNLC%s enabled, rejecting"%(tc, tc))
@@ -2840,6 +2855,10 @@ class Solution(collections.abc.Mapping):
     if state["1LDSBuffer"] == -1 and state["DirectToLds"]:
       #1LDS buffer must be 0 for DirectToLdsA
       state["1LDSBuffer"] = 0
+    # MX case
+    if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
+      if state["DirectToLdsA"] != state["DirectToLdsMXSA"] or state["DirectToLdsB"] != state["DirectToLdsMXSB"]:
+          reject(state, printRejectionReason, "DirectToLdsA/B and DirectToLdsMXSA/B should match")
 
     # does not work with UnrollLoopSwapGlobalReadOrder
     if (state["DirectToLds"] == 2 or state["DirectToLds"] == 3) and state["UnrollLoopSwapGlobalReadOrder"]:
