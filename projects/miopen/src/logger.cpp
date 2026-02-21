@@ -84,8 +84,7 @@ static thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
 
 bool IsBufferLogOn()
 {
-    bool log_buffer_en = !env::enabled(MIOPEN_DISABLE_LOG_BUFFER);
-    return log_buffer_en;
+    return !env::enabled(MIOPEN_DISABLE_LOG_BUFFER);
 }
 
 void ClearBufferLog()

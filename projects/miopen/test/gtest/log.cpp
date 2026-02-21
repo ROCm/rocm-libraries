@@ -399,7 +399,7 @@ void TestLogBufferOn()
     fs::remove(filename);
 }
 
-void TestLogBufferOff1()
+void TestLogBufferEnvDisabled()
 {
     auto filename =
         fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
@@ -422,7 +422,7 @@ void TestLogBufferOff1()
     ASSERT_FALSE(fs::exists(filename));
 }
 
-void TestLogBufferOff2()
+void TestLogBufferOffAtHighLevel()
 {
     auto filename =
         fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
