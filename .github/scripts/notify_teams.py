@@ -102,7 +102,7 @@ class ErrorExtractor:
             except (
                 subprocess.TimeoutExpired,
                 subprocess.SubprocessError,
-                FileNotFoundError
+                FileNotFoundError,
             ):
                 # Fallback if grep fails or not available (Windows)
                 error_log = self._scan_directory_python()
