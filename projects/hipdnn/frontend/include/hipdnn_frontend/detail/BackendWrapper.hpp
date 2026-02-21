@@ -20,7 +20,7 @@ std::shared_ptr<IHipdnnBackend> tryToUseBackendInterface(std::shared_ptr<T> back
     // TODO: Also check for major version once frontend has versioning
     if(status != hipdnnStatus_t::HIPDNN_STATUS_SUCCESS)
     {
-        // HIPDNN_FE_LOG_ERROR("Failed to get hipdnn version. Hipdnn backend cannot be loaded");
+        HIPDNN_FE_LOG_ERROR("Failed to get hipdnn version. Hipdnn backend cannot be loaded");
         return std::make_shared<detail::IncompatibleBackendWrapper>();
     }
 
