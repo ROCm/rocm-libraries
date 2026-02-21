@@ -3841,7 +3841,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0
-    kernel["MfmaInitCVgprs"] = True
+    disable_validation = False
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
@@ -3962,9 +3962,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
         }
 
         nglshift = nllshift = 16 # vmcnt shift for ngl and nll
-        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-        return True, opt1
-    elif isNT(kernel) and not useLDSTr and TLDS==0:
+    elif isNT(kernel) and not useLDSTr and TLDS==0 and kernel["VectorWidthA"] == 4 and kernel["VectorWidthB"] == 4:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
@@ -4032,12 +4030,16 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3 to complete"),
         ]
         nglshift = nllshift = 16 # vmcnt shift for ngl and nll
-        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
         # disable the validation until 4x4MFMA with wider loads is supported by validator
-        opt1.disableValidation()
-        return True, opt1
+        disable_validation = True
     else:
         return False, None
+        
+    kernel["MfmaInitCVgprs"] = True
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    if disable_validation:
+        opt1.disableValidation()
+    return True, opt1
 
 @RegisterSchedule(
     tile_config=TileConfig(192, 128, 32, 2, 0, 1, False, 0, 0),
