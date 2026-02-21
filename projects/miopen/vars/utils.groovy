@@ -495,6 +495,7 @@ def getDockerImage(Map conf=[:])
                     ${dockerArgs} \
                     ${buildContext}
                 """.stripIndent()
+            }
             dockerImage = docker.image("${image}")
         } catch (Exception bex) {
             echo "Buildx not available or failed, falling back to docker.build"
