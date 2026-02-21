@@ -2750,17 +2750,17 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
         syncTable = [
             -1, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=5 newLW=0 newLR=5 for iteration == 0"),
             14, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="wait for 5 LRA0s to complete"),
-            25, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for next 4 LRA0s to complete"),
+            25, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for next 4 LRA0s to complete"),
             
-            30, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRA0s to complete"),
-            30, SBarrier(comment="Barrier before GRA"),
+            34, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRA0s to complete"),
+            34, SBarrier(comment="Barrier before GRA"),
             
             46, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for 3 LRB0s to complete"),
             86, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0s to complete"),
             86, SBarrier(comment="Barrier before GRB"),
             
-            90, SWaitCnt(dscnt=-1, vlcnt=17, vscnt=-1, comment="wait for previous GRA to complete"),
-            90, SBarrier(comment="Barrier before LRA1"),
+            87, SWaitCnt(dscnt=-1, vlcnt=17, vscnt=-1, comment="wait for previous GRA to complete"),
+            87, SBarrier(comment="Barrier before LRA1"),
             118, SWaitCnt(dscnt=-1, vlcnt=12, vscnt=-1, comment="wait for previous GRB to complete"),
             118, SBarrier(comment="Barrier before LRB1"),
             131, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prev LRB1s to complete"),
@@ -2778,7 +2778,7 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
             'LRB0': [[31, 33, 36, 39, 41, 44],
                      [32, 34, 37, 40, 42, 45]], # 6
 
-            'GRA': [[30, 30, 35, 35, 40, 40, 46, 46, 51, 51, 56, 56, 61, 61, 67, 67, 72, 72, 77, 77, 82, 82]], # 22
+            'GRA': [[35, 35, 40, 40, 46, 46, 51, 51, 56, 56, 61, 61, 67, 67, 72, 72, 77, 77, 82, 82, 86, 86]], # 22
             'GRB': [[88, 88, 93, 93, 98, 98, 103, 103, 109, 109, 114, 114]], # 12
 
             'LRSA': [[64]], # 1
@@ -2786,8 +2786,8 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
             
             'LWSA': [[109]], # 1
             'LWSB': [[109]], # 1
-            'LRA1': [[90, 92, 94, 96, 98, 100, 102, 104, 106, 112, 114]], # 11
-            'LRB1': [[118, 122, 125, 127, 128, 130]], # 6 
+            'LRA1': [[87, 90, 92, 94, 96, 98, 100, 102, 104, 106, 114]], # 11
+            'LRB1': [[118, 120, 122, 124, 127, 130]], # 6 
  
             'LCC': [[numMfma-1, numMfma-1]], # 2
         }
