@@ -461,8 +461,8 @@ def getDockerImage(Map conf=[:])
     {
         echo "Building image..."
         def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRefTo},compression=zstd,mode=max " +
-                              "--cache-from type=registry,ref=${cacheRefFrom} "
+        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRefTo},compression=zstd,mode=max,registry.insecure=true " +
+                              "--cache-from type=registry,ref=${cacheRefFrom},registry.insecure=true "
 
         try {
             withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
