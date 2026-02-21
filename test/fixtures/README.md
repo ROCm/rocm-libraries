@@ -32,7 +32,7 @@ python3 .github/scripts/notify_teams.py \
   --dry-run
 
 # Test test failure notification
-python .github/scripts/notify_teams.py \
+python3 .github/scripts/notify_teams.py \
   --project miopen \
   --failure-type test \
   --platform linux \
