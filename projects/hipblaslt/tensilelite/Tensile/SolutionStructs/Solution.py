@@ -1612,6 +1612,10 @@ class Solution(collections.abc.Mapping):
       if state["UseCustomMainLoopSchedule"] == 1 and not hasCMS:
         reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 but CMS is not supported")
       state["UseCustomMainLoopSchedule"] = 1 if hasCMS else 0
+      # reject CMS + TailloopInNll
+      if state["TailloopInNll"] and state["UseCustomMainLoopSchedule"] == 1:
+        reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with TailloopInNll=True")
+        return
 
     # 0: Normal mode. Hardware applies all of the normal data dependency checks
     # 1: Full expert mode (not suppoeted yet). Disable hardware checks against: VA_VDST, VA_SDST, VA_SSRC, VA_VCC, VM_VSRC and SA_SDST.
@@ -2644,8 +2648,6 @@ class Solution(collections.abc.Mapping):
         state["StaggerUStride"] = 0
         # need to disable SuppressNoLoadLoop
         state["SuppressNoLoadLoop"] = False
-        # disable UseCustomMainLoopSchedule
-        state["UseCustomMainLoopSchedule"] = 0
         state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for TailloopInNll
 
     # Determine if we can load directly-to-Vgpr
