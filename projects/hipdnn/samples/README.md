@@ -4,6 +4,7 @@
 
 1. **Prerequisites:**
 
+   - If you're new to hipDNN, see the [Consumer Quick Start](../docs/ConsumerQuickStart.md) for project setup basics.
    - Follow the instructions in [Building.md](../docs/Building.md) to install the needed dependencies, compilers, and libraries for building hipDNN projects. Specifically:
      * CMake
      * Ninja

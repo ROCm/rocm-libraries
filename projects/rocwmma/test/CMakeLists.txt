@@ -37,7 +37,10 @@ if(ROCWMMA_CODE_COVERAGE)
     add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
     add_link_options(-fprofile-instr-generate)
 endif()
-add_link_options(-mcmodel=large -Wl,--gc-sections)
+add_link_options(-mcmodel=large)
+if(NOT WIN32)
+    add_link_options(-Wl,--gc-sections)
+endif()
 
 # Test/benchmark requires additional dependencies
 if(ROCWMMA_USE_SYSTEM_GOOGLETEST)
