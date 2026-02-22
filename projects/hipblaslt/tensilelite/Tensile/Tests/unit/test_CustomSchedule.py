@@ -494,6 +494,7 @@ class TestCustomScheduleBF16:
     # fmt: off
     "transA, transB, lds_tr_inst,  tr_lds", [
     (  True,  False,       False,       1),
+    ( False,  False,        True,       1),
     ( False,   True,        True,       0),
     # fmt: on
     ])
