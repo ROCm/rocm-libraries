@@ -3007,7 +3007,6 @@ class Solution(collections.abc.Mapping):
         if (not state["NoLdsWriteCode"]) or \
            (state["DirectToVgprA"] or state["DirectToVgprB"]) or \
            state["PrefetchGlobalRead"] < 2:
-           #state["PrefetchLocalRead"] == 0:
           state["ScheduleGROverBarrier"] = 0
         # disable this logic for very small MT sizes
         # Set threshold as MT64x64x64 with MT16x16x32x1 (with 4 waves)
