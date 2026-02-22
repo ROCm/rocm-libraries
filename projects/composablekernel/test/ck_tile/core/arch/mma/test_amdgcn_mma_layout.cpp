@@ -57,7 +57,6 @@ namespace {
  * @tparam BlockM        M-dimension of the MMA tile
  * @tparam BlockN        N-dimension of the MMA tile
  * @tparam BlockK        K-dimension of the MMA tile
- * @tparam LaneGroupSize WaveSize / LaneGroupsPerWave
  * @tparam BlockSize     HIP block size
  */
 template <typename ADataType,
@@ -66,7 +65,6 @@ template <typename ADataType,
           uint32_t BlockM,
           uint32_t BlockN,
           uint32_t BlockK,
-          uint32_t LaneGroupSize,
           uint32_t BlockSize>
 struct MmaLayoutTestKernel
 {
@@ -91,34 +89,37 @@ struct MmaLayoutTestKernel
         constexpr uint32_t b_vec_size = sizeof(BVecType) / sizeof(BDataType);
         constexpr uint32_t c_vec_size = sizeof(CVecType) / sizeof(CDataType);
 
-        // LaneGroupSize doesnt equal WaveSize on RDNA3 due to matrix replication
-        const uint32_t lane = threadIdx.x % LaneGroupSize;
+        const uint32_t lane = threadIdx.x;
 
         AVecType a_frag{};
         BVecType b_frag{};
         CVecType c_frag{};
 
-        constexpr uint32_t TileM = MmaTraits::BlockM;
-        constexpr uint32_t TileN = MmaTraits::BlockN;
-        constexpr uint32_t TileK = MmaTraits::BlockK;
-
         // get (m, k, n), where "1" should be placed for this block 
         const uint32_t case_idx = static_cast<uint32_t>(blockIdx.x);
-        const uint32_t m = case_idx / (TileK * TileN);
-        const uint32_t k = (case_idx / TileN) % TileK;
-        const uint32_t n = case_idx % TileN;
+        const uint32_t m = case_idx / (MmaTraits::BlockK * MmaTraits::BlockN);
+        const uint32_t k = (case_idx / MmaTraits::BlockN) % MmaTraits::BlockK;
+        const uint32_t n = case_idx % MmaTraits::BlockN;
 
-        // place a single "1" in A/B fragments
-        auto a_pos = RegisterMap<MmaOp>::A2RegisterMap(m, k);
-        if(a_pos.lane == lane && a_pos.vecIdx < a_vec_size)
+        // place a single "1" in A/B fragments using (lane, vecIdx) -> (row, col) mapping
+        for(uint32_t v = 0; v < a_vec_size; ++v)
         {
-            a_frag[a_pos.vecIdx] = static_cast<ADataType>(1);
+            auto a_coords = RegisterMap<MmaOp>::Register2AMap(lane, v);
+            if(static_cast<uint32_t>(a_coords[0]) == m &&
+               static_cast<uint32_t>(a_coords[1]) == k)
+            {
+                a_frag[v] = static_cast<ADataType>(1);
+            }
         }
 
-        auto b_pos = RegisterMap<MmaOp>::B2RegisterMap(k, n);
-        if(b_pos.lane == lane && b_pos.vecIdx < b_vec_size)
+        for(uint32_t v = 0; v < b_vec_size; ++v)
         {
-            b_frag[b_pos.vecIdx] = static_cast<BDataType>(1);
+            auto b_coords = RegisterMap<MmaOp>::Register2BMap(lane, v);
+            if(static_cast<uint32_t>(b_coords[0]) == n &&
+               static_cast<uint32_t>(b_coords[1]) == k)
+            {
+                b_frag[v] = static_cast<BDataType>(1);
+            }
         }
 
         c_frag = MmaOp::exec(a_frag, b_frag, c_frag);
@@ -132,22 +133,19 @@ struct MmaLayoutTestKernel
         __syncthreads();
 
         const CDataType tol = static_cast<CDataType>(1.0e-1f); // TODO: this tolerance might not be suitable for all data types and should be revisited if we add more configurations
-        for(uint32_t i = 0; i < TileM; ++i)
+        for(uint32_t v = 0; v < c_vec_size; ++v)
         {
-            for(uint32_t j = 0; j < TileN; ++j)
+            auto c_coords = RegisterMap<MmaOp>::Register2CMap(lane, v);
+            const uint32_t i = static_cast<uint32_t>(c_coords[0]);
+            const uint32_t j = static_cast<uint32_t>(c_coords[1]);
+
+            const CDataType expected = (i == m && j == n)
+                                           ? static_cast<CDataType>(1)
+                                           : static_cast<CDataType>(0);
+            const CDataType value = static_cast<CDataType>(c_frag[v]);
+            if(fabsf(static_cast<float>(value - expected)) > static_cast<float>(tol))
             {
-                auto pos = RegisterMap<MmaOp>::C2RegisterMap(i, j);
-                if(pos.lane == threadIdx.x && pos.vecIdx < c_vec_size)
-                {
-                    const CDataType expected = (i == m && j == n)
-                                                   ? static_cast<CDataType>(1)
-                                                   : static_cast<CDataType>(0);
-                    const CDataType value = static_cast<CDataType>(c_frag[pos.vecIdx]);
-                    if(fabsf(static_cast<float>(value - expected)) > static_cast<float>(tol))
-                    {
-                        atomicExch(&err, 1);
-                    }
-                }
+                atomicExch(&err, 1);
             }
         }
 
@@ -182,16 +180,13 @@ void print_tensor(const char* label, const Array& tensor, uint32_t rows, uint32_
  *
  * @tparam Selector_          MmaDefaultSelector instantiation for the target
  * @tparam CompilerTarget_    amdgcn_target describing the arch target
- * @tparam LaneGroupsPerWave_ Number of lane groups per wave
  */
-template <typename Selector_, typename CompilerTarget_, uint32_t LaneGroupsPerWave_>
+template <typename Selector_, typename CompilerTarget_>
 struct MmaLayoutTestConfig
 {
     using Selector                     = Selector_;
     using CompilerTarget               = CompilerTarget_;
     static constexpr uint32_t WaveSize = static_cast<uint32_t>(CompilerTarget::WAVE_SIZE_ID);
-    static constexpr uint32_t LaneGroupsPerWave = LaneGroupsPerWave_;
-    static constexpr uint32_t LaneGroupSize     = WaveSize / LaneGroupsPerWave;
 };
 
 /**
@@ -244,7 +239,6 @@ bool run_mma_layout_test_case()
                                        MmaTraits::BlockM,
                                        MmaTraits::BlockN,
                                        MmaTraits::BlockK,
-                                       Config::LaneGroupSize,
                                        Config::WaveSize>;
 
     std::ignore = hipGetLastError();
@@ -291,20 +285,17 @@ using MmaGfx1100Selector = mma::
     MmaDefaultSelector<ck::fp16_t, ck::fp16_t, ck::fp32_t, 16u, 16u, 16u, MmaGfx1100CompilerTarget>;
 
 struct MmaGfx12Config : MmaLayoutTestConfig<MmaGfx1201Selector,
-                                            MmaGfx1201CompilerTarget,
-                                            1u> // LaneGroupsPerWave
+                                            MmaGfx1201CompilerTarget>
 {
 };
 
 struct MmaGfx9Config : MmaLayoutTestConfig<MmaGfx90aSelector,
-                                           MmaGfx90aCompilerTarget,
-                                           1u> // LaneGroupsPerWave
+                                           MmaGfx90aCompilerTarget>
 {
 };
 
 struct MmaGfx11Config : MmaLayoutTestConfig<MmaGfx1100Selector,
-                                            MmaGfx1100CompilerTarget,
-                                            2u> // LaneGroupsPerWave
+                                            MmaGfx1100CompilerTarget>
 {
 };
 // ========================================================================

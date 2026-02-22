@@ -64,27 +64,6 @@ struct TileDistrEncodingMap
         const auto coord     = make_tensor_adaptor_coordinate(ps_ys_to_xs_adaptor, ps_ys_idx);
         return coord.get_bottom_index();
     }
-
-    /**
-     * @brief Convert matrix coordinates to (lane, vecIdx)
-     */
-    CK_TILE_HOST_DEVICE static RegisterIdxPair
-    calc_lane_vector_from_matrix_indices(index_t major_idx, index_t minor_idx)
-    {
-        for(index_t l = 0; l < NumLanes; ++l)
-        {
-            for(index_t v = 0; v < NumVecItems; ++v)
-            {
-                auto res = calc_matrix_indices_from_lane_vector(l, v);
-                if(res[0] == major_idx && res[1] == minor_idx)
-                {
-                    return {static_cast<uint32_t>(l), static_cast<uint32_t>(v)};
-                }
-            }
-        }
-        assert(false && "calc_lane_vector_from_matrix_indices: no mapping found");
-        return {0, 0};
-    }
 };
 
 /**
@@ -115,22 +94,22 @@ struct RegisterMap
     using CMap =
         TileDistrEncodingMap<typename Traits::CWarpDstrEncoding, Traits::WaveSize, Traits::CVecSize>;
 
-    CK_TILE_HOST_DEVICE static RegisterIdxPair A2RegisterMap(const uint32_t m, const uint32_t k)
+    CK_TILE_HOST_DEVICE static auto Register2AMap(const uint32_t lane, const uint32_t vecIdx)
     {
-        return AMap::calc_lane_vector_from_matrix_indices(static_cast<index_t>(m),
-                                                          static_cast<index_t>(k));
+        return AMap::calc_matrix_indices_from_lane_vector(static_cast<index_t>(lane),
+                                                          static_cast<index_t>(vecIdx));
     }
 
-    CK_TILE_HOST_DEVICE static RegisterIdxPair B2RegisterMap(const uint32_t k, const uint32_t n)
+    CK_TILE_HOST_DEVICE static auto Register2BMap(const uint32_t lane, const uint32_t vecIdx)
     {
-        return BMap::calc_lane_vector_from_matrix_indices(static_cast<index_t>(n),
-                                                          static_cast<index_t>(k));
+        return BMap::calc_matrix_indices_from_lane_vector(static_cast<index_t>(lane),
+                                                          static_cast<index_t>(vecIdx));
     }
 
-    CK_TILE_HOST_DEVICE static RegisterIdxPair C2RegisterMap(const uint32_t m, const uint32_t n)
+    CK_TILE_HOST_DEVICE static auto Register2CMap(const uint32_t lane, const uint32_t vecIdx)
     {
-        return CMap::calc_lane_vector_from_matrix_indices(static_cast<index_t>(m),
-                                                          static_cast<index_t>(n));
+        return CMap::calc_matrix_indices_from_lane_vector(static_cast<index_t>(lane),
+                                                          static_cast<index_t>(vecIdx));
     }
 };
 
