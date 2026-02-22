@@ -151,7 +151,7 @@ constexpr auto make_conv_instance()
                 "WMMA, DL (NHWC layout), or Large Tensor variant.");
         }
     }
-    // Backward data direction 
+    // Backward data direction
     else if constexpr(ConvDirectionIsBackwardData<SIGNATURE>)
     {
         if constexpr(BwdMultiDXdlAlgorithm<AlgoType>)

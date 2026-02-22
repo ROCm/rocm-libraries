@@ -26,10 +26,10 @@ template <ConvSignatureDescriptor auto SIGNATURE,
 struct ConvBwdDataMultiDWmmaFactory
 {
     static constexpr int SPATIAL_DIM = SIGNATURE.spatial_dim;
-    using Layouts                       = internal::ConvTensorLayouts<SIGNATURE>;
-    using Types                         = internal::ConvTensorDataTypes<SIGNATURE>;
-    using Ops                           = internal::ConvElementwiseOps<SIGNATURE>;
-    using AlgorithmType                 = decltype(ALGORITHM);
+    using Layouts                    = internal::ConvTensorLayouts<SIGNATURE>;
+    using Types                      = internal::ConvTensorDataTypes<SIGNATURE>;
+    using Ops                        = internal::ConvElementwiseOps<SIGNATURE>;
+    using AlgorithmType              = decltype(ALGORITHM);
 
     static constexpr auto BWD_CONV_SPECIALIZATION =
         internal::SetBwdDataConvSpecialization<ALGORITHM>();

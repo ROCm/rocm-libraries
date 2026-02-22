@@ -419,7 +419,6 @@ TEST_F(ConvTraitsTest, ConvBwdDataMultipleDCshuffleXDLTraitsExtraction)
 
     EXPECT_EQ(traits.max_transpose_transfer_src_scalar_per_vector, 1);
     EXPECT_EQ(traits.max_transpose_transfer_dst_scalar_per_vector, 1);
-
 }
 
 // Test ConvTraits with DeviceGroupedConvBwdWeight_Wmma_CShuffle

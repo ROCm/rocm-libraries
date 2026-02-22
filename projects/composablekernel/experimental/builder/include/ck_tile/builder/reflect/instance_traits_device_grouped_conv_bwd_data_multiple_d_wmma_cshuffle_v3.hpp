@@ -65,7 +65,6 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3;
 
 } // namespace ck::tensor_operation::device
 
-
 namespace ck_tile::reflect {
 /// @brief Tag type for DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle_V3 device kernel
 struct DeviceGroupedConvBwdData_multiple_d_Wmma_CShuffle_V3_Tag;
