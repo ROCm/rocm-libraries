@@ -13,8 +13,8 @@
 
 #include <hipdnn_data_sdk/utilities/LoadGraphAndTensors.hpp>
 
-#include "HipdnnEnginePluginExecutionContext.hpp"
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnMiopenContext.hpp"
+#include "HipdnnMiopenHandle.hpp"
 
 namespace test_helpers
 {
