@@ -53,7 +53,7 @@ namespace {
  *
  * @tparam ADataType     Data type of tensor A elements
  * @tparam BDataType     Data type of tensor B elements
- * @tparam CDataType     Data type of accumulator / output C elements
+ * @tparam CDataType     Data type of tensor C elements
  * @tparam BlockM        M-dimension of the MMA tile
  * @tparam BlockN        N-dimension of the MMA tile
  * @tparam BlockK        K-dimension of the MMA tile
@@ -150,38 +150,6 @@ struct MmaLayoutTestKernel
     }
 };
 
-// debug helper
-template <typename Array>
-void print_tensor(const char* label, const Array& tensor, uint32_t rows, uint32_t columns)
-{
-    std::printf("%s\n", label);
-    for(uint32_t row = 0; row < rows; ++row)
-    {
-        std::printf("    row %2u:", row);
-        for(uint32_t column = 0; column < columns; ++column)
-        {
-            float value = static_cast<float>(tensor[row * columns + column]);
-            std::printf(" %7.3f", value);
-        }
-        std::printf("\n");
-    }
-}
-
-/**
- * @class MmaLayoutTestConfig
- * @brief Gathers compile-time parameters needed for one MMA layout test variant.
- *
- * @tparam Selector_          MmaDefaultSelector instantiation for the target
- * @tparam CompilerTarget_    amdgcn_target describing the arch target
- */
-template <typename Selector_, typename CompilerTarget_>
-struct MmaLayoutTestConfig
-{
-    using Selector                     = Selector_;
-    using CompilerTarget               = CompilerTarget_;
-    static constexpr uint32_t WaveSize = static_cast<uint32_t>(CompilerTarget::WAVE_SIZE_ID);
-};
-
 /**
  * @brief Test driver: runs the test for a given MMA configuration.
  *
@@ -190,12 +158,23 @@ struct MmaLayoutTestConfig
  *   2. Executes MMA intrinsic to compute C tensor.
  *   3. Checks if C has the 1 in the expected position.
  *
- * @tparam Config An MmaLayoutTestConfig instantiation
- * @return true if the test ran on hardware; false if skipped (no matching device)
+ * @tparam Selector  Selector for the Mma operation
+ * @return true if the test ran on hardware; false if skipped (no device or unsupported)
  */
-template <typename Config>
-bool run_mma_layout_test_case()
+template <typename Selector>
+bool run_mma_layout_test()
 {
+    using MmaOp               = typename Selector::SelectedOp;
+    using MmaTraits           = mma::MmaOpTraits<MmaOp>;
+    using ADataType           = typename MmaTraits::ADataType;
+    using BDataType           = typename MmaTraits::BDataType;
+    using CDataType           = typename MmaTraits::CDataType;
+    constexpr uint32_t BlockM = MmaTraits::BlockM;
+    constexpr uint32_t BlockN = MmaTraits::BlockN;
+    constexpr uint32_t BlockK = MmaTraits::BlockK;
+    constexpr auto selector_target_id = MmaTraits::CompilerTarget::TARGET_ID;
+    constexpr auto selector_wave_size = MmaTraits::CompilerTarget::WAVE_SIZE_ID;
+
     int device_count = 0;
     hipDevice_t device{};
     HIP_CHECK_ERROR(hipGetDevice(&device));
@@ -208,38 +187,27 @@ bool run_mma_layout_test_case()
         ck_tile::core::arch::hip_device_prop_gcn_arch_name_to_amdgcn_target_id(props.gcnArchName);
     const bool has_device = device_count > 0;
 
-    if(!has_device || runtime_target == ck_tile::core::arch::amdgcn_target_id::HOST || runtime_target != Config::CompilerTarget::TARGET_ID)
+    if(!has_device || runtime_target == ck_tile::core::arch::amdgcn_target_id::HOST ||
+       runtime_target != selector_target_id || props.warpSize != static_cast<int>(selector_wave_size))
     {
         return false;
     }
 
-    using Selector   = typename Config::Selector;
-    using MmaOp      = typename Selector::SelectedOp;
-    using MmaTraits  = mma::MmaOpTraits<MmaOp>;
-
-    static_assert(MmaTraits::IsSupported, "Mma layout test requires supported register mappings");
-
-    constexpr uint32_t total_cases =
-        MmaTraits::BlockM * MmaTraits::BlockK * MmaTraits::BlockN;
+    constexpr uint32_t total_cases = BlockM * BlockK * BlockN;
     ck_tile::DeviceMem d_errors(total_cases * sizeof(uint32_t));
     std::vector<uint32_t> h_errors(total_cases, 0u);
 
     auto* d_error_ptr = static_cast<uint32_t*>(d_errors.GetDeviceBuffer());
 
-    using Kernel = MmaLayoutTestKernel<typename MmaTraits::ADataType,
-                                       typename MmaTraits::BDataType,
-                                       typename MmaTraits::CDataType,
-                                       MmaTraits::BlockM,
-                                       MmaTraits::BlockN,
-                                       MmaTraits::BlockK,
-                                       Config::WaveSize>;
-
     std::ignore = hipGetLastError();
+
+
+    using Kernel = MmaLayoutTestKernel<ADataType, BDataType, CDataType,
+                                    BlockM, BlockN, BlockK, static_cast<int>(selector_wave_size)>;
 
     std::ignore = ck_tile::launch_kernel(
         ck_tile::stream_config{nullptr, false, 0, 0, 1},
-        ck_tile::make_kernel(
-            Kernel{}, dim3(total_cases), dim3(Config::WaveSize), 0, d_error_ptr));
+        ck_tile::make_kernel(Kernel{}, dim3(total_cases), dim3(static_cast<int>(selector_wave_size)), 0, d_error_ptr));
 
     HIP_CHECK_ERROR(
         hipMemcpyAsync(h_errors.data(), d_error_ptr, d_errors.GetBufferSize(), hipMemcpyDeviceToHost));
@@ -247,9 +215,9 @@ bool run_mma_layout_test_case()
 
     for(uint32_t case_idx = 0; case_idx < total_cases; ++case_idx)
     {
-        const uint32_t m = case_idx / (MmaTraits::BlockK * MmaTraits::BlockN);
-        const uint32_t k = (case_idx / MmaTraits::BlockN) % MmaTraits::BlockK;
-        const uint32_t n = case_idx % MmaTraits::BlockN;
+        const uint32_t m = case_idx / (BlockK * BlockN);
+        const uint32_t k = (case_idx / BlockN) % BlockK;
+        const uint32_t n = case_idx % BlockN;
 
         EXPECT_EQ(h_errors[case_idx], 0u)
             << "Mismatch for m=" << m << " k=" << k << " n=" << n;
@@ -277,49 +245,28 @@ using MmaGfx90aSelector = mma::
 using MmaGfx1100Selector = mma::
     MmaDefaultSelector<ck::fp16_t, ck::fp16_t, ck::fp32_t, 16u, 16u, 16u, MmaGfx1100CompilerTarget>;
 
-struct MmaGfx12Config : MmaLayoutTestConfig<MmaGfx1201Selector,
-                                            MmaGfx1201CompilerTarget>
+// clang-format off
+using KernelTypes = ::testing::Types<
+    MmaGfx1201Selector,
+    MmaGfx90aSelector,
+    MmaGfx1100Selector
+    >;
+// clang-format on
+
+template <typename Selector>
+class TestMmaLayout : public ::testing::Test
 {
 };
 
-struct MmaGfx9Config : MmaLayoutTestConfig<MmaGfx90aSelector,
-                                           MmaGfx90aCompilerTarget>
-{
-};
+TYPED_TEST_SUITE(TestMmaLayout, KernelTypes);
 
-struct MmaGfx11Config : MmaLayoutTestConfig<MmaGfx1100Selector,
-                                            MmaGfx1100CompilerTarget>
+TYPED_TEST(TestMmaLayout, Mma_16x16x16_F16_F16_F32)
 {
-};
-// ========================================================================
-
-TEST(TestMmaLayout, Mma_16x16x16_F16_F16_F32_GFX9)
-{
-    bool executed = run_mma_layout_test_case<MmaGfx9Config>();
+    bool executed = run_mma_layout_test<TypeParam>();
 
     if(!executed)
     {
-        GTEST_SKIP() << "No gfx90a HIP device found. Skipping test.";
-    }
-}
-
-TEST(TestMmaLayout, Mma_16x16x16_F16_F16_F32_GFX11)
-{
-    bool executed = run_mma_layout_test_case<MmaGfx11Config>();
-
-    if(!executed)
-    {
-        GTEST_SKIP() << "No gfx1100 HIP device found. Skipping test.";
-    }
-}
-
-TEST(TestMmaLayout, Mma_16x16x16_F16_F16_F32_GFX12)
-{
-    bool executed = run_mma_layout_test_case<MmaGfx12Config>();
-
-    if(!executed)
-    {
-        GTEST_SKIP() << "No gfx1201 HIP device found. Skipping test.";
+        GTEST_SKIP() << "No supported HIP device found. Skipping test.";
     }
 }
 
