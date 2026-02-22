@@ -500,7 +500,10 @@ def getDockerImage(Map conf=[:])
                       ${dockerCacheArgs} \
                       ${dockerArgs} \
                       ${buildContext}
+                """.stripIndent()
 
+                // Build with buildx, but load image into the host Docker engine
+                sh """
                     # Push using regular docker (host engine trust/certs)
                     docker push ${image}
                 """.stripIndent()

@@ -337,7 +337,6 @@ FROM base AS miopen
 
 COPY --from=miopen_deps /opt/rocm /opt/rocm
 COPY --from=miopen_deps /usr/local /usr/local
-COPY --from=miopen_deps /TheRock /TheRock
 
 # Install explicit version of tools that are supported for miopen development
 # (clang-format, clang-tidy)
