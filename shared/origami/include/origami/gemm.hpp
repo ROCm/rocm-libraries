@@ -399,6 +399,24 @@ double compute_timestep_latency(const problem_t& problem,
                                 const context_t& context);
 
 /**
+ * @brief Compute the latency of the parallel reduction kernel (separate kernel launch).
+ *
+ * For parallel reduction, the GEMM kernel writes partials to workspace and a second
+ * kernel is launched to read all partials, accumulate, and write the final output.
+ * This function estimates the latency of that second kernel including launch overhead.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param context Execution context with derived parameters.
+ * @return double Latency in cycles (0 if no parallel reduction).
+ */
+double compute_parallel_reduction_latency(const problem_t& problem,
+                                          const hardware_t& hardware,
+                                          const config_t& config,
+                                          const context_t& context);
+
+/**
  * @brief Compute the total latency of a gemm based on the latency of one timestep multiplied by the
  * number of timesteps. (@see compute_timestep_latency)
  *
