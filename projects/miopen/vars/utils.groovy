@@ -493,7 +493,6 @@ def getDockerImage(Map conf=[:])
             
                 // Build with buildx, but load image into the host Docker engine
                 sh """
-                    set -euo pipefail
                     DOCKER_BUILDKIT=1 docker buildx build \
                       --builder ci-builder \
                       --load \
