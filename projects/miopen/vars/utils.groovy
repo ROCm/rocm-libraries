@@ -486,7 +486,7 @@ def getDockerImage(Map conf=[:])
 
                         # Recreate builder with config
                         docker buildx rm ci-builder || true
-                        docker buildx create --name ci-builder --driver docker-container --use --config /tmp/buildkitd.toml
+                        docker buildx create --name ci-builder --driver-opt network=host --driver docker-container --use --config /tmp/buildkitd.toml
                         docker buildx inspect ci-builder --bootstrap
                     """.stripIndent()
                 }
