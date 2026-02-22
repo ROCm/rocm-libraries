@@ -349,8 +349,6 @@ def getDockerImage(Map conf=[:])
 
     def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache_${gpu_family}"
 
-    // def cacheRef = "${env.MIOPEN_CI_DOCKER_CACHE_URL}:cache_${gpu_family}"
-
     def theRockHash = sh(
             script: """
                 grep -A 5 'repository: "ROCm/TheRock"' ${env.WORKSPACE}/.github/workflows/therock-ci-linux.yml \
@@ -366,7 +364,7 @@ def getDockerImage(Map conf=[:])
     // With the docker credentials check if the cacheRefFrom exists in the registry
     def cacheExists = ""
 
-    withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+    withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
         cacheExists = sh(
             script: """
                 if docker manifest inspect ${cacheRefFrom} > /dev/null 2>&1; then
@@ -451,7 +449,7 @@ def getDockerImage(Map conf=[:])
     try{
         echo "Pulling down image: ${image}"
         dockerImage = docker.image("${image}")
-        withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
             dockerImage.pull()
         }
     }
@@ -469,49 +467,26 @@ def getDockerImage(Map conf=[:])
         try {
 
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
-                    
-                    // Keep only host[:port], remove scheme and any path
-                    def registryHost = "${env.MIOPEN_PRIVATE_DOCKER_URL}"
-                        .trim()
-                        .replaceFirst('^https?://', '')
-                        .replaceFirst('/.*$', '')
-
-                    withCredentials([file(credentialsId: 'harbor_ca_cert', variable: 'HARBOR_CA_CERT')]) {
-                        sh """
-                            # Copy CA cert to a known location
-                            install -m 600 "\$HARBOR_CA_CERT" /tmp/harbor-ca.crt
-
-                            # Create buildkitd config to use the CA certificate
-                            cat <<EOF > /tmp/buildkitd.toml
-                            [registry."${registryHost}"]
-                            ca = ["/tmp/harbor-ca.crt"]
-                            EOF
-
-                            # Recreate builder with config
-                            docker buildx rm ci-builder || true
-                            docker buildx create --name ci-builder --driver-opt network=host --driver docker-container --use --config /tmp/buildkitd.toml
-                            docker buildx inspect ci-builder --bootstrap
-                        """.stripIndent()
-                    }
-                
-                    sh """
-                        DOCKER_BUILDKIT=1 docker buildx build \
-                        --builder ci-builder \
-                        --push \
-                        --tag ${image} \
-                        ${dockerCacheArgs} \
-                        ${dockerArgs} \
-                        ${buildContext}
-                    """.stripIndent()
-                }
+                sh """
+                    docker buildx rm ci-builder || true
+                    docker buildx create --name ci-builder --driver-opt network=host --driver docker-container --use --config /tmp/buildkitd.toml
+                    docker buildx inspect ci-builder --bootstrap
+                """.stripIndent()
+                sh """
+                    DOCKER_BUILDKIT=1 docker buildx build \
+                    --builder ci-builder \
+                    --push \
+                    --tag ${image} \
+                    ${dockerCacheArgs} \
+                    ${dockerArgs} \
+                    ${buildContext}
+                """.stripIndent()
             }
-
             dockerImage = docker.image("${image}")
         } catch (Exception bex) {
             echo "Buildx not available or failed, falling back to docker.build"
             dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
-            withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
                 dockerImage.push()
             }
         }
@@ -529,7 +504,7 @@ def getDockerImage(Map conf=[:])
         try{
             echo "Pulling down perf test image: ${image}"
             dockerImage = docker.image("${image}")
-            withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
                 dockerImage.pull()
             }
         }
@@ -540,7 +515,7 @@ def getDockerImage(Map conf=[:])
         catch(Exception ex)
         {
             dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
-            withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
                 dockerImage.push()
             }
         }
@@ -657,7 +632,7 @@ def RunPerfTest(Map conf=[:]){
         def docker_image = conf.get("docker_image")
         def miopen_install_path = conf.get("miopen_install_path", "/opt/rocm")
         def results_dir = conf.get("results_dir", "${env.WORKSPACE}/${env.MIOPEN_DIR}/results")
-        withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
             docker_image.pull()
         }
         echo "docker image: ${docker_image}"
