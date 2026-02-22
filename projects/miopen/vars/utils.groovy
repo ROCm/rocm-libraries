@@ -491,14 +491,19 @@ def getDockerImage(Map conf=[:])
                     """.stripIndent()
                 }
             
+                // Build with buildx, but load image into the host Docker engine
                 sh """
+                    set -euo pipefail
                     DOCKER_BUILDKIT=1 docker buildx build \
-                    --builder ci-builder \
-                    --push \
-                    --tag ${image} \
-                    ${dockerCacheArgs} \
-                    ${dockerArgs} \
-                    ${buildContext}
+                      --builder ci-builder \
+                      --load \
+                      --tag ${image} \
+                      ${dockerCacheArgs} \
+                      ${dockerArgs} \
+                      ${buildContext}
+
+                    # Push using regular docker (host engine trust/certs)
+                    docker push ${image}
                 """.stripIndent()
             }
             dockerImage = docker.image("${image}")
