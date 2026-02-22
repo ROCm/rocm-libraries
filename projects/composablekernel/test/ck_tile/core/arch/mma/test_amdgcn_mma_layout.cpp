@@ -123,15 +123,8 @@ struct MmaLayoutTestKernel
         }
 
         c_frag = MmaOp::exec(a_frag, b_frag, c_frag);
-        __syncthreads();
 
-        __shared__ uint32_t err;
-        if(threadIdx.x == 0)
-        {
-            err = 0;
-        }
-        __syncthreads();
-
+        uint32_t err = 0;
         const CDataType tol = static_cast<CDataType>(1.0e-1f); // TODO: this tolerance might not be suitable for all data types and should be revisited if we add more configurations
         for(uint32_t v = 0; v < c_vec_size; ++v)
         {
@@ -145,14 +138,14 @@ struct MmaLayoutTestKernel
             const CDataType value = static_cast<CDataType>(c_frag[v]);
             if(fabsf(static_cast<float>(value - expected)) > static_cast<float>(tol))
             {
-                atomicExch(&err, 1);
+                err = 1;
             }
         }
 
-        __syncthreads();
+        const uint32_t any_err = __any(err);
         if(threadIdx.x == 0)
         {
-            error_flags[case_idx] = err;
+            error_flags[case_idx] = any_err;
         }
     }
 };
