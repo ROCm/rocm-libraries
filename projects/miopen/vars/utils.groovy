@@ -218,7 +218,7 @@ def cmake_fin_build_cmd(prefixpath){
 def getDockerImageName(dockerArgs)
 {
     sh "echo ${dockerArgs} > ${env.WORKSPACE}/factors.txt"
-    def image = "${env.MIOPEN_CI_DOCKER_URL}"
+    def image = "${env.MIOPEN_DOCKER_IMAGE_URL}"
     // Note: The following files and directories from the CK repo are used to generate a hash for 
     // the docker image build. To ensure that we rebuild the docker image only when necessary.
     // Add any other files or directories that should trigger a rebuild of the docker image when changed.
