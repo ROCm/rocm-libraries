@@ -10,11 +10,24 @@ The builder provides a high-level, semantically-clear interface for constructing
 
 This project is a prototype for a more general builder pattern for all of composable_kernel (CK) and CK Tile, but is currently limited to formalizing the interface between MIOpen and CK.
 
+## Design Direction
+
+The builder's primary goal is transparent dispatch across two backend implementations: old CK (template-heavy device operations) and CK Tile (modern tile-based API). MIOpen, the consumer library, should construct kernels through the builder without needing to know which backend provides the implementation.
+
+Three principles guide the design:
+
+1. **Unified vocabulary through reflection.** The reflection system (`reflect/`) extracts kernel traits from both backends into a common `ConvTraits` representation. This shared vocabulary is the foundation for unifying algorithm descriptors across backends.
+
+2. **Expert overrides.** Power users can pin to a specific backend or device operation when needed, bypassing automatic dispatch.
+
+3. **Versioned API evolution.** The builder uses semantic version strings (`"0.0.0"`, `"0.1.0"`) to manage API changes predictably. The `ConvBuilder` template defaults to the latest version but accepts explicit version pinning.
+
 ## Design descriptions
 
 - [CK Builder design description](include/ck_tile/builder/README.md)
 - [CK Builder factory design](include/ck_tile/builder/factory/README.md)
 - [CK Builder testing design](include/ck_tile/builder/testing/README.md)
+- [CK Builder reflection design](include/ck_tile/builder/reflect/README.md)
 
 ## Directory Structure
 
@@ -23,7 +36,7 @@ This project is a prototype for a more general builder pattern for all of compos
 - `include/ck_tile/builder/reflect`
   Reflection mechanism.
 - `include/ck_tile/builder/factory`
-  Compile-time dispatch from builder descriptors to our exisitng specialized convolution kernel implementations.
+  Compile-time dispatch from builder descriptors to our existing specialized convolution kernel implementations.
 - `test/`
   Unit tests and example usage of the builder pattern.
 - `CMakeLists.txt`
@@ -62,8 +75,7 @@ ninja smoke-builder
 ```
 
 ### Regression Tests (Integration Tests)
-Integration tests that compile actual GPU kernels to verify that the builder generates valid, compilable code. These are more expensive than smoke tests (can take minutes to compile) but cover more fuctionality.
-)
+Integration tests that compile actual GPU kernels to verify that the builder generates valid, compilable code. These are more expensive than smoke tests (can take minutes to compile) but cover more functionality.
 
 ```sh
 ninja regression-builder
