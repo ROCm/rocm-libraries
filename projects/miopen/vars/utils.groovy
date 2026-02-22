@@ -347,7 +347,9 @@ def getDockerImage(Map conf=[:])
 
     def gpu_family = conf.get("gpu_family")
 
-    def cacheRef = "${env.MIOPEN_CI_DOCKER_CACHE_URL}:cache_${gpu_family}"
+    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache_${gpu_family}"
+
+    // def cacheRef = "${env.MIOPEN_CI_DOCKER_CACHE_URL}:cache_${gpu_family}"
 
     def theRockHash = sh(
             script: """
@@ -465,49 +467,46 @@ def getDockerImage(Map conf=[:])
                               "--cache-from type=registry,ref=${cacheRefFrom},registry.insecure=true "
 
         try {
-            withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+                    
+                    // Keep only host[:port], remove scheme and any path
+                    def registryHost = "${env.MIOPEN_PRIVATE_DOCKER_URL}"
+                        .trim()
+                        .replaceFirst('^https?://', '')
+                        .replaceFirst('/.*$', '')
+
+                    withCredentials([file(credentialsId: 'harbor_ca_cert', variable: 'HARBOR_CA_CERT')]) {
+                        sh """
+                            # Copy CA cert to a known location
+                            install -m 600 "\$HARBOR_CA_CERT" /tmp/harbor-ca.crt
+
+                            # Create buildkitd config to use the CA certificate
+                            cat <<EOF > /tmp/buildkitd.toml
+                            [registry."${registryHost}"]
+                            ca = ["/tmp/harbor-ca.crt"]
+                            EOF
+
+                            # Recreate builder with config
+                            docker buildx rm ci-builder || true
+                            docker buildx create --name ci-builder --driver-opt network=host --driver docker-container --use --config /tmp/buildkitd.toml
+                            docker buildx inspect ci-builder --bootstrap
+                        """.stripIndent()
+                    }
                 
-                // Keep only host[:port], remove scheme and any path
-                def registryHost = "${env.MIOPEN_PRIVATE_DOCKER_URL}"
-                    .trim()
-                    .replaceFirst('^https?://', '')
-                    .replaceFirst('/.*$', '')
-
-                withCredentials([file(credentialsId: 'harbor_ca_cert', variable: 'HARBOR_CA_CERT')]) {
                     sh """
-                        # Copy CA cert to a known location
-                        install -m 600 "\$HARBOR_CA_CERT" /tmp/harbor-ca.crt
-
-                        # Create buildkitd config to use the CA certificate
-                        cat <<EOF > /tmp/buildkitd.toml
-                        [registry."${registryHost}"]
-                        ca = ["/tmp/harbor-ca.crt"]
-                        EOF
-
-                        # Recreate builder with config
-                        docker buildx rm ci-builder || true
-                        docker buildx create --name ci-builder --driver-opt network=host --driver docker-container --use --config /tmp/buildkitd.toml
-                        docker buildx inspect ci-builder --bootstrap
+                        DOCKER_BUILDKIT=1 docker buildx build \
+                        --builder ci-builder \
+                        --push \
+                        --tag ${image} \
+                        ${dockerCacheArgs} \
+                        ${dockerArgs} \
+                        ${buildContext}
                     """.stripIndent()
                 }
-            
-                // Build with buildx, but load image into the host Docker engine
-                sh """
-                    DOCKER_BUILDKIT=1 docker buildx build \
-                      --builder ci-builder \
-                      --load \
-                      --tag ${image} \
-                      ${dockerCacheArgs} \
-                      ${dockerArgs} \
-                      ${buildContext}
-                """.stripIndent()
-
-                // Build with buildx, but load image into the host Docker engine
-                sh """
-                    # Push using regular docker (host engine trust/certs)
-                    docker push ${image}
-                """.stripIndent()
             }
+
             dockerImage = docker.image("${image}")
         } catch (Exception bex) {
             echo "Buildx not available or failed, falling back to docker.build"
