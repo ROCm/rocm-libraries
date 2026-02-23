@@ -1247,7 +1247,7 @@ class Solution(collections.abc.Mapping):
 
     # Init vars early since there are early-exit return statements below
     # tentative init for UseGeneralizedNLCOneA/B
-    # set True for DTL 
+    # set True for DTL
     state["UseGeneralizedNLCOneA"] = state["DirectToLdsA"]
     state["UseGeneralizedNLCOneB"] = state["DirectToLdsB"]
 
@@ -1609,7 +1609,13 @@ class Solution(collections.abc.Mapping):
     # Check if CMS is available for this solution
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       hasCMS,_ = hasCustomSchedule(state)
+      if state["UseCustomMainLoopSchedule"] == 1 and not hasCMS:
+        reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 but CMS is not supported")
       state["UseCustomMainLoopSchedule"] = 1 if hasCMS else 0
+      # reject CMS + TailloopInNll
+      if state["TailloopInNll"] and state["UseCustomMainLoopSchedule"] == 1:
+        reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with TailloopInNll=True")
+        return
 
     # 0: Normal mode. Hardware applies all of the normal data dependency checks
     # 1: Full expert mode (not suppoeted yet). Disable hardware checks against: VA_VDST, VA_SDST, VA_SSRC, VA_VCC, VM_VSRC and SA_SDST.
@@ -1770,7 +1776,14 @@ class Solution(collections.abc.Mapping):
                 ldsPadA = state["VectorWidthA"]
           else:
             if state["DirectToLdsA"]:
-              ldsPadA = max(lrvw, optPadA) if not state["ProblemType"]["TLUA"] else 0
+              if not state["ProblemType"]["TLUA"]:
+                bpeA = state["ProblemType"]["DataTypeA"].numBytes()
+                LdsStride = state["VectorWidthA"] * bpeA * state["DepthU"]
+                MinLdsBlockSizePerPadA = (state[f"GlobalReadVectorWidthA"] * bpeA) * state["WavefrontSize"]
+                isM0PadEnough = LdsStride >= MinLdsBlockSizePerPadA
+                ldsPadA = state["MatrixInstK"] if not isM0PadEnough else 2 * lrvw
+              else:
+                ldsPadA = 0
             else:
               ldsPadA = max(state["GlobalReadVectorWidthA"],optPadA)
           assert(ldsPadA >= 0)
@@ -1793,7 +1806,14 @@ class Solution(collections.abc.Mapping):
                 ldsPadB = state["VectorWidthB"]
           else:
             if state["DirectToLdsB"]:
-              ldsPadB = max(lrvw, optPadB) if not state["ProblemType"]["TLUB"] else 0
+              if not state["ProblemType"]["TLUB"]:
+                bpeB = state["ProblemType"]["DataTypeB"].numBytes()
+                LdsStride = state["VectorWidthB"] * bpeB * state["DepthU"]
+                MinLdsBlockSizePerPadB = (state[f"GlobalReadVectorWidthB"] * bpeB) * state["WavefrontSize"]
+                isM0PadEnough = LdsStride >= MinLdsBlockSizePerPadB
+                ldsPadB = state["MatrixInstK"] if not isM0PadEnough else 2 * lrvw
+              else:
+                ldsPadB = 0
             else:
               ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
           assert(ldsPadB >= 0)
@@ -2642,8 +2662,6 @@ class Solution(collections.abc.Mapping):
         state["StaggerUStride"] = 0
         # need to disable SuppressNoLoadLoop
         state["SuppressNoLoadLoop"] = False
-        # disable UseCustomMainLoopSchedule
-        state["UseCustomMainLoopSchedule"] = 0
         state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for TailloopInNll
 
     # Determine if we can load directly-to-Vgpr
@@ -2949,7 +2967,7 @@ class Solution(collections.abc.Mapping):
         state["ScheduleGROverBarrier"] = 0
         if state["PrefetchGlobalRead"] >= 3:
           # better to avoid applying this logic for smaller MT sizes
-          # Set threshold as 
+          # Set threshold as
           #  PGR3: MT128x64x64 with MT16x16x32x1 (with 4 waves)
           # threshold //= 2 for MI32
           thresholdMFMA = 128*64*64 / (16*16*32*4) # MI16x16x32x1 4waves

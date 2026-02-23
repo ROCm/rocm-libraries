@@ -245,3 +245,15 @@ TEST(TestBackendEnumStringUtils, GetPluginLoadingModeString)
     EXPECT_STREQ(hipdnnGetPluginLoadingModeString(static_cast<hipdnnPluginLoadingMode_ext_t>(-1)),
                  "HIPDNN_PLUGIN_LOADING_UNKNOWN");
 }
+
+TEST(TestBackendEnumStringUtils, GetPluginUnloadingModeString)
+{
+    EXPECT_STREQ(hipdnnGetPluginUnloadingModeString(HIPDNN_PLUGIN_UNLOAD_LAZY),
+                 "HIPDNN_PLUGIN_UNLOAD_LAZY");
+    EXPECT_STREQ(hipdnnGetPluginUnloadingModeString(HIPDNN_PLUGIN_UNLOAD_EAGER),
+                 "HIPDNN_PLUGIN_UNLOAD_EAGER");
+
+    EXPECT_STREQ(
+        hipdnnGetPluginUnloadingModeString(static_cast<hipdnnPluginUnloadingMode_ext_t>(-1)),
+        "HIPDNN_PLUGIN_UNLOAD_UNKNOWN");
+}
