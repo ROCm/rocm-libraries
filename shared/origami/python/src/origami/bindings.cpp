@@ -181,7 +181,9 @@ NB_MODULE(origami, m) {
         nanobind::arg("compute_clock_khz"),
         "Create hardware object for a specific architecture with specified parameters.");
 
-  m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
+  m.def("datatype_to_bits", 
+        &origami::datatype_to_bits, 
+        "Return the number of bits in a datatype");
   
   m.def("string_to_datatype",
         &origami::string_to_datatype,
@@ -209,9 +211,6 @@ NB_MODULE(origami, m) {
 
   m.def("rank_configs",
         &origami::rank_configs,
-        "problem"_a,
-        "hardware"_a,
-        "configs"_a,
         "Rank configurations by performance");
 
   m.def("select_config_mnk",
@@ -220,17 +219,10 @@ NB_MODULE(origami, m) {
 
   m.def("select_topk_configs",
         &origami::select_topk_configs,
-        "problem"_a,
-        "hardware"_a,
-        "configs"_a,
-        "topk"_a,
         "Select topk configurations");
 
   m.def("compute_perf_gflops",
         &origami::compute_perf_gflops,
-        "hardware"_a,
-        "problem"_a,
-        "latency"_a,
         "Compute performance in GFLOPS");
 
   // StreamK functions

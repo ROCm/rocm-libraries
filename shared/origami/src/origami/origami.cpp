@@ -296,7 +296,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
  * @param config Kernel configuration.
  * @param skGrid SK grid.
  * @param wgm WGM.
- * @return A staggerU_t struct: best predicted (staggerUMapping, staggerU, staggerUStrideShift).
+ * @return staggerU_t struct: best predicted (staggerUMapping, staggerU, staggerUStrideShift).
  */
 staggerU_t select_staggerU(const problem_t& problem,
                            const hardware_t& hardware,
@@ -335,9 +335,9 @@ staggerU_t select_staggerU(const problem_t& problem,
   int ntb = config.cache_hints_b;
 
   // Default values
-  size_t numCUs                     = hardware.N_CU;
-  size_t numXCD                     = hardware.NUM_XCD;
-  size_t numCUsPerXCD               = numCUs / numXCD;
+  size_t numCUs       = hardware.N_CU;
+  size_t numXCD       = hardware.NUM_XCD;
+  size_t numCUsPerXCD = numCUs / numXCD;
 
   // Number of output MTs per split and batch
   size_t numMT_M = math::safe_ceil_div(M, MT_M);
@@ -433,7 +433,7 @@ staggerU_t select_staggerU(const problem_t& problem,
 
   // Compute L2 optimal direction.
   // Row-major WGM: consecutive WGs share A (row-mates). Their temporal overlap
-  // amplifies A contention → the consecutive dimension (N) gets squared.
+  // amplifies A contention -> the consecutive dimension (N) gets squared.
   // Column-major WGM: consecutive WGs share B (column-mates): M gets squared.
   size_t A_contention, B_contention;
   if (wgm > 0) {

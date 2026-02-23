@@ -556,13 +556,13 @@ TEST_CASE("Origami: select_staggerU unit test", "[origami]") {
         return ((M + MT_M - 1) / MT_M) * ((N + MT_N - 1) / MT_N);
       };
 
-      // Test 1: Non-temporal access should disable stagger
+      // Test 1: Non-temporal access uses max_staggerU
       {
         auto problem = make_problem(4096, 4096, 2048);
         auto config  = make_config(128, 128, 64, 16, 16, 32, false, 1, 1, 4, 0);  // nta=4
         auto skGrid  = compute_skGrid(4096, 4096, 128, 128);
         auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 4);
-        REQUIRE(result.staggerU == 0);
+        REQUIRE(result.staggerU == 32);
       }
 
       // Test 2: Batch > 1 should disable stagger

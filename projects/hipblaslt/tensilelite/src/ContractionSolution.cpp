@@ -1071,7 +1071,7 @@ namespace TensileLite
             // WGMXCCCHUNK should be in this range: [0, 1, 2, 3, ..., 1023]
             assert(defaultWGMXCCCHUNK >= 0 && defaultWGMXCCCHUNK < 1024);
         }
-        
+
         return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK);
     }
 
@@ -1091,7 +1091,8 @@ namespace TensileLite
         auto sizes = problem.problemSizes();
         if(sizes[0] < 1 || sizes[1] < 1 || sizes[2] < 1 || sizes[3] < 1)
         {
-            return std::make_tuple(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
+            return std::make_tuple(
+                defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
         }
 
         // Dynamically pick the values
@@ -1106,10 +1107,10 @@ namespace TensileLite
                 if(sizes.size() >= 4)
                 {
                     origami::problem_t origami_problem = {
-                        .size  = {sizes[0], sizes[1], sizes[3]},
-                        .batch = sizes[2],
-                        .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
-                        .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                        .size    = {sizes[0], sizes[1], sizes[3]},
+                        .batch   = sizes[2],
+                        .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
                     };
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -1119,8 +1120,12 @@ namespace TensileLite
                         .cache_hints_b = sizeMapping.nonTemporalB,
                     };
 
-                    origami::staggerU_t prediction_results = origami::select_staggerU(
-                        origami_problem, *(hipAMDGPU->analyticalHardware), origami_config, skgrid, autoWGM);
+                    origami::staggerU_t prediction_results
+                        = origami::select_staggerU(origami_problem,
+                                                   *(hipAMDGPU->analyticalHardware),
+                                                   origami_config,
+                                                   skgrid,
+                                                   autoWGM);
 
                     defaultStaggerUMapping     = prediction_results.staggerUMapping;
                     defaultStaggerU            = prediction_results.staggerU;
@@ -1150,7 +1155,7 @@ namespace TensileLite
             defaultStaggerU            = sizeMapping.staggerU;
             defaultStaggerUStrideShift = sizeMapping.staggerStrideShift;
         }
-        
+
         // If values are explicitly specified at runtime, they override predictions and default values
         if(pAMDGPU->fixedStaggerUMapping != std::numeric_limits<size_t>::max())
             defaultStaggerUMapping = pAMDGPU->fixedStaggerUMapping;
@@ -1162,7 +1167,7 @@ namespace TensileLite
         // Mapping should be in this range: [0, 1, 2, 3]
         assert(defaultStaggerUMapping < 4);
         // StaggerU should be power of 2 and less than 65: [0, 2, 4, 8, 16, 32, 64]
-        assert(defaultStaggerU & (defaultStaggerU - 1) == 0 && defaultStaggerU < 65);
+        assert((defaultStaggerU & (defaultStaggerU - 1)) == 0 && defaultStaggerU < 65);
         // StaggerUStrideShift should be in [0, 5] (shift of 5 = stride multiplier of 32)
         assert(defaultStaggerUStrideShift <= 5);
 
@@ -1337,8 +1342,8 @@ namespace TensileLite
             size_t           su           = mask8 & staggerU;
             if(Debug::Instance().disableStaggerU())
                 su = 0;
-            su = su | sus;
-            su = su | sum;
+            su           = su | sus;
+            su           = su | sum;
             internalArg0 = internalArg0 | (su << 16);
         }
         else if(T_Debug && Debug::Instance().disableStaggerU())
@@ -2114,8 +2119,8 @@ namespace TensileLite
                       < DataTypeInfo::Get(rocisa::DataType::Double).elementSize)
                 vw = 4;
             else if(problem.freeSizeA(0) % 2 == 0
-                && DataTypeInfo::Get(problemType.aType).elementSize
-                      < DataTypeInfo::Get(rocisa::DataType::ComplexDouble).elementSize)
+                    && DataTypeInfo::Get(problemType.aType).elementSize
+                           < DataTypeInfo::Get(rocisa::DataType::ComplexDouble).elementSize)
                 vw = 2;
         }
 
@@ -3621,7 +3626,7 @@ namespace TensileLite
         return pp;
     }
 
-    double ContractionSolution::calculateDimensionM(Problem const&  problem) const
+    double ContractionSolution::calculateDimensionM(Problem const& problem) const
     {
         double M = 1.0;
         if(problem.freeIndicesA().size() > 1 || sizeMapping.packBatchDims & 0x1)
@@ -3638,7 +3643,7 @@ namespace TensileLite
         return M;
     }
 
-    double ContractionSolution::calculateDimensionN(Problem const&  problem) const
+    double ContractionSolution::calculateDimensionN(Problem const& problem) const
     {
         double N = 1.0;
         if(problem.freeIndicesB().size() > 1 || sizeMapping.packBatchDims & 0x2)
@@ -3653,7 +3658,7 @@ namespace TensileLite
         return N;
     }
 
-    double ContractionSolution::calculateNumBatches(Problem const&  problem) const
+    double ContractionSolution::calculateNumBatches(Problem const& problem) const
     {
         double NumBatches = 1;
         if(sizeMapping.packBatchDims == 0)
@@ -3664,7 +3669,7 @@ namespace TensileLite
         return NumBatches;
     }
 
-    origami::data_type_t ContractionSolution::getOrigamiDatatype(Problem const&  problem) const
+    origami::data_type_t ContractionSolution::getOrigamiDatatype(Problem const& problem) const
     {
         return datatypeToAnalyticalDatatype(problem.computeInputType());
     }
