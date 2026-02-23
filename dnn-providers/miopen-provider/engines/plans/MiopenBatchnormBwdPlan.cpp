@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include "MiopenBatchnormBwdPlan.hpp"
-#include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenUtils.hpp"
 
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
@@ -117,20 +116,19 @@ const std::optional<MiopenTensor>& BatchnormBwdParams::optBias() const
 }
 
 BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params,
-                                   const MiopenExecutionSettings& executionSettings)
+                                   const HipdnnMiopenSettings& executionSettings)
     : _params(std::move(params))
     , _executionSettings(executionSettings)
 {
 }
 
-size_t BatchnormBwdPlan::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+size_t BatchnormBwdPlan::getWorkspaceSize([[maybe_unused]] const HipdnnMiopenHandle& handle) const
 {
     // No workspace needed for batchnorm backward
     return 0;
 }
 
-void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
+void BatchnormBwdPlan::execute(const HipdnnMiopenHandle& handle,
                                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                uint32_t numDeviceBuffers,
                                [[maybe_unused]] void* workspace) const

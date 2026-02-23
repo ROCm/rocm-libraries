@@ -72,6 +72,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install pydantic requests
 
+      - name: Set PR_LABELS variable with labels assigned to pull request
+        if: ${{ github.event.pull_request }} # only set PR labels var if this is a pull request
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          echo "PR_LABELS=$(gh pr view ${PR_NUMBER} --json labels)" >> $GITHUB_ENV
+
       - name: Determine Linux projects to run
         id: linux_projects
         env:

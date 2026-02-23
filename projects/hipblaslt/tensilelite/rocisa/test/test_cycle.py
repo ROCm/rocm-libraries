@@ -102,7 +102,7 @@ def simple_lr_case():
         vectorStaticMultiplyAdd(vgpr('LocalReadAddrB', 1), vgpr(8, 1), 32, vgpr('LocalReadAddrB', 1), ContinuousRegister(48, 1), 'Final Offset: padding 32 per block 512'),
         VAddCOU32(dst=vgpr('LocalReadAddrB+0', 1), dst1=VCC(), src0='0x8400', src1=vgpr('LocalReadAddrB+0', 1), comment=' += LdsOffsetB (lower)'),
     ]
-    return loop_insts, lra_insts, 65*4
+    return loop_insts, lra_insts, 272
 
 @gfx((9,5,0))
 def simple_mfma_case():
@@ -194,7 +194,26 @@ def simple_mfma_case():
         vectorStaticMultiplyAdd(vgpr('LocalReadAddrB', 1), vgpr(8, 1), 32, vgpr('LocalReadAddrB', 1), ContinuousRegister(48, 1), 'Final Offset: padding 32 per block 512'),
         VAddCOU32(dst=vgpr('LocalReadAddrB+0', 1), dst1=VCC(), src0='0x8400', src1=vgpr('LocalReadAddrB+0', 1), comment=' += LdsOffsetB (lower)'),
     ]
-    return loop_insts, lra_insts, 161*4
+    return loop_insts, lra_insts, 680
+
+@gfx((9,5,0))
+def lr_test_case():
+    bc2 = 1
+    bc = 2 ** bc2
+    lra_insts = [
+        VLShiftLeftB32(dst=vgpr("LocalReadAddrA", 1), shiftHex=hex(4 + bc2), src=vgpr("Serial")),
+    ]
+    data_offset = int(128 / 32)
+    data_per_vgpr = data_offset * 4 * 256 * bc
+    loop_insts = [
+        DSLoadB128(
+            dst=vgpr("ValuA_X0_I0+%d" % (data_offset * i), data_offset),
+            src=vgpr("LocalReadAddrA", 1),
+            ds=DSModifiers(offset = i * data_per_vgpr),
+        ) for i in range(3)
+    ]
+    loop_insts.append(SWaitCnt(dscnt=0, comment=''))
+    return loop_insts, lra_insts, 144
 
 def get_cycles(module, num_waves=4):
     ripo = rocIsaPassOption()
@@ -227,6 +246,7 @@ def check_cycles(test_case_f):
 
 @pytest.mark.parametrize("test_case_f", [
     empty_case,
+    lr_test_case,
     simple_lr_case,
     simple_mfma_case
 ])
