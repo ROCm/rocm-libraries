@@ -59,7 +59,7 @@ struct DefaultTranspose
         // The tile is defined by the LaneGroupSize, which defines the number of lanes in the M/N
         // dimensions for the MMA instruction defined by warp gemm.
         // The LaneGroupSize is subdivided into groups of 16 (finer granularity of MMA
-        // instructions), we define these as major subtiles Each of this major subtile is divided
+        // instructions), we define these as major subtiles. Each of these major subtile is divided
         // into minor subtiles which group the lanes exchanging data during the transpose Example
         // LaneGroupSize = 16, 16 bit type:
         //  - There is 1 group of 16 lanes (1 major subtile)
