@@ -1536,14 +1536,14 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
-    auto layernormAttributes = hipdnn_data_sdk::data_objects::CreateLayernormFpropAttributes(
-        builder,
-        1, // x tensor uid
-        3, // scale tensor uid
-        4, // bias tensor uid
-        5, // epsilon tensor uid
-        2 // y tensor uid
-    );
+    auto layernormAttributes
+        = hipdnn_data_sdk::data_objects::CreateLayernormFpropAttributes(builder,
+                                                                        1, // x tensor uid
+                                                                        3, // scale tensor uid
+                                                                        4, // bias tensor uid
+                                                                        5, // epsilon tensor uid
+                                                                        2 // y tensor uid
+        );
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
     auto node = hipdnn_data_sdk::data_objects::CreateNodeDirect(
