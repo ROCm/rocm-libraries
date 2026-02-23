@@ -120,9 +120,10 @@ struct hipsolverRfHandle
 
             if(this->d_buffer)
             {
-                if(hipFree(this->d_buffer) != hipSuccess)
+                auto const istat = hipFree(this->d_buffer);
+                this->d_buffer   = nullptr;
+                if(istat != hipSuccess)
                     return HIPSOLVER_STATUS_INTERNAL_ERROR;
-                this->d_buffer = nullptr;
             }
 
             size_t size_dPtrA = sizeof(rocblas_int) * (n + 1);
@@ -256,9 +257,10 @@ struct hipsolverRfHandle
 
         if(this->d_buffer)
         {
-            if(hipFree(this->d_buffer) != hipSuccess)
+            auto const istat = hipFree(this->d_buffer);
+            this->d_buffer   = nullptr;
+            if(istat != hipSuccess)
                 return HIPSOLVER_STATUS_INTERNAL_ERROR;
-            this->d_buffer = nullptr;
         }
 
         return HIPSOLVER_STATUS_SUCCESS;
