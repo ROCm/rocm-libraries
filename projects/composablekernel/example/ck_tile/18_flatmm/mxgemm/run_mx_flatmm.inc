@@ -14,10 +14,6 @@ int run_mx_flatmm_with_layouts(const ck_tile::ArgParser& arg_parser,
                                const BLayout b_layout = BLayout{},
                                const CLayout c_layout = CLayout{})
 {
-    auto [result, arg_parser] = create_args(argc, argv);
-    if(!result)
-        return -1;
-
     using ADataType   = PrecActType;
     using BDataType   = PrecWeightType;
     using AccDataType = float;

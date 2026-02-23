@@ -101,7 +101,7 @@ float invoke_mx_flatmm(ck_tile::DeviceMem& a_dev_buf,
             constexpr auto has_hot_loop_v = has_hot_loop_.value;
             constexpr auto tail_num_v     = tail_num_.value;
             auto invoke_splitk_path       = [&](auto split_k_) {
-                return mx_flatmm_calc<FlatmmConfig,
+                return mx_flatmm_calc<MXFlatmmArchTraits,
                                             ADataType,
                                             BDataType,
                                             DsDatatype,
@@ -224,7 +224,7 @@ int run_mx_flatmm_example(const ck_tile::ArgParser& arg_parser)
     std::string a_layout = arg_parser.get_str("a_layout");
     std::string b_layout = arg_parser.get_str("b_layout");
     int persistent_opt   = arg_parser.get_int("persistent");
-    int warp_tile        = 0;
+
     std::cout << "Using default warptile of 16x16x128." << std::endl;
 
     if(a_layout == "R" && b_layout == "C")

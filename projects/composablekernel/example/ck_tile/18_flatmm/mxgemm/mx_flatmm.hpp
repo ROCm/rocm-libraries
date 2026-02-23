@@ -11,6 +11,8 @@
 #include "ck_tile/ops/flatmm.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
+#include "mx_flatmm_arch_traits.hpp"
+
 template <typename MXFlatmmArchTraits,
           typename ADataType,
           typename BDataType,
