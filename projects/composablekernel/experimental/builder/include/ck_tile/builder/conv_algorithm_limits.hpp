@@ -245,28 +245,11 @@ constexpr bool IsVmemVectorSizeValid()
 // Valid LDS instruction bit sizes based on supported DS_READ/DS_WRITE operations
 // DS_READ_{B32,B64,B96,B128,U8,I8,U16,I16}
 // DS_WRITE_{B32,B64,B96,B128,B8,B16}
-template <size_t... Sizes>
-using size_sequence = std::integer_sequence<size_t, Sizes...>;
-
-using valid_lds_bit_sizes = size_sequence<8, 16, 32, 64, 96, 128>;
-
-// Helper to unfold a sequence and check if a value is in it
-template <typename Seq>
-struct unfold_and_check;
-
-template <size_t... Sizes>
-struct unfold_and_check<std::integer_sequence<size_t, Sizes...>>
-{
-    static constexpr bool contains(size_t value)
-    {
-        return ck_tile::is_any_value_of(value, Sizes...);
-    }
-};
-
 template <size_t N, size_t DataTypeSize>
 constexpr bool IsLDSVectorSizeValid()
 {
-    return unfold_and_check<valid_lds_bit_sizes>::contains(N * DataTypeSize * 8);
+    constexpr size_t bits = N * DataTypeSize * 8;
+    return ck_tile::is_any_value_of(bits, 8, 16, 32, 64, 96, 128);
 }
 
 } // namespace detail
