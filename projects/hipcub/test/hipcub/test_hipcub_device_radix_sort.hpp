@@ -267,7 +267,6 @@ void sort_keys()
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
-
             const std::vector<key_type> keys_input = generate_key_input<key_type>(size, seed_value);
 
             key_type* d_keys_input;
@@ -1410,7 +1409,6 @@ inline void sort_keys_large_sizes()
         std::vector<key_type> keys_output(size);
         try
         {
-
             keys_output.resize(size);
         }
         catch(const std::bad_alloc& e)
