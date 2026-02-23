@@ -909,7 +909,7 @@ namespace rocisa
                     } else if (auto gr64 = std::dynamic_pointer_cast<BufferLoadB64>(grInst)) {
                         bpr = 8;
                     }
-                    cycles = formocast.getGlobalReadQueueFullStallCycles(currCycles, hwGRFIFO, bpr, numWaves, false);
+                    cycles = formocast.getGlobalReadQueueFullStallCycles(currCycles, hwGRFIFO, bpr, numWaves, rocIsa::getInstance().getKernel().isaVersion == std::array<int, 3>{9, 5, 0});
                 }
                 if(auto wInst = std::dynamic_pointer_cast<DSStoreB128>(item))
                 {

@@ -790,31 +790,49 @@ namespace origami
 
         int getGlobalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall)
         {
-            int finalCycle = currentCycle;
-            int grStallLatencyBuffer;
-
             if (!isStall) {
-                grStallLatencyBuffer = 1; //no stall
-            } else if (bpRead == 16) {
-                grStallLatencyBuffer = 160;
-            } else if (bpRead == 8) {
-                grStallLatencyBuffer = 80;
-            } else {
-                grStallLatencyBuffer = 40;
+                return currentCycle;
             }
-
-            if (fifo.size() < (16 / numWaves)) {
-                fifo.push(currentCycle);
-            } else {
-                int oldCycle = fifo.front();
-                if ((currentCycle - oldCycle) >= grStallLatencyBuffer) {
-                    fifo.pop();
-                    fifo.push(currentCycle);
-                } else {
-                    finalCycle = oldCycle + grStallLatencyBuffer;
-                    fifo.pop();
-                    fifo.push(finalCycle);
+            int finalCycle = currentCycle;
+            // GR FIFO length is 16, stall cycles is 16 cycles.
+            const int grFIFOLength = 16;
+            int grStallCycles = 4;
+            if (bpRead <= 4) {
+                grStallCycles = 1;
+            }
+            if (fifo.size() < grFIFOLength) {
+                // if FIFO is not empty, set finalCycle to the last cycle + 1. Only 1 GR can be issued in each cycle.
+                if (fifo.size() > 0) {
+                    finalCycle = std::max(finalCycle, fifo.back() + 1);
                 }
+                // push all GRs of all waves
+                for(auto wave = 0; wave < numWaves; wave += 2) {
+                    fifo.push(finalCycle + (wave / 2));
+                    fifo.push(finalCycle + (wave / 2));
+                }
+            } else {
+                while(fifo.size() > 0) {
+                    if (fifo.front() + grStallCycles * grFIFOLength < currentCycle) {
+                        fifo.pop();
+                    } else {
+                        break;
+                    }
+                }
+                // FIFO is full
+                // push all GRs of all waves
+                if(fifo.size() < grFIFOLength) {
+                    for(auto wave = 0; wave < numWaves; wave++) {
+                        fifo.push(finalCycle + wave);
+                    }
+                }
+                else {
+                    finalCycle = std::max(finalCycle, fifo.back() + grStallCycles);
+                    for(auto wave = 0; wave < numWaves; wave++) {    
+                        fifo.pop();
+                        fifo.push(finalCycle + wave * grStallCycles);
+                    }
+                }
+                
             }
             return finalCycle;
         }
