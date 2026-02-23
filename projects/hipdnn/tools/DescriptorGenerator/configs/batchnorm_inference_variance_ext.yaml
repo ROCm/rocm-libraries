@@ -11,8 +11,8 @@ operation:
 
   frontend:
     packer_function: "createBatchnormInferenceVarianceExtOperation"
-    node_class: "BatchnormInferenceVarianceExtNode"
-    attributes_class: "BnInferenceVarianceExtAttributes"
+    node_class: "BatchnormInferenceNodeVarianceExt"
+    attributes_class: "BatchnormInferenceAttributesVarianceExt"
 
   tensor_fields:
     - name: "x"

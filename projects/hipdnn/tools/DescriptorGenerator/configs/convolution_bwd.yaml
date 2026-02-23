@@ -10,9 +10,9 @@ operation:
   operation_attr_prefix: "HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD"
 
   frontend:
-    packer_function: "createConvBpropOperation"
-    node_class: "ConvolutionBpropNode"
-    attributes_class: "ConvBpropAttributes"
+    packer_function: "createConvDgradOperation"
+    node_class: "ConvolutionDgradNode"
+    attributes_class: "ConvDgradAttributes"
 
   tensor_fields:
     - name: "dy"

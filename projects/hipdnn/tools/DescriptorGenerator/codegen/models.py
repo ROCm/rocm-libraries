@@ -18,8 +18,29 @@ class TensorField:
     frontend_getter: str = ""
 
     @property
+    def camel_name(self) -> str:
+        """Field name in camelCase (e.g., 'inv_variance' -> 'invVariance')."""
+        return _to_camel_case(self.name)
+
+    @property
+    def pascal_name(self) -> str:
+        """Field name in PascalCase (e.g., 'inv_variance' -> 'InvVariance')."""
+        parts = self.name.split("_")
+        return "".join(p.capitalize() for p in parts)
+
+    @property
     def member_name(self) -> str:
-        return f"_{self.name}Desc"
+        return f"_{self.camel_name}Desc"
+
+    @property
+    def local_desc_name(self) -> str:
+        """Local variable name for descriptor (e.g., 'invVarianceDesc')."""
+        return f"{self.camel_name}Desc"
+
+    @property
+    def err_name(self) -> str:
+        """Error variable name for structured bindings (e.g., 'errInvVariance')."""
+        return f"err{self.pascal_name}"
 
     @property
     def uid_field(self) -> str:
@@ -27,9 +48,7 @@ class TensorField:
 
     @property
     def getter_name(self) -> str:
-        parts = self.name.split("_")
-        camel = "".join(p.capitalize() for p in parts)
-        return f"get{camel}Desc"
+        return f"get{self.pascal_name}Desc"
 
 
 def _to_camel_case(snake: str) -> str:

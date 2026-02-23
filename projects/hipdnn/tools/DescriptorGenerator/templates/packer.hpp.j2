@@ -18,8 +18,8 @@ inline Error {{ op.frontend.packer_function }}(
 {
     // Ensure tensor descriptors exist for {{ op.tensor_fields | map(attribute='attr_suffix') | join(', ') }}
 {% for tf in op.tensor_fields %}
-    auto [err{{ tf.attr_suffix }}, {{ tf.name }}Uid] = createOrFindTensorDesc(tensorDescs, attributes.{{ tf.frontend_getter }});
-    HIPDNN_CHECK_ERROR(err{{ tf.attr_suffix }});
+    auto [{{ tf.err_name }}, {{ tf.camel_name }}Uid] = createOrFindTensorDesc(tensorDescs, attributes.{{ tf.frontend_getter }});
+    HIPDNN_CHECK_ERROR({{ tf.err_name }});
 {% endfor %}
 
     // Create operation descriptor
@@ -33,7 +33,7 @@ inline Error {{ op.frontend.packer_function }}(
     // Set tensor references
 {% for tf in op.tensor_fields %}
     HIPDNN_CHECK_ERROR(setDescriptorAttrTensorRef(
-        opDesc.get(), {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, {{ tf.name }}Uid, tensorDescs, "{{ op.effective_error_label }} {{ tf.attr_suffix }}"));
+        opDesc.get(), {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, {{ tf.camel_name }}Uid, tensorDescs, "{{ op.effective_error_label }} {{ tf.attr_suffix }}"));
 {% endfor %}
 
     // Set {{ op.packer_params_label }} parameters

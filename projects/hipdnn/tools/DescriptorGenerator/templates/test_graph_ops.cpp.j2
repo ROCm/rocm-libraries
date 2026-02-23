@@ -30,7 +30,7 @@ namespace
 
 // Helper: create a finalized {{ op.class_name }} from tensor descriptors
 inline std::unique_ptr<HipdnnBackendDescriptor>
-    createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}HipdnnBackendDescriptor* {{ tf.name }}Desc{% if not loop.last %},
+    createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}HipdnnBackendDescriptor* {{ tf.local_desc_name }}{% if not loop.last %},
                           {% endif %}{% endfor %}{% if op.has_tensor_array_fields %},
 {% for taf in op.tensor_array_fields %}
                           std::vector<HipdnnBackendDescriptor*> {{ taf.name }}Descs = {}{% if not loop.last %},{% endif %}
@@ -42,7 +42,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
 
 {% for tf in op.tensor_fields %}
     desc->setAttribute(
-        {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &{{ tf.name }}Desc);
+        {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &{{ tf.local_desc_name }});
 {% endfor %}
 {% for df in op.required_data_fields %}
 {% if df.is_vector %}
@@ -107,12 +107,12 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-    auto {{ tf.name }}Desc = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
 {% else %}
-    auto {{ tf.name }}Desc = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
 {% endif %}
 {% endfor %}
-    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.name }}Desc.get(){% if not loop.last %}, {% endif %}{% endfor %});
+    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %});
 
     auto desc = getDescriptor();
     setHandle();
@@ -159,12 +159,12 @@ TEST_F(TestGraphDescriptor{{ op.name }}, ComputeDataTypePreserved)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-    auto {{ tf.name }}Desc = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
 {% else %}
-    auto {{ tf.name }}Desc = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
 {% endif %}
 {% endfor %}
-    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.name }}Desc.get(){% if not loop.last %}, {% endif %}{% endfor %}, DataType::HALF);
+    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %}, DataType::HALF);
 
     auto desc = getDescriptor();
     setHandle();
@@ -189,9 +189,9 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildWith{{ taf.test_label or taf.name 
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-    auto {{ tf.name }}Desc = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
 {% else %}
-    auto {{ tf.name }}Desc = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
 {% endif %}
 {% endfor %}
 {% for uid in taf.test_uids %}
@@ -199,7 +199,7 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildWith{{ taf.test_label or taf.name 
 {% endfor %}
 
     std::vector<HipdnnBackendDescriptor*> {{ taf.name }}Descs = {{ '{' }}{% for uid in taf.test_uids %}{{ taf.name }}Desc{{ loop.index0 }}.get(){% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
-    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.name }}Desc.get(){% if not loop.last %}, {% endif %}{% endfor %}, {{ taf.name }}Descs);
+    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %}, {{ taf.name }}Descs);
 
     auto desc = getDescriptor();
     setHandle();

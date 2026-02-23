@@ -12,7 +12,7 @@ operation:
   frontend:
     packer_function: "createBatchnormInferenceOperation"
     node_class: "BatchnormInferenceNode"
-    attributes_class: "BnInferenceAttributes"
+    attributes_class: "BatchnormInferenceAttributes"
 
   tensor_fields:
     - name: "x"
