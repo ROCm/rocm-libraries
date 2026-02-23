@@ -114,7 +114,9 @@ struct device_segmented_reduce_benchmark : public primbench::benchmark_interface
         // Generate data
         engine_type gen(seed);
 
-        const double avg_segment_length = static_cast<double>(items) / desired_segment;
+        // The minimal average length should at least be 1 to prevent infinite loop.
+        const double avg_segment_length
+            = std::max(1.0, static_cast<double>(items) / desired_segment);
         std::uniform_real_distribution<double> segment_length_dis(0, avg_segment_length * 2);
 
         std::vector<offset_type> offsets;
