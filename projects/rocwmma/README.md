@@ -56,6 +56,7 @@ For more detailed information, please refer to the [rocWMMA installation guide](
 |ROCWMMA_BUILD_DOCS|Build doxygen documentation from code|OFF|
 |ROCWMMA_BUILD_ASSEMBLY|Generate assembly files|OFF|
 |ROCWMMA_BUILD_VALIDATION_TESTS|Build validation tests |ON (requires ROCWMMA_BUILD_TESTS=ON)|
+|ROCWMMA_BUILD_REGRESSION_TESTS|Build regression testing coverage |ON (requires ROCWMMA_BUILD_TESTS=ON)|
 |ROCWMMA_BUILD_BENCHMARK_TESTS|Build benchmark tests |OFF (requires ROCWMMA_BUILD_TESTS=ON)|
 |ROCWMMA_BUILD_EXTENDED_TESTS|Build extended testing coverage |OFF (requires ROCWMMA_BUILD_TESTS=ON)|
 |ROCWMMA_VALIDATE_WITH_ROCBLAS|Use rocBLAS for validation tests|ON (requires ROCWMMA_BUILD_VALIDATION_TESTS=ON)|
