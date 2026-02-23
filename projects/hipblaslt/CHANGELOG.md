@@ -6,6 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* Migrate `HIPBLASLT_ENABLE_LLVM` to `HIPBLASLT_ENABLE_YAML` and synchronize with `TENSILELITE_LIBRARY_FORMAT`.
 * Support for AMD SMI.
 
 ### Deprecation
