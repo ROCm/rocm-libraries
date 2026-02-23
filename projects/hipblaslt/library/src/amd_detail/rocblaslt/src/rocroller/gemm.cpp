@@ -1,28 +1,5 @@
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include "gemm.hpp"
 #include "runtime_args_selection.hpp"
@@ -550,8 +527,6 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         params->setDimensionInfo(tagStoreD, macTileD);
     }
 
-    params->unrollX       = gemm->unrollX;
-    params->unrollY       = gemm->unrollY;
     params->swizzleScale  = gemm->swizzleScale;
     params->prefetchScale = gemm->prefetchScale;
     params->tailLoops     = gemm->tailLoops;
@@ -614,10 +589,12 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     // Create CommandKernel
 
     std::string kernelName = genKernelName(gemm);
-    auto        context    = Context::ForDefaultHipDevice(
+    auto context = Context::ForDefaultHipDevice(
         kernelName,
-        {{.scaleSkipPermlane = gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 3
-                                         && gemm->kernelType.scaleTypeB.preSwizzleTile.size() == 3}});
+        {{.scaleSkipPermlane = (gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 3
+                                && gemm->kernelType.scaleTypeB.preSwizzleTile.size() == 3)
+                                   ? ScaleSkipPermlaneMode::PreSwizzleScaleGFX950
+                                   : ScaleSkipPermlaneMode::None}});
     auto commandKernel = std::make_shared<CommandKernel>(command, kernelName);
     commandKernel->setContext(context);
     commandKernel->setCommandParameters(params);

@@ -46,7 +46,24 @@ private:
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _engineConfigDesc;
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _executionPlanDesc;
 
-    std::optional<int64_t> _preferredEngineId = std::nullopt;
+    std::optional<int64_t> _preferredEngineId;
+
+    static std::optional<int64_t> getDefaultEngineId()
+    {
+        static const std::optional<int64_t> s_defaultId = []() -> std::optional<int64_t> {
+            auto envStr = hipdnn_data_sdk::utilities::trim(
+                hipdnn_data_sdk::utilities::getEnv("HIPDNN_DEFAULT_ENGINE"));
+            if(envStr.empty())
+            {
+                return std::nullopt;
+            }
+            auto engineId = hipdnn_data_sdk::utilities::engineNameToId(envStr);
+            HIPDNN_FE_LOG_INFO("HIPDNN_DEFAULT_ENGINE='" << envStr
+                                                         << "' mapped to engine ID: " << engineId);
+            return engineId;
+        }();
+        return s_defaultId;
+    }
 
     void assignUnsetTensorUids()
     {
@@ -67,11 +84,32 @@ private:
     {
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
         std::vector<int64_t> engineIds;
+        auto defaultEngineId = getDefaultEngineId();
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getEngineConfigs(
-            engineConfigs, engineIds, engineHeuristicDesc, _preferredEngineId.has_value()));
+            engineConfigs,
+            engineIds,
+            engineHeuristicDesc,
+            _preferredEngineId.has_value() || defaultEngineId.has_value()));
 
         // Select engine config based on preferred ID or use first available
         size_t selectedIndex = 0;
+        if(defaultEngineId)
+        {
+            auto defaultId = defaultEngineId.value();
+            auto it = std::find(engineIds.begin(), engineIds.end(), defaultId);
+            if(it != engineIds.end())
+            {
+                selectedIndex = static_cast<size_t>(std::distance(engineIds.begin(), it));
+                HIPDNN_FE_LOG_INFO("Default engine id " << defaultId
+                                                        << " found, using it for execution plan.");
+            }
+            else
+            {
+                HIPDNN_FE_LOG_INFO("Default engine id "
+                                   << defaultId << " not found, using top engine config instead.");
+            }
+        }
+
         if(_preferredEngineId.has_value())
         {
             bool found = false;
@@ -102,6 +140,10 @@ private:
         return {ErrorCode::OK, ""};
     }
 
+    /// Initialize engine config for a specific engine ID.
+    /// @param engineId The engine to configure
+    /// @note This method does NOT finalize the engine config. The caller must
+    ///       finalize after setting any knobs on the config.
     Error initializeEngineConfig(int64_t engineId)
     {
         detail::ScopedHipdnnBackendDescriptor engineDesc;
@@ -121,7 +163,6 @@ private:
             "Failed to set engine on the engine config descriptor.");
 
         _engineConfigDesc = std::move(engineConfigDesc);
-
         return {ErrorCode::OK, ""};
     }
 
@@ -725,8 +766,7 @@ public:
             engineHeuristicDesc, _graphDesc->get(), modes));
 
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
-        std::vector<int64_t> engineIds;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getEngineConfigs(
+        HIPDNN_CHECK_ERROR(detail::getEngineConfigs(
             engineConfigs, rankedEngineIds, engineHeuristicDesc.get(), true));
 
         return {ErrorCode::OK, ""};
@@ -778,11 +818,10 @@ public:
 
         std::unordered_map<KnobType_t, Knob> existingKnobs;
         HIPDNN_CHECK_ERROR(get_knob_lookup_for_engine(engineId, existingKnobs));
-
         HIPDNN_CHECK_ERROR(initializeEngineConfig(engineId));
 
         std::vector<KnobSetting> validatedSettings;
-        for(auto& setting : settings)
+        for(const auto& setting : settings)
         {
             auto knobIt = existingKnobs.find(setting.knobId());
             if(knobIt == existingKnobs.end())
@@ -843,6 +882,16 @@ public:
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
             detail::hipdnnBackend()->backendFinalize(_engineConfigDesc->get()),
             "Failed to finalize engine config descriptor");
+
+        // Create execution plan descriptor
+        _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
+            HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+
+        if(!_executionPlanDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Failed to create backend execution descriptor."};
+        }
 
         return {ErrorCode::OK, ""};
     }
