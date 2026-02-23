@@ -53,6 +53,8 @@ add_hipdnn_sample(conv_fprop_deterministic convolution/ConvFpropDeterministic.cp
 
 add_hipdnn_sample(serialization_roundtrip serialization/SerializationRoundTrip.cpp)
 
+add_hipdnn_sample(knobs_usage knobs/KnobsUsage.cpp)
+
 # Enable testing and add sample tests
 enable_testing()
 
@@ -105,6 +107,10 @@ add_hipdnn_sample_test(fused_bn_inference_variance_activ)
 
 # Register serialization samples as tests
 add_hipdnn_sample_test(serialization_roundtrip)
+
+# Register knobs sample
+# Note: knobs_usage is informational/educational, not validation
+install(TARGETS knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # Install the generated CTestTestfile.cmake to HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH
 install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH}
