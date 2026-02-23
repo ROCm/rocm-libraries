@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include "rocRoller/Serialization/YAML.hpp"
 #include <algorithm>
@@ -1257,7 +1234,6 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--betaInFMA", &SolutionParameters::betaInFma),
         std::make_pair("--scheduler", &SolutionParameters::scheduler),
         std::make_pair("--schedulerCost", &SolutionParameters::schedulerCost),
-        std::make_pair("--matchMemoryAccess", &SolutionParameters::matchMemoryAccess),
         std::make_pair("--tailLoops", &SolutionParameters::tailLoops),
         std::make_pair("--streamK", &SolutionParameters::streamK));
 
@@ -1466,7 +1442,6 @@ namespace rocRoller::Client::GEMMClient::CLI
         update(SN(&SP::betaInFma), solution.betaInFma);
         update(SN(&SP::scheduler), solution.scheduler);
         update(SN(&SP::schedulerCost), solution.schedulerCost);
-        update(SN(&SP::matchMemoryAccess), solution.matchMemoryAccess);
     }
 }
 
@@ -1529,8 +1504,7 @@ int main(int argc, const char* argv[])
 
         .betaInFma = true,
 
-        .scheduler         = "Priority",
-        .matchMemoryAccess = true,
+        .scheduler = "Priority",
 
         .tailLoops = true,
 
@@ -1746,9 +1720,6 @@ int main(int argc, const char* argv[])
     app.add_flag(SN(&SP::betaInFma), "Use beta in FMA instruction instead of alpha.");
     app.add_option(SN(&SP::scheduler), "Which scheduler to use.");
     app.add_option(SN(&SP::schedulerCost), "Which scheduler cost function to use.");
-
-    app.add_flag(SN(&SP::matchMemoryAccess),
-                 "Match memory access to transpose.  Currently decreases performance.");
     auto descriptionPadLDSA = fmt::format("Byte padding for A LDS buffer.  Passed as a pair: "
                                           "contiguous-bytes,padding-bytes, eg {}=1024,8",
                                           SN(&SP::padLDSA));

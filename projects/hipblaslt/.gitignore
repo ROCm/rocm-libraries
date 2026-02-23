@@ -58,7 +58,8 @@ cmake_install.cmake
 **/__pycache__
 *.egg-info/
 
-#clangd
+# clangd
 .cache
 
-build_*
+# CMake user presets
+CMakeUserPresets.json

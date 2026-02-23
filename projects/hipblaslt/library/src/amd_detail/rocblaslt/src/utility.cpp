@@ -339,6 +339,8 @@ const char* rocblaslt_epilogue_to_string(rocblaslt_epilogue epilogue)
         return "EPILOGUE_GELU";
     case ROCBLASLT_EPILOGUE_DGELU:
         return "EPILOGUE_DGELU";
+    case ROCBLASLT_EPILOGUE_DRELU:
+        return "EPILOGUE_DRELU";    
     case ROCBLASLT_EPILOGUE_GELU_BIAS:
         return "EPILOGUE_GELU_BIAS";
     case ROCBLASLT_EPILOGUE_GELU_AUX:
@@ -348,9 +350,11 @@ const char* rocblaslt_epilogue_to_string(rocblaslt_epilogue epilogue)
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
         return "EPILOGUE_DGELU_BGRAD";
     case ROCBLASLT_EPILOGUE_BGRADA:
-        return "EPILOGUE_DGELU_BGRADA";
+        return "EPILOGUE_BGRADA";
     case ROCBLASLT_EPILOGUE_BGRADB:
-        return "EPILOGUE_DGELU_BGRADB";
+        return "EPILOGUE_BGRADB";
+    case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
+        return "EPILOGUE_DRELU_BGRAD";
     case ROCBLASLT_EPILOGUE_SIGMOID:
         return "EPILOGUE_SIGMOID";        
     case ROCBLASLT_EPILOGUE_SWISH_EXT:
