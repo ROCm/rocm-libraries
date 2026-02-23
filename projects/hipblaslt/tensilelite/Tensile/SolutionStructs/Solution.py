@@ -2076,10 +2076,10 @@ class Solution(collections.abc.Mapping):
             wlrB = max(state["LocalReadVectorWidthB"] // state["MIInputPerThread"], 1)
 
             if (wlrA > 1) or (wlrB > 1):
-              padA, padB, padM = calcLdsPad()
-              ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPad()
+              padA, padB, padM = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
+              ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPad(state["LocalReadVectorWidth"])
               ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
-              if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > globalParameters["MaxLDS"]:
+              if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > state["MaxLDS"]:
                 if wlrA > 1:
                   state["LocalReadVectorWidthA"] //= 2
                 if wlrB > 1:
