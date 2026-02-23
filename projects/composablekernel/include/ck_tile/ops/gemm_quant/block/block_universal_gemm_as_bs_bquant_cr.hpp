@@ -115,6 +115,20 @@ struct BQuantBlockUniversalGemmAsBsCr
 
         static constexpr index_t KPack      = WarpGemm::kKPerThread;
         static constexpr index_t KPerThread = KIterPerWarp * WarpGemm::kKPerThread;
+
+        template <typename T>
+        using has_bcastpolicy_type = decltype(T::BCastPolicy);
+
+        static constexpr bool IsBCastPolicyBeforeLDSWrite = [] {
+            if constexpr(is_detected<has_bcastpolicy_type, Problem>{})
+            {
+                return Problem::BCastPolicy == CastPolicy::BeforeLDSWrite;
+            }
+            else
+            {
+                return false;
+            }
+        }();
     };
 
     public:
@@ -127,11 +141,12 @@ struct BQuantBlockUniversalGemmAsBsCr
     using CDataType       = remove_cvref_t<typename Traits::CDataType>;
 
     // BDataType gets converted from PkInt4 during loading
-    // This is only needed when BCastPolicy is CastBeforeLDSWrite. This is always the case
-    // for pk_int4_t but not for pk_fp4_t
+    // OverrideBDataType is only used when BCastPolicy is CastBeforeLDSWrite for microscale.
+    // In that case we use ADataType
     using OverrideBDataType = std::conditional_t<
-        (std::is_same_v<BDataType, pk_int4_t> || std::is_same_v<BDataType, pk_fp4_t>) &&
-            std::is_same_v<typename Traits::BLayout, tensor_layout::gemm::RowMajor>,
+        (std::is_same_v<BDataType, pk_int4_t> &&
+         std::is_same_v<typename Traits::BLayout, tensor_layout::gemm::RowMajor>) ||
+            Traits::IsBCastPolicyBeforeLDSWrite,
         ADataType,
         BDataType>;
 
