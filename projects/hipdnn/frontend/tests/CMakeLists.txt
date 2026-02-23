@@ -33,10 +33,11 @@ add_executable(
     TestConvolutionWgradNode.cpp
     TestError.cpp
     TestGraph.cpp
-    TestHandle.cpp
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
     TestGraphSerialization.cpp
+    TestHandle.cpp
+    TestIncompatibleBackendWrapper.cpp
     TestINode.cpp
     TestKnob.cpp
     TestMatmulAttributes.cpp
