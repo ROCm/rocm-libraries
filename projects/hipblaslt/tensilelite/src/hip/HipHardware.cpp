@@ -92,7 +92,7 @@ namespace TensileLite
             HIP_CHECK_EXC(chipIdResult);
 
             if(!ChipIdRegistry::isKnownChipId(pciChipId))
-                std::cerr << unregisteredPciChipIdWarningMessage(prop, pciChipId) << std::endl;
+                logUnregisteredPciChipIdWarningOnce(prop, pciChipId);
 
             return std::make_shared<HipAMDGPU>(prop, std::make_optional(pciChipId));
         }

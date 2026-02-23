@@ -69,7 +69,7 @@ TEST(PciChipIdTest, HipHardwarePopulatesPciChipId)
         return;
     }
 
-    if(Debug::Instance().debugEnabled())
+    if(Debug::Instance().printDeviceSelection())
     {
         // Print device information
         std::cout << "\n=== AMDGPU Hardware Info ===" << std::endl;
@@ -198,7 +198,7 @@ TEST(PciChipIdTest, HardwareSelectionWithPciChipId)
     // Find best solution - should match device-specific
     auto solution = lib.findBestSolution(problem, *hardware);
 
-    if(Debug::Instance().debugEnabled())
+    if(Debug::Instance().printDeviceSelection())
     {
         std::cout << "\n=== Hardware Selection with PCI Chip ID ===" << std::endl;
         std::cout << "Device: " << amdgpu->description() << std::endl;
@@ -226,7 +226,7 @@ TEST(PciChipIdTest, HardwareSelectionWithPciChipId)
     ASSERT_NE(fallbackResult, nullptr) << "Should find fallback solution";
     EXPECT_EQ(fallbackResult->index, 2) << "Should select fallback solution (index 2) for different chip ID";
 
-    if(Debug::Instance().debugEnabled())
+    if(Debug::Instance().printDeviceSelection())
     {
         std::cout << "Fallback test with different PCI Chip ID (0x1234):" << std::endl;
         std::cout << "Selected solution: " << fallbackResult->solutionName << " (index=" << fallbackResult->index
@@ -277,7 +277,7 @@ TEST(PciChipIdTest, FindAllSolutionsWithPciChipId)
     // Find all solutions
     auto solutions = lib.findAllSolutions(problem, *hardware);
 
-    if(Debug::Instance().debugEnabled())
+    if(Debug::Instance().printDeviceSelection())
     {
         std::cout << "\n=== findAllSolutions Test ===" << std::endl;
         std::cout << "Hardware: " << amdgpu->description() << std::endl;

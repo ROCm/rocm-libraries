@@ -170,7 +170,8 @@ class HardwarePredicate(Properties.Predicate):
         pciChipIds = []
         for chipId in supportedChipIds:
             if chipId is not None:
-                pciChipIds.append(chipId)
+                # Serialize chip IDs as integers so YAML emits decimal numeric values.
+                pciChipIds.append(int(chipId, 16) if isinstance(chipId, str) else int(chipId))
 
         if len(pciChipIds) == 0:
             return None
@@ -257,13 +258,18 @@ class HardwarePredicate(Properties.Predicate):
         if not myPciChipIds and otherPciChipIds:
             return False
         if myPciChipIds and otherPciChipIds and myPciChipIds != otherPciChipIds:
-            # Prefer exact/smaller chip sets first, then use fallback-aware
-            # topological rank (source-like IDs before fallback targets).
+            # Prefer source-like chip IDs (exact-capable rows) before fallback targets.
+            # This ensures ordering like:
+            #   Equality -> Origami/Predication -> Equality fallback -> Origami/Predication fallback.
+            # Set size is used only as a tie-breaker for equally-ranked chip-ID groups.
+            myChipKey = _chipIdSetSortKey(myPciChipIds)
+            otherChipKey = _chipIdSetSortKey(otherPciChipIds)
+            if myChipKey != otherChipKey:
+                return myChipKey > otherChipKey
+
             if len(myPciChipIds) != len(otherPciChipIds):
                 return len(myPciChipIds) < len(otherPciChipIds)
 
-            myChipKey = _chipIdSetSortKey(myPciChipIds)
-            otherChipKey = _chipIdSetSortKey(otherPciChipIds)
             return myChipKey > otherChipKey
 
         # If CU properties are empty, then compare processor predicates

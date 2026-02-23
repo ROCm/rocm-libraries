@@ -28,6 +28,8 @@
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
+#include <iostream>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 
@@ -135,10 +137,17 @@ namespace TensileLite
                 << "* Architecture: " << prop.gcnArchName << "\n"
                 << "*\n"
                 << "* This chip ID is not registered in Tensile's ChipIdRegistry.\n"
-                << "* Chip ID-specific kernel selection may not work correctly.\n"
-                << "* Please update AMDGPUPredicates.hpp and Architectures.py to add this chip ID.\n"
+                << "* Using only fallback kernel selection for the detected architecture.\n"
                 << "********************************************************************************\n";
             return msg.str();
+        }
+
+        inline void logUnregisteredPciChipIdWarningOnce(hipDeviceProp_t const& prop, int pciChipId)
+        {
+            static std::once_flag warningPrinted;
+            std::call_once(warningPrinted, [&]() {
+                std::cerr << unregisteredPciChipIdWarningMessage(prop, pciChipId) << std::endl;
+            });
         }
 
         inline void CopyTensorVoid(void*                   dst,
