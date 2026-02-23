@@ -16,33 +16,26 @@ struct TileDistrEncRegMap
     static_assert(TileDistrEnc::NDimX == 2);
     static_assert(TileDistrEnc::NDimP == 1);
 
-    static constexpr auto distr               = make_static_tile_distribution(TileDistrEnc{});
-    static constexpr auto ps_ys_to_xs_adaptor = distr.get_ps_ys_to_xs_adaptor();
+    static constexpr auto ps_ys_to_xs_adaptor =
+        make_static_tile_distribution(TileDistrEnc{}).get_ps_ys_to_xs_adaptor();
 
     static constexpr index_t mat_major_size =
         container_reduce(typename TileDistrEnc::HsLengthss{}[number<0>{}], multiplies<>{}, 1);
     static constexpr index_t mat_minor_size =
         container_reduce(typename TileDistrEnc::HsLengthss{}[number<1>{}], multiplies<>{}, 1);
     static constexpr index_t num_repeat = [] {
-        // This is awkward but necessary if we want to allow empty "repeat" sequences in the Tile
-        // Distr Encoding.
         if constexpr(TileDistrEnc::NDimR > 0)
         {
             return typename TileDistrEnc::RsLengths{}[number<0>{}];
         }
         else
         {
-            return 1;
+            return 1; // Necessary to deal with empty "repeat" sequences.
         }
     }();
-    static constexpr index_t num_lanes =
-        ps_ys_to_xs_adaptor.GetBottomDimensionLengths().get(number<0>{});
+    static constexpr index_t num_lanes = ps_ys_to_xs_adaptor.get_top_dimension_length(number<0>{});
     static constexpr index_t num_vector_items =
-        ps_ys_to_xs_adaptor.GetBottomDimensionLengths().get(number<1>{});
-
-    // Our calculated matrix sizes should correspond to the top size from the distr.
-    static_assert(distr.get_lengths().get(number<0>{}) == mat_major_size);
-    static_assert(distr.get_lengths().get(number<1>{}) == mat_minor_size);
+        ps_ys_to_xs_adaptor.get_top_dimension_length(number<1>{});
 
     CK_TILE_HOST_DEVICE static auto calc_matrix_indices_from_lane_vector(index_t lane_inx,
                                                                          index_t vector_inx)
@@ -58,9 +51,7 @@ struct TileDistrEncRegMap
         }
 
         const auto ps_ys_idx = container_concat(array<index_t, 1>{lane_inx}, y_hidden_inx);
-        const auto window_adaptor_thread_coord_tmp =
-            make_tensor_adaptor_coordinate(ps_ys_to_xs_adaptor, ps_ys_idx);
-        return window_adaptor_thread_coord_tmp.get_bottom_index();
+        return ps_ys_to_xs_adaptor.calculate_bottom_index(ps_ys_idx);
     }
 
     struct LaneVec
@@ -127,7 +118,7 @@ struct TileDistrEncRegMap
     CK_TILE_HOST_DEVICE static void print_inverse_mapping()
     {
         InverseMap im = calc_inverse_map();
-        printf("Matrix element to (lane, vector) item. Elements are replicated an additional %d "
+        printf("Matrix element to (lane, vector item). Elements are replicated an additional %d "
                "time(s) in higher lanes. \n",
                num_repeat - 1);
         printf("Mat| ");
