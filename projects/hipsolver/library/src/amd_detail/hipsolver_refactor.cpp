@@ -329,11 +329,11 @@ try
 
     hipsolverRfHandle* rf     = (hipsolverRfHandle*)handle;
     hipsolverStatus_t  status = rf->free_all();
-    if(status != HIPSOLVER_STATUS_SUCCESS)
-        return status;
     rocsolver_destroy_rfinfo(rf->rfinfo);
     rocblas_destroy_handle(rf->handle);
     delete rf;
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
 
     // we check if rocsolver logging needs to be ended
     bool enable_rocsolver_logging = false;

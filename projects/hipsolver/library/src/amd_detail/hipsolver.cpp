@@ -748,9 +748,9 @@ struct hipsolverGesvdjInfo
     {
         if(capacity > 0)
         {
+            capacity = 0;
             if(hipFree(n_sweeps) != hipSuccess)
                 return HIPSOLVER_STATUS_INTERNAL_ERROR;
-            capacity = 0;
         }
         return HIPSOLVER_STATUS_SUCCESS;
     }
@@ -962,9 +962,9 @@ struct hipsolverSyevjInfo
     {
         if(capacity > 0)
         {
+            capacity = 0;
             if(hipFree(n_sweeps) != hipSuccess)
                 return HIPSOLVER_STATUS_INTERNAL_ERROR;
-            capacity = 0;
         }
         return HIPSOLVER_STATUS_SUCCESS;
     }

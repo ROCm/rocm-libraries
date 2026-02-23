@@ -418,13 +418,13 @@ try
 
     hipsolverSpHandle* sp     = (hipsolverSpHandle*)handle;
     hipsolverStatus_t  status = sp->free_all();
-    if(status != HIPSOLVER_STATUS_SUCCESS)
-        return status;
     rocblas_destroy_handle(sp->handle);
     rocsparse_destroy_handle(sp->sphandle);
     rocsolver_destroy_rfinfo(sp->rfinfo);
     cholmod_finish(&sp->c_handle);
     delete sp;
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
 
     // we check if rocsolver logging needs to be ended
     bool enable_rocsolver_logging = false;
