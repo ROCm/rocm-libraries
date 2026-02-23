@@ -82,10 +82,7 @@ static thread_local size_t log_buffer_i = 0;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 static thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
 
-bool IsBufferLogOn()
-{
-    return !env::enabled(MIOPEN_DISABLE_LOG_BUFFER);
-}
+bool IsBufferLogOn() { return !env::enabled(MIOPEN_DISABLE_LOG_BUFFER); }
 
 void ClearBufferLog()
 {
