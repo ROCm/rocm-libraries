@@ -13,8 +13,6 @@ The hipBLASLt source code resides in the following two directories:
 *  The ``library`` directory contains all source code for the library.
 *  The ``clients`` directory contains all test code and the code to build the clients.
   
-
-
 The library directory
 -----------------------
 
