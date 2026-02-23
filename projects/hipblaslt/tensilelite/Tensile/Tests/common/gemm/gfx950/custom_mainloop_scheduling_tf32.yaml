@@ -834,6 +834,8 @@ BenchmarkProblems:
         - LdsPadA: [-1] 
         - LdsPadB: [-1] 
         - StaggerU: [0]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
         - 1LDSBuffer: [0]
         - NonTemporalA: [0]
         - NonTemporalB: [0]
