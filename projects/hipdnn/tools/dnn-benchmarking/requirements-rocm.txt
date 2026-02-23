@@ -5,6 +5,11 @@
 -r requirements.txt
 
 # ROCm nightly PyTorch (required for GPU kernel timing on AMD)
-# Uses the gfx90X-dcgpu index for ROCm wheels
---index-url https://rocm.nightlies.amd.com/v2/gfx90X-dcgpu/
+# Torch wheels are only available on the v2-staging index.
+# --pre is required because ROCm torch builds are pre-releases.
+# Nightlies are ephemeral (~30 days); if install fails, check for
+# the latest available build at:
+#   https://rocm.nightlies.amd.com/v2-staging/gfx90X-dcgpu/torch/
+--index-url https://rocm.nightlies.amd.com/v2-staging/gfx90X-dcgpu/
+--pre
 torch
