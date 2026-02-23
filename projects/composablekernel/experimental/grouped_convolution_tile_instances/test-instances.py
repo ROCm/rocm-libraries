@@ -55,10 +55,6 @@ def compile_single_file(cpp_file: Path, project_root: Path, gpu_target: str, ver
             "-o", str(output_file)
         ]
         
-        # if verbose:
-        #     print()
-        #     print(f"  Command: {' '.join(cmd)}")
-        
         try:
             result = subprocess.run(
                 cmd,
