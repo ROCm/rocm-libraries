@@ -43,7 +43,8 @@ namespace mma = ck_tile::core::arch::mma;
 //
 // The kernel uses RegisterMap to scatter A and B into the correct (lane, vecIdx) positions
 // of the MMA fragment registers, executes the intrinsic, then uses RegisterMap again to
-// gather back into C matrix. The position of "1" in C is checked against the expected (m, n) location.
+// gather back into C matrix. The position of "1" in C is checked against the expected (m, n)
+// location.
 
 namespace {
 
@@ -95,18 +96,17 @@ struct MmaLayoutTestKernel
         BVecType b_frag{};
         CVecType c_frag{};
 
-        // get (m, k, n), where "1" should be placed for this block 
+        // get (m, k, n), where "1" should be placed for this block
         const uint32_t case_idx = static_cast<uint32_t>(blockIdx.x);
-        const uint32_t m = case_idx / (MmaTraits::BlockK * MmaTraits::BlockN);
-        const uint32_t k = (case_idx / MmaTraits::BlockN) % MmaTraits::BlockK;
-        const uint32_t n = case_idx % MmaTraits::BlockN;
+        const uint32_t m        = case_idx / (MmaTraits::BlockK * MmaTraits::BlockN);
+        const uint32_t k        = (case_idx / MmaTraits::BlockN) % MmaTraits::BlockK;
+        const uint32_t n        = case_idx % MmaTraits::BlockN;
 
         // place a single "1" in A/B fragments using (lane, vecIdx) -> (row, col) mapping
         for(uint32_t v = 0; v < a_vec_size; ++v)
         {
             auto a_coords = RegisterMap<MmaOp>::Register2AMap(lane, v);
-            if(static_cast<uint32_t>(a_coords[0]) == m &&
-               static_cast<uint32_t>(a_coords[1]) == k)
+            if(static_cast<uint32_t>(a_coords[0]) == m && static_cast<uint32_t>(a_coords[1]) == k)
             {
                 a_frag[v] = static_cast<ADataType>(1);
             }
@@ -115,8 +115,7 @@ struct MmaLayoutTestKernel
         for(uint32_t v = 0; v < b_vec_size; ++v)
         {
             auto b_coords = RegisterMap<MmaOp>::Register2BMap(lane, v);
-            if(static_cast<uint32_t>(b_coords[0]) == n &&
-               static_cast<uint32_t>(b_coords[1]) == k)
+            if(static_cast<uint32_t>(b_coords[0]) == n && static_cast<uint32_t>(b_coords[1]) == k)
             {
                 b_frag[v] = static_cast<BDataType>(1);
             }
@@ -124,17 +123,18 @@ struct MmaLayoutTestKernel
 
         c_frag = MmaOp::exec(a_frag, b_frag, c_frag);
 
-        uint32_t err = 0;
-        const CDataType tol = static_cast<CDataType>(1.0e-1f); // TODO: this tolerance might not be suitable for all data types and should be revisited if we add more configurations
+        uint32_t err        = 0;
+        const CDataType tol = static_cast<CDataType>(
+            1.0e-1f); // TODO: this tolerance might not be suitable for all data types and should be
+                      // revisited if we add more configurations
         for(uint32_t v = 0; v < c_vec_size; ++v)
         {
-            auto c_coords = RegisterMap<MmaOp>::Register2CMap(lane, v);
+            auto c_coords    = RegisterMap<MmaOp>::Register2CMap(lane, v);
             const uint32_t i = static_cast<uint32_t>(c_coords[0]);
             const uint32_t j = static_cast<uint32_t>(c_coords[1]);
 
-            const CDataType expected = (i == m && j == n)
-                                           ? static_cast<CDataType>(1)
-                                           : static_cast<CDataType>(0);
+            const CDataType expected =
+                (i == m && j == n) ? static_cast<CDataType>(1) : static_cast<CDataType>(0);
             const CDataType value = static_cast<CDataType>(c_frag[v]);
             if(fabsf(static_cast<float>(value - expected)) > static_cast<float>(tol))
             {
@@ -153,7 +153,8 @@ struct MmaLayoutTestKernel
 /**
  * @brief Test driver: runs the test for a given MMA configuration.
  *
- * The testlaunches (mkn) test cases (one per block) to check all possible positions of the "1" in the A/B tensors.
+ * The testlaunches (mkn) test cases (one per block) to check all possible positions of the "1" in
+ * the A/B tensors.
  *   1. Constructs A and B tensors with a single 1 at A(m,k) and B(k,n).
  *   2. Executes MMA intrinsic to compute C tensor.
  *   3. Checks if C has the 1 in the expected position.
@@ -164,14 +165,14 @@ struct MmaLayoutTestKernel
 template <typename Selector>
 bool run_mma_layout_test()
 {
-    using MmaOp               = typename Selector::SelectedOp;
-    using MmaTraits           = mma::MmaOpTraits<MmaOp>;
-    using ADataType           = typename MmaTraits::ADataType;
-    using BDataType           = typename MmaTraits::BDataType;
-    using CDataType           = typename MmaTraits::CDataType;
-    constexpr uint32_t BlockM = MmaTraits::BlockM;
-    constexpr uint32_t BlockN = MmaTraits::BlockN;
-    constexpr uint32_t BlockK = MmaTraits::BlockK;
+    using MmaOp                       = typename Selector::SelectedOp;
+    using MmaTraits                   = mma::MmaOpTraits<MmaOp>;
+    using ADataType                   = typename MmaTraits::ADataType;
+    using BDataType                   = typename MmaTraits::BDataType;
+    using CDataType                   = typename MmaTraits::CDataType;
+    constexpr uint32_t BlockM         = MmaTraits::BlockM;
+    constexpr uint32_t BlockN         = MmaTraits::BlockN;
+    constexpr uint32_t BlockK         = MmaTraits::BlockK;
     constexpr auto selector_target_id = MmaTraits::CompilerTarget::TARGET_ID;
     constexpr auto selector_wave_size = MmaTraits::CompilerTarget::WAVE_SIZE_ID;
 
@@ -188,7 +189,8 @@ bool run_mma_layout_test()
     const bool has_device = device_count > 0;
 
     if(!has_device || runtime_target == ck_tile::core::arch::amdgcn_target_id::HOST ||
-       runtime_target != selector_target_id || props.warpSize != static_cast<int>(selector_wave_size))
+       runtime_target != selector_target_id ||
+       props.warpSize != static_cast<int>(selector_wave_size))
     {
         return false;
     }
@@ -201,16 +203,24 @@ bool run_mma_layout_test()
 
     std::ignore = hipGetLastError();
 
+    using Kernel = MmaLayoutTestKernel<ADataType,
+                                       BDataType,
+                                       CDataType,
+                                       BlockM,
+                                       BlockN,
+                                       BlockK,
+                                       static_cast<int>(selector_wave_size)>;
 
-    using Kernel = MmaLayoutTestKernel<ADataType, BDataType, CDataType,
-                                    BlockM, BlockN, BlockK, static_cast<int>(selector_wave_size)>;
+    std::ignore =
+        ck_tile::launch_kernel(ck_tile::stream_config{nullptr, false, 0, 0, 1},
+                               ck_tile::make_kernel(Kernel{},
+                                                    dim3(total_cases),
+                                                    dim3(static_cast<int>(selector_wave_size)),
+                                                    0,
+                                                    d_error_ptr));
 
-    std::ignore = ck_tile::launch_kernel(
-        ck_tile::stream_config{nullptr, false, 0, 0, 1},
-        ck_tile::make_kernel(Kernel{}, dim3(total_cases), dim3(static_cast<int>(selector_wave_size)), 0, d_error_ptr));
-
-    HIP_CHECK_ERROR(
-        hipMemcpyAsync(h_errors.data(), d_error_ptr, d_errors.GetBufferSize(), hipMemcpyDeviceToHost));
+    HIP_CHECK_ERROR(hipMemcpyAsync(
+        h_errors.data(), d_error_ptr, d_errors.GetBufferSize(), hipMemcpyDeviceToHost));
     HIP_CHECK_ERROR(hipStreamSynchronize(nullptr));
 
     for(uint32_t case_idx = 0; case_idx < total_cases; ++case_idx)
@@ -219,8 +229,7 @@ bool run_mma_layout_test()
         const uint32_t k = (case_idx / BlockN) % BlockK;
         const uint32_t n = case_idx % BlockN;
 
-        EXPECT_EQ(h_errors[case_idx], 0u)
-            << "Mismatch for m=" << m << " k=" << k << " n=" << n;
+        EXPECT_EQ(h_errors[case_idx], 0u) << "Mismatch for m=" << m << " k=" << k << " n=" << n;
     }
 
     return true;
