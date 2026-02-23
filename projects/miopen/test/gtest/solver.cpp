@@ -156,12 +156,13 @@ auto GenCases()
          TestParams{SearchableTestSolver::NoSearchFileName(),
                     {1, 1, 1, 2},
                     [](miopen::ExecutionContext& c) { c.do_search = false; }},
-         TestParams{SearchableTestSolver::FileName(),
+         TestParams{SearchableTestSolver::NoSearchFileName(),
                     {1, 1, 1, 2},
                     [](miopen::ExecutionContext& c) { c.do_search = true; }}},
-        {TestParams{
-             SearchableTestSolver::FileName(), {1, 1, 1, 2}, [](miopen::ExecutionContext&) {}},
-         TestParams{SearchableTestSolver::FileName(),
+        {TestParams{SearchableTestSolver::NoSearchFileName(),
+                    {1, 1, 1, 2},
+                    [](miopen::ExecutionContext&) {}},
+         TestParams{SearchableTestSolver::NoSearchFileName(),
                     {1, 1, 1, 2},
                     [](miopen::ExecutionContext& c) { c.do_search = true; }}})};
 }
