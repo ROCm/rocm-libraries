@@ -128,9 +128,4 @@ TestConvolutionHeuristicsFp32              TestConvolutionHeuristics
 
 ## Conditional Guidelines
 
-When modifying public API headers in these directories, read and follow `docs/doxygen-guidelines.md`:
-- `backend/include/**/*.h`
-- `frontend/include/hipdnn_frontend/*.hpp` (not `detail/` subdirectory)
-- `frontend/include/hipdnn_frontend/attributes/**/*.hpp`
-- `frontend/include/hipdnn_frontend/knob/**/*.hpp`
-- `plugin_sdk/include/**/*.hpp`
+When modifying public API headers, read and follow `docs/doxygen-guidelines.md`.
