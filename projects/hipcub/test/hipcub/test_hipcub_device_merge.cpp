@@ -468,6 +468,11 @@ std::vector<std::tuple<size_t, size_t>> get_large_sizes()
 
 TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
 {
+
+#if defined(_WIN32)
+    GTEST_SKIP() << "Windows AMD HIP cannot allocate >= 4 GiB buffers.";
+#endif
+
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
