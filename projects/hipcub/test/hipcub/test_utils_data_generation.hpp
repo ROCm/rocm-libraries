@@ -473,7 +473,12 @@ inline std::vector<T> get_random_data01(size_t size, float p, int seed_value)
     return data;
 }
 
+// Windows HIP cannot support allocations >= 4 GiB.
+#ifdef _WIN32
+template<unsigned int MaxPow2 = 27>
+#else
 template<unsigned int MaxPow2 = 35>
+#endif
 inline std::vector<size_t> get_large_sizes(int seed_value)
 {
     // clang-format off
