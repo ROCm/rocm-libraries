@@ -64,7 +64,7 @@ protected:
         }
     }
 
-    virtual void runGraphTest(DataType tolerance,
+    virtual void runGraphTest(float tolerance,
                               const hipdnn_data_sdk::utilities::TensorLayout& layout
                               = hipdnn_data_sdk::utilities::TensorLayout::NCHW)
         = 0;
