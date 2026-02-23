@@ -11,10 +11,6 @@ find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 add_executable(
     hip_kernel_plugin_tests
     engines/TestHipKernelEngine.cpp
-    engines/plans/TestBatchnormApplicabilityChecks.cpp
-    engines/plans/TestBatchnormFwdInferencePlan.cpp
-    engines/plans/TestBatchnormFwdInferenceWithVariancePlan.cpp
-    engines/plans/TestBatchnormPlanBuilder.cpp
     main.cpp
     TestHipKernelEngineManager.cpp
     TestHipKernelEnginePluginApi.cpp
@@ -23,6 +19,9 @@ add_executable(
     TestHipKernelPluginApi.cpp
     TestHipProgramAndKernel.cpp
 )
+
+# Adds extra test source files to hip_kernel_plugin_tests target
+add_subdirectory(engines/plans)
 
 target_compile_options(hip_kernel_plugin_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 

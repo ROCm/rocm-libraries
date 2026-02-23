@@ -11,9 +11,9 @@
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "../tests/common/ActivationCommon.hpp"
-#include "../tests/common/BatchnormCommon.hpp"
-#include "IntegrationGraphVerificationHarness.hpp"
+#include "../../tests/common/ActivationCommon.hpp"
+#include "../../tests/common/BatchnormCommon.hpp"
+#include "../IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk::utilities;
