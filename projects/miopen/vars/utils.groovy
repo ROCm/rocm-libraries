@@ -469,8 +469,9 @@ def getDockerImage(Map conf=[:])
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
                 sh """
                     docker buildx rm ci-builder || true
-                    docker buildx create --name ci-builder --driver-opt network=host --driver docker-container --use --config /tmp/buildkitd.toml
-                    docker buildx inspect ci-builder --bootstrap
+                    docker buildx create --name ci-builder --driver docker-container --use
+                    docker buildx use ci-builder
+                    docker buildx inspect --bootstrap
                 """.stripIndent()
                 sh """
                     DOCKER_BUILDKIT=1 docker buildx build \
