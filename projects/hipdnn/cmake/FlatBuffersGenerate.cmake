@@ -34,8 +34,10 @@ function(hipdnn_generate_flatbuffer_headers)
         endif()
     endforeach()
 
-    # Common flatc code generation flags
-    set(_flatc_flags --cpp --gen-object-api --gen-mutable --gen-compare --defaults-json --scoped-enums)
+    # Common extra flags (shared between primary and secondary generation)
+    set(_flatc_extra_flags --gen-object-api --gen-mutable --gen-compare --defaults-json --scoped-enums)
+    # Full flags for direct flatc invocation (add_custom_command includes --cpp explicitly)
+    set(_flatc_flags --cpp ${_flatc_extra_flags})
 
     # Compute primary version directory
     string(REPLACE "." "_" _primary_ver_tag "${ARG_PRIMARY_VERSION}")
@@ -47,9 +49,7 @@ function(hipdnn_generate_flatbuffer_headers)
     # --- Primary version: use build_flatbuffers() from the active FlatBuffers dependency ---
     _save_var(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS)
 
-    set(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS
-        "--gen-object-api;--gen-mutable;--gen-compare;--defaults-json;--scoped-enums"
-    )
+    set(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS "${_flatc_extra_flags}")
     build_flatbuffers(
         "${ARG_SCHEMAS}" # flatbuffers_schemas
         "" # schema_include_dirs
@@ -88,6 +88,8 @@ function(hipdnn_generate_flatbuffer_headers)
         ExternalProject_Add(${_ep_name}
             GIT_REPOSITORY https://github.com/google/flatbuffers.git
             GIT_TAG v${_version}
+            UPDATE_DISCONNECTED TRUE
+            CONFIGURE_HANDLED_BY_BUILD TRUE
             BINARY_DIR ${_flatc_build_dir}
             CMAKE_ARGS
                 -DFLATBUFFERS_BUILD_FLATC=ON
