@@ -1,0 +1,51 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+#pragma once
+
+#include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
+#include <hipdnn_data_sdk/utilities/json/Common.hpp>
+
+namespace hipdnn_data_sdk::data_objects
+{
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline void to_json(nlohmann::json& rmsnormJson, const RmsnormAttributes& rms)
+{
+    auto& inputs = rmsnormJson["inputs"] = {};
+
+    inputs["x_tensor_uid"] = rms.x_tensor_uid();
+    inputs["scale_tensor_uid"] = rms.scale_tensor_uid();
+    inputs["epsilon_tensor_uid"] = rms.epsilon_tensor_uid();
+
+    auto& outputs = rmsnormJson["outputs"] = {};
+    outputs["y_tensor_uid"] = rms.y_tensor_uid();
+    if(rms.inv_rms_tensor_uid().has_value())
+    {
+        outputs["inv_rms_tensor_uid"] = rms.inv_rms_tensor_uid().value();
+    }
+}
+
+}
+namespace hipdnn_data_sdk::json
+{
+template <>
+inline auto to<data_objects::RmsnormAttributes>(flatbuffers::FlatBufferBuilder& builder,
+                                                 const nlohmann::json& entry)
+{
+    auto& inputs = entry["inputs"];
+
+    flatbuffers::Optional<int64_t> invRmsUid = flatbuffers::nullopt;
+    if(entry.contains("outputs") && entry["outputs"].contains("inv_rms_tensor_uid"))
+    {
+        invRmsUid = entry["outputs"]["inv_rms_tensor_uid"].get<int64_t>();
+    }
+
+    return data_objects::CreateRmsnormAttributes(
+        builder,
+        inputs.at("x_tensor_uid").get<int64_t>(),
+        inputs.at("scale_tensor_uid").get<int64_t>(),
+        inputs.at("epsilon_tensor_uid").get<int64_t>(),
+        entry.at("outputs").at("y_tensor_uid").get<int64_t>(),
+        invRmsUid);
+}
+
+}

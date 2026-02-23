@@ -1,0 +1,12 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_data_sdk.data_objects;
+
+table RmsnormAttributes {
+    x_tensor_uid: long;
+    scale_tensor_uid: long;
+    epsilon_tensor_uid: long;
+    y_tensor_uid: long;
+    inv_rms_tensor_uid: long = null;
+}

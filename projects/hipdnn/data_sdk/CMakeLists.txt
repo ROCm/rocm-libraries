@@ -118,6 +118,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         schemas/knob_value.fbs
         schemas/matmul_attributes.fbs
         schemas/pointwise_attributes.fbs
+        schemas/rmsnorm_attributes.fbs
         schemas/tensor_attributes.fbs
     )
 

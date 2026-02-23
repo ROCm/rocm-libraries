@@ -15,6 +15,7 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/RmsnormAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/GraphDetail.hpp>
@@ -30,6 +31,7 @@
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/RmsnormNode.hpp>
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
@@ -537,6 +539,18 @@ private:
                     }
                     _sub_nodes.emplace_back(
                         std::make_shared<MatmulNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::RmsnormAttributes:
+                {
+                    auto attr = RmsnormAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_RmsnormAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<RmsnormNode>(std::move(attr), graph_attributes));
                     break;
                 }
                 default:
@@ -1367,6 +1381,30 @@ public:
             std::move(attributes), graph_attributes));
 
         return y;
+    }
+
+    std::array<std::shared_ptr<TensorAttributes>, 2>
+        rmsnorm(std::shared_ptr<TensorAttributes> x,
+                std::shared_ptr<TensorAttributes> scale,
+                RmsnormAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Rmsnorm_" + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+        auto invRmsOut = outputTensor(attributes.get_name() + "::INV_RMS");
+
+        attributes.set_x(std::move(x));
+        attributes.set_scale(std::move(scale));
+        attributes.set_y(y);
+        attributes.set_inv_rms(invRmsOut);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<RmsnormNode>(std::move(attributes), graph_attributes));
+
+        return {y, invRmsOut};
     }
 
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
