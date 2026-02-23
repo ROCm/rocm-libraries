@@ -13,54 +13,20 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/TensorFileUtils.hpp>
 #include <type_traits>
 #include <variant>
 
 namespace hipdnn_test_sdk::utilities
 {
 
-namespace detail
-{
-
-template <class T>
-struct DatatypeFromTensor
-{
-};
-
-template <class T>
-struct DatatypeFromTensor<hipdnn_data_sdk::utilities::Tensor<T>>
-{
-    using Type = T;
-};
-
-inline void fillTensorFromFile(hipdnn_data_sdk::utilities::ITensor& tensor,
-                               const std::filesystem::path& path)
-{
-
-    std::ifstream fileInputStream(path, std::ios::binary);
-    if(!fileInputStream)
-    {
-        throw std::runtime_error("Error: could not load tensor " + path.string());
-    }
-
-    auto vec = std::vector<unsigned char>(std::istreambuf_iterator<char>(fileInputStream),
-                                          std::istreambuf_iterator<char>{});
-
-    tensor.fillWithData(vec.data(), vec.size());
-}
-}
-
-template <class T>
-using DataTypeFromTensor =
-    typename detail::DatatypeFromTensor<std::remove_cv_t<std::remove_reference_t<T>>>::Type;
-
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     tensorFromFileAndAttributes(const std::filesystem::path& filepath,
                                 const hipdnn_data_sdk::data_objects::TensorAttributes& attributes)
 {
-    auto tensor = hipdnn_test_sdk::utilities::createTensorFromAttribute(attributes);
-    detail::fillTensorFromFile(*tensor, filepath);
+    auto tensor = hipdnn_test_sdk::detail::createTensorFromAttribute(attributes);
+    hipdnn_test_sdk::detail::fillTensorFromFile(*tensor, filepath);
 
     return tensor;
 }
@@ -144,7 +110,7 @@ struct GraphAndTensorMap
                     using DataType = decltype(dataType);
 
                     auto validator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<DataType>{
-                        static_cast<DataType>(absTolerance), static_cast<DataType>(relTolerance)};
+                        absTolerance, relTolerance};
                     return validator.allClose(*referenceTensorPtr, *tensorMap.at(uid));
                 },
                 [&](int) {
