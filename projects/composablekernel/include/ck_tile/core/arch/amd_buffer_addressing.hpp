@@ -2579,7 +2579,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_max_impl(const thread_buffer<T, N> src_thr
 }
 
 template <typename T>
-using has_type = T::type;
+using has_type = typename T::type;
 
 // buffer_load requires:
 //   1) p_src_wave must point to global memory space
@@ -2621,8 +2621,8 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
             {
                 // Use vector_t for not valid elements to avoid permute instructions.
                 // Get raw type from structure
-                using vector_t = T::type __attribute__((ext_vector_type(N)));
-                if constexpr(sizeof(vector_t) != sizeof(T::type) * N)
+                using vector_t = typename T::type __attribute__((ext_vector_type(N)));
+                if constexpr(sizeof(vector_t) != sizeof(typename T::type) * N)
                 {
                     // Not possible to use set_as
                     return thread_buffer<T, N>{numeric<T>::zero()};
@@ -2683,8 +2683,8 @@ amd_buffer_load_invalid_element_return_customized_value(const T* p_src_wave,
             {
                 // Use vector_t for not valid elements to avoid permute instructions.
                 // Get raw type from structure
-                using vector_t = T::type __attribute__((ext_vector_type(N)));
-                if constexpr(sizeof(vector_t) != sizeof(T::type) * N)
+                using vector_t = typename T::type __attribute__((ext_vector_type(N)));
+                if constexpr(sizeof(vector_t) != sizeof(typename T::type) * N)
                 {
                     // Not possible to use set_as
                     return thread_buffer<T, N>{customized_value};
