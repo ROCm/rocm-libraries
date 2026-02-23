@@ -152,6 +152,18 @@ inline std::vector<ConvTestCase> getDeterministicConvTestCases4D()
     };
 }
 
+inline std::vector<ConvTestCase> getDeterministicConvTestCases5D()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        // Filter 1x1x1 - basic 5D case
+        {{1, 8, 8, 8, 8}, {1, 8, 1, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, seed},
+        // Filter 3x3x3 with padding - common 5D case
+        {{1, 8, 8, 8, 8}, {1, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
+    };
+}
+
 // ============================================================================
 // Deterministic Batchnorm Test Cases (for no-solver verification)
 // ============================================================================
@@ -265,6 +277,18 @@ using DeterministicConvFwdNchwFp32 = DeterministicConvForward<float>;
 using DeterministicConvFwdNchwBfp16 = DeterministicConvForward<bfloat16>;
 using DeterministicConvFwdNchwFp16 = DeterministicConvForward<half>;
 
+using DeterministicConvFwdNhwcFp32 = DeterministicConvForward<float>;
+using DeterministicConvFwdNhwcBfp16 = DeterministicConvForward<bfloat16>;
+using DeterministicConvFwdNhwcFp16 = DeterministicConvForward<half>;
+
+using DeterministicConvFwd5dNcdhwFp32 = DeterministicConvForward<float>;
+using DeterministicConvFwd5dNcdhwBfp16 = DeterministicConvForward<bfloat16>;
+using DeterministicConvFwd5dNcdhwFp16 = DeterministicConvForward<half>;
+
+using DeterministicConvFwd5dNdhwcFp32 = DeterministicConvForward<float>;
+using DeterministicConvFwd5dNdhwcBfp16 = DeterministicConvForward<bfloat16>;
+using DeterministicConvFwd5dNdhwcFp16 = DeterministicConvForward<half>;
+
 // ============================================================================
 // Convolution Backward Data (Dgrad) Determinism Test
 // ============================================================================
@@ -335,6 +359,18 @@ using DeterministicConvDgradNchwFp32 = DeterministicConvDgrad<float>;
 using DeterministicConvDgradNchwBfp16 = DeterministicConvDgrad<bfloat16>;
 using DeterministicConvDgradNchwFp16 = DeterministicConvDgrad<half>;
 
+using DeterministicConvDgradNhwcFp32 = DeterministicConvDgrad<float>;
+using DeterministicConvDgradNhwcBfp16 = DeterministicConvDgrad<bfloat16>;
+using DeterministicConvDgradNhwcFp16 = DeterministicConvDgrad<half>;
+
+using DeterministicConvDgrad5dNcdhwFp32 = DeterministicConvDgrad<float>;
+using DeterministicConvDgrad5dNcdhwBfp16 = DeterministicConvDgrad<bfloat16>;
+using DeterministicConvDgrad5dNcdhwFp16 = DeterministicConvDgrad<half>;
+
+using DeterministicConvDgrad5dNdhwcFp32 = DeterministicConvDgrad<float>;
+using DeterministicConvDgrad5dNdhwcBfp16 = DeterministicConvDgrad<bfloat16>;
+using DeterministicConvDgrad5dNdhwcFp16 = DeterministicConvDgrad<half>;
+
 // ============================================================================
 // Convolution Backward Weights (Wgrad) Determinism Test
 // ============================================================================
@@ -404,6 +440,18 @@ protected:
 using DeterministicConvWgradNchwFp32 = DeterministicConvWgrad<float>;
 using DeterministicConvWgradNchwBfp16 = DeterministicConvWgrad<bfloat16>;
 using DeterministicConvWgradNchwFp16 = DeterministicConvWgrad<half>;
+
+using DeterministicConvWgradNhwcFp32 = DeterministicConvWgrad<float>;
+using DeterministicConvWgradNhwcBfp16 = DeterministicConvWgrad<bfloat16>;
+using DeterministicConvWgradNhwcFp16 = DeterministicConvWgrad<half>;
+
+using DeterministicConvWgrad5dNcdhwFp32 = DeterministicConvWgrad<float>;
+using DeterministicConvWgrad5dNcdhwBfp16 = DeterministicConvWgrad<bfloat16>;
+using DeterministicConvWgrad5dNcdhwFp16 = DeterministicConvWgrad<half>;
+
+using DeterministicConvWgrad5dNdhwcFp32 = DeterministicConvWgrad<float>;
+using DeterministicConvWgrad5dNdhwcBfp16 = DeterministicConvWgrad<bfloat16>;
+using DeterministicConvWgrad5dNdhwcFp16 = DeterministicConvWgrad<half>;
 
 // ============================================================================
 // Fused Convolution Forward + Bias + Activation Determinism Test
@@ -604,6 +652,90 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          DeterministicConvFwdNchwFp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
+// NHWC Layout Tests
+TEST_P(DeterministicConvFwdNhwcFp32, Determinism)
+{
+    runDeterminismTest(TensorLayout::NHWC);
+}
+
+TEST_P(DeterministicConvFwdNhwcBfp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NHWC);
+}
+
+TEST_P(DeterministicConvFwdNhwcFp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NHWC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvFwdNhwcFp32,
+                         testing::ValuesIn(getDeterministicConvTestCases4D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvFwdNhwcBfp16,
+                         testing::ValuesIn(getDeterministicConvTestCases4D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvFwdNhwcFp16,
+                         testing::ValuesIn(getDeterministicConvTestCases4D()));
+
+// 5D NCDHW Layout Tests
+TEST_P(DeterministicConvFwd5dNcdhwFp32, Determinism)
+{
+    runDeterminismTest(TensorLayout::NCDHW);
+}
+
+TEST_P(DeterministicConvFwd5dNcdhwBfp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NCDHW);
+}
+
+TEST_P(DeterministicConvFwd5dNcdhwFp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NCDHW);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvFwd5dNcdhwFp32,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvFwd5dNcdhwBfp16,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvFwd5dNcdhwFp16,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+// 5D NDHWC Layout Tests
+TEST_P(DeterministicConvFwd5dNdhwcFp32, Determinism)
+{
+    runDeterminismTest(TensorLayout::NDHWC);
+}
+
+TEST_P(DeterministicConvFwd5dNdhwcBfp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NDHWC);
+}
+
+TEST_P(DeterministicConvFwd5dNdhwcFp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NDHWC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvFwd5dNdhwcFp32,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvFwd5dNdhwcBfp16,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvFwd5dNdhwcFp16,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
 // ============================================================================
 // Convolution Backward Data (Dgrad) Determinism Tests
 // ============================================================================
@@ -635,6 +767,90 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          DeterministicConvDgradNchwFp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
+// NHWC Layout Tests
+TEST_P(DeterministicConvDgradNhwcFp32, Determinism)
+{
+    runDeterminismTest(TensorLayout::NHWC);
+}
+
+TEST_P(DeterministicConvDgradNhwcBfp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NHWC);
+}
+
+TEST_P(DeterministicConvDgradNhwcFp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NHWC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvDgradNhwcFp32,
+                         testing::ValuesIn(getDeterministicConvTestCases4D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvDgradNhwcBfp16,
+                         testing::ValuesIn(getDeterministicConvTestCases4D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvDgradNhwcFp16,
+                         testing::ValuesIn(getDeterministicConvTestCases4D()));
+
+// 5D NCDHW Layout Tests
+TEST_P(DeterministicConvDgrad5dNcdhwFp32, Determinism)
+{
+    runDeterminismTest(TensorLayout::NCDHW);
+}
+
+TEST_P(DeterministicConvDgrad5dNcdhwBfp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NCDHW);
+}
+
+TEST_P(DeterministicConvDgrad5dNcdhwFp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NCDHW);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvDgrad5dNcdhwFp32,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvDgrad5dNcdhwBfp16,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvDgrad5dNcdhwFp16,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+// 5D NDHWC Layout Tests
+TEST_P(DeterministicConvDgrad5dNdhwcFp32, Determinism)
+{
+    runDeterminismTest(TensorLayout::NDHWC);
+}
+
+TEST_P(DeterministicConvDgrad5dNdhwcBfp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NDHWC);
+}
+
+TEST_P(DeterministicConvDgrad5dNdhwcFp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NDHWC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvDgrad5dNdhwcFp32,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvDgrad5dNdhwcBfp16,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvDgrad5dNdhwcFp16,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
 // ============================================================================
 // Convolution Backward Weights (Wgrad) Determinism Tests
 // ============================================================================
@@ -665,6 +881,90 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          DeterministicConvWgradNchwFp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
+
+// NHWC Layout Tests
+TEST_P(DeterministicConvWgradNhwcFp32, Determinism)
+{
+    runDeterminismTest(TensorLayout::NHWC);
+}
+
+TEST_P(DeterministicConvWgradNhwcBfp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NHWC);
+}
+
+TEST_P(DeterministicConvWgradNhwcFp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NHWC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvWgradNhwcFp32,
+                         testing::ValuesIn(getDeterministicConvTestCases4D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvWgradNhwcBfp16,
+                         testing::ValuesIn(getDeterministicConvTestCases4D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvWgradNhwcFp16,
+                         testing::ValuesIn(getDeterministicConvTestCases4D()));
+
+// 5D NCDHW Layout Tests
+TEST_P(DeterministicConvWgrad5dNcdhwFp32, Determinism)
+{
+    runDeterminismTest(TensorLayout::NCDHW);
+}
+
+TEST_P(DeterministicConvWgrad5dNcdhwBfp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NCDHW);
+}
+
+TEST_P(DeterministicConvWgrad5dNcdhwFp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NCDHW);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvWgrad5dNcdhwFp32,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvWgrad5dNcdhwBfp16,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvWgrad5dNcdhwFp16,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+// 5D NDHWC Layout Tests
+TEST_P(DeterministicConvWgrad5dNdhwcFp32, Determinism)
+{
+    runDeterminismTest(TensorLayout::NDHWC);
+}
+
+TEST_P(DeterministicConvWgrad5dNdhwcBfp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NDHWC);
+}
+
+TEST_P(DeterministicConvWgrad5dNdhwcFp16, Determinism)
+{
+    runDeterminismTest(TensorLayout::NDHWC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvWgrad5dNdhwcFp32,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvWgrad5dNdhwcBfp16,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         DeterministicConvWgrad5dNdhwcFp16,
+                         testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 // ============================================================================
 // Fused Convolution Forward + Bias + Activation Determinism Tests
