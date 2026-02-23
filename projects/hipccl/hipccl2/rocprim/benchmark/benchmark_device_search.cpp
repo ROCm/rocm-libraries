@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "benchmark_device_search.hpp"
-#include "benchmark_utils.hpp"
+#include "primbench.hpp"
 
 #include "../common/utils_custom_type.hpp"
 
@@ -30,46 +30,38 @@
 #include <stdint.h>
 
 #define CREATE_BENCHMARK_SEARCH(TYPE, KEY_SIZE, REPEATING) \
-    executor.queue_instance(device_search_benchmark<TYPE>(KEY_SIZE, REPEATING));
+    executor.queue<device_search_benchmark<TYPE>>(KEY_SIZE, REPEATING);
 
-#define CREATE_BENCHMARK_PATTERN(TYPE, REPEATING)       \
-    {                                                   \
-        CREATE_BENCHMARK_SEARCH(TYPE, 10, REPEATING)    \
-        CREATE_BENCHMARK_SEARCH(TYPE, 100, REPEATING)   \
-        CREATE_BENCHMARK_SEARCH(TYPE, 1000, REPEATING)  \
-        CREATE_BENCHMARK_SEARCH(TYPE, 10000, REPEATING) \
-    }
+#define CREATE_BENCHMARK_PATTERN(TYPE, REPEATING)                                               \
+    {CREATE_BENCHMARK_SEARCH(TYPE, 10, REPEATING) CREATE_BENCHMARK_SEARCH(TYPE, 100, REPEATING) \
+         CREATE_BENCHMARK_SEARCH(TYPE, 1000, REPEATING)                                         \
+             CREATE_BENCHMARK_SEARCH(TYPE, 10000, REPEATING)}
 
-#define CREATE_BENCHMARK(TYPE)                                                     \
-    {                                                                              \
-        CREATE_BENCHMARK_PATTERN(TYPE, true) CREATE_BENCHMARK_PATTERN(TYPE, false) \
-    }
+#define CREATE_BENCHMARK(TYPE) \
+    {CREATE_BENCHMARK_PATTERN(TYPE, true) CREATE_BENCHMARK_PATTERN(TYPE, false)}
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
+    primbench::settings settings;
+    settings.size                 = 128 * primbench::MiB;
+    settings.min_gpu_ms_per_batch = 100;
+    primbench::executor executor(argc, argv, settings);
 
-    CREATE_BENCHMARK(int)
-    CREATE_BENCHMARK(long long)
+    CREATE_BENCHMARK(int32_t)
+    CREATE_BENCHMARK(int64_t)
     CREATE_BENCHMARK(int8_t)
     CREATE_BENCHMARK(uint8_t)
     CREATE_BENCHMARK(rocprim::half)
-    CREATE_BENCHMARK(short)
+    CREATE_BENCHMARK(int16_t)
     CREATE_BENCHMARK(float)
     CREATE_BENCHMARK(rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t)
 
-    using custom_float2          = common::custom_type<float, float>;
-    using custom_double2         = common::custom_type<double, double>;
-    using custom_int2            = common::custom_type<int, int>;
-    using custom_char_double     = common::custom_type<char, double>;
-    using custom_longlong_double = common::custom_type<long long, double>;
-
-    CREATE_BENCHMARK(custom_float2)
-    CREATE_BENCHMARK(custom_double2)
-    CREATE_BENCHMARK(custom_int2)
-    CREATE_BENCHMARK(custom_char_double)
-    CREATE_BENCHMARK(custom_longlong_double)
+    CREATE_BENCHMARK(custom_f32_f32)
+    CREATE_BENCHMARK(custom_f64_f64)
+    CREATE_BENCHMARK(custom_i32_i32)
+    CREATE_BENCHMARK(custom_i8_f64)
+    CREATE_BENCHMARK(custom_i64_f64)
 
     executor.run();
 }
