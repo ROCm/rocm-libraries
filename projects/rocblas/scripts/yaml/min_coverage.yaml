@@ -328,18 +328,16 @@ Tests:
       - spr: *single_double_precisions_complex_real
       - spmv: *single_double_precisions_complex_real
       - sbmv: *single_double_precisions_complex_real
-      - hpr2: *single_double_precisions_complex_real
-      - hpr: *single_double_precisions_complex_real
+      - hpr2: *single_double_precisions_complex
+      - hpr: *single_double_precisions_complex
       - hpmv: *single_double_precisions_complex_real
-      - her2: *single_double_precisions_complex_real
+      - her2: *single_double_precisions_complex
       - her: *single_double_precisions_complex_real
-      - hemv: *single_double_precisions_complex_real
+      - hemv: *single_double_precisions_complex
       - hbmv: *single_double_precisions_complex_real
       - spr: *single_double_precisions_complex_real
       - spmv: *single_double_precisions_complex_real
       - sbmv: *single_double_precisions_complex_real
-      - hpr2: *single_double_precisions_complex_real
-      - hpr: *single_double_precisions_complex_real
       - hpmv: *single_double_precisions_complex_real
     arguments: *hbmv_common_args
 
@@ -353,18 +351,16 @@ Tests:
       - spr_batched: *single_double_precisions_complex_real
       - spmv_batched: *single_double_precisions_complex_real
       - sbmv_batched: *single_double_precisions_complex_real
-      - hpr2_batched: *single_double_precisions_complex_real
-      - hpr_batched: *single_double_precisions_complex_real
+      - hpr2_batched: *single_double_precisions_complex
+      - hpr_batched: *single_double_precisions_complex
       - hpmv_batched: *single_double_precisions_complex_real
-      - her2_batched: *single_double_precisions_complex_real
+      - her2_batched: *single_double_precisions_complex
       - her_batched: *single_double_precisions_complex_real
-      - hemv_batched: *single_double_precisions_complex_real
+      - hemv_batched: *single_double_precisions_complex
       - hbmv_batched: *single_double_precisions_complex_real
       - spr_batched: *single_double_precisions_complex_real
       - spmv_batched: *single_double_precisions_complex_real
       - sbmv_batched: *single_double_precisions_complex_real
-      - hpr2_batched: *single_double_precisions_complex_real
-      - hpr_batched: *single_double_precisions_complex_real
       - hpmv_batched: *single_double_precisions_complex_real
     arguments: *hbmv_common_args
     batch_count: *batch_count_range
@@ -382,9 +378,9 @@ Tests:
       - hpr2_strided_batched: *single_double_precisions_complex_real
       - hpr_strided_batched: *single_double_precisions_complex_real
       - hpmv_strided_batched: *single_double_precisions_complex_real
-      - her2_strided_batched: *single_double_precisions_complex_real
+      - her2_strided_batched: *single_double_precisions_complex
       - her_strided_batched: *single_double_precisions_complex_real
-      - hemv_strided_batched: *single_double_precisions_complex_real
+      - hemv_strided_batched: *single_double_precisions_complex
       - hbmv_strided_batched: *single_double_precisions_complex_real
       - spr_strided_batched: *single_double_precisions_complex_real
       - spmv_strided_batched: *single_double_precisions_complex_real
@@ -566,14 +562,14 @@ Tests:
   - name: her2k_L3_quick
     category: quick
     function:
-      - her2k: *single_double_precisions_complex_real
+      - her2k: *single_double_precisions_complex
     arguments: *gemm_common_args
     uplo: [ L ]
 
   - name: her2k_batched_L3_pre_checkin
     category: pre_checkin
     function:
-      - her2k_batched: *single_double_precisions_complex_real
+      - her2k_batched: *single_double_precisions_complex
     arguments: *gemm_common_args
     batch_count: *batch_count_range
     uplo: [ L ]
@@ -581,7 +577,7 @@ Tests:
   - name: her2k_strided_batched_L3_nightly
     category: nightly
     function:
-      - her2k_strided_batched: *single_double_precisions_complex_real
+      - her2k_strided_batched: *single_double_precisions_complex
     arguments: *gemm_common_args
     batch_count: *batch_count_range
     uplo: [ L ]
@@ -589,14 +585,14 @@ Tests:
   - name: herk_L3_quick
     category: quick
     function:
-      - herk: *single_double_precisions_complex_real
+      - herk: *single_double_precisions_complex
     arguments: *gemm_common_args
     uplo: [ L ]
 
   - name: herk_batched_L3_pre_checkin
     category: pre_checkin
     function:
-      - herk_batched: *single_double_precisions_complex_real
+      - herk_batched: *single_double_precisions_complex
     arguments: *gemm_common_args
     batch_count: *batch_count_range
     uplo: [ L ]
@@ -604,7 +600,7 @@ Tests:
   - name: herk_strided_batched_L3_nightly
     category: nightly
     function:
-      - herk_strided_batched: *single_double_precisions_complex_real
+      - herk_strided_batched: *single_double_precisions_complex
     arguments: *gemm_common_args
     batch_count: *batch_count_range
     uplo: [ L ]
