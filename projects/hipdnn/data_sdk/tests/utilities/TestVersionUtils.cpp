@@ -37,7 +37,8 @@ std::vector<Version> randomVersions(size_t numberGenerated, unsigned int seed = 
 {
     std::mt19937 generator(seed);
     std::uniform_int_distribution<int> distribution(0, 100);
-    std::vector<Version> versions(numberGenerated);
+    std::vector<Version> versions;
+    versions.reserve(numberGenerated);
 
     for(size_t i = 0; i < numberGenerated; i++)
     {
@@ -52,8 +53,8 @@ std::vector<std::pair<Version, Version>> randomVersionCartesianProduct(size_t nu
                                                                        unsigned int seed = 0)
 {
     auto versions = randomVersions(15, seed);
-    std::vector<std::pair<Version, Version>> versionCartesianProducts(numberGenerated
-                                                                      * numberGenerated);
+    std::vector<std::pair<Version, Version>> versionCartesianProducts;
+    versionCartesianProducts.reserve(numberGenerated * numberGenerated);
 
     for(const auto& v1 : versions)
     {
