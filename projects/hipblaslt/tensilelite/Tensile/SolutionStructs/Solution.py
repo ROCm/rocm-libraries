@@ -2755,6 +2755,7 @@ class Solution(collections.abc.Mapping):
           state["LocalWriteUseSgpr%s"%tc] = True
         else:
           state["DirectToLds%s"%tc] = False
+          state["LocalWriteUseSgpr%s"%tc] = False
           if not isDtlDoable:
             if state["UseGeneralizedNLCOne%s"%tc]:
               reject(state, printRejectionReason, "DirectToLds%s not doable, but GNLC%s enabled, rejecting"%(tc, tc))
