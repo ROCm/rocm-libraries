@@ -314,6 +314,10 @@ With _long-paths and symlinks enabled_ as described in the above sections, enabl
 git config --global core.symlinks true
 git config --global core.longpaths true
 ```
+
+> [!IMPORTANT]
+> The `core.symlinks` setting is required for AI coding tool configuration files (`.clinerules`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/*.mdc`) which are symlinks to a central `docs/ai-rules.md`. Without this setting, these files will contain the symlink target path as plain text instead of the actual rules content.
+
 Tip: you can use `git config --show-scope --show-origin core.symlinks` and `git config --show-scope --show-origin core.longpaths` to determine what the current active git configuration is and where that setting is configured.
 
 #### 6. Install Clang Toolchain

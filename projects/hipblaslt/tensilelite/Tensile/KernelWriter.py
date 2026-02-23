@@ -111,6 +111,8 @@ class ABMatrixInfo(MatrixInfo):
 
   gNLCPermBlock: int             = -1
   gNLCPerpStride: int            = -1
+  gRDtlSwizzlePerpBlockSize: int    = -1
+  gRDtlSwizzleParaBlockSize: int    = -1
 
 # States
 @dataclass
@@ -2249,7 +2251,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # Get the perIterGlobalReadCode code for PAP (if PAP=On), else would be empty
           skipGlobalReadInc = False
           if kernel["PrefetchGlobalRead"] >= 3 and isNGLL:
-            # PGR>=3 and NGLL case, we need GR Inc only for the first NGLL and skip them afterwards 
+            # PGR>=3 and NGLL case, we need GR Inc only for the first NGLL and skip them afterwards
             skipGlobalReadInc = remainPgr < kernel["PrefetchGlobalRead"] - 1
           self.makeSchedule(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, skipGlobalReadInc=skipGlobalReadInc, lastLoop=NLLlast, isNGLL=isNGLL)
           module.add(self.codes.unrollLoopHeader)
@@ -2987,7 +2989,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # Creates a negative identity matrix for 4x4x4_16b MFMA
   # Each 4x4 block is set to this:
   # -1  0  0
-  #  0 -1  0 
+  #  0 -1  0
   #  0  0 -1
   ##############################################################################
   def createNegIdentityMatrix(self, kernel):
@@ -3195,7 +3197,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 module.addComment1("local read prefetch b")
                 localReadCodeB, packCodeB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadB, iui*self.states.numReadsIterCoalescedB, espi, tensorParametersB)
                 module.add(localReadCodeB)
-                if iui == 0 or not usePLRPackCMS:  
+                if iui == 0 or not usePLRPackCMS:
                   pack[plrIdx].add(packCodeB)
               if not kernel["ForceUnrollSubIter"] and (iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"]):
                 module.addComment1("local read inc a")
@@ -4729,19 +4731,33 @@ class KernelWriter(metaclass=abc.ABCMeta):
     def GNLCOInit(tc):
       abmatrixinfo = self.states.a if tc == 'A' else self.states.b
       if kernel["DirectToLds%s"%tc] and kernel["UseGeneralizedNLCOne%s"%tc]:
+
+        isMixedPrec = (kernel["ProblemType"]["DataTypeA"].numBytes() != kernel["ProblemType"]["DataTypeB"].numBytes())
+        lrvw = kernel["LocalReadVectorWidth"]
+        grvw = kernel["GlobalReadVectorWidth%c"%tc]
+        bpe = kernel["ProblemType"]["DataType%s"%tc].numBytes()
+        LdsStride = kernel["VectorWidth%s"%tc] * bpe * kernel["DepthU"]
+        MinLdsBlockSizePerPad = (kernel[f"GlobalReadVectorWidth%s"%tc] * bpe) * kernel["WavefrontSize"]
+        isM0PadEnough = LdsStride >= MinLdsBlockSizePerPad
+
+        # Currently only supported for 16b, DTL, TLU=0 and grvw == lrvw
+        if kernel["ProblemType"]["DataType"].numBytes() == 2 and not isMixedPrec \
+           and kernel["ProblemType"]["TLU%s"%tc] == 0 and lrvw == grvw and \
+           not isM0PadEnough:
+          abmatrixinfo.gRDtlSwizzlePerpBlockSize = kernel["VectorWidth%s"%tc]
+          abmatrixinfo.gRDtlSwizzleParaBlockSize = kernel["MatrixInstK"] // (kernel["LocalReadVectorWidth"])
+        else:
+          abmatrixinfo.gRDtlSwizzlePerpBlockSize = 0
+          abmatrixinfo.gRDtlSwizzleParaBlockSize = 0
+
         ntpl = kernel["NumTotalPackedLoads%s"%tc]
-        # TODOBS: Determine logic to calculate best permStride..
         if kernel["ProblemType"]["TLU%s"%tc] == 1 and not kernel["enableLDSTr%s"%tc]:
           usePerpPerm = False
         elif kernel["ProblemType"]["TLU%s"%tc] == 1 and kernel["enableLDSTr%s"%tc]:
           usePerpPerm = (ntpl & (ntpl-1)) == 0
         else:
-          # Currently only VW=1,2 is supported due to how the local read offset
-          # is currently computed. Supporting VW=1,2 only required small modifications
-          # to the offset calc.
-          # TODO: Add support for VW=4,8, this will require more changes in LR offset
-          # calculations
-          usePerpPerm = False if kernel["VectorWidth%s"%tc] > 2 else True
+          # TLU=0 Case, not needed
+          usePerpPerm = False
 
         permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 \
           else kernel["VectorWidth%s"%tc] * kernel["MatrixInstM"]
@@ -4750,6 +4766,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         abmatrixinfo.gNLCPerpStride = 1
         abmatrixinfo.gNLCPermBlock = 1
+        abmatrixinfo.gRDtlSwizzlePerpBlockSize = 0
+        abmatrixinfo.gRDtlSwizzleParaBlockSize = 0
 
     GNLCOInit('A')
     GNLCOInit('B')

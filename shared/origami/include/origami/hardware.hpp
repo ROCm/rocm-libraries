@@ -39,27 +39,6 @@
 
 namespace origami {
 
-namespace details {
-/**
- * @brief Map of matrix instruction latencies for gfx11 architectures.
- *
- * Inline to prevent ODR violations when included in multiple shared libraries.
- * This ensures only one definition exists across all translation units. (PR#1862)
- */
-static inline const std::unordered_map<matrix_instruction, size_t> gfx11_matrix_instructions_map = {
-    // clang-format off
-          // F16
-          {matrix_instruction(16, 16, 16, data_type_t::Half), 32},  // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
-          // BF16
-          {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32},  // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
-          // I8
-          {matrix_instruction(16, 16, 16, data_type_t::Int8), 32},  // v_wmma_i32_16x16x16_iu8
-          // I4
-          {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
-                                                          // clang-format on
-};
-}  // namespace details
-
 /**
  * @brief Represents hardware characteristics and capabilities of GPU architectures.
  *
@@ -412,11 +391,61 @@ class hardware_t {
              {matrix_instruction(16, 16, 16, data_type_t::Int4), 8}, // v_wmma_i32_16x16x16_iu4
              {matrix_instruction(16, 16, 32, data_type_t::Int4), 8}, // v_wmma_i32_16x16x32_iu4
          }},
-        {architecture_t::gfx1100, details::gfx11_matrix_instructions_map},
-        {architecture_t::gfx1150, details::gfx11_matrix_instructions_map},
-        {architecture_t::gfx1151, details::gfx11_matrix_instructions_map},
-        {architecture_t::gfx1152, details::gfx11_matrix_instructions_map},
-        {architecture_t::gfx1153, details::gfx11_matrix_instructions_map},
+        {architecture_t::gfx1100,
+         {
+             // F16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 32},  // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+             // BF16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32},  // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+             // I8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 32},  // v_wmma_i32_16x16x16_iu8
+             // I4
+             {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
+         }},
+        {architecture_t::gfx1150,
+         {
+             // F16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 32},  // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+             // BF16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32},  // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+             // I8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 32},  // v_wmma_i32_16x16x16_iu8
+             // I4
+             {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
+         }},
+        {architecture_t::gfx1151,
+         {
+             // F16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 32},  // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+             // BF16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32},  // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+             // I8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 32},  // v_wmma_i32_16x16x16_iu8
+             // I4
+             {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
+         }},
+        {architecture_t::gfx1152,
+         {
+             // F16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 32},  // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+             // BF16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32},  // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+             // I8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 32},  // v_wmma_i32_16x16x16_iu8
+             // I4
+             {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
+         }},
+        {architecture_t::gfx1153,
+         {
+             // F16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 32},  // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+             // BF16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32},  // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+             // I8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 32},  // v_wmma_i32_16x16x16_iu8
+             // I4
+             {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
+         }},
       };
   // clang-format on
 
@@ -473,13 +502,15 @@ class hardware_t {
    * @param constants Architecture-specific constants
    * @param L2_capacity L2 cache capacity in bytes
    * @param compute_clock_ghz Compute clock frequency in GHz
+   * @param memory_clock_ghz Memory clock frequency in GHz
    */
   hardware_t(architecture_t arch,
              size_t N_CU,
              size_t lds_capacity,
              const architecture_constants& constants,
              size_t L2_capacity,
-             double compute_clock_ghz);
+             double compute_clock_ghz,
+             double memory_clock_ghz);
 
   /**
    * @brief Construct hardware_t from HIP device properties.

@@ -13,7 +13,7 @@
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
 #include "engines/MiopenEngine.hpp"
-#include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
+#include "mocks/MockHipdnnMiopenContext.hpp"
 #include "mocks/MockPlanBuilder.hpp"
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 
@@ -31,7 +31,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
 {
     MiopenEngine engine(1);
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnMiopenHandle dummyHandle;
     MockGraph mockGraph;
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillOnce(::testing::Return(false));
@@ -53,7 +53,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnMiopenHandle dummyHandle;
     MockGraph mockGraph;
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillOnce(::testing::Return(false));
@@ -86,7 +86,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnMiopenHandle dummyHandle;
     MockGraph mockGraph;
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
@@ -103,7 +103,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnMiopenHandle dummyHandle;
     MockGraph mockGraph;
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillOnce(::testing::Return(false));
@@ -124,7 +124,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     MockGraph mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnMiopenHandle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
@@ -144,7 +144,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
     MockGraph mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnMiopenHandle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
@@ -155,7 +155,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
     MockGraph mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnMiopenHandle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
@@ -171,14 +171,14 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     MockGraph mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnMiopenHandle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
 TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
 {
     MiopenEngine engine(1);
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnMiopenHandle dummyHandle;
     MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
@@ -192,7 +192,7 @@ TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
 TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
 {
     MiopenEngine engine(1);
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnMiopenHandle dummyHandle;
     MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
@@ -256,7 +256,7 @@ TEST(TestMiopenEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnMiopenHandle dummyHandle;
     MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
@@ -292,17 +292,21 @@ TEST(TestMiopenEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuild
     EXPECT_CALL(*mockPlanBuilder1,
                 initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
-    EXPECT_CALL(*mockPlanBuilder1, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(1);
+    EXPECT_CALL(*mockPlanBuilder1,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(1);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_)).Times(0);
-    EXPECT_CALL(*mockPlanBuilder2, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*mockPlanBuilder2,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
 
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnMiopenHandle dummyHandle;
+    MockHipdnnMiopenContext ctx;
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
@@ -313,8 +317,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextThrowsOnInvalidBenchmarkingKnob
 {
     MiopenEngine engine(1);
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnMiopenHandle dummyHandle;
+    MockHipdnnMiopenContext ctx;
 
     flatbuffers::FlatBufferBuilder builder;
     auto knobIdOffset = builder.CreateString("global.benchmarking");
@@ -345,8 +349,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
 {
     MiopenEngine engine(1);
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnMiopenHandle dummyHandle;
+    MockHipdnnMiopenContext ctx;
 
     flatbuffers::FlatBufferBuilder builder;
     auto knobIdOffset = builder.CreateString("global.benchmarking");
@@ -377,8 +381,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
 {
     MiopenEngine engine(1);
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnMiopenHandle dummyHandle;
+    MockHipdnnMiopenContext ctx;
 
     flatbuffers::FlatBufferBuilder builder;
     auto knobIdOffset = builder.CreateString("global.benchmarking");
@@ -410,8 +414,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
 {
     MiopenEngine engine(1);
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnMiopenHandle dummyHandle;
+    MockHipdnnMiopenContext ctx;
     MockEngineConfig mockConfig;
 
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
@@ -425,8 +429,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
 {
     MiopenEngine engine(1);
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnMiopenHandle dummyHandle;
+    MockHipdnnMiopenContext ctx;
 
     flatbuffers::FlatBufferBuilder builder;
     auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, 0);
@@ -450,22 +454,26 @@ TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
         .Times(2)
         .WillRepeatedly(::testing::Return(false));
-    EXPECT_CALL(*mockPlanBuilder1, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*mockPlanBuilder1,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
         .Times(2)
         .WillRepeatedly(::testing::Return(true));
     EXPECT_CALL(*mockPlanBuilder2,
                 initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
-    EXPECT_CALL(*mockPlanBuilder2, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(1);
+    EXPECT_CALL(*mockPlanBuilder2,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(1);
 
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnMiopenHandle dummyHandle;
+    MockHipdnnMiopenContext ctx;
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
@@ -480,19 +488,23 @@ TEST(TestMiopenEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplica
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
         .Times(2)
         .WillRepeatedly(::testing::Return(false));
-    EXPECT_CALL(*mockPlanBuilder1, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*mockPlanBuilder1,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
         .Times(2)
         .WillRepeatedly(::testing::Return(false));
-    EXPECT_CALL(*mockPlanBuilder2, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*mockPlanBuilder2,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
 
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnMiopenHandle dummyHandle;
+    MockHipdnnMiopenContext ctx;
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 

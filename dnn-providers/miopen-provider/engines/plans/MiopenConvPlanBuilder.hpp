@@ -3,13 +3,19 @@
 
 #pragma once
 
-#include "PlanBuilderInterface.hpp"
-#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
+
+#include "HipdnnMiopenContext.hpp"
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 
 namespace miopen_plugin
 {
 
-class MiopenConvPlanBuilder : public IPlanBuilder
+class MiopenConvPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<HipdnnMiopenHandle,
+                                                                     HipdnnMiopenSettings,
+                                                                     HipdnnMiopenContext>
 {
 public:
     struct WorkspaceSizeRange
@@ -25,27 +31,30 @@ public:
     MiopenConvPlanBuilder(const MiopenConvPlanBuilder&) = delete;
     MiopenConvPlanBuilder& operator=(const MiopenConvPlanBuilder&) = delete;
 
-    bool isApplicable(const HipdnnEnginePluginHandle& handle,
+    bool isApplicable(const HipdnnMiopenHandle& handle,
                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+
     WorkspaceSizeRange
-        getWorkspaceSizeRange(const HipdnnEnginePluginHandle& handle,
+        getWorkspaceSizeRange(const HipdnnMiopenHandle& handle,
                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const;
-    size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+    size_t getMaxWorkspaceSize(const HipdnnMiopenHandle& handle,
                                const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                               const MiopenExecutionSettings& executionSettings) const override;
+                               const HipdnnMiopenSettings& executionSettings) const override;
 
     void initializeExecutionSettings(
-        const HipdnnEnginePluginHandle& handle,
+        const HipdnnMiopenHandle& handle,
         const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
         const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-        MiopenExecutionSettings& executionSettings) const override;
+        HipdnnMiopenSettings& executionSettings) const override;
 
-    void buildPlan(const HipdnnEnginePluginHandle& handle,
-                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                   HipdnnEnginePluginExecutionContext& executionContext) const override;
+    void buildPlan(
+        const HipdnnMiopenHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        HipdnnMiopenContext& executionContext) const override;
 
     std::vector<hipdnn_data_sdk::data_objects::KnobT>
-        getCustomKnobs(const HipdnnEnginePluginHandle& handle,
+        getCustomKnobs(const HipdnnMiopenHandle& handle,
                        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
 private:
