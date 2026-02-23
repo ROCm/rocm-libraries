@@ -1746,14 +1746,9 @@ class Solution(collections.abc.Mapping):
           else:
             optPadA //= 2
             readRegsA //= 2
-        if isMX:
-          if (not isaInfoMap[isa].asmCaps['HasWMMA']) and (readRegsA > 6 or readRegsB > 6):
-            reject(state, "LocalReadVectorWidth results in attemping to read LDS larger than b192, reject")
-            return ldsPadA, ldsPadB, ldsPadM
-        else:
-          if (not isaInfoMap[isa].asmCaps['HasWMMA']) and (readRegsA > 4 or readRegsB > 4):
-            reject(state, "LocalReadVectorWidth results in attemping to read LDS larger than b128, reject")
-            return ldsPadA, ldsPadB, ldsPadM
+        if (not isaInfoMap[isa].asmCaps['HasWMMA']) and (readRegsA > 4 or readRegsB > 4):
+          reject(state, "LocalReadVectorWidth results in attemping to read LDS larger than b128, reject")
+          return ldsPadA, ldsPadB, ldsPadM
         if state["EnableMatrixInstruction"]:
           # for readRegs = 1 or 4, we need to double pad for MI16x16xNx1 to avoid bank conflict.
           if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
