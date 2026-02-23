@@ -1,0 +1,229 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include "DescriptorTestUtils.hpp"
+#include "HipdnnException.hpp"
+#include "TestMacros.hpp"
+#include "descriptors/{{ op.class_name }}.hpp"
+#include "descriptors/GraphDescriptor.hpp"
+#include "descriptors/TensorDescriptor.hpp"
+#include "hipdnn_backend.h"
+#include "mocks/MockHandle.hpp"
+
+#include <flatbuffers/flatbuffers.h>
+#include <gtest/gtest.h>
+#include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+
+#include <array>
+#include <memory>
+#include <set>
+#include <vector>
+
+using namespace hipdnn_backend;
+using namespace hipdnn_backend::test_utilities;
+using namespace hipdnn_data_sdk::data_objects;
+
+namespace
+{
+
+// Helper: create a finalized {{ op.class_name }} from tensor descriptors
+inline std::unique_ptr<HipdnnBackendDescriptor>
+    createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}HipdnnBackendDescriptor* {{ tf.name }}Desc{% if not loop.last %},
+                          {% endif %}{% endfor %}{% if op.has_tensor_array_fields %},
+{% for taf in op.tensor_array_fields %}
+                          std::vector<HipdnnBackendDescriptor*> {{ taf.name }}Descs = {}{% if not loop.last %},{% endif %}
+{% endfor %}{% endif %},
+                          DataType computeType = DataType::FLOAT)
+{
+    auto wrapper = createDescriptor<{{ op.class_name }}>();
+    auto desc = wrapper->asDescriptor<{{ op.class_name }}>();
+
+{% for tf in op.tensor_fields %}
+    desc->setAttribute(
+        {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &{{ tf.name }}Desc);
+{% endfor %}
+{% for df in op.required_data_fields %}
+{% if df.is_vector %}
+
+    std::vector<int64_t> {{ df.camel_name }} = {{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }};
+    desc->setAttribute({{ df.attr_name }}, HIPDNN_TYPE_INT64, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
+{% elif df.is_enum %}
+
+    auto {{ df.camel_name }} = static_cast<int64_t>({{ df.enum_short_type }}::{{ df.test_enum_value }});
+    desc->setAttribute({{ df.attr_name }}, HIPDNN_TYPE_INT64, 1, &{{ df.camel_name }});
+{% endif %}
+{% endfor %}
+{% if op.has_compute_data_type %}
+    desc->setAttribute({{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+{% endif %}
+{% for taf in op.tensor_array_fields %}
+
+    if(!{{ taf.name }}Descs.empty())
+    {
+        desc->setAttribute(
+            {{ taf.attr_name }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+            static_cast<int64_t>({{ taf.name }}Descs.size()), {{ taf.name }}Descs.data());
+    }
+{% endfor %}
+
+    desc->finalize();
+    return wrapper;
+}
+
+class TestGraphDescriptor{{ op.name }} : public ::testing::Test
+{
+public:
+    std::shared_ptr<GraphDescriptor> getDescriptor() const
+    {
+        return _wrapper->asDescriptor<GraphDescriptor>();
+    }
+
+    void setHandle() const
+    {
+        auto desc = getDescriptor();
+        hipdnnHandle_t handle = &_mockHandle;
+        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+    }
+
+protected:
+    std::unique_ptr<HipdnnBackendDescriptor> _wrapper = nullptr;
+    mutable MockHandle _mockHandle;
+
+    void SetUp() override
+    {
+        _wrapper = createDescriptor<GraphDescriptor>();
+    }
+
+    void TearDown() override
+    {
+        _wrapper.reset();
+    }
+};
+
+TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
+{
+{% for tf in op.tensor_fields %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+{% if tc %}
+    auto {{ tf.name }}Desc = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+{% else %}
+    auto {{ tf.name }}Desc = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% endif %}
+{% endfor %}
+    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.name }}Desc.get(){% if not loop.last %}, {% endif %}{% endfor %});
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->finalize());
+
+    // Verify the built graph
+    auto serialized = desc->getSerializedGraph();
+    ASSERT_NE(serialized.ptr, nullptr);
+    ASSERT_GT(serialized.size, 0UL);
+
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+    ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
+
+    auto graph = GetGraph(serialized.ptr);
+    auto graphT = graph->UnPack();
+
+    ASSERT_EQ(graphT->nodes.size(), 1);
+    ASSERT_EQ(graphT->tensors.size(), {{ op.tensor_fields | length }});
+
+    // Verify the node has correct attributes type
+    ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::{{ op.node_attributes_union_member }});
+
+    auto* attrs = graphT->nodes[0]->attributes.As{{ op.fbs_table }}();
+    ASSERT_NE(attrs, nullptr);
+
+    // Verify tensor UID references
+{% for tf in op.tensor_fields %}
+    EXPECT_EQ(attrs->{{ tf.uid_field }}, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% endfor %}
+{% for taf in op.tensor_array_fields %}
+
+    // Verify {{ taf.name }} tensor array is empty (not set in basic test)
+    EXPECT_EQ(attrs->{{ taf.fbs_field }}.size(), 0u);
+{% endfor %}
+}
+{% if op.has_compute_data_type %}
+
+TEST_F(TestGraphDescriptor{{ op.name }}, ComputeDataTypePreserved)
+{
+{% for tf in op.tensor_fields %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+{% if tc %}
+    auto {{ tf.name }}Desc = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+{% else %}
+    auto {{ tf.name }}Desc = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% endif %}
+{% endfor %}
+    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.name }}Desc.get(){% if not loop.last %}, {% endif %}{% endfor %}, DataType::HALF);
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+    desc->finalize();
+
+    auto serialized = desc->getSerializedGraph();
+    auto graphT = GetGraph(serialized.ptr)->UnPack();
+
+    ASSERT_EQ(graphT->nodes.size(), 1);
+    EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
+}
+{% endif %}
+{% for taf in op.tensor_array_fields %}
+{% if taf.test_uids %}
+
+TEST_F(TestGraphDescriptor{{ op.name }}, BuildWith{{ taf.test_label or taf.name | replace('_', ' ') | title | replace(' ', '') }}TensorArray)
+{
+{% for tf in op.tensor_fields %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+{% if tc %}
+    auto {{ tf.name }}Desc = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+{% else %}
+    auto {{ tf.name }}Desc = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% endif %}
+{% endfor %}
+{% for uid in taf.test_uids %}
+    auto {{ taf.name }}Desc{{ loop.index0 }} = createFinalizedTensor({{ uid }});
+{% endfor %}
+
+    std::vector<HipdnnBackendDescriptor*> {{ taf.name }}Descs = {{ '{' }}{% for uid in taf.test_uids %}{{ taf.name }}Desc{{ loop.index0 }}.get(){% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
+    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.name }}Desc.get(){% if not loop.last %}, {% endif %}{% endfor %}, {{ taf.name }}Descs);
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->finalize());
+
+    auto serialized = desc->getSerializedGraph();
+    auto graphT = GetGraph(serialized.ptr)->UnPack();
+
+    ASSERT_EQ(graphT->nodes.size(), 1);
+
+    auto* attrs = graphT->nodes[0]->attributes.As{{ op.fbs_table }}();
+    ASSERT_NE(attrs, nullptr);
+
+    // Verify {{ taf.name }} tensor array UIDs
+    ASSERT_EQ(attrs->{{ taf.fbs_field }}.size(), {{ taf.test_uids | length }}u);
+{% for uid in taf.test_uids %}
+    EXPECT_EQ(attrs->{{ taf.fbs_field }}[{{ loop.index0 }}], {{ uid }});
+{% endfor %}
+}
+{% endif %}
+{% endfor %}
+
+} // namespace

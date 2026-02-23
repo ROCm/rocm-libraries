@@ -1,0 +1,459 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include "{{ op.class_name }}.hpp"
+#include "DescriptorAttributeUtils.hpp"
+#include "HipdnnBackendDescriptorType.h"
+#include "HipdnnException.hpp"
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+
+namespace hipdnn_backend
+{
+
+void {{ op.class_name }}::finalize()
+{
+{% for tf in op.required_tensor_fields %}
+    THROW_IF_NULL({{ tf.member_name }},
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "{{ op.class_name }}::finalize() failed: {{ tf.attr_suffix }} tensor not set");
+{% endfor %}
+{% for df in op.required_data_fields %}
+{% if df.is_vector %}
+    THROW_IF_TRUE(_data.{{ df.fbs_field }}.empty(),
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "{{ op.class_name }}::finalize() failed: {{ df.name }} not set");
+{% endif %}
+{% endfor %}
+{% if op.has_compute_data_type %}
+    THROW_IF_TRUE(_computeDataType == {{ op.fbs_namespace }}::DataType::UNSET,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "{{ op.class_name }}::finalize() failed: compute data type not "
+                  "set");
+{% endif %}
+
+    HipdnnBackendDescriptorImpl<{{ op.class_name }}>::finalize();
+}
+
+// ============================================================================
+// setAttribute
+// ============================================================================
+
+void {{ op.class_name }}::setAttribute(hipdnnBackendAttributeName_t attributeName,
+                                                     hipdnnBackendAttributeType_t attributeType,
+                                                     int64_t elementCount,
+                                                     const void* arrayOfElements)
+{
+    THROW_IF_TRUE(isFinalized(),
+                  HIPDNN_STATUS_NOT_INITIALIZED,
+                  "{{ op.class_name }}::setAttribute() failed: Already finalized.");
+
+    switch(attributeName)
+    {
+{% for tf in op.tensor_fields %}
+    case {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}:
+{% endfor %}
+        setTensorDesc(attributeName, attributeType, elementCount, arrayOfElements);
+        break;
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+    case {{ df.attr_name }}:
+        setInt64Vector(_data.{{ df.fbs_field }},
+                       attributeType,
+                       elementCount,
+                       arrayOfElements,
+                       "{{ op.class_name }}::setAttribute()");
+        break;
+{% elif df.is_enum %}
+    case {{ df.attr_name }}:
+        {{ df.setter_helper_name }}(attributeType, elementCount, arrayOfElements);
+        break;
+{% elif df.is_scalar %}
+    case {{ df.attr_name }}:
+        setScalar(_data.{{ df.fbs_field }},
+                  {{ df.backend_type }},
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "{{ op.class_name }}::setAttribute()");
+        break;
+{% endif %}
+{% endfor %}
+{% if op.has_compute_data_type %}
+    case {{ op.compute_data_type_attr }}:
+        setScalar(_computeDataType,
+                  HIPDNN_TYPE_DATA_TYPE,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "{{ op.class_name }}::setAttribute()");
+        break;
+{% endif %}
+{% for taf in op.tensor_array_fields %}
+    case {{ taf.attr_name }}:
+        setTensorArrayDesc(attributeName, attributeType, elementCount, arrayOfElements);
+        break;
+{% endfor %}
+    default:
+        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                              "{{ op.class_name }}::setAttribute: attributeName not "
+                              "supported");
+    }
+}
+
+void {{ op.class_name }}::setTensorDesc(hipdnnBackendAttributeName_t attributeName,
+                                                      hipdnnBackendAttributeType_t attributeType,
+                                                      int64_t elementCount,
+                                                      const void* arrayOfElements)
+{
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "{{ op.class_name }}::setAttribute(): arrayOfElements is null");
+    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "{{ op.class_name }}::setAttribute(): attributeType is not "
+                   "BACKEND_DESCRIPTOR");
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "{{ op.class_name }}::setAttribute(): elementCount is not 1");
+
+    auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        arrayOfElements,
+        HIPDNN_STATUS_BAD_PARAM,
+        "{{ op.class_name }}::setAttribute(): Failed to unpack tensor "
+        "descriptor");
+    THROW_IF_FALSE(tensorDesc->isFinalized(),
+                   HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
+                   "{{ op.class_name }}::setAttribute(): Tensor descriptor "
+                   "not finalized");
+
+{% for tf in op.tensor_fields %}
+{% if not loop.first %}
+    else {% endif %}{% if loop.first %}    {% endif %}if(attributeName == {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }})
+    {
+        {{ tf.member_name }} = tensorDesc;
+        _data.{{ tf.uid_field }} = tensorDesc->getData().uid;
+    }
+{% endfor %}
+    else
+    {
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "{{ op.class_name }}::setTensorDesc(): unsupported "
+                              "attribute name");
+    }
+}
+{% for ef in op.enum_fields %}
+
+void {{ op.class_name }}::{{ ef.setter_helper_name }}(hipdnnBackendAttributeType_t attributeType,
+                                                    int64_t elementCount,
+                                                    const void* arrayOfElements)
+{
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "{{ op.class_name }}::setAttribute(): arrayOfElements is null");
+    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "{{ op.class_name }}::setAttribute(): attributeType mismatch");
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "{{ op.class_name }}::setAttribute(): elementCount is not 1");
+    auto mode = static_cast<{{ ef.cpp_enum }}>(
+        *static_cast<const int64_t*>(arrayOfElements));
+    THROW_IF_TRUE(mode < {{ ef.cpp_enum }}::MIN
+                      || mode > {{ ef.cpp_enum }}::MAX,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "{{ op.class_name }}::setAttribute(): invalid {{ ef.enum_short_type }} value");
+    _data.{{ ef.fbs_field }} = mode;
+}
+{% endfor %}
+{% if op.has_tensor_array_fields %}
+
+void {{ op.class_name }}::setTensorArrayDesc(hipdnnBackendAttributeName_t attributeName,
+                                                            hipdnnBackendAttributeType_t attributeType,
+                                                            int64_t elementCount,
+                                                            const void* arrayOfElements)
+{
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "{{ op.class_name }}::setAttribute(): arrayOfElements is null");
+    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "{{ op.class_name }}::setAttribute(): attributeType is not "
+                   "BACKEND_DESCRIPTOR");
+    THROW_IF_FALSE(elementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "{{ op.class_name }}::setAttribute(): elementCount < 1");
+
+    auto descs = static_cast<HipdnnBackendDescriptor* const*>(arrayOfElements);
+    std::vector<std::shared_ptr<TensorDescriptor>> tensorDescs;
+    std::vector<int64_t> uids;
+
+    for(int64_t i = 0; i < elementCount; ++i)
+    {
+        auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+            &descs[i],
+            HIPDNN_STATUS_BAD_PARAM,
+            "{{ op.class_name }}::setAttribute(): Failed to unpack tensor "
+            "descriptor");
+        THROW_IF_FALSE(tensorDesc->isFinalized(),
+                       HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
+                       "{{ op.class_name }}::setAttribute(): Tensor descriptor "
+                       "not finalized");
+        tensorDescs.push_back(tensorDesc);
+        uids.push_back(tensorDesc->getData().uid);
+    }
+
+{% for taf in op.tensor_array_fields %}
+{% if not loop.first %}
+    else {% endif %}{% if loop.first %}    {% endif %}if(attributeName == {{ taf.attr_name }})
+    {
+        _{{ taf.name }}Descs = std::move(tensorDescs);
+        _data.{{ taf.fbs_field }} = std::move(uids);
+    }
+{% endfor %}
+    else
+    {
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "{{ op.class_name }}::setTensorArrayDesc(): unsupported "
+                              "attribute name");
+    }
+}
+{% endif %}
+
+// ============================================================================
+// getAttribute
+// ============================================================================
+
+void {{ op.class_name }}::getAttribute(hipdnnBackendAttributeName_t attributeName,
+                                                     hipdnnBackendAttributeType_t attributeType,
+                                                     int64_t requestedElementCount,
+                                                     int64_t* elementCount,
+                                                     void* arrayOfElements) const
+{
+    THROW_IF_FALSE(isFinalized(),
+                   HIPDNN_STATUS_NOT_INITIALIZED,
+                   "{{ op.class_name }}::getAttribute() failed: Not finalized.");
+
+    switch(attributeName)
+    {
+{% for tf in op.tensor_fields %}
+    case {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}:
+{% endfor %}
+        getTensorDesc(
+            attributeName, attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+    case {{ df.attr_name }}:
+        getInt64Vector(_data.{{ df.fbs_field }},
+                       attributeType,
+                       requestedElementCount,
+                       elementCount,
+                       arrayOfElements,
+                       "{{ op.class_name }}::getAttribute()");
+        break;
+{% elif df.is_enum %}
+    case {{ df.attr_name }}:
+        {{ df.getter_helper_name }}(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
+{% elif df.is_scalar %}
+    case {{ df.attr_name }}:
+        getScalar(_data.{{ df.fbs_field }},
+                  {{ df.backend_type }},
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "{{ op.class_name }}::getAttribute()");
+        break;
+{% endif %}
+{% endfor %}
+{% if op.has_compute_data_type %}
+    case {{ op.compute_data_type_attr }}:
+        getScalar(_computeDataType,
+                  HIPDNN_TYPE_DATA_TYPE,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "{{ op.class_name }}::getAttribute()");
+        break;
+{% endif %}
+{% for taf in op.tensor_array_fields %}
+    case {{ taf.attr_name }}:
+        getTensorArrayDesc(
+            attributeName, attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
+{% endfor %}
+    default:
+        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                              "{{ op.class_name }}::getAttribute: attributeName not "
+                              "supported");
+    }
+}
+
+void {{ op.class_name }}::getTensorDesc(hipdnnBackendAttributeName_t attributeName,
+                                                      hipdnnBackendAttributeType_t attributeType,
+                                                      int64_t requestedElementCount,
+                                                      int64_t* elementCount,
+                                                      void* arrayOfElements) const
+{
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "{{ op.class_name }}::getAttribute(): arrayOfElements is null");
+    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "{{ op.class_name }}::getAttribute(): attributeType is not "
+                   "BACKEND_DESCRIPTOR");
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "{{ op.class_name }}::getAttribute(): requestedElementCount < 1");
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+
+    std::shared_ptr<TensorDescriptor> desc;
+{% for tf in op.tensor_fields %}
+{% if not loop.first %}
+    else {% endif %}{% if loop.first %}    {% endif %}if(attributeName == {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }})
+    {
+        desc = {{ tf.member_name }};
+    }
+{% endfor %}
+    else
+    {
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "{{ op.class_name }}::getTensorDesc(): unsupported "
+                              "attribute name");
+    }
+    HipdnnBackendDescriptor::packDescriptor(desc, arrayOfElements);
+}
+{% for ef in op.enum_fields %}
+
+void {{ op.class_name }}::{{ ef.getter_helper_name }}(hipdnnBackendAttributeType_t attributeType,
+                                                    int64_t requestedElementCount,
+                                                    int64_t* elementCount,
+                                                    void* arrayOfElements) const
+{
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "{{ op.class_name }}::getAttribute(): arrayOfElements is null");
+    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "{{ op.class_name }}::getAttribute(): attributeType mismatch");
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "{{ op.class_name }}::getAttribute(): requestedElementCount < 1");
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+    *static_cast<int64_t*>(arrayOfElements) = static_cast<int64_t>(_data.{{ ef.fbs_field }});
+}
+{% endfor %}
+{% if op.has_tensor_array_fields %}
+
+void {{ op.class_name }}::getTensorArrayDesc(hipdnnBackendAttributeName_t attributeName,
+                                                            hipdnnBackendAttributeType_t attributeType,
+                                                            int64_t requestedElementCount,
+                                                            int64_t* elementCount,
+                                                            void* arrayOfElements) const
+{
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "{{ op.class_name }}::getAttribute(): arrayOfElements is null");
+    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "{{ op.class_name }}::getAttribute(): attributeType is not "
+                   "BACKEND_DESCRIPTOR");
+
+    const std::vector<std::shared_ptr<TensorDescriptor>>* descs = nullptr;
+{% for taf in op.tensor_array_fields %}
+{% if not loop.first %}
+    else {% endif %}{% if loop.first %}    {% endif %}if(attributeName == {{ taf.attr_name }})
+    {
+        descs = &_{{ taf.name }}Descs;
+    }
+{% endfor %}
+    else
+    {
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "{{ op.class_name }}::getTensorArrayDesc(): unsupported "
+                              "attribute name");
+    }
+
+    auto count = static_cast<int64_t>(descs->size());
+    if(elementCount != nullptr)
+    {
+        *elementCount = count;
+    }
+
+    auto outDescs = static_cast<HipdnnBackendDescriptor**>(arrayOfElements);
+    auto copyCount = std::min(requestedElementCount, count);
+    for(int64_t i = 0; i < copyCount; ++i)
+    {
+        HipdnnBackendDescriptor::packDescriptor((*descs)[static_cast<size_t>(i)], &outDescs[i]);
+    }
+}
+{%- endif %}
+
+// ============================================================================
+// Other methods
+// ============================================================================
+
+std::vector<std::shared_ptr<TensorDescriptor>>
+    {{ op.class_name }}::getTensorDescriptors() const
+{
+    std::vector<std::shared_ptr<TensorDescriptor>> result = {{ '{' }}{% for tf in op.tensor_fields %}{{ tf.member_name }}{% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
+{% for taf in op.tensor_array_fields %}
+    result.insert(result.end(), _{{ taf.name }}Descs.begin(), _{{ taf.name }}Descs.end());
+{% endfor %}
+    return result;
+}
+
+std::unique_ptr<{{ op.fbs_namespace }}::NodeT>
+    {{ op.class_name }}::buildNode() const
+{
+    auto node = std::make_unique<{{ op.fbs_namespace }}::NodeT>();
+{% if op.has_compute_data_type %}
+    node->compute_data_type = _computeDataType;
+{% endif %}
+    node->attributes.Set({{ op.fbs_namespace }}::{{ op.fbs_t_type }}(_data));
+    return node;
+}
+
+hipdnnBackendDescriptorType_t {{ op.class_name }}::getStaticType()
+{
+    return {{ op.descriptor_type_enum }};
+}
+
+std::string {{ op.class_name }}::toString() const
+{
+    using hipdnn_data_sdk::utilities::vecToString;
+    std::string str = "{{ op.class_name }}: {";
+{% for tf in op.tensor_fields %}
+{% if loop.first %}
+    str += "{{ tf.name }}_uid=" + std::to_string(_data.{{ tf.uid_field }});
+{% else %}
+    str += ", {{ tf.name }}_uid=" + std::to_string(_data.{{ tf.uid_field }});
+{% endif %}
+{% endfor %}
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+    str += ", {{ df.name }}=" + vecToString(_data.{{ df.fbs_field }});
+{% elif df.is_enum %}
+    str += ", {{ df.name }}=" + std::to_string(static_cast<int>(_data.{{ df.fbs_field }}));
+{% elif df.is_scalar %}
+    str += ", {{ df.name }}=" + std::to_string(_data.{{ df.fbs_field }});
+{% endif %}
+{% endfor %}
+{% for taf in op.tensor_array_fields %}
+    str += ", {{ taf.name }}_uids=" + vecToString(_data.{{ taf.fbs_field }});
+{% endfor %}
+    str += "}";
+    return str;
+}
+
+} // namespace hipdnn_backend

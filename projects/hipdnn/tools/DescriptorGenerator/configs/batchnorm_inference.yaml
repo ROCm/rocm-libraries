@@ -1,0 +1,70 @@
+operation:
+  name: "BatchnormInference"
+  class_name: "BatchnormInferenceOperationDescriptor"
+  fbs_table: "BatchnormInferenceAttributes"
+  fbs_generated_header: "batchnorm_inference_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE"
+
+  frontend:
+    packer_function: "createBatchnormInferenceOperation"
+    node_class: "BatchnormInferenceNode"
+    attributes_class: "BnInferenceAttributes"
+
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X"
+      required: true
+      frontend_getter: "get_x()"
+
+    - name: "mean"
+      fbs_field: "mean_tensor_uid"
+      attr_suffix: "MEAN"
+      required: true
+      frontend_getter: "get_mean()"
+
+    - name: "inv_variance"
+      fbs_field: "inv_variance_tensor_uid"
+      attr_suffix: "INV_VARIANCE"
+      required: true
+      frontend_getter: "get_inv_variance()"
+
+    - name: "scale"
+      fbs_field: "scale_tensor_uid"
+      attr_suffix: "SCALE"
+      required: true
+      frontend_getter: "get_scale()"
+
+    - name: "bias"
+      fbs_field: "bias_tensor_uid"
+      attr_suffix: "BIAS"
+      required: true
+      frontend_getter: "get_bias()"
+
+    - name: "y"
+      fbs_field: "y_tensor_uid"
+      attr_suffix: "Y"
+      required: true
+      frontend_getter: "get_y()"
+
+  data_fields: []
+
+  tensor_array_fields: []
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE"
+
+  test_data:
+    tensor_uids: { x: 70, mean: 71, inv_variance: 72, scale: 73, bias: 74, y: 75 }
+    tensor_configs:
+      x: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      mean: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      inv_variance: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      scale: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      bias: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      y: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+    field_values: {}

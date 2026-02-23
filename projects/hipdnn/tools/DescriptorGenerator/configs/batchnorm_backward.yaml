@@ -1,0 +1,89 @@
+operation:
+  name: "BatchnormBackward"
+  class_name: "BatchnormBackwardOperationDescriptor"
+  fbs_table: "BatchnormBackwardAttributes"
+  fbs_generated_header: "batchnorm_backward_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD"
+
+  frontend:
+    packer_function: "createBatchnormBackwardOperation"
+    node_class: "BatchnormBackwardNode"
+    attributes_class: "BatchnormBackwardAttributes"
+
+  tensor_fields:
+    - name: "dy"
+      fbs_field: "dy_tensor_uid"
+      attr_suffix: "DY"
+      required: true
+      frontend_getter: "get_dy()"
+
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X"
+      required: true
+      frontend_getter: "get_x()"
+
+    - name: "scale"
+      fbs_field: "scale_tensor_uid"
+      attr_suffix: "SCALE"
+      required: true
+      frontend_getter: "get_scale()"
+
+    - name: "dx"
+      fbs_field: "dx_tensor_uid"
+      attr_suffix: "DX"
+      required: true
+      frontend_getter: "get_dx()"
+
+    - name: "dscale"
+      fbs_field: "dscale_tensor_uid"
+      attr_suffix: "DSCALE"
+      required: true
+      frontend_getter: "get_dscale()"
+
+    - name: "dbias"
+      fbs_field: "dbias_tensor_uid"
+      attr_suffix: "DBIAS"
+      required: true
+      frontend_getter: "get_dbias()"
+
+    - name: "mean"
+      fbs_field: "mean_tensor_uid"
+      attr_suffix: "MEAN"
+      required: false
+      frontend_getter: "get_mean()"
+
+    - name: "inv_variance"
+      fbs_field: "inv_variance_tensor_uid"
+      attr_suffix: "INV_VARIANCE"
+      required: false
+      frontend_getter: "get_inv_variance()"
+
+  data_fields: []
+
+  tensor_array_fields:
+    - name: "peer_stats"
+      fbs_field: "peer_stats_tensor_uid"
+      attr_name: "HIPDNN_ATTR_OPERATION_BATCHNORM_BWD_PEER_STATS"
+      frontend_getter: "get_peer_stats()"
+      required: false
+      test_uids: [110, 111]
+      test_label: "PeerStats"
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_BWD_COMP_TYPE"
+
+  test_data:
+    tensor_uids: { dy: 60, x: 61, scale: 62, dx: 63, dscale: 64, dbias: 65 }
+    tensor_configs:
+      dy: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      x: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      scale: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      dx: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      dscale: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      dbias: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+    field_values: {}

@@ -1,0 +1,96 @@
+operation:
+  name: "ConvolutionBwd"
+  class_name: "ConvolutionBwdOperationDescriptor"
+  fbs_table: "ConvolutionBwdAttributes"
+  fbs_generated_header: "convolution_bwd_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD"
+
+  frontend:
+    packer_function: "createConvBpropOperation"
+    node_class: "ConvolutionBpropNode"
+    attributes_class: "ConvBpropAttributes"
+
+  tensor_fields:
+    - name: "dy"
+      fbs_field: "dy_tensor_uid"
+      attr_suffix: "DY"
+      required: true
+      frontend_getter: "get_dy()"
+
+    - name: "w"
+      fbs_field: "w_tensor_uid"
+      attr_suffix: "W"
+      required: true
+      frontend_getter: "get_w()"
+
+    - name: "dx"
+      fbs_field: "dx_tensor_uid"
+      attr_suffix: "DX"
+      required: true
+      frontend_getter: "get_dx()"
+
+  data_fields:
+    - name: "pre_padding"
+      fbs_field: "pre_padding"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_pre_padding()"
+      shared: true
+
+    - name: "post_padding"
+      fbs_field: "post_padding"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_post_padding()"
+      shared: true
+
+    - name: "stride"
+      fbs_field: "stride"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_stride()"
+      shared: true
+
+    - name: "dilation"
+      fbs_field: "dilation"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_DILATIONS"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_dilation()"
+      shared: true
+
+    - name: "conv_mode"
+      fbs_field: "conv_mode"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_CONV_MODE"
+      type: "enum"
+      cpp_enum: "hipdnn_data_sdk::data_objects::ConvMode"
+      required: false
+      frontend_getter: "get_convolution_mode()"
+      frontend_converter: "toSdkType"
+      shared: true
+      test_enum_value: "CROSS_CORRELATION"
+
+  tensor_array_fields: []
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_CONVOLUTION_COMP_TYPE"
+  compute_data_type_shared: true
+
+  test_data:
+    tensor_uids: { dy: 10, w: 11, dx: 12 }
+    tensor_configs:
+      dy: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      w: { dims: [64, 3, 3, 3], strides: [27, 9, 3, 1] }
+      dx: { dims: [1, 3, 32, 32], strides: [3072, 1024, 32, 1] }
+    field_values:
+      pre_padding: [1, 1]
+      post_padding: [1, 1]
+      stride: [1, 1]
+      dilation: [1, 1]
