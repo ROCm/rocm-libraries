@@ -127,6 +127,9 @@ export CUDACXX="${CUDA_COMPILER}"
 export CUDAHOSTCXX="${HOST_COMPILER}"
 export CXX_STANDARD
 
+# Set LLVM_PATH so COMGR finds the correct clang binary for GCC detection
+export LLVM_PATH=/opt/rocm/lib/llvm
+
 source ./pretty_printing.sh
 
 print_environment_details() {
