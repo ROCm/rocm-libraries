@@ -1947,8 +1947,9 @@ inline bool IsValidCtestStyleConfig(const conv_test_input& input)
     const auto pad_mode_upper = miopen::ToUpper(input.pad_mode);
     for(std::size_t i = 0; i < spatial_dim; ++i)
     {
-        const auto stride   = static_cast<long long>(input.pads_strides_dilations[spatial_dim + i]);
-        const auto dilation = static_cast<long long>(input.pads_strides_dilations[2 * spatial_dim + i]);
+        const auto stride = static_cast<long long>(input.pads_strides_dilations[spatial_dim + i]);
+        const auto dilation =
+            static_cast<long long>(input.pads_strides_dilations[2 * spatial_dim + i]);
         if(stride <= 0 || dilation <= 0)
         {
             return false;
