@@ -110,7 +110,7 @@ struct ArgsHelper
     static constexpr const char* db_class_arg  = "mp-test-child-db-class";
 
     // Exact gtest filter for spawning child worker processes.
-    // Must match: TEST_F(CPU_PerfDb_ChildWorker_NONE, ProcessWork)
+    // Must match the CPU_PerfDb_ChildWorker_NONE.ProcessWork test case
     static constexpr const char* child_worker_filter = "CPU_PerfDb_ChildWorker_NONE.ProcessWork";
 
     struct db_class
