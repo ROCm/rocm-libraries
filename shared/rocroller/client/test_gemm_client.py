@@ -1,29 +1,7 @@
 #!/usr/bin/env python3
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2026 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """Test basic functionality of rocRoller's GEMM client."""
 
@@ -246,8 +224,6 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
@@ -277,8 +253,7 @@ types:
   scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
-  scaleSkipPermlane: false
-matchMemoryAccess: true
+  scaleSkipPermlane: None
 tailLoops: true
 streamK: None
 loadScale_A: BufferToVGPR
@@ -312,8 +287,6 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
@@ -326,7 +299,6 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
-matchMemoryAccess: true
 tailLoops: true
 types:
   trans_A: N
@@ -345,7 +317,7 @@ types:
   scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -377,8 +349,6 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
@@ -391,7 +361,6 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
-matchMemoryAccess: true
 tailLoops: true
 types:
   trans_A: N
@@ -410,7 +379,7 @@ types:
   scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -653,6 +622,41 @@ def test_gemm_options(tmp_path):
                 "--arch=gfx950",
                 "--wgts=128x128x128",
                 "--mac_M=256",
+            ],
+            check=True,
+        )
+
+    # PreSwizzleScaleGFX950 requires pretileScale; client must assert and exit non-zero
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--scaleSkipPermlane=PreSwizzleScaleGFX950",
+                "--scale_A=Separate",
+                "--scale_B=Separate",
+                "--scaleBlockSize=32",
+                "--sts=32x8/32x8",
+            ],
+            check=True,
+        )
+
+    # PreSwizzleScaleGFX950 requires swizzleTileSize (m=32, n=32, k=8); wrong sts must fail
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--scaleSkipPermlane=PreSwizzleScaleGFX950",
+                "--scale_A=Separate",
+                "--scale_B=Separate",
+                "--scaleBlockSize=32",
+                "--sts=64x8/64x8",
+                "--pretileScale",
             ],
             check=True,
         )

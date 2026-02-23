@@ -10,6 +10,9 @@
 
 // using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::data_objects;
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
+using namespace hipdnn_data_sdk::types;
 
 constexpr float PI_FLOAT = 3.14159265358979323846f;
 constexpr double PI_DOUBLE = 3.14159265358979323846;
@@ -137,13 +140,13 @@ TEST(TestTensorValueAttributes, PackUnpackBFloat1Value)
     EXPECT_EQ(fbTensor->value_type(), TensorValue::BFloat16Value);
     auto hval = fbTensor->value_as_BFloat16Value();
     ASSERT_NE(hval, nullptr);
-    EXPECT_EQ(hval->value(), 1.0_bf);
+    EXPECT_EQ(hval->value(), static_cast<float>(1.0_bf));
 
     auto unpacked = std::unique_ptr<TensorAttributesT>(fbTensor->UnPack());
     ASSERT_EQ(unpacked->value.type, TensorValue::BFloat16Value);
     auto* halfVal = unpacked->value.AsBFloat16Value();
     ASSERT_NE(halfVal, nullptr);
-    EXPECT_EQ(halfVal->value(), 1.0_bf);
+    EXPECT_EQ(halfVal->value(), static_cast<float>(1.0_bf));
 }
 
 TEST(TestTensorValueAttributes, PackUnpackDoubleValue)
@@ -209,7 +212,7 @@ TEST(TestTensorValueAttributes, TypeSafety)
     EXPECT_FLOAT_EQ(floatOpt.value(), 42.0f);
 
     EXPECT_FALSE(tensor.get_pass_by_value<half>().has_value());
-    EXPECT_FALSE(tensor.get_pass_by_value<hip_bfloat16>().has_value());
+    EXPECT_FALSE(tensor.get_pass_by_value<bfloat16>().has_value());
     EXPECT_FALSE(tensor.get_pass_by_value<uint8_t>().has_value());
     EXPECT_FALSE(tensor.get_pass_by_value<int32_t>().has_value());
     EXPECT_FALSE(tensor.get_pass_by_value<double>().has_value());
