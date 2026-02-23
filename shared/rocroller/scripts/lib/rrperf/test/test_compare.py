@@ -21,7 +21,11 @@ def write_sample_yaml(target_dir: Path, source_file: Path, m_override: int = Non
     target_dir.mkdir(parents=True, exist_ok=True)
     result = yaml.safe_load(source_file.read_text())
     if m_override is not None:
-        result["M"] = m_override
+        # Support both legacy flat GEMM YAML and nested schema.
+        if isinstance(result.get("problem"), dict):
+            result["problem"]["M"] = m_override
+        else:
+            result["M"] = m_override
     (target_dir / "gemm-000000.yaml").write_text(
         yaml.safe_dump(result, sort_keys=False)
     )
