@@ -7,7 +7,8 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "engines/plans/MiopenConvFwdPlan.hpp"
 
 using namespace miopen_plugin;
@@ -18,18 +19,9 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
-        ASSERT_EQ(miopenCreate(&_handle.miopenHandle), miopenStatusSuccess);
     }
 
-    void TearDown() override
-    {
-        if(_handle.miopenHandle != nullptr)
-        {
-            EXPECT_EQ(miopenDestroy(_handle.miopenHandle), miopenStatusSuccess);
-        }
-    }
-
-    HipdnnEnginePluginHandle _handle;
+    HipdnnMiopenHandle _handle;
 };
 
 TEST(TestConvFwdParams, InitializesAllTensorsFromValidGraph)
@@ -246,7 +238,8 @@ TEST_F(TestGpuConvFwdPlan, CreatesPlanWithValidGraph)
     ConvFwdParams params(*attrs, graph.getTensorMap());
 
     // Create plan
-    ConvFwdPlan(_handle, std::move(params));
+    HipdnnMiopenSettings executionSettings;
+    ConvFwdPlan(_handle, std::move(params), executionSettings);
 }
 
 TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
@@ -284,7 +277,9 @@ TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
     ConvFwdParams params(*attrs, graph.getTensorMap());
 
     // Create plan and expect exception
-    EXPECT_THROW(ConvFwdPlan(_handle, std::move(params)), hipdnn_plugin_sdk::HipdnnPluginException);
+    HipdnnMiopenSettings executionSettings;
+    EXPECT_THROW(ConvFwdPlan(_handle, std::move(params), executionSettings),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestConvFwdParams, AcceptsDeterministicEnabledFlag)
