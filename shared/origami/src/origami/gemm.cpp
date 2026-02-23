@@ -63,7 +63,7 @@ context_t::context_t(const problem_t& problem,
   // Hardware-derived values
   active_cus     = cus;
   mem_bw_limited = compute_mem_bw_from_occupancy(hardware, active_cus);
-  write_mem_bw_limited = compute_mem_bw_from_occupancy(hardware, num_tiles);
+  write_mem_bw_limited = compute_mem_bw_from_occupancy(hardware, num_tiles * batch);
 
   // Tile-derived values
   tile_elements     = MT_M * MT_N;
@@ -953,9 +953,20 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
   const workgroup_mapping_t raw_wgm = {0, 0, wgm.wgm}; // no-wgmxcc for raw dispatch queries
   t0 = count_unique_tiles_timestep(grid, wgm, N_CU, 0);
   const size_t t0_count = std::min(N_CU, total);
-  const double t0_uncached = (t0.m * a_tile + t0.n * b_tile) * t0.k * t0.b;
+  // Spatial reuse is per-batch: different batches have independent A/B data.
+  // Each batch's unique mn×k working set is loaded independently.
+  // Per-batch uncached = (unique_m × a_tile + unique_n × b_tile) × unique_k
+  // Total uncached = per_batch × unique_b (each batch is fully independent)
+  const double t0_uncached_per_batch = (t0.m * a_tile + t0.n * b_tile) * t0.k;
+  const double t0_mn_per_batch = static_cast<double>(t0.m) * t0.n * t0.k;
+  const double t0_total_per_batch = t0_mn_per_batch * per_wg;
+  const double t0_cached_per_batch = t0_total_per_batch - t0_uncached_per_batch;
+  // Scale to all batches — rate is the same for each batch
+  const double t0_uncached = t0_uncached_per_batch * t0.b;
   const double t0_total    = t0_count * per_wg;
-  const double t0_cached   = t0_total - t0_uncached; // spatial reuse only
+  const double t0_cached   = (t0_total_per_batch > 0)
+      ? (t0_cached_per_batch / t0_total_per_batch) * t0_total
+      : 0.0;
 
   // MALL hit rate
   double mall_rate = 0.0;
@@ -966,7 +977,10 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
     if (num_ts > 1 && total > N_CU) {
       t1 = count_unique_tiles_timestep(grid, wgm, N_CU, 1);
       const size_t t1_count = std::min(N_CU, total - N_CU);
-      const double t1_uncached = (t1.m * a_tile + t1.n * b_tile) * t1.k * t1.b;
+      // Per-batch spatial reuse for T1 (same logic as T0)
+      const double t1_uncached_per_batch = (t1.m * a_tile + t1.n * b_tile) * t1.k;
+      const double t1_mn_per_batch = static_cast<double>(t1.m) * t1.n * t1.k;
+      const double t1_total_per_batch = t1_mn_per_batch * per_wg;
       t1_total = t1_count * per_wg;
 
       // Temporal overlap: tiles reused from T0 -> T1
@@ -986,8 +1000,19 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
       // K overlap
       size_t k_overlap = std::min(t0.k, t1.k);
 
-      double mall_temporal = m_overlap * k_overlap * a_tile + n_overlap * k_overlap * b_tile;
-      t1_mall_hits = t1_total - std::max(t1_uncached - mall_temporal, 0.0);
+      // Temporal reuse only applies within the same batch — different batches
+      // have independent A/B data, so no cross-batch MALL reuse.
+      double mall_temporal = 0.0;
+      bool mall_same_batch = (problem.batch <= 1) || (t0.b == 1 && t1.b == 1);
+      if (mall_same_batch)
+        mall_temporal = m_overlap * k_overlap * a_tile + n_overlap * k_overlap * b_tile;
+
+      // Per-batch: spatial + temporal reuse rate, then apply to full total
+      double t1_uncached_adj = std::max(t1_uncached_per_batch - mall_temporal, 0.0);
+      double t1_rate = (t1_total_per_batch > 0)
+          ? 1.0 - t1_uncached_adj / t1_total_per_batch
+          : 0.0;
+      t1_mall_hits = t1_rate * t1_total;
     }
 
     // Extrapolate: T0 (cold) + (num_ts - 1) * T1 (warm)
@@ -1011,20 +1036,30 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
     const size_t last_xcd = num_xcd - 1;
     const size_t per_xcd_count = std::max(std::min(t0_count / num_xcd, tiles_per_xcd_ts), static_cast<size_t>(1));
 
-    // T0: spatial reuse only (cold start)
+    // T0: spatial reuse only (cold start).
+    // Per-batch: different batches have independent A/B data — no cross-batch reuse.
     xcd_t0 = count_unique_tiles(grid, wgm, N_CU, num_xcd, last_xcd, 0);
-    double xcd_t0_ws  = (xcd_t0.m * a_tile + xcd_t0.n * b_tile) * xcd_t0.k * xcd_t0.b;
+    double xcd_t0_ws_per_batch = (xcd_t0.m * a_tile + xcd_t0.n * b_tile) * xcd_t0.k;
+    double xcd_t0_mn_per_batch = static_cast<double>(xcd_t0.m) * xcd_t0.n * xcd_t0.k;
+    double xcd_t0_req_per_batch = xcd_t0_mn_per_batch * per_wg;
+    double xcd_t0_rate = (xcd_t0_req_per_batch > 0)
+        ? 1.0 - xcd_t0_ws_per_batch / xcd_t0_req_per_batch
+        : 0.0;
+
     double xcd_t0_req = per_xcd_count * per_wg;
 
     // L2 capacity check: use per-iteration working set (one MT_K chunk), not full K-loop.
-    // Each main loop iteration loads MT_K worth of A and B — that's the live L2 footprint.
+    // Per-batch only — batch doesn't add to L2 pressure within one iteration.
     const double a_iter = static_cast<double>(config.mt.m) * config.mt.k * data_type_to_bytes(problem.a_dtype);
     const double b_iter = static_cast<double>(config.mt.n) * config.mt.k * data_type_to_bytes(problem.b_dtype);
-    double xcd_t0_iter_ws = (xcd_t0.m * a_iter + xcd_t0.n * b_iter) * xcd_t0.b;
+    double xcd_t0_iter_ws = (xcd_t0.m * a_iter + xcd_t0.n * b_iter);
     double l2_residency = (xcd_t0_iter_ws > 0) ? std::min(l2_cap / xcd_t0_iter_ws, 1.0) : 1.0;
-    double effective_ws = xcd_t0_ws * l2_residency + xcd_t0_req * (1.0 - l2_residency);
 
-    double t0_l2_hits = xcd_t0_req - effective_ws;
+    // Apply residency scaling to the per-batch rate
+    double effective_rate = xcd_t0_rate * l2_residency;
+    double xcd_t0_ws = xcd_t0_req * (1.0 - effective_rate);
+
+    double t0_l2_hits = xcd_t0_req - xcd_t0_ws;
 
     double t1_l2_hits = t0_l2_hits;
     double xcd_t1_req = xcd_t0_req;
@@ -1057,19 +1092,39 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
 
       size_t xcd_m_overlap = (xcd_t0.m == grid.m && xcd_t1.m == grid.m) ? grid.m : 0;
 
+      // Temporal reuse only if:
+      // 1. T0's per-batch working set fits in L2
+      // 2. T0 and T1 share the same batch (different batches have independent data)
+      // For batched GEMMs with many batches, T0 and T1 tiles are from different
+      // batches, so no temporal reuse across timesteps.
       double l2_temporal = 0.0;
-      if (xcd_t0_ws <= l2_cap)
+      bool same_batch_t0_t1 = (problem.batch <= 1) ||
+          (xcd_t0.b == 1 && xcd_t1.b == 1);  // single batch per XCD per timestep
+      if (xcd_t0_ws_per_batch <= l2_cap && same_batch_t0_t1)
         l2_temporal = xcd_m_overlap * a_tile + xcd_n_overlap * b_tile;
 
-      double xcd_t1_ws = (xcd_t1.m * a_tile + xcd_t1.n * b_tile) * xcd_t1.k * xcd_t1.b;
+      // Per-batch spatial reuse for T1 L2
+      double xcd_t1_ws_per_batch = (xcd_t1.m * a_tile + xcd_t1.n * b_tile) * xcd_t1.k;
+      double xcd_t1_mn_per_batch = static_cast<double>(xcd_t1.m) * xcd_t1.n * xcd_t1.k;
+      double xcd_t1_req_per_batch = xcd_t1_mn_per_batch * per_wg;
+      double xcd_t1_rate = (xcd_t1_req_per_batch > 0)
+          ? 1.0 - xcd_t1_ws_per_batch / xcd_t1_req_per_batch
+          : 0.0;
 
-      // L2 capacity scaling for T1 (same per-iteration footprint)
-      double xcd_t1_iter_ws = (xcd_t1.m * a_iter + xcd_t1.n * b_iter) * xcd_t1.b;
+      // L2 capacity scaling for T1 (per-batch, no batch in iter WS)
+      double xcd_t1_iter_ws = (xcd_t1.m * a_iter + xcd_t1.n * b_iter);
       double l2_residency_t1 = (xcd_t1_iter_ws > 0) ? std::min(l2_cap / xcd_t1_iter_ws, 1.0) : 1.0;
-      double effective_temporal = l2_temporal * l2_residency_t1;
-      double effective_ws_t1 = xcd_t1_ws * l2_residency_t1 + xcd_t1_req * (1.0 - l2_residency_t1);
 
-      t1_l2_hits = xcd_t1_req - std::max(effective_ws_t1 - effective_temporal, 0.0);
+      // Temporal reuse is per-batch: only same-batch data from T0 can be reused in T1.
+      // No cross-batch temporal overlap.
+      double effective_temporal = l2_temporal * l2_residency_t1;
+      double effective_rate_t1 = xcd_t1_rate * l2_residency_t1;
+      double xcd_t1_ws_per_batch_adj = std::max(xcd_t1_ws_per_batch - effective_temporal, 0.0);
+      double t1_rate_with_temporal = (xcd_t1_req_per_batch > 0)
+          ? 1.0 - xcd_t1_ws_per_batch_adj / xcd_t1_req_per_batch
+          : 0.0;
+      t1_rate_with_temporal = std::max(t1_rate_with_temporal * l2_residency_t1, 0.0);
+      t1_l2_hits = t1_rate_with_temporal * xcd_t1_req;
     }
 
     // Extrapolate: T0 (cold) + (num_ts - 1) * T1 (warm)
@@ -1205,6 +1260,7 @@ double compute_epilogue_latency(const problem_t& problem,
   // Extract parameters
   const size_t M = problem.size.m;
   const size_t N = problem.size.n;
+  const size_t batch = problem.batch;
 
   const size_t MT_M = config.mt.m;
   const size_t MT_N = config.mt.n;
@@ -1227,7 +1283,7 @@ double compute_epilogue_latency(const problem_t& problem,
   constexpr double cycles_per_acc_read = 8.0;
   constexpr double acc_read_parallelism = 0.9;
   constexpr double cycles_per_bounds_check = 6.0;
-  constexpr double scalar_store_penalty = 2.0;
+  constexpr double scalar_store_penalty = 1.0;
   constexpr size_t threads_per_wave = 64;
   constexpr size_t bytes_per_vectorized_store = 16; // buffer_store_dwordx4 = 16 bytes
   constexpr size_t cache_line_bytes = 128;
@@ -1316,7 +1372,7 @@ double compute_epilogue_latency(const problem_t& problem,
   // Take the worst case
   double L_epilogue = std::max({L_epilogue_interior, L_epilogue_n_edge, L_epilogue_m_edge, L_epilogue_corner});
 
-  if(context.num_timesteps > 1)
+  if(context.num_timesteps > 1 && batch == 1)
   {
     if (grid_m > grid_n)
       L_epilogue = std::max(L_epilogue_interior, L_epilogue_n_edge);
@@ -1384,7 +1440,8 @@ double compute_tile_latency(const problem_t& problem,
       std::min(std::max(config.occupancy, static_cast<int>(1)),
                static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor,
                                                     hardware.N_CU)));  // Number of WGs per CU.
-  double occupancy_factor = pow(heuristic.occupancy_decay_base, real_occupancy);
+  // double occupancy_factor = pow(heuristic.occupancy_decay_base, real_occupancy);
+  double occupancy_factor = pow(real_occupancy, heuristic.occupancy_decay_base) / real_occupancy;
 
   // 3-1) Prologue: set as memory latency
   double L_prologue = L_mem;
@@ -1395,9 +1452,47 @@ double compute_tile_latency(const problem_t& problem,
   double L_epilogue = compute_epilogue_latency(problem, hardware, config, context);
   L_epilogue += L_compute;
 
-  // Block 4: K-padding penalty (if applicable)
-  double problem_k_quant = static_cast<double>(K % MT_K) / static_cast<double>(K);
-  L_epilogue += problem_k_quant * heuristic.k_padding_penalty;
+  // Block 4: Tail loop cost (when K % MT_K != 0).
+  // The tail loop processes the K-remainder:
+  //   - ceil((K%MT_K) / MI_K) iterations
+  //   - Each iteration: LDS read (A+B) → waitcnt → v_cndmask zeroing → MFMAs
+  //   - NO prefetching — loads and compute are serial (not overlapped like main loop)
+  // Per tail iteration cost = LDS_read + cndmask_zeroing + compute_per_mi_k
+  const long k_per_split = static_cast<long>(math::safe_ceil_div(K, splitting_factor));
+  const size_t k_remainder = k_per_split % MT_K;
+  double L_tail = 0;
+  if (k_remainder > 0) {
+    const size_t MI_K = config.mi.k;
+    const size_t mfma_per_mi_k = math::safe_ceil_div(MT_K, MI_K);
+    const size_t tail_iters = math::safe_ceil_div(k_remainder, MI_K);
+
+    // Compute per MI_K iteration (fraction of full L_compute)
+    double L_compute_per_mi_k = L_compute / std::max(mfma_per_mi_k, static_cast<size_t>(1));
+
+    // LDS reads per tail iteration depend on MI dimensions:
+    // A needs ceil(MT_M/MI_M) ds_read_b128, B needs ceil(MT_N/MI_N)
+    double lds_reads_A = static_cast<double>(math::safe_ceil_div(MT_M, config.mi.m));
+    double lds_reads_B = static_cast<double>(math::safe_ceil_div(MT_N, config.mi.n));
+    constexpr double cycles_per_lds_read = 4.0;
+    double L_lds_read = (lds_reads_A + lds_reads_B) * cycles_per_lds_read;
+
+    // v_cndmask zeroing: ~32 instructions to zero out-of-bounds K elements
+    constexpr double cndmask_overhead = 32.0;
+
+    // Serial: LDS read + zeroing + compute (no overlap)
+    double L_tail_per_iter = L_lds_read + cndmask_overhead + L_compute_per_mi_k;
+    L_tail = tail_iters * L_tail_per_iter;
+    L_epilogue += L_tail;
+  }
+
+  // Block 5: K-padding penalty — penalizes tiles where K doesn't divide evenly by MT_K.
+  // Fraction of total K that falls into the unrolled tail, scaled by a tuning constant.
+  // Prevents the model from favoring arbitrarily large MT_K values.
+  constexpr double k_padding_penalty = 20000.0;
+  const double problem_k_quant = static_cast<double>(k_remainder) / k_per_split;
+  L_epilogue += problem_k_quant * k_padding_penalty;
+
+  L_epilogue *= occupancy_factor;
 
   // 4) Single-tile latency (apply penalty after finding the bottleneck)
   // tf32 emu has some more overhead
@@ -1413,11 +1508,10 @@ double compute_tile_latency(const problem_t& problem,
   double L_tile_single =
       std::max(L_compute * heuristic.weight_compute, L_mem * heuristic.weight_memory);
   L_tile_single *= heuristic.main_loop_efficiency;
-  // L_tile_single *= effective_tile_penalty;
+  L_tile_single *= 0.5 * effective_tile_penalty;
   L_tile_single += L_cvt;
 
   // 5) Number of K-iterations (excluding epilogue), at least 1
-  const long k_per_split = static_cast<long>(math::safe_ceil_div(K, splitting_factor));
   long num_iter =
       std::max(static_cast<long>(math::safe_ceil_div(static_cast<size_t>(k_per_split), MT_K) - 1),
                static_cast<long>(1));
@@ -1445,6 +1539,7 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("L_cvt: " << L_cvt);
     OLOG_DEBUG("k_per_split: " << k_per_split);
     OLOG_DEBUG("num_iter: " << int(num_iter));
+    OLOG_DEBUG("L_tail: " << L_tail);
     OLOG_DEBUG("problem_k_quant: " << problem_k_quant);
     OLOG_DEBUG("L_prologue: " << L_prologue);
     OLOG_DEBUG("L_tile_single: " << L_tile_single);
@@ -1466,108 +1561,75 @@ double compute_timestep_latency(const problem_t& problem,
   return L_timestep;
 }
 
-// Compute the latency of the parallel reduction kernel (separate kernel launch).
-// This is a second kernel that reads all partials from workspace, accumulates, and writes output.
+// Compute the latency of the PostGSU parallel reduction kernel.
 double compute_parallel_reduction_latency(const problem_t& problem,
                                           const hardware_t& hardware,
                                           const config_t& config,
                                           const context_t& context) {
+  // Single kernel launch and flat reduction. 
+  // Each thread reads ALL splitting_factor partials from workspace (f32), 
+  // accumulates them sequentially, and writes one output element (d_dtype). 
+  // For small GSU (4/8/16) the reads are fully unrolled; for larger GSU a loop is used.
+  
   // Only applies to parallel reduction with splitting
   if (context.splitting_factor <= 1 || context.reduction_strategy != reduction_t::parallel)
     return 0.0;
 
   // Extract parameters
-  const size_t num_tiles = context.num_tiles;
   const size_t splitting_factor = context.splitting_factor;
+  const size_t M = problem.size.m;
+  const size_t N = problem.size.n;
+  const size_t batch = problem.batch;
+  const size_t output_elements = M * N * batch;
+  const size_t compute_bytes = 4; // workspace partials stored as f32
   const size_t d_bytes = data_type_to_bytes(problem.d_dtype);
-  const size_t tile_elements = config.mt.m * config.mt.n;
 
   // Constants
-  constexpr double kernel_launch_overhead = 10000.0;
-  constexpr double cycles_per_barrier = 500.0; // global memory fence + barrier sync
-  constexpr size_t threads_per_wave = 64;
+  constexpr double kernel_launch_overhead = 20000.0;
+  constexpr size_t threads_per_wg = 256;
+  constexpr size_t wavefront_size = 64;
 
-  // Log-based tree reduction (single kernel launch, sync barriers between rounds):
-  // Round i: ceil(remaining/2) WGs per tile, each reads 2 partials, accumulates, writes 1.
-  // A sync barrier separates each round (not a separate kernel launch).
-  // Total rounds = ceil(log2(splitting_factor)).
-  const size_t num_rounds = static_cast<size_t>(std::ceil(std::log2(static_cast<double>(splitting_factor))));
-  if (num_rounds == 0) return 0.0;
+  // Each thread processes VW output elements.
+  const size_t VW = std::max(static_cast<size_t>(1), 4 / d_bytes); // 16 bytes / d_bytes, capped
+  const size_t total_wgs = math::safe_ceil_div(output_elements, threads_per_wg * VW);
+  const size_t active_wgs = std::min(total_wgs, hardware.N_CU);
+  const size_t timesteps = math::safe_ceil_div(total_wgs, hardware.N_CU);
 
-  // One kernel launch for the entire reduction
-  double L_total = kernel_launch_overhead;
-  size_t partials_remaining = splitting_factor;
+  // Bandwidth based on occupancy of the reduction kernel
+  double bw = std::max(
+      hardware.mem3_perf_ratio * compute_mem_bw_from_occupancy(hardware, active_wgs), 1e-12);
 
-  // Cache-aware bandwidth selection per round:
-  // L2 is ~10× faster than DRAM, MALL is ~3× faster.
-  // When the round's working set fits in cache, use the higher bandwidth.
-  const double l2_bw_boost = 10.0;   // L2 is ~10× DRAM bandwidth
-  const double mall_bw_boost = 3.0;  // MALL is ~3× DRAM bandwidth
-  const double l2_capacity = static_cast<double>(hardware.L2_capacity);
-  // MALL capacity: approximate as L2 × 64 (~256MB for MI300X)
-  const double mall_capacity = l2_capacity * 64.0;
+  // Total data movement per timestep:
+  //   Read:  active_wgs × threads_per_wg × VW × splitting_factor × compute_bytes
+  //   Write: active_wgs × threads_per_wg × VW × d_bytes
+  double elements_per_ts = static_cast<double>(active_wgs) * threads_per_wg * VW;
+  double read_bytes_per_ts  = elements_per_ts * splitting_factor * compute_bytes;
+  double write_bytes_per_ts = elements_per_ts * d_bytes;
 
-  for (size_t round = 0; round < num_rounds; ++round) {
-    // This round: each WG reads 2 partials, accumulates, writes 1
-    size_t wgs_per_tile = partials_remaining / 2;
-    if (wgs_per_tile == 0) wgs_per_tile = 1;
-    size_t total_wgs = num_tiles * wgs_per_tile;
+  // Cache-aware: workspace data from GEMM kernel may still be in MALL
+  double total_workspace = static_cast<double>(output_elements) * splitting_factor * compute_bytes;
+  double mall_capacity = static_cast<double>(hardware.L2_capacity) * 64.0;
+  double l2_capacity   = static_cast<double>(hardware.L2_capacity);
 
-    // Working set for this round: all partials being read + written
-    double partial_size = static_cast<double>(tile_elements) * d_bytes;
-    double round_working_set = total_wgs * 3.0 * partial_size; // 2 reads + 1 write per WG
+  double read_bw = bw;
+  if (total_workspace <= l2_capacity)
+    read_bw *= 10.0;
+  else if (total_workspace <= mall_capacity)
+    read_bw *= 3.0;
 
-    // Base DRAM bandwidth for this occupancy
-    double dram_bw = std::max(
-        hardware.mem3_perf_ratio * compute_mem_bw_from_occupancy(hardware, total_wgs), 1e-12);
+  // Per-timestep latency: read + accumulate + write
+  double L_read  = read_bytes_per_ts / read_bw;
+  double L_write = write_bytes_per_ts / bw;
+  // Accumulate: (splitting_factor - 1) adds per element, 1 add per cycle per lane
+  double L_acc   = static_cast<double>(splitting_factor - 1) * elements_per_ts
+                 / (active_wgs * wavefront_size);
 
-    // Boost bandwidth if working set fits in cache
-    double effective_bw = dram_bw;
-    if (round_working_set <= l2_capacity)
-      effective_bw = dram_bw * l2_bw_boost;
-    else if (round_working_set <= mall_capacity)
-      effective_bw = dram_bw * mall_bw_boost;
-
-    double per_cu_bw = effective_bw / std::max(static_cast<double>(total_wgs), 1.0);
-
-    // Each WG: read 2 partial results of the same output tile, accumulate, write 1 merged partial
-    double L_read  = (2.0 * partial_size) / per_cu_bw;
-    double L_write = partial_size / per_cu_bw;
-    double L_acc   = static_cast<double>(tile_elements) / threads_per_wave;
-
-    // Timesteps if total_wgs > N_CU
-    size_t timesteps = math::safe_ceil_div(total_wgs, hardware.N_CU);
-
-    // Round cost: barrier + per-tile work × timesteps
-    double L_round = cycles_per_barrier + (L_read + L_acc + L_write) * timesteps;
-    L_total += L_round;
-
-    // Next round has half as many partials
-    partials_remaining = (partials_remaining + 1) / 2;
-  }
-
-  // Penalty for high split-to-tile ratio: when splitting_factor >> num_tiles,
-  // the reduction becomes pathologically inefficient — late rounds have very few WGs,
-  // the last rounds are essentially serial, and workspace memory traffic is massive.
-  // Split-ratio penalty for pathologically high split-to-tile ratios
-  double split_ratio = static_cast<double>(splitting_factor) / std::max(static_cast<double>(num_tiles), 1.0);
-  if (split_ratio > 1.0) {
-    double ratio_penalty = 1.0 + 0.3 * std::sqrt(std::log2(split_ratio));
-    L_total *= ratio_penalty;
-  }
-
-  // High split factor overhead: StreamK dispatch, workspace allocation,
-  // partial tile assignment, and reduced pipeline efficiency per WG.
-  constexpr double split_overhead_per_doubling = 0.15;
-  if (splitting_factor > 1) {
-    double split_penalty = 1.0 + split_overhead_per_doubling * std::log2(static_cast<double>(splitting_factor));
-    L_total *= split_penalty;
-  }
+  double L_total = kernel_launch_overhead + (L_read + L_acc + L_write) * timesteps;
 
   if (runtime_options::get().debug_enabled) {
-    OLOG_DEBUG("L_parallel_reduce_split_ratio: " << split_ratio);
-    OLOG_DEBUG("L_parallel_reduce_rounds: " << num_rounds);
-    OLOG_DEBUG("L_parallel_reduce_total: " << L_total);
+    OLOG_DEBUG("L_parallel_reduce_reads: " << L_read);
+    OLOG_DEBUG("L_parallel_reduce_accumulates: " << L_acc);
+    OLOG_DEBUG("L_parallel_reduce_writes: " << L_write);
   }
 
   return L_total;
