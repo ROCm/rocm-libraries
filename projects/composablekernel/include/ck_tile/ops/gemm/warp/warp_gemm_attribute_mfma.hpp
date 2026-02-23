@@ -17,6 +17,35 @@ enum class WGAttrNumAccessEnum
     Invalid = -1
 };
 
+template <WGAttrNumAccessEnum AttrNumAccess>
+struct get_wgattr_num_access
+{
+    private:
+    static constexpr index_t getAccesses()
+    {
+        if constexpr(AttrNumAccess == WGAttrNumAccessEnum::Single)
+        {
+            return 1;
+        }
+        else if constexpr(AttrNumAccess == WGAttrNumAccessEnum::Double)
+        {
+            return 2;
+        }
+        else if constexpr(AttrNumAccess == WGAttrNumAccessEnum::Quad)
+        {
+            return 4;
+        }
+        else
+        {
+            static_assert(false, "unsupported AttrNumAccess");
+            return 0;
+        }
+    }
+
+    public:
+    static constexpr auto value = getAccesses();
+};
+
 template <typename WarpGemmAttributeMfmaImpl_,
           WGAttrNumAccessEnum AttrNumAccessA_ = WGAttrNumAccessEnum::Single,
           WGAttrNumAccessEnum AttrNumAccessB_ = AttrNumAccessA_>
@@ -24,11 +53,11 @@ struct WarpGemmAttributeMfma
 {
     using Impl                            = remove_cvref_t<WarpGemmAttributeMfmaImpl_>;
     static constexpr auto AttrNumAccessA  = AttrNumAccessA_;
-    static constexpr auto AttrNumAccessAV = static_cast<index_t>(AttrNumAccessA);
+    static constexpr auto AttrNumAccessAV = get_wgattr_num_access<AttrNumAccessA>::value;
     static constexpr auto AttrNumAccessB  = AttrNumAccessB_;
-    static constexpr auto AttrNumAccessBV = static_cast<index_t>(AttrNumAccessB);
+    static constexpr auto AttrNumAccessBV = get_wgattr_num_access<AttrNumAccessB>::value;
 
-    static constexpr bool UsePackNumAccess = AttrNumAccessAV != AttrNumAccessBV;
+    static constexpr bool UsePackNumAccess = AttrNumAccessA != AttrNumAccessB;
 
     using ADataType = typename Impl::ADataType;
     using BDataType = typename Impl::BDataType;
@@ -165,11 +194,11 @@ struct WarpGemmAttributeMfmaIterateK
 
     using Impl                            = remove_cvref_t<WarpGemmAttributeMfmaImpl_>;
     static constexpr auto AttrNumAccessA  = AttrNumAccessA_;
-    static constexpr auto AttrNumAccessAV = static_cast<index_t>(AttrNumAccessA);
+    static constexpr auto AttrNumAccessAV = get_wgattr_num_access<AttrNumAccessA>::value;
     static constexpr auto AttrNumAccessB  = AttrNumAccessB_;
-    static constexpr auto AttrNumAccessBV = static_cast<index_t>(AttrNumAccessB);
+    static constexpr auto AttrNumAccessBV = get_wgattr_num_access<AttrNumAccessB>::value;
 
-    static constexpr bool UsePackNumAccess = AttrNumAccessAV != AttrNumAccessBV;
+    static constexpr bool UsePackNumAccess = AttrNumAccessA != AttrNumAccessB;
 
     using ADataType = typename Impl::ADataType;
     using BDataType = typename Impl::BDataType;
