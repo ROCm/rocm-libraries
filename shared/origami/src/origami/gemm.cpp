@@ -1435,30 +1435,13 @@ double compute_tile_latency(const problem_t& problem,
   double L_WG_setup = 1;  // WG_setup_Latency
 
   // 3) Prologue and Epilogue latencies
-  // Occupancy-based latency hiding requires a deep enough K-loop pipeline:
-  // other wavefronts' main-loop compute overlaps one wavefront's prologue/epilogue stall.
-  // With few K iterations all wavefronts execute the same phase simultaneously,
-  // so occupancy adds memory pressure rather than hiding latency.
-  // For batched GEMMs the lockstep effect is stronger because wavefronts from
-  // independent batch elements share no data, requiring more iterations before
-  // the pipeline stagger provides real overlap.
-  const long k_per_split = static_cast<long>(math::safe_ceil_div(K, splitting_factor));
-  const long k_iters_raw = static_cast<long>(
-      math::safe_ceil_div(static_cast<size_t>(k_per_split), MT_K)) - 1;
-  const double k_iters = static_cast<double>(std::max(k_iters_raw, 0L));
-
-  constexpr double base_pipeline_depth = 4.0;
-  const double pipeline_depth = base_pipeline_depth
-      + 2.0 * std::log2(std::max(static_cast<double>(batch), 1.0));
-  const double iter_blend = k_iters / (k_iters + pipeline_depth);
-  const double effective_decay =
-      1.0 - (1.0 - heuristic.occupancy_decay_base) * iter_blend;
-
+  // Prologue and Epilogue overhead are reduced with higher occupancy kernels.
   size_t real_occupancy =
       std::min(std::max(config.occupancy, static_cast<int>(1)),
                static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor,
-                                                    hardware.N_CU)));
-  double occupancy_factor = pow(real_occupancy, effective_decay) / real_occupancy;
+                                                    hardware.N_CU)));  // Number of WGs per CU.
+  // double occupancy_factor = pow(heuristic.occupancy_decay_base, real_occupancy);
+  double occupancy_factor = pow(real_occupancy, heuristic.occupancy_decay_base) / real_occupancy;
 
   // 3-1) Prologue: set as memory latency
   double L_prologue = L_mem;
@@ -1475,6 +1458,7 @@ double compute_tile_latency(const problem_t& problem,
   //   - Each iteration: LDS read (A+B) → waitcnt → v_cndmask zeroing → MFMAs
   //   - NO prefetching — loads and compute are serial (not overlapped like main loop)
   // Per tail iteration cost = LDS_read + cndmask_zeroing + compute_per_mi_k
+  const long k_per_split = static_cast<long>(math::safe_ceil_div(K, splitting_factor));
   const size_t k_remainder = k_per_split % MT_K;
   double L_tail = 0;
   if (k_remainder > 0) {
@@ -1549,11 +1533,6 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("effective_tile_penalty: " << effective_tile_penalty);
     OLOG_DEBUG("config.occupancy: " << config.occupancy);
     OLOG_DEBUG("real_occupancy: " << real_occupancy);
-    OLOG_DEBUG("k_iters (raw main loop): " << k_iters);
-    OLOG_DEBUG("pipeline_depth: " << pipeline_depth);
-    OLOG_DEBUG("iter_blend: " << iter_blend);
-    OLOG_DEBUG("effective_decay: " << effective_decay);
-    OLOG_DEBUG("occupancy_factor: " << occupancy_factor);
 
     OLOG_DEBUG("L_mem: " << L_mem);
     OLOG_DEBUG("L_compute: " << L_compute);
