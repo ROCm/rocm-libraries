@@ -107,7 +107,7 @@ class ConvDescription : public Description
                     traits_.warp_gemm.n_iter);
 
         // Memory Access section
-        f.writeLast(2, "Memory access:");
+        f.writeLine(2, "Memory access:");
 
         f.writeLine(3, "A Tile transfer: ");
         f.writeLine(4,
@@ -200,7 +200,7 @@ class ConvDescription : public Description
                     traits_.c_tile_transfer.thread_cluster_dims[2],
                     "×",
                     traits_.c_tile_transfer.thread_cluster_dims[3]);
-        f.writeLine(4,
+        f.writeLast(4,
                     "Vector access (GMEM write) instruction size: ",
                     traits_.c_tile_transfer.scalar_per_vector);
         if(traits_.num_gemm_k_prefetch_stage)
