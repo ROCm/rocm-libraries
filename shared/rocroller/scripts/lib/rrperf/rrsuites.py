@@ -1,27 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright (C) 2024-2026 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 import pathlib
 from itertools import product
@@ -1061,7 +1039,6 @@ def fp4_target():
         prefetchLDSFactor=2,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1107,7 +1084,6 @@ def fp4_target_d2lds_mi32x32x64_pf2x1():
         prefetchLDSFactor=1,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1188,7 +1164,6 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1238,7 +1213,6 @@ def fp4_target_d2lds_mi32x32x64_st32x8_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1300,7 +1274,6 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
         betaInFma=True,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1351,7 +1324,6 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf4x1():
         betaInFma=True,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1414,7 +1386,6 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
         betaInFma=True,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
-        matchMemoryAccess=True,
         tailLoops=False,
         types=TypeParameters(
             trans_A="T",
@@ -1459,7 +1430,7 @@ def fp4_mt32x32x256_d2lds_mi16x16x128_st32x8_pf2x1():
         load_B="BufferToLDS",
         loadScale_A="BufferToLDS",
         loadScale_B="BufferToLDS",
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=1,
@@ -1545,7 +1516,6 @@ def fp4_target_mxd2lds_mi16x16x128_st32x8_pf2x1():
         betaInFma=True,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1605,7 +1575,6 @@ def does_this_fail():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1652,7 +1621,6 @@ def fp4_single_scale_target_d2lds_mi16x16x128_pf4x1():
         scaleValue_B=1e-2,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1809,7 +1777,6 @@ def mxfp8_target_128x256():
         prefetchLDSFactor=2,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1855,7 +1822,6 @@ def mxfp8_target_256x128():
         prefetchLDSFactor=2,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1901,7 +1867,6 @@ def mxfp8_target_d2lds_mi32x32x64_pf2x1():
         prefetchLDSFactor=1,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1955,7 +1920,6 @@ def mxfp8_target_d2lds_mi32x32x64_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -2009,7 +1973,6 @@ def mxfp8_target_d2lds_mi16x16x128_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -2063,7 +2026,6 @@ def fp8_target_d2lds_mi16x16x128_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",

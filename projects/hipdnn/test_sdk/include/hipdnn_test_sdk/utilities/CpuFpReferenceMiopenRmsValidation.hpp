@@ -3,13 +3,8 @@
 
 #pragma once
 
-#if defined(__HIP_PLATFORM_AMD__)
-// Need these for the half and bfloat16 types
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
-#endif
-
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
@@ -59,6 +54,7 @@ public:
         hipdnn_data_sdk::utilities::TensorView<T> implView(implementation);
 
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
+            using hipdnn_data_sdk::types::fabs;
             T refValueT = refView.getHostValue(indices);
             T implValueT = implView.getHostValue(indices);
 
@@ -75,7 +71,7 @@ public:
 
             // Track maximum magnitudes
             double currentMaxRef = maxRefMagnitude.load(std::memory_order_relaxed);
-            double absRefValue = std::fabs(refValue);
+            double absRefValue = fabs(refValue);
             while(absRefValue > currentMaxRef
                   && !maxRefMagnitude.compare_exchange_weak(
                       currentMaxRef, absRefValue, std::memory_order_relaxed))
@@ -83,7 +79,7 @@ public:
             }
 
             double currentMaxImpl = maxImplMagnitude.load(std::memory_order_relaxed);
-            double absImplValue = std::fabs(implValue);
+            double absImplValue = fabs(implValue);
             while(absImplValue > currentMaxImpl
                   && !maxImplMagnitude.compare_exchange_weak(
                       currentMaxImpl, absImplValue, std::memory_order_relaxed))
@@ -104,12 +100,14 @@ private:
                        double maxImplMagnitude,
                        size_t elementCount) const
     {
+        using hipdnn_data_sdk::types::max;
+        using hipdnn_data_sdk::types::sqrt;
         // Find the maximum magnitude between reference and implementation
         double maxMagnitude
-            = std::max({maxRefMagnitude, maxImplMagnitude, std::numeric_limits<double>::min()});
+            = max(max(maxRefMagnitude, maxImplMagnitude), std::numeric_limits<double>::min());
 
-        double relativeRmsError = std::sqrt(squareDifference)
-                                  / (std::sqrt(static_cast<double>(elementCount)) * maxMagnitude);
+        double relativeRmsError
+            = sqrt(squareDifference) / (sqrt(static_cast<double>(elementCount)) * maxMagnitude);
 
         if(relativeRmsError > _relativeTolerance)
         {
@@ -133,11 +131,12 @@ inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
     case hipdnn_data_sdk::data_objects::DataType::FLOAT:
         return std::make_unique<CpuFpReferenceMiopenRmsValidation<float>>(relativeTolerance);
     case hipdnn_data_sdk::data_objects::DataType::HALF:
-        return std::make_unique<CpuFpReferenceMiopenRmsValidation<half>>(
-            static_cast<half>(relativeTolerance));
+        return std::make_unique<CpuFpReferenceMiopenRmsValidation<hipdnn_data_sdk::types::half>>(
+            hipdnn_data_sdk::types::half(relativeTolerance));
     case hipdnn_data_sdk::data_objects::DataType::BFLOAT16:
-        return std::make_unique<CpuFpReferenceMiopenRmsValidation<hip_bfloat16>>(
-            static_cast<hip_bfloat16>(relativeTolerance));
+        return std::make_unique<
+            CpuFpReferenceMiopenRmsValidation<hipdnn_data_sdk::types::bfloat16>>(
+            hipdnn_data_sdk::types::bfloat16(relativeTolerance));
     case hipdnn_data_sdk::data_objects::DataType::DOUBLE:
         return std::make_unique<CpuFpReferenceMiopenRmsValidation<double>>(
             static_cast<double>(relativeTolerance));
