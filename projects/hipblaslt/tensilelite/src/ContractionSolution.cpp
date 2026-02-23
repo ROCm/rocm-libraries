@@ -807,8 +807,6 @@ namespace TensileLite
                                           autoWGMXCCCHUNK,
                                           autoGsuVal);
 
-	// NOTE: an assumption here is A & B must be both MX data types or non-MX data types.
-	//       Mixing is not supported.
         if(!problemType.useScaleAB.empty())
         {
             args.template append<void const*>("scaleA", inputs.scaleA);
