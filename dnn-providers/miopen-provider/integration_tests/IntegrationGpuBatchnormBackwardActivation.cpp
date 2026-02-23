@@ -60,7 +60,7 @@ protected:
             ->fillTensorWithRandomValues(1.9f, 2.0f, seed);
     }
 
-    void runGraphTest([[maybe_unused]] DataType tolerance, const TensorLayout& layout)
+    void runGraphTest([[maybe_unused]] float tolerance, const TensorLayout& layout)
     {
         namespace fe = hipdnn_frontend;
 
@@ -175,7 +175,7 @@ protected:
 
         auto intermediateTolerance = batchnorm::getToleranceBackward<float>();
 
-        this->registerValidator(dxOut, static_cast<float>(tolerance));
+        this->registerValidator(dxOut, tolerance);
         this->registerValidator(dscaleOut, intermediateTolerance);
         this->registerValidator(dbiasOut, intermediateTolerance);
 
@@ -185,29 +185,25 @@ protected:
 
 using IntegrationGpuBatchnormBackwardActivationNchwFp32 = BatchnormBackwardActivation<float>;
 
-using IntegrationGpuBatchnormBackwardActivationNchwBfp16
-    = BatchnormBackwardActivation<hip_bfloat16>;
+using IntegrationGpuBatchnormBackwardActivationNchwBfp16 = BatchnormBackwardActivation<bfloat16>;
 
 using IntegrationGpuBatchnormBackwardActivationNchwFp16 = BatchnormBackwardActivation<half>;
 
 using IntegrationGpuBatchnormBackwardActivationNhwcFp32 = BatchnormBackwardActivation<float>;
 
-using IntegrationGpuBatchnormBackwardActivationNhwcBfp16
-    = BatchnormBackwardActivation<hip_bfloat16>;
+using IntegrationGpuBatchnormBackwardActivationNhwcBfp16 = BatchnormBackwardActivation<bfloat16>;
 
 using IntegrationGpuBatchnormBackwardActivationNhwcFp16 = BatchnormBackwardActivation<half>;
 
 using IntegrationGpuBatchnormBackwardActivationNcdhwFp32 = BatchnormBackwardActivation<float>;
 
-using IntegrationGpuBatchnormBackwardActivationNcdhwBfp16
-    = BatchnormBackwardActivation<hip_bfloat16>;
+using IntegrationGpuBatchnormBackwardActivationNcdhwBfp16 = BatchnormBackwardActivation<bfloat16>;
 
 using IntegrationGpuBatchnormBackwardActivationNcdhwFp16 = BatchnormBackwardActivation<half>;
 
 using IntegrationGpuBatchnormBackwardActivationNdhwcFp32 = BatchnormBackwardActivation<float>;
 
-using IntegrationGpuBatchnormBackwardActivationNdhwcBfp16
-    = BatchnormBackwardActivation<hip_bfloat16>;
+using IntegrationGpuBatchnormBackwardActivationNdhwcBfp16 = BatchnormBackwardActivation<bfloat16>;
 
 using IntegrationGpuBatchnormBackwardActivationNdhwcFp16 = BatchnormBackwardActivation<half>;
 
@@ -234,7 +230,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNchwBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCHW);
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -291,7 +287,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NHWC);
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -341,7 +337,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCDHW);
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -377,7 +373,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NDHWC);
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(

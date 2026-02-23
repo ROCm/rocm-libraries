@@ -8,6 +8,7 @@
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/heuristics.hpp"
+#include "origami/logger.hpp"
 #include "origami/types.hpp"
 
 namespace origami {
@@ -172,7 +173,7 @@ heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
                                                  const hardware_t& hardware,
                                                  const config_t& config) const {
   // When heuristics are disabled, always return default parameters (no overrides).
-  if (!origami::runtime_options().get().heuristics_enabled) { return default_params_; }
+  if (!origami::runtime_options::get().heuristics_enabled) { return default_params_; }
 
   // Start with default parameters
   heuristic_params_t result = default_params_;
@@ -189,9 +190,9 @@ heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
 
     auto it = hand_optimized_map_.find(fast_key);
     if (it != hand_optimized_map_.end()) {
-      if (origami::runtime_options().get().debug_enabled) {
-        std::cout << "Found hand-optimized kernel " << fast_key.to_string() << " with efficiency "
-                  << it->second.main_loop_efficiency << "\n";
+      if (origami::runtime_options::get().debug_enabled) {
+        OLOG_DEBUG("Hand-optimized kernel " << fast_key.to_string() << ", efficiency: "
+                   << it->second.main_loop_efficiency);
       }
       result = it->second;
     }
@@ -321,6 +322,43 @@ void heuristics_database_t::initialize_defaults() {
     for (const auto& cfg : bf16_tn_configs) {
       auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
                                                 data_type_t::BFloat16,
+                                                transpose_t::T,
+                                                transpose_t::N,
+                                                cfg.m,
+                                                cfg.n,
+                                                cfg.k);
+      heuristic_params_t params;
+      params.main_loop_efficiency = cfg.eff;
+      add_entry(key, params);
+    }
+
+    // TF32 NN
+    std::vector<cms_config> tf32_nn_configs = {
+        {192, 256, 32, 1.0 / 1.23},
+    };
+
+    for (const auto& cfg : tf32_nn_configs) {
+      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
+                                                data_type_t::XFloat32,
+                                                transpose_t::N,
+                                                transpose_t::N,
+                                                cfg.m,
+                                                cfg.n,
+                                                cfg.k);
+      heuristic_params_t params;
+      params.main_loop_efficiency = cfg.eff;
+      add_entry(key, params);
+    }
+
+    // TF32 TN
+    std::vector<cms_config> tf32_tn_configs = {
+        {128, 256, 32, 1.0 / 1.26},
+        {192, 256, 32, 1.0 / 1.23},
+    };
+
+    for (const auto& cfg : tf32_tn_configs) {
+      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
+                                                data_type_t::XFloat32,
                                                 transpose_t::T,
                                                 transpose_t::N,
                                                 cfg.m,

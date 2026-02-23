@@ -11,9 +11,8 @@
 #include "PointwiseTensorBundles.hpp"
 
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -25,6 +24,8 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
 
 struct ReluPointwiseTestParams
 {
@@ -194,7 +195,7 @@ protected:
     using DataTypeT = T;
 };
 
-using TestTypes = ::testing::Types<float, half, hip_bfloat16>;
+using TestTypes = ::testing::Types<float, half, bfloat16>;
 TYPED_TEST_SUITE(ReluPointwiseOperationsCpuGraphExecutor, TestTypes, );
 
 // =============================================================================
