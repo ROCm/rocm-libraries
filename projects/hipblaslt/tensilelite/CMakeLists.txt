@@ -28,12 +28,10 @@ if(TENSILELITE_ENABLE_HOST)
     if(HIPBLASLT_ENABLE_YAML)
         target_link_libraries(tensilelite-host PRIVATE LLVMObjectYAML)
         target_include_directories(tensilelite-host PRIVATE ${LLVM_INCLUDE_DIRS})
-        target_compile_definitions(tensilelite-host PUBLIC TENSILE_YAML)
-    endif()
-
-    if(HIPBLASLT_ENABLE_MSGPACK)
+        target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_YAML>)
+    else()
         target_link_libraries(tensilelite-host PRIVATE ${hipblaslt_msgpack_target})
-        target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_MSGPACK>) # make TENSILELITE_MSGPACK
+        target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_MSGPACK>)
     endif()
 
     target_include_directories(tensilelite-host

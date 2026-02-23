@@ -3,9 +3,7 @@
 
 if(HIPBLASLT_ENABLE_YAML)
     add_subdirectory(llvm)
-endif()
-
-if(HIPBLASLT_ENABLE_MSGPACK)
+else()
     add_subdirectory(msgpack)
 endif()
 
