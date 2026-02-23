@@ -15,6 +15,7 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+include(hipblaslt_shim)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(GenerateExportHeader)
@@ -74,9 +75,9 @@ if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_ASAN "Build hipBLASLt with address sanitizer enabled." OFF)
     option(HIPBLASLT_ENABLE_TSAN "Build hipBLASLt with thread sanitizer enabled." OFF)
     option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
-    option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
+    option(HIPBLASLT_ENABLE_YAML "Use YAML for parsing configuration files." OFF)
+    cmake_dependent_option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON "NOT HIPBLASLT_ENABLE_YAML" OFF)
     option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
-    option(HIPBLASLT_ENABLE_LLVM "Use msgpack for parsing configuration files." OFF)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST)
@@ -154,7 +155,7 @@ if(HIPBLASLT_ENABLE_OPENMP)
     find_package(OpenMP REQUIRED)
 endif()
 
-if(HIPBLASLT_ENABLE_LLVM)
+if(HIPBLASLT_ENABLE_YAML)
     find_package(LLVM REQUIRED)
 endif()
 
@@ -436,7 +437,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
             hipblaslt-bench-extop-amax
         COMPONENT benchmarks
     )
-    if(HIPBLASLT_ENABLE_LLVM)
+    if(HIPBLASLT_ENABLE_YAML)
         rocm_install(
             TARGETS
                 hipblaslt-sequence

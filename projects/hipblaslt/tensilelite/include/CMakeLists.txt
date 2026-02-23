@@ -88,7 +88,7 @@ target_sources(tensilelite-host
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/geom.hpp"
 )
 
-if(HIPBLASLT_ENABLE_LLVM)
+if(HIPBLASLT_ENABLE_YAML)
     target_sources(tensilelite-host
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/llvm/Loading.hpp"

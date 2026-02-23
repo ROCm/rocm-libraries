@@ -25,7 +25,7 @@ if(TENSILELITE_ENABLE_HOST)
             $<BUILD_INTERFACE:__HIP_HCC_COMPAT_MODE__=1> # if we don't have this we fail tests on 942_304cu
     )
 
-    if(HIPBLASLT_ENABLE_LLVM)
+    if(HIPBLASLT_ENABLE_YAML)
         target_link_libraries(tensilelite-host PRIVATE LLVMObjectYAML)
         target_include_directories(tensilelite-host PRIVATE ${LLVM_INCLUDE_DIRS})
         target_compile_definitions(tensilelite-host PUBLIC TENSILE_YAML)
