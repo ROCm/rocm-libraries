@@ -46,7 +46,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         .set_stride({1})
         .set_value(1e-5);
 
-    hipdnn_frontend::graph::RmsnormAttributes rmsnormAttrs;
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttrs;
     rmsnormAttrs.set_name("rmsnorm_fwd");
     rmsnormAttrs.set_epsilon(epsilonTensor);
     rmsnormAttrs.set_compute_data_type(hipdnn_frontend::fromSdkType(computeDataType));

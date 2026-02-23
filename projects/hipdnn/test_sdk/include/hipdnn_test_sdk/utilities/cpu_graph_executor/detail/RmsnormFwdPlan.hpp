@@ -132,7 +132,7 @@ public:
             return false;
         }
 
-        const auto* nodeAttributes = node.attributes_as_RmsnormAttributes();
+        const auto* nodeAttributes = node.attributes_as_RMSNormAttributes();
         if(nodeAttributes == nullptr)
         {
             return false;
@@ -160,10 +160,10 @@ public:
         buildNodePlan(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
                       const hipdnn_data_sdk::data_objects::Node& node) const override
     {
-        const auto* nodeAttributes = node.attributes_as_RmsnormAttributes();
+        const auto* nodeAttributes = node.attributes_as_RMSNormAttributes();
         if(nodeAttributes == nullptr)
         {
-            throw std::runtime_error("Node attributes are not of type RmsnormAttributes");
+            throw std::runtime_error("Node attributes are not of type RMSNormAttributes");
         }
 
         const auto& tensorMap = graph.getTensorMap();

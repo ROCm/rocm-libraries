@@ -117,7 +117,7 @@ private:
             return detail::ConvolutionWrwSignatureKey(node, tensorMap, computeType);
         case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
             return detail::MatmulSignatureKey(node, tensorMap, computeType);
-        case hipdnn_data_sdk::data_objects::NodeAttributes::RmsnormAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes:
             return detail::RmsnormFwdSignatureKey(node, tensorMap);
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");

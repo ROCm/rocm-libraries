@@ -21,7 +21,7 @@ struct RmsnormFwdTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBu
         : hipdnn_test_sdk::utilities::GraphTensorBundle(tensorMap)
     {
         const auto& attributes
-            = node.attributesAs<hipdnn_data_sdk::data_objects::RmsnormAttributes>();
+            = node.attributesAs<hipdnn_data_sdk::data_objects::RMSNormAttributes>();
 
         randomizeTensor(attributes.x_tensor_uid(), 0.0f, 1.0f, seed);
         randomizeTensor(attributes.scale_tensor_uid(), 0.0f, 1.0f, seed);

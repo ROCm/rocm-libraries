@@ -16,7 +16,7 @@ namespace hipdnn_test_sdk::detail
 struct RmsnormFwdSignatureKey
 {
     const hipdnn_data_sdk::data_objects::NodeAttributes nodeType
-        = hipdnn_data_sdk::data_objects::NodeAttributes::RmsnormAttributes;
+        = hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes;
     hipdnn_data_sdk::data_objects::DataType xDataType;
     hipdnn_data_sdk::data_objects::DataType scaleDataType;
     hipdnn_data_sdk::data_objects::DataType outputDataType;
@@ -39,11 +39,11 @@ struct RmsnormFwdSignatureKey
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap)
     {
-        const auto* nodeAttributes = node.attributes_as_RmsnormAttributes();
+        const auto* nodeAttributes = node.attributes_as_RMSNormAttributes();
         if(nodeAttributes == nullptr)
         {
             throw std::runtime_error(
-                "Node attributes could not be cast to RmsnormAttributes");
+                "Node attributes could not be cast to RMSNormAttributes");
         }
 
         auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());

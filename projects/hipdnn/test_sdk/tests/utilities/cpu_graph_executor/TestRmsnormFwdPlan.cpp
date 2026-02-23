@@ -35,7 +35,7 @@ TEST(TestRmsnormFwdPlan, ExecutePlan)
     RmsnormFwdTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
 
     const auto& attributes
-        = node.attributesAs<hipdnn_data_sdk::data_objects::RmsnormAttributes>();
+        = node.attributesAs<hipdnn_data_sdk::data_objects::RMSNormAttributes>();
     const auto& tensorMap = graphWrapper.getTensorMap();
 
     RmsnormFwdParams params;
