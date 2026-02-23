@@ -130,6 +130,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockOffset)
                            device_input,
                            device_output,
                            distance);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_data.data(),
@@ -212,6 +213,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockRotate)
                            device_input,
                            device_output,
                            distance);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_data.data(),
@@ -295,6 +297,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockUp)
                            0,
                            device_input,
                            device_output);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_data.data(),
@@ -393,6 +396,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockUpWithSuffix)
             device_input,
             device_output,
             device_suffix);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(
@@ -488,6 +492,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockDown)
                            0,
                            device_input,
                            device_output);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_data.data(),
@@ -586,6 +591,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockDownWithSuffix)
             device_input,
             device_output,
             device_prefix);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(
