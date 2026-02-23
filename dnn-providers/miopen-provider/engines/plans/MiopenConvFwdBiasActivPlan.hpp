@@ -12,11 +12,13 @@
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <miopen/miopen.h>
 
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "MiopenConvDescriptor.hpp"
-#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
-#include "PlanInterface.hpp"
 
 namespace miopen_plugin
 {
@@ -54,12 +56,12 @@ private:
     MiopenTensor _y;
 };
 
-class ConvFwdBiasActivPlan : public IPlan
+class ConvFwdBiasActivPlan : public hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>
 {
 public:
-    ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle,
+    ConvFwdBiasActivPlan(const HipdnnMiopenHandle& handle,
                          ConvFwdBiasActivParams&& params,
-                         const MiopenExecutionSettings& executionSettings,
+                         const HipdnnMiopenSettings& executionSettings,
                          bool compile = true,
                          bool getWsSize = true);
     ~ConvFwdBiasActivPlan() override = default;
@@ -70,9 +72,9 @@ public:
     ConvFwdBiasActivPlan(ConvFwdBiasActivPlan&& other) = default;
     ConvFwdBiasActivPlan& operator=(ConvFwdBiasActivPlan&& other) = default;
 
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
+    size_t getWorkspaceSize(const HipdnnMiopenHandle& handle) const override;
 
-    void execute(const HipdnnEnginePluginHandle& handle,
+    void execute(const HipdnnMiopenHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
@@ -81,7 +83,7 @@ private:
     ConvFwdBiasActivParams _params;
     hipdnn_data_sdk::utilities::ScopedResource<miopenFusionPlanDescriptor_t> _fusePlanDesc;
     size_t _workspaceSize = 0;
-    MiopenExecutionSettings _executionSettings;
+    HipdnnMiopenSettings _executionSettings;
 };
 
 } // namespace miopen_plugin
