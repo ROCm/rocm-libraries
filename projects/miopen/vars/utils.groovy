@@ -287,7 +287,7 @@ def buildDevDockerImage(Map conf=[:])
     echo "Docker Args: ${dockerArgs}"
 
     def buildDate = sh(script: "date +%Y%m%d", returnStdout: true).trim()
-    def image = "${env.MIOPEN_DOCKER_IMAGE_URL}:multiarch_dev_${buildDate}"
+    def image = "${env.MIOPEN_DOCKER_IMAGE_URL}-dev:multiarch_dev_${buildDate}"
 
     def dockerImage
     try{
