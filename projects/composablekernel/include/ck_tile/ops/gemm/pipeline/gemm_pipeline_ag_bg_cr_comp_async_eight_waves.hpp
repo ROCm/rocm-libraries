@@ -6,7 +6,7 @@
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_base.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_v3.hpp"
-#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_async_eight_warps_policy.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_async_eight_waves_policy.hpp"
 
 namespace ck_tile {
 
@@ -16,8 +16,8 @@ namespace ck_tile {
  * This pipeline introduces asynchronous load from global memory to LDS,
  * skipping the intermediate loading into pipeline registers.
  */
-template <typename Problem, typename Policy = GemmPipelineAgBgCrCompAsyncEightWarpsPolicy>
-struct GemmPipelineAgBgCrCompAsyncEightWarps : public BaseGemmPipelineAgBgCrCompV3<Problem>
+template <typename Problem, typename Policy = GemmPipelineAgBgCrCompAsyncEightWavesPolicy>
+struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrCompV3<Problem>
 {
     using Base             = BaseGemmPipelineAgBgCrCompV3<Problem>;
     using PipelineImplBase = GemmPipelineAgBgCrImplBase<Problem, Policy>;
@@ -116,7 +116,7 @@ struct GemmPipelineAgBgCrCompAsyncEightWarps : public BaseGemmPipelineAgBgCrComp
         // clang-format off
         constexpr index_t WaveNumM = BlockGemmShape::BlockWarps::at(I0);
         constexpr index_t WaveNumN = BlockGemmShape::BlockWarps::at(I1);
-        return concat('_', "pipeline_AgBgCrCompAsyncEightWarps", 
+        return concat('_', "pipeline_AgBgCrCompAsyncEightWaves", 
                       concat('x', MPerBlock, NPerBlock, KPerBlock),  BlockSize,
                       concat('x', GetVectorSizeA(), GetVectorSizeB()),
                       concat('x', WaveNumM, WaveNumN),

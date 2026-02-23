@@ -14,8 +14,8 @@ namespace ck_tile {
 // GetBlockGemm implementation is copied from GemmPipelineAgBgCrCompV4DefaultPolicy
 namespace detail {
 template <typename Problem>
-struct GemmPipelineAgBgCrCompAsyncEightWarpsPolicy
-// : public UniversalGemmBasePolicy<GemmPipelineAgBgCrCompAsyncEightWarpsPolicy>
+struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
+// : public UniversalGemmBasePolicy<GemmPipelineAgBgCrCompAsyncEightWavesPolicy>
 {
     static constexpr auto I0             = number<0>{};
     static constexpr auto I1             = number<1>{};
@@ -358,19 +358,19 @@ struct GemmPipelineAgBgCrCompAsyncEightWarpsPolicy
                                                                     BlockWarps,
                                                                     WarpGemm>;
 
-        return BlockGemmARegBRegCRegEightWarpsV1<Problem, BlockGemmPolicy>{};
+        return BlockGemmARegBRegCRegEightWavesV1<Problem, BlockGemmPolicy>{};
     }
 };
 } // namespace detail
 
-struct GemmPipelineAgBgCrCompAsyncEightWarpsPolicy
+struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
 {
 
 #define FORWARD_METHOD_(method)                                                      \
     template <typename Problem, typename... Args>                                    \
     CK_TILE_HOST_DEVICE static constexpr auto method(Args&&... args)                 \
     {                                                                                \
-        return detail::GemmPipelineAgBgCrCompAsyncEightWarpsPolicy<Problem>::method( \
+        return detail::GemmPipelineAgBgCrCompAsyncEightWavesPolicy<Problem>::method( \
             std::forward<Args>(args)...);                                            \
     }
 

@@ -13,7 +13,7 @@ namespace ck_tile {
 // B is block distributed tensor
 // C is block distributed tensor
 template <typename Problem_, typename Policy_ = BlockGemmARegBRegCRegV1DefaultPolicy>
-struct BlockGemmARegBRegCRegEightWarpsV1
+struct BlockGemmARegBRegCRegEightWavesV1
 {
     private:
     template <typename PipelineProblem_, typename GemmPolicy_>
