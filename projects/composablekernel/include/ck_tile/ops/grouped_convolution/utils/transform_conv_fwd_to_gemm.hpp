@@ -573,6 +573,72 @@ struct TransformConvFwdToGemm
                     make_tuple(sequence<0>{}, sequence<1>{}));
             }
         }
+        else if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter5x5)
+        {
+            if constexpr(NumGroupsToMerge == 1)
+            {
+
+                const auto in_n_wi_c_desc =
+                    make_naive_tensor_descriptor(make_tuple(N_, Wi_),
+                                                 make_tuple(NStrideTensorA_, WiStride_),
+                                                 number<VectorSizeA>{},
+                                                 I1);
+
+                const auto in_n_wip_c_desc = transform_tensor_descriptor(
+                    in_n_wi_c_desc,
+                    make_tuple(make_pass_through_transform(N_),
+                               make_pad_transform(Wi_, InLeftPadW_, InRightPadW_)),
+                    make_tuple(sequence<0>{}, sequence<1>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}));
+
+                const auto in_n_x_wo_c_desc = transform_tensor_descriptor(
+                    in_n_wip_c_desc,
+                    make_tuple(make_pass_through_transform(N_),
+                               make_embed_transform(make_tuple(number<5>{}, Wo_),
+                                                    make_tuple(ConvDilationW_, ConvStrideW_))),
+                    make_tuple(sequence<0>{}, sequence<1>{}),
+                    make_tuple(sequence<0>{}, sequence<1, 2>{}));
+
+                return transform_tensor_descriptor(
+                    in_n_x_wo_c_desc,
+                    make_tuple(make_merge_transform(make_tuple(N_, Wo_)),
+                               make_pass_through_transform(number<5>{})),
+                    make_tuple(sequence<0, 2>{}, sequence<1>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}));
+            }
+            else
+            {
+                const auto in_n_wi_c_desc = make_naive_tensor_descriptor(
+                    make_tuple(N_, Wi_, NumGroupsToMerge),
+                    make_tuple(NStrideTensorA_, WiStride_, GStrideTensorA_),
+                    number<VectorSizeA>{},
+                    I1);
+
+                const auto in_n_wip_c_desc = transform_tensor_descriptor(
+                    in_n_wi_c_desc,
+                    make_tuple(make_pass_through_transform(N_),
+                               make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}));
+
+                const auto in_n_x_wo_c_desc = transform_tensor_descriptor(
+                    in_n_wip_c_desc,
+                    make_tuple(make_pass_through_transform(N_),
+                               make_embed_transform(make_tuple(number<5>{}, Wo_),
+                                                    make_tuple(ConvDilationW_, ConvStrideW_)),
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
+                    make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3>{}));
+
+                return transform_tensor_descriptor(
+                    in_n_x_wo_c_desc,
+                    make_tuple(make_merge_transform(make_tuple(N_, Wo_, NumGroupsToMerge)),
+                               make_pass_through_transform(number<5>{})),
+                    make_tuple(sequence<0, 2, 3>{}, sequence<1>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}));
+            }
+        }
         else if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter1x1Pad0)
         {
             if constexpr(NumGroupsToMerge == 1)
@@ -808,6 +874,77 @@ struct TransformConvFwdToGemm
                     in_n_y_ho_x_wo_groups_c_desc,
                     make_tuple(make_merge_transform(make_tuple(N_, Ho_, Wo_, NumGroupsToMerge)),
                                make_merge_transform(make_tuple(number<3>{}, number<3>{}))),
+                    make_tuple(sequence<0, 2, 4, 5>{}, sequence<1, 3>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}));
+            }
+        }
+        else if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter5x5)
+        {
+            if constexpr(NumGroupsToMerge == 1)
+            {
+                const auto in_n_hi_wi_c_desc =
+                    make_naive_tensor_descriptor(make_tuple(N_, Hi_, Wi_),
+                                                 make_tuple(NStrideTensorA_, HiStride_, WiStride_),
+                                                 number<VectorSizeA>{},
+                                                 I1);
+
+                const auto in_n_hip_wip_c_desc = transform_tensor_descriptor(
+                    in_n_hi_wi_c_desc,
+                    make_tuple(make_pass_through_transform(N_),
+                               make_pad_transform(Hi_, InLeftPadH_, InRightPadH_),
+                               make_pad_transform(Wi_, InLeftPadW_, InRightPadW_)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}));
+
+                const auto in_n_y_ho_x_wo_c_desc = transform_tensor_descriptor(
+                    in_n_hip_wip_c_desc,
+                    make_tuple(make_pass_through_transform(N_),
+                               make_embed_transform(make_tuple(number<5>{}, Ho_),
+                                                    make_tuple(ConvDilationH_, ConvStrideH_)),
+                               make_embed_transform(make_tuple(number<5>{}, Wo_),
+                                                    make_tuple(ConvDilationW_, ConvStrideW_))),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
+                    make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3, 4>{}));
+
+                return transform_tensor_descriptor(
+                    in_n_y_ho_x_wo_c_desc,
+                    make_tuple(make_merge_transform(make_tuple(N_, Ho_, Wo_)),
+                               make_merge_transform(make_tuple(number<5>{}, number<5>{}))),
+                    make_tuple(sequence<0, 2, 4>{}, sequence<1, 3>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}));
+            }
+            else
+            {
+                const auto in_n_hi_wi_groups_c_desc = make_naive_tensor_descriptor(
+                    make_tuple(N_, Hi_, Wi_, NumGroupsToMerge),
+                    make_tuple(NStrideTensorA_, HiStride_, WiStride_, GStrideTensorA_),
+                    number<VectorSizeA>{},
+                    I1);
+
+                const auto in_n_hip_wip_groups_c_desc = transform_tensor_descriptor(
+                    in_n_hi_wi_groups_c_desc,
+                    make_tuple(make_pass_through_transform(N_),
+                               make_pad_transform(Hi_, InLeftPadH_, InRightPadH_),
+                               make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}));
+
+                const auto in_n_y_ho_x_wo_groups_c_desc = transform_tensor_descriptor(
+                    in_n_hip_wip_groups_c_desc,
+                    make_tuple(make_pass_through_transform(N_),
+                               make_embed_transform(make_tuple(number<5>{}, Ho_),
+                                                    make_tuple(ConvDilationH_, ConvStrideH_)),
+                               make_embed_transform(make_tuple(number<5>{}, Wo_),
+                                                    make_tuple(ConvDilationW_, ConvStrideW_)),
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
+                    make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3, 4>{}, sequence<5>{}));
+
+                return transform_tensor_descriptor(
+                    in_n_y_ho_x_wo_groups_c_desc,
+                    make_tuple(make_merge_transform(make_tuple(N_, Ho_, Wo_, NumGroupsToMerge)),
+                               make_merge_transform(make_tuple(number<5>{}, number<5>{}))),
                     make_tuple(sequence<0, 2, 4, 5>{}, sequence<1, 3>{}),
                     make_tuple(sequence<0>{}, sequence<1>{}));
             }
@@ -1093,6 +1230,93 @@ struct TransformConvFwdToGemm
                     make_tuple(sequence<0>{}, sequence<1>{}));
             }
         }
+        else if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter3x3)
+        {
+            if constexpr(NumGroupsToMerge == 1)
+            {
+                const auto in_n_di_hi_wi_c_desc = make_naive_tensor_descriptor(
+                    make_tuple(N_, Di_, Hi_, Wi_),
+                    make_tuple(NStrideTensorA_, DiStride_, HiStride_, WiStride_),
+                    number<VectorSizeA>{},
+                    I1);
+
+                const auto in_n_hip_wip_c_desc = transform_tensor_descriptor(
+                    in_n_di_hi_wi_c_desc,
+                    make_tuple(make_pass_through_transform(N_),
+                               make_pad_transform(Di_, InLeftPadD_, InRightPadD_),
+                               make_pad_transform(Hi_, InLeftPadH_, InRightPadH_),
+                               make_pad_transform(Wi_, InLeftPadW_, InRightPadW_)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}));
+
+                const auto in_n_z_do_y_ho_x_wo_c_desc = transform_tensor_descriptor(
+                    in_n_hip_wip_c_desc,
+                    make_tuple(make_pass_through_transform(N_),
+                               make_embed_transform(make_tuple(number<5>{}, Do_),
+                                                    make_tuple(ConvDilationD_, ConvStrideD_)),
+                               make_embed_transform(make_tuple(number<5>{}, Ho_),
+                                                    make_tuple(ConvDilationH_, ConvStrideH_)),
+                               make_embed_transform(make_tuple(number<5>{}, Wo_),
+                                                    make_tuple(ConvDilationW_, ConvStrideW_))),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
+                    make_tuple(
+                        sequence<0>{}, sequence<1, 2>{}, sequence<3, 4>{}, sequence<5, 6>{}));
+
+                return transform_tensor_descriptor(
+                    in_n_z_do_y_ho_x_wo_c_desc,
+                    make_tuple(
+                        make_merge_transform(make_tuple(N_, Do_, Ho_, Wo_)),
+                        make_merge_transform(make_tuple(number<5>{}, number<5>{}, number<5>{}))),
+                    make_tuple(sequence<0, 2, 4, 6>{}, sequence<1, 3, 5>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}));
+            }
+            else
+            {
+                const auto in_n_di_hi_wi_c_desc = make_naive_tensor_descriptor(
+                    make_tuple(N_, Di_, Hi_, Wi_, NumGroupsToMerge),
+                    make_tuple(NStrideTensorA_, DiStride_, HiStride_, WiStride_, GStrideTensorA_),
+                    number<VectorSizeA>{},
+                    I1);
+
+                const auto in_n_hip_wip_c_desc = transform_tensor_descriptor(
+                    in_n_di_hi_wi_c_desc,
+                    make_tuple(make_pass_through_transform(N_),
+                               make_pad_transform(Di_, InLeftPadD_, InRightPadD_),
+                               make_pad_transform(Hi_, InLeftPadH_, InRightPadH_),
+                               make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(
+                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}),
+                    make_tuple(
+                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}));
+
+                const auto in_n_z_do_y_ho_x_wo_c_desc = transform_tensor_descriptor(
+                    in_n_hip_wip_c_desc,
+                    make_tuple(make_pass_through_transform(N_),
+                               make_embed_transform(make_tuple(number<5>{}, Do_),
+                                                    make_tuple(ConvDilationD_, ConvStrideD_)),
+                               make_embed_transform(make_tuple(number<5>{}, Ho_),
+                                                    make_tuple(ConvDilationH_, ConvStrideH_)),
+                               make_embed_transform(make_tuple(number<5>{}, Wo_),
+                                                    make_tuple(ConvDilationW_, ConvStrideW_)),
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(
+                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}),
+                    make_tuple(sequence<0>{},
+                               sequence<1, 2>{},
+                               sequence<3, 4>{},
+                               sequence<5, 6>{},
+                               sequence<7>{}));
+
+                return transform_tensor_descriptor(
+                    in_n_z_do_y_ho_x_wo_c_desc,
+                    make_tuple(
+                        make_merge_transform(make_tuple(N_, Do_, Ho_, Wo_, NumGroupsToMerge)),
+                        make_merge_transform(make_tuple(number<5>{}, number<5>{}, number<5>{}))),
+                    make_tuple(sequence<0, 2, 4, 6, 7>{}, sequence<1, 3, 5>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}));
+            }
+        }
         else if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter1x1Pad0)
         {
             if constexpr(NumGroupsToMerge == 1)
@@ -1299,6 +1523,36 @@ struct TransformConvFwdToGemm
                 std::conditional_t<NDimSpatial == 1,
                                    number<3>,
                                    std::conditional_t<NDimSpatial == 2, number<9>, number<27>>>;
+
+            if constexpr(NumGroupsToMerge == 1)
+            {
+                return make_naive_tensor_descriptor(make_tuple(K_, FilterSizeNumType{}),
+                                                    make_tuple(FilterSizeNumType{}, I1),
+                                                    number<VectorSizeB>{},
+                                                    I1);
+            }
+            else
+            {
+
+                const auto wei_gemmn_groups_gemmk_desc = make_naive_tensor_descriptor(
+                    make_tuple(K_, NumGroupsToMerge, FilterSizeNumType{}),
+                    make_tuple(KStrideTensorB_, GStrideTensorB_, CStrideTensorB_),
+                    number<VectorSizeB>{},
+                    I1);
+                return transform_tensor_descriptor(
+                    wei_gemmn_groups_gemmk_desc,
+                    make_tuple(make_merge_transform(make_tuple(K_, NumGroupsToMerge)),
+                               make_pass_through_transform(FilterSizeNumType{})),
+                    make_tuple(sequence<0, 1>{}, sequence<2>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}));
+            }
+        }
+        else if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter5x5)
+        {
+            using FilterSizeNumType =
+                std::conditional_t<NDimSpatial == 1,
+                                   number<5>,
+                                   std::conditional_t<NDimSpatial == 2, number<25>, number<125>>>;
 
             if constexpr(NumGroupsToMerge == 1)
             {

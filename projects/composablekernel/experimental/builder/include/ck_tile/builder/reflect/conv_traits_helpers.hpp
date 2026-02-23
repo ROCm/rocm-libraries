@@ -300,6 +300,7 @@ constexpr builder::ConvSpecialization conv_spec()
         case Filter1x1Pad0: return FILTER_1X1_PAD0;
         case Filter1x1Stride1Pad0: return FILTER_1X1_STRIDE1_PAD0;
         case Filter3x3: return FILTER_3x3;
+        case Filter5x5: return FILTER_5x5;
         case OddC: return ODD_C;
         }
     }

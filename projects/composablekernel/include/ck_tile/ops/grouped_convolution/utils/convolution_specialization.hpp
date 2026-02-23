@@ -13,6 +13,7 @@ enum struct ConvolutionSpecialization
     Filter1x1Pad0,
     Filter1x1Stride1Pad0,
     Filter3x3,
+    Filter5x5,
 };
 
 CK_TILE_HOST std::string getConvSpecializationString(const ConvolutionSpecialization& s)
@@ -23,6 +24,7 @@ CK_TILE_HOST std::string getConvSpecializationString(const ConvolutionSpecializa
     case ConvolutionSpecialization::Filter1x1Pad0: return "Filter1x1Pad0";
     case ConvolutionSpecialization::Filter1x1Stride1Pad0: return "Filter1x1Stride1Pad0";
     case ConvolutionSpecialization::Filter3x3: return "Filter3x3";
+    case ConvolutionSpecialization::Filter5x5: return "Filter5x5";
     default: return "Unrecognized specialization!";
     }
 }

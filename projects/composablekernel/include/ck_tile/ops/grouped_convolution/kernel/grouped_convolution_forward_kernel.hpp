@@ -509,6 +509,7 @@ struct GroupedConvolutionForwardKernel
     static constexpr auto I1 = number<1>();
     static constexpr auto I2 = number<2>();
     static constexpr auto I3 = number<3>();
+    static constexpr auto I5 = number<5>();
 
     static_assert(GemmPipeline::kPadM && GemmPipeline::kPadN && GemmPipeline::kPadK,
                   "Not supported!");
@@ -727,6 +728,22 @@ struct GroupedConvolutionForwardKernel
                 }
             }
         }
+        else if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter5x5)
+        {
+            if(ConvC != 1)
+            {
+                return false;
+            }
+            for(index_t i = 0; i < NDimSpatial; ++i)
+            {
+                const index_t filter_spatial_dim = kargs.wei_g_k_c_xs_lengths[i + I3];
+
+                if(filter_spatial_dim != I5)
+                {
+                    return false;
+                }
+            }
+        }
 
         if constexpr(GroupedConvTraitsType_::ExplicitGemm &&
                      ConvSpecialization != ConvolutionSpecialization::Filter1x1Stride1Pad0)
@@ -745,7 +762,7 @@ struct GroupedConvolutionForwardKernel
                      std::is_same_v<InLayout, ctc::NDHWGC>)
         {
             // Check access per C
-            if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0)
+            if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0 && ConvSpecialization == ConvolutionSpecialization::Default)
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
@@ -792,7 +809,7 @@ struct GroupedConvolutionForwardKernel
                      std::is_same_v<OutLayout, ctc::NHWGK> ||
                      std::is_same_v<OutLayout, ctc::NDHWGK>)
         {
-            if(ConvK % GroupedConvTraitsType_::VectorSizeC != 0)
+            if(ConvK % GroupedConvTraitsType_::VectorSizeC != 0 && ConvSpecialization != ConvolutionSpecialization::Default && GroupedConvTraitsType_::NumGroupsToMerge == 1)
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
