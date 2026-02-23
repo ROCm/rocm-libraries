@@ -229,11 +229,11 @@ void checkNodeAttrsTensors(
     else if(activAttr != nullptr)
     {
         // The activation input must be the matmul output
-        if(activAttr != nullptr && activAttr->in_0_tensor_uid() != matmulAttr.c_tensor_uid())
+        if(activAttr->in_0_tensor_uid() != matmulAttr.c_tensor_uid())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Activation node input must be the convolution node output tensor");
+                "Activation node input must be the matmul node output tensor");
         }
     }
 }
@@ -256,7 +256,7 @@ void checkComputeTypes(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& grap
     if(biasAttr != nullptr)
     {
         if(graph.getNode(biasAttrIdx).compute_data_type()
-           != graph.getNode(biasAttrIdx).compute_data_type())
+           != graph.getNode(matmulAttrIdx).compute_data_type())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,

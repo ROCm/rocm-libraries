@@ -51,7 +51,6 @@ protected:
 
         graph::PointwiseAttributes biasAttrs;
         biasAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
-        biasAttrs.set_compute_data_type(getDataTypeEnumFromType<DataType>());
 
         auto cBiasAttr = graphObj.pointwise(cAttr, biasTensorAttr, biasAttrs);
 
