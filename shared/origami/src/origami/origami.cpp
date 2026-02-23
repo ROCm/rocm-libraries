@@ -462,6 +462,9 @@ staggerU_t select_staggerU(const problem_t& problem,
     working_set = MT_K * (std::min(L2_value, L2Tile_N) * L2Tile_M * MT_M * bpe_a +
                           L2Tile_N * MT_N * bpe_b);
   }
+  // 0.95 is a heuristic to make sure we don't exceed L2 capacity and if we are not
+  // underestimating the working set. The effect of a false prediction is more severe
+  // than not predicting at all.
   if (working_set > 0.95 * hardware.L2_capacity)
     return staggerU_t{0, 0, 0};
   // Early Exit: L2 value is already max_staggerU
@@ -490,7 +493,7 @@ staggerU_t select_staggerU(const problem_t& problem,
     out_staggerU = max_staggerU;
   } else {
     // L2 and MALL disagree. Only switch when BOTH conditions hold:
-    // 1. Contention is close (ratio < 2×)
+    // 1. Contention is close (ratio < 2)
     // 2. L2 tile is asymmetric (ratio > 2)
     size_t L2_winner = std::max(A_contention, B_contention);
     size_t L2_loser  = std::min(A_contention, B_contention);
