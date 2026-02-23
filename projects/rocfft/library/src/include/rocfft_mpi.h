@@ -29,7 +29,7 @@
 
 #include "../../../shared/array_predicate.h"
 #include "rocfft/rocfft.h"
-#include <memory>
+#include <optional>
 
 class MPI_Comm_wrapper_t
 {
@@ -41,7 +41,7 @@ public:
         MPI_Comm_wrapper_t wrap;
         if(raw_comm != MPI_COMM_NULL)
         {
-            wrap.mpi_comm = std::make_unique<MPI_Comm>(raw_comm);
+            wrap.mpi_comm = std::make_optional<MPI_Comm>(raw_comm);
         }
         return wrap;
     }
@@ -83,7 +83,7 @@ public:
     void free()
     {
         if(mpi_comm && *mpi_comm != MPI_COMM_NULL)
-            MPI_Comm_free(mpi_comm.get());
+            MPI_Comm_free(&(*mpi_comm));
         mpi_comm.reset();
     }
 
@@ -92,8 +92,8 @@ public:
         free();
         if(in_comm != MPI_COMM_NULL)
         {
-            mpi_comm = std::make_unique<MPI_Comm>();
-            if(MPI_Comm_dup(in_comm, mpi_comm.get()) != MPI_SUCCESS)
+            mpi_comm = std::make_optional<MPI_Comm>();
+            if(MPI_Comm_dup(in_comm, &(*mpi_comm)) != MPI_SUCCESS)
                 throw std::runtime_error("failed to duplicate MPI communicator");
         }
     }
@@ -109,7 +109,7 @@ public:
     }
 
 private:
-    std::unique_ptr<MPI_Comm> mpi_comm;
+    std::optional<MPI_Comm> mpi_comm;
 };
 
 // RAII wrapper around MPI_Datatypes
