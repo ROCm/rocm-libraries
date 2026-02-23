@@ -159,7 +159,7 @@ Tests:
 - name: spmm_coo
   category: quick
   function: spmm_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_int32_int32_abct_precision
   M: [300]
   N: [118]
@@ -179,7 +179,7 @@ Tests:
 - name: spmm_coo
   category: quick
   function: spmm_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_float32_float32_abct_precision
   M: [300]
   N: [231]
@@ -390,7 +390,7 @@ Tests:
 - name: spmm_coo_file
   category: pre_checkin
   function: spmm_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_int32_int32_abct_precision
   M: 1
   N: [87]
@@ -613,7 +613,7 @@ Tests:
 - name: spmm_coo_file
   category: nightly
   function: spmm_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_float32_float32_abct_precision
   M: 1
   N: [65]
