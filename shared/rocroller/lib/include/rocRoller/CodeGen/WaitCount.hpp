@@ -8,6 +8,7 @@
 
 #include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
+#include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/Settings_fwd.hpp>
 
 namespace rocRoller
@@ -34,6 +35,10 @@ namespace rocRoller
                   int                    kmcnt,
                   int                    expcnt);
         WaitCount(GPUArchitecture const& arch, GPUWaitQueue, int count);
+
+        WaitCount(GPUArchitecture const&       arch,
+                  EnumBitset<GPUWaitQueueType> queuesToEmpty,
+                  std::string const&           message = "");
 
         ~WaitCount() = default;
 
@@ -63,6 +68,19 @@ namespace rocRoller
         static WaitCount Zero(GPUArchitecture const& arch, std::string const& message = " ");
 
         static WaitCount Max(GPUArchitecture const& arch, std::string const& message = " ");
+
+        /**
+         * This means to empty the specified queue, i.e. include a waitcount of 0 if that queue is not empty.
+         */
+        static WaitCount EmptyQueue(GPUArchitecture const& arch,
+                                    GPUWaitQueueType       queue,
+                                    std::string const&     message = "");
+        /**
+         * This means to empty the specified queues, i.e. include a waitcount of 0 if any of the specified queues are not empty.
+         */
+        static WaitCount EmptyQueue(GPUArchitecture const&       arch,
+                                    EnumBitset<GPUWaitQueueType> queues,
+                                    std::string const&           message = "");
 
         std::string toString(LogLevel level) const;
         void        toStream(std::ostream& os, LogLevel level) const;
@@ -106,6 +124,8 @@ namespace rocRoller
 
         WaitCount getAsSaturatedWaitCount(GPUArchitecture const& arch) const;
 
+        EnumBitset<GPUWaitQueueType> const& queuesToEmpty() const;
+
     private:
         /**
          * -1 means don't care.
@@ -125,6 +145,8 @@ namespace rocRoller
         bool m_isSplitCounter = false;
         bool m_hasVSCnt       = false;
         bool m_hasEXPCnt      = false;
+
+        EnumBitset<GPUWaitQueueType> m_queuesToEmpty;
     };
 
     std::ostream& operator<<(std::ostream& stream, WaitCount const& wait);
