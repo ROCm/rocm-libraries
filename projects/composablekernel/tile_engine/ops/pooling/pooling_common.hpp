@@ -15,7 +15,7 @@ namespace ck_tile {
 /// @brief Kernel trait parameters for pooling tile_engine configurations
 struct PoolingKernelTraits
 {
-    std::string reduce_op; // "max" or "avg"
+    std::string reduce_op; // "max", "min", or "avg"
     bool output_index;     // Whether to output indices (max pooling)
     bool propagate_nan;    // Whether to propagate NaN values
     bool cross_warp;       // Whether cross-warp reduction is used
@@ -34,7 +34,12 @@ struct PoolingKernelTraits
 inline PoolingKernelTraits extract_pooling_traits_from_name(const std::string& name)
 {
     PoolingKernelTraits traits;
-    traits.reduce_op = (name.find("max") != std::string::npos) ? "max" : "avg";
+    if(name.find("max") != std::string::npos)
+        traits.reduce_op = "max";
+    else if(name.find("min") != std::string::npos)
+        traits.reduce_op = "min";
+    else
+        traits.reduce_op = "avg";
     traits.output_index =
         (name.find("idx") != std::string::npos) && (name.find("noidx") == std::string::npos);
     traits.propagate_nan =

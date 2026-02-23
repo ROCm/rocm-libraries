@@ -34,7 +34,7 @@ struct PoolProblem2D
     index_t pad_h_left, pad_h_right; // Height padding
     index_t pad_w_left, pad_w_right; // Width padding
     std::string datatype;            // Data type name
-    std::string reduce_op;           // "max" or "avg"
+    std::string reduce_op;           // "max", "min", or "avg"
 
     index_t Ho() const
     {
@@ -73,7 +73,7 @@ struct PoolProblem3D
     index_t pad_h_left, pad_h_right;            // Height padding
     index_t pad_w_left, pad_w_right;            // Width padding
     std::string datatype;                       // Data type name
-    std::string reduce_op;                      // "max" or "avg"
+    std::string reduce_op;                      // "max", "min", or "avg"
 
     index_t Do() const
     {

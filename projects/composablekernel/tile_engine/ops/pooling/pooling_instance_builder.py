@@ -23,7 +23,12 @@ import concurrent.futures
 from pathlib import Path
 import logging
 
-from pooling_validation_utils import is_tile_config_valid, is_trait_combination_valid
+from pooling_validation_utils import (
+    is_tile_config_valid,
+    is_trait_combination_valid,
+    get_dtype_string,
+    get_reduce_op_string,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -48,20 +53,20 @@ class PoolingKernelBuilder:
         """Return default configuration if no config file is provided"""
         return {
             "tile_config": {
-                "block_m": {"values": [128]},
-                "block_n": {"values": [1]},
+                "block_m": {"values": [64,128,256]},
+                "block_n": {"values": [1,2]},
                 "warp_m": {"values": [1]},
                 "warp_n": {"values": [1]},
                 "warp_tile_m": {"values": [128]},
                 "warp_tile_n": {"values": [1]},
-                "thread_tile_m": {"values": [2]},
+                "thread_tile_m": {"values": [1,2,4]},
                 "thread_tile_n": {"values": [1]},
             },
             "trait_config": {
-                "reduce_op": {"values": ["max"]},
-                "output_index": {"values": [True]},
-                "propagate_nan": {"values": [False]},
-                "pooling_dim": {"values": ["2d"]},
+                "reduce_op": {"values": ["max", "min", "avg"]},
+                "output_index": {"values": [True, False]},
+                "propagate_nan": {"values": [True, False]},
+                "pooling_dim": {"values": ["2d", "3d"]},
             },
         }
 
@@ -72,13 +77,13 @@ class PoolingKernelBuilder:
 
         tile_config = self.config["tile_config"]
 
-        block_m_values = tile_config.get("block_m", {}).get("values", [128])
-        block_n_values = tile_config.get("block_n", {}).get("values", [1])
+        block_m_values = tile_config.get("block_m", {}).get("values", [64,128,256])
+        block_n_values = tile_config.get("block_n", {}).get("values", [1,2])
         warp_m_values = tile_config.get("warp_m", {}).get("values", [1])
         warp_n_values = tile_config.get("warp_n", {}).get("values", [1])
         warp_tile_m_values = tile_config.get("warp_tile_m", {}).get("values", [128])
         warp_tile_n_values = tile_config.get("warp_tile_n", {}).get("values", [1])
-        thread_tile_m_values = tile_config.get("thread_tile_m", {}).get("values", [2])
+        thread_tile_m_values = tile_config.get("thread_tile_m", {}).get("values", [1,2,4])
         thread_tile_n_values = tile_config.get("thread_tile_n", {}).get("values", [1])
 
         configs = []
@@ -127,45 +132,20 @@ class PoolingKernelBuilder:
         thread_tile_n,
         fast_mode=False,
     ):
-        """Validate that tile configuration is reasonable"""
-        if fast_mode:
-            # Basic sanity checks only
-            if any(
-                v <= 0
-                for v in [
-                    block_m,
-                    block_n,
-                    warp_m,
-                    warp_n,
-                    warp_tile_m,
-                    warp_tile_n,
-                    thread_tile_m,
-                    thread_tile_n,
-                ]
-            ):
-                return False
-            if warp_tile_m % thread_tile_m != 0:
-                return False
-            if warp_tile_n % thread_tile_n != 0:
-                return False
-            return True
-        else:
-            # Determine data types
-            in_datatype = self.datatype
-            out_datatype = self.datatype
-
-            return is_tile_config_valid(
-                block_m,
-                block_n,
-                warp_m,
-                warp_n,
-                warp_tile_m,
-                warp_tile_n,
-                thread_tile_m,
-                thread_tile_n,
-                in_datatype,
-                out_datatype,
-            )
+        """Validate tile configuration via pooling_validation_utils."""
+        return is_tile_config_valid(
+            block_m,
+            block_n,
+            warp_m,
+            warp_n,
+            warp_tile_m,
+            warp_tile_n,
+            thread_tile_m,
+            thread_tile_n,
+            self.datatype,
+            self.datatype,
+            fast_mode=fast_mode,
+        )
 
     def _generate_trait_combinations(self):
         """Generate all combinations of traits"""
@@ -174,10 +154,10 @@ class PoolingKernelBuilder:
 
         trait_config = self.config["trait_config"]
 
-        reduce_ops = trait_config.get("reduce_op", {}).get("values", ["max"])
-        output_indices = trait_config.get("output_index", {}).get("values", [True])
-        propagate_nans = trait_config.get("propagate_nan", {}).get("values", [False])
-        pooling_dims = trait_config.get("pooling_dim", {}).get("values", ["2d"])
+        reduce_ops = trait_config.get("reduce_op", {}).get("values", ["min","max","avg"])
+        output_indices = trait_config.get("output_index", {}).get("values", [True, False])
+        propagate_nans = trait_config.get("propagate_nan", {}).get("values", [True, False])
+        pooling_dims = trait_config.get("pooling_dim", {}).get("values", ["2d", "3d"])
 
         all_combinations = list(
             itertools.product(reduce_ops, output_indices, propagate_nans, pooling_dims)
@@ -199,22 +179,12 @@ class PoolingKernelBuilder:
         return combinations
 
     def _get_dtype_string(self):
-        """Get C++ type string for datatype"""
-        dtype_map = {
-            "fp16": "ck_tile::fp16_t",
-            "bf16": "ck_tile::bf16_t",
-            "fp32": "float",
-            "fp64": "double",
-        }
-        return dtype_map.get(self.datatype, "float")
+        """Get C++ type string for datatype."""
+        return get_dtype_string(self.datatype)
 
     def _get_reduce_op_string(self, reduce_op):
-        """Get C++ reduce op type string"""
-        reduce_op_map = {
-            "max": "ck_tile::ReduceOp::Max",
-            "avg": "ck_tile::ReduceOp::Add",
-        }
-        return reduce_op_map.get(reduce_op, "ck_tile::ReduceOp::Max")
+        """Get C++ reduce op type string."""
+        return get_reduce_op_string(reduce_op)
 
     def _generate_kernel_instance(self, tile_config, trait_combo, is_header=True):
         """Generate a single kernel instance header"""
@@ -489,7 +459,7 @@ def main():
     parser.add_argument(
         "--datatype",
         required=True,
-        choices=["fp16", "bf16", "fp32"],
+        choices=["fp8", "fp16", "bf16", "fp32"],
         help="Data type",
     )
     parser.add_argument("--config_json", help="Configuration JSON file")

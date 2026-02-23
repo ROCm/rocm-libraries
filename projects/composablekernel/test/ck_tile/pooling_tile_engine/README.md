@@ -78,7 +78,6 @@ The tile_engine pooling op lives at `tile_engine/ops/pooling/` and provides:
 - `pooling_validation_utils.py` - Configuration validation
 - `pooling_common.hpp` - Shared trait definitions
 - `pooling_benchmark.hpp` - Problem/metric definitions
-- `pooling_profiler.hpp` - Benchmark profiling
 - `pooling_benchmark_single.cpp` - Single-kernel benchmark entry point
 
 The underlying ck_tile pooling kernel lives at `include/ck_tile/ops/pooling/` and provides:
