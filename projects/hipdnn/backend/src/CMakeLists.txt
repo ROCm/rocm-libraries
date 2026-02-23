@@ -20,6 +20,7 @@ add_library(
     descriptors/VariantDescriptor.cpp
     descriptors/TensorDescriptor.cpp
     descriptors/ConvolutionFwdOperationDescriptor.cpp
+    descriptors/ConvolutionWrwOperationDescriptor.cpp
     descriptors/DescriptorFactory.cpp
     handle/HandleFactory.cpp
     handle/Handle.cpp

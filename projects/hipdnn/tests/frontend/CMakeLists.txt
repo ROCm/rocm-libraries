@@ -12,6 +12,7 @@ add_executable(
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
     IntegrationConvForward.cpp
     IntegrationConvFpropDescriptorLowering.cpp
+    IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
     IntegrationGraphEngineFiltering.cpp
