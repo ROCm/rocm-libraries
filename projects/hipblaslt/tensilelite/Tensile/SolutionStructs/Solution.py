@@ -1910,11 +1910,13 @@ class Solution(collections.abc.Mapping):
                   LdsBlockSizePerPadB = 0
           else:
             LdsBlockSizePerPadB = 0
+
         # set LdsBlockSizePerPadA,B=0 for DirectToVgpr
         if state["DirectToVgprA"]:
           LdsBlockSizePerPadA = 0
         if state["DirectToVgprB"]:
           LdsBlockSizePerPadB = 0
+
         if state["DirectToLdsA"]:
           bpeA = state["ProblemType"]["DataTypeA"].numBytes()
           # For DTL lds padding must be a multiple of the instruction load size (in bytes)
@@ -1924,6 +1926,7 @@ class Solution(collections.abc.Mapping):
           else:
             LdsBlockSizePerPadA = max(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
             LdsBlockSizePerPadA = roundUpToNearestMultiple(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
+
         if state["DirectToLdsB"]:
           bpeB = state["ProblemType"]["DataTypeB"].numBytes()
           # For DTL lds padding must be a multiple of the instruction load size (in bytes)
@@ -1933,6 +1936,7 @@ class Solution(collections.abc.Mapping):
           else:
             LdsBlockSizePerPadB = max(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
             LdsBlockSizePerPadB = roundUpToNearestMultiple(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
+
         return LdsBlockSizePerPadA, LdsBlockSizePerPadB
 
       def calcLdsNumBytes(ldsPadA: int, LdsBlockSizePerPadA: int, ldsPadB: int, LdsBlockSizePerPadB: int) -> int:
@@ -2011,11 +2015,6 @@ class Solution(collections.abc.Mapping):
 
         return ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, \
                ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB
-
-
-
-
-
 
       if state["LocalReadVectorWidthA"] == -1:
         state["LocalReadVectorWidthA"] = state["LocalReadVectorWidth"]
@@ -2996,7 +2995,6 @@ class Solution(collections.abc.Mapping):
     auto_LdsBlockSizePerPadB_for_mix = 0
     if state["LdsBlockSizePerPadB"] == -1:
       auto_LdsBlockSizePerPadB_for_mix = 1
-
     state["LdsBlockSizePerPadA"], state["LdsBlockSizePerPadB"] = calcLdsBlockSizePerPad()
 
     if state["LdsBlockSizePerPadMetadata"] == -1:
@@ -3341,7 +3339,6 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetMXSB"] = state["LdsOffsetB"] + state["LdsNumElementsAlignedB"]
       state["LdsOffsetMetadata"] = state["LdsOffsetMXSB"] + state["LdsNumElementsAlignedMXSB"]
       ldsNumBytesAB = state["LdsOffsetMetadata"] + ldsNumBytesMetadata
-
 
     # lds size is the greater of the two
     ldsNumBytes = max(ldsNumBytesAB, ldsNumBytesReduction, ldsNumBytesOccupancy)
