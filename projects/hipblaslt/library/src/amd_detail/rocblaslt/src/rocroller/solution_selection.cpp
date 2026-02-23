@@ -203,10 +203,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             if (hasPreSwizzle)
             {
                 if (kernelType.typeA != rocRoller::DataType::FP4 ||
-                    kernelType.typeB != rocRoller::DataType::FP4 ||
-                    kernelType.typeD != rocRoller::DataType::BFloat16)
-                    continue;
-                if (wgt.m != 256 || wgt.n != 256 || wgt.k != 256)
+                    kernelType.typeB != rocRoller::DataType::FP4)
                     continue;
                 if (wgt.m % 32 != 0 || wgt.n % 32 != 0)
                     continue;
