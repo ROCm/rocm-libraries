@@ -194,14 +194,16 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
                                                 !is_detected<is_tuple, BsDramBlockWindowTmp>::value,
                                             bool>* = nullptr>
         CK_TILE_DEVICE auto operator()(const AsDramBlockWindowTmp& a_dram_block_window_tmp,
-                                       [[maybe_unused]] const AElementFunction& a_element_func,
+                                       const AElementFunction& a_element_func,
                                        const BsDramBlockWindowTmp& b_dram_block_window_tmp,
-                                       [[maybe_unused]] const BElementFunction& b_element_func,
+                                       const BElementFunction& b_element_func,
                                        index_t num_loop,
                                        void* __restrict__ p_smem0,
                                        void* __restrict__ p_smem1) const
         {
-            // TODO: A/B element func are currently not used
+            // TODO currently fused elementwise are not supported
+            ignore = a_element_func;
+            ignore = b_element_func;
 
             // ------
             // Checks

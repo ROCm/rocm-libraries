@@ -7,15 +7,15 @@
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_universal_pipeline_ag_bg_cr_policy.hpp"
+#include "ck_tile/ops/gemm/block/block_gemm_areg_breg_creg_v1_custom_policy.hpp"
+#include "ck_tile/ops/gemm/block/block_gemm_areg_breg_creg_eight_waves_v1.hpp"
 
 namespace ck_tile {
-// Default policy for GemmPipelineAgBgCrCompAsync
+// Default policy for GemmPipelineAgBgCrCompAsyncEightWaves
 // Customized methods: MakeALdsBlockDescriptor, MakeBLdsBlockDescriptor
-// GetBlockGemm implementation is copied from GemmPipelineAgBgCrCompV4DefaultPolicy
 namespace detail {
 template <typename Problem>
 struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
-// : public UniversalGemmBasePolicy<GemmPipelineAgBgCrCompAsyncEightWavesPolicy>
 {
     static constexpr auto I0             = number<0>{};
     static constexpr auto I1             = number<1>{};
@@ -343,7 +343,7 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
 
         using WarpGemm = WarpGemmDispatcher<typename Problem::ADataType,
                                             typename Problem::BDataType,
-                                            typename Problem::CDataType, // AccDataType
+                                            typename Problem::CDataType,
                                             WarpTile::at(I0),
                                             WarpTile::at(I1),
                                             WarpTile::at(I2),
