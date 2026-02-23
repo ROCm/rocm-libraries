@@ -124,6 +124,39 @@ float GemmWrwBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
 #endif
 }
 
+// function generated from MI355 2d data
+bool GemmWrw1x1_stride1::IsSlow(const ProblemDescription& problem) const
+{
+    auto b                  = problem.GetBatchSize();
+    auto s                  = problem.GetInHeight() * problem.GetInWidth();
+    auto c                  = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                  = problem.GetGroupCount();
+    auto channels_per_group = c / g;
+
+    // High batch (always problematic for WRW)
+    if(b >= 16)
+        return true;
+
+    // Moderate batch + low cpg WITH groups threshold
+    // g <= 8 prevents false positives from high-group cases
+    if(b >= 4 && channels_per_group < 320 && g <= 8)
+        return true;
+
+    // Very low cpg WITH groups threshold
+    if(channels_per_group < 64 && g <= 8)
+        return true;
+
+    // Very large spatial area
+    if(s >= 32768)
+        return true;
+
+    // Very low total channels
+    if(c <= 128)
+        return true;
+
+    return false;
+}
+
 bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
                                       const ProblemDescription& problem) const
 {
@@ -136,6 +169,9 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
 
     const auto wei_spatial =
         dwDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
+
+    if(IsSlow(problem))
+        return false;
 
     return miopen::all_of(wei_spatial, [](auto v) { return v == 1; }) &&
            miopen::all_of(conv.GetConvStrides(), [](auto v) { return v == 1; }) &&
@@ -320,11 +356,56 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
 #endif
 }
 
+// function generated from MI355 2d data
+bool GemmWrwUniversal::IsSlow(const ProblemDescription& problem) const
+{
+    auto b                  = problem.GetBatchSize();
+    auto s                  = problem.GetInHeight() * problem.GetInWidth();
+    auto c                  = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                  = problem.GetGroupCount();
+    auto channels_per_group = c / g;
+    auto work_per_group     = (b * s * c) / g;
+
+    // EXEMPTION: High work per group
+    // Saves high-work cases that perform well
+    if(work_per_group >= 250e6)
+        return false;
+
+    // High batch
+    if(b >= 64)
+        return true;
+
+    // Moderate-high batch with low cpg (with groups filter)
+    if(b >= 16 && channels_per_group < 320 && g <= 8)
+        return true;
+
+    // Moderate batch with low cpg (with groups filter)
+    if(b >= 4 && channels_per_group < 128 && g <= 8)
+        return true;
+
+    // Very low cpg (with groups filter)
+    if(channels_per_group < 32 && g <= 8)
+        return true;
+
+    // Very large spatial
+    if(s >= 40960)
+        return true;
+
+    // Very low channels
+    if(c <= 160)
+        return true;
+
+    return false;
+}
+
 bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
                                     const ProblemDescription& problem) const
 {
 #if MIOPEN_USE_GEMM
     if(!GemmWrwBase::IsApplicable(context, problem))
+        return false;
+
+    if(IsSlow(problem))
         return false;
 
     return !GemmWrw1x1_stride1{}.IsApplicable(context, problem) &&

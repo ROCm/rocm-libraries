@@ -173,6 +173,40 @@ size_t GemmBwd1x1_stride2::GetWorkspaceSize(const ExecutionContext& context,
 #endif
 }
 
+// function generated from MI355 2d data
+bool GemmBwd1x1_stride2::IsSlow(const ProblemDescription& problem) const
+{
+    auto b                  = problem.GetBatchSize();
+    auto s                  = problem.GetInHeight() * problem.GetInWidth();
+    auto c                  = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                  = problem.GetGroupCount();
+    auto channels_per_group = c / g;
+    auto work_per_group     = (b * s * c) / g;
+
+    // EXEMPTION: High work_per_group (saves FP@110 cases)
+    // Higher work cases can perform well despite other metrics
+    if(work_per_group >= 150000)
+        return false;
+
+    // Low work per group (best discriminator)
+    if(work_per_group < 143000)
+        return true;
+
+    // Very low channels per group
+    if(channels_per_group < 24)
+        return true;
+
+    // Rule 3: Very high groups
+    if(g > 64)
+        return true;
+
+    // Rule 4: Very high batch
+    if(b > 128)
+        return true;
+
+    return false;
+}
+
 bool GemmBwd1x1_stride2::IsApplicable(const ExecutionContext& context,
                                       const ProblemDescription& problem) const
 {
@@ -186,6 +220,9 @@ bool GemmBwd1x1_stride2::IsApplicable(const ExecutionContext& context,
     const auto spatial_dim = conv.GetSpatialDimension();
     const auto wei_spatial =
         wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+
+    if(IsSlow(problem))
+        return false;
 
     return conv.GetSpatialDimension() == 2 &&
            miopen::all_of(wei_spatial, [](auto v) { return v == 1; }) &&
@@ -377,6 +414,52 @@ size_t GemmBwd1x1_stride1::GetWorkspaceSize(const ExecutionContext&,
     return 0;
 }
 
+// function generated from MI355 2d data
+bool GemmBwd1x1_stride1::IsSlow(const ProblemDescription& problem) const
+{
+    auto b                  = problem.GetBatchSize();
+    auto s                  = problem.GetInHeight() * problem.GetInWidth();
+    auto c                  = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                  = problem.GetGroupCount();
+    auto channels_per_group = c / g;
+    auto work_per_group     = (b * s * c) / g;
+    auto spatial_per_batch  = s / b;
+
+    // EXEMPTION 1: High work indicates parallelizable workload
+    if(work_per_group >= 12e6)
+    {
+        // Exception to exemption: fragmented multi-group workloads perform poorly
+        if(spatial_per_batch <= 8 and g >= 2)
+            return true; // Reject fragmented cases even with high wpg
+        return false;    // Exempt other high-work cases
+    }
+
+    // EXEMPTION 2: High spatial_per_batch (low batch + large spatial)
+    // These cases perform well despite low cpg
+    if(spatial_per_batch >= 800)
+        return false;
+
+    // Base: Low channels per group (catches most terrible cases)
+    if(channels_per_group < 122)
+        return true;
+
+    // Moderate cpg with MANY groups (fragmented work)
+    // Catches additional terrible cases that have slightly higher cpg but many groups
+    if(channels_per_group < 360 and g >= 32)
+        return true;
+
+    // Very high batch
+    if(b >= 512)
+        return true;
+
+    // Low spatial_per_batch with multiple groups
+    // Catches fragmented multi-group workloads (high batch, small spatial, multiple groups)
+    if(spatial_per_batch <= 8 and g >= 2)
+        return true;
+
+    return false;
+}
+
 bool GemmBwd1x1_stride1::IsApplicable(const ExecutionContext& context,
                                       const ProblemDescription& problem) const
 {
@@ -390,6 +473,9 @@ bool GemmBwd1x1_stride1::IsApplicable(const ExecutionContext& context,
     const auto spatial_dim = conv.GetSpatialDimension();
     const auto wei_spatial =
         wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+
+    if(IsSlow(problem))
+        return false;
 
     return miopen::all_of(wei_spatial, [](auto v) { return v == 1; }) &&
            miopen::all_of(conv.GetConvPads(), [](auto v) { return v == 0; }) &&
@@ -566,11 +652,49 @@ size_t GemmBwdRest::GetWorkspaceSize(const ExecutionContext& context,
 #endif
 }
 
+// function generated from MI355 2d data
+bool GemmBwdRest::IsSlow(const ProblemDescription& problem) const
+{
+    auto filter_h          = problem.GetWeightsHeight();
+    auto filter_w          = problem.GetWeightsWidth();
+    auto b                 = problem.GetBatchSize();
+    auto s                 = problem.GetInHeight() * problem.GetInWidth();
+    auto g                 = problem.GetGroupCount();
+    auto spatial_per_batch = s / b;
+
+    // EXEMPTION 1: 7x7 filters perform well
+    if(filter_h == 7 and filter_w == 7)
+        return false;
+
+    // EXEMPTION 2: Very large spatial areas
+    if(s >= 150000)
+        return false;
+
+    // Low spatial_per_batch (excellent discriminator)
+    // Low spatial per batch = high batch relative to spatial → poor
+    if(spatial_per_batch < 40)
+        return true;
+
+    // High batch
+    if(b > 6)
+        return true;
+
+    // Small spatial + high groups (catches fragmented workloads)
+    // This rule catches more terrible cases with minimal FP increase
+    if(s <= 2000 and g >= 16)
+        return true;
+
+    return false;
+}
+
 bool GemmBwdRest::IsApplicable(const ExecutionContext& context,
                                const ProblemDescription& problem) const
 {
 #if MIOPEN_USE_GEMM
     if(!GemmBwdBase::IsApplicable(context, problem))
+        return false;
+
+    if(IsSlow(problem))
         return false;
 
     return !GemmBwd1x1_stride2{}.IsApplicable(context, problem) &&
