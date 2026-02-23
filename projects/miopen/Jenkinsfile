@@ -269,7 +269,7 @@ pipeline {
                 stage('Build Docker gfx90X') { steps { script { runDockerBuild('gfx90X') } } }
                 stage('Build Docker gfx942') { steps { script { runDockerBuild('gfx942') } } }
                 stage('Build Docker gfx950') { steps { script { runDockerBuild('gfx950') } } }
-                stage('Build Docker Navi(gfx12-generic, gfx11-generic)') { steps { script { runDockerBuild('navi') } } }
+                stage('Build Docker Navi(gfx1101, gfx1151)') { steps { script { runDockerBuild('navi') } } }
             }
         }
         stage("Package and Static checks") {
