@@ -28,18 +28,20 @@ target_link_libraries(hipblaslt-clients-common
         hip::device
 )
 
-if(HIPBLASLT_ENABLE_ROCROLLER)
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        if(HIPBLASLT_ENABLE_THEROCK)
-            find_package(mxDataGenerator REQUIRED)
-        else()
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
-        endif()
+if(NOT ROCM_LIBS_SUPERBUILD)
+    if(HIPBLASLT_ENABLE_THEROCK)
+        find_package(mxDataGenerator REQUIRED)
+    else()
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
     endif()
-    target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
-    target_link_libraries(hipblaslt-clients-common PRIVATE roc::mxDataGenerator)
-    target_compile_features(hipblaslt-clients-common PRIVATE cxx_std_20)
 endif()
+target_compile_features(hipblaslt-clients-common PRIVATE cxx_std_20)
+target_link_libraries(hipblaslt-clients-common PRIVATE roc::mxDataGenerator)
+
+if(HIPBLASLT_ENABLE_ROCROLLER)
+    target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
+endif()
+
 
 if(HIPBLASLT_ENABLE_ASAN)
     hipblaslt_target_configure_sanitizers(hipblaslt-clients-common PUBLIC)

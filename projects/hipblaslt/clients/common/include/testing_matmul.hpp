@@ -1869,7 +1869,6 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         hipblaslt_seedrand();
 
-#ifdef HIPBLASLT_USE_ROCROLLER
         if(isBlockScaling(arg.scaleA))
         {
             if(arg.initialization != hipblaslt_initialization::hpl
@@ -1914,7 +1913,6 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         else
         {
-#endif
             hipblaslt_init_device(ABC_dims::A,
                                   arg.initialization,
                                   alpha_isnan_type(arg, Talpha),
@@ -1926,7 +1924,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   (do_swizzle_a && stride_a[i] != 0) ? A_row[i] * A_col[i]
                                                                      : stride_a[i],
                                   num_batches[i]);
-#ifdef HIPBLASLT_USE_ROCROLLER
         }
         if(isBlockScaling(arg.scaleB))
         {
@@ -1970,7 +1967,6 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         else
         {
-#endif
             hipblaslt_init_device(ABC_dims::B,
                                   arg.initialization,
                                   alpha_isnan_type(arg, Talpha),
@@ -1982,9 +1978,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   (do_swizzle_b && stride_b[i] != 0) ? B_row[i] * B_col[i]
                                                                      : stride_b[i],
                                   num_batches[i]);
-#ifdef HIPBLASLT_USE_ROCROLLER
         }
-#endif
         hipblaslt_init_device(ABC_dims::C,
                               arg.initialization,
                               beta_isnan_type(arg, Talpha),

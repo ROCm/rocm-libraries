@@ -22,3 +22,12 @@ target_sources(tensilelite-client
     "${CMAKE_CURRENT_SOURCE_DIR}/SolutionIterator.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/LibraryUpdateReporter.cpp"
 )
+
+target_sources(tensilelite-client
+    PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../clients/common/src/mxDataGen.cpp"
+)
+target_include_directories(tensilelite-client
+    PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../clients/common/include"
+)

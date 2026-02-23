@@ -231,7 +231,6 @@ std::vector<float> generateData(T                           dgen,
 
     std::vector<uint8_t> scaleBytes = dgen.getScaleBytes();
 
-#ifdef HIPBLASLT_USE_ROCROLLER
     // Apply pre-swizzle to scale data if preSwizzleTile is provided
     if(preSwizzleTile.size() == 3)
     {
@@ -245,7 +244,6 @@ std::vector<float> generateData(T                           dgen,
 
         scaleBytes = DGen::preSwizzle(scaleBytes, {scaleRows, scaleCols}, preSwizzleTile, preTile);
     }
-#endif
 
     std::memcpy(scale, scaleBytes.data(), scaleBytes.size() * sizeof(uint8_t));
 
@@ -291,7 +289,6 @@ std::vector<float> generateData(T                           dgen,
     }
 }
 
-#ifdef HIPBLASLT_USE_ROCROLLER
 /**
  * @brief Generate random data for OCP (MX) F8/F6/F4 types
  *
@@ -423,4 +420,3 @@ std::vector<float> generateMXInput(hipDataType                dataType,
         throw std::runtime_error("Unsupported data types in MX data generation!");
     }
 }
-#endif

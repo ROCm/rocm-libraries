@@ -13,6 +13,15 @@ target_link_libraries(tensilelite-client
         Boost::filesystem
         OpenMP::OpenMP_CXX
 )
+
+target_link_libraries(tensilelite-client PRIVATE roc::mxDataGenerator)
+set_target_properties(tensilelite-client
+    PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
 if(NOT WIN32)
     find_package(rocm_smi REQUIRED)
 else()
@@ -23,13 +32,6 @@ if(rocm_smi_FOUND)
 endif()
 target_include_directories(tensilelite-client PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_definitions(tensilelite-client PRIVATE TENSILE_DEFAULT_SERIALIZATION)
-
-set_target_properties(tensilelite-client
-    PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-)
 
 if(HIPBLASLT_ENABLE_ASAN)
     hipblaslt_target_configure_sanitizers(tensilelite-client PRIVATE)

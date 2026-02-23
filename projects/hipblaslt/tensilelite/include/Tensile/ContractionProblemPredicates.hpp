@@ -2715,6 +2715,78 @@ namespace TensileLite
                 }
             };
 
+	    struct MXBlockACheck : public Predicate_CRTP<MXBlockACheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockACheck() = default;
+                MXBlockACheck(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return (problem.mxBlockA() == value);
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+
+                    stream << *this << ": prob: " << problem.mxBlockA()
+                           << ", Is sol support: " << value << std::endl;
+                    return rv;
+                }
+            };
+
+	    struct MXBlockBCheck : public Predicate_CRTP<MXBlockBCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockBCheck() = default;
+                MXBlockBCheck(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockB";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return (problem.mxBlockB() == value);
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+
+                    stream << *this << ": prob: " << problem.mxBlockB()
+                           << ", Is sol support: " << value << std::endl;
+                    return rv;
+                }
+            };
+
             struct F32XdlMathOpEqual
                 : public Predicate_CRTP<F32XdlMathOpEqual, ContractionProblemGemm>
             {

@@ -241,6 +241,13 @@ inline rocisa::DataType hipDataType_to_tensile_type(hipDataType type)
         return rocisa::DataType::Int8;
     case HIP_R_32I:
         return rocisa::DataType::Int32;
+    // MX 6/4 data types
+    case HIP_R_6F_E2M3:
+	return rocisa::DataType::Float6;
+    case HIP_R_6F_E3M2:
+	return rocisa::DataType::BFloat6;
+    case HIP_R_4F_E2M1:
+	return rocisa::DataType::Float4;
     default:
         assert(!"hipDataType_to_tensile_type: non-supported type");
         return rocisa::DataType::None;
