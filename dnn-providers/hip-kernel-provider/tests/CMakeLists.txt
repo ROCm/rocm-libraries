@@ -13,6 +13,7 @@ add_executable(
     engines/TestHipKernelEngine.cpp
     engines/plans/TestBatchnormApplicabilityChecks.cpp
     engines/plans/TestBatchnormFwdInferencePlan.cpp
+    engines/plans/TestBatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/TestBatchnormPlanBuilder.cpp
     main.cpp
     TestHipKernelEngineManager.cpp
