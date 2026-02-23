@@ -7,17 +7,17 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_frontend/attributes/RmsnormAttributes.hpp>
+#include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class RmsnormNode : public BaseNode<RmsnormNode>
+class RMSNormNode : public BaseNode<RMSNormNode>
 {
 public:
-    RmsnormAttributes attributes;
+    RMSNormAttributes attributes;
 
-    RmsnormNode(RmsnormAttributes&& rmsnormAttrs, const GraphAttributes& graphAttrs)
+    RMSNormNode(RMSNormAttributes&& rmsnormAttrs, const GraphAttributes& graphAttrs)
         : BaseNode(graphAttrs)
         , attributes(std::move(rmsnormAttrs))
     {
@@ -33,30 +33,31 @@ public:
         // For each channel c, RMSNorm computes the root mean square:
         //   rms_c = sqrt((1/m) * sum_{n,h,w} x[n,c,h,w]^2 + epsilon)
         //
-        // Normalizes: y[n,c,h,w] = (x[n,c,h,w] / rms_c) * scale_c
+        // Without bias: y[n,c,h,w] = (x[n,c,h,w] / rms_c) * scale_c
+        // With bias:    y[n,c,h,w] = (x[n,c,h,w] / rms_c) * scale_c + bias_c
         //
         // Key difference from BatchNorm/LayerNorm:
         // - NO mean subtraction (no centering)
-        // - NO bias term
+        // - Bias is optional
         // - Simpler and more efficient than LayerNorm
         // ====================================================================
 
         // SECTION 1: Validate Required Tensor Pointers
         HIPDNN_RETURN_IF_FALSE(attributes.get_x(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "RmsnormNode missing x for pre-validation");
+                               "RMSNormNode missing x for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(attributes.get_scale(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "RmsnormNode missing scale for pre-validation");
+                               "RMSNormNode missing scale for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(attributes.get_y(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "RmsnormNode missing y for pre-validation");
+                               "RMSNormNode missing y for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(attributes.get_epsilon(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "RmsnormNode missing epsilon for pre-validation");
+                               "RMSNormNode missing epsilon for pre-validation");
 
         // Get tensor references
         auto x = attributes.get_x();
@@ -83,6 +84,10 @@ public:
 
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
 
+        // Validate optional bias tensor (per-channel with shape [1, C, 1, 1, ...])
+        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
+            attributes.get_bias(), channels, "Bias tensor"));
+
         // Validate optional inv_rms tensor (only if dimensions set)
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
             attributes.get_inv_rms(), channels, "Inverse RMS tensor"));
@@ -98,13 +103,13 @@ public:
         if(!x)
         {
             return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "RmsnormNode missing x for setting properties"};
+                    "RMSNormNode missing x for setting properties"};
         }
 
         if(!y)
         {
             return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "RmsnormNode missing y for setting properties"};
+                    "RMSNormNode missing y for setting properties"};
         }
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
@@ -141,6 +146,12 @@ public:
             inferCTensor(invRms);
         }
 
+        auto bias = attributes.get_bias();
+        if(bias)
+        {
+            inferCTensor(bias);
+        }
+
         return {};
     }
 
@@ -151,7 +162,7 @@ public:
             builder,
             attributes.get_name().c_str(),
             toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::RmsnormAttributes,
+            hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes,
             attributes.pack_attributes(builder).Union());
     }
 };

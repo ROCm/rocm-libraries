@@ -16,31 +16,33 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 namespace hipdnn_data_sdk {
 namespace data_objects {
 
-struct RmsnormAttributes;
-struct RmsnormAttributesBuilder;
-struct RmsnormAttributesT;
+struct RMSNormAttributes;
+struct RMSNormAttributesBuilder;
+struct RMSNormAttributesT;
 
-bool operator==(const RmsnormAttributesT &lhs, const RmsnormAttributesT &rhs);
-bool operator!=(const RmsnormAttributesT &lhs, const RmsnormAttributesT &rhs);
+bool operator==(const RMSNormAttributesT &lhs, const RMSNormAttributesT &rhs);
+bool operator!=(const RMSNormAttributesT &lhs, const RMSNormAttributesT &rhs);
 
-struct RmsnormAttributesT : public ::flatbuffers::NativeTable {
-  typedef RmsnormAttributes TableType;
+struct RMSNormAttributesT : public ::flatbuffers::NativeTable {
+  typedef RMSNormAttributes TableType;
   int64_t x_tensor_uid = 0;
   int64_t scale_tensor_uid = 0;
   int64_t epsilon_tensor_uid = 0;
   int64_t y_tensor_uid = 0;
   ::flatbuffers::Optional<int64_t> inv_rms_tensor_uid = ::flatbuffers::nullopt;
+  ::flatbuffers::Optional<int64_t> bias_tensor_uid = ::flatbuffers::nullopt;
 };
 
-struct RmsnormAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
-  typedef RmsnormAttributesT NativeTableType;
-  typedef RmsnormAttributesBuilder Builder;
+struct RMSNormAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef RMSNormAttributesT NativeTableType;
+  typedef RMSNormAttributesBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_X_TENSOR_UID = 4,
     VT_SCALE_TENSOR_UID = 6,
     VT_EPSILON_TENSOR_UID = 8,
     VT_Y_TENSOR_UID = 10,
-    VT_INV_RMS_TENSOR_UID = 12
+    VT_INV_RMS_TENSOR_UID = 12,
+    VT_BIAS_TENSOR_UID = 14
   };
   int64_t x_tensor_uid() const {
     return GetField<int64_t>(VT_X_TENSOR_UID, 0);
@@ -72,6 +74,12 @@ struct RmsnormAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table 
   bool mutate_inv_rms_tensor_uid(int64_t _inv_rms_tensor_uid) {
     return SetField<int64_t>(VT_INV_RMS_TENSOR_UID, _inv_rms_tensor_uid);
   }
+  ::flatbuffers::Optional<int64_t> bias_tensor_uid() const {
+    return GetOptional<int64_t, int64_t>(VT_BIAS_TENSOR_UID);
+  }
+  bool mutate_bias_tensor_uid(int64_t _bias_tensor_uid) {
+    return SetField<int64_t>(VT_BIAS_TENSOR_UID, _bias_tensor_uid);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_X_TENSOR_UID, 8) &&
@@ -79,51 +87,57 @@ struct RmsnormAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table 
            VerifyField<int64_t>(verifier, VT_EPSILON_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_Y_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_INV_RMS_TENSOR_UID, 8) &&
+           VerifyField<int64_t>(verifier, VT_BIAS_TENSOR_UID, 8) &&
            verifier.EndTable();
   }
-  RmsnormAttributesT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
-  void UnPackTo(RmsnormAttributesT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
-  static ::flatbuffers::Offset<RmsnormAttributes> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const RmsnormAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+  RMSNormAttributesT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(RMSNormAttributesT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<RMSNormAttributes> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const RMSNormAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 };
 
-struct RmsnormAttributesBuilder {
-  typedef RmsnormAttributes Table;
+struct RMSNormAttributesBuilder {
+  typedef RMSNormAttributes Table;
   ::flatbuffers::FlatBufferBuilder &fbb_;
   ::flatbuffers::uoffset_t start_;
   void add_x_tensor_uid(int64_t x_tensor_uid) {
-    fbb_.AddElement<int64_t>(RmsnormAttributes::VT_X_TENSOR_UID, x_tensor_uid, 0);
+    fbb_.AddElement<int64_t>(RMSNormAttributes::VT_X_TENSOR_UID, x_tensor_uid, 0);
   }
   void add_scale_tensor_uid(int64_t scale_tensor_uid) {
-    fbb_.AddElement<int64_t>(RmsnormAttributes::VT_SCALE_TENSOR_UID, scale_tensor_uid, 0);
+    fbb_.AddElement<int64_t>(RMSNormAttributes::VT_SCALE_TENSOR_UID, scale_tensor_uid, 0);
   }
   void add_epsilon_tensor_uid(int64_t epsilon_tensor_uid) {
-    fbb_.AddElement<int64_t>(RmsnormAttributes::VT_EPSILON_TENSOR_UID, epsilon_tensor_uid, 0);
+    fbb_.AddElement<int64_t>(RMSNormAttributes::VT_EPSILON_TENSOR_UID, epsilon_tensor_uid, 0);
   }
   void add_y_tensor_uid(int64_t y_tensor_uid) {
-    fbb_.AddElement<int64_t>(RmsnormAttributes::VT_Y_TENSOR_UID, y_tensor_uid, 0);
+    fbb_.AddElement<int64_t>(RMSNormAttributes::VT_Y_TENSOR_UID, y_tensor_uid, 0);
   }
   void add_inv_rms_tensor_uid(int64_t inv_rms_tensor_uid) {
-    fbb_.AddElement<int64_t>(RmsnormAttributes::VT_INV_RMS_TENSOR_UID, inv_rms_tensor_uid);
+    fbb_.AddElement<int64_t>(RMSNormAttributes::VT_INV_RMS_TENSOR_UID, inv_rms_tensor_uid);
   }
-  explicit RmsnormAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+  void add_bias_tensor_uid(int64_t bias_tensor_uid) {
+    fbb_.AddElement<int64_t>(RMSNormAttributes::VT_BIAS_TENSOR_UID, bias_tensor_uid);
+  }
+  explicit RMSNormAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  ::flatbuffers::Offset<RmsnormAttributes> Finish() {
+  ::flatbuffers::Offset<RMSNormAttributes> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = ::flatbuffers::Offset<RmsnormAttributes>(end);
+    auto o = ::flatbuffers::Offset<RMSNormAttributes>(end);
     return o;
   }
 };
 
-inline ::flatbuffers::Offset<RmsnormAttributes> CreateRmsnormAttributes(
+inline ::flatbuffers::Offset<RMSNormAttributes> CreateRMSNormAttributes(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     int64_t x_tensor_uid = 0,
     int64_t scale_tensor_uid = 0,
     int64_t epsilon_tensor_uid = 0,
     int64_t y_tensor_uid = 0,
-    ::flatbuffers::Optional<int64_t> inv_rms_tensor_uid = ::flatbuffers::nullopt) {
-  RmsnormAttributesBuilder builder_(_fbb);
+    ::flatbuffers::Optional<int64_t> inv_rms_tensor_uid = ::flatbuffers::nullopt,
+    ::flatbuffers::Optional<int64_t> bias_tensor_uid = ::flatbuffers::nullopt) {
+  RMSNormAttributesBuilder builder_(_fbb);
+  if(bias_tensor_uid) { builder_.add_bias_tensor_uid(*bias_tensor_uid); }
   if(inv_rms_tensor_uid) { builder_.add_inv_rms_tensor_uid(*inv_rms_tensor_uid); }
   builder_.add_y_tensor_uid(y_tensor_uid);
   builder_.add_epsilon_tensor_uid(epsilon_tensor_uid);
@@ -132,30 +146,31 @@ inline ::flatbuffers::Offset<RmsnormAttributes> CreateRmsnormAttributes(
   return builder_.Finish();
 }
 
-::flatbuffers::Offset<RmsnormAttributes> CreateRmsnormAttributes(::flatbuffers::FlatBufferBuilder &_fbb, const RmsnormAttributesT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+::flatbuffers::Offset<RMSNormAttributes> CreateRMSNormAttributes(::flatbuffers::FlatBufferBuilder &_fbb, const RMSNormAttributesT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
 
-inline bool operator==(const RmsnormAttributesT &lhs, const RmsnormAttributesT &rhs) {
+inline bool operator==(const RMSNormAttributesT &lhs, const RMSNormAttributesT &rhs) {
   return
       (lhs.x_tensor_uid == rhs.x_tensor_uid) &&
       (lhs.scale_tensor_uid == rhs.scale_tensor_uid) &&
       (lhs.epsilon_tensor_uid == rhs.epsilon_tensor_uid) &&
       (lhs.y_tensor_uid == rhs.y_tensor_uid) &&
-      (lhs.inv_rms_tensor_uid == rhs.inv_rms_tensor_uid);
+      (lhs.inv_rms_tensor_uid == rhs.inv_rms_tensor_uid) &&
+      (lhs.bias_tensor_uid == rhs.bias_tensor_uid);
 }
 
-inline bool operator!=(const RmsnormAttributesT &lhs, const RmsnormAttributesT &rhs) {
+inline bool operator!=(const RMSNormAttributesT &lhs, const RMSNormAttributesT &rhs) {
     return !(lhs == rhs);
 }
 
 
-inline RmsnormAttributesT *RmsnormAttributes::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
-  auto _o = std::unique_ptr<RmsnormAttributesT>(new RmsnormAttributesT());
+inline RMSNormAttributesT *RMSNormAttributes::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<RMSNormAttributesT>(new RMSNormAttributesT());
   UnPackTo(_o.get(), _resolver);
   return _o.release();
 }
 
-inline void RmsnormAttributes::UnPackTo(RmsnormAttributesT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+inline void RMSNormAttributes::UnPackTo(RMSNormAttributesT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
   (void)_o;
   (void)_resolver;
   { auto _e = x_tensor_uid(); _o->x_tensor_uid = _e; }
@@ -163,28 +178,31 @@ inline void RmsnormAttributes::UnPackTo(RmsnormAttributesT *_o, const ::flatbuff
   { auto _e = epsilon_tensor_uid(); _o->epsilon_tensor_uid = _e; }
   { auto _e = y_tensor_uid(); _o->y_tensor_uid = _e; }
   { auto _e = inv_rms_tensor_uid(); _o->inv_rms_tensor_uid = _e; }
+  { auto _e = bias_tensor_uid(); _o->bias_tensor_uid = _e; }
 }
 
-inline ::flatbuffers::Offset<RmsnormAttributes> RmsnormAttributes::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const RmsnormAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
-  return CreateRmsnormAttributes(_fbb, _o, _rehasher);
+inline ::flatbuffers::Offset<RMSNormAttributes> RMSNormAttributes::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const RMSNormAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateRMSNormAttributes(_fbb, _o, _rehasher);
 }
 
-inline ::flatbuffers::Offset<RmsnormAttributes> CreateRmsnormAttributes(::flatbuffers::FlatBufferBuilder &_fbb, const RmsnormAttributesT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+inline ::flatbuffers::Offset<RMSNormAttributes> CreateRMSNormAttributes(::flatbuffers::FlatBufferBuilder &_fbb, const RMSNormAttributesT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
   (void)_rehasher;
   (void)_o;
-  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const RmsnormAttributesT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const RMSNormAttributesT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
   auto _x_tensor_uid = _o->x_tensor_uid;
   auto _scale_tensor_uid = _o->scale_tensor_uid;
   auto _epsilon_tensor_uid = _o->epsilon_tensor_uid;
   auto _y_tensor_uid = _o->y_tensor_uid;
   auto _inv_rms_tensor_uid = _o->inv_rms_tensor_uid;
-  return hipdnn_data_sdk::data_objects::CreateRmsnormAttributes(
+  auto _bias_tensor_uid = _o->bias_tensor_uid;
+  return hipdnn_data_sdk::data_objects::CreateRMSNormAttributes(
       _fbb,
       _x_tensor_uid,
       _scale_tensor_uid,
       _epsilon_tensor_uid,
       _y_tensor_uid,
-      _inv_rms_tensor_uid);
+      _inv_rms_tensor_uid,
+      _bias_tensor_uid);
 }
 
 }  // namespace data_objects

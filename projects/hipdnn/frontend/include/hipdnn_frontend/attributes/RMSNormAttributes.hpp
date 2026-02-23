@@ -10,14 +10,15 @@
 
 namespace hipdnn_frontend::graph
 {
-class RmsnormAttributes : public Attributes<RmsnormAttributes>
+class RMSNormAttributes : public Attributes<RMSNormAttributes>
 {
 public:
     enum class InputNames
     {
         X = 0,
         SCALE = 1,
-        EPSILON = 2
+        EPSILON = 2,
+        BIAS = 3
     };
     typedef InputNames input_names; // NOLINT(readability-identifier-naming)
 
@@ -47,6 +48,11 @@ public:
         return getInput(InputNames::EPSILON);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> get_bias() const
+    {
+        return getInput(InputNames::BIAS);
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_y() const
     {
         return getOutput(OutputNames::Y);
@@ -58,75 +64,87 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    RmsnormAttributes& set_x(const std::shared_ptr<TensorAttributes>& value)
+    RMSNormAttributes& set_x(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::X, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    RmsnormAttributes& set_x(std::shared_ptr<TensorAttributes>&& value)
+    RMSNormAttributes& set_x(std::shared_ptr<TensorAttributes>&& value)
     {
         return setInput(InputNames::X, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    RmsnormAttributes& set_scale(const std::shared_ptr<TensorAttributes>& value)
+    RMSNormAttributes& set_scale(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::SCALE, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    RmsnormAttributes& set_scale(std::shared_ptr<TensorAttributes>&& value)
+    RMSNormAttributes& set_scale(std::shared_ptr<TensorAttributes>&& value)
     {
         return setInput(InputNames::SCALE, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    RmsnormAttributes& set_epsilon(const std::shared_ptr<TensorAttributes>& value)
+    RMSNormAttributes& set_epsilon(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::EPSILON, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    RmsnormAttributes& set_epsilon(std::shared_ptr<TensorAttributes>&& value)
+    RMSNormAttributes& set_epsilon(std::shared_ptr<TensorAttributes>&& value)
     {
         return setInput(InputNames::EPSILON, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    RmsnormAttributes& set_y(const std::shared_ptr<TensorAttributes>& value)
+    RMSNormAttributes& set_bias(const std::shared_ptr<TensorAttributes>& value)
+    {
+        return setInput(InputNames::BIAS, value);
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    RMSNormAttributes& set_bias(std::shared_ptr<TensorAttributes>&& value)
+    {
+        return setInput(InputNames::BIAS, std::move(value));
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    RMSNormAttributes& set_y(const std::shared_ptr<TensorAttributes>& value)
     {
         return setOutput(OutputNames::Y, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    RmsnormAttributes& set_y(std::shared_ptr<TensorAttributes>&& value)
+    RMSNormAttributes& set_y(std::shared_ptr<TensorAttributes>&& value)
     {
         return setOutput(OutputNames::Y, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    RmsnormAttributes& set_inv_rms(const std::shared_ptr<TensorAttributes>& value)
+    RMSNormAttributes& set_inv_rms(const std::shared_ptr<TensorAttributes>& value)
     {
         return setOutput(OutputNames::INV_RMS, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    RmsnormAttributes& set_inv_rms(std::shared_ptr<TensorAttributes>&& value)
+    RMSNormAttributes& set_inv_rms(std::shared_ptr<TensorAttributes>&& value)
     {
         return setOutput(OutputNames::INV_RMS, std::move(value));
     }
 
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::RmsnormAttributes>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::RMSNormAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto invRms = get_inv_rms();
+        auto bias = get_bias();
 
-        return hipdnn_data_sdk::data_objects::CreateRmsnormAttributes(
+        return hipdnn_data_sdk::data_objects::CreateRMSNormAttributes(
             builder,
             get_x()->get_uid(),
             get_scale()->get_uid(),
             get_epsilon()->get_uid(),
             get_y()->get_uid(),
-            invRms ? flatbuffers::Optional<int64_t>(invRms->get_uid()) : flatbuffers::nullopt);
+            invRms ? flatbuffers::Optional<int64_t>(invRms->get_uid()) : flatbuffers::nullopt,
+            bias ? flatbuffers::Optional<int64_t>(bias->get_uid()) : flatbuffers::nullopt);
     }
 
-    static RmsnormAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::RmsnormAttributes* fb,
+    static RMSNormAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::RMSNormAttributes* fb,
         const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
     {
-        RmsnormAttributes attr;
+        RMSNormAttributes attr;
 
         attr.set_x(tensorMap.at(fb->x_tensor_uid()));
         attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
@@ -138,7 +156,15 @@ public:
             attr.set_inv_rms(tensorMap.at(fb->inv_rms_tensor_uid().value()));
         }
 
+        if(fb->bias_tensor_uid().has_value())
+        {
+            attr.set_bias(tensorMap.at(fb->bias_tensor_uid().value()));
+        }
+
         return attr;
     }
 };
+
+using Rmsnorm_attributes = RMSNormAttributes; // NOLINT(readability-identifier-naming)
+
 } // namespace hipdnn_frontend::graph

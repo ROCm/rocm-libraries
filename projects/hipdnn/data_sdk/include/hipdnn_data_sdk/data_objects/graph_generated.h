@@ -53,9 +53,9 @@ enum class NodeAttributes : uint8_t {
   ConvolutionWrwAttributes = 7,
   BatchnormInferenceAttributesVarianceExt = 8,
   MatmulAttributes = 9,
-  RmsnormAttributes = 10,
+  RMSNormAttributes = 10,
   MIN = NONE,
-  MAX = RmsnormAttributes
+  MAX = RMSNormAttributes
 };
 
 inline const NodeAttributes (&EnumValuesNodeAttributes())[11] {
@@ -70,7 +70,7 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[11] {
     NodeAttributes::ConvolutionWrwAttributes,
     NodeAttributes::BatchnormInferenceAttributesVarianceExt,
     NodeAttributes::MatmulAttributes,
-    NodeAttributes::RmsnormAttributes
+    NodeAttributes::RMSNormAttributes
   };
   return values;
 }
@@ -87,14 +87,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "ConvolutionWrwAttributes",
     "BatchnormInferenceAttributesVarianceExt",
     "MatmulAttributes",
-    "RmsnormAttributes",
+    "RMSNormAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::RmsnormAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::RMSNormAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -139,8 +139,8 @@ template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::MatmulAttr
   static const NodeAttributes enum_value = NodeAttributes::MatmulAttributes;
 };
 
-template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::RmsnormAttributes> {
-  static const NodeAttributes enum_value = NodeAttributes::RmsnormAttributes;
+template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::RMSNormAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::RMSNormAttributes;
 };
 
 template<typename T> struct NodeAttributesUnionTraits {
@@ -183,8 +183,8 @@ template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::Matmu
   static const NodeAttributes enum_value = NodeAttributes::MatmulAttributes;
 };
 
-template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::RmsnormAttributesT> {
-  static const NodeAttributes enum_value = NodeAttributes::RmsnormAttributes;
+template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::RMSNormAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::RMSNormAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -289,13 +289,13 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::MatmulAttributes ?
       reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(value) : nullptr;
   }
-  hipdnn_data_sdk::data_objects::RmsnormAttributesT *AsRmsnormAttributes() {
-    return type == NodeAttributes::RmsnormAttributes ?
-      reinterpret_cast<hipdnn_data_sdk::data_objects::RmsnormAttributesT *>(value) : nullptr;
+  hipdnn_data_sdk::data_objects::RMSNormAttributesT *AsRMSNormAttributes() {
+    return type == NodeAttributes::RMSNormAttributes ?
+      reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value) : nullptr;
   }
-  const hipdnn_data_sdk::data_objects::RmsnormAttributesT *AsRmsnormAttributes() const {
-    return type == NodeAttributes::RmsnormAttributes ?
-      reinterpret_cast<const hipdnn_data_sdk::data_objects::RmsnormAttributesT *>(value) : nullptr;
+  const hipdnn_data_sdk::data_objects::RMSNormAttributesT *AsRMSNormAttributes() const {
+    return type == NodeAttributes::RMSNormAttributes ?
+      reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value) : nullptr;
   }
 };
 
@@ -342,9 +342,9 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
       return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(rhs.value));
     }
-    case NodeAttributes::RmsnormAttributes: {
-      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::RmsnormAttributesT *>(lhs.value)) ==
-             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::RmsnormAttributesT *>(rhs.value));
+    case NodeAttributes::RMSNormAttributes: {
+      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -421,8 +421,8 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_data_sdk::data_objects::MatmulAttributes *attributes_as_MatmulAttributes() const {
     return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes ? static_cast<const hipdnn_data_sdk::data_objects::MatmulAttributes *>(attributes()) : nullptr;
   }
-  const hipdnn_data_sdk::data_objects::RmsnormAttributes *attributes_as_RmsnormAttributes() const {
-    return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::RmsnormAttributes ? static_cast<const hipdnn_data_sdk::data_objects::RmsnormAttributes *>(attributes()) : nullptr;
+  const hipdnn_data_sdk::data_objects::RMSNormAttributes *attributes_as_RMSNormAttributes() const {
+    return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes ? static_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributes *>(attributes()) : nullptr;
   }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
@@ -478,8 +478,8 @@ template<> inline const hipdnn_data_sdk::data_objects::MatmulAttributes *Node::a
   return attributes_as_MatmulAttributes();
 }
 
-template<> inline const hipdnn_data_sdk::data_objects::RmsnormAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::RmsnormAttributes>() const {
-  return attributes_as_RmsnormAttributes();
+template<> inline const hipdnn_data_sdk::data_objects::RMSNormAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::RMSNormAttributes>() const {
+  return attributes_as_RMSNormAttributes();
 }
 
 struct NodeBuilder {
@@ -884,8 +884,8 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case NodeAttributes::RmsnormAttributes: {
-      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RmsnormAttributes *>(obj);
+    case NodeAttributes::RMSNormAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
     default: return true;
@@ -943,8 +943,8 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
-    case NodeAttributes::RmsnormAttributes: {
-      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RmsnormAttributes *>(obj);
+    case NodeAttributes::RMSNormAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
     default: return nullptr;
@@ -990,9 +990,9 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(value);
       return CreateMatmulAttributes(_fbb, ptr, _rehasher).Union();
     }
-    case NodeAttributes::RmsnormAttributes: {
-      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RmsnormAttributesT *>(value);
-      return CreateRmsnormAttributes(_fbb, ptr, _rehasher).Union();
+    case NodeAttributes::RMSNormAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value);
+      return CreateRMSNormAttributes(_fbb, ptr, _rehasher).Union();
     }
     default: return 0;
   }
@@ -1036,8 +1036,8 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
       value = new hipdnn_data_sdk::data_objects::MatmulAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::MatmulAttributesT *>(u.value));
       break;
     }
-    case NodeAttributes::RmsnormAttributes: {
-      value = new hipdnn_data_sdk::data_objects::RmsnormAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::RmsnormAttributesT *>(u.value));
+    case NodeAttributes::RMSNormAttributes: {
+      value = new hipdnn_data_sdk::data_objects::RMSNormAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(u.value));
       break;
     }
     default:
@@ -1092,8 +1092,8 @@ inline void NodeAttributesUnion::Reset() {
       delete ptr;
       break;
     }
-    case NodeAttributes::RmsnormAttributes: {
-      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::RmsnormAttributesT *>(value);
+    case NodeAttributes::RMSNormAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value);
       delete ptr;
       break;
     }

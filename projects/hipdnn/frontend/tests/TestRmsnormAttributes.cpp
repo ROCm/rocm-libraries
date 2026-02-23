@@ -1,11 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 #include <gtest/gtest.h>
-#include <hipdnn_frontend/attributes/RmsnormAttributes.hpp>
+#include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 
-TEST(TestRmsnormAttributes, CreateRmsnormAttributes)
+TEST(TestRMSNormAttributes, CreateRMSNormAttributes)
 {
-    hipdnn_frontend::graph::RmsnormAttributes rmsnormAttributes;
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
 
     rmsnormAttributes.set_x(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
     rmsnormAttributes.set_y(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
@@ -52,9 +52,9 @@ TEST(TestRmsnormAttributes, CreateRmsnormAttributes)
     EXPECT_EQ(epsilonTensor->get_name(), "EpsilonTensor");
 }
 
-TEST(TestRmsnormAttributes, SetXWithMove)
+TEST(TestRMSNormAttributes, SetXWithMove)
 {
-    hipdnn_frontend::graph::RmsnormAttributes rmsnormAttributes;
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
 
     auto xTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     xTensor->set_uid(1).set_name("XTensor");
@@ -71,9 +71,9 @@ TEST(TestRmsnormAttributes, SetXWithMove)
     EXPECT_EQ(retrieved.get(), rawPtr);
 }
 
-TEST(TestRmsnormAttributes, SetScaleWithMove)
+TEST(TestRMSNormAttributes, SetScaleWithMove)
 {
-    hipdnn_frontend::graph::RmsnormAttributes rmsnormAttributes;
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
 
     auto scaleTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     scaleTensor->set_uid(2).set_name("ScaleTensor");
@@ -90,9 +90,9 @@ TEST(TestRmsnormAttributes, SetScaleWithMove)
     EXPECT_EQ(retrieved.get(), rawPtr);
 }
 
-TEST(TestRmsnormAttributes, SetEpsilonWithMove)
+TEST(TestRMSNormAttributes, SetEpsilonWithMove)
 {
-    hipdnn_frontend::graph::RmsnormAttributes rmsnormAttributes;
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
 
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilonTensor->set_uid(3).set_name("EpsilonTensor");
@@ -109,9 +109,28 @@ TEST(TestRmsnormAttributes, SetEpsilonWithMove)
     EXPECT_EQ(retrieved.get(), rawPtr);
 }
 
-TEST(TestRmsnormAttributes, SetYWithMove)
+TEST(TestRMSNormAttributes, SetBiasWithMove)
 {
-    hipdnn_frontend::graph::RmsnormAttributes rmsnormAttributes;
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
+
+    auto biasTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    biasTensor->set_uid(5).set_name("BiasTensor");
+
+    auto rawPtr = biasTensor.get();
+
+    rmsnormAttributes.set_bias(std::move(biasTensor));
+
+    auto retrieved = rmsnormAttributes.get_bias();
+    EXPECT_EQ(retrieved->get_uid(), 5);
+    EXPECT_EQ(retrieved->get_name(), "BiasTensor");
+
+    EXPECT_EQ(biasTensor, nullptr);
+    EXPECT_EQ(retrieved.get(), rawPtr);
+}
+
+TEST(TestRMSNormAttributes, SetYWithMove)
+{
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
 
     auto yTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     yTensor->set_uid(4).set_name("YTensor");
@@ -128,9 +147,9 @@ TEST(TestRmsnormAttributes, SetYWithMove)
     EXPECT_EQ(retrieved.get(), rawPtr);
 }
 
-TEST(TestRmsnormAttributes, SetInvRmsWithMove)
+TEST(TestRMSNormAttributes, SetInvRmsWithMove)
 {
-    hipdnn_frontend::graph::RmsnormAttributes rmsnormAttributes;
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
 
     auto invRmsTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     invRmsTensor->set_uid(5).set_name("InvRmsTensor");
@@ -147,9 +166,9 @@ TEST(TestRmsnormAttributes, SetInvRmsWithMove)
     EXPECT_EQ(retrieved.get(), rawPtr);
 }
 
-TEST(TestRmsnormAttributes, InvRmsIsOptional)
+TEST(TestRMSNormAttributes, InvRmsIsOptional)
 {
-    hipdnn_frontend::graph::RmsnormAttributes rmsnormAttributes;
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
 
     rmsnormAttributes.set_x(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
     rmsnormAttributes.set_scale(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
@@ -160,11 +179,33 @@ TEST(TestRmsnormAttributes, InvRmsIsOptional)
     EXPECT_EQ(rmsnormAttributes.get_inv_rms(), nullptr);
 }
 
+TEST(TestRMSNormAttributes, BiasIsOptional)
+{
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
+
+    rmsnormAttributes.set_x(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
+    rmsnormAttributes.set_scale(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
+    rmsnormAttributes.set_epsilon(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
+    rmsnormAttributes.set_y(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
+
+    // bias should be null when not set
+    EXPECT_EQ(rmsnormAttributes.get_bias(), nullptr);
+}
+
+TEST(TestRMSNormAttributes, TypeAliasWorks)
+{
+    // Verify the compatibility alias compiles and works
+    hipdnn_frontend::graph::Rmsnorm_attributes rmsnormAttributes;
+
+    rmsnormAttributes.set_x(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
+    EXPECT_NE(rmsnormAttributes.get_x(), nullptr);
+}
+
 // Simplified move tests
 
-TEST(TestRmsnormAttributes, SimplifiedSetXWithMove)
+TEST(TestRMSNormAttributes, SimplifiedSetXWithMove)
 {
-    hipdnn_frontend::graph::RmsnormAttributes rmsnormAttributes;
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
 
     auto xTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     rmsnormAttributes.set_x(std::move(xTensor));
@@ -172,9 +213,9 @@ TEST(TestRmsnormAttributes, SimplifiedSetXWithMove)
     EXPECT_NE(rmsnormAttributes.get_x(), nullptr);
 }
 
-TEST(TestRmsnormAttributes, SimplifiedSetScaleWithMove)
+TEST(TestRMSNormAttributes, SimplifiedSetScaleWithMove)
 {
-    hipdnn_frontend::graph::RmsnormAttributes rmsnormAttributes;
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
 
     auto scaleTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     rmsnormAttributes.set_scale(std::move(scaleTensor));
@@ -182,9 +223,9 @@ TEST(TestRmsnormAttributes, SimplifiedSetScaleWithMove)
     EXPECT_NE(rmsnormAttributes.get_scale(), nullptr);
 }
 
-TEST(TestRmsnormAttributes, SimplifiedSetEpsilonWithMove)
+TEST(TestRMSNormAttributes, SimplifiedSetEpsilonWithMove)
 {
-    hipdnn_frontend::graph::RmsnormAttributes rmsnormAttributes;
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
 
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     rmsnormAttributes.set_epsilon(std::move(epsilonTensor));
@@ -192,9 +233,9 @@ TEST(TestRmsnormAttributes, SimplifiedSetEpsilonWithMove)
     EXPECT_NE(rmsnormAttributes.get_epsilon(), nullptr);
 }
 
-TEST(TestRmsnormAttributes, SimplifiedSetYWithMove)
+TEST(TestRMSNormAttributes, SimplifiedSetYWithMove)
 {
-    hipdnn_frontend::graph::RmsnormAttributes rmsnormAttributes;
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
 
     auto yTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     rmsnormAttributes.set_y(std::move(yTensor));
@@ -202,12 +243,22 @@ TEST(TestRmsnormAttributes, SimplifiedSetYWithMove)
     EXPECT_NE(rmsnormAttributes.get_y(), nullptr);
 }
 
-TEST(TestRmsnormAttributes, SimplifiedSetInvRmsWithMove)
+TEST(TestRMSNormAttributes, SimplifiedSetInvRmsWithMove)
 {
-    hipdnn_frontend::graph::RmsnormAttributes rmsnormAttributes;
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
 
     auto invRmsTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     rmsnormAttributes.set_inv_rms(std::move(invRmsTensor));
 
     EXPECT_NE(rmsnormAttributes.get_inv_rms(), nullptr);
+}
+
+TEST(TestRMSNormAttributes, SimplifiedSetBiasWithMove)
+{
+    hipdnn_frontend::graph::RMSNormAttributes rmsnormAttributes;
+
+    auto biasTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    rmsnormAttributes.set_bias(std::move(biasTensor));
+
+    EXPECT_NE(rmsnormAttributes.get_bias(), nullptr);
 }

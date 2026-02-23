@@ -8,13 +8,17 @@
 namespace hipdnn_data_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
-inline void to_json(nlohmann::json& rmsnormJson, const RmsnormAttributes& rms)
+inline void to_json(nlohmann::json& rmsnormJson, const RMSNormAttributes& rms)
 {
     auto& inputs = rmsnormJson["inputs"] = {};
 
     inputs["x_tensor_uid"] = rms.x_tensor_uid();
     inputs["scale_tensor_uid"] = rms.scale_tensor_uid();
     inputs["epsilon_tensor_uid"] = rms.epsilon_tensor_uid();
+    if(rms.bias_tensor_uid().has_value())
+    {
+        inputs["bias_tensor_uid"] = rms.bias_tensor_uid().value();
+    }
 
     auto& outputs = rmsnormJson["outputs"] = {};
     outputs["y_tensor_uid"] = rms.y_tensor_uid();
@@ -28,8 +32,8 @@ inline void to_json(nlohmann::json& rmsnormJson, const RmsnormAttributes& rms)
 namespace hipdnn_data_sdk::json
 {
 template <>
-inline auto to<data_objects::RmsnormAttributes>(flatbuffers::FlatBufferBuilder& builder,
-                                                 const nlohmann::json& entry)
+inline auto to<data_objects::RMSNormAttributes>(flatbuffers::FlatBufferBuilder& builder,
+                                                const nlohmann::json& entry)
 {
     auto& inputs = entry["inputs"];
 
@@ -39,13 +43,20 @@ inline auto to<data_objects::RmsnormAttributes>(flatbuffers::FlatBufferBuilder& 
         invRmsUid = entry["outputs"]["inv_rms_tensor_uid"].get<int64_t>();
     }
 
-    return data_objects::CreateRmsnormAttributes(
+    flatbuffers::Optional<int64_t> biasUid = flatbuffers::nullopt;
+    if(inputs.contains("bias_tensor_uid"))
+    {
+        biasUid = inputs["bias_tensor_uid"].get<int64_t>();
+    }
+
+    return data_objects::CreateRMSNormAttributes(
         builder,
         inputs.at("x_tensor_uid").get<int64_t>(),
         inputs.at("scale_tensor_uid").get<int64_t>(),
         inputs.at("epsilon_tensor_uid").get<int64_t>(),
         entry.at("outputs").at("y_tensor_uid").get<int64_t>(),
-        invRmsUid);
+        invRmsUid,
+        biasUid);
 }
 
 }

@@ -30,7 +30,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::ConvolutionBwdAttributes, "ConvolutionBwdAttributes"},
      {NodeAttributes::ConvolutionWrwAttributes, "ConvolutionWrwAttributes"},
      {NodeAttributes::MatmulAttributes, "MatmulAttributes"},
-     {NodeAttributes::RmsnormAttributes, "RmsnormAttributes"},
+     {NodeAttributes::RMSNormAttributes, "RMSNormAttributes"},
      {NodeAttributes::NONE, ""}})
 
 NLOHMANN_JSON_SERIALIZE_ENUM(ConvMode,
@@ -72,8 +72,8 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
     case data_objects::NodeAttributes::MatmulAttributes:
         nodeJson = *node.attributes_as_MatmulAttributes();
         break;
-    case data_objects::NodeAttributes::RmsnormAttributes:
-        nodeJson = *node.attributes_as_RmsnormAttributes();
+    case data_objects::NodeAttributes::RMSNormAttributes:
+        nodeJson = *node.attributes_as_RMSNormAttributes();
         break;
     default:
         throw std::runtime_error(
@@ -133,8 +133,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::ConvolutionWrwAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::MatmulAttributes:
             return to<data_objects::MatmulAttributes>(builder, entry).Union();
-        case data_objects::NodeAttributes::RmsnormAttributes:
-            return to<data_objects::RmsnormAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::RMSNormAttributes:
+            return to<data_objects::RMSNormAttributes>(builder, entry).Union();
         default:
             throw std::runtime_error(
                 "hipdnn_data_sdk::json::to<data_objects::Node>(): Unsupported NodeAttributes type: "

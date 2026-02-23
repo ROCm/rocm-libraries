@@ -113,7 +113,7 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid matmul graph)";
             break;
-        case hipdnn_data_sdk::data_objects::NodeAttributes::RmsnormAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidRmsnormGraph();
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid rmsnorm graph)";

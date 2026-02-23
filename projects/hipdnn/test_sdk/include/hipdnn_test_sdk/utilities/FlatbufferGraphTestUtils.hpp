@@ -1530,7 +1530,7 @@ inline flatbuffers::FlatBufferBuilder
         builder.CreateStruct(epsilonVal).Union()));
 
     auto rmsnormAttributes
-        = hipdnn_data_sdk::data_objects::CreateRmsnormAttributes(builder,
+        = hipdnn_data_sdk::data_objects::CreateRMSNormAttributes(builder,
                                                                   1, // x uid
                                                                   3, // scale uid
                                                                   4, // epsilon uid
@@ -1542,7 +1542,7 @@ inline flatbuffers::FlatBufferBuilder
         builder,
         "rmsnorm",
         computeDataType,
-        hipdnn_data_sdk::data_objects::NodeAttributes::RmsnormAttributes,
+        hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes,
         rmsnormAttributes.Union());
     nodes.push_back(node);
 
