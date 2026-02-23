@@ -389,7 +389,6 @@ def runShell(String command){
 }
 
 def buildHipClangJob(Map conf=[:]){
-        show_node_info()
         /*
             The following is a workaround for git submodule updating for the fin module.  After Jenkins upgrade,
             many plugins started misbehaving, and submodules wouldn't get pulled.  This ensures that we always pull
