@@ -7,16 +7,16 @@
 using Row = ck_tile::tensor_layout::gemm::RowMajor;
 using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
 
-using MxFp8Types = ::testing::Types<
-    std::tuple<ck_tile::fp8_t, ck_tile::fp8_t, MXfp8_GemmConfig16, Row, Col, Row>>;
+using MxFp8Types =
+    ::testing::Types<std::tuple<ck_tile::fp8_t, ck_tile::fp8_t, MXfp8_GemmConfig16, Row, Col, Row>>;
 
 template <typename TypeParam>
 class TestMxGemmFp8 : public TestMxGemmUtil<std::tuple_element_t<0, TypeParam>,
-                                           std::tuple_element_t<1, TypeParam>,
-                                           std::tuple_element_t<2, TypeParam>,
-                                           std::tuple_element_t<3, TypeParam>,
-                                           std::tuple_element_t<4, TypeParam>,
-                                           std::tuple_element_t<5, TypeParam>>
+                                            std::tuple_element_t<1, TypeParam>,
+                                            std::tuple_element_t<2, TypeParam>,
+                                            std::tuple_element_t<3, TypeParam>,
+                                            std::tuple_element_t<4, TypeParam>,
+                                            std::tuple_element_t<5, TypeParam>>
 {
 };
 

@@ -12,11 +12,11 @@ using MxFp4Types = ::testing::Types<
 
 template <typename TypeParam>
 class TestMxGemmFp4 : public TestMxGemmUtil<std::tuple_element_t<0, TypeParam>,
-                                           std::tuple_element_t<1, TypeParam>,
-                                           std::tuple_element_t<2, TypeParam>,
-                                           std::tuple_element_t<3, TypeParam>,
-                                           std::tuple_element_t<4, TypeParam>,
-                                           std::tuple_element_t<5, TypeParam>>
+                                            std::tuple_element_t<1, TypeParam>,
+                                            std::tuple_element_t<2, TypeParam>,
+                                            std::tuple_element_t<3, TypeParam>,
+                                            std::tuple_element_t<4, TypeParam>,
+                                            std::tuple_element_t<5, TypeParam>>
 {
 };
 

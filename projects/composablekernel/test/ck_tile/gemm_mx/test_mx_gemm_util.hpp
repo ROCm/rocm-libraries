@@ -25,9 +25,8 @@ auto calculate_rtol_atol_mx(ck_tile::index_t K, float max_accumulated_value)
     using ComputeType =
         std::conditional_t<sizeof(ADataType) < sizeof(BDataType), ADataType, BDataType>;
     const auto rtol = ck_tile::get_relative_threshold<ComputeType, CDataType, AccDataType>(K);
-    const auto atol =
-        ck_tile::get_absolute_threshold<ComputeType, CDataType, AccDataType>(max_accumulated_value,
-                                                                             K);
+    const auto atol = ck_tile::get_absolute_threshold<ComputeType, CDataType, AccDataType>(
+        max_accumulated_value, K);
     return ck_tile::make_tuple(rtol, atol);
 }
 
@@ -39,7 +38,7 @@ template <typename ADataType,
           typename CLayout>
 class TestMxGemmUtil : public ::testing::Test
 {
-protected:
+    protected:
     using AccDataType = float;
     using CDataType   = ck_tile::fp16_t;
     using ScaleType   = ck_tile::e8m0_t;
@@ -92,17 +91,17 @@ protected:
         ScaleN scale_n(reinterpret_cast<ScaleType*>(scale_b_dev_buf.GetDeviceBuffer()));
 
         MXGemmHostArgs<ScaleM, ScaleN> args(a_dev_buf.GetDeviceBuffer(),
-                                             b_dev_buf.GetDeviceBuffer(),
-                                             c_dev_buf.GetDeviceBuffer(),
-                                             1,
-                                             M,
-                                             N,
-                                             K,
-                                             stride_A,
-                                             stride_B,
-                                             stride_C,
-                                             scale_m,
-                                             scale_n);
+                                            b_dev_buf.GetDeviceBuffer(),
+                                            c_dev_buf.GetDeviceBuffer(),
+                                            1,
+                                            M,
+                                            N,
+                                            K,
+                                            stride_A,
+                                            stride_B,
+                                            stride_C,
+                                            scale_m,
+                                            scale_n);
 
         mx_gemm_calc<GemmConfig,
                      ADataType,
@@ -115,8 +114,7 @@ protected:
                      ScaleM,
                      ScaleN,
                      true,
-                     false>(args,
-                            ck_tile::stream_config{nullptr, true, 1, 0, 1, true, true, 50});
+                     false>(args, ck_tile::stream_config{nullptr, true, 1, 0, 1, true, true, 50});
 
         c_dev_buf.FromDevice(c_host.data());
 
@@ -132,8 +130,7 @@ protected:
         const double rtol = rtol_atol.at(ck_tile::number<0>{});
         const double atol = rtol_atol.at(ck_tile::number<1>{});
 
-        bool pass =
-            ck_tile::check_err(c_host, c_ref, "MX GEMM: Incorrect results!", rtol, atol);
+        bool pass = ck_tile::check_err(c_host, c_ref, "MX GEMM: Incorrect results!", rtol, atol);
 
         EXPECT_TRUE(pass);
     }

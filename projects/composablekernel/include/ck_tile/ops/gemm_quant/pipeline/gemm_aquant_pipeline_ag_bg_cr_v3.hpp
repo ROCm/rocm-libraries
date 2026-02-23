@@ -102,7 +102,8 @@ struct AQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Prob
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
-        // We are not storing the original packed type in LDS, so we need to multiply the smem size by the packed size.
+        // We are not storing the original packed type in LDS, so we need to multiply the smem size
+        // by the packed size.
         constexpr index_t smem_size_a = Policy::template GetSmemSizeA<Problem>() * APackedSize;
         constexpr index_t smem_size_b = Policy::template GetSmemSizeB<Problem>() * BPackedSize;
 
