@@ -347,7 +347,7 @@ RUN apt-get update && apt-get install -y \
     llvm-20 \
     && rm -rf /var/lib/apt/lists/*
 
-# Workaround for broken clang-tidy
+# Workaround for broken clang-tidy in TheRock
 RUN mv /opt/rocm/llvm/bin/clang-tidy /opt/rocm/llvm/bin/clang-tidy.disabled || true
 RUN ln -sf /usr/bin/clang-tidy-20 /opt/rocm/llvm/bin/clang-tidy
 
@@ -361,5 +361,6 @@ RUN printf '%s\n' /opt/rocm/lib > /etc/ld.so.conf.d/rocm.conf && ldconfig
 
 ENV HIP_PLATFORM=amd
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
+ENV ROCM_PATH=/opt/rocm
 
 WORKDIR /workspace
