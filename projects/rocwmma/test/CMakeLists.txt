@@ -29,6 +29,7 @@ include( CMakeDependentOption )
 cmake_dependent_option( ROCWMMA_BUILD_VALIDATION_TESTS "Build validation tests" ON "ROCWMMA_BUILD_TESTS" OFF )
 cmake_dependent_option( ROCWMMA_BUILD_BENCHMARK_TESTS "Build benchmarking tests" OFF "ROCWMMA_BUILD_TESTS" OFF )
 cmake_dependent_option( ROCWMMA_BUILD_EXTENDED_TESTS "Build extended test parameter coverage" OFF "ROCWMMA_BUILD_TESTS" OFF )
+cmake_dependent_option( ROCWMMA_BUILD_REGRESSION_TESTS "Build regression tests" ON "ROCWMMA_BUILD_TESTS" OFF )
 cmake_dependent_option( ROCWMMA_USE_SYSTEM_GOOGLETEST "Use system Google Test library instead of downloading and building it" OFF "ROCWMMA_BUILD_TESTS" OFF )
 
 add_compile_options(-mcmodel=large)
@@ -36,7 +37,10 @@ if(ROCWMMA_CODE_COVERAGE)
     add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
     add_link_options(-fprofile-instr-generate)
 endif()
-add_link_options(-mcmodel=large -Wl,--gc-sections)
+add_link_options(-mcmodel=large)
+if(NOT WIN32)
+    add_link_options(-Wl,--gc-sections)
+endif()
 
 # Test/benchmark requires additional dependencies
 if(ROCWMMA_USE_SYSTEM_GOOGLETEST)
@@ -191,6 +195,10 @@ endfunction()
 add_subdirectory(gemm)
 add_subdirectory(unit)
 add_subdirectory(dlrm)
+
+if(ROCWMMA_BUILD_REGRESSION_TESTS)
+    add_subdirectory(regression)
+endif()
 
 rocm_install(
     FILES "${INSTALL_TEST_FILE}"

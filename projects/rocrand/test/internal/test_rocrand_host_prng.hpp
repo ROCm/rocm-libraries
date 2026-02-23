@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -168,7 +168,7 @@ void normal_floating_point_host_test(rocrand_ordering ordering)
                                               data + size,
                                               0.0,
                                               [mean](double acc, double x)
-                                              { return acc + std::powf((x - mean), 2); })
+                                              { return acc + std::pow((x - mean), 2); })
                               / size);
 
     EXPECT_NEAR(2.0, mean, 0.4); // 20%
@@ -216,7 +216,7 @@ void log_normal_floating_point_host_test(rocrand_ordering ordering)
                                               data + size,
                                               0.0,
                                               [mean](double acc, double x)
-                                              { return acc + std::powf((x - mean), 2); })
+                                              { return acc + std::pow((x - mean), 2); })
                               / size);
 
     EXPECT_NEAR(log_normal_mean, mean, log_normal_mean * 0.2); // 20%
@@ -256,7 +256,7 @@ TYPED_TEST_P(generator_prng_host_tests, poisson_test)
         = std::accumulate(data,
                           data + size,
                           0.0,
-                          [mean](double acc, double x) { return acc + std::powf(x - mean, 2); })
+                          [mean](double acc, double x) { return acc + std::pow(x - mean, 2); })
           / size;
 
     EXPECT_NEAR(mean, 5.5, std::max(1.0, 5.5 * 1e-2));

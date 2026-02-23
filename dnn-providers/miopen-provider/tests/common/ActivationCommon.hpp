@@ -61,8 +61,6 @@ struct ActivTestCase
 
     friend std::ostream& operator<<(std::ostream& ss, const ActivTestCase& tc)
     {
-        using namespace hipdnn_data_sdk::utilities;
-
         ss << "(mode:" << tc.mode;
         if(tc.reluLowerClip)
         {
