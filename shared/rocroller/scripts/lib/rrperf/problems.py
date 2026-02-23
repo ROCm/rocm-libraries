@@ -1,27 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 import pathlib
 from dataclasses import asdict, dataclass, field, fields
@@ -273,8 +251,12 @@ class GEMM(GEMMProblem, GEMMSolution):
 
     @property
     def run_invariant_token(self):
+        # Build metadata (e.g. git commit tag) should not affect cross-run matching.
+        # Excluding version keeps GEMM comparisons stable across different commits.
+        solution_fields = field_dict(GEMMSolution, self)
+        solution_fields.pop("version", None)
         return repr(GEMMProblem(**field_dict(GEMMProblem, self))) + repr(
-            GEMMSolution(**field_dict(GEMMSolution, self))
+            GEMMSolution(**solution_fields)
         )
 
     @property
