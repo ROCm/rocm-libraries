@@ -477,6 +477,8 @@ TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
     auto computeType = DataType::FLOAT;
     convDesc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    auto convMode = static_cast<int64_t>(ConvMode::CROSS_CORRELATION);
+    convDesc->setAttribute(HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 1, &convMode);
     convDesc->finalize();
 
     auto desc = getDescriptor();
@@ -1125,6 +1127,8 @@ public:
                                dilation.data());
         convDesc->setAttribute(
             HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeDataType);
+        auto convMode = static_cast<int64_t>(ConvMode::CROSS_CORRELATION);
+        convDesc->setAttribute(HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 1, &convMode);
         convDesc->finalize();
 
         // Build graph via GraphDescriptor
@@ -1481,6 +1485,36 @@ TEST_F(TestGraphDescriptorOps, SharedTensorDifferentPositions)
                       toVec(K_CONV_PADDING),
                       toVec(K_CONV_STRIDE),
                       toVec(K_CONV_DILATION));
+}
+
+TEST_F(TestGraphDescriptorOps, FinalizeFailsDuplicateTensorUidDifferentDescriptors)
+{
+    // Create two distinct tensor descriptors with the same UID
+    auto xDesc1 = createFinalizedTensor(K_TENSOR_X_UID);
+    auto xDesc2 = createFinalizedTensor(K_TENSOR_X_UID);
+    auto wDesc
+        = createFinalizedTensor(K_TENSOR_W_UID, toVec(K_TENSOR_W_DIMS), toVec(K_TENSOR_W_STRIDES));
+    auto yDesc
+        = createFinalizedTensor(K_TENSOR_Y_UID, toVec(K_TENSOR_Y_DIMS), toVec(K_TENSOR_Y_STRIDES));
+
+    // Op1 uses xDesc1, Op2 uses xDesc2 (different object, same UID)
+    auto op1 = createFinalizedConvOp(xDesc1.get(), wDesc.get(), yDesc.get());
+
+    auto xDesc2a = createFinalizedTensor(
+        K_TENSOR_X2_UID, toVec(K_TENSOR_X2_DIMS), toVec(K_TENSOR_X2_STRIDES));
+    auto wDesc2 = createFinalizedTensor(
+        K_TENSOR_W2_UID, toVec(K_TENSOR_W2_DIMS), toVec(K_TENSOR_W2_STRIDES));
+    // Use xDesc2 (same UID as xDesc1, different descriptor object) as Y
+    auto op2 = createFinalizedConvOp(xDesc2a.get(), wDesc2.get(), xDesc2.get());
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 2> ops = {op1.get(), op2.get()};
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, ops.data());
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestGraphDescriptorOps, SetOperationsRejectsNonOperationDescriptor)

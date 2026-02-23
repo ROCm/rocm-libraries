@@ -7,7 +7,7 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 
-#include <unordered_set>
+#include <unordered_map>
 
 namespace hipdnn_backend
 {
@@ -36,7 +36,7 @@ void GraphDescriptor::buildGraphFromOperations()
     _graph->io_data_type = _ioDataType;
     _graph->preferred_engine_id = _preferredEngineId;
 
-    std::unordered_set<int64_t> tensorUids;
+    std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
 
     for(const auto& op : _operations)
     {
@@ -44,9 +44,18 @@ void GraphDescriptor::buildGraphFromOperations()
         for(const auto& tensorDesc : op->getTensorDescriptors())
         {
             auto uid = tensorDesc->getData().uid;
-            if(tensorUids.find(uid) == tensorUids.end())
+            auto it = seenTensors.find(uid);
+            if(it != seenTensors.end())
             {
-                tensorUids.insert(uid);
+                THROW_IF_FALSE(it->second.get() == tensorDesc.get(),
+                               HIPDNN_STATUS_BAD_PARAM,
+                               "GraphDescriptor::buildGraphFromOperations: Tensor UID "
+                                   + std::to_string(uid)
+                                   + " used with different descriptor objects");
+            }
+            else
+            {
+                seenTensors[uid] = tensorDesc;
                 _graph->tensors.push_back(
                     std::make_unique<hipdnn_data_sdk::data_objects::TensorAttributesT>(
                         tensorDesc->getData()));
@@ -57,6 +66,10 @@ void GraphDescriptor::buildGraphFromOperations()
         _graph->nodes.push_back(op->buildNode());
     }
 
+    // TODO: Keep _operations instead of clearing, and add a getAttribute path
+    // for HIPDNN_ATTR_OPERATIONGRAPH_OPS to allow retrieving the operations.
+    // This will enable rebuilding graphs in the frontend from a serialized
+    // backend graph.
     _operations.clear();
 }
 
@@ -234,6 +247,8 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
 
 hipdnnPluginConstData_t GraphDescriptor::getSerializedGraph() const
 {
+    // TODO: Support serializing a graph without finalization, and deserializing
+    // without a handle set.
     THROW_IF_FALSE(isFinalized(),
                    HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
                    "GraphDescriptor::getSerializedGraph: graph is not finalized");

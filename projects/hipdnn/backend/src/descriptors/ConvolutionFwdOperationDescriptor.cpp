@@ -37,6 +37,9 @@ void ConvolutionFwdOperationDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "ConvolutionFwdOperationDescriptor::finalize() failed: compute data type not "
                   "set");
+    THROW_IF_TRUE(_data.conv_mode == hipdnn_data_sdk::data_objects::ConvMode::UNSET,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "ConvolutionFwdOperationDescriptor::finalize() failed: conv_mode not set");
 
     HipdnnBackendDescriptorImpl<ConvolutionFwdOperationDescriptor>::finalize();
 }

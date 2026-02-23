@@ -76,6 +76,9 @@ public:
         auto computeType = DataType::FLOAT;
         getDescriptor()->setAttribute(
             HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        auto convMode = static_cast<int64_t>(ConvMode::CROSS_CORRELATION);
+        getDescriptor()->setAttribute(
+            HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 1, &convMode);
     }
 
     void makeFinalized() const
@@ -238,6 +241,19 @@ TEST_F(TestConvolutionFwdOperationDescriptor, FinalizeFailsWithoutComputeType)
 {
     setTensors();
     setConvParams();
+    auto convMode = static_cast<int64_t>(ConvMode::CROSS_CORRELATION);
+    getDescriptor()->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 1, &convMode);
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionFwdOperationDescriptor, FinalizeFailsWithoutConvMode)
+{
+    setTensors();
+    setConvParams();
+    auto computeType = DataType::FLOAT;
+    getDescriptor()->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -529,7 +545,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeConvParams)
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 1, &convModeCount, &convMode));
     ASSERT_EQ(convModeCount, 1);
-    EXPECT_EQ(convMode, static_cast<int64_t>(ConvMode::UNSET));
+    EXPECT_EQ(convMode, static_cast<int64_t>(ConvMode::CROSS_CORRELATION));
 }
 
 TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeComputeType)

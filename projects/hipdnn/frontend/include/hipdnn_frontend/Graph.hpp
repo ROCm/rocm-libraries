@@ -656,6 +656,16 @@ public:
 
     Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
     {
+        // TODO: Remove this feature flag once all operation types support descriptor-based
+        // lowering and the flatbuffer path is no longer needed.
+        static const bool s_useDescriptorApi
+            = hipdnn_data_sdk::utilities::getEnv("HIPDNN_USE_DESCRIPTOR_API") == "1";
+
+        if(s_useDescriptorApi)
+        {
+            return build_operation_graph_via_descriptors(handle);
+        }
+
         HIPDNN_FE_LOG_INFO("Building operation graph " << graph_attributes.get_name());
 
         auto serializedGraph = buildFlatbufferOperationGraph();

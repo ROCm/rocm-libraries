@@ -20,7 +20,7 @@ typedef enum
     HIPDNN_BACKEND_KERNEL_CACHE_DESCRIPTOR,
     HIPDNN_BACKEND_OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR,
 
-    // Descriptor API types (for building graphs without FlatBuffers in frontend)
+    // Descriptor API types for lowering operations into backend
     HIPDNN_BACKEND_TENSOR_DESCRIPTOR,
     HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
 
