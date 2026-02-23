@@ -1817,9 +1817,9 @@ struct conv_test_input // TODO: check all the fields if they're parameters
     bool preallocate         = false;
 };
 
-std::vector<std::size_t> get_batch_sizes() { return {1, 8, 2, 64, 30, 128, 352, 512}; }
+inline std::vector<std::size_t> get_batch_sizes() { return {1, 8, 2, 64, 30, 128, 352, 512}; }
 
-std::vector<std::vector<std::size_t>> get_2d_spatial_dims()
+inline std::vector<std::vector<std::size_t>> get_2d_spatial_dims()
 {
     return {{14, 14},
             {28, 28},
@@ -1837,22 +1837,22 @@ std::vector<std::vector<std::size_t>> get_2d_spatial_dims()
             {7, 1}};
 }
 
-std::vector<std::vector<std::size_t>> get_2d_filter_dims()
+inline std::vector<std::vector<std::size_t>> get_2d_filter_dims()
 {
     return {{1, 1}, {3, 3}, {1, 7}, {5, 5}, {7, 1}, {7, 7}, {11, 11}, {2, 2}, {4, 4}};
 }
 
-std::vector<std::size_t> get_output_channels()
+inline std::vector<std::size_t> get_output_channels()
 {
     return {32, 64, 16, 128, 96, 112, 192, 256, 320, 512, 1024};
 }
 
-std::vector<std::size_t> get_input_channels()
+inline std::vector<std::size_t> get_input_channels()
 {
     return {16, 32, 3, 128, 96, 112, 192, 256, 320, 512, 1024};
 }
 
-std::vector<std::vector<int>> get_2d_pads_strides_dilations()
+inline std::vector<std::vector<int>> get_2d_pads_strides_dilations()
 {
     return {{0, 0, 1, 1, 1, 1},
             {0, 0, 2, 2, 1, 1},
@@ -1867,7 +1867,7 @@ std::vector<std::vector<int>> get_2d_pads_strides_dilations()
             {1, 1, 2, 2, 2, 1}};
 }
 
-std::vector<std::vector<std::size_t>> get_3d_spatial_dims()
+inline std::vector<std::vector<std::size_t>> get_3d_spatial_dims()
 {
     return {{3, 4, 4},
             {4, 9, 9},
@@ -1880,7 +1880,7 @@ std::vector<std::vector<std::size_t>> get_3d_spatial_dims()
             {1, 2, 2}};
 }
 
-std::vector<std::vector<std::size_t>> get_3d_filter_dims()
+inline std::vector<std::vector<std::size_t>> get_3d_filter_dims()
 {
     return {{1, 1, 1},
             {3, 3, 3},
@@ -1893,9 +1893,9 @@ std::vector<std::vector<std::size_t>> get_3d_filter_dims()
             {3, 5, 20}};
 }
 
-std::vector<std::vector<int>> get_2d_trans_output_pads() { return {{0, 0}}; }
+inline std::vector<std::vector<int>> get_2d_trans_output_pads() { return {{0, 0}}; }
 
-std::vector<std::vector<int>> get_3d_pads_strides_dilations()
+inline std::vector<std::vector<int>> get_3d_pads_strides_dilations()
 {
     return {{0, 0, 0, 1, 1, 1, 1, 1, 1},
             {0, 0, 0, 2, 2, 2, 1, 1, 1},
@@ -1912,7 +1912,7 @@ std::vector<std::vector<int>> get_3d_pads_strides_dilations()
             {3, 3, 3, 2, 2, 2, 3, 3, 4}};
 }
 
-std::vector<std::vector<int>> get_3d_trans_output_pads() { return {{0, 0, 0}}; }
+inline std::vector<std::vector<int>> get_3d_trans_output_pads() { return {{0, 0, 0}}; }
 
 inline bool IsValidCtestStyleConfig(const conv_test_input& input)
 {
