@@ -1036,6 +1036,21 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
     const size_t last_xcd = num_xcd - 1;
     const size_t per_xcd_count = std::max(std::min(t0_count / num_xcd, tiles_per_xcd_ts), static_cast<size_t>(1));
 
+    // L2 spatial reuse warmup factor: cross-CU L2 sharing (e.g. B reuse across
+    // M tiles from the same batch) requires that earlier loads populate the cache
+    // before later CUs request the same data.  With few K iterations all CUs
+    // fire their loads simultaneously in the prologue, so most of the theoretical
+    // spatial reuse doesn't materialize.  With a deep K-loop pipeline, prefetch
+    // stagger lets earlier iterations warm L2 for later requestors.
+    const size_t l2_k_iters_raw = (config.mt.k > 0)
+        ? math::safe_ceil_div(split_K, config.mt.k) : 1;
+    const double l2_k_iters = static_cast<double>(
+        std::max(static_cast<long>(l2_k_iters_raw) - 1, 0L));
+    constexpr double l2_pipeline_depth = 4.0;
+    const double l2_iter_blend = l2_k_iters / (l2_k_iters + l2_pipeline_depth);
+    constexpr double l2_cold_floor = 0.2;
+    const double l2_warmup = l2_cold_floor + (1.0 - l2_cold_floor) * l2_iter_blend;
+
     // T0: spatial reuse only (cold start).
     // Per-batch: different batches have independent A/B data — no cross-batch reuse.
     xcd_t0 = count_unique_tiles(grid, wgm, N_CU, num_xcd, last_xcd, 0);
@@ -1045,14 +1060,16 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
     double xcd_t0_rate = (xcd_t0_req_per_batch > 0)
         ? 1.0 - xcd_t0_ws_per_batch / xcd_t0_req_per_batch
         : 0.0;
+    xcd_t0_rate *= l2_warmup;
 
     double xcd_t0_req = per_xcd_count * per_wg;
 
     // L2 capacity check: use per-iteration working set (one MT_K chunk), not full K-loop.
-    // Per-batch only — batch doesn't add to L2 pressure within one iteration.
+    // Scale by active batches on this XCD to account for multi-batch L2 pressure.
     const double a_iter = static_cast<double>(config.mt.m) * config.mt.k * data_type_to_bytes(problem.a_dtype);
     const double b_iter = static_cast<double>(config.mt.n) * config.mt.k * data_type_to_bytes(problem.b_dtype);
-    double xcd_t0_iter_ws = (xcd_t0.m * a_iter + xcd_t0.n * b_iter);
+    double xcd_t0_iter_ws = (xcd_t0.m * a_iter + xcd_t0.n * b_iter)
+        * std::max(xcd_t0.b, static_cast<size_t>(1));
     double l2_residency = (xcd_t0_iter_ws > 0) ? std::min(l2_cap / xcd_t0_iter_ws, 1.0) : 1.0;
 
     // Apply residency scaling to the per-batch rate
@@ -1111,8 +1128,9 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
           ? 1.0 - xcd_t1_ws_per_batch / xcd_t1_req_per_batch
           : 0.0;
 
-      // L2 capacity scaling for T1 (per-batch, no batch in iter WS)
-      double xcd_t1_iter_ws = (xcd_t1.m * a_iter + xcd_t1.n * b_iter);
+      // L2 capacity scaling for T1 (include active batches for multi-batch pressure)
+      double xcd_t1_iter_ws = (xcd_t1.m * a_iter + xcd_t1.n * b_iter)
+          * std::max(xcd_t1.b, static_cast<size_t>(1));
       double l2_residency_t1 = (xcd_t1_iter_ws > 0) ? std::min(l2_cap / xcd_t1_iter_ws, 1.0) : 1.0;
 
       // Temporal reuse is per-batch: only same-batch data from T0 can be reused in T1.
@@ -1123,7 +1141,7 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
       double t1_rate_with_temporal = (xcd_t1_req_per_batch > 0)
           ? 1.0 - xcd_t1_ws_per_batch_adj / xcd_t1_req_per_batch
           : 0.0;
-      t1_rate_with_temporal = std::max(t1_rate_with_temporal * l2_residency_t1, 0.0);
+      t1_rate_with_temporal = std::max(t1_rate_with_temporal * l2_residency_t1 * l2_warmup, 0.0);
       t1_l2_hits = t1_rate_with_temporal * xcd_t1_req;
     }
 
@@ -1136,6 +1154,8 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
     {
       OLOG_DEBUG("Last XCD L2 Tiles (T0): " << xcd_t0.k << " " << xcd_t0.m << " " << xcd_t0.n << " " << xcd_t0.b);
       OLOG_DEBUG("Last XCD L2 Tiles (T1): " << xcd_t1.k << " " << xcd_t1.m << " " << xcd_t1.n << " " << xcd_t1.b);
+      OLOG_DEBUG("L2 k_iters: " << l2_k_iters);
+      OLOG_DEBUG("L2 warmup factor: " << l2_warmup);
       OLOG_DEBUG("L2 Hit-rate (T0): " << t0_l2_hits / xcd_t0_req);
       OLOG_DEBUG("L2 Hit-rate (T1): " << t1_l2_hits / xcd_t1_req);
     }
@@ -1435,13 +1455,28 @@ double compute_tile_latency(const problem_t& problem,
   double L_WG_setup = 1;  // WG_setup_Latency
 
   // 3) Prologue and Epilogue latencies
-  // Prologue and Epilogue overhead are reduced with higher occupancy kernels.
+  // Occupancy-based latency hiding requires a deep enough K-loop pipeline:
+  // other wavefronts' main-loop compute overlaps one wavefront's prologue/epilogue stall.
+  // With few K iterations all wavefronts execute the same phase simultaneously,
+  // so occupancy adds memory pressure rather than hiding latency.
+  // For batched GEMMs the lockstep effect is stronger because wavefronts from
+  // independent batch elements share no data, requiring more iterations before
+  // the pipeline stagger provides real overlap.
+  const long k_per_split = static_cast<long>(math::safe_ceil_div(K, splitting_factor));
+  const long k_iters_raw = static_cast<long>(
+      math::safe_ceil_div(static_cast<size_t>(k_per_split), MT_K)) - 1;
+  const double k_iters = static_cast<double>(std::max(k_iters_raw, 0L));
+
+  constexpr double pipeline_depth = 4.0;
+  const double iter_blend = k_iters / (k_iters + pipeline_depth);
+  const double effective_decay =
+      1.0 - (1.0 - heuristic.occupancy_decay_base) * iter_blend;
+
   size_t real_occupancy =
       std::min(std::max(config.occupancy, static_cast<int>(1)),
                static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor,
-                                                    hardware.N_CU)));  // Number of WGs per CU.
-  // double occupancy_factor = pow(heuristic.occupancy_decay_base, real_occupancy);
-  double occupancy_factor = pow(real_occupancy, heuristic.occupancy_decay_base) / real_occupancy;
+                                                    hardware.N_CU)));
+  double occupancy_factor = pow(real_occupancy, effective_decay) / real_occupancy;
 
   // 3-1) Prologue: set as memory latency
   double L_prologue = L_mem;
@@ -1458,7 +1493,6 @@ double compute_tile_latency(const problem_t& problem,
   //   - Each iteration: LDS read (A+B) → waitcnt → v_cndmask zeroing → MFMAs
   //   - NO prefetching — loads and compute are serial (not overlapped like main loop)
   // Per tail iteration cost = LDS_read + cndmask_zeroing + compute_per_mi_k
-  const long k_per_split = static_cast<long>(math::safe_ceil_div(K, splitting_factor));
   const size_t k_remainder = k_per_split % MT_K;
   double L_tail = 0;
   if (k_remainder > 0) {
@@ -1492,7 +1526,7 @@ double compute_tile_latency(const problem_t& problem,
   const double problem_k_quant = static_cast<double>(k_remainder) / k_per_split;
   L_epilogue += problem_k_quant * k_padding_penalty;
 
-  L_epilogue *= occupancy_factor;
+  // L_epilogue *= occupancy_factor;
 
   // 4) Single-tile latency (apply penalty after finding the bottleneck)
   // tf32 emu has some more overhead
@@ -1533,6 +1567,11 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("effective_tile_penalty: " << effective_tile_penalty);
     OLOG_DEBUG("config.occupancy: " << config.occupancy);
     OLOG_DEBUG("real_occupancy: " << real_occupancy);
+    OLOG_DEBUG("k_iters (raw main loop): " << k_iters);
+    OLOG_DEBUG("pipeline_depth: " << pipeline_depth);
+    OLOG_DEBUG("iter_blend: " << iter_blend);
+    OLOG_DEBUG("effective_decay: " << effective_decay);
+    OLOG_DEBUG("occupancy_factor: " << occupancy_factor);
 
     OLOG_DEBUG("L_mem: " << L_mem);
     OLOG_DEBUG("L_compute: " << L_compute);
