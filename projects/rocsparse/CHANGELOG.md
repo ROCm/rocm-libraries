@@ -14,9 +14,11 @@ Documentation for rocSPARSE is available at
 * Added half float mixed precision to `rocsparse_spmv` where A, X, and Y use float16 and the compute type use float.
 * Added float16 and bfloat16 output support for level 3 functions (`rocsparse_spmm`, `rocsparse_csrmm`, `rocsparse_coomm`, `rocsparse_spgemm`). This enables mixed precision workflows where the output matrix C can use float16 or bfloat16 types.
 * For sparse matrix vector product (`rocsparse_spmv`), when using `rocsparse_spmv_alg_default`, the routine now automatically falls back to a supported algorithm depending on the sparse matrix format and requested operation. For example, CSR format with transposed operations or CSC format with non-transposed operations will fall back to an appropriate algorithm.
+* Added `--show-skipped` and `--hide-skipped` command-line options to `rocsparse-test` to control whether skipped test output is displayed.
 
 ### Changed
 * Use `std::hypot` in `rocsparse_complex_num<T>::abs` function.
+* Non-YAML tests (bfloat16, complex_types, atomic_add) are now automatically skipped when running `rocsparse-test` with the `--yaml` filter, and skipped test output is hidden by default in this mode.
 
 ### Resolved issues
 * Fix issue in `rocsparse_[s|d|c|z]gebsrmv` routine where incorrect results could sometimes be returned.
