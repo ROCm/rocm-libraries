@@ -32,9 +32,16 @@ endfunction()
 function(add_rocprim_test TEST_NAME TEST_SOURCES)
   get_rocprim_test_target(${TEST_SOURCES} TEST_TARGET)
   add_rocprim_test_internal(${TEST_NAME} "${TEST_SOURCES}" ${TEST_TARGET})
+  # Re-propagate DLLS_COPIED_2 from add_rocprim_test_internal's scope to our
+  # caller (file scope). PARENT_SCOPE only propagates one level, so without
+  # this relay the guard resets on every call and each test target gets
+  # duplicate POST_BUILD copy commands that race on parallel builds.
+  if(DEFINED DLLS_COPIED_2)
+    set(DLLS_COPIED_2 "${DLLS_COPIED_2}" PARENT_SCOPE)
+  endif()
   if(WITH_ROCRAND)
     find_package(rocrand REQUIRED)
-    target_link_libraries(${TEST_TARGET} PRIVATE roc::rocrand) 
+    target_link_libraries(${TEST_TARGET} PRIVATE roc::rocrand)
     target_compile_definitions(${TEST_TARGET} PRIVATE WITH_ROCRAND)
   endif()
   if(BUILD_CODE_COVERAGE)
