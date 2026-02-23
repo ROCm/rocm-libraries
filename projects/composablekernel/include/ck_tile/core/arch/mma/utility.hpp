@@ -12,7 +12,7 @@ template <typename TileDistrEnc>
 struct TileDistrEncRegMap
 {
     // Make sure this is a proper Tile Distr Encoding for Lane Vector mapping.
-    static_assert(TileDistrEnc::NDimR == 1);
+    static_assert(TileDistrEnc::NDimR <= 1);
     static_assert(TileDistrEnc::NDimX == 2);
     static_assert(TileDistrEnc::NDimP == 1);
 
@@ -23,8 +23,18 @@ struct TileDistrEncRegMap
         container_reduce(typename TileDistrEnc::HsLengthss{}[number<0>{}], multiplies<>{}, 1);
     static constexpr index_t mat_minor_size =
         container_reduce(typename TileDistrEnc::HsLengthss{}[number<1>{}], multiplies<>{}, 1);
-    static constexpr index_t num_repeat = typename TileDistrEnc::RsLengths{}[number<0>{}];
-
+    static constexpr index_t num_repeat = [] {
+        // This is awkward but necessary if we want to allow empty "repeat" sequences in the Tile
+        // Distr Encoding.
+        if constexpr(TileDistrEnc::NDimR > 0)
+        {
+            return typename TileDistrEnc::RsLengths{}[number<0>{}];
+        }
+        else
+        {
+            return 1;
+        }
+    }();
     static constexpr index_t num_lanes =
         ps_ys_to_xs_adaptor.GetBottomDimensionLengths().get(number<0>{});
     static constexpr index_t num_vector_items =
@@ -34,7 +44,8 @@ struct TileDistrEncRegMap
     static_assert(distr.get_lengths().get(number<0>{}) == mat_major_size);
     static_assert(distr.get_lengths().get(number<1>{}) == mat_minor_size);
 
-    static auto calc_matrix_indices_from_lane_vector(index_t lane_inx, index_t vector_inx)
+    CK_TILE_HOST_DEVICE static auto calc_matrix_indices_from_lane_vector(index_t lane_inx,
+                                                                         index_t vector_inx)
     {
         // For some reason the Y dimension is not treated the same as the P dimension and we need to
         // manually unmerge the Y dimension index into its hidden indices before being able to use
@@ -62,7 +73,7 @@ struct TileDistrEncRegMap
         std::array<std::array<std::array<LaneVec, num_repeat>, mat_minor_size>, mat_major_size>;
 
     // TODO: In theory this could be done with inverted merge unmerge operations.
-    static constexpr InverseMap calc_inverse_map()
+    CK_TILE_HOST_DEVICE static constexpr InverseMap calc_inverse_map()
     {
         InverseMap im{};
         for(index_t l = 0; l < num_lanes; ++l)
@@ -83,7 +94,7 @@ struct TileDistrEncRegMap
         return im;
     }
 
-    static void print_dims()
+    CK_TILE_HOST_DEVICE static void print_dims()
     {
         printf("Matrix dims major, minor, repeat = %d %d %d\n",
                mat_major_size,
@@ -92,7 +103,7 @@ struct TileDistrEncRegMap
         printf("Num lanes, vector items = %d %d\n", num_lanes, num_vector_items);
     }
 
-    static void print_mapping()
+    CK_TILE_HOST_DEVICE static void print_mapping()
     {
         printf("(lane, vector) item to matrix element\n L | ");
         for(index_t v = 0; v < num_vector_items; v++)
@@ -113,7 +124,7 @@ struct TileDistrEncRegMap
         }
     }
 
-    static void print_inverse_mapping()
+    CK_TILE_HOST_DEVICE static void print_inverse_mapping()
     {
         InverseMap im = calc_inverse_map();
         printf("Matrix element to (lane, vector) item. Elements are replicated an additional %d "
@@ -137,7 +148,7 @@ struct TileDistrEncRegMap
         }
     }
 
-    static void print()
+    CK_TILE_HOST_DEVICE static void print()
     {
         print_dims();
         print_mapping();

@@ -26,7 +26,7 @@ int main()
     // Example RDNA3 V_WMMA_F32_16X16X16_F16 C Matrix (M, N)
     // M{2, 1} L{M1N} V{M2M0} (dummy unmerge to be more similar to other layouts)
     using Encoding2 =
-        tile_distribution_encoding<sequence<1>,                            // R (= Repeat)
+        tile_distribution_encoding<sequence<>,                             // R (= Repeat)
                                    tuple<sequence<8, 2, 1>, sequence<16>>, // H (= Hidden dims =
                                                                            // unmerged dims) for M,
                                                                            // N dimension
