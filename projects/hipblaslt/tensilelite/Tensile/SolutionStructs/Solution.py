@@ -1783,36 +1783,37 @@ class Solution(collections.abc.Mapping):
               if state["DirectToLdsA"]:
                 ldsPadA = max(lrvwA, optPadA) if not state["ProblemType"]["TLUA"] else 0
               else:
-                ldsPadA = max(state["GlobalReadVectorWidthA"], optPadA)
+                ldsPadA = max(state["GlobalReadVectorWidthA"],optPadA)
           assert(ldsPadA >= 0)
-          if ldsPadB == -1:
-            if state["ProblemType"]["DataTypeB"].is6bitFloat():
-              ldsPadB = 0
-            else:
-              if not state["UnrollMajorLDSB"]:
-                if state["EnableMatrixInstruction"]:
-                  ldsPadB = 0
-                  if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
-                    ldsPadB = int(((16 * state["VectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes() + state["MacroTile1"] * state["ProblemType"]["MacDataTypeB"].numBytes() * lrvwB) % 128) // state["ProblemType"]["MacDataTypeB"].numBytes()) \
-                              if isMX else \
-                              ((16 * state["VectorWidthB"] * state["ProblemType"]["DataType"].numBytes() + state["MacroTile1"] * state["ProblemType"]["DataType"].numBytes() * state["LocalReadVectorWidth"]) % 128) // state["ProblemType"]["DataType"].numBytes()
-                  if state["GlobalReadVectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes() == 32 and ldsPadB == 0:
-                    ldsPadB = int(16 // state["ProblemType"]["MacDataTypeB"].numBytes()) \
-                              if isMX else \
-                              16 // state["ProblemType"]["DataType"].numBytes()
-                  if state["DirectToLdsB"]:
-                    # TODO: Check if there are cases which benefit from padding, currently set to zero by default
-                    ldsPadB = state["MatrixInstM"] if state["enableLDSTrB"] else 0
-                else:
-                  if state["ProblemType"]["TLUB"]:
-                    ldsPadB = 0
-                  else:
-                    ldsPadB = state["VectorWidthB"]
-              else:
+
+        if ldsPadB == -1:
+          if state["ProblemType"]["DataTypeB"].is6bitFloat():
+            ldsPadB = 0
+          else:
+            if not state["UnrollMajorLDSB"]:
+              if state["EnableMatrixInstruction"]:
+                ldsPadB = 0
+                if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
+                  ldsPadB = int(((16 * state["VectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes() + state["MacroTile1"] * state["ProblemType"]["MacDataTypeB"].numBytes() * lrvwB) % 128) // state["ProblemType"]["MacDataTypeB"].numBytes()) \
+                            if isMX else \
+                            ((16 * state["VectorWidthB"] * state["ProblemType"]["DataType"].numBytes() + state["MacroTile1"] * state["ProblemType"]["DataType"].numBytes() * state["LocalReadVectorWidth"]) % 128) // state["ProblemType"]["DataType"].numBytes()
+                if state["GlobalReadVectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes() == 32 and ldsPadB == 0:
+                  ldsPadB = int(16 // state["ProblemType"]["MacDataTypeB"].numBytes()) \
+                            if isMX else \
+                            16 // state["ProblemType"]["DataType"].numBytes()
                 if state["DirectToLdsB"]:
-                  ldsPadB = max(lrvw, optPadB) if not state["ProblemType"]["TLUB"] else 0
+                  # TODO: Check if there are cases which benefit from padding, currently set to zero by default
+                  ldsPadB = state["MatrixInstM"] if state["enableLDSTrB"] else 0
+              else:
+                if state["ProblemType"]["TLUB"]:
+                  ldsPadB = 0
                 else:
-                  ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
+                  ldsPadB = state["VectorWidthB"]
+            else:
+              if state["DirectToLdsB"]:
+                ldsPadB = max(lrvw, optPadB) if not state["ProblemType"]["TLUB"] else 0
+              else:
+                ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
           assert(ldsPadB >= 0)
 
         if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
