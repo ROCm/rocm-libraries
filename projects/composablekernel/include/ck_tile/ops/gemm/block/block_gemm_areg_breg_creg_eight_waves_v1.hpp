@@ -186,7 +186,6 @@ struct BlockGemmARegBRegCRegEightWavesV1
 
     CK_TILE_DEVICE static constexpr auto MakeCBlockTile()
     {
-        // TODO: account for transposeC
         return make_static_distributed_tensor<CDataType>(
             make_static_tile_distribution(MakeCBlockDistributionEncode()));
     }
