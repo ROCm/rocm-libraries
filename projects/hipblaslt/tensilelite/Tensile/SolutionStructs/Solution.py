@@ -1762,7 +1762,7 @@ class Solution(collections.abc.Mapping):
             if readRegsB == 4 or readRegsB == 1:
               optPadB *= 2
         if ldsPadA == -1:
-          if state["ProblemType"]["DataTypeA"].is6bitFloat():
+          if isMX and state["ProblemType"]["DataTypeA"].is6bitFloat():
             ldsPadA = 0
           else:
             if not state["UnrollMajorLDSA"]:
@@ -1792,7 +1792,7 @@ class Solution(collections.abc.Mapping):
           assert(ldsPadA >= 0)
 
         if ldsPadB == -1:
-          if state["ProblemType"]["DataTypeB"].is6bitFloat():
+          if isMX and state["ProblemType"]["DataTypeB"].is6bitFloat():
             ldsPadB = 0
           else:
             if not state["UnrollMajorLDSB"]:
@@ -1861,35 +1861,53 @@ class Solution(collections.abc.Mapping):
 
         return ldsPadA, ldsPadB, ldsPadM
 
-      def calcLdsBlockSizePerPadForNonMX(lrvw: int) -> int:
+      def calcLdsBlockSizePerPad(lrvw: int) -> int:
+        isMX = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
         LdsBlockSizePerPadA = state["LdsBlockSizePerPadA"]
         LdsBlockSizePerPadB = state["LdsBlockSizePerPadB"]
-        tmpBpe = state["ProblemType"]["DataTypeA"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["DataType"].numBytes()
+        tmpBpe = None
+        lrvwA = lrvwB = None
+        if isMX:
+          lrvwA = state["LocalReadVectorWidthA"]
+          lrvwB = state["LocalReadVectorWidthB"]
+        else:
+          lrvwA = lrvwB = lrvw
+        tmpBpe = state["ProblemType"]["DataTypeA"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataTypeA"].numBytes() \
+                 if isMX else \
+                 state["ProblemType"]["DataTypeA"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["DataType"].numBytes()
         if LdsBlockSizePerPadA == -1:
           if state["EnableMatrixInstruction"]:
-            if state["UnrollMajorLDSA"]:
-              LdsBlockSizePerPadA = roundUpToNearestMultiple(state["_DepthUA"] * tmpBpe, 128)
-              if state["_DepthUA"] * tmpBpe * state["VectorWidthA"] > 128:
-                LdsBlockSizePerPadA = roundUpToNearestMultiple(state["_DepthUA"] * tmpBpe * state["VectorWidthA"], 128)
+            if isMX and state["ProblemType"]["DataTypeA"].is6bitFloat():
+              LdsBlockSizePerPadA = 0
             else:
-              if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
-                LdsBlockSizePerPadA = state["MacroTile0"] * tmpBpe * lrvw
+              if state["UnrollMajorLDSA"]:
+                LdsBlockSizePerPadA = roundUpToNearestMultiple(int(state["_DepthUA"] * tmpBpe), 128)
+                if state["_DepthUA"] * tmpBpe * state["VectorWidthA"] > 128:
+                  LdsBlockSizePerPadA = roundUpToNearestMultiple(int(state["_DepthUA"] * tmpBpe * state["VectorWidthA"]), 128)
               else:
-                LdsBlockSizePerPadA = 0
+                if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
+                  LdsBlockSizePerPadA = int(state["MacroTile0"] * tmpBpe * lrvwA)
+                else:
+                  LdsBlockSizePerPadA = 0
           else:
             LdsBlockSizePerPadA = 0
-        tmpBpe = state["ProblemType"]["DataTypeB"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["DataType"].numBytes()
+        tmpBpe = state["ProblemType"]["DataTypeB"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataTypeB"].numBytes() \
+                 if isMX else \
+                 state["ProblemType"]["DataTypeB"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["DataType"].numBytes()
         if LdsBlockSizePerPadB == -1:
           if state["EnableMatrixInstruction"]:
-            if state["UnrollMajorLDSB"]:
-              LdsBlockSizePerPadB = roundUpToNearestMultiple(state["_DepthUB"] * tmpBpe, 128)
-              if state["_DepthUB"] * tmpBpe * state["VectorWidthB"] > 128:
-                LdsBlockSizePerPadB = roundUpToNearestMultiple(state["_DepthUB"] * tmpBpe * state["VectorWidthB"], 128)
+            if isMX and state["ProblemType"]["DataTypeB"].is6bitFloat():
+              LdsBlockSizePerPadB = 0
             else:
-              if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
-                LdsBlockSizePerPadB = state["MacroTile1"] * tmpBpe * lrvw
+              if state["UnrollMajorLDSB"]:
+                LdsBlockSizePerPadB = roundUpToNearestMultiple(int(state["_DepthUB"] * tmpBpe), 128)
+                if state["_DepthUB"] * tmpBpe * state["VectorWidthB"] > 128:
+                  LdsBlockSizePerPadB = roundUpToNearestMultiple(int(state["_DepthUB"] * tmpBpe * state["VectorWidthB"]), 128)
               else:
-                LdsBlockSizePerPadB = 0
+                if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
+                  LdsBlockSizePerPadB = int(state["MacroTile1"] * tmpBpe * lrvwB)
+                else:
+                  LdsBlockSizePerPadB = 0
           else:
             LdsBlockSizePerPadB = 0
         # set LdsBlockSizePerPadA,B=0 for DirectToVgpr
@@ -1915,69 +1933,6 @@ class Solution(collections.abc.Mapping):
           else:
             LdsBlockSizePerPadB = max(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
             LdsBlockSizePerPadB = roundUpToNearestMultiple(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
-        return LdsBlockSizePerPadA, LdsBlockSizePerPadB
-
-
-      def calcLdsBlockSizePerPadForMX() -> int:
-        lrvwA = state["LocalReadVectorWidthA"]
-        lrvwB = state["LocalReadVectorWidthB"]
-        LdsBlockSizePerPadA = state["LdsBlockSizePerPadA"]
-        LdsBlockSizePerPadB = state["LdsBlockSizePerPadB"]
-        tmpBpe = state["ProblemType"]["DataTypeA"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataTypeA"].numBytes()
-        if LdsBlockSizePerPadA == -1:
-          if state["EnableMatrixInstruction"] and not state["ProblemType"]["DataTypeA"].is6bitFloat():
-            if state["UnrollMajorLDSA"]:
-              LdsBlockSizePerPadA = roundUpToNearestMultiple(int(state["_DepthUA"] * tmpBpe), 128)
-              if state["_DepthUA"] * tmpBpe * state["VectorWidthA"] > 128:
-                LdsBlockSizePerPadA = roundUpToNearestMultiple(int(state["_DepthUA"] * tmpBpe * state["VectorWidthA"]), 128)
-            else:
-              if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
-                LdsBlockSizePerPadA = int(state["MacroTile0"] * tmpBpe * lrvwA)
-              else:
-                LdsBlockSizePerPadA = 0
-          else:
-            LdsBlockSizePerPadA = 0
-        tmpBpe = state["ProblemType"]["DataTypeB"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataTypeB"].numBytes()
-        if LdsBlockSizePerPadB == -1:
-          if state["EnableMatrixInstruction"] and not state["ProblemType"]["DataTypeB"].is6bitFloat():
-            if state["UnrollMajorLDSB"]:
-              LdsBlockSizePerPadB = roundUpToNearestMultiple(int(state["_DepthUB"] * tmpBpe), 128)
-              if state["_DepthUB"] * tmpBpe * state["VectorWidthB"] > 128:
-                LdsBlockSizePerPadB = roundUpToNearestMultiple(int(state["_DepthUB"] * tmpBpe * state["VectorWidthB"]), 128)
-            else:
-              if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
-                LdsBlockSizePerPadB = int(state["MacroTile1"] * tmpBpe * lrvwB)
-              else:
-                LdsBlockSizePerPadB = 0
-          else:
-            LdsBlockSizePerPadB = 0
-
-        # set LdsBlockSizePerPadA,B=0 for DirectToVgpr
-        if state["DirectToVgprA"]:
-          LdsBlockSizePerPadA = 0
-        if state["DirectToVgprB"]:
-          LdsBlockSizePerPadB = 0
-
-        if state["DirectToLdsA"]:
-          bpeA = state["ProblemType"]["DataTypeA"].numBytes()
-          # For DTL lds padding must be a multiple of the instruction load size (in bytes)
-          MinLdsBlockSizePerPadA = (state[f"GlobalReadVectorWidthA"] * bpeA) * state["WavefrontSize"]
-          if state["UseGeneralizedNLCOneA"]:
-            LdsBlockSizePerPadA = MinLdsBlockSizePerPadA
-          else:
-            LdsBlockSizePerPadA = max(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
-            LdsBlockSizePerPadA = roundUpToNearestMultiple(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
-
-        if state["DirectToLdsB"]:
-          bpeB = state["ProblemType"]["DataTypeB"].numBytes()
-          # For DTL lds padding must be a multiple of the instruction load size (in bytes)
-          MinLdsBlockSizePerPadB = (state[f"GlobalReadVectorWidthB"] * bpeB) * state["WavefrontSize"]
-          if state["UseGeneralizedNLCOneB"]:
-            LdsBlockSizePerPadB = MinLdsBlockSizePerPadB
-          else:
-            LdsBlockSizePerPadB = max(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
-            LdsBlockSizePerPadB = roundUpToNearestMultiple(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
-
         return LdsBlockSizePerPadA, LdsBlockSizePerPadB
 
       def calcLdsNumBytes(ldsPadA: int, LdsBlockSizePerPadA: int, ldsPadB: int, LdsBlockSizePerPadB: int) -> int:
@@ -2128,7 +2083,7 @@ class Solution(collections.abc.Mapping):
 
             if (wlrA > 1) or (wlrB > 1):
               padA, padB, padM = calcLdsPad()
-              ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPadForMX()
+              ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPad()
               ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
               if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > globalParameters["MaxLDS"]:
                 if wlrA > 1:
@@ -2199,7 +2154,7 @@ class Solution(collections.abc.Mapping):
                 state["LocalReadVectorWidth"] //= 2
             if state["LocalReadVectorWidth"] // state["MIInputPerThread"] > 1:
               padA, padB, padM = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
-              ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPadForNonMX(state["LocalReadVectorWidth"])
+              ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPad(state["LocalReadVectorWidth"])
               ldsBlockSizePerPadA = 0 if padA == 0 else ldsBlockSizePerPadA
               ldsBlockSizePerPadB = 0 if padB == 0 else ldsBlockSizePerPadB
               ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
@@ -3042,10 +2997,7 @@ class Solution(collections.abc.Mapping):
     if state["LdsBlockSizePerPadB"] == -1:
       auto_LdsBlockSizePerPadB_for_mix = 1
 
-    if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
-      state["LdsBlockSizePerPadA"], state["LdsBlockSizePerPadB"] = calcLdsBlockSizePerPadForMX()
-    else:
-      state["LdsBlockSizePerPadA"], state["LdsBlockSizePerPadB"] = calcLdsBlockSizePerPadForNonMX(state["LocalReadVectorWidth"])
+    state["LdsBlockSizePerPadA"], state["LdsBlockSizePerPadB"] = calcLdsBlockSizePerPad()
 
     if state["LdsBlockSizePerPadMetadata"] == -1:
       state["LdsBlockSizePerPadMetadata"] = state["LdsBlockSizePerPadA"]
