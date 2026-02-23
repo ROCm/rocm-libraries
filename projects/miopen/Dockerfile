@@ -347,12 +347,14 @@ RUN apt-get update && apt-get install -y \
     llvm-20 \
     && rm -rf /var/lib/apt/lists/*
 
+# Workaround for broken clang-tidy
+RUN mv /opt/rocm/llvm/bin/clang-tidy /opt/rocm/llvm/bin/clang-tidy.disabled || true
+RUN ln -sf /usr/bin/clang-tidy-20 /opt/rocm/llvm/bin/clang-tidy
+
 # Use update-alternatives to set default versions
 RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
 RUN update-alternatives --install /opt/rocm/llvm/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
-# Workaround for broken clang-tidy
 RUN update-alternatives --set clang-tidy /usr/bin/clang-tidy-20
-RUN mv /opt/rocm/llvm/bin/clang-tidy /opt/rocm/llvm/bin/clang-tidy.disabled || true
 
 # Ensure the dynamic linker can find ROCm libraries by adding /opt/rocm/lib to the linker cache. 
 RUN printf '%s\n' /opt/rocm/lib > /etc/ld.so.conf.d/rocm.conf && ldconfig
