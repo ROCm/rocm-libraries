@@ -124,13 +124,7 @@ ninja check
 ### Building Specific Components
 ```bash
 # Build without plugins
-cmake -GNinja -DHIP_DNN_BUILD_PLUGINS=OFF ..
-
-# Build without frontend
-cmake -GNinja -DHIP_DNN_BUILD_FRONTEND=OFF ..
-
-# Build without backend
-cmake -GNinja -DHIP_DNN_BUILD_BACKEND=OFF ..
+cmake -GNinja -DHIPDNN_BUILD_PLUGINS=OFF ..
 ```
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
@@ -197,7 +191,7 @@ All targets support parallel builds with ninja.
 | `current-coverage` | Generate test coverage reports using coverage data already on disk (does not automatically run `check`; requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
 | `clean` | Clean build artifacts |
 | `validate_test_names` | Validates test names conform to naming rules |
-| `generate_hipdnn_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
+| `generate_hipdnn_data_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
 
 The following example build commands are equivalent (depending on which generator was used) and will build the `check` target, to build and run all tests.
 
@@ -320,6 +314,10 @@ With _long-paths and symlinks enabled_ as described in the above sections, enabl
 git config --global core.symlinks true
 git config --global core.longpaths true
 ```
+
+> [!IMPORTANT]
+> The `core.symlinks` setting is required for AI coding tool configuration files (`.clinerules`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/*.mdc`) which are symlinks to a central `docs/ai-rules.md`. Without this setting, these files will contain the symlink target path as plain text instead of the actual rules content.
+
 Tip: you can use `git config --show-scope --show-origin core.symlinks` and `git config --show-scope --show-origin core.longpaths` to determine what the current active git configuration is and where that setting is configured.
 
 #### 6. Install Clang Toolchain

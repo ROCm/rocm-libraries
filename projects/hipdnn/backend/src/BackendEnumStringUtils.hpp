@@ -7,6 +7,7 @@
 #include "HipdnnBackendAttributeType.h"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendPluginLoadingMode.h"
+#include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnStatus.h"
 
 namespace hipdnn_backend
@@ -101,6 +102,11 @@ inline const char* hipdnnGetAttributeTypeString(hipdnnBackendAttributeType_t typ
         return "HIPDNN_TYPE_NORM_FWD_PHASE";
     case HIPDNN_TYPE_RNG_DISTRIBUTION:
         return "HIPDNN_TYPE_RNG_DISTRIBUTION";
+
+    // Extension API
+    case HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT:
+        return "HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT";
+
     default:
         return "HIPDNN_ATTRIBUTE_UNKNOWN";
     }
@@ -254,6 +260,13 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_DEVICEPROP_HANDLE";
     case HIPDNN_ATTR_DEVICEPROP_JSON_REPRESENTATION:
         return "HIPDNN_ATTR_DEVICEPROP_JSON_REPRESENTATION";
+
+    // Extension API
+    case HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT:
+        return "HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT";
+    case HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT:
+        return "HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT";
+
     default:
         return "HIPDNN_ATTR_UNKNOWN";
     }
@@ -269,6 +282,19 @@ inline const char* hipdnnGetPluginLoadingModeString(hipdnnPluginLoadingMode_ext_
         return "HIPDNN_PLUGIN_LOADING_ABSOLUTE";
     default:
         return "HIPDNN_PLUGIN_LOADING_UNKNOWN";
+    }
+}
+
+inline const char* hipdnnGetPluginUnloadingModeString(hipdnnPluginUnloadingMode_ext_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_PLUGIN_UNLOAD_LAZY:
+        return "HIPDNN_PLUGIN_UNLOAD_LAZY";
+    case HIPDNN_PLUGIN_UNLOAD_EAGER:
+        return "HIPDNN_PLUGIN_UNLOAD_EAGER";
+    default:
+        return "HIPDNN_PLUGIN_UNLOAD_UNKNOWN";
     }
 }
 

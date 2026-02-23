@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -68,11 +68,8 @@ void testing_csrilusv(Arguments argus)
     int m;
     int n;
     int nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     // Allocate memory on device
     auto dptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * (m + 1)), device_free};
@@ -143,14 +140,14 @@ void testing_csrilusv(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(&hposition_2, d_position, sizeof(int), hipMemcpyDeviceToHost));
 
     // Compute host reference csrilu0
-    int position_gold = csrilu0(m,
-                                hcsr_row_ptr.data(),
-                                hcsr_col_ind.data(),
-                                hcsr_val.data(),
-                                idx_base,
-                                false,
-                                0.0,
-                                make_DataType<T>(0.0, 0.0));
+    int position_gold = host_csrilu0(m,
+                                     hcsr_row_ptr.data(),
+                                     hcsr_col_ind.data(),
+                                     hcsr_val.data(),
+                                     idx_base,
+                                     false,
+                                     0.0,
+                                     make_DataType<T>(0.0, 0.0));
 
     // Check zero pivot results
     unit_check_general(1, 1, 1, &position_gold, &hposition_1);

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -199,8 +199,10 @@ namespace ck
                     {
                         std::vector<std::unique_ptr<DeviceOp>> op_ptrs;
 
-                        if constexpr(is_same_v<ADataType, float> && is_same_v<BDataType, float>
-                                     && is_same_v<DsDataType, float> && is_same_v<EDataType, float>)
+                        if constexpr(
+                            is_same_v<
+                                ADataType,
+                                float> && is_same_v<BDataType, float> && is_same_v<DsDataType, float> && is_same_v<EDataType, float>)
                         {
                             if constexpr(NumDimM == 6 && NumDimN == 6 && NumDimK == 6)
                             {
@@ -215,9 +217,10 @@ namespace ck
                             }
                         }
 
-                        if constexpr(is_same_v<ADataType, double> && is_same_v<BDataType, double>
-                                     && is_same_v<DsDataType, double>
-                                     && is_same_v<EDataType, double>)
+                        if constexpr(
+                            is_same_v<
+                                ADataType,
+                                double> && is_same_v<BDataType, double> && is_same_v<DsDataType, double> && is_same_v<EDataType, double>)
                         {
                             if constexpr(NumDimM == 6 && NumDimN == 6 && NumDimK == 6)
                             {
@@ -240,4 +243,3 @@ namespace ck
         } // namespace device
     } // namespace tensor_operation
 } // namespace ck
-

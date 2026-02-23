@@ -54,6 +54,49 @@ function(hipdnn_add_dependency dep_name)
     endif()
 endfunction()
 
+# Extract and use include directories from dependency targets instead of linking
+# Function to add include directories and optional compile definitions from dependency targets
+# Automatically detects target type and uses appropriate visibility (INTERFACE for interface libs, PUBLIC for others)
+function(hipdnn_add_dependency_includes TARGET_NAME HEADER_LIB_TARGET_NAME)
+    # Parse optional arguments
+    set(options "")
+    set(oneValueArgs "")
+    set(multiValueArgs COMPILE_DEFINITIONS)
+    cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    # Validate required parameters
+    if(NOT TARGET ${TARGET_NAME})
+        message(FATAL_ERROR "hipdnn_add_dependency_includes: Target '${TARGET_NAME}' does not exist")
+        return()
+    endif()
+
+    if(NOT TARGET ${HEADER_LIB_TARGET_NAME})
+        message(FATAL_ERROR "hipdnn_add_dependency_includes: Header library target '${HEADER_LIB_TARGET_NAME}' does not exist")
+        return()
+    endif()
+
+    # Determine visibility based on target type
+    get_target_property(_target_type ${TARGET_NAME} TYPE)
+    if(_target_type STREQUAL "INTERFACE_LIBRARY")
+        set(_visibility INTERFACE)
+    else()
+        set(_visibility PUBLIC)
+    endif()
+
+    get_target_property(_dep_includes ${HEADER_LIB_TARGET_NAME} INTERFACE_INCLUDE_DIRECTORIES)
+    if(_dep_includes)
+        foreach(_include IN LISTS _dep_includes)
+            message(VERBOSE "${TARGET_NAME} adding include from ${HEADER_LIB_TARGET_NAME}: ${_include}")
+            target_include_directories(${TARGET_NAME} SYSTEM ${_visibility} $<BUILD_INTERFACE:${_include}>)
+        endforeach()
+    endif()
+
+    if(ARG_COMPILE_DEFINITIONS)
+        target_compile_definitions(${TARGET_NAME} ${_visibility} ${ARG_COMPILE_DEFINITIONS})
+    endif()
+endfunction()
+
+
 # Builds a dependency locally
 macro(_build_local)
     cmake_policy(PUSH)

@@ -18,6 +18,7 @@ inline void to_json(nlohmann::json& batchnormJson,
     inputs["scale_tensor_uid"] = bn.scale_tensor_uid();
     inputs["variance_tensor_uid"] = bn.variance_tensor_uid();
     inputs["bias_tensor_uid"] = bn.bias_tensor_uid();
+    inputs["epsilon_tensor_uid"] = bn.epsilon_tensor_uid();
 
     batchnormJson["outputs"]["y_tensor_uid"] = bn.y_tensor_uid();
 }
@@ -37,7 +38,8 @@ inline auto to<data_objects::BatchnormInferenceAttributesVarianceExt>(
         inputs.at("variance_tensor_uid").get<int64_t>(),
         inputs.at("scale_tensor_uid").get<int64_t>(),
         inputs.at("bias_tensor_uid").get<int64_t>(),
-        entry.at("outputs").at("y_tensor_uid").get<int64_t>());
+        entry.at("outputs").at("y_tensor_uid").get<int64_t>(),
+        inputs.at("epsilon_tensor_uid").get<int64_t>());
 }
 
 }

@@ -108,6 +108,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid convolution weight gradient graph)";
             break;
+        case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid matmul graph)";
+            break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
             break;

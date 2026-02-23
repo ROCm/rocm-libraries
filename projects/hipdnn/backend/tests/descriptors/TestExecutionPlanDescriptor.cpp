@@ -139,7 +139,7 @@ TEST_F(TestExecutionPlanDescriptor, CreateExecutionPlanDescriptor)
 TEST_F(TestExecutionPlanDescriptor, SetAttrWhenNotFinalized)
 {
     auto plan = getExecutionPlanDescriptor();
-    uint64_t dummyWorkspaceSize;
+    uint64_t dummyWorkspaceSize = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
         plan->setAttribute(
@@ -253,7 +253,7 @@ TEST_F(TestExecutionPlanDescriptor, Finalize)
 TEST_F(TestExecutionPlanDescriptor, GetAttrWhenNotFinalized)
 {
     auto plan = getExecutionPlanDescriptor();
-    uint64_t dummyWorkspaceSize;
+    uint64_t dummyWorkspaceSize = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(plan->getAttribute(HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
                                                   HIPDNN_TYPE_INT64,

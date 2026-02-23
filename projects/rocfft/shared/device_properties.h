@@ -28,7 +28,7 @@
 
 // Generic GCN arch name for configuration entries that
 // do not report a specific name in kernel_generator.py
-static const std::string generic_gcn_arch_name("gfx_generic");
+static const char* generic_gcn_arch_name = "gfx_generic";
 
 // get device properties
 static hipDeviceProp_t get_curr_device_prop()
@@ -45,13 +45,22 @@ static hipDeviceProp_t get_curr_device_prop()
     return prop;
 }
 
-// Get current device GCN arch name without any suffix after ':'
-// If no devices are found, return empty string
-static std::string get_curr_gcn_arch_name()
+// Check if there are any visible HIP devices visible to the runtime
+static bool check_any_devices_visible()
 {
     int  dev_count = 0;
     auto ret       = hipGetDeviceCount(&dev_count);
     if(ret != hipSuccess || dev_count == 0)
+        return false;
+
+    return true;
+}
+
+// Get current device GCN arch name without any suffix after ':'
+// If no devices are found, return empty string
+static std::string get_curr_gcn_arch_name()
+{
+    if(!check_any_devices_visible())
         return "";
 
     auto        dev_prop       = get_curr_device_prop();

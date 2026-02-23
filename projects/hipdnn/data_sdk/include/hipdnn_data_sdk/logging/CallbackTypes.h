@@ -7,6 +7,12 @@
 extern "C" {
 #endif
 
+// This file's definitions are duplicated by HipdnnBackendCallbackTypes.h.
+// Please ensure any updates are synced between the two files!
+
+#ifndef HIPDNN_CALLBACK_TYPES_DEFINED
+#define HIPDNN_CALLBACK_TYPES_DEFINED
+
 /**
  * @brief Severity levels for logging in hipDNN
  */
@@ -26,6 +32,8 @@ typedef enum
  * @param message The log message, formatted by the logger.
  */
 typedef void (*hipdnnCallback_t)(hipdnnSeverity_t severity, const char* message);
+
+#endif // HIPDNN_CALLBACK_TYPES_DEFINED
 
 #ifdef __cplusplus
 }

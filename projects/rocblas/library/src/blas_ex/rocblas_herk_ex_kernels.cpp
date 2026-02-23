@@ -55,12 +55,10 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
     constexpr bool BATCHED = false;
     constexpr bool HERM    = true;
 
-    /* if constexpr(sizeof(Tex) < 8)
+    /* TODO if constexpr(rocblas_internal_syrk_herk_ex_use_gemm<Tex>())
     {
-        constexpr bool FORCEDGEMM = true;
-
         size_t size
-            = rocblas_internal_syrk_herk_workspace<T, FORCEDGEMM>(handle, n, k, batch_count);
+            = rocblas_internal_syrk_herk_ex_workspace<HERM>(handle, n, k, batch_count);
 
         //Allocate Workspace memory
         auto w_mem = handle->device_malloc(size);

@@ -22,6 +22,17 @@
 
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
+# --------------------------------------
+# Update these variables at release time
+#
+# Set the library version
+set(VERSION_STRING "3.1.0")
+# Set the minimum required rocPRIM version
+set(MIN_ROCRAND_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocRAND to search for when ROCRAND_FETCH_METHOD is set to PACKAGE.")
+# Set download branch for dependency rocPRIM
+set(ROCM_DEP_RELEASE_BRANCH "release/rocm-rel-7.2" CACHE STRING "Download branch for ROCm dependencies")
+# --------------------------------------
+
 if(DEFINED ENV{ROCM_PATH})
   set (ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH "The path to the ROCm installation.")
 endif()
@@ -40,7 +51,6 @@ endif()
 # hipRAND project
 #
 project(hipRAND CXX)
-set(hipRAND_VERSION "3.1.0")
 
 # Build options
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
@@ -48,7 +58,7 @@ option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 option(BUILD_FORTRAN_WRAPPER "Build Fortran wrapper" OFF)
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
-option(DEPENDENCIES_FORCE_DOWNLOAD "Do not use system installed dependencies, always download and build them" OFF)
+option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Download non-ROCm dependencies and do not search for packages" OFF)
 option(DISABLE_WERROR "Disable building with Werror" ON)
 option(DOWNLOAD_ROCRAND "Download rocRAND if it is not found in the default install directory or the manually-specified directory" OFF)
 option(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
@@ -56,6 +66,24 @@ option(BUILD_SHARED_LIBS "Build shared" ON)
 
 set(BUILD_WITH_LIB "ROCM" CACHE STRING "Select backend library to build with (ROCM or CUDA)")
 set_property(CACHE BUILD_WITH_LIB PROPERTY STRINGS "ROCM" "CUDA")
+
+# Set up options for obtaining dependency rocPRIM.
+# PACKAGE: Search for an install package that contains the dependency.
+# MONOREPO: Assume this is a monorepo checkout and search for the dependency in the directory at ../../projects/.
+# DOWNLOAD: Download the dependency from the monorepo.
+set(FETCH_METHOD_OPTIONS "PACKAGE" "MONOREPO" "DOWNLOAD")
+
+set(ROCRAND_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the rocRAND dependency")
+
+# This function checks to see if the fetch method variable it's passed is defined, and contains a valid value.
+# If it does not contain a valid value, it issues a fatal failure with an error message.
+function(check_fetch_method method)
+  if (DEFINED ${method} AND NOT ${${method}} IN_LIST FETCH_METHOD_OPTIONS)
+    message(FATAL_ERROR "Unrecognized ${method}: \"${${method}}\". Valid options are: ${FETCH_METHOD_OPTIONS}.")
+  endif()
+endfunction()
+
+check_fetch_method(ROCRAND_FETCH_METHOD)
 
 if (BUILD_WITH_LIB STREQUAL "CUDA")
   # Not relevant for CUDA builds
@@ -92,7 +120,14 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
-include(cmake/ROCmCMakeBuildToolsDependency.cmake)
+include(ROCmCMakeBuildToolsDependency)
+
+# Set version variables
+rocm_setup_version( VERSION ${VERSION_STRING} )
+set ( hiprand_VERSION ${VERSION_STRING} )
+# Old-style version number used within the library's API. rocrand_get_version should be modified.
+math(EXPR hiprand_VERSION_NUMBER "${hipRAND_VERSION_MAJOR} * 100000 + ${hipRAND_VERSION_MINOR} * 100 + ${hipRAND_VERSION_PATCH}")
+set(hiprand_SOVERSION 1.1)
 
 # Set target IDs for compilation
 if (NOT BUILD_WITH_LIB STREQUAL "CUDA")
@@ -116,14 +151,14 @@ endif()
 # Verify that hipcc or HIP-aware clang is used on ROCM software
 # TODO: Fix VerifyCompiler for Windows
 if (NOT WIN32)
-  include(cmake/VerifyCompiler.cmake)
+  include(VerifyCompiler)
 else()
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm)
   find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH})
 endif()
 
 # Include cmake scripts
-include(cmake/Dependencies.cmake)
+include(Dependencies)
 
 # Build CXX flags
 if (NOT DEFINED CMAKE_CXX_STANDARD)
@@ -154,15 +189,8 @@ if(BUILD_ADDRESS_SANITIZER AND BUILD_SHARED_LIBS)
   add_link_options(-fuse-ld=lld)
 endif()
 
-# Set version variables
-rocm_setup_version( VERSION "${hipRAND_VERSION}" )
-set ( hiprand_VERSION ${hipRAND_VERSION} )
-# Old-style version number used within the library's API. rocrand_get_version should be modified.
-math(EXPR hiprand_VERSION_NUMBER "${hipRAND_VERSION_MAJOR} * 100000 + ${hipRAND_VERSION_MINOR} * 100 + ${hipRAND_VERSION_PATCH}")
-set(hiprand_SOVERSION 1.1)
-
 # Print configuration summary
-include(cmake/Summary.cmake)
+include(Summary)
 print_configuration_summary()
 
 # hipRAND library
@@ -203,7 +231,7 @@ if( HIP_RUNTIME_LOWER STREQUAL "rocclr" )
 elseif( HIP_RUNTIME STREQUAL "cuda" )
     rocm_package_add_dependencies("hip-nvcc >= 3.5.0")
 endif( )
-rocm_package_add_dependencies("rocrand >= ${hipRAND_VERSION}")
+rocm_package_add_dependencies("rocrand >= ${VERSION_STRING}")
 
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include")
 

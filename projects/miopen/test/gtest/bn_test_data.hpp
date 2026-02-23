@@ -140,7 +140,9 @@ inline std::vector<BN2DTestCase> Network2DLarge()
         // {1, 512, 7, 7, miopen::batchnorm::Direction::Backward, 1, 1},
         // edge cases
         {69328, 1, 22, 22, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
-        {69328, 1, 13, 79, miopen::batchnorm::Direction::ForwardTraining, 1, 1}
+        {69328, 1, 13, 79, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
+        // Forward passes that should select variant 3 according to the current heuristic in common_spatial.hpp:DefaultConfigSpatialSingle and layout NCHW
+        {16, 1, 32, 32, miopen::batchnorm::Direction::ForwardTraining, 1, 1}
         };
     // clang-format on
 }
@@ -284,11 +286,14 @@ template <typename XDataType,
           typename TConfig>
 struct BNInferTestData : public BNTestData<XDataType, YDataType, AccDataType, TConfig>
 {
-    void
-    SetUpImpl(const TConfig& config, miopenBatchNormMode_t t_bnmode, miopenTensorLayout_t t_layout)
+    void SetUpImpl(const TConfig& config,
+                   miopenBatchNormMode_t t_bnmode,
+                   miopenTensorLayout_t t_layout,
+                   bool useInverseVariance_)
     {
         BNTestData<XDataType, YDataType, AccDataType, TConfig>::SetUpImpl(
             config, t_bnmode, t_layout);
+        useInverseVariance = useInverseVariance_;
         CreateTensors();
         InitTensorsWithRandValue();
         WriteToGPU();
@@ -308,6 +313,7 @@ struct BNInferTestData : public BNTestData<XDataType, YDataType, AccDataType, TC
     double activ_alpha;
     double activ_beta;
     miopenActivationMode_t activ_mode;
+    bool useInverseVariance = false;
 
 private:
     void CreateTensors()
@@ -338,10 +344,19 @@ private:
         shift.generate(uniform_signed_initializer<BiasDataType>(2e-3 /*scale*/, 1000 /*range*/));
         estMean.generate(
             uniform_signed_initializer<MeanVarDataType>(2e-3 /*scale*/, 1000 /*range*/));
-        // estVaraince has to be +ve number otherwise 1/sqrt(-ve) would
-        // give img number
-        estVariance.generate(
-            uniform_unsigned_initializer<MeanVarDataType>(2e-3 /*scale*/, 1000 /*range*/));
+        if(useInverseVariance)
+        {
+            // Given an epsilon of 1e-5, the max value is 1/sqrt(epsilon) ==> 316.228
+            // Given a max variance of 2, the min value is 1/sqrt(epsilon + 2.0) ==> 0.7
+            estVariance.generate(uniform_unsigned_initializer<MeanVarDataType>(0.7, 317));
+        }
+        else
+        {
+            // estVaraince has to be +ve number otherwise 1/sqrt(-ve) would
+            // give img number
+            estVariance.generate(
+                uniform_unsigned_initializer<MeanVarDataType>(2e-3 /*scale*/, 1000 /*range*/));
+        }
     }
     void WriteToGPU()
     {
@@ -498,6 +513,11 @@ struct BNFwdTrainTestData : public BNTestData<XDataType, YDataType, AccDataType,
     tensor<RunSaveDataType> saveVariance;
     tensor<RunSaveDataType> runMean;
     tensor<RunSaveDataType> runVariance;
+    // V3 API: separate prev/next buffers for ping-pong
+    tensor<RunSaveDataType> prevRunMean;
+    tensor<RunSaveDataType> prevRunVariance;
+    tensor<RunSaveDataType> nextRunMean;
+    tensor<RunSaveDataType> nextRunVariance;
 
     tensor<AccDataType> saveMean_ref;
     tensor<AccDataType> saveVariance_ref;
@@ -510,6 +530,11 @@ struct BNFwdTrainTestData : public BNTestData<XDataType, YDataType, AccDataType,
     miopen::Allocator::ManageDataPtr saveVariance_dev;
     miopen::Allocator::ManageDataPtr runMean_dev;
     miopen::Allocator::ManageDataPtr runVariance_dev;
+    // V3 API: separate prev/next device buffers
+    miopen::Allocator::ManageDataPtr prevRunMean_dev;
+    miopen::Allocator::ManageDataPtr prevRunVariance_dev;
+    miopen::Allocator::ManageDataPtr nextRunMean_dev;
+    miopen::Allocator::ManageDataPtr nextRunVariance_dev;
     double epsilon       = 1.0e-5;
     double averageFactor = 0.1;
     float alpha          = 1.0f;
@@ -544,6 +569,19 @@ private:
         runVariance = tensor<RunSaveDataType>{
             BNTestData<XDataType, YDataType, AccDataType, TConfig>::tensor_layout,
             derivedBnDesc.GetLengths()};
+        // V3 API: separate prev/next buffers
+        prevRunMean = tensor<RunSaveDataType>{
+            BNTestData<XDataType, YDataType, AccDataType, TConfig>::tensor_layout,
+            derivedBnDesc.GetLengths()};
+        prevRunVariance = tensor<RunSaveDataType>{
+            BNTestData<XDataType, YDataType, AccDataType, TConfig>::tensor_layout,
+            derivedBnDesc.GetLengths()};
+        nextRunMean = tensor<RunSaveDataType>{
+            BNTestData<XDataType, YDataType, AccDataType, TConfig>::tensor_layout,
+            derivedBnDesc.GetLengths()};
+        nextRunVariance = tensor<RunSaveDataType>{
+            BNTestData<XDataType, YDataType, AccDataType, TConfig>::tensor_layout,
+            derivedBnDesc.GetLengths()};
         // ref
         saveMean_ref = tensor<AccDataType>{
             BNTestData<XDataType, YDataType, AccDataType, TConfig>::tensor_layout,
@@ -568,6 +606,12 @@ private:
             uniform_signed_initializer<RunSaveDataType>(2e-3 /*scale*/, 1000 /*range*/));
         runVariance.generate(
             uniform_signed_initializer<RunSaveDataType>(2e-3 /*scale*/, 1000 /*range*/));
+        // V3 API: initialize prev buffers with same values as runMean/runVariance
+        prevRunMean.generate(
+            uniform_signed_initializer<RunSaveDataType>(2e-3 /*scale*/, 1000 /*range*/));
+        prevRunVariance.generate(
+            uniform_signed_initializer<RunSaveDataType>(2e-3 /*scale*/, 1000 /*range*/));
+        // nextRunMean and nextRunVariance will be output buffers (don't need initialization)
 
         std::transform(saveMean.data.begin(),
                        saveMean.data.end(),
@@ -595,5 +639,11 @@ private:
         saveVariance_dev = handle.Write(saveVariance.data);
         runMean_dev      = handle.Write(runMean.data);
         runVariance_dev  = handle.Write(runVariance.data);
+        // V3 API: write prev buffers to GPU
+        prevRunMean_dev     = handle.Write(prevRunMean.data);
+        prevRunVariance_dev = handle.Write(prevRunVariance.data);
+        // Allocate next buffers (output only, no need to initialize data)
+        nextRunMean_dev     = handle.Create<RunSaveDataType>(prevRunMean.data.size());
+        nextRunVariance_dev = handle.Create<RunSaveDataType>(prevRunVariance.data.size());
     }
 };

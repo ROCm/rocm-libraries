@@ -8,7 +8,7 @@
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
-namespace hipdnn_plugin_sdk
+namespace hipdnn_data_sdk::flatbuffer_utilities
 {
 
 class INodeWrapper
@@ -77,6 +77,8 @@ public:
         {
         case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
             return typeid(hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+            return typeid(hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt);
         case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
             return typeid(hipdnn_data_sdk::data_objects::PointwiseAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
@@ -89,6 +91,8 @@ public:
             return typeid(hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
             return typeid(hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::MatmulAttributes);
         default:
             throw std::invalid_argument("Node attributes type is not recognized");
         }
@@ -116,4 +120,14 @@ private:
 
     const hipdnn_data_sdk::data_objects::Node* _shallowNode = nullptr;
 };
-}
+
+} // namespace hipdnn_data_sdk::flatbuffer_utilities
+
+// Backward compatibility aliases - DEPRECATED
+// These aliases are deprecated and will be removed in a future release.
+// Use hipdnn_data_sdk::flatbuffer_utilities::<TypeName> instead.
+namespace hipdnn_plugin_sdk
+{
+using INodeWrapper = hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper;
+using NodeWrapper = hipdnn_data_sdk::flatbuffer_utilities::NodeWrapper;
+} // namespace hipdnn_plugin_sdk

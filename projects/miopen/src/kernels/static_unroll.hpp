@@ -27,7 +27,7 @@
 #ifndef MIOPEN_STATIC_UNROLL_HPP
 #define MIOPEN_STATIC_UNROLL_HPP
 
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #endif
@@ -182,7 +182,7 @@ struct static_unroll_count
     template <typename F>
     __forceinline__ __host__ __device__ constexpr static_unroll_count(F f)
     {
-        if constexpr(Hint == 1)
+        if constexpr(Hint == 1 || (End - Start) <= Hint)
         {
             static_nounroll<ItemType, Start, End, Stride>{f};
         }

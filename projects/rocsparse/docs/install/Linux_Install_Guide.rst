@@ -124,6 +124,12 @@ Using install.sh to build rocSPARSE with dependencies
 
 The following table lists the common ways to use ``install.sh`` to build the rocSPARSE dependencies and library.
 
+.. note::
+
+   By default, rocBLAS is a dependency and the build will fail if it isn't found.
+   To opt out of using rocBLAS when building from source with
+   the ``install.sh`` script, use the ``no-rocblas`` option. 
+
 .. csv-table::
    :header: "Command","Description"
    :widths: 40, 90

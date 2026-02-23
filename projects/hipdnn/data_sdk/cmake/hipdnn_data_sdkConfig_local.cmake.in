@@ -3,6 +3,10 @@
 
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+
+find_dependency(hip CONFIG REQUIRED)
+
 # Find required dependencies
 find_package(Threads REQUIRED)
 

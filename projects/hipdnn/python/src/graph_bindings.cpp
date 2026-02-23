@@ -10,10 +10,12 @@
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/vector.h>
+#include <nlohmann/json.hpp>
 
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
@@ -114,10 +116,38 @@ void graph_bindings(nb::module_& m)
                                std::shared_ptr<graph::TensorAttributes>,
                                graph::PointwiseAttributes>(&graph::Graph::pointwise))
         .def("conv_fprop", &graph::Graph::conv_fprop)
+        .def("matmul", &graph::Graph::matmul)
         .def("conv_dgrad", &graph::Graph::conv_dgrad)
         .def("conv_wgrad", &graph::Graph::conv_wgrad)
-        .def("set_preferred_engine_id_ext", &graph::Graph::set_preferred_engine_id_ext)
+        .def("set_preferred_engine_id_ext",
+             nb::overload_cast<std::optional<int64_t>>(&graph::Graph::set_preferred_engine_id_ext),
+             nb::arg("engineId") = std::nullopt,
+             nb::rv_policy::reference_internal)
+        .def("set_preferred_engine_id_ext",
+             nb::overload_cast<const std::string&>(&graph::Graph::set_preferred_engine_id_ext),
+             nb::rv_policy::reference_internal)
+        .def("get_name", &graph::Graph::get_name)
+        .def("get_compute_data_type", &graph::Graph::get_compute_data_type)
+        .def("get_intermediate_data_type", &graph::Graph::get_intermediate_data_type)
+        .def("get_io_data_type", &graph::Graph::get_io_data_type)
+        .def("get_preferred_engine_id_ext", &graph::Graph::get_preferred_engine_id_ext)
         .def("tensor", &graph::Graph::tensor, nb::rv_policy::reference)
         .def_static(
-            "tensor_like", &graph::Graph::tensor_like, nb::arg("tensor"), nb::arg("name") = "");
+            "tensor_like", &graph::Graph::tensor_like, nb::arg("tensor"), nb::arg("name") = "")
+        .def(
+            "to_json",
+            [](graph::Graph& g) {
+                // toJson() is non-const, assigns UIDs if not set
+                nlohmann::json j = g.toJson();
+                return j.dump(); // Convert to JSON string
+            },
+            "Serialize the graph to a JSON string")
+        .def(
+            "from_json",
+            [](graph::Graph& g, const std::string& jsonStr) {
+                nlohmann::json j = nlohmann::json::parse(jsonStr);
+                return g.deserialize(j);
+            },
+            nb::arg("json_string"),
+            "Deserialize a graph from a JSON string");
 }

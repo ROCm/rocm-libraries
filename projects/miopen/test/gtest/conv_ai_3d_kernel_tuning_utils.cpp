@@ -41,6 +41,7 @@
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 using namespace miopen::solver::conv;
+using namespace miopen::ai::tuning::candidate_selection;
 
 namespace {
 // Helper: layout string to code (must match GetFeatures3D)
@@ -224,6 +225,167 @@ Conv3DKernelTuningTestName(const ::testing::TestParamInfo<Conv3DKernelTuningTest
 {
     return info.param.test_name;
 }
+
+// Helper function for metadata encoding validation
+// Validates that all CK kernel instances can be encoded without errors
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+void ValidateMetadataEncoding(const std::string& solver_name,
+                              const std::vector<std::string>& all_ck_kernels,
+                              const std::string& device_arch)
+{
+    ASSERT_FALSE(all_ck_kernels.empty()) << "No CK instances found for " << solver_name;
+    MIOPEN_LOG_I("Testing " << all_ck_kernels.size() << " total CK instances for " << solver_name);
+
+    const auto& model    = GetCandidateSelectionModel(device_arch, solver_name);
+    const auto& metadata = model.metadata();
+
+    // Get supported kernel names from metadata (check both encodings and constants)
+    std::set<std::string> supported_kernel_names;
+
+    auto encodings_it = metadata.sequence_encodings().find("000_kernel_name");
+    if(encodings_it != metadata.sequence_encodings().end())
+    {
+        // Variable kernel names - get all encoded values
+        for(const auto& [name, value] : encodings_it->second)
+        {
+            supported_kernel_names.insert(name);
+        }
+    }
+    else
+    {
+        // Check if it's a constant (single kernel type)
+        auto constant_kernel = metadata.GetOutputConstant("000_kernel_name");
+        if(constant_kernel.has_value())
+        {
+            supported_kernel_names.insert(constant_kernel.value());
+            MIOPEN_LOG_I("Kernel name is constant: " << constant_kernel.value());
+        }
+    }
+
+    // Separate kernels into supported and unsupported
+    std::vector<std::string> supported_kernels;
+    std::vector<std::string> unsupported_kernels;
+
+    if(!supported_kernel_names.empty())
+    {
+        for(const auto& typestring : all_ck_kernels)
+        {
+            auto tokens = GetKernelAsTokens(typestring);
+            if(!tokens.empty())
+            {
+                const std::string& kernel_name = tokens[0];
+                if(supported_kernel_names.count(kernel_name) > 0)
+                {
+                    supported_kernels.push_back(typestring);
+                }
+                else
+                {
+                    unsupported_kernels.push_back(typestring);
+                }
+            }
+        }
+    }
+    else
+    {
+        // No kernel name filtering available - test all kernels
+        MIOPEN_LOG_I("No kernel name filtering available - testing all kernels");
+        supported_kernels = all_ck_kernels;
+    }
+
+    // Log unsupported kernels (expected - these are CK kernels not in the model)
+    if(!unsupported_kernels.empty())
+    {
+        MIOPEN_LOG_I("Found " << unsupported_kernels.size()
+                              << " CK kernels not in metadata (expected)");
+    }
+
+    ASSERT_FALSE(supported_kernels.empty()) << "No supported kernels found";
+    MIOPEN_LOG_I("Testing " << supported_kernels.size() << " supported kernels");
+
+    // Create kernel parameter vectors from supported TypeStrings
+    std::vector<std::vector<std::string>> kernel_params;
+    for(const auto& typestring : supported_kernels)
+    {
+        auto tokens = GetKernelAsTokens(typestring);
+
+        // Check if this kernel type requires split_k to be appended
+        // by checking if the kernel_str_mapping includes a parameter with "splitk" in its name
+        if(!tokens.empty())
+        {
+            const std::string& kernel_name = tokens[0];
+            try
+            {
+                auto kernel_mapping = metadata.GetKernelStrMapping(kernel_name);
+
+                // Check if any parameter name contains "splitk" (case-insensitive)
+                bool has_split_k_mapping = false;
+                for(const auto& [idx, param_name] : kernel_mapping)
+                {
+                    std::string param_lower = param_name;
+                    std::transform(param_lower.begin(),
+                                   param_lower.end(),
+                                   param_lower.begin(),
+                                   [](unsigned char c) { return std::tolower(c); });
+                    if(param_lower.find("splitk") != std::string::npos)
+                    {
+                        has_split_k_mapping = true;
+                        break;
+                    }
+                }
+
+                // If split_k is expected in the mapping, append a default value
+                if(has_split_k_mapping)
+                {
+                    tokens.push_back("1"); // Add default split_k value
+                }
+            }
+            catch(const std::exception&)
+            {
+                // Kernel not in metadata - skip split_k append
+            }
+        }
+
+        kernel_params.push_back(tokens);
+    }
+
+    // Encode all supported kernels
+    auto encoded = EncodeKernelParams(kernel_params, metadata);
+
+    // Verify no NaN values (which indicate encoding failures)
+    int nan_count = 0;
+    std::vector<std::string> failed_kernels;
+
+    for(size_t i = 0; i < encoded.size(); ++i)
+    {
+        bool has_nan = false;
+        for(size_t j = 0; j < encoded[i].size(); ++j)
+        {
+            if(std::isnan(encoded[i][j]))
+            {
+                nan_count++;
+                has_nan = true;
+            }
+        }
+        if(has_nan)
+        {
+            failed_kernels.push_back(supported_kernels[i]);
+        }
+    }
+
+    if(nan_count > 0)
+    {
+        MIOPEN_LOG_E("Found " << nan_count << " NaN encodings across " << failed_kernels.size()
+                              << " kernels");
+        for(const auto& kernel : failed_kernels)
+        {
+            MIOPEN_LOG_E("  Failed kernel: " << kernel);
+        }
+    }
+
+    EXPECT_EQ(nan_count, 0) << "Found " << nan_count
+                            << " NaN encodings - indicates missing metadata entries";
+}
+#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 } // anonymous namespace
 
 // ------------------- Base Test Fixture -------------------
@@ -292,6 +454,96 @@ TEST_F(GPU_Conv3DKernelTuning_FP32, GenerateSplitK_Test)
     auto split_ks             = GenerateSplitK(8);
     std::vector<int> expected = {1, 2, 4, 8};
     ASSERT_EQ(split_ks, expected);
+}
+
+TEST_F(GPU_Conv3DKernelTuning_FP32, ProcessExplicitXdlParams_Test)
+{
+    // Test case matching the Python preprocessing logic
+    std::vector<std::string> input = {"DeviceGroupedConvBwdWeight_Explicit_Xdl",
+                                      "DeviceBatchedGemmXdlUniversal<Default,CRR>",
+                                      "BlkSize:256",
+                                      "BlkTile:256x256x32",
+                                      "WaveTile:32x32",
+                                      "WaveMap:4x4",
+                                      "VmemReadVec:8x8",
+                                      "BlkGemmPipelineScheduler:Intrawave",
+                                      "BlkGemmPipelineVersion:v4",
+                                      "BlkGemmPipelinePrefetchStages:3",
+                                      "1"};
+
+    auto result = ProcessExplicitXdlParams(input);
+
+    // Expected output after processing:
+    // 1. First element unchanged
+    // 2. Remove parameter names (e.g., "BlkSize:256" -> "256")
+    // 3. Split on 'x' (e.g., "256x256x32" -> ["256", "256", "32"])
+    std::vector<std::string> expected = {
+        "DeviceGroupedConvBwdWeight_Explicit_Xdl",    // 0: unchanged
+        "DeviceBatchedGemmXdlUniversal<Default,CRR>", // 1: unchanged (no colon)
+        "256",                                        // 2: BlkSize value
+        "256",
+        "256",
+        "32", // 3-5: BlkTile split
+        "32",
+        "32", // 6-7: WaveTile split
+        "4",
+        "4", // 8-9: WaveMap split
+        "8",
+        "8",                                  // 10-11: VmemReadVec split
+        "BlkGemmPipelineScheduler:Intrawave", // 12: BlkGemmPipelineScheduler value
+        "BlkGemmPipelineVersion:v4",          // 13: BlkGemmPipelineVersion value
+        "3",                                  // 14: BlkGemmPipelinePrefetchStages value
+        "1"                                   // 15: split_k value
+    };
+
+    ASSERT_EQ(result.size(), expected.size())
+        << "Expected " << expected.size() << " parameters, got " << result.size();
+
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        EXPECT_EQ(result[i], expected[i]) << "Mismatch at index " << i << ": expected '"
+                                          << expected[i] << "', got '" << result[i] << "'";
+    }
+}
+
+TEST_F(GPU_Conv3DKernelTuning_FP32, ProcessExplicitXdlParams_EmptyInput_Test)
+{
+    std::vector<std::string> empty_input;
+    auto result = ProcessExplicitXdlParams(empty_input);
+    ASSERT_TRUE(result.empty());
+}
+
+TEST_F(GPU_Conv3DKernelTuning_FP32, FillHeuristicKernels_WithExplicitXdl_Test)
+{
+    // Test that FillHeuristicKernels applies ProcessExplicitXdlParams for Explicit_Xdl kernels
+    std::vector<std::string> valid_kernels = {
+        "DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmXdlUniversal<Default,CRR>,"
+        "BlkSize:256,BlkTile:256x256x32,WaveTile:32x32,WaveMap:4x4,VmemReadVec:8x8,"
+        "BlkGemmPipelineScheduler:Intrawave,BlkGemmPipelineVersion:v4,"
+        "BlkGemmPipelinePrefetchStages:3,1>",
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>"};
+
+    std::vector<int> indexes;
+    std::vector<std::vector<std::string>> kernels;
+
+    FillHeuristicKernels(valid_kernels, indexes, kernels);
+
+    ASSERT_EQ(kernels.size(), 2u);
+
+    // First kernel should be processed by ProcessExplicitXdlParams
+    // Should have 16 parameters (0-15) after processing
+    EXPECT_EQ(kernels[0].size(), 16u)
+        << "Explicit_Xdl kernel should have 16 parameters after processing";
+    EXPECT_EQ(kernels[0][0], "DeviceGroupedConvBwdWeight_Explicit_Xdl");
+    EXPECT_EQ(kernels[0][2], "256"); // BlkSize value
+    EXPECT_EQ(kernels[0][3], "256"); // First part of BlkTile
+    EXPECT_EQ(kernels[0][4], "256"); // Second part of BlkTile
+    EXPECT_EQ(kernels[0][5], "32");  // Third part of BlkTile
+
+    // Second kernel should NOT be processed (regular kernel)
+    // Should have its normal parameter count
+    EXPECT_GT(kernels[1].size(), 0u);
+    EXPECT_EQ(kernels[1][0], "DeviceGroupedConvBwdWeight_Xdl_CShuffle");
 }
 
 // ------------------- AI Model Tests (Architecture-Dependent) -------------------
@@ -366,10 +618,37 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
     ASSERT_TRUE(kernel_id.empty());
 }
 
+// ------------------- Metadata Encoding Validation Tests -------------------
+
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+
+TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Wrw_Test)
+{
+    ValidateMetadataEncoding(
+        "ConvHipImplicitGemm3DGroupWrwXdlops", GetAllWrwKernelTypeStrings(), device_arch);
+}
+
+TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Fwd_Test)
+{
+    ValidateMetadataEncoding(
+        "ConvHipImplicitGemm3DGroupFwdXdlops", GetAllFwdKernelTypeStrings(), device_arch);
+}
+
+TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Bwd_Test)
+{
+    ValidateMetadataEncoding(
+        "ConvHipImplicitGemm3DGroupBwdXdlops", GetAllBwdKernelTypeStrings(), device_arch);
+}
+
+#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+
 // ------------------- Full Solver Tests -------------------
 
 TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Wrw_Test)
 {
+#if !MIOPEN_USE_COMPOSABLEKERNEL
+    GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
+#else
     auto problem =
         GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
     ConvHipImplicitGemm3DGroupWrwXdlops solver;
@@ -382,10 +661,14 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Wrw_Test)
     ASSERT_FALSE(solution.construction_params.empty());
     ASSERT_TRUE(solution.invoker_factory);
     ASSERT_GE(solution.workspace_sz, 0u);
+#endif
 }
 
 TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Fwd_Test)
 {
+#if !MIOPEN_USE_COMPOSABLEKERNEL
+    GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
+#else
     auto problem = GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::Forward);
     ConvHipImplicitGemm3DGroupFwdXdlops solver;
 
@@ -397,10 +680,14 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Fwd_Test)
     ASSERT_FALSE(solution.construction_params.empty());
     ASSERT_TRUE(solution.invoker_factory);
     ASSERT_GE(solution.workspace_sz, 0u);
+#endif
 }
 
 TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Bwd_Test)
 {
+#if !MIOPEN_USE_COMPOSABLEKERNEL
+    GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
+#else
     auto problem =
         GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardData);
     ConvHipImplicitGemm3DGroupBwdXdlops solver;
@@ -413,6 +700,7 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Bwd_Test)
     ASSERT_FALSE(solution.construction_params.empty());
     ASSERT_TRUE(solution.invoker_factory);
     ASSERT_GE(solution.workspace_sz, 0u);
+#endif
 }
 
 // ------------------- Cross-Platform Diagnostic Tests -------------------

@@ -110,6 +110,7 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void csrmvt_general_device(bool                 skip_diag,
                                                     bool                 conj,
                                                     J                    m,
+                                                    J                    size_y,
                                                     T                    alpha,
                                                     const I*             csr_row_ptr_begin,
                                                     const I*             csr_row_ptr_end,
@@ -139,7 +140,7 @@ namespace rocsparse
                     if(col != row)
                     {
                         const A val = rocsparse::conj_val(csr_val[j], conj);
-                        rocsparse::atomic_add(y, col, m, row_val * val);
+                        rocsparse::atomic_add(y, col, size_y, row_val * val);
                     }
                 }
             }
@@ -157,7 +158,7 @@ namespace rocsparse
                     const J col = csr_col_ind[j] - idx_base;
 
                     const A val = rocsparse::conj_val(csr_val[j], conj);
-                    rocsparse::atomic_add(y, col, m, row_val * val);
+                    rocsparse::atomic_add(y, col, size_y, row_val * val);
                 }
             }
         }

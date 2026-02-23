@@ -16,6 +16,7 @@
 #include "descriptors/VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <spdlog/fmt/ranges.h>
 
 namespace hipdnn_backend
 {
@@ -29,11 +30,14 @@ struct PluginLoadingConfig
 {
     std::set<std::filesystem::path> paths;
     hipdnnPluginLoadingMode_ext_t mode = HIPDNN_DEFAULT_PLUGIN_LOADING_MODE;
+    hipdnnPluginUnloadingMode_ext_t unloadingMode = HIPDNN_DEFAULT_PLUGIN_UNLOADING_MODE;
 };
 
 std::mutex pluginMutex;
 PluginLoadingConfig pluginConfig;
 std::weak_ptr<EnginePluginManager> pmPtr;
+// Keeps EnginePluginManager alive in lazy unloading mode
+std::shared_ptr<EnginePluginManager> persistentPmPtr;
 
 } // namespace
 
@@ -42,6 +46,17 @@ void EnginePluginResourceManager::setPluginPaths(
     hipdnnPluginLoadingMode_ext_t loadingMode)
 {
     std::lock_guard<std::mutex> lock(pluginMutex);
+
+    auto newPathsSet = std::set<std::filesystem::path>{pluginPaths.begin(), pluginPaths.end()};
+    if(pluginConfig.paths == newPathsSet && pluginConfig.mode == loadingMode)
+    {
+        return;
+    }
+
+    // Clear persistent pointer first to allow lazy mode check to work correctly.
+    // If only persistentPmPtr is keeping plugins alive (no active handles),
+    // then pmPtr will expire after this reset.
+    persistentPmPtr.reset();
 
     THROW_IF_FALSE(pmPtr.expired(),
                    HIPDNN_STATUS_NOT_SUPPORTED,
@@ -63,6 +78,34 @@ std::set<std::filesystem::path> EnginePluginResourceManager::getPluginPaths()
 {
     std::lock_guard<std::mutex> lock(pluginMutex);
     return pluginConfig.paths;
+}
+
+void EnginePluginResourceManager::setPluginUnloadingMode(hipdnnPluginUnloadingMode_ext_t mode)
+{
+    std::lock_guard<std::mutex> lock(pluginMutex);
+
+    switch(mode)
+    {
+    case HIPDNN_PLUGIN_UNLOAD_EAGER:
+        // Clear persistent pointer - if no handles exist, plugins will be unloaded
+        persistentPmPtr.reset();
+        break;
+
+    case HIPDNN_PLUGIN_UNLOAD_LAZY:
+        // If plugins are already loaded, keep them alive by storing in persistent pointer
+        if(auto pm = pmPtr.lock())
+        {
+            persistentPmPtr = pm;
+        }
+        // If no plugins loaded yet, persistentPmPtr will be set when create() is called
+        break;
+
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Invalid plugin unloading mode: " + std::to_string(mode));
+    }
+
+    pluginConfig.unloadingMode = mode;
 }
 
 void EnginePluginResourceManager::getLoadedPluginFiles(size_t* numPlugins,
@@ -126,6 +169,12 @@ std::shared_ptr<EnginePluginResourceManager> EnginePluginResourceManager::create
             pm = std::make_shared<EnginePluginManager>();
             pm->loadPlugins(pluginConfig.paths, pluginConfig.mode);
             pmPtr = pm;
+
+            // In lazy mode, keep the plugin manager alive by storing in persistent pointer
+            if(pluginConfig.unloadingMode == HIPDNN_PLUGIN_UNLOAD_LAZY)
+            {
+                persistentPmPtr = pm;
+            }
         }
     }
 
@@ -140,20 +189,76 @@ EnginePluginResourceManager::EnginePluginResourceManager()
 EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EnginePluginManager> pm)
     : _pm(std::move(pm))
 {
+    // Helper to safely destroy a handle during error cleanup, logging any failures
+    auto safeDestroyHandle = [](const EnginePlugin* plugin, hipdnnEnginePluginHandle_t handle) {
+        try
+        {
+            plugin->destroyHandle(handle);
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_BACKEND_LOG_WARN("Failed to destroy handle for plugin '{}' during cleanup: {}",
+                                    plugin->name(),
+                                    e.what());
+        }
+        catch(...)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Failed to destroy handle for plugin '{}' during cleanup: unknown error",
+                plugin->name());
+        }
+    };
+
     // Create plugin handles
     const auto& plugins = _pm->getPlugins();
     for(const auto& plugin : plugins)
     {
-        auto handle = plugin->createHandle();
+        hipdnnEnginePluginHandle_t handle = nullptr;
+
+        try
+        {
+            handle = plugin->createHandle();
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_BACKEND_LOG_ERROR(
+                "Failed to create handle for plugin '{}': {}", plugin->name(), e.what());
+            continue;
+        }
+
+        if(handle == nullptr)
+        {
+            HIPDNN_BACKEND_LOG_ERROR("Plugin '{}' returned null handle", plugin->name());
+            continue;
+        }
 
         if(_handleToPlugin.find(handle) != _handleToPlugin.end())
         {
-            throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "Plugin handle already exists");
+            safeDestroyHandle(plugin.get(), handle);
+            HIPDNN_BACKEND_LOG_ERROR(
+                "Plugin '{}' returned a handle that collides with another plugin. "
+                "This may indicate a symbol collision between plugins. "
+                "Ensure all plugins are built with -fvisibility=hidden.",
+                plugin->name());
+            continue;
         }
 
         _handleToPlugin[handle] = plugin.get();
 
-        auto engineIds = plugin->getAllEngineIds();
+        std::vector<int64_t> engineIds;
+        try
+        {
+            engineIds = plugin->getAllEngineIds();
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_BACKEND_LOG_ERROR(
+                "Failed to get engine IDs for plugin '{}': {}", plugin->name(), e.what());
+            safeDestroyHandle(plugin.get(), handle);
+            _handleToPlugin.erase(handle);
+            continue;
+        }
+
         for(const auto id : engineIds)
         {
             _engineIdToHandle[id] = handle;
@@ -172,7 +277,7 @@ EnginePluginResourceManager::~EnginePluginResourceManager()
         }
         catch(const HipdnnException& e)
         {
-            HIPDNN_LOG_ERROR(e.getMessage());
+            HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
         }
     }
 }
@@ -458,7 +563,7 @@ EngineDetailsWrapper::~EngineDetailsWrapper()
     }
     catch(const HipdnnException& e)
     {
-        HIPDNN_LOG_ERROR(e.getMessage());
+        HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
     }
 }
 
@@ -520,7 +625,7 @@ EngineExecutionContextWrapper::~EngineExecutionContextWrapper()
     }
     catch(const HipdnnException& e)
     {
-        HIPDNN_LOG_ERROR(e.getMessage());
+        HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
     }
 }
 
@@ -559,6 +664,27 @@ hipdnnEnginePluginExecutionContext_t EngineExecutionContextWrapper::get() const
     }
 
     return _executionContext;
+}
+
+std::string EnginePluginResourceManager::toString() const
+{
+    if(!_pm)
+    {
+        return "EnginePluginResourceManager: {loadedPlugins=0}";
+    }
+
+    auto loadedPlugins = _pm->getLoadedPluginFiles();
+
+    std::vector<std::string> pluginPathStrings;
+    pluginPathStrings.reserve(loadedPlugins.size());
+    for(const auto& path : loadedPlugins)
+    {
+        pluginPathStrings.push_back(path.string());
+    }
+
+    return fmt::format("EnginePluginResourceManager: {{loadedPlugins={}, loadedPluginPaths=[{}]}}",
+                       loadedPlugins.size(),
+                       fmt::join(pluginPathStrings, ", "));
 }
 
 } // namespace plugin

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,20 +42,8 @@ hipsparseStatus_t hipsparseSpruneDense2csr_bufferSize(hipsparseHandle_t         
                                                       const int*                csrColInd,
                                                       size_t*                   pBufferSizeInBytes)
 {
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse_sprune_dense2csr_buffer_size((rocsparse_handle)handle,
-                                               m,
-                                               n,
-                                               A,
-                                               lda,
-                                               threshold,
-                                               (const rocsparse_mat_descr)descr,
-                                               csrVal,
-                                               csrRowPtr,
-                                               csrColInd,
-                                               pBufferSizeInBytes));
-
-    return HIPSPARSE_STATUS_SUCCESS;
+    return hipsparseSpruneDense2csr_bufferSizeExt(
+        handle, m, n, A, lda, threshold, descr, csrVal, csrRowPtr, csrColInd, pBufferSizeInBytes);
 }
 
 hipsparseStatus_t hipsparseDpruneDense2csr_bufferSize(hipsparseHandle_t         handle,
@@ -70,20 +58,8 @@ hipsparseStatus_t hipsparseDpruneDense2csr_bufferSize(hipsparseHandle_t         
                                                       const int*                csrColInd,
                                                       size_t*                   pBufferSizeInBytes)
 {
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse_dprune_dense2csr_buffer_size((rocsparse_handle)handle,
-                                               m,
-                                               n,
-                                               A,
-                                               lda,
-                                               threshold,
-                                               (const rocsparse_mat_descr)descr,
-                                               csrVal,
-                                               csrRowPtr,
-                                               csrColInd,
-                                               pBufferSizeInBytes));
-
-    return HIPSPARSE_STATUS_SUCCESS;
+    return hipsparseDpruneDense2csr_bufferSizeExt(
+        handle, m, n, A, lda, threshold, descr, csrVal, csrRowPtr, csrColInd, pBufferSizeInBytes);
 }
 
 hipsparseStatus_t hipsparseSpruneDense2csr_bufferSizeExt(hipsparseHandle_t         handle,

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -35,6 +12,9 @@
 
 namespace GEMMTests
 {
+    std::set<int> NonZeroDSReadOffsets(std::string const& instruction, std::string const& s);
+    std::set<int> Direct2LDSWriteStrides(std::string const& s);
+
     template <typename T>
     concept isF8 = std::is_same_v<T, rocRoller::FP8> || std::is_same_v<T, rocRoller::BF8>;
 
@@ -305,11 +285,11 @@ namespace GEMMTests
                                                   : std::vector<size_t>({});
 
             auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataTypeA, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
+                2, dataTypeA, {}, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataTypeB, gemm.transB == "N" ? oneStridesN : oneStridesT)); // B
+                2, dataTypeB, {}, gemm.transB == "N" ? oneStridesN : oneStridesT)); // B
             auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
             auto mulInputA = tagLoadA;
@@ -321,7 +301,7 @@ namespace GEMMTests
             if(gemm.scaleAMode == Operations::ScaleMode::Separate)
             {
                 tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                    2, gemm.scaleTypeA, gemm.transA == "N" ? oneStridesN : oneStridesT));
+                    2, gemm.scaleTypeA, {}, gemm.transA == "N" ? oneStridesN : oneStridesT));
                 tagLoadScaleA
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleA));
 
@@ -345,7 +325,7 @@ namespace GEMMTests
             if(gemm.scaleBMode == Operations::ScaleMode::Separate)
             {
                 tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                    2, gemm.scaleTypeB, gemm.transB == "N" ? oneStridesN : oneStridesT));
+                    2, gemm.scaleTypeB, {}, gemm.transB == "N" ? oneStridesN : oneStridesT));
                 tagLoadScaleB
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleB));
 
@@ -367,7 +347,7 @@ namespace GEMMTests
             }
 
             auto tagTensorC = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataTypeC, oneStridesN)); // C
+                rocRoller::Operations::Tensor(2, dataTypeC, {}, oneStridesN)); // C
             auto tagLoadC = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
 
             auto tagScalarAlpha
@@ -405,7 +385,7 @@ namespace GEMMTests
             command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
             auto tagTensorD = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataTypeD, oneStridesN)); // D
+                rocRoller::Operations::Tensor(2, dataTypeD, {}, oneStridesN)); // D
             Operations::OperationTag tagScalarSeed;
             if constexpr(std::is_same_v<TC, TD>)
             {
@@ -491,13 +471,15 @@ namespace GEMMTests
             params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
             params->setSplitStoreTileIntoWaveBlocks(gemm.splitStoreTileIntoWaveBlocks);
 
+            // Set LDS padding for MATRIX_A and MATRIX_B
+            params->ldsPadding[LayoutType::MATRIX_A] = gemm.padA;
+            params->ldsPadding[LayoutType::MATRIX_B] = gemm.padB;
+
             params->swizzleScale                  = gemm.swizzleScale;
             params->prefetchScale                 = gemm.prefetchScale;
             params->fuseLoops                     = gemm.fuseLoops;
             params->tailLoops                     = gemm.tailLoops;
             params->allowAmbiguousMemoryNodes     = gemm.allowAmbiguousMemoryNodes;
-            params->unrollX                       = gemm.unrollX;
-            params->unrollY                       = gemm.unrollY;
             params->unrollK                       = gemm.unrollK;
             params->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
             params->prefetch                      = gemm.prefetch;
@@ -529,8 +511,6 @@ namespace GEMMTests
 
             if(gemm.streamK)
             {
-                REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
-
                 AssertFatal(
                     numWorkgroupY == 1,
                     "Current scratch space implementation assumes that the kernel is launched "
@@ -612,7 +592,9 @@ namespace GEMMTests
                     {gemm.macM, gemm.macN},
                     LayoutType::MATRIX_ACCUMULATOR,
                     {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
-                    gemm.storeLDSD ? MemoryType::LDS : MemoryType::WAVE);
+                    gemm.storePath == SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer
+                        ? MemoryType::WAVE_LDS
+                        : MemoryType::WAVE);
                 params->setDimensionInfo(tagStoreD, macTileD);
             }
 

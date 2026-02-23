@@ -203,11 +203,13 @@ hipError_t radix_sort_merge_impl(
     // In the case that the user provides no custom config for merge sort block sort,
     // instead of using the autotuned merge_sort_block_sort_config, use a hard-coded config that
     // a power-of-two items sorted per block.
-    using default_block_sort_config =
-        typename radix_sort_block_sort_config_base<key_type, value_type>::type;
+    constexpr auto default_block_sort_config
+        = radix_sort_block_sort_config_params_base<key_type, value_type>();
+
     using radix_sort_block_sort_config =
         typename std::conditional<is_default_config,
-                                  default_block_sort_config,
+                                  kernel_config<default_block_sort_config.block_size,
+                                                default_block_sort_config.items_per_thread>,
                                   // extract the relevant config from merge_sort_block_sort_config
                                   typename Config::block_sort_config::sort_config>::type;
     static_assert(
@@ -218,20 +220,21 @@ hipError_t radix_sort_merge_impl(
     using merge_sort_block_merge_config = typename std::
         conditional<is_default_config, default_config, typename Config::block_merge_config>::type;
 
+    using selector_bm = merge_sort_block_merge_config_selector<key_type, value_type>;
+    using selector_bs = merge_sort_block_sort_config_selector<key_type, value_type>;
+
     // Wrap our radix_sort_block_sort kernel config in a merge_sort_block_sort_config
     // just so device_merge_sort_compile_time_verifier can check.
     using merge_sort_block_sort_config
         = merge_sort_block_sort_config<radix_sort_block_sort_config::block_size,
                                        radix_sort_block_sort_config::items_per_thread,
                                        block_sort_algorithm::default_algorithm>;
-    using wrapped_bs_config
-        = wrapped_merge_sort_block_sort_config<merge_sort_block_sort_config, key_type, value_type>;
-    using wrapped_bm_config = wrapped_merge_sort_block_merge_config<merge_sort_block_merge_config,
-                                                                    key_type,
-                                                                    value_type>;
 
     // Some helpful checks during compile-time
-    device_merge_sort_compile_time_verifier<wrapped_bs_config, wrapped_bm_config>();
+    device_merge_sort_compile_time_verifier<merge_sort_block_sort_config,
+                                            merge_sort_block_merge_config,
+                                            selector_bs,
+                                            selector_bm>();
 
     // We will get this later from the block_sort algorithm
     unsigned int sort_items_per_block

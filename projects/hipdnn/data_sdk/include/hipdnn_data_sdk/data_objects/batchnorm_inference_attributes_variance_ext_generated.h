@@ -31,6 +31,7 @@ struct BatchnormInferenceAttributesVarianceExtT : public ::flatbuffers::NativeTa
   int64_t scale_tensor_uid = 0;
   int64_t bias_tensor_uid = 0;
   int64_t y_tensor_uid = 0;
+  int64_t epsilon_tensor_uid = 0;
 };
 
 struct BatchnormInferenceAttributesVarianceExt FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -42,7 +43,8 @@ struct BatchnormInferenceAttributesVarianceExt FLATBUFFERS_FINAL_CLASS : private
     VT_VARIANCE_TENSOR_UID = 8,
     VT_SCALE_TENSOR_UID = 10,
     VT_BIAS_TENSOR_UID = 12,
-    VT_Y_TENSOR_UID = 14
+    VT_Y_TENSOR_UID = 14,
+    VT_EPSILON_TENSOR_UID = 16
   };
   int64_t x_tensor_uid() const {
     return GetField<int64_t>(VT_X_TENSOR_UID, 0);
@@ -80,6 +82,12 @@ struct BatchnormInferenceAttributesVarianceExt FLATBUFFERS_FINAL_CLASS : private
   bool mutate_y_tensor_uid(int64_t _y_tensor_uid = 0) {
     return SetField<int64_t>(VT_Y_TENSOR_UID, _y_tensor_uid, 0);
   }
+  int64_t epsilon_tensor_uid() const {
+    return GetField<int64_t>(VT_EPSILON_TENSOR_UID, 0);
+  }
+  bool mutate_epsilon_tensor_uid(int64_t _epsilon_tensor_uid = 0) {
+    return SetField<int64_t>(VT_EPSILON_TENSOR_UID, _epsilon_tensor_uid, 0);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_X_TENSOR_UID, 8) &&
@@ -88,6 +96,7 @@ struct BatchnormInferenceAttributesVarianceExt FLATBUFFERS_FINAL_CLASS : private
            VerifyField<int64_t>(verifier, VT_SCALE_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_BIAS_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_Y_TENSOR_UID, 8) &&
+           VerifyField<int64_t>(verifier, VT_EPSILON_TENSOR_UID, 8) &&
            verifier.EndTable();
   }
   BatchnormInferenceAttributesVarianceExtT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -117,6 +126,9 @@ struct BatchnormInferenceAttributesVarianceExtBuilder {
   void add_y_tensor_uid(int64_t y_tensor_uid) {
     fbb_.AddElement<int64_t>(BatchnormInferenceAttributesVarianceExt::VT_Y_TENSOR_UID, y_tensor_uid, 0);
   }
+  void add_epsilon_tensor_uid(int64_t epsilon_tensor_uid) {
+    fbb_.AddElement<int64_t>(BatchnormInferenceAttributesVarianceExt::VT_EPSILON_TENSOR_UID, epsilon_tensor_uid, 0);
+  }
   explicit BatchnormInferenceAttributesVarianceExtBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -135,8 +147,10 @@ inline ::flatbuffers::Offset<BatchnormInferenceAttributesVarianceExt> CreateBatc
     int64_t variance_tensor_uid = 0,
     int64_t scale_tensor_uid = 0,
     int64_t bias_tensor_uid = 0,
-    int64_t y_tensor_uid = 0) {
+    int64_t y_tensor_uid = 0,
+    int64_t epsilon_tensor_uid = 0) {
   BatchnormInferenceAttributesVarianceExtBuilder builder_(_fbb);
+  builder_.add_epsilon_tensor_uid(epsilon_tensor_uid);
   builder_.add_y_tensor_uid(y_tensor_uid);
   builder_.add_bias_tensor_uid(bias_tensor_uid);
   builder_.add_scale_tensor_uid(scale_tensor_uid);
@@ -156,7 +170,8 @@ inline bool operator==(const BatchnormInferenceAttributesVarianceExtT &lhs, cons
       (lhs.variance_tensor_uid == rhs.variance_tensor_uid) &&
       (lhs.scale_tensor_uid == rhs.scale_tensor_uid) &&
       (lhs.bias_tensor_uid == rhs.bias_tensor_uid) &&
-      (lhs.y_tensor_uid == rhs.y_tensor_uid);
+      (lhs.y_tensor_uid == rhs.y_tensor_uid) &&
+      (lhs.epsilon_tensor_uid == rhs.epsilon_tensor_uid);
 }
 
 inline bool operator!=(const BatchnormInferenceAttributesVarianceExtT &lhs, const BatchnormInferenceAttributesVarianceExtT &rhs) {
@@ -179,6 +194,7 @@ inline void BatchnormInferenceAttributesVarianceExt::UnPackTo(BatchnormInference
   { auto _e = scale_tensor_uid(); _o->scale_tensor_uid = _e; }
   { auto _e = bias_tensor_uid(); _o->bias_tensor_uid = _e; }
   { auto _e = y_tensor_uid(); _o->y_tensor_uid = _e; }
+  { auto _e = epsilon_tensor_uid(); _o->epsilon_tensor_uid = _e; }
 }
 
 inline ::flatbuffers::Offset<BatchnormInferenceAttributesVarianceExt> BatchnormInferenceAttributesVarianceExt::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const BatchnormInferenceAttributesVarianceExtT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -195,6 +211,7 @@ inline ::flatbuffers::Offset<BatchnormInferenceAttributesVarianceExt> CreateBatc
   auto _scale_tensor_uid = _o->scale_tensor_uid;
   auto _bias_tensor_uid = _o->bias_tensor_uid;
   auto _y_tensor_uid = _o->y_tensor_uid;
+  auto _epsilon_tensor_uid = _o->epsilon_tensor_uid;
   return hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
       _fbb,
       _x_tensor_uid,
@@ -202,7 +219,8 @@ inline ::flatbuffers::Offset<BatchnormInferenceAttributesVarianceExt> CreateBatc
       _variance_tensor_uid,
       _scale_tensor_uid,
       _bias_tensor_uid,
-      _y_tensor_uid);
+      _y_tensor_uid,
+      _epsilon_tensor_uid);
 }
 
 }  // namespace data_objects

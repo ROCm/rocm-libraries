@@ -313,4 +313,25 @@ auto hipblas_syrk_ex_dispatch(const Arguments& arg)
     return TEST<void>{}(arg);
 }
 
+// herk_ex
+template <template <typename...> class TEST>
+auto hipblas_herk_ex_dispatch(const Arguments& arg)
+{
+    const auto Ti = arg.a_type, To = arg.c_type, Tex = arg.compute_type;
+
+    if(Ti != Tex && (Ti == HIP_C_32F && Tex == HIP_C_64F))
+    {
+        if(To == HIP_C_32F && To == Ti && Tex == HIP_C_64F)
+        {
+            return TEST<std::complex<float>, std::complex<float>, std::complex<double>>{}(arg);
+        }
+        else if(To == Tex)
+        {
+            return TEST<std::complex<float>, std::complex<double>, std::complex<double>>{}(arg);
+        }
+    }
+
+    return TEST<void>{}(arg);
+}
+
 #endif

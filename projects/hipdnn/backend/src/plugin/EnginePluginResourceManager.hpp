@@ -45,6 +45,9 @@ public:
                                hipdnnPluginLoadingMode_ext_t loadingMode);
     static std::set<std::filesystem::path> getPluginPaths();
 
+    // Set plugin unloading mode (lazy keeps plugins loaded until app exit or path change)
+    static void setPluginUnloadingMode(hipdnnPluginUnloadingMode_ext_t mode);
+
     static std::shared_ptr<EnginePluginResourceManager> create();
 
     EnginePluginResourceManager(std::shared_ptr<EnginePluginManager> pm);
@@ -83,6 +86,8 @@ public:
 
     virtual void
         getLoadedPluginFiles(size_t* numPlugins, char** pluginPaths, size_t* maxStringLen) const;
+
+    virtual std::string toString() const;
 
 private:
     // MT-unsafe instance methods

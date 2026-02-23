@@ -2,6 +2,25 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM x.y.z for ROCm 8.0
+
+### Optimizations
+
+* Updated config system to pick better fallback configs for untuned GPUs.
+
+### Upcoming changes
+
+* Deprecated the `ROCPRIM_PRINT_ERROR_ONCE` macro.
+
+### Changed
+
+* Changed various APIs with undefined behaviors to abort with a trap instead of printing a runtime error with `ROCPRIM_PRINT_ERROR_ONCE` 
+
+### Removed
+
+* Removed unused `equality`, `inequality`, `sum`, `max`, `min` from thread_operator.hpp.
+* Removed duplicate `inequality_operator` from binary_op_warpper.hpp
+
 ## rocPRIM 4.2.0 for ROCm 7.2
 
 ### Added
@@ -13,7 +32,8 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
   * Run the script with `--help` for usage instructions, and see `projects/rocprim/docs/concepts/tuning.rst` for documentation.
 * Kernel Tuner proof-of-concept.
 * Enhanced SPIR-V support and performance.
-  
+* Added `block_adjacent_difference_crosslane` using warp intrinsics, for better performance in some cases compared to using only LDS.
+
 ### Optimizations
 
 * Improved performance of `device_radix_sort` onesweep variant 

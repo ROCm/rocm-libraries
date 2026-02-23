@@ -48,8 +48,21 @@ namespace rocsparse
         int const local_j = threadIdx.x / block_size;
 
         int row = blockIdx.x * blockDim.y + threadIdx.y;
-        if(bsr_mask_ptr != nullptr)
+
+        // Do not run out of bounds
+        if(bsr_mask_ptr == nullptr)
         {
+            if(row >= mb)
+            {
+                return;
+            }
+        }
+        else
+        {
+            if(row >= size_of_mask)
+            {
+                return;
+            }
             row = bsr_mask_ptr[row] - idx_base;
         }
 

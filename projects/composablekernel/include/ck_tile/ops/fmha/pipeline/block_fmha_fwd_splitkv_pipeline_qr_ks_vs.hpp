@@ -6,6 +6,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_fwd_splitkv_pipeline_qr_ks_vs_default_policy.hpp"
+#include "ck_tile/ops/gemm/warp/warp_wmma_gemm_gfx11_utils.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
 namespace ck_tile {
@@ -163,7 +164,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                const AttentionVariantParams& variant_params,
                const BlockIndices& block_indices,
                index_t kv_l2p_offset, // logical-to-physical offset of seqlen_k coordinate
-               void* smem_ptr) const
+               void* smem_ptr,
+               float sink_v) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -227,8 +229,24 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
         auto l     = MLBlockTileType{};
 
         clear_tile(o_acc);
-        set_tile(m, -numeric<SMPLComputeDataType>::infinity());
-        clear_tile(l);
+        if((__builtin_isinf_sign(sink_v) >= 0) && i_split == 0)
+        {
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                set_tile(m, sink_v * C_LOG2E * scale_s);
+            else
+                set_tile(m, sink_v * C_LOG2E);
+#else
+            set_tile(m, sink_v);
+#endif
+            set_tile(l, SMPLComputeDataType{1.0f});
+        }
+        else
+        {
+            set_tile(m, -numeric<SMPLComputeDataType>::infinity());
+            clear_tile(l);
+        }
 
         const auto q_origin          = q_dram_window.get_window_origin();
         const auto tile_range_result = [&mask, &q_origin, num_splits, i_split]() {
@@ -260,7 +278,14 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                     auto lse_acc =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
 
-                    set_tile(lse_acc, -numeric<SMPLComputeDataType>::infinity());
+                    if(__builtin_isinf_sign(sink_v) >= 0 && i_split == 0)
+                    {
+                        set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
+                    }
+                    else
+                    {
+                        set_tile(lse_acc, -numeric<SMPLComputeDataType>::infinity());
+                    }
 
                     store_tile(lse_acc_dram_window_tmp,
                                tile_elementwise_in(lse_acc_element_func, lse_acc));
@@ -272,6 +297,29 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
             }
         }
 
+        if(i_split > 0)
+        {
+            auto [start, end] = mask.GetTileRangeAlongX(
+                q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{}, num_splits, i_split - 1);
+            if((__builtin_isinf_sign(sink_v) >= 0) && start >= end)
+            {
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                             BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                    set_tile(m, sink_v * C_LOG2E * scale_s);
+                else
+                    set_tile(m, sink_v * C_LOG2E);
+#else
+                set_tile(m, sink_v);
+#endif
+                set_tile(l, SMPLComputeDataType{1.0f});
+            }
+            else
+            {
+                set_tile(m, -numeric<SMPLComputeDataType>::infinity());
+                clear_tile(l);
+            }
+        }
         const index_t physical_seqlen_k_start = logical_seqlen_k_start + kv_l2p_offset;
         const index_t physical_seqlen_k_end   = logical_seqlen_k_end + kv_l2p_offset;
         // make sure the first tile is completely located in page-block (page-block size should be
@@ -657,8 +705,15 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
             i_page_block_v = v_page_block_navigator.move_tile_window(
                 i_page_block_v, v_dram_window, {0, kK1}, physical_next_block_id_v);
 
+#if defined(__gfx11__)
+            auto p = make_static_distributed_tensor<PDataType>(
+                decltype(gemm_1)::template MakeABlockTileDistribution<kM0, kN0>());
+            PermuteWarpGemmCToA(
+                p, cast_tile<PDataType>(tile_elementwise_in(p_compute_element_func, p_compute)));
+#else
             const auto p =
                 cast_tile<PDataType>(tile_elementwise_in(p_compute_element_func, p_compute));
+#endif
 
             // STAGE 3, KV gemm
             if constexpr(k1_loops > 1)
@@ -797,7 +852,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                const AttentionVariantParams& variant_params,
                const BlockIndices& block_indices,
                index_t kv_l2p_offset, // logical-to-physical offset of seqlen_k coordinate
-               void* smem_ptr) const
+               void* smem_ptr,
+               float sink_v) const
     {
         return operator()(q_dram_block_window_tmp,
                           identity{},
@@ -823,7 +879,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                           variant_params,
                           block_indices,
                           kv_l2p_offset,
-                          smem_ptr);
+                          smem_ptr,
+                          sink_v);
     }
 };
 

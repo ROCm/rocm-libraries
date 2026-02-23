@@ -571,10 +571,6 @@ Arguments:
   - swizzle_a: c_bool
   - swizzle_b: c_bool
   - dump_matrix: c_bool
-  - scaleABlockRowSize: c_uint32
-  - scaleABlockColSize: c_uint32
-  - scaleBBlockRowSize: c_uint32
-  - scaleBBlockColSize: c_uint32
   - use_ext: c_bool
   - use_ext_setproblem: c_bool
   - algo_method: c_int32
@@ -681,10 +677,6 @@ Defaults:
   swizzle_a: false
   swizzle_b: false
   dump_matrix: false
-  scaleABlockRowSize: 32
-  scaleABlockColSize: 1
-  scaleBBlockRowSize: 1
-  scaleBBlockColSize: 32
   use_ext: false
   use_ext_setproblem: false
   algo_method: 0

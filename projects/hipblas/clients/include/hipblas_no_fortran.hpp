@@ -1251,6 +1251,7 @@
 #define hipblasGemmStridedBatchedExWithFlags_64Fortran hipblasGemmStridedBatchedExWithFlags_64
 
 #define hipblasSyrkExFortran hipblasSyrkEx
+#define hipblasHerkExFortran hipblasHerkEx
 
 #define hipblasTrsmExFortran hipblasTrsmEx
 #define hipblasTrsmBatchedExFortran hipblasTrsmBatchedEx

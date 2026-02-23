@@ -283,6 +283,10 @@ namespace TensileLite
             return append<BFloat16>(name, (BFloat16 const)value, true);
         case rocisa::DataType::Int8:
             return append<int8_t>(name, (int8_t const)value, true);
+        case rocisa::DataType::ComplexFloat:
+            return append<std::complex<float>>(name, (std::complex<float> const)value, true);
+        case rocisa::DataType::ComplexDouble:
+            return append<std::complex<double>>(name, (std::complex<double> const)value, true);
         default:
             throw std::runtime_error("Unsupported ConstantVariant append type.");
         }

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -59,45 +36,45 @@ namespace LDSCopyTest
      *
      * Kernel
      *   |
-     *   --[body]--> Scope --[body]--> ComputeIndex --[seq]--> ComputeIndex --[seq]--> LoadTiled
+     *   --[body]--> Scope --[body]--> Assign --[seq]--> Assign --[seq]--> LoadTiled
      *                 |
      *                 |[seq]
      *                 |
      *                 v
-     *              Barrier --[seq]--> Scope --[seq]--> ComputeIndex --[seq]--> ComputeIndex --[seq] -->StoreLDSTiled
+     *              Barrier --[seq]--> Scope --[seq]--> Assign --[seq]--> Assign --[seq] -->StoreLDSTiled
      *
      *
      * New control graph:
      *
      * Kernel
      *   |
-     *   --[body]--> Scope --[body]--> ComputeIndex --[seq]--> ComputeIndex --[seq]--> NOP
-     *                                                                                  |
-     *                                                                                  |[seq]
-     *                                                                                  |
-     *                                                                                  v
-     *                                                                             ComputeIndex
-     *                                                                                  |
-     *                                                                                  |[seq]
-     *                                                                                  |
-     *                                                                                  v
-     *                                                                             ComputeIndex
-     *                                                                                  |
-     *                                                                                  |[seq]
-     *                                                                                  |
-     *                                                                                  v
-     *                                                                                 NOP
-     *                                                                                  |
-     *                                                                                  |[seq]
-     *                                                                                  |
-     *                                                                                  v
-     *                                                                                Barrier
-     *                                                                                  |
-     *                                                                                  |[seq]
-     *                                                                                  |
-     *                                                                                  v
-     *                                                                          LoadTileDirect2LDS
-    */
+     *   --[body]--> Scope --[body]--> Assign --[seq]--> Assign --[seq]--> NOP
+     *                                                                       |
+     *                                                                       |[seq]
+     *                                                                       |
+     *                                                                       v
+     *                                                                     Assign
+     *                                                                       |
+     *                                                                       |[seq]
+     *                                                                       |
+     *                                                                       v
+     *                                                                     Assign
+     *                                                                       |
+     *                                                                       |[seq]
+     *                                                                       |
+     *                                                                       v
+     *                                                                      NOP
+     *                                                                       |
+     *                                                                       |[seq]
+     *                                                                       |
+     *                                                                       v
+     *                                                                     Barrier
+     *                                                                       |
+     *                                                                       |[seq]
+     *                                                                       |
+     *                                                                       v
+     *                                                               LoadTileDirect2LDS
+     */
     void addDirect2LDS(rocRoller::KernelGraph::KernelGraph& kgraph)
     {
         auto loadTiledNodes    = kgraph.control.getNodes<LoadTiled>().to<std::vector>();
@@ -270,11 +247,7 @@ namespace LDSCopyTest
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
 
-        auto addComputeIndex = std::make_shared<AddComputeIndex>();
-        kgraph               = kgraph.transform(addComputeIndex);
-
-        if(m_context->kernelOptions()->removeSetCoordinate)
-            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+        kgraph = kgraph.transform(std::make_shared<AddLDSBarriers>());
 
         auto command = std::make_shared<rocRoller::Command>();
         command->allocateArgument({DataType::UInt32, PointerType::PointerGlobal},
@@ -287,8 +260,12 @@ namespace LDSCopyTest
                                   ArgumentType::Value,
                                   DataDirection::ReadOnly,
                                   "a");
+        auto assignIndexExprs = std::make_shared<AssignIndexExpressions>(m_context, command);
+        kgraph                = kgraph.transform(assignIndexExprs);
 
-        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(m_context, command));
+        if(m_context->kernelOptions()->removeSetCoordinate)
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+
         kgraph = kgraph.transform(std::make_shared<CleanArguments>(m_context, command));
 
         m_context->schedule(k->preamble());

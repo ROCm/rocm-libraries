@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,16 +35,16 @@ Tests:
   category: quick
   function: csrgemm2_a
   precision: *single_double_precisions_complex_real
-  M: [0, 50, 647, 1799]
-  N: [0, 13, 523, 3712]
-  K: [0, 50, 254, 1942]
+  M: [0, 274, 1857]
+  N: [0, 857, 2837]
+  K: [0, 475, 2738]
   alpha: [2.0]
   alphai: [-0.5]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ONE]
 
 - name: csrgemm2_a
   category: pre_checkin

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -218,11 +195,11 @@ namespace MatrixMultiplyTest
 
             auto command    = std::make_shared<Command>();
             auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataTypeA, transA == "N" ? unitStridesN : unitStridesT));
+                2, dataTypeA, {}, transA == "N" ? unitStridesN : unitStridesT));
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataTypeB, transB == "N" ? unitStridesN : unitStridesT));
+                2, dataTypeB, {}, transB == "N" ? unitStridesN : unitStridesT));
             auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
             std::optional<rocRoller::Operations::OperationTag> tagTensorScaleA, tagLoadScaleA,
@@ -231,7 +208,7 @@ namespace MatrixMultiplyTest
             if(scaleA)
             {
                 tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                    2, scaleTypeA, transA == "N" ? unitStridesN : unitStridesT));
+                    2, scaleTypeA, {}, transA == "N" ? unitStridesN : unitStridesT));
                 tagLoadScaleA
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleA));
             }
@@ -239,7 +216,7 @@ namespace MatrixMultiplyTest
             if(scaleB)
             {
                 tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                    2, scaleTypeB, transB == "N" ? unitStridesN : unitStridesT));
+                    2, scaleTypeB, {}, transB == "N" ? unitStridesN : unitStridesT));
                 tagLoadScaleB
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleB));
             }
@@ -590,12 +567,12 @@ namespace MatrixMultiplyTest
             std::vector<size_t> unitStridesN = {1, 0};
             std::vector<size_t> unitStridesT = {0, 1};
 
-            auto tagTensorA = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataTypeA, transA ? unitStridesT : unitStridesN));
+            auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
+                2, dataTypeA, {}, transA ? unitStridesT : unitStridesN));
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataTypeB, transB ? unitStridesT : unitStridesN)); // B
+                2, dataTypeB, {}, transB ? unitStridesT : unitStridesN)); // B
             auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
             auto tagStoreD = command->addOperation(

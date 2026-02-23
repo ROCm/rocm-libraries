@@ -65,7 +65,8 @@ hipError_t search_n_impl(void*          temporary_storage,
 {
     using input_type  = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    using config      = wrapped_search_n_config<Config, input_type>;
+
+    using Selector = search_n_config_selector<input_type>;
 
     // The `size` must greater than or equal to `count`
     if(count > size)
@@ -75,8 +76,12 @@ hipError_t search_n_impl(void*          temporary_storage,
 
     target_arch target_arch;
     ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+    gpu target_gpu;
+    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
-    const auto         params           = dispatch_target_arch<config, false>(target_arch);
+    const target current_target(target_arch, target_gpu);
+
+    const auto         params           = get_config<Selector>(Config{}, current_target);
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
     const unsigned int items_per_block  = block_size * items_per_thread;
@@ -164,12 +169,12 @@ hipError_t search_n_impl(void*          temporary_storage,
                 }
             }
         };
-        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                            search_n_normal_kernel,
-                                                            num_blocks,
-                                                            block_size,
-                                                            0,
-                                                            stream));
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      search_n_normal_kernel,
+                                                                      num_blocks,
+                                                                      block_size,
+                                                                      0,
+                                                                      stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_normal_kernel", size, start);
         ROCPRIM_RETURN_ON_ERROR(
             transform(tmp_output, output, 1, identity<output_type>(), stream, debug_synchronous));
@@ -244,12 +249,12 @@ hipError_t search_n_impl(void*          temporary_storage,
             }
         }
     };
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                        search_n_find_heads_kernel,
-                                                        num_blocks_for_find_heads,
-                                                        block_size,
-                                                        0,
-                                                        stream));
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                  search_n_find_heads_kernel,
+                                                                  num_blocks_for_find_heads,
+                                                                  block_size,
+                                                                  0,
+                                                                  stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_find_heads_kernel",
                                                 possible_head_exist_size,
                                                 start);
@@ -294,12 +299,12 @@ hipError_t search_n_impl(void*          temporary_storage,
             filtered_heads[atomic_add(tmp_output, 1)] = this_head;
         }
     };
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                        search_n_heads_filter_kernel,
-                                                        num_blocks_for_heads_filter,
-                                                        block_size,
-                                                        0,
-                                                        stream));
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                  search_n_heads_filter_kernel,
+                                                                  num_blocks_for_heads_filter,
+                                                                  block_size,
+                                                                  0,
+                                                                  stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_heads_filter_kernel", num_groups, start);
 
     size_t h_filtered_heads_size = 0;
@@ -387,12 +392,12 @@ hipError_t search_n_impl(void*          temporary_storage,
             }
         }
     };
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                        search_n_discard_heads_kernel,
-                                                        num_blocks_for_discard_heads,
-                                                        block_size,
-                                                        0,
-                                                        stream));
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                  search_n_discard_heads_kernel,
+                                                                  num_blocks_for_discard_heads,
+                                                                  block_size,
+                                                                  0,
+                                                                  stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_discard_heads_kernel ",
                                                 h_filtered_heads_size,
                                                 start);

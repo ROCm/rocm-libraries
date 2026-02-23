@@ -35,6 +35,10 @@ private:
                              int64_t* elementCount,
                              void* arrayOfElements) const;
 
+    void setKnobChoice(hipdnnBackendAttributeType_t attributeType,
+                       int64_t elementCount,
+                       const void* arrayOfElements);
+
 public:
     EngineConfigDescriptor();
     static constexpr int64_t INVALID_WORKSPACE_SIZE = -1;
@@ -58,6 +62,8 @@ public:
     virtual std::shared_ptr<const EngineDescriptor> getEngine() const;
 
     virtual hipdnnPluginConstData_t getSerializedEngineConfig() const;
+
+    std::string toString() const override;
 };
 
 } // namespace hipdnn_backend

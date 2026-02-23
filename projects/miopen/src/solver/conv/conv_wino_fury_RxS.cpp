@@ -75,7 +75,7 @@ uint32_t GetNGroups(uint64_t cu_count)
 
 bool GpuHasReducedVGPRMem(const std::string& dev_name)
 {
-    static constexpr std::array<std::string_view, 5> kFullVgprMemDevices{
+    static constexpr std::array<std::string_view, 8> kFullVgprMemDevices{
         "gfx1100", "gfx1101", "gfx1151", "gfx1200", "gfx1201"};
     const std::string_view name{dev_name};
     return std::find(kFullVgprMemDevices.begin(), kFullVgprMemDevices.end(), name) ==

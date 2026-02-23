@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <set>
 #include <vector>
 
@@ -48,6 +49,8 @@ namespace TensileLite
         std::unordered_map<int, std::shared_ptr<MySolution>> solutionmap;
         std::vector<origami::config_t>                       origami_config_list;
         std::unordered_map<origami::config_t, int>           origami_config_map;
+
+        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         static std::string Type()
         {
@@ -198,7 +201,15 @@ namespace TensileLite
                     }
                 }
             }
+
+            // can't reach the requested number, means findTop already done its best
+            lastFindTopRetAll = (rv.size() < numSolutions);
             return rv;
+        }
+
+        virtual bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>

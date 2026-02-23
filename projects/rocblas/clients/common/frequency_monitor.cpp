@@ -34,9 +34,8 @@
 
 #ifndef _WIN32
 
+#include <amd_smi/amdsmi.h>
 #include <hip/hip_runtime.h>
-#include <rocm_smi/rocm_smi.h>
-#include <rocm_smi/rocm_smi64Config.h>
 
 template <typename T>
 inline std::ostream& stream_write(std::ostream& stream, T&& val)
@@ -76,14 +75,14 @@ inline std::string concatenate(Ts&&... vals)
         }                                                                                         \
     } while(0)
 
-#define RSMI_CHECK_EXC(expr)                                                                      \
+#define AMDSMI_CHECK_EXC(expr)                                                                    \
     do                                                                                            \
     {                                                                                             \
-        rsmi_status_t e = (expr);                                                                 \
+        amdsmi_status_t e = (expr);                                                               \
         if(e)                                                                                     \
         {                                                                                         \
             const char* errName = nullptr;                                                        \
-            rsmi_status_string(e, &errName);                                                      \
+            amdsmi_status_code_to_string(e, &errName);                                            \
             std::ostringstream msg;                                                               \
             msg << "Error " << e << "(" << errName << ") " << __FILE__ << ":" << __LINE__ << ": " \
                 << std::endl                                                                      \
@@ -120,31 +119,39 @@ public:
 
     FrequencyMonitorImp()
     {
+        if(!enabled())
+            return;
+
         initThread();
+        clearValues();
     }
 
     ~FrequencyMonitorImp()
     {
-        m_stop = true;
-        m_exit = true;
+        if(!enabled())
+            return;
 
-        m_cv.notify_all();
-        m_thread.join();
+        stopThread();
     }
 
     void set_device_id(int deviceId)
     {
-        m_smiDeviceIndex = GetROCmSMIIndex(deviceId);
+        if(!enabled())
+            return;
+
+        m_smiDeviceIndex = GetAMDSMIIndex(deviceId);
         m_XCDCount       = 1;
 
-#if rocm_smi_VERSION_MAJOR >= 7
-        auto status2 = rsmi_dev_metrics_xcd_counter_get(m_smiDeviceIndex, &m_XCDCount);
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
+        auto status2
+            = amdsmi_get_gpu_xcd_counter(m_processorHandles[m_smiDeviceIndex], &m_XCDCount);
 
-        if(status2 != RSMI_STATUS_SUCCESS)
+        if(status2 != AMDSMI_STATUS_SUCCESS)
         {
             m_XCDCount = 1;
         }
 #endif
+        clearValues();
     }
 
     void start()
@@ -265,15 +272,44 @@ private:
         m_stop = false;
         m_exit = false;
 
-        rsmi_version_t version;
+        InitAMDSMI();
+
+        amdsmi_version_t version;
 
         m_isMultiXCDSupported = false;
-#if rocm_smi_VERSION_MAJOR >= 7
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
         m_isMultiXCDSupported = true;
 #endif
 
+        // Initialize socket and processor handles
+        uint32_t socketCount = 0;
+        AMDSMI_CHECK_EXC(amdsmi_get_socket_handles(&socketCount, nullptr));
+        m_socketHandles.resize(socketCount);
+        AMDSMI_CHECK_EXC(amdsmi_get_socket_handles(&socketCount, m_socketHandles.data()));
+
+        for(uint32_t i = 0; i < socketCount; i++)
+        {
+            uint32_t processorCount = 0;
+            AMDSMI_CHECK_EXC(
+                amdsmi_get_processor_handles(m_socketHandles[i], &processorCount, nullptr));
+
+            size_t offset = m_processorHandles.size();
+            m_processorHandles.resize(offset + processorCount);
+            AMDSMI_CHECK_EXC(amdsmi_get_processor_handles(
+                m_socketHandles[i], &processorCount, &m_processorHandles[offset]));
+        }
+
         m_thread = std::thread([=]() { this->runLoop(); });
         return;
+    }
+
+    void stopThread()
+    {
+        m_stop = true;
+        m_exit = true;
+
+        m_cv.notify_all();
+        m_thread.join();
     }
 
     void runBetweenEvents()
@@ -315,15 +351,16 @@ private:
 
     void collect()
     {
-        rsmi_frequencies_t freq;
+        amdsmi_frequencies_t freq;
         do
         {
-#if rocm_smi_VERSION_MAJOR >= 7
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
 
-            rsmi_gpu_metrics_t gpuMetrics;
+            amdsmi_gpu_metrics_t gpuMetrics;
             // multi_XCD
-            auto status1 = rsmi_dev_gpu_metrics_info_get(m_smiDeviceIndex, &gpuMetrics);
-            if(status1 == RSMI_STATUS_SUCCESS)
+            auto status1
+                = amdsmi_get_gpu_metrics_info(m_processorHandles[m_smiDeviceIndex], &gpuMetrics);
+            if(status1 == AMDSMI_STATUS_SUCCESS)
             {
                 for(int i = 0; i < m_XCDCount; i++)
                 {
@@ -335,8 +372,9 @@ private:
 #else
 
             //XCD 0
-            auto status1 = rsmi_dev_gpu_clk_freq_get(m_smiDeviceIndex, RSMI_CLK_TYPE_SYS, &freq);
-            if(status1 == RSMI_STATUS_SUCCESS)
+            auto status1 = amdsmi_get_clk_freq(
+                m_processorHandles[m_smiDeviceIndex], AMDSMI_CLK_TYPE_SYS, &freq);
+            if(status1 == AMDSMI_STATUS_SUCCESS)
             {
                 m_SYSCLK_sum[0] += freq.frequency[freq.current];
                 m_SYSCLK_array[0].push_back(freq.frequency[freq.current]);
@@ -344,8 +382,9 @@ private:
 
 #endif
 
-            auto status2 = rsmi_dev_gpu_clk_freq_get(m_smiDeviceIndex, RSMI_CLK_TYPE_MEM, &freq);
-            if(status2 == RSMI_STATUS_SUCCESS)
+            auto status2 = amdsmi_get_clk_freq(
+                m_processorHandles[m_smiDeviceIndex], AMDSMI_CLK_TYPE_MEM, &freq);
+            if(status2 == AMDSMI_STATUS_SUCCESS)
             {
                 m_MEMCLK_sum += freq.frequency[freq.current];
                 m_MEMCLK_array.push_back(freq.frequency[freq.current]);
@@ -389,15 +428,15 @@ private:
         m_future = std::move(std::future<void>());
     }
 
-    void InitROCmSMI()
+    void InitAMDSMI()
     {
-        static rsmi_status_t status = rsmi_init(0);
-        RSMI_CHECK_EXC(status);
+        static amdsmi_status_t status = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+        AMDSMI_CHECK_EXC(status);
     }
 
-    uint32_t GetROCmSMIIndex(int hipDeviceIndex)
+    uint32_t GetAMDSMIIndex(int hipDeviceIndex)
     {
-        InitROCmSMI();
+        InitAMDSMI();
 
         hipDeviceProp_t props;
 
@@ -415,36 +454,47 @@ private:
 #endif
 
         uint64_t hipPCIID = 0;
-        // hipPCIID |= props.pciDeviceID & 0xFF;
-        // hipPCIID |= ((props.pciBusID & 0xFF) << 8);
-        // hipPCIID |= (props.pciDomainID) << 16;
 
         hipPCIID |= (((uint64_t)props.pciDomainID & 0xffffffff) << 32);
         hipPCIID |= ((props.pciBusID & 0xff) << 8);
         hipPCIID |= ((props.pciDeviceID & 0x1f) << 3);
 
-        uint32_t smiCount = 0;
+        uint32_t smiSocketCount{};
+        AMDSMI_CHECK_EXC(amdsmi_get_socket_handles(&smiSocketCount, nullptr));
 
-        RSMI_CHECK_EXC(rsmi_num_monitor_devices(&smiCount));
+        m_socketHandles.resize(smiSocketCount);
+        AMDSMI_CHECK_EXC(amdsmi_get_socket_handles(&smiSocketCount, &m_socketHandles[0]));
 
         std::ostringstream msg;
         msg << "PCI IDs: [" << std::endl;
 
-        for(uint32_t smiIndex = 0; smiIndex < smiCount; smiIndex++)
+        for(uint32_t device = 0; device < smiSocketCount; device++)
         {
-            uint64_t rsmiPCIID = 0;
+            uint32_t deviceCount{};
+            AMDSMI_CHECK_EXC(
+                amdsmi_get_processor_handles(m_socketHandles[device], &deviceCount, nullptr));
+            m_processorHandles.resize(deviceCount);
 
-            RSMI_CHECK_EXC(rsmi_dev_pci_id_get(smiIndex, &rsmiPCIID));
+            AMDSMI_CHECK_EXC(amdsmi_get_processor_handles(
+                m_socketHandles[device], &deviceCount, &m_processorHandles[0]));
 
-            msg << smiIndex << ": " << rsmiPCIID << std::endl;
+            for(uint32_t smiIndex = 0; smiIndex < deviceCount; smiIndex++)
+            {
+                uint64_t amdSMIPCIID{};
+                AMDSMI_CHECK_EXC(amdsmi_get_gpu_bdf_id(m_processorHandles[smiIndex], &amdSMIPCIID));
 
-            if(hipPCIID == rsmiPCIID)
-                return smiIndex;
+                msg << smiIndex << ": " << amdSMIPCIID << std::endl;
+
+                if(hipPCIID == amdSMIPCIID)
+                {
+                    return smiIndex;
+                }
+            }
         }
 
         msg << "]" << std::endl;
 
-        throw std::runtime_error(concatenate("RSMI Can't find a device with PCI ID ",
+        throw std::runtime_error(concatenate("AMDSMI Can't find a device with PCI ID ",
                                              hipPCIID,
                                              "(",
                                              props.pciDomainID,
@@ -464,14 +514,17 @@ private:
     std::thread             m_thread;
     std::condition_variable m_cv;
     std::mutex              m_mutex;
-    uint32_t                m_smiDeviceIndex;
+    uint32_t                m_smiDeviceIndex{};
     bool                    m_isMultiXCDSupported;
-    uint16_t                m_XCDCount;
-    uint16_t                m_CUCount;
+    uint16_t                m_XCDCount{};
+    uint16_t                m_CUCount{};
+
+    std::vector<amdsmi_socket_handle>    m_socketHandles;
+    std::vector<amdsmi_processor_handle> m_processorHandles;
 
     std::vector<uint64_t>              m_SYSCLK_sum;
     std::vector<std::vector<uint64_t>> m_SYSCLK_array;
-    uint64_t                           m_MEMCLK_sum;
+    uint64_t                           m_MEMCLK_sum{};
     std::vector<uint64_t>              m_MEMCLK_array;
 
 #else // WIN32

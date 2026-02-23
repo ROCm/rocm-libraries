@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,10 @@
  * THE SOFTWARE.
  *
  *******************************************************************************/
+
+#if !NDEBUG
+#include <iostream>
+#endif // !NDEBUG
 
 #include "contraction_solution_registry.hpp"
 
@@ -77,6 +81,13 @@ namespace hiptensor
         ContractionSolutionRegistry::Query::query(ContractionOpId_t opCDE) const
     {
         return query(hashContractionOps(opCDE));
+    }
+
+    ContractionSolutionRegistry::Query
+        ContractionSolutionRegistry::Query::query(hiptensorOperator_t opA,
+                                                  hiptensorOperator_t opB) const
+    {
+        return query(hashElementOps(opA, opB));
     }
 
     std::unordered_map<ContractionSolutionRegistry::Query::Uid, ContractionSolution*> const&
