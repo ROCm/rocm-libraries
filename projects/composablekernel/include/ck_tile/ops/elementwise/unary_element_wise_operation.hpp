@@ -363,42 +363,38 @@ CK_TILE_HOST_DEVICE bf16x8_t bf8x8_to_bf16x8_scale(const bf8x8_t& src, const flo
 {
     bf16x8_t y;
 #if defined(__gfx950__)
-    union
-    {
-        uint32_t i16val;
-        bf8_t i8val[4];
-    } input;
-
-    union
-    {
-        bf16x2_t bhalf_vec;
-        bf16_t bhalf_arr[2];
-    } output;
-
     constexpr index_t USE_BOTTOM = 0;
     constexpr index_t USE_TOP    = 1;
 
-    input.i8val[0]   = src[0];
-    input.i8val[1]   = src[1];
-    input.i8val[2]   = src[2];
-    input.i8val[3]   = src[3];
-    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.i16val, scale, USE_BOTTOM);
-    y[0]             = output.bhalf_arr[0];
-    y[1]             = output.bhalf_arr[1];
-    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.i16val, scale, USE_TOP);
-    y[2]             = output.bhalf_arr[0];
-    y[3]             = output.bhalf_arr[1];
+    auto convert_quartet = [&](index_t src_offset, index_t dst_offset) {
+        union
+        {
+            uint32_t packed;
+            bf8_t elements[4];
+        } input;
 
-    input.i8val[0]   = src[4];
-    input.i8val[1]   = src[5];
-    input.i8val[2]   = src[6];
-    input.i8val[3]   = src[7];
-    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.i16val, scale, USE_BOTTOM);
-    y[4]             = output.bhalf_arr[0];
-    y[5]             = output.bhalf_arr[1];
-    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.i16val, scale, USE_TOP);
-    y[6]             = output.bhalf_arr[0];
-    y[7]             = output.bhalf_arr[1];
+        union
+        {
+            bf16x2_t vec;
+            bf16_t elements[2];
+        } output;
+
+        input.elements[0] = src[src_offset];
+        input.elements[1] = src[src_offset + 1];
+        input.elements[2] = src[src_offset + 2];
+        input.elements[3] = src[src_offset + 3];
+
+        output.vec    = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.packed, scale, USE_BOTTOM);
+        y[dst_offset] = output.elements[0];
+        y[dst_offset + 1] = output.elements[1];
+
+        output.vec        = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.packed, scale, USE_TOP);
+        y[dst_offset + 2] = output.elements[0];
+        y[dst_offset + 3] = output.elements[1];
+    };
+
+    convert_quartet(0, 0);
+    convert_quartet(4, 4);
 #else
     static_for<0, 8, 1>{}([&](auto i) {
         y[i.value] = type_convert<bf16_t>(type_convert<float>(src[i.value]) * scale);
@@ -411,42 +407,38 @@ CK_TILE_HOST_DEVICE bf16x8_t fp8x8_to_bf16x8_scale(const fp8x8_t& src, const flo
 {
     bf16x8_t y;
 #if defined(__gfx950__)
-    union
-    {
-        uint32_t i16val;
-        fp8_t i8val[4];
-    } input;
-
-    union
-    {
-        bf16x2_t bhalf_vec;
-        bf16_t bhalf_arr[2];
-    } output;
-
     constexpr index_t USE_BOTTOM = 0;
     constexpr index_t USE_TOP    = 1;
 
-    input.i8val[0]   = src[0];
-    input.i8val[1]   = src[1];
-    input.i8val[2]   = src[2];
-    input.i8val[3]   = src[3];
-    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp8(input.i16val, scale, USE_BOTTOM);
-    y[0]             = output.bhalf_arr[0];
-    y[1]             = output.bhalf_arr[1];
-    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp8(input.i16val, scale, USE_TOP);
-    y[2]             = output.bhalf_arr[0];
-    y[3]             = output.bhalf_arr[1];
+    auto convert_quartet = [&](index_t src_offset, index_t dst_offset) {
+        union
+        {
+            uint32_t packed;
+            fp8_t elements[4];
+        } input;
 
-    input.i8val[0]   = src[4];
-    input.i8val[1]   = src[5];
-    input.i8val[2]   = src[6];
-    input.i8val[3]   = src[7];
-    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp8(input.i16val, scale, USE_BOTTOM);
-    y[4]             = output.bhalf_arr[0];
-    y[5]             = output.bhalf_arr[1];
-    output.bhalf_vec = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp8(input.i16val, scale, USE_TOP);
-    y[6]             = output.bhalf_arr[0];
-    y[7]             = output.bhalf_arr[1];
+        union
+        {
+            bf16x2_t vec;
+            bf16_t elements[2];
+        } output;
+
+        input.elements[0] = src[src_offset];
+        input.elements[1] = src[src_offset + 1];
+        input.elements[2] = src[src_offset + 2];
+        input.elements[3] = src[src_offset + 3];
+
+        output.vec    = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp8(input.packed, scale, USE_BOTTOM);
+        y[dst_offset] = output.elements[0];
+        y[dst_offset + 1] = output.elements[1];
+
+        output.vec        = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp8(input.packed, scale, USE_TOP);
+        y[dst_offset + 2] = output.elements[0];
+        y[dst_offset + 3] = output.elements[1];
+    };
+
+    convert_quartet(0, 0);
+    convert_quartet(4, 4);
 #else
     static_for<0, 8, 1>{}([&](auto i) {
         y[i.value] = type_convert<bf16_t>(type_convert<float>(src[i.value]) * scale);
@@ -459,42 +451,38 @@ CK_TILE_HOST_DEVICE fp16x8_t fp8x8_to_fp16x8_scale(const fp8x8_t& src, const flo
 {
     fp16x8_t y;
 #if defined(__gfx950__)
-    union
-    {
-        uint32_t i16val;
-        fp8_t i8val[4];
-    } input;
-
-    union
-    {
-        fp16x2_t half_vec;
-        fp16_t half_arr[2];
-    } output;
-
     constexpr index_t USE_BOTTOM = 0;
     constexpr index_t USE_TOP    = 1;
 
-    input.i8val[0]  = src[0];
-    input.i8val[1]  = src[1];
-    input.i8val[2]  = src[2];
-    input.i8val[3]  = src[3];
-    output.half_vec = __builtin_amdgcn_cvt_scalef32_pk_f16_fp8(input.i16val, scale, USE_BOTTOM);
-    y[0]            = output.half_arr[0];
-    y[1]            = output.half_arr[1];
-    output.half_vec = __builtin_amdgcn_cvt_scalef32_pk_f16_fp8(input.i16val, scale, USE_TOP);
-    y[2]            = output.half_arr[0];
-    y[3]            = output.half_arr[1];
+    auto convert_quartet = [&](index_t src_offset, index_t dst_offset) {
+        union
+        {
+            uint32_t packed;
+            fp8_t elements[4];
+        } input;
 
-    input.i8val[0]  = src[4];
-    input.i8val[1]  = src[5];
-    input.i8val[2]  = src[6];
-    input.i8val[3]  = src[7];
-    output.half_vec = __builtin_amdgcn_cvt_scalef32_pk_f16_fp8(input.i16val, scale, USE_BOTTOM);
-    y[4]            = output.half_arr[0];
-    y[5]            = output.half_arr[1];
-    output.half_vec = __builtin_amdgcn_cvt_scalef32_pk_f16_fp8(input.i16val, scale, USE_TOP);
-    y[6]            = output.half_arr[0];
-    y[7]            = output.half_arr[1];
+        union
+        {
+            fp16x2_t vec;
+            fp16_t elements[2];
+        } output;
+
+        input.elements[0] = src[src_offset];
+        input.elements[1] = src[src_offset + 1];
+        input.elements[2] = src[src_offset + 2];
+        input.elements[3] = src[src_offset + 3];
+
+        output.vec    = __builtin_amdgcn_cvt_scalef32_pk_f16_fp8(input.packed, scale, USE_BOTTOM);
+        y[dst_offset] = output.elements[0];
+        y[dst_offset + 1] = output.elements[1];
+
+        output.vec        = __builtin_amdgcn_cvt_scalef32_pk_f16_fp8(input.packed, scale, USE_TOP);
+        y[dst_offset + 2] = output.elements[0];
+        y[dst_offset + 3] = output.elements[1];
+    };
+
+    convert_quartet(0, 0);
+    convert_quartet(4, 4);
 #else
     static_for<0, 8, 1>{}([&](auto i) {
         y[i.value] = type_convert<fp16_t>(type_convert<float>(src[i.value]) * scale);
@@ -507,42 +495,38 @@ CK_TILE_HOST_DEVICE fp16x8_t bf8x8_to_fp16x8_scale(const bf8x8_t& src, const flo
 {
     fp16x8_t y;
 #if defined(__gfx950__)
-    union
-    {
-        uint32_t i16val;
-        bf8_t i8val[4];
-    } input;
-
-    union
-    {
-        fp16x2_t half_vec;
-        fp16_t half_arr[2];
-    } output;
-
     constexpr index_t USE_BOTTOM = 0;
     constexpr index_t USE_TOP    = 1;
 
-    input.i8val[0]  = src[0];
-    input.i8val[1]  = src[1];
-    input.i8val[2]  = src[2];
-    input.i8val[3]  = src[3];
-    output.half_vec = __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(input.i16val, scale, USE_BOTTOM);
-    y[0]            = output.half_arr[0];
-    y[1]            = output.half_arr[1];
-    output.half_vec = __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(input.i16val, scale, USE_TOP);
-    y[2]            = output.half_arr[0];
-    y[3]            = output.half_arr[1];
+    auto convert_quartet = [&](index_t src_offset, index_t dst_offset) {
+        union
+        {
+            uint32_t packed;
+            bf8_t elements[4];
+        } input;
 
-    input.i8val[0]  = src[4];
-    input.i8val[1]  = src[5];
-    input.i8val[2]  = src[6];
-    input.i8val[3]  = src[7];
-    output.half_vec = __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(input.i16val, scale, USE_BOTTOM);
-    y[4]            = output.half_arr[0];
-    y[5]            = output.half_arr[1];
-    output.half_vec = __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(input.i16val, scale, USE_TOP);
-    y[6]            = output.half_arr[0];
-    y[7]            = output.half_arr[1];
+        union
+        {
+            fp16x2_t vec;
+            fp16_t elements[2];
+        } output;
+
+        input.elements[0] = src[src_offset];
+        input.elements[1] = src[src_offset + 1];
+        input.elements[2] = src[src_offset + 2];
+        input.elements[3] = src[src_offset + 3];
+
+        output.vec    = __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(input.packed, scale, USE_BOTTOM);
+        y[dst_offset] = output.elements[0];
+        y[dst_offset + 1] = output.elements[1];
+
+        output.vec        = __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(input.packed, scale, USE_TOP);
+        y[dst_offset + 2] = output.elements[0];
+        y[dst_offset + 3] = output.elements[1];
+    };
+
+    convert_quartet(0, 0);
+    convert_quartet(4, 4);
 #else
     static_for<0, 8, 1>{}([&](auto i) {
         y[i.value] = type_convert<fp16_t>(type_convert<float>(src[i.value]) * scale);
