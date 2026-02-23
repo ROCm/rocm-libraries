@@ -2437,8 +2437,6 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
     return amd_buffer_load_impl<T, N, coherence>(
         src_wave_buffer_resource, src_addr_shift + src_thread_addr_offset, 0);
 #else
-    thread_buffer<T, N> tmp =
-        amd_buffer_load_impl<T, N, coherence>(src_wave_buffer_resource, src_thread_addr_offset, 0);
     if constexpr(oob_conditional_check)
     {
         if(!src_thread_element_valid)
@@ -2455,8 +2453,10 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
                 }
                 else
                 {
+                    thread_buffer<T, N> tmp;
                     tmp.template set_as<vector_t>(number<0>{},
                                                   vector_t{numeric<typename T::type>::zero()});
+                    return tmp;
                 }
             }
             else
@@ -2470,12 +2470,15 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
                 }
                 else
                 {
+                    thread_buffer<T, N> tmp;
                     tmp.template set_as<vector_t>(number<0>{}, vector_t{numeric<T>::zero()});
+                    return tmp;
                 }
             }
         }
     }
-    return tmp;
+    return amd_buffer_load_impl<T, N, coherence>(
+        src_wave_buffer_resource, src_thread_addr_offset, 0);
 #endif
 }
 
@@ -2499,8 +2502,6 @@ amd_buffer_load_invalid_element_return_customized_value(const T* p_src_wave,
 
     index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
 
-    thread_buffer<T, N> tmp =
-        amd_buffer_load_impl<T, N, coherence>(src_wave_buffer_resource, src_thread_addr_offset, 0);
     if constexpr(oob_conditional_check)
     {
         if(!src_thread_element_valid)
@@ -2517,7 +2518,9 @@ amd_buffer_load_invalid_element_return_customized_value(const T* p_src_wave,
                 }
                 else
                 {
+                    thread_buffer<T, N> tmp;
                     tmp.template set_as<vector_t>(number<0>{}, vector_t{customized_value});
+                    return tmp;
                 }
             }
             else
@@ -2531,12 +2534,15 @@ amd_buffer_load_invalid_element_return_customized_value(const T* p_src_wave,
                 }
                 else
                 {
+                    thread_buffer<T, N> tmp;
                     tmp.template set_as<vector_t>(number<0>{}, vector_t{customized_value});
+                    return tmp;
                 }
             }
         }
     }
-    return tmp;
+    return amd_buffer_load_impl<T, N, coherence>(
+        src_wave_buffer_resource, src_thread_addr_offset, 0);
 }
 
 template <typename T,
