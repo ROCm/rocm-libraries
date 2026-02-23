@@ -24,11 +24,11 @@
  *
  *******************************************************************************/
 
-#include "gtest_common.hpp"
-#include <tensor_util.hpp>
 #include <miopen/lrn.hpp>
-
+#include "gtest_common.hpp"
+#include "tensor_util.hpp"
 #include "network_data.hpp"
+#include "checkboard_sign.hpp"
 
 namespace {
 

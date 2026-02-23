@@ -26,20 +26,10 @@
 #ifndef GUARD_CPU_CONV_HPP
 #define GUARD_CPU_CONV_HPP
 
-#include "test.hpp"
 #include <array>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
-#include <utility>
-
-#include "tensor_holder.hpp"
-#include <miopen/stringutils.hpp>
-#include <miopen/functional.hpp>
+#include <algorithm>
 #include <hip_float8.hpp>
+#include "tensor_holder.hpp"
 
 template <class T, class... Ts>
 static constexpr auto make_array(T x, Ts... xs)

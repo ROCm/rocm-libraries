@@ -24,10 +24,9 @@
  *
  *******************************************************************************/
 #include <tuple>
-#include <string_view>
 
 #include "gtest_common.hpp"
-
+#include "invoke_with_params.hpp"
 #include "../conv2d.hpp"
 
 namespace conv_ck_igemm_fwd_v6r1_dlops_nchw {

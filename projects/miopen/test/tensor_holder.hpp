@@ -26,24 +26,29 @@
 #ifndef GUARD_TENSOR_HOLDER_HPP
 #define GUARD_TENSOR_HOLDER_HPP
 
-#include "network_data.hpp"
 #include <miopen/ford.hpp>
 #include <miopen/tensor.hpp>
-#include <miopen/functional.hpp>
 #include <miopen/type_name.hpp>
-#include <miopen/each_args.hpp>
-#include <miopen/bfloat16.hpp>
+#include "network_data.hpp"
+#include "serialize.hpp"
 #include "../driver/random.hpp"
 
-#include "serialize.hpp"
-
 #include <half/half.hpp>
-using half         = half_float::half;
+using half = half_float::half;
+
+#include <miopen/bfloat16.hpp>
 using hip_bfloat16 = bfloat16;
+
 #include "../../src/kernels/hip_float8.hpp"
 using float8_fnuz  = miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8>;
 using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
 
+#include <stdexcept>
+#include <type_traits>
+#include <utility>
+#include <numeric>
+#include <functional>
+#include <array>
 #include <iomanip>
 #include <fstream>
 

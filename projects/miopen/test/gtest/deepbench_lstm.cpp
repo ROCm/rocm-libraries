@@ -37,7 +37,7 @@ TEST_P(GPU_DeepBench_LSTM_FP32, FloatTest)
     int device_count{0};
     if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
     {
-        // GTEST_SKIP() << "No HIP devices available for testing";
+        GTEST_SKIP() << "No HIP devices available for testing";
     }
 
     this->numLayers     = 1;

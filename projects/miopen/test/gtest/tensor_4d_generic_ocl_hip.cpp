@@ -23,11 +23,10 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "get_handle.hpp"
-#include "perf_helper.hpp"
-
 #include <miopen/datatype.hpp>
-#include <verify.hpp>
+#include "get_handle.hpp"
+#include "verify.hpp"
+#include "perf_helper.hpp"
 
 #include <gtest/gtest.h>
 

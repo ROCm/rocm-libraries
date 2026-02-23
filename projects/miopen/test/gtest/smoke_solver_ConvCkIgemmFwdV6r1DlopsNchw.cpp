@@ -24,11 +24,10 @@
  *
  *******************************************************************************/
 #include <tuple>
-#include <string_view>
 
 #include "gtest_common.hpp"
 #include "get_handle.hpp"
-
+#include "invoke_with_params.hpp"
 #include "../conv2d.hpp"
 
 namespace {

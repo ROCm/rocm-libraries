@@ -24,17 +24,20 @@
  *******************************************************************************/
 
 #include "lstm_common.hpp"
+#include "../verify.hpp"
 #include <gtest/gtest_common.hpp>
+
+template <class V, class... Ts>
+auto cpu_async(V& v, Ts&&... xs) -> std::future<decltype(v.cpu(xs...))>
+{
+    return std::async(std::launch::deferred, [&] { return v.cpu(xs...); });
+}
 
 struct Verifier
 {
-    int iteration{0};
+    bool time{false};
     int time_iter{1};
     int warmup_iter{0};
-    bool time{false};
-    bool verbose{false};
-    bool rethrow{false};
-    bool no_validate{false};
     double tolerance{80.0};
 
     template <class CpuRange, class GpuRange, class Compare, class Report, class Fail>
@@ -79,20 +82,12 @@ struct Verifier
                    const auto& out_cpu,
                    const auto& out_gpu,
                    auto fail) {
-            if(not pass or verbose)
+            if(not pass)
             {
-                if(not error.empty() or not pass)
+                if(not error.empty())
                 {
-                    if(not error.empty())
-                        std::cout << (pass ? "error: " : "FAILED: ") << error.front() << std::endl;
-                    else
-                        std::cout << "FAILED: " << std::endl;
-
-                    if(not verbose)
-                    {
-                        std::cout << "Iteration: " << iteration << std::endl;
-                        fail(-1);
-                    }
+                    std::cout << "FAILED: " << error.front() << std::endl;
+                    fail(-1);
                 }
 
                 auto mxdiff = miopen::max_diff(out_cpu, out_gpu);
@@ -173,39 +168,25 @@ struct Verifier
                 h.EnableProfiling(false);
             }
 
-            // Validate
-            if(not no_validate)
-            {
-                cpu         = cpuf.get();
-                auto report = verify_reporter();
-                compare_and_report(cpu, gpu, f, report, [&](int mode) { v.fail(mode, xs...); });
-            }
+            cpu         = cpuf.get();
+            auto report = verify_reporter();
+            compare_and_report(cpu, gpu, f, report, [&](int mode) { v.fail(mode, xs...); });
 
-            if(verbose or time)
+            if(time)
                 v.fail(std::integral_constant<int, -1>{}, xs...);
         }
         catch(const std::exception& ex)
         {
             std::cout << "FAILED: " << ex.what() << std::endl;
             v.fail(-1, xs...);
-            if(rethrow)
-                throw;
         }
         catch(...)
         {
             std::cout << "FAILED with unknown exception" << std::endl;
             v.fail(-1, xs...);
-            if(rethrow)
-                throw;
         }
-        if(no_validate)
-        {
-            return std::make_pair(gpu, gpu);
-        }
-        else
-        {
-            return std::make_pair(cpu, gpu);
-        }
+
+        return std::make_pair(cpu, gpu);
     }
 
     template <class V, class... Ts>
@@ -213,7 +194,7 @@ struct Verifier
     {
         return verify_impl(
             [&](std::vector<double>& error, auto&& cpu, auto&& gpu) {
-                CHECK(miopen::range_distance(cpu) == miopen::range_distance(gpu));
+                EXPECT_TRUE(miopen::range_distance(cpu) == miopen::range_distance(gpu));
 
                 using value_type = miopen::range_value<decltype(gpu)>;
                 double threshold = std::numeric_limits<value_type>::epsilon() * tolerance;
