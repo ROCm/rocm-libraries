@@ -1914,6 +1914,72 @@ std::vector<std::vector<int>> get_3d_pads_strides_dilations()
 
 std::vector<std::vector<int>> get_3d_trans_output_pads() { return {{0, 0, 0}}; }
 
+inline bool IsValidCtestStyleConfig(const conv_test_input& input)
+{
+    const auto spatial_dim = input.filter_dims.size();
+    if(spatial_dim < 2 || spatial_dim > 3)
+    {
+        return false;
+    }
+    if(input.spatial_dim_elements.size() != spatial_dim ||
+       input.pads_strides_dilations.size() != 3 * spatial_dim ||
+       input.trans_output_pads.size() != spatial_dim)
+    {
+        return false;
+    }
+    if(input.in_layout.size() != 2 + spatial_dim || input.fil_layout.size() != 2 + spatial_dim ||
+       input.out_layout.size() != 2 + spatial_dim)
+    {
+        return false;
+    }
+
+    const auto group_count = std::max(input.groupCount, 1);
+    if(input.input_channels == 0 || input.output_channels == 0 || group_count <= 0)
+    {
+        return false;
+    }
+    if(input.input_channels % static_cast<std::size_t>(group_count) != 0 ||
+       input.output_channels % static_cast<std::size_t>(group_count) != 0)
+    {
+        return false;
+    }
+
+    const auto pad_mode_upper = miopen::ToUpper(input.pad_mode);
+    for(std::size_t i = 0; i < spatial_dim; ++i)
+    {
+        const auto stride   = static_cast<long long>(input.pads_strides_dilations[spatial_dim + i]);
+        const auto dilation = static_cast<long long>(input.pads_strides_dilations[2 * spatial_dim + i]);
+        if(stride <= 0 || dilation <= 0)
+        {
+            return false;
+        }
+
+        const auto in_size     = static_cast<long long>(input.spatial_dim_elements[i]);
+        const auto filter_size = static_cast<long long>(input.filter_dims[i]);
+        long long out_size     = 0;
+        if(pad_mode_upper == "SAME")
+        {
+            out_size = (in_size + stride - 1) / stride;
+        }
+        else if(pad_mode_upper == "VALID")
+        {
+            const auto numerator = in_size - filter_size + 1;
+            out_size             = (numerator + stride - 1) / stride;
+        }
+        else // DEFAULT mode
+        {
+            const auto pad       = static_cast<long long>(input.pads_strides_dilations[i]);
+            const auto numerator = in_size + (2 * pad) - (dilation * (filter_size - 1)) - 1;
+            out_size             = (numerator / stride) + 1;
+        }
+        if(out_size <= 0)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 template <class T, ConvApi api = ConvApi::Find_1_0, class Tout = T>
 struct conv_test_base : public ::testing::TestWithParam<conv_test_input>
 {
