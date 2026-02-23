@@ -135,9 +135,3 @@ using MXFlatmm_GFX950_FP8FP4_Traits =
     MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFlatmmConfigBase16>;
 using MXFlatmm_GFX950_FP4FP8_Traits =
     MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFlatmmConfigBase16>;
-
-// Helper to get current target ID based on compile-time macros
-// constexpr ck_tile::core::arch::TargetId GetCurrentTargetId()
-// {
-//     return ck_tile::core::arch::TargetId::GFX950; // Default fallback
-// }
