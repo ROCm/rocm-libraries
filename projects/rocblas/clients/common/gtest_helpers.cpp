@@ -159,6 +159,16 @@ static const unsigned test_timeout = [] {
     return env && sscanf(env, "%u", &timeout) == 1 ? timeout : TEST_TIMEOUT;
 }();
 
+void logHipLastError()
+{
+    const ::testing::TestInfo* test_info = ::testing::UnitTest::GetInstance()->current_test_info();
+
+    rocblas_cerr << "hipGetLastError at end of test function call: "
+                 << (test_info ? test_info->name() : "Unknown") << std::endl;
+    (void)rocblas_internal_convert_hip_to_rocblas_status_and_log(
+        hipGetLastError()); // clear last error
+}
+
 // Lambda wrapper which detects signals and exceptions in an invokable function
 void catch_signals_and_exceptions_as_failures(std::function<void()> test, bool set_alarm)
 {
@@ -220,14 +230,9 @@ void catch_signals_and_exceptions_as_failures(std::function<void()> test, bool s
     // Restore the previous handler
     t_handler = old_handler;
 
-    const ::testing::TestInfo* test_info = ::testing::UnitTest::GetInstance()->current_test_info();
-
     if(hipPeekAtLastError() != hipSuccess)
     {
-        rocblas_cerr << "hipGetLastError at end of test: "
-                     << (test_info ? test_info->name() : "Unknown") << std::endl;
-        (void)rocblas_internal_convert_hip_to_rocblas_status_and_log(
-            hipGetLastError()); // clear last error
+        logHipLastError();
     }
 
 #endif
