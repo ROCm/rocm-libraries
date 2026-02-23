@@ -60,6 +60,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --driver-mode=g++ -Xclang -fallow-half-a
 if( CMAKE_PROJECT_NAME STREQUAL "rocwmma" )
   option( ROCWMMA_BUILD_TESTS "Build rocWMMA tests" ON )
   option( ROCWMMA_BUILD_SAMPLES "Build rocWMMA samples" ON )
+  option( ROCWMMA_BUILD_COMMUNITY_SAMPLES "Build community-contributed rocWMMA samples" OFF )
   option( ROCWMMA_BUILD_ASSEMBLY "Output assembly files" OFF )
   option( BUILD_OFFLOAD_COMPRESS "Build rocWMMA with offload compression" ON )
   option( ROCWMMA_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
