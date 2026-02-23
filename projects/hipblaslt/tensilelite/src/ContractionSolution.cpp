@@ -970,9 +970,16 @@ namespace TensileLite
         hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
 
         // Default WGM
-        int32_t  defaultWGM;
-        uint32_t defaultWGMXCC;
-        uint32_t defaultWGMXCCCHUNK;
+        int32_t  defaultWGM         = 0;
+        uint32_t defaultWGMXCC      = 0;
+        uint32_t defaultWGMXCCCHUNK = 0;
+
+        // If any of the problem sizes are less than 1, return 0 for all values
+        auto sizes = problem.problemSizes();
+        if(sizes[0] < 1 || sizes[1] < 1 || sizes[2] < 1 || sizes[3] < 1)
+        {
+            return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK);
+        }
 
         // Dynamically pick the values
         if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
@@ -983,7 +990,6 @@ namespace TensileLite
 
             if(cachedWGMParams == std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX))
             {
-                auto sizes = problem.problemSizes();
                 if(sizes.size() >= 4)
                 {
                     origami::problem_t origami_problem = {
@@ -1081,6 +1087,13 @@ namespace TensileLite
         size_t defaultStaggerU            = 0;
         size_t defaultStaggerUStrideShift = 0;
 
+        // If any of the problem sizes are less than 1, return 0 for all values
+        auto sizes = problem.problemSizes();
+        if(sizes[0] < 1 || sizes[1] < 1 || sizes[2] < 1 || sizes[3] < 1)
+        {
+            return std::make_tuple(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
+        }
+
         // Dynamically pick the values
         if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
            && sizeMapping.workGroupMappingXCC == -1)
@@ -1089,8 +1102,7 @@ namespace TensileLite
             auto cachedStaggerUParams = staggerUParamsCache.find(problem);
 
             if(cachedStaggerUParams == std::make_tuple(SIZE_MAX, SIZE_MAX, SIZE_MAX))
-            {                
-                auto sizes = problem.problemSizes();
+            {
                 if(sizes.size() >= 4)
                 {
                     origami::problem_t origami_problem = {
