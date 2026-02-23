@@ -645,6 +645,20 @@ struct GridwiseGemm_wmma_cshuffle_v3
 
         return Base::template CheckValidity<Argument>(karg, allow_short_v3_pipe);
     }
+
+    __host__ __device__ static constexpr bool
+    CheckValidity(const index_t M,
+                  const index_t N,
+                  const index_t K,
+                  const index_t StrideA,
+                  const index_t StrideB,
+                  const std::array<index_t, NumDTensor> StrideDs,
+                  const index_t StrideE,
+                  const index_t KBatch)
+    {
+        return Base::CheckValidity(M, N, K, StrideA, StrideB, StrideDs, StrideE, KBatch);
+    }
+
     __device__ static index_t GetKBlockPerScale() { return 1; }
 
     template <bool HasMainKBlockLoop,
