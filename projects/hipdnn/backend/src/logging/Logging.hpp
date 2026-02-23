@@ -65,6 +65,11 @@ void logHipDeviceInfo(hipStream_t stream);
 hipdnnStatus_t initializeGlobalOutputCallbackLogger(hipdnnBackendLogOutputCallback_t callback,
                                                     bool async);
 
+hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
+                                  hipdnnSeverity_t minLevel,
+                                  hipdnnLogCallbackMode_t mode,
+                                  hipdnnUserLogCallbackHandle_t userHandle);
+
 hipdnnStatus_t setGlobalLogLevel(hipdnnSeverity_t level);
 
 hipdnnStatus_t getGlobalLogLevel(hipdnnSeverity_t* level);

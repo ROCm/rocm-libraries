@@ -373,6 +373,17 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     return hipdnn_backend::logging::initializeGlobalOutputCallbackLogger(callback, async);
 }
 
+// NOLINTBEGIN(readability-identifier-naming) - C API function
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetUserLogCallback_ext(hipdnnUserLogCallback_t callback,
+                                 hipdnnSeverity_t minLevel,
+                                 hipdnnLogCallbackMode_t mode,
+                                 hipdnnUserLogCallbackHandle_t userHandle)
+// NOLINTEND(readability-identifier-naming)
+{
+    return hipdnn_backend::logging::setUserLogCallback(callback, minLevel, mode, userHandle);
+}
+
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLogLevel_ext(hipdnnSeverity_t level)
 {
     // Validate log level

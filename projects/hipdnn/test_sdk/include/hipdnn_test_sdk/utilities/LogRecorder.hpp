@@ -436,8 +436,8 @@ private:
  * test as all instances of the IsolatedLogRecorder will share the same log
  * recording buffer internally.
  *
- * This class provides a static IsolatedLogRecorder::getIsoaltedRecordingCallback() method to
- * obtain the callback function for registration with the UUT's APIs.
+ * This class provides a static IsolatedLogRecorder::getIsolatedRecordingCallback()
+ * method to obtain the callback function for registration with the UUT's APIs.
  *
  * Two modes available:
  * 1. **withCurrentLevel()** - Preserves UUT's current log level
@@ -476,7 +476,7 @@ public:
      *
      * @return Callback function pointer suitable for logging API registration
      */
-    static hipdnnCallback_t getIsoaltedRecordingCallback()
+    static hipdnnCallback_t getIsolatedRecordingCallback()
     {
         return &isolatedRecordingCallback;
     }

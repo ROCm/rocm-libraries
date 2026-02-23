@@ -542,7 +542,7 @@ TEST_F(TestLogRecorder, IsolatedWithCurrentLevelPreservesLevel)
 
 TEST_F(TestLogRecorder, IsolatedGetCallbackReturnsValidCallback)
 {
-    hipdnnCallback_t callback = IsolatedLogRecorder::getIsoaltedRecordingCallback();
+    hipdnnCallback_t callback = IsolatedLogRecorder::getIsolatedRecordingCallback();
     EXPECT_NE(callback, nullptr);
 }
 
@@ -556,7 +556,7 @@ TEST_F(TestLogRecorder, IsolatedCallbackRecordsToIsolatedInstance)
     LogRecording::instance(LogRecording::Id::ISOLATED).startRecording();
 
     // Get the callback and invoke it directly
-    hipdnnCallback_t callback = IsolatedLogRecorder::getIsoaltedRecordingCallback();
+    hipdnnCallback_t callback = IsolatedLogRecorder::getIsolatedRecordingCallback();
     callback(HIPDNN_SEV_INFO, "test isolated message");
 
     // Verify log was recorded to ISOLATED instance

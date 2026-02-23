@@ -46,7 +46,7 @@ TEST_F(IntegrationFrontendBackendLogging, FrontendLogsProducedOnGlobalCallback)
 
     // Register callback through frontend API
     auto error
-        = setGlobalLoggingCallback(IsolatedLogRecorder::getIsoaltedRecordingCallback(), false);
+        = setGlobalLoggingCallback(IsolatedLogRecorder::getIsolatedRecordingCallback(), false);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     error = setGlobalLogLevel(HIPDNN_SEV_INFO);
@@ -69,7 +69,7 @@ TEST_F(IntegrationFrontendBackendLogging, LogLevelControlsFrontendLogs)
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     auto error
-        = setGlobalLoggingCallback(IsolatedLogRecorder::getIsoaltedRecordingCallback(), false);
+        = setGlobalLoggingCallback(IsolatedLogRecorder::getIsolatedRecordingCallback(), false);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     // Set to WARN level - INFO should be filtered
@@ -92,7 +92,7 @@ TEST_F(IntegrationFrontendBackendLogging, LogLevelOffFiltersAllLogs)
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     auto error
-        = setGlobalLoggingCallback(IsolatedLogRecorder::getIsoaltedRecordingCallback(), false);
+        = setGlobalLoggingCallback(IsolatedLogRecorder::getIsolatedRecordingCallback(), false);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     error = setGlobalLogLevel(HIPDNN_SEV_OFF);
@@ -113,7 +113,7 @@ TEST_F(IntegrationFrontendBackendLogging, ClearingCallbackStopsCallbacks)
 
     // Set callback
     auto error
-        = setGlobalLoggingCallback(IsolatedLogRecorder::getIsoaltedRecordingCallback(), false);
+        = setGlobalLoggingCallback(IsolatedLogRecorder::getIsolatedRecordingCallback(), false);
     ASSERT_EQ(error.code, ErrorCode::OK);
     error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);

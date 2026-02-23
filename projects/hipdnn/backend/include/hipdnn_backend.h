@@ -412,6 +412,77 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLoggingCallback_ext(
     hipdnnBackendLogOutputCallback_t callback, bool async);
 
 /**
+ * @brief User-defined opaque handle passed to callback and used as unique ID.
+ *
+ * The userHandle serves two purposes:
+ * 1. Passed back as parameter to the user callback function
+ * 2. Used as part of the unique identifier for the callback (callback, userHandle)
+ */
+typedef void* hipdnnUserLogCallbackHandle_t;
+
+/**
+ * @brief User callback signature - includes user handle as first parameter.
+ *
+ * @param[in] userHandle User-provided context handle
+ * @param[in] severity   Log message severity level
+ * @param[in] message    The log message (null-terminated string, includes component name)
+ *
+ * @note Callback should return promptly. For blocking operations (network, disk I/O),
+ *       queue work to a separate thread to avoid impacting hipDNN performance.
+ */
+typedef void (*hipdnnUserLogCallback_t)(hipdnnUserLogCallbackHandle_t userHandle,
+                                        hipdnnSeverity_t severity,
+                                        const char* message);
+
+/**
+ * @brief Callback mode (sync vs async).
+ */
+typedef enum
+{
+    HIPDNN_LOG_CALLBACK_SYNC = 0, ///< Callback invoked on logging thread (synchronous)
+    HIPDNN_LOG_CALLBACK_ASYNC = 1 ///< Callback invoked on worker thread (asynchronous)
+} hipdnnLogCallbackMode_t;
+
+/**
+ * @brief Set or update a user log callback.
+ *
+ * This API allows registering multiple user callbacks with individual log levels and sync/async modes.
+ * Each callback is uniquely identified by the composite key (callback, userHandle).
+ *
+ * @note When a synchronous callback is registered, the synchronous callbacks will delay hipDNN
+ *       until the callback returns, regardless of any async log callbacks also being registered.
+ *
+ * Behavior:
+ * - If (callback, userHandle) already registered: UPDATES settings (level and/or sync/async mode)
+ * - If (callback, userHandle) new: ADDS new registration
+ * - If minLevel == SEV_OFF: REMOVES registration
+ * - userHandle must be non-null
+ *
+ * Callback Removal (minLevel == SEV_OFF):
+ * - No further logs will be received on the callback.
+ * - Any pending async logs for this callback will be abandoned
+ * - After this function returns, user can safely destroy data referenced by userHandle
+ *
+ * @param[in] callback   The callback function to invoke
+ * @param[in] minLevel   Minimum severity level (SEV_OFF removes the callback)
+ * @param[in] minLevel   Minimum severity level (SEV_OFF removes the callback). Note that
+ * the logs produced on this callback will be limited by the global log level set either by
+ * the HIPDNN_LOG_LEVEL environment variable or the setGlobalLogLevel() API function.
+* @param[in] mode       Sync or async invocation mode
+ * @param[in] userHandle Non-null user data (also serves as unique callback ID)
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           The callback was set/updated/removed successfully
+ * @retval HIPDNN_STATUS_BAD_PARAM         callback is NULL, userHandle is NULL, invalid mode,
+ *                                         or attempting to remove non-existent callback
+ * @retval HIPDNN_STATUS_NOT_INITIALIZED   Logging system not initialized
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetUserLogCallback_ext(hipdnnUserLogCallback_t callback,
+                                 hipdnnSeverity_t minLevel,
+                                 hipdnnLogCallbackMode_t mode,
+                                 hipdnnUserLogCallbackHandle_t userHandle);
+
+/**
  * @brief Set the global log level for the backend.
  *
  * This controls which log messages are output to console/file AND to the global backend log output callback.

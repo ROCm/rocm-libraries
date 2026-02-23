@@ -5,6 +5,7 @@
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <iostream>
 #include <mutex>
 #include <spdlog/details/log_msg.h>
