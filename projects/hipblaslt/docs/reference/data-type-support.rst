@@ -118,11 +118,11 @@ The hipBLASLt compute modes are listed in the following table.
 
     *
       - ``HIPBLAS_COMPUTE_32F_FAST_16F``
-      - Enables the library to utilize Tensor Cores with 32-bit float computation for matrices with 16-bit half precision input and output.
+      - Enables the library to utilize Tensor Cores with 32-bit float computation for matrices with 16-bit half precision input.
 
     *
       - ``HIPBLAS_COMPUTE_32F_FAST_16BF``
-      - Enables the library to utilize Tensor Cores with 32-bit float computation for matrices with 16-bit bfloat16 precision input and output.
+      - Enables the library to utilize Tensor Cores with 32-bit float computation for matrices with 16-bit bfloat16 precision input.
 
     *
       - ``HIPBLAS_COMPUTE_32F_FAST_TF32``
