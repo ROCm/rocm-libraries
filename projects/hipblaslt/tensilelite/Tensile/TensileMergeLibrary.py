@@ -163,11 +163,10 @@ def removeDuplicatedSolutions(oriData, prefix=""):
 
 
 from Tensile import LibraryIO
-from Tensile.Common.GlobalParameters import defaultSolution
 
-# for new format files this function can be discarded
-def convertToList(data, filename):
-    if type(data) == list:
+# for dict format files this function can be discarded
+def convertToDict(data: list | dict, filename) -> dict:
+    if isinstance(data, list):
         rv = LibraryIO.parseLibraryLogicList(data, filename)
 
         for kernel in rv["Solutions"]:
@@ -188,7 +187,7 @@ from .CustomYamlLoader import load_yaml_stream
 
 def loadData(filename):
     data = load_yaml_stream(filename, yaml.CSafeLoader)
-    data = convertToList(data, filename)
+    data = convertToDict(data, filename)
 
     return [filename, data]
 
@@ -237,7 +236,7 @@ def debug(*args, **kwargs):
     if verbosity < 2: return
     msg(*args, **kwargs)
 
-def syncDefaultParams(origData, incData, origDefaultValues, incDefaultValues):
+def syncDefaultParams(origData, origDefaultValues, incDefaultValues):
     # if orig and inc default values are the same, nothing to do
     if origDefaultValues == incDefaultValues: return
 
@@ -393,7 +392,7 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         origDefaultValues = deepcopy(oriData["DefaultSolution"])
         incDefaultValues = deepcopy(incData["DefaultSolution"])
 
-        syncDefaultParams(oriData, incData, origDefaultValues, incDefaultValues)
+        syncDefaultParams(oriData, origDefaultValues, incDefaultValues)
 
         sanitizeSolutions(oriData)
         sanitizeSolutions(incData)
@@ -441,7 +440,7 @@ def main():
     originalDir = args.original_dir
     incrementalDir = args.incremental_dir
     outputPath = args.output_dir
-    # global verbosity
+    global verbosity
     verbosity = args.verbosity
     forceMerge = args.force_merge.lower()
     no_eff = args.no_eff
