@@ -85,7 +85,7 @@ class GETRI : public ::TestWithParam<getri_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>
@@ -110,7 +110,7 @@ class GETRI_NPVT : public ::TestWithParam<getri_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>
@@ -135,7 +135,7 @@ class GETRI_OUTOFPLACE : public ::TestWithParam<getri_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>
@@ -160,7 +160,7 @@ class GETRI_NPVT_OUTOFPLACE : public ::TestWithParam<getri_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>

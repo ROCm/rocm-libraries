@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -105,14 +105,16 @@ namespace TensileLite
                                        solution->sizeMapping.macroTile.y,
                                        solution->sizeMapping.depthU},
                                 .mi = origami_mi,
-                                .custom_mainloop_scheduling = (solution->sizeMapping.customMainLoopScheduling > 0) ? true : false,
+                                .hand_optimized_main_loop
+                                = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
+                                                                                       : false,
                                 .occupancy
                                 = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
-                                .workgroup_mapping          = solution->sizeMapping.workGroupMapping,
-                                .cache_hints_a              = solution->sizeMapping.nonTemporalA,
-                                .cache_hints_b              = solution->sizeMapping.nonTemporalB,
-                                .workspace_size             = std::numeric_limits<size_t>::max(),
-                                .workspace_size_per_elem_c  = std::numeric_limits<size_t>::max(),
+                                .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
+                                .cache_hints_a             = solution->sizeMapping.nonTemporalA,
+                                .cache_hints_b             = solution->sizeMapping.nonTemporalB,
+                                .workspace_size            = std::numeric_limits<size_t>::max(),
+                                .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);

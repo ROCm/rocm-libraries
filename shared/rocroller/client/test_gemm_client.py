@@ -1,29 +1,7 @@
 #!/usr/bin/env python3
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2026 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """Test basic functionality of rocRoller's GEMM client."""
 
@@ -32,12 +10,12 @@ import functools
 import itertools
 import os
 import pathlib
+import shutil
 import subprocess
 from dataclasses import dataclass
 
 import pytest
 import yaml
-import shutil
 
 SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
 
@@ -246,13 +224,11 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
 padLDS_B: [0, 0]
-storeLDS_D: true
+store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -278,11 +254,8 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
-matchMemoryAccess: true
 tailLoops: true
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -314,13 +287,11 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
 padLDS_B: [0, 0]
-storeLDS_D: true
+store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -328,7 +299,6 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
-matchMemoryAccess: true
 tailLoops: true
 types:
   trans_A: N
@@ -357,9 +327,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
@@ -381,13 +349,11 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
 padLDS_B: [0, 0]
-storeLDS_D: true
+store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -395,7 +361,6 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
-matchMemoryAccess: true
 tailLoops: true
 types:
   trans_A: N
@@ -424,9 +389,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
@@ -485,7 +448,7 @@ def build_solution_params():
         # data-parallel gemm, float, params from config file
         ["--config", DP_GEMM],
         # streamk gemm, float, params from command line
-        ["--streamk"],
+        ["--streamK", "Standard"],
     ]
 
     for type, prefetch, scaleA, scaleB in itertools.product(
@@ -694,14 +657,14 @@ def test_gemm_options(tmp_path):
     )
     assert post["load_A"] == "BufferToLDSViaVGPR"
     assert post["load_B"] == "BufferToLDSViaVGPR"
-    assert not post["storeLDS_D"]
+    assert post["store"] == "VGPRToGlobalMemoryWithBuffer"
 
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--lds=BD"]
     )
     assert post["load_A"] == "BufferToVGPR"
     assert post["load_B"] == "BufferToLDSViaVGPR"
-    assert post["storeLDS_D"]
+    assert post["store"] == "VGPRToGlobalMemoryViaLDSWithBuffer"
 
     # setting d2l options
     post = run_and_load_example_yaml(

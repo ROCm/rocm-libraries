@@ -75,7 +75,7 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [1]
+        - UseCustomMainLoopSchedule: [0]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
         - SFCWGM: [[[5,5],[2,2]], [[8,1],[4,3]]]
       BenchmarkJoinParameters:
@@ -113,7 +113,7 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [1]
+        - UseCustomMainLoopSchedule: [0]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
         - SFCWGM: [[[5,5],[2,2]], [[8,1],[4,3]]]
       BenchmarkJoinParameters:

@@ -149,6 +149,12 @@ namespace origami
             uint32_t LocalReadConflictMultiplierB128;
             uint32_t LocalReadConflictMultiplierB64;
             uint32_t LocalReadConflictMultiplierB32;
+            uint32_t LocalWriteBaseLatencyB128;
+            uint32_t LocalWriteBaseLatencyB64;
+            uint32_t LocalWriteBaseLatencyB32;
+            uint32_t LocalWriteConflictMultiplierB128;
+            uint32_t LocalWriteConflictMultiplierB64;
+            uint32_t LocalWriteConflictMultiplierB32;
             hardware_t::architecture_t architecture;
 
             void print() const {
@@ -476,34 +482,9 @@ namespace origami
         /**
          * @brief Predict overall performance for the configured problem and solution
          * 
-         * This function combines the functionality of calculateIntermediateMetrics() and
-         * calculateFinalPerformance() into a single call for convenience. It is a legacy
-         * interface that may be deprecated in the future.
-         * 
-         * @note Future development will determine which approach to keep based on developer
-         *       and debugging requirements. The refactored two-step approach (calculate
-         *       intermediate metrics separately, then compute final performance) provides
-         *       better visibility into the prediction process for debugging, while this
-         *       unified function offers simpler usage.
-         * 
          * @return PredictedPerformance structure with execution time and cache hit rates
-         * @see calculateIntermediateMetrics() for detailed intermediate metrics
-         * @see calculateFinalPerformance() for the refactored final calculation
          */
         PredictedPerformance predictedPerformance() const;
-        
-        /**
-         * @brief Calculate intermediate performance metrics (refactored version)
-         * @return IntermediatePerformanceMetrics with detailed breakdown
-         */
-        IntermediatePerformanceMetrics calculateIntermediateMetrics() const;
-        
-        /**
-         * @brief Calculate final performance from intermediate metrics
-         * @param metrics Intermediate performance metrics
-         * @return PredictedPerformance with final execution time prediction
-         */
-        PredictedPerformance calculateFinalPerformance(const IntermediatePerformanceMetrics& metrics) const;
         
         /**
          * @brief Compute L1 cache hit rates for both matrix operands
@@ -652,6 +633,16 @@ namespace origami
          * @return Stall cycles if FIFO is full, 0 otherwise
          */
         int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall, double bankConflict) const;
+
+        /**
+         * @brief Check if local write FIFO is full
+         * @param currentCycle Current simulation cycle
+         * @param issueCycles Issue cycles for the write operation
+         * @param bpWrite Bytes per write operation
+         * @param numWaves Number of waves
+         * @return The Cycle this instruction can be issued.
+         */
+        int getLocalWriteQueueFullStallCycles(int currentCycle, int previousLW, int issueCycles, int bpWrite, int numWaves) const;
         
         /**
          * @brief Check if local read operations have finished
@@ -679,17 +670,10 @@ namespace origami
          * @param fifo FIFO queue
          * @param bpr Bytes per read operation
          * @param bankConflict Bank conflict rate
+         * @param isLocalRead Whether this is a local read operation
+         * @param numPreviousLRs Number of previous local reads
          */
-        void pushLocalReadWrite(int currentCycle, std::queue<int>& fifo, int bpr, double bankConflict);
-        
-        /**
-         * @brief Push a local read operation into FIFO
-         * @param currentCycle Current simulation cycle
-         * @param fifo FIFO queue
-         * @param bpr Bytes per read operation
-         * @param isGfx950 Whether hardware is GFX950
-         */
-        void pushLocalRead(int currentCycle, std::queue<int>& fifo, int bpr, bool isGfx950);
+        void pushLocalReadWrite(int currentCycle, std::queue<int>& fifo, int bpr, double bankConflict, bool isLocalRead, int numPreviousLRs);
         
         /**
          * @brief Analyze bank conflicts from VGPR states for both matrix operands

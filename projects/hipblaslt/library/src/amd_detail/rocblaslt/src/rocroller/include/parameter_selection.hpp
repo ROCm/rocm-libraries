@@ -1,29 +1,5 @@
-/*! \file */
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -33,6 +9,7 @@
 #include <optional>
 
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/StoreOption.hpp>
 #include <rocRoller/Parameters/Solution/StreamK.hpp>
 
 /**
@@ -63,7 +40,8 @@ struct SolutionParameters
     rocRoller::Parameters::Solution::LoadPath loadPathB
         = rocRoller::Parameters::Solution::LoadPath::BufferToLDS;
 
-    bool storeLDSD = false;
+    rocRoller::Parameters::Solution::StorePath storePath
+        = rocRoller::Parameters::Solution::StorePath::VGPRToGlobalMemoryWithBuffer;
 
     bool prefetch          = true;
     int  prefetchInFlight  = 2;
@@ -71,14 +49,9 @@ struct SolutionParameters
     bool prefetchMixMemOps = true;
     bool betaInFma         = true;
 
-    // Unroll Options
-    unsigned int unrollX = 0;
-    unsigned int unrollY = 0;
-
     std::string scheduler;
 
-    bool streamK        = false;
-    bool streamKTwoTile = false;
+    rocRoller::StreamKMode streamK = rocRoller::StreamKMode::None;
 
     bool tailLoops = true;
 
@@ -134,12 +107,6 @@ inline std::optional<int> selectSwizzleTileMN(const WorkGroupTileSize&      work
                                               int                           workgroupSizeY,
                                               const std::vector<size_t>&    preSwizzleTileSize)
 {
-    // For pre-swizzled data, return tileMN from preSwizzleTileSize
-    if(preSwizzleTileSize.size() == 3)
-    {
-        return static_cast<int>(preSwizzleTileSize[0]);
-    }
-
     // Validate inputs
     if(mi.m <= 0 || mi.n <= 0 || workgroupSizeX <= 0 || workgroupSizeY <= 0)
     {
@@ -160,10 +127,23 @@ inline std::optional<int> selectSwizzleTileMN(const WorkGroupTileSize&      work
     int numMTilesPerWave = workgroupTile.m / mi.m / numWavesX;
     int numNTilesPerWave = workgroupTile.n / mi.n / numWavesY;
 
+    if (numMTilesPerWave <= 0 || numNTilesPerWave <= 0)
+    {
+        return std::nullopt;
+    }
+
     // Possible swizzle tile MN values
-    // If workgroupTile.k < 256, swizzleTileMN must be 64
-    std::vector<int> possibleSwizzleTileMN
-        = (workgroupTile.k < 256) ? std::vector<int>{64} : std::vector<int>{32, 64};
+    std::vector<int> possibleSwizzleTileMN;
+    if(preSwizzleTileSize.size() == 3)
+    {
+        // For pre-swizzled data, use tileMN from preSwizzleTileSize
+        possibleSwizzleTileMN = {static_cast<int>(preSwizzleTileSize[0])};
+    }
+    else
+    {
+        // If workgroupTile.k < 256, swizzleTileMN must be 64
+        possibleSwizzleTileMN = (workgroupTile.k < 256) ? std::vector<int>{64} : std::vector<int>{32, 64};
+    }
     std::vector<int> validSwizzleTileMN;
 
     for(int swizzleTileMN : possibleSwizzleTileMN)
@@ -239,6 +219,10 @@ inline std::optional<int> selectSwizzleTileK(const WorkGroupTileSize&      workg
 
     // Possible swizzle tile K values
     std::vector<int> possibleSwizzleTileK = {4, 8, 16};
+    if (swizzleTileMN == 32)
+    {
+        possibleSwizzleTileK = {8};
+    }
     std::vector<int> validSwizzleTileK;
 
     for(int swizzleTileK : possibleSwizzleTileK)
