@@ -378,7 +378,8 @@ def getDockerImage(Map conf=[:])
     }
 
     if (cacheExists != "true") {
-        cacheRefFrom = "${cacheRef}"
+    // If cache tag does not exist then default to the dev build cache
+        cacheRefFrom = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache_dev_build"
     }
 
     // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
