@@ -46,7 +46,24 @@ private:
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _engineConfigDesc;
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _executionPlanDesc;
 
-    std::optional<int64_t> _preferredEngineId = std::nullopt;
+    std::optional<int64_t> _preferredEngineId;
+
+    static std::optional<int64_t> getDefaultEngineId()
+    {
+        static const std::optional<int64_t> s_defaultId = []() -> std::optional<int64_t> {
+            auto envStr = hipdnn_data_sdk::utilities::trim(
+                hipdnn_data_sdk::utilities::getEnv("HIPDNN_DEFAULT_ENGINE"));
+            if(envStr.empty())
+            {
+                return std::nullopt;
+            }
+            auto engineId = hipdnn_data_sdk::utilities::engineNameToId(envStr);
+            HIPDNN_FE_LOG_INFO("HIPDNN_DEFAULT_ENGINE='" << envStr
+                                                         << "' mapped to engine ID: " << engineId);
+            return engineId;
+        }();
+        return s_defaultId;
+    }
 
     void assignUnsetTensorUids()
     {
@@ -67,11 +84,32 @@ private:
     {
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
         std::vector<int64_t> engineIds;
+        auto defaultEngineId = getDefaultEngineId();
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getEngineConfigs(
-            engineConfigs, engineIds, engineHeuristicDesc, _preferredEngineId.has_value()));
+            engineConfigs,
+            engineIds,
+            engineHeuristicDesc,
+            _preferredEngineId.has_value() || defaultEngineId.has_value()));
 
         // Select engine config based on preferred ID or use first available
         size_t selectedIndex = 0;
+        if(defaultEngineId)
+        {
+            auto defaultId = defaultEngineId.value();
+            auto it = std::find(engineIds.begin(), engineIds.end(), defaultId);
+            if(it != engineIds.end())
+            {
+                selectedIndex = static_cast<size_t>(std::distance(engineIds.begin(), it));
+                HIPDNN_FE_LOG_INFO("Default engine id " << defaultId
+                                                        << " found, using it for execution plan.");
+            }
+            else
+            {
+                HIPDNN_FE_LOG_INFO("Default engine id "
+                                   << defaultId << " not found, using top engine config instead.");
+            }
+        }
+
         if(_preferredEngineId.has_value())
         {
             bool found = false;
