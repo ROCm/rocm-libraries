@@ -117,8 +117,11 @@ struct Tensor
         auto err = hipMalloc(&data, data_size);
         if(err != hipSuccess)
         {
-            fprintf(stderr, "hipMalloc failed: %s at %s:%d\n",
-                    hipGetErrorString(err), __FILE__, __LINE__);
+            fprintf(stderr,
+                    "hipMalloc failed: %s at %s:%d\n",
+                    hipGetErrorString(err),
+                    __FILE__,
+                    __LINE__);
             abort();
         }
 #endif

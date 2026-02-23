@@ -53,6 +53,19 @@ class PlotData:
     )
 
 
+@dataclass
+class ComparisonCounts:
+    compared: int = 0
+    significant: int = 0
+    insignificant: int = 0
+    reference_only: int = 0
+    candidate_only: int = 0
+
+    @property
+    def not_compared_total(self) -> int:
+        return self.reference_only + self.candidate_only
+
+
 class PerformanceRun:
     timestamp: float
     commit: str
@@ -190,6 +203,40 @@ def summary_statistics(perf_runs):
                 problem=A.problem_token(priority_problems()),
             )
     return stats
+
+
+def comparison_counts(perf_runs, summary, threshold=0.05):
+    counts = ComparisonCounts()
+
+    if len(perf_runs) < 2:
+        return counts
+
+    ref = perf_runs[0]
+    runs = perf_runs[1:]
+    compared_tokens = set(PerformanceRun.get_comparable_tokens(ref, runs))
+    counts.compared = len(compared_tokens)
+
+    token_pvals = defaultdict(list)
+    for run_summary in summary.values():
+        for token, (_, comparison) in run_summary.items():
+            token_pvals[token].append(comparison.moods_pval)
+
+    for token in compared_tokens:
+        pvals = token_pvals.get(token, [])
+        if any(p < threshold for p in pvals):
+            counts.significant += 1
+        else:
+            counts.insignificant += 1
+
+    ref_tokens = set(ref.results.keys())
+    candidate_tokens = set()
+    for run in runs:
+        candidate_tokens.update(run.results.keys())
+
+    counts.reference_only = len(ref_tokens - compared_tokens)
+    counts.candidate_only = len(candidate_tokens - compared_tokens)
+
+    return counts
 
 
 def summary_as_df(summary, ResultType):
@@ -331,6 +378,7 @@ def markdown_summary(md, perf_runs, detail=False):
     """Create Markdown report of summary statistics."""
 
     summary = summary_statistics(perf_runs)
+    counts = comparison_counts(perf_runs, summary)
 
     header = [
         "Problem",
@@ -341,6 +389,14 @@ def markdown_summary(md, perf_runs, detail=False):
     ]
 
     result_diff = significant_changes(summary)
+
+    print("## Comparison Summary\n", file=md)
+    print(f"- Compared: {counts.compared}", file=md)
+    print(f"- Significant diffs: {counts.significant}", file=md)
+    print(f"- Insignificant diffs: {counts.insignificant}", file=md)
+    print(f"- Not compared (reference-only): {counts.reference_only}", file=md)
+    print(f"- Not compared (candidate-only): {counts.candidate_only}", file=md)
+    print(f"- Not compared (total): {counts.not_compared_total}\n", file=md)
 
     result_table = ""
     if detail:
@@ -543,7 +599,9 @@ def html_summary(  # noqa: C901
         )
 
     perf_runs.sort()
-    summary = summary_statistics(perf_runs[-2:])
+    comparison_runs = perf_runs[-2:]
+    summary = summary_statistics(comparison_runs)
+    counts = comparison_counts(comparison_runs, summary)
 
     plots = []
 
@@ -687,6 +745,24 @@ def html_summary(  # noqa: C901
     )
 
     print("<h1>rocRoller performance</h1>", file=html_file)
+    print("<h2>Comparison Summary</h2>", file=html_file)
+    print("<ul>", file=html_file)
+    print(f"<li>Compared: {counts.compared}</li>", file=html_file)
+    print(f"<li>Significant diffs: {counts.significant}</li>", file=html_file)
+    print(f"<li>Insignificant diffs: {counts.insignificant}</li>", file=html_file)
+    print(
+        f"<li>Not compared (reference-only): {counts.reference_only}</li>",
+        file=html_file,
+    )
+    print(
+        f"<li>Not compared (candidate-only): {counts.candidate_only}</li>",
+        file=html_file,
+    )
+    print(
+        f"<li>Not compared (total): {counts.not_compared_total}</li>",
+        file=html_file,
+    )
+    print("</ul>", file=html_file)
 
     if len(perf_runs) == 2:
         print("<h2>Overview</h2>", file=html_file)
