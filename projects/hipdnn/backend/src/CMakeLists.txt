@@ -19,6 +19,7 @@ add_library(
     descriptors/GraphDescriptor.cpp
     descriptors/VariantDescriptor.cpp
     descriptors/TensorDescriptor.cpp
+    descriptors/BatchnormInferenceOperationDescriptor.cpp
     descriptors/ConvolutionFwdOperationDescriptor.cpp
     descriptors/DescriptorFactory.cpp
     handle/HandleFactory.cpp

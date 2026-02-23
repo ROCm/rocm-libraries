@@ -32,7 +32,9 @@ add_executable(
     descriptors/TestGraphDescriptor.cpp
     descriptors/TestGraphDescriptorOps.cpp
     descriptors/TestTensorDescriptor.cpp
+    descriptors/TestBatchnormInferenceOperationDescriptor.cpp
     descriptors/TestConvolutionFwdOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorBatchnormInference.cpp
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
     TestEnginePluginResourceManager.cpp
