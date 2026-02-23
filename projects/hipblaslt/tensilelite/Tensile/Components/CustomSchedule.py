@@ -662,7 +662,7 @@ class RegisterSchedule:
         self.matrix_inst = matrix_inst
         self.mfma_wave_group = mfma_wave_group
 
-    def _make_probe_kernel(self, transA: bool, transB: bool, useLDSTr: bool, TLDS: int) -> dict:
+    def _make_probe_kernel(self, transA: bool, transB: bool, useLDSTr: bool, TLDS: int, vectorWidthA: int, vectorWidthB: int) -> dict:
         """Build a synthetic kernel dict for probing layout support."""
         tc = self.tile_config
         mi = self.matrix_inst
@@ -686,6 +686,8 @@ class RegisterSchedule:
             "WaveSeparateGlobalReadB": tc.wave_separate_global_read_b,
             "GlobalReadVectorWidthA": self.vector_widths[0],
             "GlobalReadVectorWidthB": self.vector_widths[1],
+            "VectorWidthA": vectorWidthA,
+            "VectorWidthB": vectorWidthB,
             "LocalReadVectorWidth": self.vector_widths[2],
             "MatrixInstruction": list(self.matrix_inst),
             "MIWaveGroup": list(self.mfma_wave_group),
@@ -713,23 +715,26 @@ class RegisterSchedule:
         def as_str(transpose: bool) -> str:
             return "T" if transpose else "N"
         
+        valid_vector_widths = [1, 2, 3, 4, 6, 8]
         detected = set()
         for transA, transB in product([True, False], repeat=2):
-            for useLDSTr, TLDS in product([True, False], [1, 0]):                
-                probe = self._make_probe_kernel(transA, transB, useLDSTr, TLDS)
-                try:
-                    found, _ = func(probe, useLDSTr, TLDS)
-                    if found:
-                        detected.add(as_str(transA) + as_str(transB))
-                except ValueError as e:
-                    layout = as_str(transA) + as_str(transB)
-                    printWarning(
-                        f"Layout probe failed for func '{func.__name__}' "
-                        f"with layout={layout}, useLDSTr={useLDSTr}, TLDS={TLDS}\n"
-                        f"  Kernel: {probe['MacroTile0']}x{probe['MacroTile1']}x{probe['DepthU']} {layout}\n"
-                        f"  Error: {e}"
-                    )
-                    continue
+            for useLDSTr, TLDS in product([True, False], [1, 0]):
+                for vwA, vwB in product(valid_vector_widths, repeat=2):
+                    probe = self._make_probe_kernel(transA, transB, useLDSTr, TLDS, vwA, vwB)
+                    try:
+                        found, _ = func(probe, useLDSTr, TLDS)
+                        if found:
+                            detected.add(as_str(transA) + as_str(transB))
+                    except (ValueError, KeyError) as e:
+                        layout = as_str(transA) + as_str(transB)
+                        printWarning(
+                            f"Layout probe failed for func '{func.__name__}' "
+                            f"with layout={layout}, useLDSTr={useLDSTr}, TLDS={TLDS}, "
+                            f"VectorWidthA={vwA}, VectorWidthB={vwB}\n"
+                            f"  Kernel: {probe['MacroTile0']}x{probe['MacroTile1']}x{probe['DepthU']} {layout}\n"
+                            f"  Error: {e}"
+                        )
+                        continue
 
         return list(detected)
 
