@@ -20,8 +20,12 @@
 #
 # ########################################################################
 
-# CTest test categorization (shared/ctest) - YAML-based categories and labels
-include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
+# Optional: CTest test categorization when building in rocm-libraries with shared/ctest.
+# Skipped when shared/ is not present (e.g. standalone rocblas or sparse checkout in CI).
+if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+  include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
+  set(ROCBLAS_HAS_CTEST_CATEGORIES ON)
+endif()
 
 #enable_testing()
 find_package( GTest REQUIRED )
@@ -202,17 +206,21 @@ add_custom_target( rocblas-test-files DEPENDS "${ROCBLAS_SMOKE}" "${ROCBLAS_EXTR
 
 add_dependencies( rocblas-test rocblas-test-data rocblas-test-files rocblas-common )
 
-# CTest categories: quick (= smoke, *quick*), standard (= precheckin), comprehensive (= extended), stress (= weekly)
-# Working dir: staging (test binary, rocblas_gtest.data)
+# CTest categories: quick (= smoke), standard (= precheckin), comprehensive (= extended), stress (= weekly)
+# Only when both test_categories.yaml and shared/ctest exist (full rocm-libraries tree).
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
-  enable_testing()
-  message(STATUS "rocBLAS: YAML-based test categorization")
-  file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
-  apply_test_category_labels(
-    rocblas-test
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
-    "${PROJECT_BINARY_DIR}/staging"
-  )
+  if(ROCBLAS_HAS_CTEST_CATEGORIES)
+    enable_testing()
+    message(STATUS "rocBLAS: YAML-based test categorization")
+    file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
+    apply_test_category_labels(
+      rocblas-test
+      "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+      "${PROJECT_BINARY_DIR}/staging"
+    )
+  else()
+    message(STATUS "rocBLAS: shared/ctest not found (e.g. standalone checkout), skipping CTest categories")
+  endif()
 else()
   message(STATUS "rocBLAS: No test_categories.yaml (CTest categories not used)")
 endif()
