@@ -36,12 +36,13 @@ SKIPPABLE_PATH_PATTERNS = [
     "*/.wordlist.txt",
     "projects/*/docs/*",
     "projects/*/.gitignore",
-    "projects/*/*.md",
-    "projects/*/*.rst",
     "shared/*/docs/*",
     "shared/*/.gitignore",
-    "shared/*/*.md",
-    "shared/*/*.rst",
+    "dnn-providers/*/docs/*",
+    "dnn-providers/*/.gitignore",
+    "*.clinerules",
+    "*.cursorrules",
+    "*.mdc",
 ]
 
 
