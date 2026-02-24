@@ -2659,15 +2659,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # packPre code
           if doNext or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
-            packPre[packStoreIdx].add(packPreA)
+            packPre[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packPreA)
           else:
             # otherwise, put pack pre to pack
-            pack[packStoreIdx].add(packPreA)
+            pack[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packPreA)
           # pack code
           if usePLRPackA:
-            packPre[packStoreIdx].add(packCodeA)
+            packPre[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packCodeA)
           else:
-            pack[packStoreIdx].add(packCodeA)
+            pack[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packCodeA)
         if doReadM:
           localReads.addComment1("local read metadata")
           localReadCodeM, packCodeM, packPreM = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMetadata, iui*self.states.numReadsIterCoalescedMetadata, 0, tPM)
@@ -2688,18 +2688,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # packPre code
           if doNext or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
-            packPre[packStoreIdx].add(packPreB)
+            packPre[packStoreIdx*self.states.numIterPerCoalescedReadB].add(packPreB)
           else:
             # otherwise, put pack pre to pack
-            pack[packStoreIdx].add(packPreB)
+            pack[packStoreIdx*self.states.numIterPerCoalescedReadB].add(packPreB)
           # pack code
           if usePLRPackB:
             if usePLRPackBNext:
-              packPre[packStoreIdx+1].add(packCodeB)
+              packPre[(packStoreIdx+1)*self.states.numIterPerCoalescedReadB].add(packCodeB)
             else:
-              packPre[packStoreIdx].add(packCodeB)
+              packPre[packStoreIdx*self.states.numIterPerCoalescedReadB].add(packCodeB)
           else:
-            pack[packStoreIdx].add(packCodeB)
+            pack[packStoreIdx*self.states.numIterPerCoalescedReadB].add(packCodeB)
         if (not isResetLroIter or iui != kernel["InnerUnroll"]-1):
           if doReadA:
             localReads.addComment1("local read increment a")
@@ -3168,16 +3168,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # packPre code
           if doNext or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
-            packPre[packStoreIdx].add(packPreA)
+            packPre[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packPreA)
           else:
             # otherwise, put pack pre to pack
-            pack[packStoreIdx].add(packPreA)
+            pack[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packPreA)
           # pack code
           if usePLRPackA:
             # put pack code to packPre
-            packPre[packStoreIdx].add(packCodeA)
+            packPre[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packCodeA)
           else:
-            pack[packStoreIdx].add(packCodeA)
+            pack[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packCodeA)
           if kernel["UseCustomMainLoopSchedule"]:
             LRCodeAAllIters[uIdx].add(localReadCodeA)
             PackCodeAAllIters[uIdx].add(packPreA)
@@ -3202,20 +3202,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # packPre code
           if doNext or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
-            packPre[packStoreIdx].add(packPreB)
+            packPre[packStoreIdx*self.states.numIterPerCoalescedReadB].add(packPreB)
           else:
             # otherwise, put pack pre to pack
-            pack[packStoreIdx].add(packPreB)
+            pack[packStoreIdx*self.states.numIterPerCoalescedReadB].add(packPreB)
           # pack code
           if usePLRPackB:
             # put pack code to packPre
             if usePLRPackBNext:
               # usePLRPackBNext case, put to the next pre pack
-              packPre[packStoreIdx+1].add(packCodeB)
+              packPre[(packStoreIdx+1)*self.states.numIterPerCoalescedReadB].add(packCodeB)
             else:
-              packPre[packStoreIdx].add(packCodeB)
+              packPre[packStoreIdx*self.states.numIterPerCoalescedReadB].add(packCodeB)
           else:
-            pack[packStoreIdx].add(packCodeB)
+            pack[packStoreIdx*self.states.numIterPerCoalescedReadB].add(packCodeB)
           if kernel["UseCustomMainLoopSchedule"]:
             LRCodeBAllIters[uIdx].add(localReadCodeB)
             PackCodeBAllIters[uIdx].add(packPreB)
