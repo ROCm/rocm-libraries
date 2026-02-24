@@ -44,8 +44,10 @@ struct amdgcn_mma<
     using OpType                          = MfmaOp;
     static constexpr MmaOpFamily OpFamily = MmaOpFamily::SPARSE;
 
-    using AVecType = ext_vector_t<fp16_t, 4>;
-    using BVecType = ext_vector_t<fp16_t, 8>;
+    static constexpr index_t ABVecN = 8;
+
+    using AVecType = ext_vector_t<fp16_t, ABVecN>;
+    using BVecType = ext_vector_t<fp16_t, ABVecN>;
     using CVecType = ext_vector_t<fp32_t, 4>;
 
     static constexpr index_t kAMBlock = 1;
@@ -66,15 +68,25 @@ struct amdgcn_mma<
     CK_TILE_DEVICE static auto
     exec(AVecType& aVec, BVecType const& bVec, CVecType const& cVec) -> CVecType
     {
-        // TODO: Compressing A on-the-fly should be OK for now, but  we need to validate
+        static constexpr index_t CompressedSize = ABVecN / kCompressionRatio;
+        using AVecCompressed                    = ext_vector_t<fp16_t, CompressedSize>;
+        static_assert(CompressedSize == 4);
+        // TODO: Compressing A on-the-fly should be OK for now, but we need to validate
         // and evaluate changing this to a transform at a higher level.
-        const int32_t idx = ck_tile::compress_a_impl<fp16_t>(aVec);
+        // aVec not being const can cause problems when running multiple intrinsics.
+        const int32_t idx = ck_tile::compress_a_impl<fp16_t, CompressedSize>(aVec);
+
+        const AVecCompressed a_vec_pruned = {aVec[0], aVec[1], aVec[2], aVec[3]};
 
         using namespace sparse::detail;
         static constexpr BuiltinParams PARAMS =
             get_builtin_params<CtrlFlags::CompressionIndex>::value;
-        return {__builtin_amdgcn_smfmac_f32_16x16x32_f16(
-            aVec, bVec, cVec, idx, PARAMS.Override16BitDefaultMask, PARAMS.ByteIndexToOverride)};
+        return {__builtin_amdgcn_smfmac_f32_16x16x32_f16(a_vec_pruned,
+                                                         bVec,
+                                                         cVec,
+                                                         idx,
+                                                         PARAMS.Override16BitDefaultMask,
+                                                         PARAMS.ByteIndexToOverride)};
     }
 };
 

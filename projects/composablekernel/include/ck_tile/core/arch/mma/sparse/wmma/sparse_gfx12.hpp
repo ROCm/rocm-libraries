@@ -31,8 +31,10 @@ struct amdgcn_mma<fp16_t,
     using OpType                          = WmmaOp;
     static constexpr MmaOpFamily OpFamily = MmaOpFamily::SPARSE;
 
-    using AVecType = ext_vector_t<fp16_t, 8>;
-    using BVecType = ext_vector_t<fp16_t, 16>;
+    static constexpr index_t ABVecN = 16;
+
+    using AVecType = ext_vector_t<fp16_t, ABVecN>;
+    using BVecType = ext_vector_t<fp16_t, ABVecN>;
     using CVecType = ext_vector_t<fp32_t, 8>;
 
     static constexpr index_t kAMBlock = 1;
@@ -53,10 +55,18 @@ struct amdgcn_mma<fp16_t,
     CK_TILE_DEVICE static auto
     exec(AVecType& aVec, BVecType const& bVec, CVecType const& cVec) -> CVecType
     {
-        // TODO: Compressing A on-the-fly should be OK for now, but  we need to validate
+        static constexpr index_t CompressedSize = ABVecN / kCompressionRatio;
+        using AVecCompressed                    = ext_vector_t<fp16_t, CompressedSize>;
+        static_assert(CompressedSize == 8);
+        // TODO: Compressing A on-the-fly should be OK for now, but we need to validate
         // and evaluate changing this to a transform at a higher level.
-        const int32_t idx = ck_tile::compress_a_impl<fp16_t>(aVec);
-        return {__builtin_amdgcn_swmmac_f32_16x16x32_f16_w32(aVec, bVec, cVec, idx)};
+        // aVec not being const can cause problems when running multiple intrinsics.
+        const int32_t idx = ck_tile::compress_a_impl<fp16_t, CompressedSize>(aVec);
+
+        const AVecCompressed a_vec_pruned = {
+            aVec[0], aVec[1], aVec[2], aVec[3], aVec[4], aVec[5], aVec[6], aVec[7]};
+
+        return {__builtin_amdgcn_swmmac_f32_16x16x32_f16_w32(a_vec_pruned, bVec, cVec, idx)};
     }
 };
 

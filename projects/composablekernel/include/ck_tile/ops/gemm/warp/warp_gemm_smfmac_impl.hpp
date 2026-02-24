@@ -4,6 +4,8 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/tensor/static_distributed_tensor.hpp"
 namespace ck_tile {
 
 //----------------------------------------------------------------------------------------------
@@ -14,12 +16,12 @@ namespace ck_tile {
 ///
 /// @return     Four 2-bit indexes of non-zero elements locations
 ///
-template <typename ADataType, typename AVec>
+template <typename ADataType, index_t CompressedSize, typename AVec>
 static CK_TILE_DEVICE int32_t compress_a_impl(AVec& a_vec)
 {
     int32_t idx = 0b11101110;
 
-    static_for<0, 2, 1>{}([&](auto i) {
+    static_for<0, CompressedSize / 2, 1>{}([&](auto i) {
         ADataType nonzero_elems[2] = {a_vec[i * 4 + 2], a_vec[i * 4 + 3]};
         int32_t non_zero_pos       = 0;
 
@@ -74,10 +76,10 @@ struct WarpGemmSmfmacImpl
         return WarpGemmAttribute_::get_num_of_access();
     }
 
-    template <typename AVec>
+    template <index_t CompressedSize, typename AVec>
     CK_TILE_DEVICE int32_t compress_a_vec(AVec& a_vec)
     {
-        return compress_a_impl<ADataType>(a_vec);
+        return compress_a_impl<ADataType, CompressedSize>(a_vec);
     }
 
     template <typename CTensor, typename ATensor, typename BTensor, bool post_nop_ = false>
@@ -90,10 +92,11 @@ struct WarpGemmSmfmacImpl
         constexpr auto CompressionRatio = WarpGemmAttribute::kCompressionRatio;
 
         using AVec = ext_vector_t<ADataType, ATensor::get_thread_buffer_size()>;
-        using AVecCompressed =
-            ext_vector_t<ADataType, ATensor::get_thread_buffer_size() / CompressionRatio>;
-        using BVec = ext_vector_t<BDataType, BTensor::get_thread_buffer_size()>;
-        using CVec = ext_vector_t<CDataType, CTensor::get_thread_buffer_size()>;
+        static constexpr index_t CompressedSize =
+            ATensor::get_thread_buffer_size() / CompressionRatio;
+        using AVecCompressed = ext_vector_t<ADataType, CompressedSize>;
+        using BVec           = ext_vector_t<BDataType, BTensor::get_thread_buffer_size()>;
+        using CVec           = ext_vector_t<CDataType, CTensor::get_thread_buffer_size()>;
 
         constexpr auto I0 = number<0>{};
 
@@ -101,8 +104,9 @@ struct WarpGemmSmfmacImpl
         const auto b_vec = b.get_thread_buffer().template get_as<BVec>()[I0];
         auto c_vec       = c.get_thread_buffer().template get_as<CVec>()[I0];
 
-        const int32_t idx = compress_a_vec(a_vec);
+        const int32_t idx = compress_a_vec<CompressedSize>(a_vec);
 
+        static_assert(CompressedSize == 4);
         // @TODO can we simply set a_vec_pruned to a_vec[0:3]?
         const AVecCompressed a_vec_pruned = {a_vec[0], a_vec[1], a_vec[2], a_vec[3]};
 
