@@ -1966,7 +1966,8 @@ class Solution(collections.abc.Mapping):
         if not state["ProblemType"]["MXBlockA"]:
           assert not state["ProblemType"]["MXBlockB"], \
               "A and B must be both MX data types or non-MX data types."
-          return ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata
+          return ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, \
+                 0, 0, 0, 0
 
         if state["ProblemType"]["MXBlockA"]:
           ldsAlign = 64
@@ -1974,7 +1975,7 @@ class Solution(collections.abc.Mapping):
           ldsNumBytesAlignedMXSA = roundUpToNearestMultiple(ldsNumBytesMXSA, ldsAlign)
         else:
           ldsNumBytesMXSA = 0
-          ldsNumBytesAlignedMXSA = 0;
+          ldsNumBytesAlignedMXSA = 0
 
         if state["ProblemType"]["MXBlockB"]:
           ldsAlign = 64
@@ -2054,7 +2055,9 @@ class Solution(collections.abc.Mapping):
             if (wlrA > 1) or (wlrB > 1):
               padA, padB, padM = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
               ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPad(state["LocalReadVectorWidth"])
-              ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
+              ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, \
+              ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB \
+                = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
               if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > state["MaxLDS"]:
                 if wlrA > 1:
                   state["LocalReadVectorWidthA"] //= 2
@@ -2127,7 +2130,9 @@ class Solution(collections.abc.Mapping):
               ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPad(state["LocalReadVectorWidth"])
               ldsBlockSizePerPadA = 0 if padA == 0 else ldsBlockSizePerPadA
               ldsBlockSizePerPadB = 0 if padB == 0 else ldsBlockSizePerPadB
-              ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
+              ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, \
+              ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB \
+                = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
               if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > state["MaxLDS"]:
                 state["LocalReadVectorWidth"] //= 2
 
@@ -3209,15 +3214,9 @@ class Solution(collections.abc.Mapping):
     if (state["UnrollMajorLDSA"] or state["UnrollMajorLDSB"]) and (not state["EnableMatrixInstruction"]) and (not state["UseDotInstruction"]):
         reject(state, printRejectionReason, "UnrollMajorLDS Supports only in EnableMatrixInstruction=1 or dot2 kernel")
 
-    if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
-      ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, \
-      ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytes(state["LdsPadA"], state["LdsBlockSizePerPadA"], state["LdsPadB"], state["LdsBlockSizePerPadB"])
-    else:
-      ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, \
-       = calcLdsNumBytes(state["LdsPadA"], state["LdsBlockSizePerPadA"], state["LdsPadB"], state["LdsBlockSizePerPadB"])
-       # This is just in case if subsequent code is checking these values
-      ldsNumBytesMXSA = ldsNumBytesAlignedMXSA = ldsNumBytesMXSB = ldsNumBytesAlignedMXSB = 0
-
+    ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata, \
+    ldsNumBytesMXSA, ldsNumBytesAlignedMXSA, ldsNumBytesMXSB, ldsNumBytesAlignedMXSB \
+      = calcLdsNumBytes(state["LdsPadA"], state["LdsBlockSizePerPadA"], state["LdsPadB"], state["LdsBlockSizePerPadB"])
 
     state["LdsOffsetA_Blk"] = 0
     state["LdsOffsetB_Blk"] = 0
