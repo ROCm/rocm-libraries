@@ -246,23 +246,22 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
     });
 }
 
-HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedGraph_ext(
-    hipdnnBackendDescriptor_t descriptor, size_t* graphByteSize, uint8_t* serializedGraph)
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendGetSerializedGraph_ext(hipdnnBackendDescriptor_t descriptor,
+                                        size_t requestedByteSize,
+                                        size_t* graphByteSize,
+                                        uint8_t* serializedGraph)
 {
-    LOG_API_ENTRY("descriptor={}, graphByteSize_ptr={:p}, serializedGraph_ptr={:p}",
+    LOG_API_ENTRY("descriptor={}, requestedByteSize={}, graphByteSize_ptr={:p}, "
+                  "serializedGraph_ptr={:p}",
                   logPtr(descriptor),
+                  requestedByteSize,
                   static_cast<void*>(graphByteSize),
                   static_cast<void*>(serializedGraph));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfInvalidDescriptor(descriptor);
         throwIfNull(graphByteSize);
-
-        if(!descriptor->isFinalized())
-        {
-            throw hipdnn_backend::HipdnnException(HIPDNN_STATUS_NOT_INITIALIZED,
-                                                  "Descriptor is not finalized");
-        }
 
         auto graphDesc = descriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
         auto data = graphDesc->getSerializedGraph();
@@ -271,6 +270,12 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedGraph_ext(
 
         if(serializedGraph != nullptr)
         {
+            THROW_IF_LT(requestedByteSize,
+                        data.size,
+                        HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT,
+                        "Requested buffer size (" + std::to_string(requestedByteSize)
+                            + ") is smaller than the serialized graph size ("
+                            + std::to_string(data.size) + ")");
             std::memcpy(serializedGraph, data.ptr, data.size);
         }
 

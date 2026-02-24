@@ -98,8 +98,8 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsIfNotFinalized)
               HIPDNN_STATUS_SUCCESS);
 
     size_t size = 0;
-    EXPECT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, &size, nullptr),
-              HIPDNN_STATUS_NOT_INITIALIZED);
+    EXPECT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 0, &size, nullptr),
+              HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
 
     hipdnnBackendDestroyDescriptor(desc);
 }
@@ -107,7 +107,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsIfNotFinalized)
 TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithNullParams)
 {
     size_t size = 0;
-    EXPECT_EQ(hipdnnBackendGetSerializedGraph_ext(nullptr, &size, nullptr),
+    EXPECT_EQ(hipdnnBackendGetSerializedGraph_ext(nullptr, 0, &size, nullptr),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -117,7 +117,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithNullSizeParam)
     ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &desc),
               HIPDNN_STATUS_SUCCESS);
 
-    EXPECT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, nullptr, nullptr),
+    EXPECT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 0, nullptr, nullptr),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     hipdnnBackendDestroyDescriptor(desc);
@@ -155,14 +155,14 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSizeQueryMatchesCopySize
 
     // Query size
     size_t queriedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, &queriedSize, nullptr),
+    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 0, &queriedSize, nullptr),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(queriedSize, 0u);
 
     // Copy with queried size
     std::vector<uint8_t> buffer(queriedSize);
-    size_t copySize = queriedSize;
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, &copySize, buffer.data()),
+    size_t copySize = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, queriedSize, &copySize, buffer.data()),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(copySize, queriedSize);
 
@@ -207,11 +207,11 @@ TEST_F(IntegrationGraphDescriptorApi, SerializedGraphRoundTripPreservesGraphProp
 
     // Use two-call pattern to get serialized data
     size_t size = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, &size, nullptr), HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 0, &size, nullptr), HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(size, 0u);
 
     std::vector<uint8_t> buffer(size);
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, &size, buffer.data()),
+    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, size, &size, buffer.data()),
               HIPDNN_STATUS_SUCCESS);
 
     // Verify graph properties match what we set
@@ -226,6 +226,103 @@ TEST_F(IntegrationGraphDescriptorApi, SerializedGraphRoundTripPreservesGraphProp
     EXPECT_EQ(graphT.compute_data_type, DataTypeSdk::FLOAT);
     EXPECT_TRUE(graphT.tensors.empty());
     EXPECT_TRUE(graphT.nodes.empty());
+
+    hipdnnBackendDestroyDescriptor(desc);
+    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
+}
+
+TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithInsufficientBuffer)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
+                                                                  "BufferSizeTest",
+                                                                  DataTypeSdk::FLOAT,
+                                                                  DataTypeSdk::FLOAT,
+                                                                  DataTypeSdk::FLOAT,
+                                                                  &tensorAttributes,
+                                                                  &nodes);
+    builder.Finish(graph);
+    flatbuffers::DetachedBuffer serializedGraph = builder.Release();
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
+                  &desc, serializedGraph.data(), serializedGraph.size()),
+              HIPDNN_STATUS_SUCCESS);
+
+    hipdnnHandle_t handle = nullptr;
+    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(
+                  desc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
+
+    // Query actual size
+    size_t queriedSize = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 0, &queriedSize, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_GT(queriedSize, 1u);
+
+    // Attempt copy with undersized buffer
+    std::vector<uint8_t> buffer(1);
+    size_t reportedSize = 0;
+    EXPECT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 1, &reportedSize, buffer.data()),
+              HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT);
+
+    hipdnnBackendDestroyDescriptor(desc);
+    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
+}
+
+TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithOversizedBuffer)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
+                                                                  "OversizedBufferTest",
+                                                                  DataTypeSdk::FLOAT,
+                                                                  DataTypeSdk::FLOAT,
+                                                                  DataTypeSdk::FLOAT,
+                                                                  &tensorAttributes,
+                                                                  &nodes);
+    builder.Finish(graph);
+    flatbuffers::DetachedBuffer serializedGraph = builder.Release();
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
+                  &desc, serializedGraph.data(), serializedGraph.size()),
+              HIPDNN_STATUS_SUCCESS);
+
+    hipdnnHandle_t handle = nullptr;
+    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(
+                  desc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
+
+    // Query actual size
+    size_t queriedSize = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 0, &queriedSize, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_GT(queriedSize, 0u);
+
+    // Copy with oversized buffer
+    auto oversizedSize = queriedSize * 2;
+    std::vector<uint8_t> buffer(oversizedSize);
+    size_t reportedSize = 0;
+    ASSERT_EQ(
+        hipdnnBackendGetSerializedGraph_ext(desc, oversizedSize, &reportedSize, buffer.data()),
+        HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(reportedSize, queriedSize);
+
+    // Verify data is valid
+    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+    ASSERT_NE(graphFb, nullptr);
 
     hipdnnBackendDestroyDescriptor(desc);
     EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
