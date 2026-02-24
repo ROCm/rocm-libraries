@@ -51,9 +51,9 @@ namespace rocRoller
                 for(auto const& t : {typeC, typeD, typeAcc})
                     rv << "_" << t;
 
-                if(scaleSkipPermlane)
+                if(scaleSkipPermlane != rocRoller::ScaleSkipPermlaneMode::None)
                 {
-                    rv << "_PreSW";
+                    rv << "_PreSW" << toString(scaleSkipPermlane);
                 }
 
                 if(!scalePretileA.empty())
