@@ -6,21 +6,21 @@
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
-#include <rocRoller/Scheduling/LDSBankModel.hpp>
+#include <rocRoller/Scheduling/LDSModel.hpp>
 
 #include <common/CommonGraphs.hpp>
+#include <common/Scheduling.hpp>
 
 #include "CustomSections.hpp"
 #include "TestContext.hpp"
 
-namespace LDSBankModelTest
+namespace LDSModelTest
 {
-    using namespace rocRoller::Scheduling::LDSBankModel;
+    using namespace rocRoller;
+    using namespace rocRoller::Scheduling::LDSModel;
 
     TEST_CASE("LDS model get threads per clock", "[lds-bank-model]")
     {
-        using namespace rocRoller;
-
         SECTION("GFX950 read operations")
         {
             auto ldsRead = MemoryOpLDS{LdsDirection::Read};
@@ -61,8 +61,6 @@ namespace LDSBankModelTest
 
     TEST_CASE("LDS model make bank to address counts", "[lds-bank-model]")
     {
-        using namespace rocRoller;
-
         SECTION("Bank conflicts")
         {
             // Test multiple addresses accessing the same bank
@@ -107,8 +105,6 @@ namespace LDSBankModelTest
 
     TEST_CASE("LDS model calculate bank conflict cycles", "[lds-bank-model]")
     {
-        using namespace rocRoller;
-
         std::map<uint, uint> bankToAddressCounts = {};
         CHECK(calculateBankConflictCycles(bankToAddressCounts) == 0);
 
@@ -127,8 +123,6 @@ namespace LDSBankModelTest
 
     TEST_CASE("LDS model divide into thread groups", "[lds-bank-model]")
     {
-        using namespace rocRoller;
-
         std::vector<size_t> addresses       = {0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44};
         uint                threadsPerClock = 4;
 
@@ -158,8 +152,6 @@ namespace LDSBankModelTest
 
     TEST_CASE("LDS model compute thread group bank mappings", "[lds-bank-model]")
     {
-        using namespace rocRoller;
-
         RuntimeLDSInstruction instr;
         instr.memoryOp = MemoryOpLDS{LdsDirection::Read};
         instr.dwords   = 4;
@@ -187,8 +179,6 @@ namespace LDSBankModelTest
 
     TEST_CASE("LDS model calculate total cycles from bank mappings", "[lds-bank-model]")
     {
-        using namespace rocRoller;
-
         std::vector<std::map<uint, uint>> mappings = {
             {{0, 5}, {1, 2}, {2, 1}}, // Group 1: max 5 accesses
             {{3, 1}, {4, 1}, {5, 1}}, // Group 2: max 1 access (no conflicts)
@@ -200,8 +190,6 @@ namespace LDSBankModelTest
 
     TEST_CASE("LDS model get clock count", "[lds-bank-model]")
     {
-        using namespace rocRoller;
-
         RuntimeLDSInstruction instr;
         instr.dwords        = 2;
         instr.baseAddresses = {0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120};
@@ -228,8 +216,6 @@ namespace LDSBankModelTest
 
     TEST_CASE("LDS model get instruction issue cycles", "[lds-bank-model]")
     {
-        using namespace rocRoller;
-
         SECTION("Read operations")
         {
             auto ldsRead = MemoryOpLDS{LdsDirection::Read};
@@ -255,8 +241,6 @@ namespace LDSBankModelTest
 
     TEST_CASE("LDS model sample addresses", "[lds-bank-model]")
     {
-        using namespace rocRoller;
-
         // Sample taken from a GEMM kernel through rocgdb
         // Note: stride is not always 64 even though the first few appear to be so
         std::vector<size_t> addresses
@@ -270,5 +254,61 @@ namespace LDSBankModelTest
 
         auto expectedCycles = getInstructionDataCycles(instr, GPUArchitectureGFX::GFX950);
         CHECK(expectedCycles == 16); // Compared to same kernel through rocprofv3
+    }
+
+    TEST_CASE("LDS model data cycle predictions", "[lds-bank-model]")
+    {
+        SECTION("ds_read_b32 stride 1")
+        {
+            const int dwords        = 1;
+            const int stride        = 1;
+            const int workgroupSize = 64;
+
+            CHECK(getInstructionDataCycles(
+                      {.memoryOp      = MemoryOpLDS{LdsDirection::Read},
+                       .dwords        = dwords,
+                       .baseAddresses = generateLDSAddresses(workgroupSize, stride, dwords)},
+                      GPUArchitectureGFX::GFX950)
+                  == 4);
+        }
+
+        SECTION("ds_read_b32 stride 2")
+        {
+            const int dwords        = 1;
+            const int stride        = 2;
+            const int workgroupSize = 64;
+
+            CHECK(getInstructionDataCycles(
+                      {.memoryOp      = MemoryOpLDS{LdsDirection::Read},
+                       .dwords        = dwords,
+                       .baseAddresses = generateLDSAddresses(workgroupSize, stride, dwords)},
+                      GPUArchitectureGFX::GFX950)
+                  == 4);
+        }
+    }
+
+    TEST_CASE("hasNonOverlappingBankAccess", "[lds-bank-model]")
+    {
+        SECTION("ds_read_b64 stride 1 wgs 256")
+        {
+            const int             dwords = 2;
+            RuntimeLDSInstruction instr;
+            instr.memoryOp.direction = LdsDirection::Read;
+            instr.dwords             = dwords;
+            instr.baseAddresses      = generateLDSAddresses(256, 1, dwords);
+
+            CHECK(hasNonOverlappingBankAccess(instr, GPUArchitectureGFX::GFX950));
+        }
+
+        SECTION("ds_read_b64 stride 2 wgs 256")
+        {
+            const int             dwords = 2;
+            RuntimeLDSInstruction instr;
+            instr.memoryOp.direction = LdsDirection::Read;
+            instr.dwords             = dwords;
+            instr.baseAddresses      = generateLDSAddresses(256, 2, dwords);
+
+            CHECK_FALSE(hasNonOverlappingBankAccess(instr, GPUArchitectureGFX::GFX950));
+        }
     }
 }
