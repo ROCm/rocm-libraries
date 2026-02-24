@@ -422,8 +422,8 @@ void TestLogBufferEnvDisabled()
 
     ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
                                                  "5"); // miopen::LoggingLevel::Info
-    ScopedEnvironment<std::string> log_buffer_off_env(MIOPEN_DISABLE_LOG_BUFFER,
-                                                      "1"); // disable logging
+    ScopedEnvironment<std::string> log_buffer_off_env(MIOPEN_LOG_BUFFER_SIZE,
+                                                      "0"); // disable logging
 
     miopen::ClearBufferLog();
     // log messages
