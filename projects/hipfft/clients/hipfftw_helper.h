@@ -81,7 +81,7 @@ private:
     dynamically_loaded_hipfftw()
     {
 #ifdef __HIP_PLATFORM_AMD__
-        const std::string lib_basename = "hipfftw";
+        const std::string lib_basename = "hipfftw0";
 #else
         const std::string lib_basename = "cufftw";
 #endif
