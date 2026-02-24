@@ -3,10 +3,29 @@
 
 #pragma once
 
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
+#include <hipdnn_frontend/detail/IncompatibleBackend.hpp>
 
 namespace hipdnn_frontend::detail
 {
+
+// Attempts to create a backend interface of type T, falling back to IncompatibleBackend if it fails to satisfy requirements
+template <class T>
+std::shared_ptr<IHipdnnBackend> tryToUseBackendInterface(std::shared_ptr<T> backendInterface)
+{
+    const char* version;
+    auto status = backendInterface->versionExt(&version);
+    // TODO: Also check for major version once frontend has versioning
+    if(status != hipdnnStatus_t::HIPDNN_STATUS_SUCCESS)
+    {
+        HIPDNN_FE_LOG_ERROR("Failed to get hipdnn version. Hipdnn backend cannot be loaded");
+        return std::make_shared<detail::IncompatibleBackendWrapper>();
+    }
+
+    return backendInterface;
+}
 
 class HipdnnBackendWrapper : public IHipdnnBackend
 {
@@ -89,6 +108,11 @@ public:
         hipdnnGetLastErrorString(message, maxSize);
     }
 
+    hipdnnStatus_t versionExt(const char** version) override
+    {
+        return hipdnnGetVersion_ext(version);
+    }
+
     hipdnnStatus_t backendCreateAndDeserializeGraphExt(hipdnnBackendDescriptor_t* descriptor,
                                                        const uint8_t* serializedGraph,
                                                        size_t graphByteSize) override
@@ -115,7 +139,8 @@ inline static std::shared_ptr<IHipdnnBackend> hipdnnBackend()
 {
     if(!IHipdnnBackend::getInstance())
     {
-        IHipdnnBackend::setInstance(std::make_shared<HipdnnBackendWrapper>());
+        IHipdnnBackend::setInstance(
+            tryToUseBackendInterface(std::make_shared<HipdnnBackendWrapper>()));
     }
 
     return IHipdnnBackend::getInstance();

@@ -438,6 +438,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
                                                              char* type,
                                                              size_t* typeLen);
 
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version);
+
 #ifdef __cplusplus
 }
 #endif

@@ -13,6 +13,7 @@
 #include "logging/Logging.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
 
+#include <hipdnn_backend/version.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 using namespace hipdnn_backend;
@@ -466,5 +467,13 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
                         info.pluginName,
                         info.version,
                         info.type);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version)
+{
+    return hipdnn_backend::tryCatch([&]() {
+        throwIfNull(version);
+        *version = HIPDNN_BACKEND_VERSION_STRING;
     });
 }
