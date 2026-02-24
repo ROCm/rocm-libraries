@@ -64,7 +64,7 @@ TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
     std::vector<size_t> emptySwizzle;
     std::vector<size_t> emptyTile;
 
-    generateMXInput((hipDataType)HIP_R_4F_E2M1_EXT,
+    generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     dataBuffer.data(),
                     scaleBuffer.data(),
                     rows,
@@ -155,7 +155,7 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
     std::vector<uint8_t> scaleShuf(numScales, 0);
 
     // Generate without preSwizzle (natural scale order)
-    generateMXInput((hipDataType)HIP_R_4F_E2M1_EXT,
+    generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     dataNoShuf.data(),
                     scaleNoShuf.data(),
                     rows, cols, rows,
@@ -165,7 +165,7 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
                     "Bounded", -1.0f, 1.0f);
 
     // Generate with preSwizzle (shuffled scale order expected by the GPU kernel)
-    generateMXInput((hipDataType)HIP_R_4F_E2M1_EXT,
+    generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     dataShuf.data(),
                     scaleShuf.data(),
                     rows, cols, rows,
