@@ -1010,6 +1010,19 @@ class LocalReadMFMA(LocalRead):
                                             self.pack4LowBitsFinal(kernel, writer, tc, valuiIdx, bufferIdx, iui, packCodeT, lrvwTile, tmpvgprFP32, useDirect32XEmulation)
                                     if valuiIdx % 8 == 4 and (not allPack4LoDone):
                                         self.releaseTmpVregForPack(kernel, writer, tc, baseValuiIdx, tmpvgprFP32, useDirect32XEmulation)
+                                    # For WMMA V3 multigroup XF32: rearrange packed BF16 data so all
+                                    # hi values are contiguous (X0+0..7) followed by lo values (X0+8..15).
+                                    # Must happen here in pack code (not MAC code) to avoid the scheduler
+                                    # interleaving the swap with residual/TF32_2 packing operations.
+                                    if multiGroupXF32 and rIdx == numReadsPerUnroll - 1:
+                                        halfGroup = 4
+                                        for i in range(halfGroup):
+                                            swapIdx1 = outerBaseValuiIdx + halfGroup + i
+                                            swapIdx2 = outerBaseValuiIdx + halfGroup * 2 + i
+                                            swapVgpr1 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, swapIdx1))
+                                            swapVgpr2 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, swapIdx2))
+                                            packCodeT.add(VSwapB32(dst=swapVgpr1, src=swapVgpr2,
+                                                comment="XF32 pack rearrange %s: swap [%d] <-> [%d]"%(tc, swapIdx1, swapIdx2)))
 
                                 if kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]):
                                     if tP["bpe"] == 2 and tP["bpeDS"] == 4:
@@ -1562,25 +1575,6 @@ class LocalReadMFMA(LocalRead):
 
                             subIterLoadCount += 1
                     # End of loop3
-                    # WMMA V3 XF32 emulation: rearrange packed data from per-group
-                    # [HI_g0(4), LO_g0(4), HI_g1(4), LO_g1(4)] layout to
-                    # [HI_g0(4), HI_g1(4), LO_g0(4), LO_g1(4)] layout
-                    # so 3-pass WMMA uses X[0:7] = all HI, X[8:15] = all LO
-                    if multiGroupXF32 and needPack:
-                        swapMod = Module("WMMA V3 XF32 rearrange %s" % tc)
-                        halfGroup = 4  # half of an 8-VGPR group
-                        totalVgprs = numVgpr * numReadsPerUnroll
-                        numGroups = totalVgprs // 8
-                        assert numGroups == 2, \
-                            "WMMA V3 XF32 rearrange currently only supports 2 groups, got %d" % numGroups
-                        # Swap LO of group 0 with HI of group 1
-                        swapStart = outerBaseValuiIdx + halfGroup  # start of LO_g0
-                        for i in range(halfGroup):
-                            swapMod.add(VSwapB32(
-                                dst=vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, swapStart + i)),
-                                src=vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, swapStart + halfGroup + i)),
-                                comment="XF32 rearrange: swap LO_g0[%d] <-> HI_g1[%d]" % (i, i)))
-                        packCode.add(swapMod)
                     if needPack:
                         if tP["isA"]:
                             writer.states.a.numPackCvt = len(packCode.flatitems())
