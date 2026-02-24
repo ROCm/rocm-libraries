@@ -184,24 +184,26 @@ namespace TensileLite
 
         void RocProfiler::stop() {
             if (m_context_started && m_context.handle != 0) {
-                rocprofiler_flush_buffer(m_buffer);
+                std::lock_guard<std::mutex> lock(m_mutex);
                 rocprofiler_stop_context(m_context);
                 m_context_started = false;
             }
         }
 
         std::string RocProfiler::fetch(int index) {
-            if (m_context_started && m_context.handle != 0) {
-                rocprofiler_flush_buffer(m_buffer);
-            }
+            std::lock_guard<std::mutex> lock(m_mutex);
             auto it = m_profiler->m_solutionIdx2DispatchId.find(index);
             if (it == m_profiler->m_solutionIdx2DispatchId.end())
-                throw std::runtime_error("no data for solution " + std::to_string(index));
+                throw std::runtime_error("no counter data for solution " + std::to_string(index));
             auto dispatchId = it->second;
             auto counters = m_profiler->m_dispatchId2ProfileInfo[dispatchId].counters;
             std::ostringstream ss;
             int i = 0;
-            for (const auto& [name, value] : counters) {
+            for (const auto& [name, counter_id] : m_counterName2Id) {
+                auto cit = counters.find(counter_id.handle);
+                if (cit == counters.end())
+                    throw std::runtime_error("counter " + name + " value not found.");
+                auto value = cit->second;
                 if (i != 0) {
                     ss << ",";
                 }
@@ -214,7 +216,6 @@ namespace TensileLite
         void RocProfiler::shutdown() {
             if (m_initialized) {
                 stop();
-                ROCPROFILER_CALL(rocprofiler_destroy_buffer(m_buffer), "Failed to destroy buffer");
                 m_initialized = false;
             }
         }
@@ -227,23 +228,11 @@ namespace TensileLite
             if (!ROCPROFILER_CHECK(rocprofiler_create_context(&rocprofiler->m_context), "Failed to create context in tool_init"))
                 return -1;
 
-            // Create buffer
-            if (!ROCPROFILER_CHECK(rocprofiler_create_buffer(rocprofiler->m_context,
-                                                             4096,  // size
-                                                             2048,  // watermark
-                                                             ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-                                                             RocProfiler::bufferedCallback,
-                                                             tool_data,
-                                                             &rocprofiler->m_buffer),
-                                  "Failed to create buffer"))
-                return -1;
-
-            // Configure dispatch counting service
-            if (!ROCPROFILER_CHECK(rocprofiler_configure_buffer_dispatch_counting_service(rocprofiler->m_context,
-                                                                                          rocprofiler->m_buffer,
-                                                                                          RocProfiler::dispatchCallback,
-                                                                                          tool_data),
-                                  "Failed to configure dispatch counting service"))
+            // configure dispatch counting service
+            if (!ROCPROFILER_CHECK(rocprofiler_configure_callback_dispatch_counting_service(rocprofiler->m_context,
+                                                                                            RocProfiler::dispatchCallback, tool_data,
+                                                                                            RocProfiler::recordCallback, tool_data),
+                                   "Failed to configure callback dispatch counting service"))
                 return -1;
 
             return 0;
@@ -259,54 +248,33 @@ namespace TensileLite
             std::lock_guard<std::mutex> lock(rocprofiler->m_mutex);
             if (rocprofiler->m_do) {
                 *config = rocprofiler->m_agentProfile;
-                auto dispatch_id = dispatch_data.dispatch_info.dispatch_id;
-                rocprofiler->m_profiler->m_solutionIdx2DispatchId[rocprofiler->m_profiler->m_currentSolutionIdx] = dispatch_id;
+                user_data->value = rocprofiler->m_profiler->m_currentSolutionIdx;
+            } else {
+                *config = rocprofiler_counter_config_id_t{0}; // no profiling
             }
         }
 
-        void RocProfiler::bufferedCallback(
-                              rocprofiler_context_id_t,
-                              rocprofiler_buffer_id_t,
-                              rocprofiler_record_header_t** headers,
-                              size_t num_headers,
-                              void* user_data,
-                              uint64_t)
+        void RocProfiler::recordCallback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                                         rocprofiler_counter_record_t* record_data,
+                                         unsigned long record_count,
+                                         rocprofiler_user_data_t user_data,
+                                         void* callback_data)
         {
-            auto* rocprofiler = static_cast<RocProfiler*>(user_data);
+            auto* rocprofiler = static_cast<RocProfiler*>(callback_data);
             std::lock_guard<std::mutex> lock(rocprofiler->m_mutex);
-
+            int solutionIdx = user_data.value;
+            auto dispatch_id = dispatch_data.dispatch_info.dispatch_id;
+            rocprofiler->m_profiler->m_solutionIdx2DispatchId[solutionIdx] = dispatch_id;
             Profiler::ProfileInfo pinfo;
-            bool has_header = false;
-            for (size_t i = 0; i < num_headers; ++i) {
-                auto* header = headers[i];
-
-                if (header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
-                    header->kind == ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER)
-                {
-                    auto* record = static_cast<rocprofiler_dispatch_counting_service_record_t*>(header->payload);
-                    pinfo.dispatch_id = record->dispatch_info.dispatch_id;
-                    pinfo.kernel_id = record->dispatch_info.kernel_id;
-                    pinfo.execution_time_us = (record->end_timestamp - record->start_timestamp) / 1e3;
-                    has_header = true;
-                }
-                else if (header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
-                         header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
-                {
-                    auto* record = static_cast<rocprofiler_counter_record_t*>(header->payload);
-                    rocprofiler_counter_id_t counter_id = {.handle = 0};
-                    rocprofiler_query_record_counter_id(record->id, &counter_id);
-
-                    // Get counter name
-                    auto it = std::find_if(rocprofiler->m_counterName2Id.begin(), rocprofiler->m_counterName2Id.end(),
-                                           [&counter_id](const std::pair<std::string, rocprofiler_counter_id_t>& pair) {
-                                               return counter_id.handle == pair.second.handle;
-                                           });
-                    if (it != rocprofiler->m_counterName2Id.end())
-                        pinfo.counters[it->first] = record->counter_value;
-                }
+            pinfo.kernel_id = dispatch_data.dispatch_info.kernel_id;
+            pinfo.execution_time_us = (dispatch_data.end_timestamp - dispatch_data.start_timestamp) / 1e3;
+            for (unsigned long i = 0; i < record_count; ++i) {
+                const auto& record = record_data[i];
+                rocprofiler_counter_id_t counter_id = {.handle = 0};
+                rocprofiler_query_record_counter_id(record.id, &counter_id);
+                pinfo.counters[counter_id.handle] = record.counter_value;
             }
-            if (has_header)
-                rocprofiler->m_profiler->m_dispatchId2ProfileInfo[pinfo.dispatch_id] = pinfo;
+            rocprofiler->m_profiler->m_dispatchId2ProfileInfo.emplace(dispatch_id, pinfo);
         }
 
         namespace rocprof

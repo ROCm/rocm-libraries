@@ -52,11 +52,9 @@ namespace TensileLite
         {
         public:
             struct ProfileInfo {
-                uint64_t dispatch_id;
                 uint64_t kernel_id;
                 double execution_time_us;
-                std::unordered_map<std::string, uint64_t> counters;
-                int solutionIdx;
+                std::unordered_map<uint64_t, uint64_t> counters;
             };
 
             static std::shared_ptr<Profiler>
@@ -200,7 +198,6 @@ namespace TensileLite
             uint32_t m_locationId;
             std::mutex m_mutex;
             rocprofiler_context_id_t m_context;
-            rocprofiler_buffer_id_t m_buffer;
             rocprofiler_agent_v0_t m_agent;
             rocprofiler_counter_config_id_t m_agentProfile;
             Profiler* m_profiler;
@@ -211,19 +208,19 @@ namespace TensileLite
 
             // Dispatch callback - called for each kernel dispatch
             static void dispatchCallback(
-                                  rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                                  rocprofiler_counter_config_id_t* config,
-                                  rocprofiler_user_data_t* user_data,
-                                  void* callback_data);
+                                         rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                                         rocprofiler_counter_config_id_t* config,
+                                         rocprofiler_user_data_t* user_data,
+                                         void* callback_data);
 
-            // Buffered callback - receives counter data
-            static void bufferedCallback(
-                                  rocprofiler_context_id_t,
-                                  rocprofiler_buffer_id_t,
-                                  rocprofiler_record_header_t** headers,
-                                  size_t num_headers,
-                                  void* user_data,
-                                  uint64_t);
+            // Record callback - called after kernel finished
+            static void recordCallback(
+                                       rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                                       rocprofiler_counter_record_t* record_data,
+                                       unsigned long record_count,
+                                       rocprofiler_user_data_t user_data,
+                                       void* callback_data);
+
         };
     }
 }
