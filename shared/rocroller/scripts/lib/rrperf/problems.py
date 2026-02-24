@@ -105,7 +105,7 @@ class TypeParameters:
     # If scale_A or scale_B is Separate, scaleBlockSize
     # needs to be set to a valid block size (e.g. 32)
     scaleBlockSize: int = -1
-    scaleSkipPermlane: bool = False
+    scaleSkipPermlane: str = "None"  # None, PreSwizzleScale, PreSwizzleScaleGFX950
 
     def __init__(self, typeParams: Optional[Any] = None, **kwargs):
         if isinstance(typeParams, TypeParameters):
@@ -251,8 +251,12 @@ class GEMM(GEMMProblem, GEMMSolution):
 
     @property
     def run_invariant_token(self):
+        # Build metadata (e.g. git commit tag) should not affect cross-run matching.
+        # Excluding version keeps GEMM comparisons stable across different commits.
+        solution_fields = field_dict(GEMMSolution, self)
+        solution_fields.pop("version", None)
         return repr(GEMMProblem(**field_dict(GEMMProblem, self))) + repr(
-            GEMMSolution(**field_dict(GEMMSolution, self))
+            GEMMSolution(**solution_fields)
         )
 
     @property

@@ -322,7 +322,7 @@ size_t rocfft_plan_t::AddMultiPlanItem(std::unique_ptr<MultiPlanItem>&& item,
        }))
         throw std::runtime_error("antecedent does not exist");
 
-    item->local_comm_rank = get_local_comm_rank();
+    item->local_comm_rank = desc.get_local_comm_rank();
 
     multiPlan.emplace_back(std::move(item));
     multiPlanAntecedents.emplace_back(antecedents);
@@ -368,7 +368,7 @@ try
     log_trace(
         __func__, "description", description, "comm_type", comm_type, "comm_handle", comm_handle);
 
-    // If you give say that you're going to give is a communicator, please don't give us a null
+    // If you say that you're going to give us a communicator, please don't give us a null
     // pointer.
     if(comm_type != rocfft_comm_none && comm_handle == nullptr)
     {
@@ -382,14 +382,19 @@ try
     case rocfft_comm_none:
     {
 #ifdef ROCFFT_MPI_ENABLE
-        description->user_mpi_comm = MPI_COMM_NULL;
+        description->mpi_comm.free();
 #endif
         break;
     }
 #ifdef ROCFFT_MPI_ENABLE
     case rocfft_comm_mpi:
     {
-        description->user_mpi_comm = *static_cast<MPI_Comm*>(comm_handle);
+        // duplicate the user-provided MPI communicator and set
+        // our own error policy on it
+        description->mpi_comm.duplicate(*static_cast<MPI_Comm*>(comm_handle));
+        auto mpiret = MPI_Comm_set_errhandler(description->mpi_comm, MPI_ERRORS_RETURN);
+        if(mpiret != MPI_SUCCESS)
+            return rocfft_status_failure;
         break;
     }
 #endif
@@ -814,6 +819,16 @@ std::string rocfft_bench_command(const rocfft_plan& plan)
     bench << params.token();
 
     return bench.str();
+}
+
+rocfft_location_t rocfft_plan_description_t::get_current_location() const
+{
+    rocfft_location_t current_loc;
+    current_loc.comm_rank = get_local_comm_rank();
+    current_loc.device    = hipInvalidDeviceId;
+    if(hipGetDevice(&current_loc.device) != hipSuccess || current_loc.device == hipInvalidDeviceId)
+        throw std::runtime_error("hipGetDevice failed");
+    return current_loc;
 }
 
 // Verify that the transform type, array type, and placement are coherent.
@@ -1249,7 +1264,7 @@ void rocfft_plan_t::AllocateInternalTempBuffers()
 {
     for(auto& t : tempBuffers)
     {
-        if(t.first.comm_rank != get_local_comm_rank())
+        if(t.first.comm_rank != desc.get_local_comm_rank())
             continue;
 
         t.second->alloc(t.first.device);
@@ -1340,7 +1355,7 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
 
     std::vector<BufferPtr> inputBufs = GatherUserBuffers(BufferPtr::user_input, bricks);
 
-    const auto local_comm_rank = get_local_comm_rank();
+    const auto local_comm_rank = desc.get_local_comm_rank();
 
     BufferPtr  gatherDest;
     const bool gatherToTemp
@@ -1481,7 +1496,7 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
 
     std::vector<BufferPtr> outputBufs = GatherUserBuffers(BufferPtr::user_output, bricks);
 
-    const auto local_comm_rank = get_local_comm_rank();
+    const auto local_comm_rank = desc.get_local_comm_rank();
 
     BufferPtr  scatterSrc;
     const bool scatterFromTemp
@@ -1648,7 +1663,7 @@ void rocfft_plan_t::GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& ex
     // complex side of real-complex transforms, since it's bigger.
     const size_t in_elem_count = compute_ptrdiff(lengths, desc.inStrides, batch, desc.inDist);
 
-    const auto local_comm_rank = get_local_comm_rank();
+    const auto local_comm_rank = desc.get_local_comm_rank();
 
     // May need buffer(s) to do the actual FFT
     std::shared_ptr<TempBufferLease> fftBuf;
@@ -1920,7 +1935,7 @@ static size_t C2CBrickOneDimension(rocfft_plan_t&                 plan,
     rootPlanData.deviceProp   = get_curr_device_prop();
 
     auto singlePlan       = BuildSingleDevicePlan(rootPlanData,
-                                            plan.get_local_comm_rank(),
+                                            plan.desc.get_local_comm_rank(),
                                             location,
                                             plan.transformType,
                                             loadOps,
@@ -2088,7 +2103,7 @@ void rocfft_plan_t::GlobalTransposeP2P(size_t                     elem_size,
 {
     std::vector<TempBufferLease> packBufs;
 
-    const auto local_comm_rank = get_local_comm_rank();
+    const auto local_comm_rank = desc.get_local_comm_rank();
 
     // loop over each input brick, finding the intersection of it with
     // every output brick
@@ -2244,8 +2259,8 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
                                        std::vector<size_t>&       outputItems,
                                        const std::string&         itemGroup)
 {
-    const auto local_comm_rank = get_local_comm_rank();
-    const auto local_comm_size = get_local_comm_size();
+    const auto local_comm_rank = desc.get_local_comm_rank();
+    const auto local_comm_size = desc.get_local_comm_size();
 
     // for us to be attempting an AlltoAll, bricks send/received
     // from/to the local rank should be on only one device
@@ -2430,7 +2445,7 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
         // ordering
         std::vector<int> comm_ranks_vec;
         std::copy(comm_ranks.begin(), comm_ranks.end(), std::back_inserter(comm_ranks_vec));
-        subcomm = make_subcommunicator(mpi_comm, comm_ranks_vec);
+        subcomm = make_subcommunicator(desc.mpi_comm, comm_ranks_vec);
     }
 #endif
 
@@ -2670,7 +2685,7 @@ void get_transpose_plan(const std::array<int, 3>&        input_grid,
 
 bool rocfft_plan_t::BuildOptMultiDevicePlan()
 {
-    const auto local_comm_rank = get_local_comm_rank();
+    const auto local_comm_rank = desc.get_local_comm_rank();
 
     // keep track of how many transposes we've done so we can log
     // distinct messages about each one
@@ -2992,7 +3007,7 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
     // TODO: make async.
 
     // First, compute the number of bricks per field.
-    std::vector<int> global_brick_count(plan->get_local_comm_size());
+    std::vector<int> global_brick_count(plan->desc.get_local_comm_size());
     typeof(decltype(global_brick_count)::value_type) local_brick_count = field.bricks.size();
     {
         // OpenMPI has a runtime error if this is const, so make sure it isn't.
@@ -3003,7 +3018,7 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
                               global_brick_count.data(),
                               1,
                               type_to_mpi_type<typeof(decltype(global_brick_count)::value_type)>(),
-                              plan->mpi_comm);
+                              plan->desc.mpi_comm);
         if(rcmpi != MPI_SUCCESS)
         {
             throw std::runtime_error("MPI_Allgather failed: " + std::to_string(rcmpi));
@@ -3011,7 +3026,7 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
     }
 
     // We need the displacments (as an int[]) for MPI_Allgatherv:
-    typeof(global_brick_count) displacements(plan->get_local_comm_size());
+    typeof(global_brick_count) displacements(plan->desc.get_local_comm_size());
     displacements[0] = 0;
     std::partial_sum(
         global_brick_count.begin(), global_brick_count.end() - 1, displacements.begin() + 1);
@@ -3076,13 +3091,13 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
         std::is_same_v<std::underlying_type<typeof(decltype(local_lowers)::value_type)>,
                        std::underlying_type<typeof(decltype(global_lowers)::value_type)>>);
     rcmpi = MPI_Allgatherv(local_lowers.data(),
-                           recvcount[plan->get_local_comm_rank()],
+                           recvcount[plan->desc.get_local_comm_rank()],
                            type_to_mpi_type<typeof(decltype(local_lowers)::value_type)>(),
                            global_lowers.data(),
                            recvcount.data(),
                            displacements.data(),
                            type_to_mpi_type<typeof(decltype(global_lowers)::value_type)>(),
-                           plan->mpi_comm);
+                           plan->desc.mpi_comm);
     if(rcmpi != MPI_SUCCESS)
     {
         throw std::runtime_error("MPI_Allgatherv failed: " + std::to_string(rcmpi));
@@ -3093,13 +3108,13 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
         std::is_same_v<std::underlying_type<typeof(decltype(local_uppers)::value_type)>,
                        std::underlying_type<typeof(decltype(global_uppers)::value_type)>>);
     rcmpi = MPI_Allgatherv(local_uppers.data(),
-                           recvcount[plan->get_local_comm_rank()],
+                           recvcount[plan->desc.get_local_comm_rank()],
                            type_to_mpi_type<typeof(decltype(local_uppers)::value_type)>(),
                            global_uppers.data(),
                            recvcount.data(),
                            displacements.data(),
                            type_to_mpi_type<typeof(decltype(global_uppers)::value_type)>(),
-                           plan->mpi_comm);
+                           plan->desc.mpi_comm);
     if(rcmpi != MPI_SUCCESS)
     {
         throw std::runtime_error("MPI_Allgatherv failed: " + std::to_string(rcmpi));
@@ -3110,13 +3125,13 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
         std::is_same_v<std::underlying_type<typeof(decltype(local_strides)::value_type)>,
                        std::underlying_type<typeof(decltype(global_strides)::value_type)>>);
     rcmpi = MPI_Allgatherv(local_strides.data(),
-                           recvcount[plan->get_local_comm_rank()],
+                           recvcount[plan->desc.get_local_comm_rank()],
                            type_to_mpi_type<typeof(decltype(local_strides)::value_type)>(),
                            global_strides.data(),
                            recvcount.data(),
                            displacements.data(),
                            type_to_mpi_type<typeof(decltype(global_strides)::value_type)>(),
-                           plan->mpi_comm);
+                           plan->desc.mpi_comm);
     if(rcmpi != MPI_SUCCESS)
     {
         throw std::runtime_error("MPI_Allgatherv failed: " + std::to_string(rcmpi));
@@ -3127,13 +3142,13 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
         std::is_same_v<std::underlying_type<typeof(decltype(local_devices)::value_type)>,
                        std::underlying_type<typeof(decltype(global_devices)::value_type)>>);
     rcmpi = MPI_Allgatherv(local_devices.data(),
-                           global_brick_count[plan->get_local_comm_rank()],
+                           global_brick_count[plan->desc.get_local_comm_rank()],
                            type_to_mpi_type<typeof(decltype(local_devices)::value_type)>(),
                            global_devices.data(),
                            global_brick_count.data(),
                            scalar_displacements.data(),
                            type_to_mpi_type<typeof(decltype(global_devices)::value_type)>(),
-                           plan->mpi_comm);
+                           plan->desc.mpi_comm);
     if(rcmpi != MPI_SUCCESS)
     {
         throw std::runtime_error("MPI_Allgatherv failed: " + std::to_string(rcmpi));
@@ -3144,13 +3159,13 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
         std::is_same_v<std::underlying_type<typeof(decltype(local_comm_ranks)::value_type)>,
                        std::underlying_type<typeof(decltype(global_comm_ranks)::value_type)>>);
     rcmpi = MPI_Allgatherv(local_comm_ranks.data(),
-                           global_brick_count[plan->get_local_comm_rank()],
+                           global_brick_count[plan->desc.get_local_comm_rank()],
                            type_to_mpi_type<typeof(decltype(local_comm_ranks)::value_type)>(),
                            global_comm_ranks.data(),
                            global_brick_count.data(),
                            scalar_displacements.data(),
                            type_to_mpi_type<typeof(decltype(global_comm_ranks)::value_type)>(),
-                           plan->mpi_comm);
+                           plan->desc.mpi_comm);
     if(rcmpi != MPI_SUCCESS)
     {
         throw std::runtime_error("MPI_Allgatherv failed: " + std::to_string(rcmpi));
@@ -3201,7 +3216,7 @@ rocfft_status allgather_brick_params_mpi(rocfft_plan& plan)
 #if !defined ROCFFT_MPI_ENABLE
     return rocfft_status_failure;
 #else
-    if(!plan->mpi_comm)
+    if(!plan->desc.mpi_comm)
     {
         // If the comm type is MPI, but the comm pointer is null, then return an error.
         return rocfft_status_failure;
@@ -3219,7 +3234,7 @@ rocfft_status allgather_brick_params_mpi(rocfft_plan& plan)
     {
         for(auto& ibrick : ifield.bricks)
         {
-            ibrick.location.comm_rank = plan->get_local_comm_rank();
+            ibrick.location.comm_rank = plan->desc.get_local_comm_rank();
             if(local_bricklength == 0)
             {
                 local_bricklength = ibrick.lower.size();
@@ -3237,7 +3252,7 @@ rocfft_status allgather_brick_params_mpi(rocfft_plan& plan)
     {
         for(auto& obrick : ofield.bricks)
         {
-            obrick.location.comm_rank = plan->get_local_comm_rank();
+            obrick.location.comm_rank = plan->desc.get_local_comm_rank();
             if(local_bricklength == 0)
             {
                 local_bricklength = obrick.lower.size();
@@ -3258,14 +3273,15 @@ rocfft_status allgather_brick_params_mpi(rocfft_plan& plan)
     // which is ok.  However, it should not build its house out of straw.
     size_t global_brick_length = 0;
     {
-        std::vector<decltype(local_bricklength)> all_brick_lengths(plan->get_local_comm_size());
+        std::vector<decltype(local_bricklength)> all_brick_lengths(
+            plan->desc.get_local_comm_size());
         rcmpi = MPI_Allgather(&local_bricklength,
                               1,
                               type_to_mpi_type<typeof(local_bricklength)>(),
                               all_brick_lengths.data(),
                               1,
                               type_to_mpi_type<typeof(decltype(all_brick_lengths)::value_type)>(),
-                              plan->mpi_comm);
+                              plan->desc.mpi_comm);
         if(rcmpi != MPI_SUCCESS)
         {
             throw std::runtime_error("MPI_Allgather failed: " + std::to_string(rcmpi));
@@ -3292,9 +3308,9 @@ rocfft_status allgather_brick_params_mpi(rocfft_plan& plan)
     // Verify that all ranks have the same number of input and output fields.
     try
     {
-        if(!all_mpi_ranks_same_scalar(plan->desc.inFields.size(), plan->mpi_comm))
+        if(!all_mpi_ranks_same_scalar(plan->desc.inFields.size(), plan->desc.mpi_comm))
             return rocfft_status_failure;
-        if(!all_mpi_ranks_same_scalar(plan->desc.outFields.size(), plan->mpi_comm))
+        if(!all_mpi_ranks_same_scalar(plan->desc.outFields.size(), plan->desc.mpi_comm))
             return rocfft_status_failure;
     }
     catch(std::exception& e)
@@ -3398,10 +3414,10 @@ void rocfft_plan_t::ValidateFields() const
             "multi-process transforms require both input and output fields to be specified");
 }
 
-int rocfft_plan_t::get_local_comm_rank() const
+int rocfft_plan_description_t::get_local_comm_rank() const
 {
 #ifdef ROCFFT_MPI_ENABLE
-    if(desc.comm_type == rocfft_comm_none || !mpi_comm)
+    if(comm_type == rocfft_comm_none || !mpi_comm)
         return 0;
 
     int  mpi_rank = 0;
@@ -3414,10 +3430,10 @@ int rocfft_plan_t::get_local_comm_rank() const
 #endif
 }
 
-int rocfft_plan_t::get_local_comm_size() const
+int rocfft_plan_description_t::get_local_comm_size() const
 {
 #ifdef ROCFFT_MPI_ENABLE
-    if(desc.comm_type == rocfft_comm_none || !mpi_comm)
+    if(comm_type == rocfft_comm_none || !mpi_comm)
         return 1;
 
     int  mpi_size = 0;
@@ -3439,9 +3455,12 @@ rocfft_status rocfft_plan_create_internal(rocfft_plan                   plan,
                                           const size_t                  number_of_transforms,
                                           const rocfft_plan_description description)
 {
+#ifdef ROCFFT_MPI_ENABLE
+// TODO allgather for placement, transform_type, precision, dimensions, {lengths}, and
+// number_of_transforms and validate that all ranks' args are identical, before proceeding
+#endif
     if(dimensions > 3)
         return rocfft_status_invalid_dimensions;
-
     try
     {
         plan->rank = dimensions;
@@ -3472,16 +3491,6 @@ rocfft_status rocfft_plan_create_internal(rocfft_plan                   plan,
 #ifdef ROCFFT_MPI_ENABLE
         if(plan->desc.comm_type == rocfft_comm_mpi)
         {
-            // duplicate the user-provided MPI communicator and set
-            // our own error policy on it
-            if(plan->desc.user_mpi_comm)
-            {
-                plan->mpi_comm.duplicate(plan->desc.user_mpi_comm);
-                auto mpiret = MPI_Comm_set_errhandler(plan->mpi_comm, MPI_ERRORS_RETURN);
-                if(mpiret != MPI_SUCCESS)
-                    return rocfft_status_failure;
-            }
-
             // Each rank needs to know the global data distribution for plan generation, so we
             // gather all the brick information here.
             rcfft = allgather_brick_params_mpi(plan);
