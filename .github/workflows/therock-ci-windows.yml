@@ -103,6 +103,7 @@ jobs:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: "ADHOCBUILD"
           extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=${{ github.workspace }} ${{ inputs.cmake_options }}"
+          cmake_preset: windows-release
         run: |
           # clear cache before build and after download
           ccache -z
