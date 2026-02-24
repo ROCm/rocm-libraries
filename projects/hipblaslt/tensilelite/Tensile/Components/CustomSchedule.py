@@ -4200,7 +4200,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         lwsa   = [                                                                          20] # use delay before mfma4x4x4
         lwsb   = [                                                                          20]
         
-    elif isNN(kernel) and TLDS==1  and kernel["VectorWidthA"] == 2 and False: # force disable this kernel due to test fail (TODO: re-enable it)
+    elif isNN(kernel) and TLDS==1  and kernel["VectorWidthA"] == 2:
         disable_validation = True # swap instructions included in pack are not supported yet
 
         lra0   = [0,0,0,0,
