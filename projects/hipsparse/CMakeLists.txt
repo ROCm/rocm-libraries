@@ -264,7 +264,7 @@ if(HIPSPARSE_ENABLE_ASAN)
     target_link_options(hipsparse PRIVATE -fsanitize=address -shared-libasan -fuse-ld=lld)
     
     # Apply ASAN to client common libraries
-    if(HIPSPARSE_ENABLE_CLIENT)
+    if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
         target_compile_options(hipsparse-clients-common PUBLIC -fsanitize=address -shared-libasan)
         target_link_options(hipsparse-clients-common PUBLIC -fsanitize=address -shared-libasan -fuse-ld=lld)
         

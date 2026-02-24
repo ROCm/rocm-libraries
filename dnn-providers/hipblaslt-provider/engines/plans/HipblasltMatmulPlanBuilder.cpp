@@ -16,52 +16,263 @@ namespace hipblaslt_plugin
 {
 namespace
 {
-bool checkDataTypes(const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
-                    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB,
-                    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tC)
+
+bool isBias(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attr)
 {
-    const auto& aType = tA.dataType();
-    const auto& bType = tB.dataType();
-    const auto& cType = tC.dataType();
+    return attr.operation() == hipdnn_data_sdk::data_objects::PointwiseMode::ADD;
+}
+
+bool isSupportedActivation(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attr)
+{
+    using PointwiseMode = hipdnn_data_sdk::data_objects::PointwiseMode;
+    switch(attr.operation())
+    {
+    case PointwiseMode::RELU_FWD:
+    case PointwiseMode::GELU_APPROX_TANH_FWD:
+    case PointwiseMode::SWISH_FWD:
+        return true;
+    default:
+        return false;
+    }
+}
+
+std::tuple<const hipdnn_data_sdk::data_objects::MatmulAttributes&,
+           const hipdnn_data_sdk::data_objects::PointwiseAttributes*,
+           const hipdnn_data_sdk::data_objects::PointwiseAttributes*>
+    getNodeAttrs(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+{
+    if(opGraph.nodeCount() < 1 || opGraph.nodeCount() > 3)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Matmul plan builder supports only graphs with 1, 2 or 3 nodes. Graph has "
+                + std::to_string(opGraph.nodeCount()) + " nodes");
+    }
+
+    // Expect that the graph is sorted in topological order
+    // Expect the first node to be matmul operation
+    const auto& matmulNodeWrapper = opGraph.getNodeWrapper(0);
+    const auto matmulNodeName = matmulNodeWrapper.name();
+    if(matmulNodeWrapper.attributesType()
+       != hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "First node in the graph (" + matmulNodeName + ") must be matmul. Found node of type: "
+                + std::string(
+                    hipdnn_data_sdk::data_objects::toString(matmulNodeWrapper.attributesType())));
+    }
+
+    const auto& matmulAttr
+        = matmulNodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::MatmulAttributes>();
+    if(opGraph.nodeCount() == 1)
+    {
+        return {matmulAttr, nullptr, nullptr};
+    }
+
+    // Expect the possble second node to be either bias or activation forward
+    const auto& secondNodeWrapper = opGraph.getNodeWrapper(1);
+    const auto secondNodeName = secondNodeWrapper.name();
+    if(secondNodeWrapper.attributesType()
+       != hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Second node in the graph (" + secondNodeName
+                + ") must be pointwise operation. Found node of type: "
+                + std::string(
+                    hipdnn_data_sdk::data_objects::toString(secondNodeWrapper.attributesType())));
+    }
+    const auto& secondNodeAttr
+        = opGraph.getNodeWrapper(1)
+              .attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+
+    if(isSupportedActivation(secondNodeAttr))
+    {
+        // The second node is activation.
+        // If activation node is already present, then graph must have only 2 nodes
+        if(opGraph.nodeCount() != 2)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Activation cannot be followed by another node. Found "
+                    + std::to_string(opGraph.nodeCount()) + " nodes in the graph.");
+        }
+
+        // The second node is activation
+        const auto& activAttr = secondNodeAttr;
+        return {matmulAttr, nullptr, &activAttr};
+    }
+
+    if(!isBias(secondNodeAttr))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Second node in the graph (" + secondNodeName
+                + ") must be either bias addition or supported activation. Found pointwise "
+                  "operation: "
+                + std::string(hipdnn_data_sdk::data_objects::toString(secondNodeAttr.operation())));
+    }
+
+    // The second node is bias
+    const auto& biasAttr = secondNodeAttr;
+    if(opGraph.nodeCount() == 2)
+    {
+        return {matmulAttr, &biasAttr, nullptr};
+    }
+
+    // The third node after bias is activation
+    const auto& thirdNodeWrapper = opGraph.getNodeWrapper(2);
+    const auto thirdNodeName = thirdNodeWrapper.name();
+    if(thirdNodeWrapper.attributesType()
+       != hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Third node in the graph (" + thirdNodeName
+                + ") must be pointwise operation. Found node of type: "
+                + std::string(
+                    hipdnn_data_sdk::data_objects::toString(thirdNodeWrapper.attributesType())));
+    }
+    const auto& thirdNodeAttr
+        = opGraph.getNodeWrapper(2)
+              .attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+
+    if(!isSupportedActivation(thirdNodeAttr))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Third node in the graph (" + thirdNodeName
+                + ") must be supported activation. Found pointwise operation: "
+                + std::string(hipdnn_data_sdk::data_objects::toString(thirdNodeAttr.operation())));
+    }
+
+    const auto& activAttr = thirdNodeAttr;
+    return {matmulAttr, &biasAttr, &activAttr};
+}
+
+void checkNodeAttrsTensors(
+    const hipdnn_data_sdk::data_objects::MatmulAttributes& matmulAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes* activAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    const auto& aType
+        = hipblaslt_utils::findTensorAttributes(tensorMap, matmulAttr.a_tensor_uid()).dataType();
+    const auto& bType
+        = hipblaslt_utils::findTensorAttributes(tensorMap, matmulAttr.b_tensor_uid()).dataType();
+    const auto& cType
+        = hipblaslt_utils::findTensorAttributes(tensorMap, matmulAttr.c_tensor_uid()).dataType();
 
     static constexpr std::array<hipdnn_data_sdk::data_objects::DataType, 3> validDataTypes
         = {hipdnn_data_sdk::data_objects::DataType::FLOAT,
            hipdnn_data_sdk::data_objects::DataType::HALF,
            hipdnn_data_sdk::data_objects::DataType::BFLOAT16};
+
     if(std::find(validDataTypes.begin(), validDataTypes.end(), aType) == validDataTypes.end()
        || std::find(validDataTypes.begin(), validDataTypes.end(), bType) == validDataTypes.end()
        || std::find(validDataTypes.begin(), validDataTypes.end(), cType) == validDataTypes.end())
     {
-        HIPDNN_PLUGIN_LOG_INFO("Matmul plan builder: only fp32, fp16 and bf16 are supported");
-        return false;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Matmul node input and output data types must be fp32, fp16 or bf16");
     }
 
-    return true;
+    // Check the connections between the matmul and bias/activation nodes
+    if(biasAttr != nullptr)
+    {
+        if(!biasAttr->in_1_tensor_uid().has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                           "Bias node must have two input tensors");
+        }
+
+        // One of the bias inputs must be the matmul output
+        if(biasAttr->in_0_tensor_uid() != matmulAttr.c_tensor_uid()
+           && biasAttr->in_1_tensor_uid().value() != matmulAttr.c_tensor_uid())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "One of the bias node inputs must be the matmul output tensor");
+        }
+
+        // The existing activation input must be the bias output
+        if(activAttr != nullptr && activAttr->in_0_tensor_uid() != biasAttr->out_0_tensor_uid())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Activation node input must be the bias node output tensor");
+        }
+
+        const auto& biasInType
+            = biasAttr->in_0_tensor_uid() != matmulAttr.c_tensor_uid()
+                  ? hipblaslt_utils::findTensorAttributes(tensorMap,
+                                                          biasAttr->in_1_tensor_uid().value())
+                        .dataType()
+                  : hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->in_0_tensor_uid())
+                        .dataType();
+        const auto& biasOutType
+            = hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid())
+                  .dataType();
+
+        if(std::find(validDataTypes.begin(), validDataTypes.end(), biasInType)
+               == validDataTypes.end()
+           || std::find(validDataTypes.begin(), validDataTypes.end(), biasOutType)
+                  == validDataTypes.end())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Bias node input and output data types must be fp32, fp16 or bf16");
+        }
+    }
+    else if(activAttr != nullptr)
+    {
+        // The activation input must be the matmul output
+        if(activAttr->in_0_tensor_uid() != matmulAttr.c_tensor_uid())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Activation node input must be the matmul node output tensor");
+        }
+    }
 }
 
-void validateGraphConfiguration(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+void checkComputeTypes(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
+                       const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
+                       const hipdnn_data_sdk::data_objects::PointwiseAttributes* activAttr)
 {
-    if(opGraph.nodeCount() != 1)
+    uint32_t matmulAttrIdx = 0;
+    uint32_t biasAttrIdx = 1;
+    uint32_t activAttrIdx = (biasAttr != nullptr) ? 2 : 1;
+
+    if(graph.getNode(matmulAttrIdx).compute_data_type()
+       != hipdnn_data_sdk::data_objects::DataType::FLOAT)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Matmul plan builder supports only single node graphs. Graph has "
-                + std::to_string(opGraph.nodeCount()) + " nodes");
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Matmul node compute data type must be float");
     }
 
-    if(opGraph.getNode(0).attributes_type()
-       != hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes)
+    if(biasAttr != nullptr)
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Matmul plan builder supports only MatmulAttributes nodes");
+        if(graph.getNode(biasAttrIdx).compute_data_type()
+           != graph.getNode(matmulAttrIdx).compute_data_type())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Bias node compute data type must be equal to matmul node compute data type");
+        }
     }
 
-    if(opGraph.getNode(0).compute_data_type() != hipdnn_data_sdk::data_objects::DataType::FLOAT)
+    if(activAttr != nullptr)
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Matmul plan builder only supports nodes with an fp32 compute_data_type");
+        if(graph.getNode(activAttrIdx).compute_data_type()
+           != graph.getNode(matmulAttrIdx).compute_data_type())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Activation node compute data type must be equal to matmul node compute data type");
+        }
     }
 }
 
@@ -73,21 +284,18 @@ bool HipblasltMatmulPlanBuilder::isApplicable(
 {
     try
     {
-        validateGraphConfiguration(opGraph);
+        auto nodeAttrs = getNodeAttrs(opGraph);
+        checkNodeAttrsTensors(std::get<0>(nodeAttrs),
+                              std::get<1>(nodeAttrs),
+                              std::get<2>(nodeAttrs),
+                              opGraph.getTensorMap());
 
-        const auto& attr = opGraph.getNodeWrapper(0)
-                               .attributesAs<hipdnn_data_sdk::data_objects::MatmulAttributes>();
+        checkComputeTypes(opGraph, std::get<1>(nodeAttrs), std::get<2>(nodeAttrs));
 
-        const auto& tensorMap = opGraph.getTensorMap();
-        auto aAttr = hipblaslt_utils::findTensorAttributes(tensorMap, attr.a_tensor_uid());
-        auto bAttr = hipblaslt_utils::findTensorAttributes(tensorMap, attr.b_tensor_uid());
-        auto cAttr = hipblaslt_utils::findTensorAttributes(tensorMap, attr.c_tensor_uid());
-        if(!checkDataTypes(aAttr, bAttr, cAttr))
-        {
-            return false;
-        }
-
-        MatmulParams params(attr, opGraph.getTensorMap());
+        MatmulParams params(std::get<0>(nodeAttrs),
+                            std::get<1>(nodeAttrs),
+                            std::get<2>(nodeAttrs),
+                            opGraph.getTensorMap());
         MatmulPlan plan(handle, std::move(params));
         return true;
     }
@@ -102,11 +310,16 @@ size_t HipblasltMatmulPlanBuilder::getWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    validateGraphConfiguration(opGraph);
+    auto nodeAttrs = getNodeAttrs(opGraph);
+    checkNodeAttrsTensors(std::get<0>(nodeAttrs),
+                          std::get<1>(nodeAttrs),
+                          std::get<2>(nodeAttrs),
+                          opGraph.getTensorMap());
 
-    const auto& attr
-        = opGraph.getNodeWrapper(0).attributesAs<hipdnn_data_sdk::data_objects::MatmulAttributes>();
-    MatmulParams params(attr, opGraph.getTensorMap());
+    MatmulParams params(std::get<0>(nodeAttrs),
+                        std::get<1>(nodeAttrs),
+                        std::get<2>(nodeAttrs),
+                        opGraph.getTensorMap());
     MatmulPlan plan(handle, std::move(params));
     return plan.getWorkspaceSize(handle);
 }
@@ -116,13 +329,18 @@ void HipblasltMatmulPlanBuilder::buildPlan(
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
-    validateGraphConfiguration(opGraph);
+    auto nodeAttrs = getNodeAttrs(opGraph);
+    checkNodeAttrsTensors(std::get<0>(nodeAttrs),
+                          std::get<1>(nodeAttrs),
+                          std::get<2>(nodeAttrs),
+                          opGraph.getTensorMap());
 
-    const auto& nodeWrapper = opGraph.getNodeWrapper(0);
-    HIPDNN_PLUGIN_LOG_INFO("Building matmul plan for node: " << nodeWrapper.name());
+    HIPDNN_PLUGIN_LOG_INFO("Building matmul plan for node: " << opGraph.getNodeWrapper(0).name());
 
-    const auto& attr = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::MatmulAttributes>();
-    MatmulParams params(attr, opGraph.getTensorMap());
+    MatmulParams params(std::get<0>(nodeAttrs),
+                        std::get<1>(nodeAttrs),
+                        std::get<2>(nodeAttrs),
+                        opGraph.getTensorMap());
     auto plan = std::make_unique<MatmulPlan>(handle, std::move(params));
     executionContext.setPlan(std::move(plan));
 }
