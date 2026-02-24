@@ -367,7 +367,7 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   preSwizzleTile,
                                                                   preTile);
     }
-    else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E2M3_EXT)
+    else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E2M3)
     {
         DGen::DataGenerator<DGen::ocp_e2m3_mxfp6> dgen;
         return generateData<decltype(dgen), DGen::ocp_e2m3_mxfp6>(dgen,
@@ -383,7 +383,7 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   preSwizzleTile,
                                                                   preTile);
     }
-    else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E3M2_EXT)
+    else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E3M2)
     {
         DGen::DataGenerator<DGen::ocp_e3m2_mxfp6> dgen;
         return generateData<decltype(dgen), DGen::ocp_e3m2_mxfp6>(dgen,
@@ -399,7 +399,7 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   preSwizzleTile,
                                                                   preTile);
     }
-    else if(static_cast<hipDataType>(dataType) == HIP_R_4F_E2M1_EXT)
+    else if(static_cast<hipDataType>(dataType) == HIP_R_4F_E2M1)
     {
         DGen::DataGenerator<DGen::ocp_e2m1_mxfp4> dgen;
         return generateData<decltype(dgen), DGen::ocp_e2m1_mxfp4>(dgen,

@@ -26,8 +26,9 @@
 
 #pragma once
 
-#include <hipblaslt/hipblaslt.h>
-#include <stdint.h>
+#include <hip/hip_runtime.h>
+
+#include <vector>
 
 std::vector<float> generateMXInput(hipDataType                dataType,
                                    void*                      data,

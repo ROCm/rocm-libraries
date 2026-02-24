@@ -1787,7 +1787,7 @@ namespace TensileLite
                 auto& pristineMXScaleA
                     = m_vdata[ContractionProblemGemm::TENSOR::MXSA].pristine[problem.mxsa().dataType()];
 
-                generateMXInput((hipDataType)HIP_R_4F_E2M1_EXT,
+                generateMXInput((hipDataType)HIP_R_4F_E2M1,
                                 pristineA.cpuInput.valid.get(),
                                 pristineMXScaleA.cpuInput.valid.get(),
                                 rows,
@@ -1816,7 +1816,7 @@ namespace TensileLite
                 auto& pristineMXScaleB
                     = m_vdata[ContractionProblemGemm::TENSOR::MXSB].pristine[problem.mxsb().dataType()];
 
-                generateMXInput((hipDataType)HIP_R_4F_E2M1_EXT,
+                generateMXInput((hipDataType)HIP_R_4F_E2M1,
                                 pristineB.cpuInput.valid.get(),
                                 pristineMXScaleB.cpuInput.valid.get(),
                                 rows,
