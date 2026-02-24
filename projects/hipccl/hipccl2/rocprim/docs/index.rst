@@ -32,6 +32,8 @@ The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/de
   .. grid-item-card:: How to
 
     * :doc:`Use the SPIR-V target with rocPRIM <./how-to/rocPRIM-spir-v>`
+    * :doc:`Use primbench for benchmarking <./how-to/rocPRIM-primbench>`
+    
    
   .. grid-item-card:: Reference
 
