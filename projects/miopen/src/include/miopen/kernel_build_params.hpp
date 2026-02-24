@@ -31,6 +31,7 @@
 #include <initializer_list>
 #include <string>
 #include <vector>
+#include <iterator>
 
 #include <miopen/config.hpp>
 

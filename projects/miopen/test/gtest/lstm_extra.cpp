@@ -27,9 +27,51 @@
 #include "lstm.hpp"
 #include <hip/hip_runtime.h>
 
-struct GPU_LSTM_extra_FP32
-    : LSTM_test<float>,
-      testing::TestWithParam<std::tuple<int, int, int, int, int, int, int, int, int>>
+namespace {
+
+auto GetTestCases()
+{
+    return std::vector{
+        // clang-format off
+        //          dir-mode no-hx no-dhy no-cx no-dcy no-hy no-dhx no-cy no-dcx
+        std::make_tuple(0,     1,    0,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(0,     0,    1,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(0,     1,    1,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(0,     0,    0,     1,    0,     0,    0,     0,    0),
+        std::make_tuple(0,     1,    0,     1,    0,     0,    0,     0,    0),
+        std::make_tuple(0,     0,    0,     0,    1,     0,    0,     0,    0),
+        std::make_tuple(0,     0,    0,     1,    1,     0,    0,     0,    0),
+        std::make_tuple(1,     1,    0,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(1,     0,    1,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(1,     1,    1,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(1,     0,    0,     1,    0,     0,    0,     0,    0),
+        std::make_tuple(1,     1,    0,     1,    0,     0,    0,     0,    0),
+        std::make_tuple(1,     0,    0,     0,    1,     0,    0,     0,    0),
+        std::make_tuple(1,     0,    0,     1,    1,     0,    0,     0,    0),
+        std::make_tuple(0,     0,    0,     0,    0,     1,    0,     0,    0),
+        std::make_tuple(0,     0,    0,     0,    0,     0,    1,     0,    0),
+        std::make_tuple(0,     0,    0,     0,    0,     1,    1,     0,    0),
+        std::make_tuple(0,     0,    0,     0,    0,     0,    0,     1,    0),
+        std::make_tuple(0,     0,    0,     0,    0,     1,    0,     1,    0),
+        std::make_tuple(0,     0,    0,     0,    0,     0,    0,     0,    1),
+        std::make_tuple(0,     0,    0,     0,    0,     0,    0,     1,    1),
+        std::make_tuple(1,     0,    0,     0,    0,     1,    0,     0,    0),
+        std::make_tuple(1,     0,    0,     0,    0,     0,    1,     0,    0),
+        std::make_tuple(1,     0,    0,     0,    0,     1,    1,     0,    1),
+        std::make_tuple(1,     0,    0,     0,    0,     0,    0,     1,    0),
+        std::make_tuple(1,     0,    0,     0,    0,     1,    0,     1,    0),
+        std::make_tuple(1,     0,    0,     0,    0,     0,    0,     0,    1),
+        std::make_tuple(1,     0,    0,     0,    0,     0,    0,     1,    1),
+        std::make_tuple(0,     1,    1,     1,    1,     1,    1,     1,    1),
+        std::make_tuple(1,     1,    1,     1,    1,     1,    1,     1,    1)
+        // clang-format on
+    };
+}
+
+} // namespace
+
+using TestCase = decltype(GetTestCases())::value_type;
+struct GPU_LSTM_extra_FP32 : LSTM_test<float>, testing::TestWithParam<TestCase>
 {
 };
 
@@ -65,39 +107,4 @@ TEST_P(GPU_LSTM_extra_FP32, FloatTest)
     RunTest();
 };
 
-// clang-format off
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    GPU_LSTM_extra_FP32,
-    testing::Values(// dir-mode no-hx no-dhy no-cx no-dcy no-hy no-dhx no-cy no-dcx
-        std::make_tuple(0,       1,    0,     0,    0,     0,    0,     0,    0),
-        std::make_tuple(0,       0,    1,     0,    0,     0,    0,     0,    0),
-        std::make_tuple(0,       1,    1,     0,    0,     0,    0,     0,    0),
-        std::make_tuple(0,       0,    0,     1,    0,     0,    0,     0,    0),
-        std::make_tuple(0,       1,    0,     1,    0,     0,    0,     0,    0),
-        std::make_tuple(0,       0,    0,     0,    1,     0,    0,     0,    0),
-        std::make_tuple(0,       0,    0,     1,    1,     0,    0,     0,    0),
-        std::make_tuple(1,       1,    0,     0,    0,     0,    0,     0,    0),
-        std::make_tuple(1,       0,    1,     0,    0,     0,    0,     0,    0),
-        std::make_tuple(1,       1,    1,     0,    0,     0,    0,     0,    0),
-        std::make_tuple(1,       0,    0,     1,    0,     0,    0,     0,    0),
-        std::make_tuple(1,       1,    0,     1,    0,     0,    0,     0,    0),
-        std::make_tuple(1,       0,    0,     0,    1,     0,    0,     0,    0),
-        std::make_tuple(1,       0,    0,     1,    1,     0,    0,     0,    0),
-        std::make_tuple(0,       0,    0,     0,    0,     1,    0,     0,    0),
-        std::make_tuple(0,       0,    0,     0,    0,     0,    1,     0,    0),
-        std::make_tuple(0,       0,    0,     0,    0,     1,    1,     0,    0),
-        std::make_tuple(0,       0,    0,     0,    0,     0,    0,     1,    0),
-        std::make_tuple(0,       0,    0,     0,    0,     1,    0,     1,    0),
-        std::make_tuple(0,       0,    0,     0,    0,     0,    0,     0,    1),
-        std::make_tuple(0,       0,    0,     0,    0,     0,    0,     1,    1),
-        std::make_tuple(1,       0,    0,     0,    0,     1,    0,     0,    0),
-        std::make_tuple(1,       0,    0,     0,    0,     0,    1,     0,    0),
-        std::make_tuple(1,       0,    0,     0,    0,     1,    1,     0,    1),
-        std::make_tuple(1,       0,    0,     0,    0,     0,    0,     1,    0),
-        std::make_tuple(1,       0,    0,     0,    0,     1,    0,     1,    0),
-        std::make_tuple(1,       0,    0,     0,    0,     0,    0,     0,    1),
-        std::make_tuple(1,       0,    0,     0,    0,     0,    0,     1,    1),
-        std::make_tuple(0,       1,    1,     1,    1,     1,    1,     1,    1),
-        std::make_tuple(1,       1,    1,     1,    1,     1,    1,     1,    1)));
-// clang-format on
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_extra_FP32, testing::ValuesIn(GetTestCases()));

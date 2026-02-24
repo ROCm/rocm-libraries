@@ -24,12 +24,6 @@
  *
  *******************************************************************************/
 
-//#include <array>
-//#include <vector>
-
-//#include <miopen/float_equal.hpp>
-//#include <miopen/miopen.h>
-
 #include "gtest_common.hpp"
 #include "test_parameter_name_generator.hpp"
 
@@ -232,7 +226,7 @@ struct verify_w_tensor_get
         const int bi              = (directionMode == miopenRNNbidirection) ? 2 : 1;
 
         size_t wei_sz{0};
-        auto status   = miopenGetRNNParamsSize(&handle, rnnDesc, inputTensor, &wei_sz, miopenFloat);
+        auto status = miopenGetRNNParamsSize(&handle, rnnDesc, inputTensor, &wei_sz, miopenFloat);
         EXPECT_EQ(status, miopenStatusSuccess);
 
         wei_sz /= sizeof(float);

@@ -27,8 +27,43 @@
 #include "lstm.hpp"
 #include <hip/hip_runtime.h>
 
-struct GPU_DeepBench_LSTM_FP32 : LSTM_test<float>,
-                                 testing::TestWithParam<std::tuple<int, int, int, int>>
+namespace {
+
+auto GetTestCases()
+{
+    return std::vector{
+        // clang-format off
+        //            batch-size seq-len vector-len hidden-size
+        std::make_tuple( 16,       25,      512,       512 ),
+        std::make_tuple( 32,       25,      512,       512 ),
+        std::make_tuple( 64,       25,      512,       512 ),
+        std::make_tuple(128,       25,      512,       512 ),
+        std::make_tuple( 16,       25,     1024,      1024 ),
+        std::make_tuple( 32,       25,     1024,      1024 ),
+        std::make_tuple( 64,       25,     1024,      1024 ),
+        std::make_tuple(128,       25,     1024,      1024 ),
+        std::make_tuple( 16,       25,     2048,      2048 ),
+        std::make_tuple( 32,       25,     2048,      2048 ),
+        std::make_tuple( 64,       25,     2048,      2048 ),
+        std::make_tuple(128,       25,     2048,      2048 ),
+        std::make_tuple( 16,       25,     4096,      4096 ),
+        std::make_tuple( 32,       25,     4096,      4096 ),
+        std::make_tuple( 64,       25,     4096,      4096 ),
+        std::make_tuple(128,       25,     4096,      4096 ),
+        std::make_tuple(  8,       50,     1536,      1536 ),
+        std::make_tuple( 16,       50,     1536,      1536 ),
+        std::make_tuple( 32,       50,     1536,      1536 ),
+        std::make_tuple( 16,      150,      256,       256 ),
+        std::make_tuple( 32,      150,      256,       256 ),
+        std::make_tuple( 64,      150,      256,       256 )
+        // clang-format on
+    };
+}
+
+} // namespace
+
+using TestCase = decltype(GetTestCases())::value_type;
+struct GPU_DeepBench_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<TestCase>
 {
 };
 
@@ -46,39 +81,16 @@ TEST_P(GPU_DeepBench_LSTM_FP32, FloatTest)
     this->dirMode       = 0;
     this->flatBatchFill = 1;
 
+    auto params = GetParam();
+
     auto [batchSize, seqLength, inVecLen, hiddenSize] = GetParam();
 
     this->batchSize  = batchSize;
     this->seqLength  = seqLength;
     this->inVecLen   = inVecLen;
     this->hiddenSize = hiddenSize;
+
+    RunTest();
 };
 
-// clang-format off
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    GPU_DeepBench_LSTM_FP32,
-    testing::Values(//batch-size seq-len vector-len hidden-size
-        std::make_tuple( 16,       25,      512,      512 ),
-        std::make_tuple( 32,       25,      512,      512 ),
-        std::make_tuple( 64,       25,      512,      512 ),
-        std::make_tuple(128,       25,      512,      512 ),
-        std::make_tuple( 16,       25,     1024,     1024 ),
-        std::make_tuple( 32,       25,     1024,     1024 ),
-        std::make_tuple( 64,       25,     1024,     1024 ),
-        std::make_tuple(128,       25,     1024,     1024 ),
-        std::make_tuple( 16,       25,     2048,     2048 ),
-        std::make_tuple( 32,       25,     2048,     2048 ),
-        std::make_tuple( 64,       25,     2048,     2048 ),
-        std::make_tuple(128,       25,     2048,     2048 ),
-        std::make_tuple( 16,       25,     4096,     4096 ),
-        std::make_tuple( 32,       25,     4096,     4096 ),
-        std::make_tuple( 64,       25,     4096,     4096 ),
-        std::make_tuple(128,       25,     4096,     4096 ),
-        std::make_tuple(  8,       50,     1536,     1536 ),
-        std::make_tuple( 16,       50,     1536,     1536 ),
-        std::make_tuple( 32,       50,     1536,     1536 ),
-        std::make_tuple( 16,      150,      256,      256 ),
-        std::make_tuple( 32,      150,      256,      256 ),
-        std::make_tuple( 64,      150,      256,      256 )));
-// clang-format on
+INSTANTIATE_TEST_SUITE_P(Full, GPU_DeepBench_LSTM_FP32, testing::ValuesIn(GetTestCases()));

@@ -790,7 +790,7 @@ if(MIOPEN_USE_ROCBLAS OR MIOPEN_USE_HIPBLASLT)
     )
 endif()
 
-if( MIOPEN_BACKEND STREQUAL "OpenCL" )
+if(MIOPEN_BACKEND STREQUAL "OpenCL")
     list(APPEND MIOpen_Source
         ocl/handleocl.cpp
         ocl_kernel.cpp
@@ -799,7 +799,7 @@ if( MIOPEN_BACKEND STREQUAL "OpenCL" )
     )
 endif()
 
-if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
+if(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
     list(APPEND MIOpen_Source
         hip/hiperrors.cpp
         hip/handlehip.cpp
@@ -808,7 +808,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
         )
 endif()
 
-if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+if(MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     list(APPEND MIOpen_Source
         hip/hiperrors.cpp
         nogpu/handle.cpp
@@ -817,7 +817,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
         )
 endif()
 
-if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND MATCHES "^HIP")
     set(KERNELS_SRC_BATCH_FACTOR 50 CACHE STRING "Amount of kernel source files to inline to a single object file.")
     set(KERNELS_BATCH_ID 0)
 
@@ -1013,14 +1013,14 @@ if( MIOPEN_BACKEND STREQUAL "OpenCL")
     target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS} )
     target_link_libraries( MIOpen PUBLIC ${OPENCL_LIBRARIES} )
     list(APPEND PACKAGE_DEPENDS PACKAGE OpenCL)
-elseif(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
+elseif(MIOPEN_BACKEND MATCHES "^HIP") # "HIP" "HIPOC" "HIPNOGPU"
     target_link_libraries( MIOpen PRIVATE hip::device )
     target_link_libraries( MIOpen INTERFACE hip::host )
     if(MIOPEN_USE_HIPRTC)
         if(WIN32)
             target_link_libraries( MIOpen PRIVATE hiprtc::hiprtc )
         else()
-            target_link_libraries( MIOpen PRIVATE hiprtc)
+            target_link_libraries( MIOpen PRIVATE hiprtc )
         endif()
     endif()
     if(ENABLE_HIP_WORKAROUNDS)
