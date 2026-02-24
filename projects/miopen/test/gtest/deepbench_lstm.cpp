@@ -81,8 +81,6 @@ TEST_P(GPU_DeepBench_LSTM_FP32, FloatTest)
     this->dirMode       = 0;
     this->flatBatchFill = 1;
 
-    auto params = GetParam();
-
     auto [batchSize, seqLength, inVecLen, hiddenSize] = GetParam();
 
     this->batchSize  = batchSize;
