@@ -224,7 +224,7 @@ namespace rocRoller::Client::GEMMClient
                     ShowValue(problemParams.types.scaleB));
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
         {
-            if((problemParams.types.scaleSkipPermlane)
+            if((problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                || (not problemParams.types.scalePretileA.empty()))
             {
                 auto descScaleA = descA.withNormalizedDimensions();
@@ -235,7 +235,7 @@ namespace rocRoller::Client::GEMMClient
                 }
 
                 std::vector<size_t> preSwizzleSize;
-                if(problemParams.types.scaleSkipPermlane)
+                if(problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                 {
                     AssertFatal(problemParams.types.scaleShuffleTileA.size() == 3);
                     preSwizzleSize = problemParams.types.scaleShuffleTileA;
@@ -256,8 +256,15 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileA[0]};
                 }
 
-                auto tmpScaleA
-                    = DGen::preSwizzle(hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
+                auto tmpScaleA = [&]() {
+                    if(problemParams.types.scaleSkipPermlane
+                       == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                        return DGen::preSwizzleScalesGFX950(
+                            hostScaleA, {descScaleA.sizes()[1], descScaleA.sizes()[0]});
+                    else
+                        return DGen::preSwizzle(
+                            hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
+                }();
                 deviceScaleA = make_shared_device(tmpScaleA);
             }
             else
@@ -267,7 +274,7 @@ namespace rocRoller::Client::GEMMClient
         }
         if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
         {
-            if((problemParams.types.scaleSkipPermlane)
+            if((problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                || (not problemParams.types.scalePretileB.empty()))
             {
                 auto descScaleB = descB.withNormalizedDimensions();
@@ -278,7 +285,7 @@ namespace rocRoller::Client::GEMMClient
                 }
 
                 std::vector<size_t> preSwizzleSize;
-                if(problemParams.types.scaleSkipPermlane)
+                if(problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                 {
                     AssertFatal(problemParams.types.scaleShuffleTileB.size() == 3);
                     preSwizzleSize = problemParams.types.scaleShuffleTileB;
@@ -299,8 +306,15 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileB[1]};
                 };
 
-                auto tmpScaleB
-                    = DGen::preSwizzle(hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
+                auto tmpScaleB = [&]() {
+                    if(problemParams.types.scaleSkipPermlane
+                       == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                        return DGen::preSwizzleScalesGFX950(
+                            hostScaleB, {descScaleB.sizes()[1], descScaleB.sizes()[0]});
+                    else
+                        return DGen::preSwizzle(
+                            hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
+                }();
                 deviceScaleB = make_shared_device(tmpScaleB);
             }
             else
@@ -1667,7 +1681,8 @@ int main(int argc, const char* argv[])
                    "Set MX scaling block size for A and B. (default: 32)");
     app.add_option("--scaleSkipPermlane",
                    types.scaleSkipPermlane,
-                   "Experimental: Skip Permlane instructions for scale data for performance.");
+                   "Experimental: Skip Permlane instructions for scale data. Options: None, "
+                   "PreSwizzleScale, PreSwizzleScaleGFX950.");
 
     bool pretileScale = false;
     app.add_flag("--pretileScale", pretileScale, "Experimental: pretile scale data.");
@@ -2132,7 +2147,17 @@ int main(int argc, const char* argv[])
                             solution.macK,
                             solution.waveK));
 
-    if(types.scaleSkipPermlane)
+    if(types.scaleSkipPermlane == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+    {
+        AssertFatal(solution.swizzleTileSize.m == 32 && solution.swizzleTileSize.n == 32
+                        && solution.swizzleTileSize.k == 8,
+                    "When scaleSkipPermlane is PreSwizzleScaleGFX950, swizzleTileSize must be "
+                    "(m=32, n=32, k=8).");
+        AssertFatal(pretileScale,
+                    "pretileScale must be true when scaleSkipPermlane is PreSwizzleScaleGFX950.");
+    }
+
+    if(types.scaleSkipPermlane != rocRoller::ScaleSkipPermlaneMode::None)
     {
         AssertFatal(types.transA == Client::GEMMClient::TransposeType::T, ShowValue(types));
         AssertFatal(types.scaleA == Operations::ScaleMode::Separate, ShowValue(types));
@@ -2149,7 +2174,7 @@ int main(int argc, const char* argv[])
                                    kSubtile};
     }
 
-    if(types.scaleSkipPermlane)
+    if(types.scaleSkipPermlane != rocRoller::ScaleSkipPermlaneMode::None)
     {
         AssertFatal(types.transB == Client::GEMMClient::TransposeType::N, ShowValue(types));
         AssertFatal(types.scaleB == Operations::ScaleMode::Separate, ShowValue(types));

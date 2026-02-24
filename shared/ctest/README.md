@@ -126,6 +126,69 @@ execution_settings:
 - `category_timeouts`: Timeouts for specific categories (before multiplier is applied)
 ```
 
+### **Enhanced Structure (Optional Fields)**
+
+All fields below are **optional** and can be added incrementally. Teams can use them for richer test documentation and enable future capabilities like AI-assisted test selection:
+
+```yaml
+test_categories:
+  category_name:
+    # Required fields (same as base)
+    description: "Human-readable description"
+    test_patterns: ["*pattern1*", "*pattern2*"]
+    labels: ["label1", "label2"]
+
+    # Optional enhancement fields - add only if useful for your project
+    notes: |
+      Human-readable context about when to run these tests.
+      Can include historical context, gotchas, or guidance for developers and AI tools.
+    source_coverage:
+      - "library/src/file.cpp"
+      - "library/src/module.cpp:function_name"
+    api_coverage:
+      - "apiFunction1"
+      - "apiFunction2"
+    feature_tags:
+      - "performance-critical"
+      - "numerical-stability"
+    dependencies:
+      - "other_category"  # Metadata for related categories (not enforced by parser; for documentation/tooling)
+
+    # Standard fields (from base)
+    exclude: ["*always_exclude*"]
+    exclude_windows: ["*linux_only*"]
+    exclude_linux: ["*windows_only*"]
+
+# Optional: Top-level context for AI/LLM tools
+llm_context:
+  code_to_test_mapping_guidelines: |
+    Guidance for AI tools on how to map code changes to test categories.
+    Projects can use this for AI-assisted test selection.
+
+execution_settings:
+  default_timeout: 300
+  category_timeouts:
+    category_name: 600
+```
+
+**Optional Field Descriptions:**
+
+| Field | Purpose | Example Use |
+|-------|---------|-------------|
+| `notes` | Free-form text for context and documentation | "Run when epilogue changes. See bug #8765 for history" |
+| `source_coverage` | Source files/functions tested by this category | `["library/src/gemm.cpp:matmul_kernel"]` |
+| `api_coverage` | API functions tested by this category | `["hipblasLtMatmul", "hipblasLtMatmulAlgo"]` |
+| `feature_tags` | Semantic tags for classification and filtering | `["performance-critical", "mixed-precision"]` |
+| `dependencies` | Related test categories (documentation only) | `["auxiliary"]` - advisory metadata for downstream tooling |
+| `llm_context` | Top-level guidance for AI-assisted workflows | Instructions for AI tools on test selection logic |
+
+**Key Points:**
+- All enhancement fields are **optional** - teams can ignore them entirely ✅
+- Projects can adopt incrementally: start with just `notes`, add more later ✅
+- **Parser does NOT process these fields** - they are for documentation and downstream tooling only ✅
+- Parser gracefully ignores unknown fields - no code changes needed ✅
+- Enables richer test documentation and future AI-assisted workflows ✅
+
 ### **GPU Exclusion with Hierarchical Matching**
 
 GPU-specific exclusions use hierarchical pattern matching with wildcard 'X':

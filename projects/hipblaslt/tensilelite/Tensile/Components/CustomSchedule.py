@@ -662,7 +662,7 @@ class RegisterSchedule:
         self.matrix_inst = matrix_inst
         self.mfma_wave_group = mfma_wave_group
 
-    def _make_probe_kernel(self, transA: bool, transB: bool, useLDSTr: bool, TLDS: int) -> dict:
+    def _make_probe_kernel(self, transA: bool, transB: bool, useLDSTr: bool, TLDS: int, vectorWidthA: int, vectorWidthB: int) -> dict:
         """Build a synthetic kernel dict for probing layout support."""
         tc = self.tile_config
         mi = self.matrix_inst
@@ -686,6 +686,8 @@ class RegisterSchedule:
             "WaveSeparateGlobalReadB": tc.wave_separate_global_read_b,
             "GlobalReadVectorWidthA": self.vector_widths[0],
             "GlobalReadVectorWidthB": self.vector_widths[1],
+            "VectorWidthA": vectorWidthA,
+            "VectorWidthB": vectorWidthB,
             "LocalReadVectorWidth": self.vector_widths[2],
             "MatrixInstruction": list(self.matrix_inst),
             "MIWaveGroup": list(self.mfma_wave_group),
@@ -713,23 +715,26 @@ class RegisterSchedule:
         def as_str(transpose: bool) -> str:
             return "T" if transpose else "N"
         
+        valid_vector_widths = [1, 2, 3, 4, 6, 8]
         detected = set()
         for transA, transB in product([True, False], repeat=2):
-            for useLDSTr, TLDS in product([True, False], [1, 0]):                
-                probe = self._make_probe_kernel(transA, transB, useLDSTr, TLDS)
-                try:
-                    found, _ = func(probe, useLDSTr, TLDS)
-                    if found:
-                        detected.add(as_str(transA) + as_str(transB))
-                except ValueError as e:
-                    layout = as_str(transA) + as_str(transB)
-                    printWarning(
-                        f"Layout probe failed for func '{func.__name__}' "
-                        f"with layout={layout}, useLDSTr={useLDSTr}, TLDS={TLDS}\n"
-                        f"  Kernel: {probe['MacroTile0']}x{probe['MacroTile1']}x{probe['DepthU']} {layout}\n"
-                        f"  Error: {e}"
-                    )
-                    continue
+            for useLDSTr, TLDS in product([True, False], [1, 0]):
+                for vwA, vwB in product(valid_vector_widths, repeat=2):
+                    probe = self._make_probe_kernel(transA, transB, useLDSTr, TLDS, vwA, vwB)
+                    try:
+                        found, _ = func(probe, useLDSTr, TLDS)
+                        if found:
+                            detected.add(as_str(transA) + as_str(transB))
+                    except (ValueError, KeyError) as e:
+                        layout = as_str(transA) + as_str(transB)
+                        printWarning(
+                            f"Layout probe failed for func '{func.__name__}' "
+                            f"with layout={layout}, useLDSTr={useLDSTr}, TLDS={TLDS}, "
+                            f"VectorWidthA={vwA}, VectorWidthB={vwB}\n"
+                            f"  Kernel: {probe['MacroTile0']}x{probe['MacroTile1']}x{probe['DepthU']} {layout}\n"
+                            f"  Error: {e}"
+                        )
+                        continue
 
         return list(detected)
 
@@ -3149,7 +3154,7 @@ def _get_schedule_128x192x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 192, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(128, 192, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -3215,7 +3220,7 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(192, 256, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(192, 256, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -3360,7 +3365,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
         }
 
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
-    elif isNN(kernel) and TLDS==1:
+    elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
@@ -3545,7 +3550,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 192, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(256, 192, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -3642,7 +3647,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
 
-    elif isNN(kernel) and TLDS==1:
+    elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
         
@@ -3825,7 +3830,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 256, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(256, 256, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -3964,7 +3969,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(192, 128, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(192, 128, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -4052,7 +4057,7 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 128, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(128, 128, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -4195,7 +4200,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         lwsa   = [                                                                          20] # use delay before mfma4x4x4
         lwsb   = [                                                                          20]
         
-    elif isNN(kernel) and TLDS==1  and kernel["VectorWidthA"] == 2:
+    elif isNN(kernel) and TLDS==1  and kernel["VectorWidthA"] == 2 and False: # force disable this kernel due to test fail (TODO: re-enable it)
         disable_validation = True # swap instructions included in pack are not supported yet
 
         lra0   = [0,0,0,0,
@@ -4428,7 +4433,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
 
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 256, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(128, 256, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -4838,7 +4843,7 @@ def _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS):
 
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 128, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(256, 128, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -4851,6 +4856,8 @@ def _get_schedule_256x128x32_TF32(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
 
     if isTN(kernel) and useLDSTr and TLDS==1:
+        kernel["UseMFMAF32XEmulation"] = False
+        kernel["UseDot2F32XEmulation"] = False
         kernel["UsePLRPack"] = True
         numPackInstr = 24 
         numPackIndices = numPackInstr // 2 # Assign 2 pack instructions per mfma index
