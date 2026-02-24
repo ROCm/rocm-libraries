@@ -135,7 +135,7 @@ struct block_merge_impl<
              class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void process_tile(KeysInputIterator    keys_input,
                                                           KeysOutputIterator   keys_output,
-                                                          ValuesInputIterator  values_input,
+                                                          const ValuesInputIterator  values_input,
                                                           ValuesOutputIterator values_output,
                                                           const OffsetT        input_size,
                                                           const OffsetT        current_run_length,

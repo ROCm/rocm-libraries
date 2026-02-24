@@ -275,7 +275,6 @@ inline hipError_t launch_mergepath_fused_kernel(KeysInputIterator    keys_input_
         // This determines exactly where in the Left Run this block should begin merging.
         {
             const OffsetT global_offset = static_cast<OffsetT>(start_tile_idx) * items_per_block;
-            const OffsetT merged_run_length = 2 * current_run_len;
             // Calculate the base of the current merge group
             const OffsetT group_base = (global_offset / merged_run_length) * merged_run_length;
 
@@ -307,16 +306,8 @@ inline hipError_t launch_mergepath_fused_kernel(KeysInputIterator    keys_input_
             partition_beg = run_beg_L + consumed_L;
         }
 
-        #pragma unroll
-        for(unsigned int i = 0; i < tiles_per_block_limit; ++i)
+        for(unsigned int tile_idx = start_tile_idx; tile_idx < end_tile_idx; ++tile_idx)
         {
-            const unsigned int tile_idx = start_tile_idx + i;
-
-            if(tile_idx >= end_tile_idx)
-            {
-                break;
-            }
-
             // Calculate global offset for the current tile
             const OffsetT global_offset = static_cast<OffsetT>(tile_idx) * items_per_block;
 
