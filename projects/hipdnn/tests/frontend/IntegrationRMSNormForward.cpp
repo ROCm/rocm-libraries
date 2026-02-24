@@ -147,12 +147,11 @@ protected:
         return handle;
     }
 
-    static std::pair<std::shared_ptr<Graph>, RMSNormTestTensors>
-        createRMSNormTestGraphWithUids(
-            const std::string& graphName,
-            const SimpleRMSNorm2DTensorBundle<float, float>& tensorBundle,
-            bool useManualUids,
-            bool hasBias)
+    static std::pair<std::shared_ptr<Graph>, RMSNormTestTensors> createRMSNormTestGraphWithUids(
+        const std::string& graphName,
+        const SimpleRMSNorm2DTensorBundle<float, float>& tensorBundle,
+        bool useManualUids,
+        bool hasBias)
     {
         auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
         graph->set_name(graphName)
@@ -190,8 +189,7 @@ protected:
 
         if(hasBias)
         {
-            auto biasAttr
-                = makeTensorAttributes("bias", DataType::FLOAT, tensorBundle.biasTensor);
+            auto biasAttr = makeTensorAttributes("bias", DataType::FLOAT, tensorBundle.biasTensor);
             if(useManualUids)
             {
                 biasAttr.set_uid(uid++);
