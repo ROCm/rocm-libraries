@@ -30,7 +30,7 @@ from pooling_validation_utils import (
     get_reduce_op_string,
 )
 
-logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class PoolingKernelBuilder:
@@ -172,7 +172,7 @@ class PoolingKernelBuilder:
             ):
                 combinations.append(combo)
             else:
-                logging.debug(
+                logger.debug(
                     f"Skipping unsupported trait combination: {reduce_op}-{output_index}-{propagate_nan}-{pooling_dim}"
                 )
 
@@ -235,6 +235,8 @@ class PoolingKernelBuilder:
 #include <cstdint>
 #include <utility>
 #include <tuple>
+#include <iostream>
+#include <stdexcept>
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/pooling.hpp"
@@ -296,7 +298,8 @@ struct SelectedKernel {{
         auto kernel_args = Kernel::MakeKernelArgs(args);
 
         if (!Kernel::IsSupportedArgument(kernel_args)) {{
-            throw std::runtime_error("Wrong! Arguments not supported! Skipping pooling!");
+            throw std::runtime_error(
+                std::string("Unsupported arguments for pooling kernel: ") + KERNEL_NAME);
         }}
 
         const ck_tile::index_t kGridSize = Kernel::CalculateGridSize(kernel_args);
@@ -452,6 +455,8 @@ def _generate_single_kernel_individual(work_item):
 
 
 def main():
+    logging.basicConfig(level=logging.INFO)
+
     parser = argparse.ArgumentParser(
         description="Pooling kernel instance builder for tile_engine"
     )

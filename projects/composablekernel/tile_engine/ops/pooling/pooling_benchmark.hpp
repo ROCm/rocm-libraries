@@ -8,6 +8,7 @@
 #include <numeric>
 #include <algorithm>
 #include <iostream>
+#include <sstream>
 #include <cmath>
 
 #include "ck_tile/core.hpp"

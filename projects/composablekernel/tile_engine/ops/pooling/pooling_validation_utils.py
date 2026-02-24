@@ -15,7 +15,7 @@ or runtime.
 import logging
 from typing import List, Tuple
 
-logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Hardware constants
@@ -360,7 +360,7 @@ def is_tile_config_valid(
     # --- Positivity (always) ---
     ok, err = validate_positivity(*all_params)
     if not ok:
-        logging.debug(f"Positivity check failed: {err}")
+        logger.debug(f"Positivity check failed: {err}")
         return False
 
     # --- Thread-tile alignment (always) ---
@@ -368,7 +368,7 @@ def is_tile_config_valid(
         warp_tile_m, warp_tile_n, thread_tile_m, thread_tile_n
     )
     if not ok:
-        logging.debug(f"Thread tile alignment failed: {err}")
+        logger.debug(f"Thread tile alignment failed: {err}")
         return False
 
     if fast_mode:
@@ -377,7 +377,7 @@ def is_tile_config_valid(
     # --- Power-of-two ---
     ok, err = validate_power_of_two(*all_params)
     if not ok:
-        logging.debug(f"Power-of-two check failed: {err}")
+        logger.debug(f"Power-of-two check failed: {err}")
         return False
 
     # --- Warp-thread distribution ---
@@ -385,31 +385,31 @@ def is_tile_config_valid(
         warp_tile_m, warp_tile_n, thread_tile_m, thread_tile_n
     )
     if not ok:
-        logging.debug(f"Warp thread distribution failed: {err}")
+        logger.debug(f"Warp thread distribution failed: {err}")
         return False
 
     # --- Block-tile coverage ---
     ok, err = validate_block_tile_coverage(*all_params)
     if not ok:
-        logging.debug(f"Block tile coverage failed: {err}")
+        logger.debug(f"Block tile coverage failed: {err}")
         return False
 
     # --- Block size ---
     ok, err = validate_block_size(warp_m, warp_n)
     if not ok:
-        logging.debug(f"Block size check failed: {err}")
+        logger.debug(f"Block size check failed: {err}")
         return False
 
     # --- Repeat factors ---
     ok, err = validate_repeat_factors(*all_params)
     if not ok:
-        logging.debug(f"Repeat factor check failed: {err}")
+        logger.debug(f"Repeat factor check failed: {err}")
         return False
 
     # --- Vector load alignment ---
     ok, err = validate_vector_load_alignment(block_m, thread_tile_m, in_datatype)
     if not ok:
-        logging.debug(f"Vector load alignment failed: {err}")
+        logger.debug(f"Vector load alignment failed: {err}")
         return False
 
     return True
@@ -437,16 +437,16 @@ def is_trait_combination_valid(
     pooling_dim  : ``"2d"`` or ``"3d"``.
     """
     if reduce_op not in SUPPORTED_REDUCE_OPS:
-        logging.debug(f"Unsupported reduce_op: '{reduce_op}'")
+        logger.debug(f"Unsupported reduce_op: '{reduce_op}'")
         return False
 
     if pooling_dim not in SUPPORTED_POOLING_DIMS:
-        logging.debug(f"Invalid pooling dimension: '{pooling_dim}'")
+        logger.debug(f"Invalid pooling dimension: '{pooling_dim}'")
         return False
 
     # output_index only makes sense for max pooling (CK constraint)
     if output_index and reduce_op != "max":
-        logging.debug(
+        logger.debug(
             f"output_index=True is only supported for 'max' pooling, "
             f"not '{reduce_op}'"
         )

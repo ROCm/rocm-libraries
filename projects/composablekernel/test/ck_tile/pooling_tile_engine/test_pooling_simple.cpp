@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "ck_tile/core.hpp"
@@ -218,7 +219,7 @@ TEST_P(PoolingTileEngineTest2D, BasicFunctionality)
 
 TEST_P(PoolingTileEngineTest2D, KernelInfo)
 {
-    EXPECT_TRUE(strlen(KERNEL_NAME) > 0) << "Kernel name should not be empty";
+    EXPECT_TRUE(std::string_view(KERNEL_NAME).size() > 0) << "Kernel name should not be empty";
 
     std::cout << "Testing kernel: " << KERNEL_NAME << std::endl;
     std::cout << "Problem size: N=" << N_ << " H=" << H_ << " W=" << W_ << " C=" << C_
@@ -405,7 +406,7 @@ TEST_P(PoolingTileEngineTest3D, BasicFunctionality)
 
 TEST_P(PoolingTileEngineTest3D, KernelInfo)
 {
-    EXPECT_TRUE(strlen(KERNEL_NAME) > 0) << "Kernel name should not be empty";
+    EXPECT_TRUE(std::string_view(KERNEL_NAME).size() > 0) << "Kernel name should not be empty";
 
     std::cout << "Testing kernel: " << KERNEL_NAME << std::endl;
     std::cout << "Problem size: N=" << N_ << " D=" << D_ << " H=" << H_ << " W=" << W_
