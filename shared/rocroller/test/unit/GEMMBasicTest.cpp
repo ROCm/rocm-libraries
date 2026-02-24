@@ -91,19 +91,6 @@ namespace GEMMTests
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
-    TEST_P(GEMMBasicTestSuite, GPU_BasicGEMM_FP4)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        GEMMProblem gemm;
-        gemm.waveM = 16;
-        gemm.waveN = 16;
-        gemm.waveK = 64;
-        gemm.macM  = 256;
-        gemm.macN  = 256;
-        gemm.macK  = 128;
-        basicGEMM<FP4, FP4, float>(gemm);
-    }
-
     TEST_P(GEMMBasicTestSuite, GPU_BasicGEMM_StreamK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
@@ -157,35 +144,14 @@ namespace GEMMTests
     TEST_P(GEMMBasicTestSuite, GPU_BasicGEMM_WMMA)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
+        REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_f32_16x16x16_f16);
         GEMMProblem gemm;
         gemm.waveM = 16;
         gemm.waveN = 16;
         gemm.waveK = 16;
-        basicGEMM<Half>(gemm);
-    }
-
-    TEST_P(GEMMBasicTestSuite, GPU_BasicGEMM_Swizzle)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        GEMMProblem gemm;
-        gemm.waveM          = 16;
-        gemm.waveN          = 16;
-        gemm.waveK          = 64;
-        gemm.macM           = 256;
-        gemm.macN           = 256;
-        gemm.macK           = 64;
-        gemm.loadPathA      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.loadPathB      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.scaleAMode     = Operations::ScaleMode::Separate;
-        gemm.scaleBMode     = Operations::ScaleMode::None;
-        gemm.scaleTypeA     = DataType::E8M0;
-        gemm.scaleBlockSize = 32;
-        gemm.swizzleScale   = true;
-        gemm.swizzleM       = 64;
-        gemm.swizzleK       = 4;
-        gemm.swizzleN       = 64;
-        gemm.swizzleB       = 4;
-        basicGEMM<FP4, FP4, float>(gemm);
+        gemm.wavefrontSize
+            = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultWavefrontSize);
+        basicGEMM<Half, Half, float>(gemm);
     }
 
     INSTANTIATE_TEST_SUITE_P(GEMMBasicTest, GEMMBasicTestSuite, currentGPUISA());

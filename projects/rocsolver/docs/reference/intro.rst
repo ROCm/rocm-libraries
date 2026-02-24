@@ -182,6 +182,7 @@ LAPACK main functions
 
     :ref:`rocsolver_gesvd <gesvd>`, x, x, x, x
     :ref:`rocsolver_gesvdx <gesvdx>`, x, x, x, x
+    :ref:`rocsolver_gesdd <gesdd>`, x, x, x, x
 
 LAPACK-like functions
 ----------------------------
