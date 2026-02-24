@@ -53,8 +53,7 @@ struct ConvFwdXdlFactory
                                       BLOCK.block_size,
                                       BLOCK.per_block>);
     static_assert(A_BLOCK_TRANSFER.src_vector_dim == 2 ||
-                  (ALGORITHM.num_conv_groups_to_merge > 1 &&
-                   A_BLOCK_TRANSFER.src_vector_dim == 1));
+                  (ALGORITHM.num_conv_groups_to_merge > 1 && A_BLOCK_TRANSFER.src_vector_dim == 1));
     static_assert(ValidBBlockTransfer<B_BLOCK_TRANSFER,
                                       Types::weight_types.first,
                                       sizeof(typename Types::WeiDataType),
