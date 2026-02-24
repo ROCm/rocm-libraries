@@ -1431,13 +1431,13 @@ class Solution(collections.abc.Mapping):
       sizeDataTypeB = state["ProblemType"]["DataTypeB"].numBytes()
       sizeDataType = state["ProblemType"]["DataType"].numBytes()
       if (
-        not state["ProblemType"]["Sparse"] and
         state["EnableMatrixInstruction"] and not state["ExpandPointerSwap"] and
         state["DepthU"] == state["MatrixInstK"] and state["PrefetchGlobalRead"] and not state["1LDSBuffer"]
         and (state["MIWaveTile"][0] > 2  and state["MIWaveTile"][1] > 2)
         and (state["MIWaveTile"][0] % 2 == 0 and state["MIWaveTile"][1] % 2 == 0)
         and (sizeDataTypeA == sizeDataType) and (sizeDataTypeB == sizeDataType)
         and ((TLUA == False or state["enableLDSTrA"] or sizeDataTypeA >= 4) and (TLUB == False or state["enableLDSTrB"] or sizeDataTypeB >= 4) )
+        and (not state["ProblemType"]["Sparse"] or state["TransposeLDSMetadata"])
       ):
         state["ForceUnrollSubIter"] = True
         state["numSubTiles"] = 2
