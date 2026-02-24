@@ -5460,11 +5460,14 @@ class KernelWriterAssembly(KernelWriter):
     else:
       #TODO: TDM
       pass
-    if kernel["ProblemType"]["MXBlockA"]:
-      imod.add(self.removeStagger(kernel, tPA["MX"]))
+    if "MX" in tPA:
+      if not kernel["enableTDMA"]:
+        imod.add(self.removeStagger(kernel, tPA["MX"]))
     # Remove stagger B(MXSB)
-    if kernel["ProblemType"]["MXBlockB"]:
-      imod.add(self.removeStagger(kernel, tPB["MX"]))
+    if "MX" in tPB:
+      if not kernel["enableTDMB"]:
+        imod.add(self.removeStagger(kernel, tPB["MX"]))
+
     if not kernel["enableTDMB"]:
       imod.add(self.removeStagger(kernel, tPB))
     else:
