@@ -43,6 +43,9 @@ SKIPPABLE_PATH_PATTERNS = [
     "*.clinerules",
     "*.cursorrules",
     "*.mdc",
+    # Tools are standalone scripts/utilities not part of the build or test pipeline.
+    # Changes here should not trigger CI builds.
+    "projects/hipdnn/tools/*",
 ]
 
 
