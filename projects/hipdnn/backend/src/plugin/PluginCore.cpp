@@ -26,30 +26,18 @@ PluginBase::PluginBase()
 
 void PluginBase::resolveSymbols()
 {
-    const auto funcNameGetName = "hipdnnPluginGetName";
-    _funcGetName = _lib.getSymbol<decltype(_funcGetName)>(funcNameGetName);
+    _funcGetName = _lib.getSymbol<decltype(_funcGetName)>("hipdnnPluginGetName");
+    _funcGetVersion = _lib.getSymbol<decltype(_funcGetVersion)>("hipdnnPluginGetVersion");
+    _funcGetType = _lib.getSymbol<decltype(_funcGetType)>("hipdnnPluginGetType");
+    _funcGetLastErrorStr
+        = _lib.getSymbol<decltype(_funcGetLastErrorStr)>("hipdnnPluginGetLastErrorString");
 
-    const auto funcNameGetVersion = "hipdnnPluginGetVersion";
-    _funcGetVersion = _lib.getSymbol<decltype(_funcGetVersion)>(funcNameGetVersion);
-
-    const auto funcNameGetType = "hipdnnPluginGetType";
-    _funcGetType = _lib.getSymbol<decltype(_funcGetType)>(funcNameGetType);
-
-    const auto funcNameGetLastErrorStr = "hipdnnPluginGetLastErrorString";
-    _funcGetLastErrorStr = _lib.getSymbol<decltype(_funcGetLastErrorStr)>(funcNameGetLastErrorStr);
-
-    // Logging callback is optional
-    try
+    if(!tryAssignSymbol(_funcGetApiVersion, "hipdnnPluginGetApiVersion"))
     {
-        const auto funcNameSetLoggingCallback = "hipdnnPluginSetLoggingCallback";
-        _funcSetLoggingCallback
-            = _lib.getSymbol<decltype(_funcSetLoggingCallback)>(funcNameSetLoggingCallback);
+        HIPDNN_BACKEND_LOG_INFO("Plugin does not support returning plugin API version");
     }
-    catch(const HipdnnException&)
+    if(!tryAssignSymbol(_funcSetLoggingCallback, "hipdnnPluginSetLoggingCallback"))
     {
-        _funcSetLoggingCallback = nullptr;
-
-        // Add name of plugin if ever possible
         HIPDNN_BACKEND_LOG_INFO("Plugin does not support logging callback");
     }
 
@@ -71,6 +59,18 @@ std::string_view PluginBase::version() const
     assert(_initialized);
     const char* version;
     invokePluginFunction("get plugin version", _funcGetVersion, &version);
+    return version;
+}
+
+std::string_view PluginBase::apiVersion() const
+{
+    assert(_initialized);
+    const char* version;
+    if(_funcGetApiVersion == nullptr)
+    {
+        return "0.0.0";
+    }
+    invokePluginFunction("get plugin api version", _funcGetApiVersion, &version);
     return version;
 }
 
