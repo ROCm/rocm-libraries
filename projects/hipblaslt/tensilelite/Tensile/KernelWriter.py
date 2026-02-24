@@ -1931,7 +1931,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if not schedulePackConsiderMetadata:
               insertABcount = 0
               isLastNop = False
-              if kernel["UseF32XEmulation"]:
+              isWmmaXf32Direct = kernel["UseF32XEmulation"] and kernel.get("UseDirect32XEmulation", False) and not kernel["UseMFMAF32XEmulation"]
+              if isWmmaXf32Direct:
+                # XF32 direct emulation with multigroup WMMA V3: place ALL pack
+                # items (including the rearrange swaps) before the first WMMA to
+                # ensure all bf16_hi and bf16_lo values are fully packed.
+                while packItems:
+                  iterCode.add(packItems.pop(0))
+                  curPackIdx += 1
+              elif kernel["UseF32XEmulation"]:
                 if instPerPackA > 0 or instPerPackB == 0 and packItems:
                   tmp = []
                   num, _ = self._packItemsConditional(instPerPackA, packItems, tmp, ["__TF32_1_A", "__TF32_2_A"])
@@ -1953,40 +1961,41 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   if packItems:
                     iterCode.add(packItems.pop(0))
                     curPackIdx += 1
-              for j in range(instPerPackMXSA):
-                if packItems:
-                  iterCode.add(packItems.pop(0))
-                  curPackIdx += 1
-              for j in range(instPerPackMXSB):
-                if packItems:
-                  iterCode.add(packItems.pop(0))
-                  curPackIdx += 1
-              if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-                for j in range(ceil(instPerPackM)):
+              if not isWmmaXf32Direct:
+                for j in range(instPerPackMXSA):
                   if packItems:
                     iterCode.add(packItems.pop(0))
                     curPackIdx += 1
-              if kernel["UseF32XEmulation"]:
-                if instPerPackB > 0 or instPerPackA == 0 and packItems:
-                  tmp = []
-                  num, _ = self._packItemsConditional(instPerPackB, packItems, tmp, ["__TF32_1_B", "__TF32_2_B"])
-                  if num > 0:
-                    insertABcount += 1
-                    instPerPackB -= num
-                  if not firstDone and instPerPackA == 0:
+                for j in range(instPerPackMXSB):
+                  if packItems:
+                    iterCode.add(packItems.pop(0))
+                    curPackIdx += 1
+                if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+                  for j in range(ceil(instPerPackM)):
+                    if packItems:
+                      iterCode.add(packItems.pop(0))
+                      curPackIdx += 1
+                if kernel["UseF32XEmulation"]:
+                  if instPerPackB > 0 or instPerPackA == 0 and packItems:
+                    tmp = []
                     num, _ = self._packItemsConditional(instPerPackB, packItems, tmp, ["__TF32_1_B", "__TF32_2_B"])
                     if num > 0:
                       insertABcount += 1
                       instPerPackB -= num
-                  firstDone = True
-                  for n in tmp:
-                    isLastNop = isinstance(n, SNop)
-                    iterCode.add(n)
-              else:
-                for j in range(instPerPackB):
-                  if packItems:
-                    iterCode.add(packItems.pop(0))
-                    curPackIdx += 1
+                    if not firstDone and instPerPackA == 0:
+                      num, _ = self._packItemsConditional(instPerPackB, packItems, tmp, ["__TF32_1_B", "__TF32_2_B"])
+                      if num > 0:
+                        insertABcount += 1
+                        instPerPackB -= num
+                    firstDone = True
+                    for n in tmp:
+                      isLastNop = isinstance(n, SNop)
+                      iterCode.add(n)
+                else:
+                  for j in range(instPerPackB):
+                    if packItems:
+                      iterCode.add(packItems.pop(0))
+                      curPackIdx += 1
               # since packed register need to wait 2 quad cycle to finish packing
               # we insert pack instruction if we can, or s_nop
               while curPackIdx < numPack+2 and not kernel["UseF32XEmulation"]:
