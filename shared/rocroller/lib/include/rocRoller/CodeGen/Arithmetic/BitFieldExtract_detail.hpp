@@ -235,7 +235,7 @@ namespace rocRoller
         const auto& dstInfo = DataTypeInfo::Get(dstType);
         const auto& srcInfo = DataTypeInfo::Get(srcType);
 
-        const unsigned int dwidth = dstInfo.elementBits;
+        const auto dwidth = dstInfo.elementBits;
 
         AssertFatal(arg != nullptr);
         AssertFatal(dstType.dataType == expr.outputDataType);
