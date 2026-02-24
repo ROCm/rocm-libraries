@@ -155,8 +155,8 @@ TEST(TestPlatformUtils, GetEnvReturnsDefaultWhenUnset)
 {
     hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_PLATFORMUTILS_UNSET");
 
-    auto result =
-        hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_UNSET", "default_value");
+    auto result
+        = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_UNSET", "default_value");
 
     EXPECT_EQ(result, "default_value");
 }
@@ -175,8 +175,8 @@ TEST(TestPlatformUtils, GetEnvReturnsEmptyStringValue)
     hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter(
         "HIPDNN_TEST_PLATFORMUTILS_EMPTY", "");
 
-    auto result =
-        hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_EMPTY", "default_value");
+    auto result
+        = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_EMPTY", "default_value");
 
     EXPECT_EQ(result, "");
 }
