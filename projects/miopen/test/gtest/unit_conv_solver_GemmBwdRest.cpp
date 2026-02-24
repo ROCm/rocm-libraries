@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "unit_conv_solver.hpp"
+#include "get_handle.hpp"
 
 namespace {
 
@@ -47,9 +48,21 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
 
     if(datatype == miopenHalf)
     {
+        const miopen::Handle& handle = get_handle();
+        const std::string name       = handle.GetDeviceName();
+
         // clang-format off
-        // Regression test for https://github.com/ROCm/MIOpen/issues/1956
-        cases.emplace_back(TestCase{{2, 64, 128, 128, 128}, {32, 64, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, miopenHalf});
+        if(!miopen::StartsWith(name, "gfx1151"))
+        {
+            // Regression test for https://github.com/ROCm/MIOpen/issues/1956            
+            cases.emplace_back(TestCase{{2, 64, 128, 128, 128}, {32, 64, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, miopenHalf});
+        }
+        else
+        {
+            //https://github.com/ROCm/TheRock/issues/3202
+            // We have out of memory error on gfx1151 (flaky issue), so let's reduce tensor size for this type of machibes
+            cases.emplace_back(TestCase{{2, 64, 64, 64, 64}, {32, 64, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, miopenHalf});
+        }
         // clang-format on
     }
 

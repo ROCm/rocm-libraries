@@ -141,7 +141,10 @@ CK_TILE_HOST double get_absolute_threshold(const double max_possible_num,
                             int>::value,
                   "Warning: Unhandled ComputeDataType for setting up the absolute threshold!");
 
-    auto expo            = std::log2(std::abs(max_possible_num));
+    // Use discrete exponent (floor of log2) to match actual floating-point exponent levels
+    // This ensures ULP calculation matches the discrete precision levels of FP representation
+    int discrete_expo =
+        std::floor(static_cast<int>(std::floor(std::log2(std::abs(max_possible_num)))));
     double compute_error = 0;
     if constexpr(is_any_of<ComputeDataType, pk_int4_t, I8, I32, int>::value)
     {
@@ -149,7 +152,7 @@ CK_TILE_HOST double get_absolute_threshold(const double max_possible_num,
     }
     else
     {
-        compute_error = std::pow(2, expo - numeric_traits<ComputeDataType>::mant) * 0.5;
+        compute_error = std::pow(2, discrete_expo - numeric_traits<ComputeDataType>::mant) * 0.5;
     }
 
     static_assert(
@@ -163,7 +166,10 @@ CK_TILE_HOST double get_absolute_threshold(const double max_possible_num,
     }
     else
     {
-        output_error = std::pow(2, expo - numeric_traits<OutDataType>::mant) * 0.5;
+        // Use full ULP (1.0) instead of half ULP (0.5) for output_error to account for
+        // hardware vs software conversion differences (e.g., hardware __bf16 vs software
+        // float_to_bf16 can differ by up to 1 ULP at tie cases)
+        output_error = std::pow(2, discrete_expo - numeric_traits<OutDataType>::mant) * 1.0;
     }
     double midway_error = std::max(compute_error, output_error);
 
@@ -178,8 +184,8 @@ CK_TILE_HOST double get_absolute_threshold(const double max_possible_num,
     }
     else
     {
-        acc_error =
-            std::pow(2, expo - numeric_traits<AccDataType>::mant) * 0.5 * number_of_accumulations;
+        acc_error = std::pow(2, discrete_expo - numeric_traits<AccDataType>::mant) * 0.5 *
+                    number_of_accumulations;
     }
     return std::max(acc_error, midway_error);
 }

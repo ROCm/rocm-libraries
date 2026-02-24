@@ -145,7 +145,10 @@ int main() {
 | gfx942 | MI325X, MI300X, MI300A | ✔️ | ✔️ |
 | gfx950 | MI355X, MI350X | ✔️ | ✔️ |
 | gfx1100 | Radeon RX 7900 XTX, Radeon RX 7900 XT, Radeon RX 7900 GRE, Radeon RX 7900 | ✔️ | |
+| gfx1150 | AMD Strix Point iGPU | ✔️ | |
 | gfx1151 | Radeon RX 8000 series | ✔️ | |
+| gfx1152 | AMD Radeon 840M iGPU | ✔️ | |
+| gfx1153 | AMD Radeon 820M iGPU | ✔️ | |
 | gfx1201 | Radeon RX 8900 XTX, Radeon RX 8900 XT, Radeon RX 8800 XT, Radeon RX 8800, Radeon RX 8700 XT, Radeon RX 8700, Radeon RX 8600 XT, Radeon RX 8600 | ✔️ | |
 
 For more information on GPU hardware specifications, check out [ROCm documentation](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html).
