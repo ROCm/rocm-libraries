@@ -807,12 +807,12 @@ class TestCustomScheduleTF32:
 
     @pytest.mark.parametrize(
     # fmt: off
-    "transA, transB, lds_tr_inst,  tr_lds", [
-    (  True,  False,       False,       1),
-    ( False,   True,       False,       0),
+    "transA, transB, lds_tr_inst,  tr_lds,  vwa, vwb", [
+    (  True,  False,       False,       1,  None, None),
+    ( False,   True,       False,       0,  4,    4),
     # fmt: on
     ])
-    def test_schedule_256x256x32_TF32(self,transA, transB, lds_tr_inst, tr_lds):
+    def test_schedule_256x256x32_TF32(self,transA, transB, lds_tr_inst, tr_lds, vwa, vwb):
         """Tests the 256x256x32 TF32 TN schedule."""
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
@@ -828,6 +828,11 @@ class TestCustomScheduleTF32:
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 8, "MIWaveTileB": 8,
         })
+
+        if vwa is not None:
+            kernel.update({"VectorWidthA": vwa})
+        if vwb is not None:
+            kernel.update({"VectorWidthB": vwb})
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
