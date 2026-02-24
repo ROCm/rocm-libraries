@@ -22,8 +22,8 @@
 
 # Optional: CTest test categorization when building in rocm-libraries with shared/ctest.
 # Skipped when shared/ is not present (e.g. standalone rocblas or sparse checkout in CI).
-if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
-  include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
+if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+  include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
   set(ROCBLAS_HAS_CTEST_CATEGORIES ON)
 endif()
 

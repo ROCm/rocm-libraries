@@ -13,7 +13,7 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Precheckin - same as Jenkins precheckin (target: < 30 min)"
+    description: "Precheckin - same as Jenkins precheckin (timeout: 2 hours)"
     test_patterns:
       - "*quick*"
       - "*pre_checkin*"
@@ -25,7 +25,7 @@ test_categories:
       - "precheckin"
 
   comprehensive:
-    description: "Extended - same as Jenkins extended/nightly (target: < 2 hours)"
+    description: "Extended - same as Jenkins extended/nightly (timeout: 8 hours)"
     test_patterns:
       - "*nightly*"
     exclude:
