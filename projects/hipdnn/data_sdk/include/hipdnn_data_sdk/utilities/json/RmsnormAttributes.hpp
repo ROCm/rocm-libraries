@@ -55,8 +55,8 @@ inline auto to<data_objects::RMSNormAttributes>(flatbuffers::FlatBufferBuilder& 
         inputs.at("scale_tensor_uid").get<int64_t>(),
         inputs.at("epsilon_tensor_uid").get<int64_t>(),
         entry.at("outputs").at("y_tensor_uid").get<int64_t>(),
-        invRmsUid,
-        biasUid);
+        biasUid,
+        invRmsUid);
 }
 
 }

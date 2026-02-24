@@ -1487,11 +1487,11 @@ inline flatbuffers::FlatBufferBuilder
 
 inline flatbuffers::FlatBufferBuilder
     createValidRmsnormGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
-                             const std::vector<int64_t>& dims = {1, 3, 224, 224},
-                             hipdnn_data_sdk::data_objects::DataType inputDataType
-                             = hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_data_sdk::data_objects::DataType computeDataType
-                             = hipdnn_data_sdk::data_objects::DataType::FLOAT)
+                            const std::vector<int64_t>& dims = {1, 3, 224, 224},
+                            hipdnn_data_sdk::data_objects::DataType inputDataType
+                            = hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                            hipdnn_data_sdk::data_objects::DataType computeDataType
+                            = hipdnn_data_sdk::data_objects::DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
@@ -1531,10 +1531,10 @@ inline flatbuffers::FlatBufferBuilder
 
     auto rmsnormAttributes
         = hipdnn_data_sdk::data_objects::CreateRMSNormAttributes(builder,
-                                                                  1, // x uid
-                                                                  3, // scale uid
-                                                                  4, // epsilon uid
-                                                                  2 // y uid
+                                                                 1, // x uid
+                                                                 3, // scale uid
+                                                                 4, // epsilon uid
+                                                                 2 // y uid
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;

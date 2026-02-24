@@ -136,8 +136,8 @@ public:
             get_scale()->get_uid(),
             get_epsilon()->get_uid(),
             get_y()->get_uid(),
-            invRms ? flatbuffers::Optional<int64_t>(invRms->get_uid()) : flatbuffers::nullopt,
-            bias ? flatbuffers::Optional<int64_t>(bias->get_uid()) : flatbuffers::nullopt);
+            bias ? flatbuffers::Optional<int64_t>(bias->get_uid()) : flatbuffers::nullopt,
+            invRms ? flatbuffers::Optional<int64_t>(invRms->get_uid()) : flatbuffers::nullopt);
     }
 
     static RMSNormAttributes fromFlatBuffer(

@@ -33,13 +33,7 @@ public:
         // For each channel c, RMSNorm computes the root mean square:
         //   rms_c = sqrt((1/m) * sum_{n,h,w} x[n,c,h,w]^2 + epsilon)
         //
-        // Without bias: y[n,c,h,w] = (x[n,c,h,w] / rms_c) * scale_c
-        // With bias:    y[n,c,h,w] = (x[n,c,h,w] / rms_c) * scale_c + bias_c
-        //
-        // Key difference from BatchNorm/LayerNorm:
-        // - NO mean subtraction (no centering)
-        // - Bias is optional
-        // - Simpler and more efficient than LayerNorm
+        //   y[n,c,h,w] = (x[n,c,h,w] / rms_c) * scale_c + bias_c
         // ====================================================================
 
         // SECTION 1: Validate Required Tensor Pointers
@@ -85,8 +79,8 @@ public:
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
 
         // Validate optional bias tensor (per-channel with shape [1, C, 1, 1, ...])
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
-            attributes.get_bias(), channels, "Bias tensor"));
+        HIPDNN_CHECK_ERROR(
+            detail::validateChannelOnlyShapeIfSet(attributes.get_bias(), channels, "Bias tensor"));
 
         // Validate optional inv_rms tensor (only if dimensions set)
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
@@ -102,14 +96,12 @@ public:
 
         if(!x)
         {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "RMSNormNode missing x for setting properties"};
+            return {ErrorCode::ATTRIBUTE_NOT_SET, "RMSNormNode missing x for setting properties"};
         }
 
         if(!y)
         {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "RMSNormNode missing y for setting properties"};
+            return {ErrorCode::ATTRIBUTE_NOT_SET, "RMSNormNode missing y for setting properties"};
         }
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
