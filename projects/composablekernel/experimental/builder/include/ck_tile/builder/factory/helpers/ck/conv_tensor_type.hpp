@@ -64,12 +64,6 @@ consteval auto ConvertDataTypeToCK()
     return DataTypeToCK<dt>{};
 }
 
-template <DataType dt, DataType ct>
-consteval auto GetTensorDataAndComputeCKTypes()
-{
-    return std::make_pair(ConvertDataTypeToCK<dt>(), ConvertDataTypeToCK<ct>());
-}
-
 template <auto Config, DataType SignatureDataType>
 consteval auto ExtractTensorDataType()
 {
@@ -183,20 +177,12 @@ struct ConvTensorDataTypes
     static constexpr auto output_types =
         GetTensorDataAndComputeTypes<Signature.output.config, Signature.data_type>();
 
-    // CK equivalent types
-    static constexpr auto input_ck_types =
-        GetTensorDataAndComputeCKTypes<input_types.first, input_types.second>();
-    static constexpr auto weight_ck_types =
-        GetTensorDataAndComputeCKTypes<weight_types.first, weight_types.second>();
-    static constexpr auto output_ck_types =
-        GetTensorDataAndComputeCKTypes<output_types.first, output_types.second>();
-
-    using InDataType     = typename decltype(input_ck_types.first)::type;
-    using InComputeType  = typename decltype(input_ck_types.second)::type;
-    using WeiDataType    = typename decltype(weight_ck_types.first)::type;
-    using WeiComputeType = typename decltype(weight_ck_types.second)::type;
-    using OutDataType    = typename decltype(output_ck_types.first)::type;
-    using OutComputeType = typename decltype(output_ck_types.second)::type;
+    using InDataType     = typename DataTypeToCK<input_types.first>::type;
+    using InComputeType  = typename DataTypeToCK<input_types.second>::type;
+    using WeiDataType    = typename DataTypeToCK<weight_types.first>::type;
+    using WeiComputeType = typename DataTypeToCK<weight_types.second>::type;
+    using OutDataType    = typename DataTypeToCK<output_types.first>::type;
+    using OutComputeType = typename DataTypeToCK<output_types.second>::type;
     using AccDataType =
         typename decltype(GetTensorAccumulationType<Signature.accumulation_data_type,
                                                     Signature.data_type>())::type;
