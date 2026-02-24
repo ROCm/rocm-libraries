@@ -24,11 +24,19 @@
  *
  *******************************************************************************/
 
+#include "get_handle.hpp"
 #include "gtest_common.hpp"
+#include <cstring>
+#include <functional>
+#include <numeric>
 #include <tensor_util.hpp>
 #include <miopen/reducetensor.hpp>
 #include "cpu_reduce_util.hpp"
-#include "workspace.hpp"
+#include "device_prng.hpp"
+
+#include "global_test_memory.hpp"
+#include "miopen/miopen.h"
+#include "tensor_holder.hpp"
 
 // Recently added FP16, BFP16 and I8 reduce custom test cases fail compiler staging tests
 #define WORKAROUND_ISSUE_895 1
@@ -81,9 +89,12 @@ template <class T, bool toVerifyData>
 struct verify_reduce_with_indices
 {
     miopen::ReduceTensorDescriptor reduce;
+    test::gtest::global_buffer::DeviceBufferObject in_dev;
+    test::gtest::global_buffer::DeviceBufferObject out_dev;
     tensor<T> input;
     tensor<T> output;
-    tensor<T> workspace;
+    test::gtest::global_buffer::DeviceBufferObject wspace_dev;
+    test::gtest::global_buffer::DeviceBufferObject indices_dev;
     tensor<int> indices;
     float alpha;
     float beta;
@@ -97,14 +108,12 @@ struct verify_reduce_with_indices
     verify_reduce_with_indices(const miopen::ReduceTensorDescriptor& reduce_,
                                const tensor<T>& input_,
                                const tensor<T>& output_,
-                               const tensor<T>& workspace_,
                                const tensor<int>& indices_,
                                float alpha_,
                                float beta_)
         : reduce(reduce_),
           input(input_),
           output(output_),
-          workspace(workspace_),
           indices(indices_),
           alpha(alpha_),
           beta(beta_),
@@ -116,14 +125,11 @@ struct verify_reduce_with_indices
     {
     }
 
-    tensor<float> cpu() const
+    tensor<float> convert_to_float(const std::tuple<tensor<T>, tensor<int>>& results) const
     {
         using reduce::convert_type;
 
-        const std::tuple<tensor<T>, tensor<int>> results =
-            GetCpuImplResult<T, verify_reduce_with_indices>(compTypeVal, *this);
-
-        if(toVerifyData)
+        if constexpr(toVerifyData)
         {
             const auto& dimLengths = output.desc.GetLengths();
 
@@ -149,42 +155,29 @@ struct verify_reduce_with_indices
 
             return (result_indicesFloat);
         };
+    }
+
+    tensor<float> cpu() const
+    {
+        const auto results = GetCpuImplResult<T, verify_reduce_with_indices>(compTypeVal, *this);
+
+        return convert_to_float(results);
     };
 
-    tensor<float> gpu() const
+    void gpu() const { gpuImpl(); };
+
+    tensor<float> gpu_result() const
     {
-        using reduce::convert_type;
+        auto res         = output;
+        auto indices_res = indices;
 
-        std::tuple<tensor<T>, tensor<int>> results;
+        out_dev.HostMirrorWait();
+        std::memcpy(res.data.data(), out_dev.host_mirror_, out_dev.size_bytes_);
 
-        results = gpuImpl();
+        indices_dev.HostMirrorWait();
+        std::memcpy(indices_res.data.data(), indices_dev.host_mirror_, indices_dev.size_bytes_);
 
-        if(toVerifyData)
-        {
-            const auto& dimLengths = output.desc.GetLengths();
-
-            auto result_dataFloat = tensor<float>(dimLengths);
-
-            tensor<T>& result_dataT = std::get<0>(results);
-
-            for(size_t i = 0; i < result_dataT.data.size(); i++)
-                result_dataFloat.data[i] = convert_type<float>(result_dataT.data[i]);
-
-            return (result_dataFloat);
-        }
-        else
-        {
-            const auto& dimLengths = indices.desc.GetLengths();
-
-            auto result_indicesFloat = tensor<float>(dimLengths);
-
-            tensor<int>& result_indices = std::get<1>(results);
-
-            for(size_t i = 0; i < result_indices.data.size(); i++)
-                result_indicesFloat.data[i] = static_cast<float>(result_indices.data[i]);
-
-            return (result_indicesFloat);
-        };
+        return convert_to_float(std::make_tuple(res, indices_res));
     };
 
     template <typename compType>
@@ -233,6 +226,8 @@ struct verify_reduce_with_indices
             toReduceLengths.begin(), toReduceLengths.end(), std::size_t{1}, std::multiplies<>{});
 
         auto PreUnaryOp = reduce::PreUnaryOpFn<compType>(reduceOp, divider);
+
+        in_dev.HostMirrorWait();
 
         if(reduceAllDims)
         {
@@ -309,7 +304,10 @@ struct verify_reduce_with_indices
 
                 auto src_offset = get_offset_from_index(inStrides, src_index);
 
-                auto currVal = convert_type<compType>(input.data[src_offset]);
+                // auto currVal =
+                // convert_type<compType>(static_cast<T*>(in_dev.host_mirror_)[src_offset]);
+                auto currVal =
+                    convert_type<compType>(static_cast<T*>(in_dev.host_mirror_)[src_offset]);
 
                 // unary operation before reducing, only needed by AMAX. For MIN/MAX, nothing is
                 // actually done
@@ -359,7 +357,7 @@ struct verify_reduce_with_indices
         {
             auto src_offset = get_offset_from_index(inStrides, src_index);
 
-            auto currVal = convert_type<compType>(input.data[src_offset]);
+            auto currVal = convert_type<compType>(static_cast<T*>(in_dev.host_mirror_)[src_offset]);
 
             // unary operation before reducing, only needed by AMAX. For MIN/MAX, nothing is
             // actually done
@@ -384,21 +382,15 @@ struct verify_reduce_with_indices
         res_indices.data[0] = accuIndex;
     }
 
-    std::tuple<tensor<T>, tensor<int>> gpuImpl() const
+    void gpuImpl() const
     {
-        auto&& handle   = get_handle();
-        auto input_dev  = handle.Write(input.data);
-        auto output_dev = handle.Write(output.data);
+        out_dev.fill(T{0});
+        indices_dev.fill(int{1});
+        wspace_dev.fill(T{0});
 
         // replicate
         auto res         = output;
         auto res_indices = indices;
-
-        Workspace idxspace{};
-        idxspace.Write(indices.data);
-
-        Workspace wspace{};
-        wspace.Write(workspace.data);
 
         const double alpha64 = alpha;
         const double beta64  = beta;
@@ -410,39 +402,37 @@ struct verify_reduce_with_indices
                                          ? static_cast<const void*>(&beta64)
                                          : static_cast<const void*>(&beta);
 
-        if(wspace.size() > 0)
+        if(wspace_dev.size_bytes_ > 0)
         {
             reduce.ReduceTensor(get_handle(),
-                                idxspace.ptr(),
-                                idxspace.size(),
-                                wspace.ptr(),
-                                wspace.size(),
+                                indices_dev.ptr_,
+                                indices_dev.size_bytes_,
+                                wspace_dev.ptr_,
+                                wspace_dev.size_bytes_,
                                 alphaPtr,
                                 input.desc,
-                                input_dev.get(),
+                                in_dev.ptr_,
                                 betaPtr,
                                 output.desc,
-                                output_dev.get());
+                                out_dev.ptr_);
         }
         else
         {
             reduce.ReduceTensor(get_handle(),
-                                idxspace.ptr(),
-                                idxspace.size(),
+                                indices_dev.ptr_,
+                                indices_dev.size_bytes_,
                                 nullptr,
                                 0,
                                 alphaPtr,
                                 input.desc,
-                                input_dev.get(),
+                                in_dev.ptr_,
                                 betaPtr,
                                 output.desc,
-                                output_dev.get());
+                                out_dev.ptr_);
         };
 
-        res.data         = handle.Read<T>(output_dev, res.data.size());
-        res_indices.data = idxspace.Read<decltype(res_indices.data)>();
-
-        return (std::make_tuple(res, res_indices));
+        out_dev.HostMirrorAsync();
+        indices_dev.HostMirrorAsync();
     }
 
     void fail() const
@@ -456,9 +446,11 @@ template <class T>
 struct verify_reduce_no_indices
 {
     miopen::ReduceTensorDescriptor reduce;
-    tensor<T> input;
+    test::gtest::global_buffer::DeviceBufferObject in_dev;
+    test::gtest::global_buffer::DeviceBufferObject out_dev;
+    miopen::TensorDescriptor input_desc;
     tensor<T> output;
-    tensor<T> workspace;
+    test::gtest::global_buffer::DeviceBufferObject wspace_dev;
     float alpha;
     float beta;
 
@@ -468,15 +460,13 @@ struct verify_reduce_no_indices
 
     verify_reduce_no_indices( // NOLINT (hicpp-member-init)
         const miopen::ReduceTensorDescriptor& reduce_,
-        const tensor<T>& input_,
+        const miopen::TensorDescriptor& inputDescriptor_,
         const tensor<T>& output_,
-        const tensor<T>& workspace_,
         float alpha_,
         float beta_)
         : reduce(reduce_),
-          input(input_),
+          input_desc(inputDescriptor_),
           output(output_),
-          workspace(workspace_),
           alpha(alpha_),
           beta(beta_),
           reduceOp(reduce_.reduceTensorOp_),
@@ -487,25 +477,17 @@ struct verify_reduce_no_indices
 
     tensor<float> cpu() const
     {
-        using reduce::convert_type;
-
         const tensor<T> result = GetCpuImplResult<T, verify_reduce_no_indices>(compTypeVal, *this);
 
-        const auto& dimLengths = output.desc.GetLengths();
-        auto result_dataFloat  = tensor<float>(dimLengths);
-
-        for(size_t i = 0; i < result.data.size(); i++)
-            result_dataFloat.data[i] = convert_type<float>(result.data[i]);
-
-        return (result_dataFloat);
+        return convert_to_float(result);
     };
 
     template <typename compType>
     tensor<T> cpuImpl() const
     {
-        auto inLengths  = input.desc.GetLengths();
+        auto inLengths  = input_desc.GetLengths();
         auto outLengths = output.desc.GetLengths();
-        auto inStrides  = input.desc.GetStrides();
+        auto inStrides  = input_desc.GetStrides();
         auto outStrides = output.desc.GetStrides();
 
         // replicate
@@ -542,6 +524,8 @@ struct verify_reduce_no_indices
 
         auto PreUnaryOp = reduce::PreUnaryOpFn<compType>(reduceOp, divider);
         auto PosUnaryOp = reduce::PosUnaryOpFn<compType>(reduceOp, divider);
+
+        in_dev.HostMirrorWait();
 
         if(reduceAllDims)
         {
@@ -617,7 +601,8 @@ struct verify_reduce_no_indices
 
                 auto src_offset = get_offset_from_index(inStrides, src_index);
 
-                auto currVal = convert_type<compType>(input.data[src_offset]);
+                auto currVal =
+                    convert_type<compType>(static_cast<T*>(in_dev.host_mirror_)[src_offset]);
 
                 PreUnaryOp(currVal);
 
@@ -663,7 +648,7 @@ struct verify_reduce_no_indices
         {
             auto src_offset = get_offset_from_index(inStrides, src_index);
 
-            auto currVal = convert_type<compType>(input.data[src_offset]);
+            auto currVal = convert_type<compType>(static_cast<T*>(in_dev.host_mirror_)[src_offset]);
 
             PreUnaryOp(currVal);
 
@@ -684,32 +669,37 @@ struct verify_reduce_no_indices
         res.data[0] = convert_type<T>(accuVal);
     }
 
-    tensor<float> gpu() const
+    tensor<float> convert_to_float(const std::tuple<tensor<T>>& result) const
     {
         using reduce::convert_type;
-
-        auto result = gpuImpl();
 
         const auto& dimLengths = output.desc.GetLengths();
         auto result_dataFloat  = tensor<float>(dimLengths);
 
-        for(size_t i = 0; i < result.data.size(); i++)
-            result_dataFloat.data[i] = convert_type<float>(result.data[i]);
+        auto& result_dataT = std::get<0>(result);
 
-        return (result_dataFloat);
-    };
+        for(size_t i = 0; i < result_dataT.data.size(); i++)
+            result_dataFloat.data[i] = convert_type<float>(result_dataT.data[i]);
 
-    tensor<T> gpuImpl() const
+        return result_dataFloat;
+    }
+
+    void gpu() const { gpuImpl(); };
+
+    tensor<float> gpu_result() const
     {
-        auto&& handle   = get_handle();
-        auto input_dev  = handle.Write(input.data);
-        auto output_dev = handle.Write(output.data);
-
-        // replicate
         auto res = output;
 
-        Workspace wspace{};
-        wspace.Write(workspace.data);
+        out_dev.HostMirrorWait();
+        std::memcpy(res.data.data(), out_dev.host_mirror_, out_dev.size_bytes_);
+
+        return convert_to_float(res);
+    };
+
+    void gpuImpl() const
+    {
+        out_dev.fill(T{0});
+        wspace_dev.fill(T{0});
 
         const double alpha64 = alpha;
         const double beta64  = beta;
@@ -721,19 +711,19 @@ struct verify_reduce_no_indices
                                          ? static_cast<const void*>(&beta64)
                                          : static_cast<const void*>(&beta);
 
-        if(wspace.size() > 0)
+        if(wspace_dev.size_bytes_ > 0)
         {
             reduce.ReduceTensor(get_handle(),
                                 nullptr,
                                 0,
-                                wspace.ptr(),
-                                wspace.size(),
+                                wspace_dev.ptr_,
+                                wspace_dev.size_bytes_,
                                 alphaPtr,
-                                input.desc,
-                                input_dev.get(),
+                                input_desc,
+                                in_dev.ptr_,
                                 betaPtr,
                                 output.desc,
-                                output_dev.get());
+                                out_dev.ptr_);
         }
         else
         {
@@ -743,16 +733,14 @@ struct verify_reduce_no_indices
                                 nullptr,
                                 0,
                                 alphaPtr,
-                                input.desc,
-                                input_dev.get(),
+                                input_desc,
+                                in_dev.ptr_,
                                 betaPtr,
                                 output.desc,
-                                output_dev.get());
+                                out_dev.ptr_);
         };
 
-        res.data = handle.Read<T>(output_dev, res.data.size());
-
-        return (res);
+        out_dev.HostMirrorAsync();
     }
 
     void fail() const
@@ -872,6 +860,7 @@ inline auto GetCasesReduceCustomTestSet2()
 template <class T>
 struct ReduceCommon : public testing::TestWithParam<TestCase>
 {
+
     void SetUp() override
     {
         auto&& handle           = get_handle();
@@ -883,6 +872,8 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
 
         std::tie(inLengths, toReduceDims, reduceOp, nanOpt, indicesOpt, scales) = GetParam();
     }
+
+    void TearDown() override { test::gtest::global_buffer::ReleaseBuffer(); }
 
     void Run()
     {
@@ -954,49 +945,6 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
                                                          : 999;
         }
 
-        // default data gneration (used by MIN/MAX)
-        auto gen_value_min_max = [&](auto... is) {
-            return (tensor_elem_gen_integer{max_value}(is...) *
-                    tensor_elem_gen_checkboard_sign{}(is...));
-        };
-
-        // data generation used by ADD/AVG, data is distributed around 1.0 rather than 0.0, very low
-        // probability to get a reduced result of zero-value
-        auto gen_value_add_avg = [&](auto... is) {
-            auto rand_value = tensor_elem_gen_integer{max_value}(is...);
-            auto sign_value = tensor_elem_gen_checkboard_sign{}(is...);
-
-            return (sign_value * rand_value / max_value + 0.01);
-        };
-
-        // Special data generation for MUL, to avoid all-zero and large accumulative error in the
-        // reduced result
-        auto gen_value_mul = [&](auto... is) {
-            auto rand_value = tensor_elem_gen_integer{max_value}(is...);
-            auto sign_value = tensor_elem_gen_checkboard_sign{}(is...);
-
-            return sign_value > 0.0 ? (rand_value + max_value) / (rand_value + max_value + 1)
-                                    : (rand_value + max_value + 1) / (rand_value + max_value);
-        };
-
-        // Special data generation for NORM1 and NORM2 using a space of limitless number of values.
-        auto gen_value_norm1_norm2 = [&](auto... is) {
-            auto rand_upper = tensor_elem_gen_integer{max_value}(is...);
-            auto sign_value = tensor_elem_gen_checkboard_sign{}(is...);
-            auto rand_ratio = prng::gen_A_to_B(
-                0.1, 1.); // limit range due to numeric errors, see WORKAROUND_GPU_NUMERIC_ERROR
-
-            return rand_upper * sign_value * rand_ratio;
-        };
-
-        // Special data generation for AMAX, no zero value used
-        auto gen_value_amax = [&](auto... is) {
-            auto rand_value = tensor_elem_gen_integer{max_value}(is...);
-            auto sign_value = tensor_elem_gen_checkboard_sign{}(is...);
-
-            return sign_value > 0.0 ? (rand_value + 0.5) : (-1.0 * rand_value - 0.5);
-        };
-
         // default tolerance (refer to driver.hpp)
         this->tolerance = 80;
 
@@ -1017,43 +965,38 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
         if(std::is_same<T, half_float::half>::value)
             this->tolerance *= this->tolerance * 10.0;
 
-        tensor<T> inputTensor;
-
-        switch(reduceOp)
-        {
-        case MIOPEN_REDUCE_TENSOR_ADD:
-        case MIOPEN_REDUCE_TENSOR_AVG:
-            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_add_avg);
-            break;
-        case MIOPEN_REDUCE_TENSOR_MUL:
-            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_mul);
-            break;
-        case MIOPEN_REDUCE_TENSOR_NORM1:
-        case MIOPEN_REDUCE_TENSOR_NORM2:
-            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_norm1_norm2);
-            break;
-        case MIOPEN_REDUCE_TENSOR_AMAX:
-            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_amax);
-            break;
-        default: inputTensor = tensor<T>{this->inLengths}.generate(gen_value_min_max);
-        };
+        miopen::TensorDescriptor inputDesc(miopen_type<T>{}, this->inLengths);
 
         auto outputTensor = tensor<T>{outLengths};
 
         std::fill(outputTensor.begin(), outputTensor.end(), convert_type<T>(0.0f));
 
-        auto indices_nelem =
-            reduceDesc.GetIndicesSize(inputTensor.desc, outputTensor.desc) / sizeof(int);
+        const auto indices_size = reduceDesc.GetIndicesSize(inputDesc, outputTensor.desc);
+        auto indices_nelem      = indices_size / sizeof(int);
 
         auto ws_sizeInBytes =
-            reduceDesc.GetWorkspaceSize(get_handle(), inputTensor.desc, outputTensor.desc);
-        auto workspace_nelem = (indices_nelem == 0) ? ws_sizeInBytes / sizeof(T)
-                                                    : (ws_sizeInBytes + sizeof(T) - 1) / sizeof(T);
+            reduceDesc.GetWorkspaceSize(get_handle(), inputDesc, outputTensor.desc);
 
-        std::vector<std::size_t> wsLengths = {static_cast<std::size_t>(workspace_nelem), 1};
-        auto workspaceTensor               = tensor<T>{wsLengths};
+        const auto input_buf_size  = inputDesc.GetNumBytes();
+        const auto output_buf_size = outputTensor.data.size() * sizeof(T);
+        test::gtest::global_buffer::EnsureBufferSize(input_buf_size + output_buf_size +
+                                                     ws_sizeInBytes + indices_size);
 
-        std::fill(workspaceTensor.begin(), workspaceTensor.end(), convert_type<T>(0.0f));
+        // Input device buffer
+        auto in_buf = test::gtest::global_buffer::GetDeviceBuffer(input_buf_size);
+
+        test::gtest::ReduceGenerator<T>(static_cast<T*>(in_buf.ptr_),
+                                        inputDesc.GetElementSpace(),
+                                        prng::details::get_default_seed(),
+                                        reduceOp,
+                                        max_value,
+                                        get_handle().GetStream());
+
+        in_buf.HostMirrorAsync();
+
+        // Output device buffer
+        auto out_buf = test::gtest::global_buffer::GetDeviceBuffer(output_buf_size);
+        auto wspace  = test::gtest::global_buffer::GetDeviceBuffer(ws_sizeInBytes).fill(T{0});
 
         if(indices_nelem > 0)
         {
@@ -1062,43 +1005,76 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
 
             std::fill(indicesTensor.begin(), indicesTensor.end(), 1);
 
-            VerifyReduceWithIndices<true>(
-                reduceDesc, inputTensor, outputTensor, workspaceTensor, indicesTensor, 1.0f, 0.0f);
+            auto idxspace = test::gtest::global_buffer::GetDeviceBuffer(indices_size);
 
-            VerifyReduceWithIndices<false>(
-                reduceDesc, inputTensor, outputTensor, workspaceTensor, indicesTensor, 1.0f, 0.0f);
+            VerifyReduceWithIndices<true>(reduceDesc,
+                                          in_buf,
+                                          out_buf,
+                                          inputDesc,
+                                          outputTensor,
+                                          wspace,
+                                          idxspace,
+                                          indicesTensor,
+                                          1.0f,
+                                          0.0f);
+
+            VerifyReduceWithIndices<false>(reduceDesc,
+                                           in_buf,
+                                           out_buf,
+                                           inputDesc,
+                                           outputTensor,
+                                           wspace,
+                                           idxspace,
+                                           indicesTensor,
+                                           1.0f,
+                                           0.0f);
         }
         else
         {
             VerifyReduceNoIndices(
-                reduceDesc, inputTensor, outputTensor, workspaceTensor, alpha, beta);
+                reduceDesc, in_buf, out_buf, inputDesc, outputTensor, wspace, alpha, beta);
         };
-    };
+    }
 
 private:
     template <bool toVerifyData>
     void VerifyReduceWithIndices(const miopen::ReduceTensorDescriptor& reduce,
-                                 const tensor<T>& input,
+                                 const test::gtest::global_buffer::DeviceBufferObject in_dev,
+                                 const test::gtest::global_buffer::DeviceBufferObject out_dev,
+                                 const miopen::TensorDescriptor& input_desc,
                                  const tensor<T>& output,
-                                 const tensor<T>& workspace,
+                                 const test::gtest::global_buffer::DeviceBufferObject wspace_dev,
+                                 const test::gtest::global_buffer::DeviceBufferObject indices_dev,
                                  const tensor<int>& indices,
                                  float alpha,
                                  float beta) const
     {
         verify_reduce_with_indices<T, toVerifyData> reduce_with_indices(
-            reduce, input, output, workspace, indices, alpha, beta);
+            reduce, input_desc, output, indices, alpha, beta);
+
+        reduce_with_indices.in_dev      = in_dev;
+        reduce_with_indices.out_dev     = out_dev;
+        reduce_with_indices.wspace_dev  = wspace_dev;
+        reduce_with_indices.indices_dev = indices_dev;
+
         CompareResults(reduce_with_indices, toVerifyData);
     }
 
     void VerifyReduceNoIndices(const miopen::ReduceTensorDescriptor& reduce,
-                               const tensor<T>& input,
+                               const test::gtest::global_buffer::DeviceBufferObject in_dev,
+                               const test::gtest::global_buffer::DeviceBufferObject out_dev,
+                               const miopen::TensorDescriptor& input_desc,
                                const tensor<T>& output,
-                               const tensor<T>& workspace,
+                               const test::gtest::global_buffer::DeviceBufferObject wspace_dev,
                                float alpha,
                                float beta) const
     {
-        verify_reduce_no_indices<T> reduce_no_indices(
-            reduce, input, output, workspace, alpha, beta);
+        verify_reduce_no_indices<T> reduce_no_indices(reduce, input_desc, output, alpha, beta);
+
+        reduce_no_indices.in_dev     = in_dev;
+        reduce_no_indices.out_dev    = out_dev;
+        reduce_no_indices.wspace_dev = wspace_dev;
+
         CompareResults(reduce_no_indices, true);
     }
 
@@ -1115,8 +1091,10 @@ private:
     template <class TVerifier>
     void CompareResults(const TVerifier& verifier, bool toVerifyData) const
     {
+        verifier.gpu();
         const tensor<float> cpu = std::move(verifier.cpu());
-        const tensor<float> gpu = std::move(verifier.gpu());
+
+        const tensor<float> gpu = std::move(verifier.gpu_result());
 
         if(toVerifyData)
         {

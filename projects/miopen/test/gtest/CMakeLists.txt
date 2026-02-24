@@ -16,6 +16,8 @@ set(SOURCES
     platform.cpp
     conv_common.cpp
     unit_conv_solver.cpp
+    global_test_memory.cpp
+    device_prng.cpp
     )
 
 
@@ -164,7 +166,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     if (NOT MIOPEN_TEST_DEEPBENCH)
         add_gtest_negative_filter("*DeepBench*")
     endif()
-    
+
     if (NOT MIOPEN_TEST_CONV)
         add_gtest_negative_filter("*MIOpenTestConv*")
     endif()
@@ -172,7 +174,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     if(MIOPEN_NO_GPU)
         add_gtest_negative_filter("*GPU*")
     endif()
-    
+
     if(MIOPEN_TEST_GFX115X)
         add_gtest_negative_filter("Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("Smoke/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
