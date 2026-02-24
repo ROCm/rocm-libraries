@@ -40,7 +40,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1,  1, 6, 8,  2,2 ]          
+          - [16, 16, 32, 1,  1, 6, 8,  2,2 ]
         - PrefetchGlobalRead: [2] 
         - PrefetchLocalRead: [1]
         - DepthU: [32]
@@ -78,7 +78,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-           - [16, 16, 32, 1, 1, 4, 6, 2, 2]          
+           - [16, 16, 32, 1, 1, 4, 6, 2, 2]
         - DepthU: [32]
         - LocalReadVectorWidth: [4]
         - ScheduleIterAlg: [3]
@@ -106,9 +106,9 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1,  1, 8, 8,  2,2 ]          
+          - [16, 16, 32, 1,  1, 8, 8,  2,2 ]
         - PrefetchGlobalRead: [2] 
-        - PrefetchLocalRead: [0]
+        - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
@@ -138,15 +138,15 @@ BenchmarkProblems:
           - Range: [[256], [256], [1], [1,1,64]]
           - Range: [[256], [256], [1], [32, 64, 256]]
         - BiasTypeArgs: ['b']
-    - # BenchmarkProblemSizeGroup - Standard - All problem        
+    - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1,  1, 4, 4,  2,2 ]         
+          - [16, 16, 32, 1,  1, 4, 4,  2,2 ]
         - PrefetchGlobalRead: [2] 
-        - PrefetchLocalRead: [0]
+        - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
@@ -185,7 +185,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1, 4, 4,  2,2 ]         
         - PrefetchGlobalRead: [2] 
-        - PrefetchLocalRead: [0]
+        - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
@@ -259,9 +259,9 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1,  1, 4, 4,  2,2 ]         
+          - [16, 16, 32, 1,  1, 4, 4,  2,2 ]
         - PrefetchGlobalRead: [2] 
-        - PrefetchLocalRead: [0]
+        - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
@@ -290,13 +290,13 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [512, 8192, 1, 1980]
         - BiasTypeArgs: ['s']
-    - # BenchmarkProblemSizeGroup - Standard - All problem        
+    - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1,  1, 4, 4,  2,2 ]         
+          - [16, 16, 32, 1,  1, 4, 4,  2,2 ]
         - PrefetchGlobalRead: [2] 
         - PrefetchLocalRead: [1]
         - DepthU: [64]
@@ -366,9 +366,9 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 8, 6, 2, 2]         
+          - [16, 16, 32, 1, 1, 8, 6, 2, 2]
         - PrefetchGlobalRead: [2] 
-        - PrefetchLocalRead: [0]
+        - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
@@ -490,7 +490,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - UseCustomMainLoopSchedule: [0]
+        - UseCustomMainLoopSchedule: [1]
         - StreamK: [3]
         - LdsPadA: [8]
         - LdsPadB: [8]
@@ -605,9 +605,9 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1,  1, 6, 8,  2, 2 ]          
+          - [16, 16, 32, 1,  1, 6, 8,  2, 2 ]
         - PrefetchGlobalRead: [2] 
-        - PrefetchLocalRead: [0]
+        - PrefetchLocalRead: [1]
         - DepthU: [32]
         - TransposeLDS: [1]
         - DirectToLds: [1]
@@ -639,7 +639,7 @@ BenchmarkProblems:
     #     - MatrixInstruction:
     #       - [16, 16, 32, 1, 1, 4, 8, 2, 2]
     #     - PrefetchGlobalRead: [2]
-    #     - PrefetchLocalRead: [0]
+    #     - PrefetchLocalRead: [1]
     #     - DepthU: [32]
     #     - TransposeLDS: [1]
     #     - DirectToLds: [1]
@@ -663,8 +663,8 @@ BenchmarkProblems:
     #       - Range: [[128], [256], [1], [32, 64, 256]]
     #     - BiasTypeArgs: ['s']
 
-    - # BenchmarkProblemSizeGroup - Standard - All problem        
-      # MT 128x128x64, DU=32, PGR=2, PLR=1, MI=32x32x16   
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      # MT 128x128x64, DU=32, PGR=2, PLR=1, MI=32x32x16
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -697,7 +697,7 @@ BenchmarkProblems:
         - WorkGroupMapping: [1]
         - WorkGroupMappingXCC: [4]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [1]
+        - UseCustomMainLoopSchedule: [0] # [1] TODO: re-enable this
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -744,9 +744,9 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1,  1, 8, 6,  2, 2 ]          
+          - [16, 16, 32, 1,  1, 8, 6,  2, 2 ]
         - PrefetchGlobalRead: [2] 
-        - PrefetchLocalRead: [0]
+        - PrefetchLocalRead: [1]
         - DepthU: [32]
         - TransposeLDS: [1]
         - DirectToLds: [1]
