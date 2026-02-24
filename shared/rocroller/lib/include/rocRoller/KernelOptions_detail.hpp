@@ -10,8 +10,7 @@ namespace rocRoller
 {
     struct KernelOptionValues
     {
-        DSObserverType dsObserver = DSObserverType::DSMEMObserver;
-        LogLevel       logLevel   = LogLevel::Verbose;
+        LogLevel logLevel = LogLevel::Verbose;
 
         bool alwaysWaitAfterLoad         = false;
         bool alwaysWaitAfterStore        = false;
@@ -93,6 +92,8 @@ namespace rocRoller
          * separated into categories.
          */
         std::optional<int> maxConcurrentControlOps;
+
+        DSObserverType dsObserver = DSObserverType::DSMEMObserver;
 
         /**
          * By default, we no longer allow full integer division or modulo in
