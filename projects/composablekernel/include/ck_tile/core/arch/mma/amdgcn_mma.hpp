@@ -125,3 +125,4 @@ struct amdgcn_mma
 // Include the implementations
 #include "wmma/wmma.hpp"
 #include "mfma/mfma.hpp"
+#include "sparse/sparse.hpp"
