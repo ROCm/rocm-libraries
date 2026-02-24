@@ -49,6 +49,7 @@ namespace std
 #endif
 
 #include "../../shared/CLI11.hpp"
+#include "../../shared/fft_enums.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/hip_object_wrapper.h"
 #include "../../shared/rocfft_params.h"
@@ -471,8 +472,8 @@ int main(int argc, char* argv[])
             std::copy(ingrid.begin(), ingrid.end(), input_grid.begin() + 1);
             std::copy(outgrid.begin(), outgrid.end(), output_grid.begin() + 1);
 
-            params.distribute_input(localDeviceCount, input_grid);
-            params.distribute_output(localDeviceCount, output_grid);
+            params.distribute_field<fft_io::fft_io_in>(localDeviceCount, input_grid);
+            params.distribute_field<fft_io::fft_io_out>(localDeviceCount, output_grid);
         }
 
         if(*opt_not_in_place)

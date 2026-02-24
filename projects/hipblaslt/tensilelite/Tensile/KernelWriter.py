@@ -34,7 +34,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB256, \
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, \
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
-  MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpLeU32, \
+  MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64
 from rocisa.register import RegisterPool
@@ -111,6 +111,8 @@ class ABMatrixInfo(MatrixInfo):
 
   gNLCPermBlock: int             = -1
   gNLCPerpStride: int            = -1
+  gRDtlSwizzlePerpBlockSize: int    = -1
+  gRDtlSwizzleParaBlockSize: int    = -1
 
 # States
 @dataclass
@@ -2249,7 +2251,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # Get the perIterGlobalReadCode code for PAP (if PAP=On), else would be empty
           skipGlobalReadInc = False
           if kernel["PrefetchGlobalRead"] >= 3 and isNGLL:
-            # PGR>=3 and NGLL case, we need GR Inc only for the first NGLL and skip them afterwards 
+            # PGR>=3 and NGLL case, we need GR Inc only for the first NGLL and skip them afterwards
             skipGlobalReadInc = remainPgr < kernel["PrefetchGlobalRead"] - 1
           self.makeSchedule(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, skipGlobalReadInc=skipGlobalReadInc, lastLoop=NLLlast, isNGLL=isNGLL)
           module.add(self.codes.unrollLoopHeader)
@@ -2987,7 +2989,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # Creates a negative identity matrix for 4x4x4_16b MFMA
   # Each 4x4 block is set to this:
   # -1  0  0
-  #  0 -1  0 
+  #  0 -1  0
   #  0  0 -1
   ##############################################################################
   def createNegIdentityMatrix(self, kernel):
@@ -3195,7 +3197,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 module.addComment1("local read prefetch b")
                 localReadCodeB, packCodeB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadB, iui*self.states.numReadsIterCoalescedB, espi, tensorParametersB)
                 module.add(localReadCodeB)
-                if iui == 0 or not usePLRPackCMS:  
+                if iui == 0 or not usePLRPackCMS:
                   pack[plrIdx].add(packCodeB)
               if not kernel["ForceUnrollSubIter"] and (iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"]):
                 module.addComment1("local read inc a")
@@ -3489,18 +3491,102 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment1("Tail global read %s"%tc1)
       if tailLoopOpt1st and (globalReadMode1st == 2):
         module.add(self.doTailLoopOpt(kernel, tensorParameters1st))
+        module.addComment1("Update M0 for DTLDS")
+        moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters2nd, True)
+        module.add(replaceHolder(moduleTmp, 0))
+        module.addComment1("Tail global read %s"%tc2)
+        if tailLoopOpt2nd and (globalReadMode2nd == 2):
+          module.add(self.doTailLoopOpt(kernel, tensorParameters2nd))
+        else:
+          # Keep per-tensor tail branching for tc2 when tc1 uses tailLoopOpt.
+          if kernel["KRingShift"] and kernel["BufferLoad"] and tc2 in ("A", "B"):
+            labelNoKRS = Label(self.labels.getNameInc(f"KRS_tail_noop_{tc2}"), "")
+            labelDoneKRS = Label(self.labels.getNameInc(f"KRS_tail_done_{tc2}"), "")
+            labelNoKRS.comment = f"KRS: tail no-KRS path for {tc2} (sgprKRingShift==0)"
+            labelDoneKRS.comment = f"KRS: tail KRS branch join for {tc2}"
+            module.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: sgprKRingShift==0 ?"))
+            module.add(SCBranchSCC1(labelName=labelNoKRS.getLabelName(), comment="KRS: take no-KRS tail loads"))
+            module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd, krTailForceDisable=False))
+            module.add(SBranch(labelName=labelDoneKRS.getLabelName(), comment="KRS: skip no-KRS tail loads"))
+            module.add(labelNoKRS)
+            module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd, krTailForceDisable=True))
+            module.add(labelDoneKRS)
+          else:
+            module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd))
       else:
-        module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st))
-      module.addComment1("Update M0 for DTLDS")
-      # skip wait for DTL if global load 1st is DTL
-      skip2ndWaitForDtl = kernel["DirectToLds%s"%tc1]
-      moduleTmp = self.directToLdsM0Update(kernel, 2, tensorParameters2nd, skip2ndWaitForDtl)
-      module.add(replaceHolder(moduleTmp, 0))
-      module.addComment1("Tail global read %s"%tc2)
-      if tailLoopOpt2nd and (globalReadMode2nd == 2):
-        module.add(self.doTailLoopOpt(kernel, tensorParameters2nd))
-      else:
-        module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd))
+        # KRS: If both tail global-read blocks (A/B) are eligible for KRS, do ONE runtime branch and
+        # share ONE set of labels for A/B. When sgprKRingShift==0, force both tail blocks down the
+        # original "load-only" path (no KRS_TAIL_OFFSET_* at all).
+        # skip wait for DTL if global load 1st is DTL
+        skip2ndWaitForDtl = kernel["DirectToLds%s"%tc1]
+        krsTailBranchable1 = kernel["KRingShift"] and kernel["BufferLoad"] and tc1 in ("A", "B")
+        krsTailBranchable2 = kernel["KRingShift"] and kernel["BufferLoad"] and tc2 in ("A", "B") \
+                             and not (tailLoopOpt2nd and (globalReadMode2nd == 2))
+        if krsTailBranchable1 and krsTailBranchable2:
+          labelNoKRS = Label(self.labels.getNameInc("KRS_tail_noop_AB"), "")
+          labelDoneKRS = Label(self.labels.getNameInc("KRS_tail_done_AB"), "")
+          labelNoKRS.comment = "KRS: tail no-KRS path for A/B (sgprKRingShift==0)"
+          labelDoneKRS.comment = "KRS: tail KRS branch join for A/B"
+
+          module.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: sgprKRingShift==0 ?"))
+          module.add(SCBranchSCC1(labelName=labelNoKRS.getLabelName(), comment="KRS: take no-KRS tail loads (A+B)"))
+
+          # KRS-enabled path: A then B
+          module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st, krTailForceDisable=False))
+          module.addComment1("Update M0 for DTLDS")
+          moduleTmp = self.directToLdsM0Update(kernel, 2, tensorParameters2nd, skip2ndWaitForDtl)
+          module.add(replaceHolder(moduleTmp, 0))
+          module.addComment1("Tail global read %s"%tc2)
+          module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd, krTailForceDisable=False))
+          module.add(SBranch(labelName=labelDoneKRS.getLabelName(), comment="KRS: skip no-KRS tail loads (A+B)"))
+
+          # no-KRS path: A then B (load-only)
+          module.add(labelNoKRS)
+          module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st, krTailForceDisable=True))
+          module.addComment1("Update M0 for DTLDS")
+          moduleTmp = self.directToLdsM0Update(kernel, 2, tensorParameters2nd, skip2ndWaitForDtl)
+          module.add(replaceHolder(moduleTmp, 0))
+          module.addComment1("Tail global read %s"%tc2)
+          module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd, krTailForceDisable=True))
+          module.add(labelDoneKRS)
+        else:
+          # Fallback: keep per-tensor tail branching.
+          if krsTailBranchable1:
+            labelNoKRS = Label(self.labels.getNameInc(f"KRS_tail_noop_{tc1}"), "")
+            labelDoneKRS = Label(self.labels.getNameInc(f"KRS_tail_done_{tc1}"), "")
+            labelNoKRS.comment = f"KRS: tail no-KRS path for {tc1} (sgprKRingShift==0)"
+            labelDoneKRS.comment = f"KRS: tail KRS branch join for {tc1}"
+            module.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: sgprKRingShift==0 ?"))
+            module.add(SCBranchSCC1(labelName=labelNoKRS.getLabelName(), comment="KRS: take no-KRS tail loads"))
+            module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st, krTailForceDisable=False))
+            module.add(SBranch(labelName=labelDoneKRS.getLabelName(), comment="KRS: skip no-KRS tail loads"))
+            module.add(labelNoKRS)
+            module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st, krTailForceDisable=True))
+            module.add(labelDoneKRS)
+          else:
+            module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st))
+
+          module.addComment1("Update M0 for DTLDS")
+          moduleTmp = self.directToLdsM0Update(kernel, 2, tensorParameters2nd, skip2ndWaitForDtl)
+          module.add(replaceHolder(moduleTmp, 0))
+          module.addComment1("Tail global read %s"%tc2)
+          if tailLoopOpt2nd and (globalReadMode2nd == 2):
+            module.add(self.doTailLoopOpt(kernel, tensorParameters2nd))
+          else:
+            if kernel["KRingShift"] and kernel["BufferLoad"] and tc2 in ("A", "B"):
+              labelNoKRS = Label(self.labels.getNameInc(f"KRS_tail_noop_{tc2}"), "")
+              labelDoneKRS = Label(self.labels.getNameInc(f"KRS_tail_done_{tc2}"), "")
+              labelNoKRS.comment = f"KRS: tail no-KRS path for {tc2} (sgprKRingShift==0)"
+              labelDoneKRS.comment = f"KRS: tail KRS branch join for {tc2}"
+              module.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: sgprKRingShift==0 ?"))
+              module.add(SCBranchSCC1(labelName=labelNoKRS.getLabelName(), comment="KRS: take no-KRS tail loads"))
+              module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd, krTailForceDisable=False))
+              module.add(SBranch(labelName=labelDoneKRS.getLabelName(), comment="KRS: skip no-KRS tail loads"))
+              module.add(labelNoKRS)
+              module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd, krTailForceDisable=True))
+              module.add(labelDoneKRS)
+            else:
+              module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd))
 
       doA = False
       doB = False
@@ -4645,19 +4731,33 @@ class KernelWriter(metaclass=abc.ABCMeta):
     def GNLCOInit(tc):
       abmatrixinfo = self.states.a if tc == 'A' else self.states.b
       if kernel["DirectToLds%s"%tc] and kernel["UseGeneralizedNLCOne%s"%tc]:
+
+        isMixedPrec = (kernel["ProblemType"]["DataTypeA"].numBytes() != kernel["ProblemType"]["DataTypeB"].numBytes())
+        lrvw = kernel["LocalReadVectorWidth"]
+        grvw = kernel["GlobalReadVectorWidth%c"%tc]
+        bpe = kernel["ProblemType"]["DataType%s"%tc].numBytes()
+        LdsStride = kernel["VectorWidth%s"%tc] * bpe * kernel["DepthU"]
+        MinLdsBlockSizePerPad = (kernel[f"GlobalReadVectorWidth%s"%tc] * bpe) * kernel["WavefrontSize"]
+        isM0PadEnough = LdsStride >= MinLdsBlockSizePerPad
+
+        # Currently only supported for 16b, DTL, TLU=0 and grvw == lrvw
+        if kernel["ProblemType"]["DataType"].numBytes() == 2 and not isMixedPrec \
+           and kernel["ProblemType"]["TLU%s"%tc] == 0 and lrvw == grvw and \
+           not isM0PadEnough:
+          abmatrixinfo.gRDtlSwizzlePerpBlockSize = kernel["VectorWidth%s"%tc]
+          abmatrixinfo.gRDtlSwizzleParaBlockSize = kernel["MatrixInstK"] // (kernel["LocalReadVectorWidth"])
+        else:
+          abmatrixinfo.gRDtlSwizzlePerpBlockSize = 0
+          abmatrixinfo.gRDtlSwizzleParaBlockSize = 0
+
         ntpl = kernel["NumTotalPackedLoads%s"%tc]
-        # TODOBS: Determine logic to calculate best permStride..
         if kernel["ProblemType"]["TLU%s"%tc] == 1 and not kernel["enableLDSTr%s"%tc]:
           usePerpPerm = False
         elif kernel["ProblemType"]["TLU%s"%tc] == 1 and kernel["enableLDSTr%s"%tc]:
           usePerpPerm = (ntpl & (ntpl-1)) == 0
         else:
-          # Currently only VW=1,2 is supported due to how the local read offset
-          # is currently computed. Supporting VW=1,2 only required small modifications
-          # to the offset calc.
-          # TODO: Add support for VW=4,8, this will require more changes in LR offset
-          # calculations
-          usePerpPerm = False if kernel["VectorWidth%s"%tc] > 2 else True
+          # TLU=0 Case, not needed
+          usePerpPerm = False
 
         permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 \
           else kernel["VectorWidth%s"%tc] * kernel["MatrixInstM"]
@@ -4666,6 +4766,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         abmatrixinfo.gNLCPerpStride = 1
         abmatrixinfo.gNLCPermBlock = 1
+        abmatrixinfo.gRDtlSwizzlePerpBlockSize = 0
+        abmatrixinfo.gRDtlSwizzleParaBlockSize = 0
 
     GNLCOInit('A')
     GNLCOInit('B')
@@ -4975,8 +5077,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # for cgemm or zgemm + MIAV case, allocate 2 or 4 vgpr for alpha calculation (cannot use tmp vgpr in write batch)
     if kernel["ProblemType"]["DataType"].isComplex() \
-      and kernel["MIArchVgpr"] \
-      and (kernel["_GlobalAccumulation"] == 'SingleBuffer' or kernel["_GlobalAccumulation"] == None):
+      and kernel["MIArchVgpr"]: 
 
       # need proper alignment
       vgprIdx = ((vgprIdx+2 - 1)//2)*2
