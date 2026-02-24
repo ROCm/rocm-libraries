@@ -359,7 +359,7 @@ void TestLogBufferOn()
     ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
                                                  "5"); // miopen::LoggingLevel::Info
     // test log dump after error
-    miopen::ClearBufferLog();
+    miopen::ClearLogBuffer();
     MIOPEN_LOG_W("warn");
     MIOPEN_LOG_I("info");
     MIOPEN_LOG_I2("info2");
@@ -387,7 +387,7 @@ void TestLogBufferOn()
     fs::remove(filename);
 
     // test log dump after throw
-    miopen::ClearBufferLog();
+    miopen::ClearLogBuffer();
     MIOPEN_LOG_W("warn");
     MIOPEN_LOG_I("info");
     MIOPEN_LOG_I2("info2");
@@ -425,7 +425,7 @@ void TestLogBufferEnvDisabled()
     ScopedEnvironment<std::string> log_buffer_off_env(MIOPEN_LOG_BUFFER_SIZE,
                                                       "0"); // disable logging
 
-    miopen::ClearBufferLog();
+    miopen::ClearLogBuffer();
     // log messages
     MIOPEN_LOG_W("warn");
     MIOPEN_LOG_I("info");
@@ -446,7 +446,7 @@ void TestLogBufferOffAtHighLevel()
     ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
                                                  "6"); // miopen::LoggingLevel::Info2
 
-    miopen::ClearBufferLog();
+    miopen::ClearLogBuffer();
     // log messages
     MIOPEN_LOG_W("warn");
     MIOPEN_LOG_I("info");

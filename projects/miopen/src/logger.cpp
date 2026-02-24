@@ -76,9 +76,9 @@ namespace miopen {
 
 size_t GetBufferSize() { return env::value(MIOPEN_LOG_BUFFER_SIZE); }
 
-bool IsBufferLogOn() { return GetBufferSize() != 0; }
+bool IsLogBufferOn() { return GetBufferSize() != 0; }
 
-std::vector<std::string>& GetBufferLog()
+std::vector<std::string>& GetLogBuffer()
 {
     auto log_buffer_size = GetBufferSize();
     static thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
@@ -93,9 +93,9 @@ size_t& GetBufferIdx()
     return log_buffer_i;
 }
 
-void ClearBufferLog()
+void ClearLogBuffer()
 {
-    auto& log_buffer   = GetBufferLog();
+    auto& log_buffer   = GetLogBuffer();
     auto& log_buffer_i = GetBufferIdx();
     log_buffer         = std::vector<std::string>(GetBufferSize(), "");
     log_buffer_i       = 0;
@@ -103,7 +103,7 @@ void ClearBufferLog()
 
 void BufferLog(std::string line)
 {
-    auto& log_buffer         = GetBufferLog();
+    auto& log_buffer         = GetLogBuffer();
     auto& log_buffer_i       = GetBufferIdx();
     log_buffer[log_buffer_i] = line;
     log_buffer_i             = (log_buffer_i + 1) % GetBufferSize();
@@ -111,7 +111,7 @@ void BufferLog(std::string line)
 
 void OutputBufferedLogs()
 {
-    auto& log_buffer     = GetBufferLog();
+    auto& log_buffer     = GetLogBuffer();
     auto& log_buffer_i   = GetBufferIdx();
     auto log_buffer_size = GetBufferSize();
     auto buffer_size     = (log_buffer[log_buffer_size - 1] == "") ? log_buffer_i : log_buffer_size;

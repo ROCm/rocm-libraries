@@ -367,9 +367,9 @@ constexpr std::string_view LoggingParseFunction(const std::string_view func,
 #define MIOPEN_GET_FN_NAME miopen::LoggingParseFunction(__func__, __PRETTY_FUNCTION__)
 #endif
 
-MIOPEN_INTERNALS_EXPORT bool IsBufferLogOn();
+MIOPEN_INTERNALS_EXPORT bool IsLogBufferOn();
 
-MIOPEN_INTERNALS_EXPORT void ClearBufferLog();
+MIOPEN_INTERNALS_EXPORT void ClearLogBuffer();
 
 MIOPEN_INTERNALS_EXPORT void BufferLog(std::string line);
 
@@ -382,7 +382,7 @@ MIOPEN_INTERNALS_EXPORT void OutputBufferedLogs();
         const bool is_logging = miopen::IsLogging(level, disableQuieting);                  \
         const bool is_logging_i2 =                                                          \
             miopen::IsLogging(miopen::LoggingLevel::Info2, disableQuieting);                \
-        const bool buffer_on = miopen::IsBufferLogOn();                                     \
+        const bool buffer_on = miopen::IsLogBufferOn();                                     \
         if(is_logging || (buffer_on && !is_logging_i2))                                     \
         {                                                                                   \
             miopen_log_ss << miopen::LoggingPrefix() << category << " [" << fn_name << "] " \
