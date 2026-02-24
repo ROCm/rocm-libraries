@@ -118,7 +118,14 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
                                ${PROJECT_SOURCE_DIR}/library/src/include
                                ${PROJECT_SOURCE_DIR}/library/src
                                ${PROJECT_SOURCE_DIR}/test
+                               ${PROJECT_BINARY_DIR}/include/hiptensor
+                               ${PROJECT_BINARY_DIR}/include
                                ${hiptensor_test_YAML_DIR})
+
+    # -Wno-ignored-attributes to avoid warning: __declspec attribute 'dllimport' is not supported [-Wignored-attributes] which is used by msvc compiler
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(${BINARY_NAME} PRIVATE -Wno-ignored-attributes)
+    endif()
 
     # C++ code handles the following symbols defined:
     # - HIPTENSOR_TEST_YAML_INCLUDE
@@ -176,7 +183,14 @@ function(add_hiptensor_unit_test)
                                ${PROJECT_SOURCE_DIR}/library/include
                                ${PROJECT_SOURCE_DIR}/library/src/include
                                ${PROJECT_SOURCE_DIR}/library/src
-                               ${PROJECT_SOURCE_DIR}/test)
+                               ${PROJECT_SOURCE_DIR}/test
+                               ${PROJECT_BINARY_DIR}/include/hiptensor
+                               ${PROJECT_BINARY_DIR}/include)
+
+    # -Wno-ignored-attributes to avoid warning: __declspec attribute 'dllimport' is not supported [-Wignored-attributes] which is used by msvc compiler
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(${BINARY_NAME} PRIVATE -Wno-ignored-attributes)
+    endif()
 
     # Build this test under custom target
     add_dependencies(hiptensor_tests ${BINARY_NAME})

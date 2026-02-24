@@ -76,6 +76,8 @@ set(HIPTENSOR_LLVM_INCLUDES ${LLVM_INCLUDE_DIRS}
                             ${PROJECT_SOURCE_DIR}/library/src/include
                             ${PROJECT_SOURCE_DIR}/library/src
                             ${PROJECT_SOURCE_DIR}/test
+                            ${PROJECT_BINARY_DIR}/include/hiptensor
+                            ${PROJECT_BINARY_DIR}/include
                             )
 
 # Sources for this static object
@@ -93,3 +95,14 @@ target_include_directories(${LIBRARY_NAME} PRIVATE ${HIPTENSOR_LLVM_INCLUDES})
 target_include_directories(${LIBRARY_NAME} INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(${LIBRARY_NAME} PRIVATE -fno-rtti ${CLANG_DRIVER_MODE})
 target_link_options(${LIBRARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
+
+# On Windows, define static define to disable dllimport/export since tests use static library
+# Use PUBLIC so it applies to this target AND propagates to targets that link with this library
+if(WIN32)
+    target_compile_definitions(${LIBRARY_NAME} PUBLIC HIPTENSOR_STATIC_DEFINE)
+endif()
+
+# -Wno-ignored-attributes to avoid warning: __declspec attribute 'dllimport' is not supported [-Wignored-attributes] which is used by msvc compiler
+if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(${LIBRARY_NAME} PRIVATE -Wno-ignored-attributes)
+endif()
