@@ -570,7 +570,7 @@ void iota_modulo(ForwardIt first, ForwardIt last, T lbound, const size_t ubound)
     const T value_mod = static_cast<size_t>(lbound) < ubound ? lbound : 0;
     using value_type  = typename std::iterator_traits<ForwardIt>::value_type;
 
-    for(T value = value_mod; first != last; value++, static_cast<void>(*first++))
+    for(T value = value_mod; first != last; value++, static_cast<void>(first++))
     {
         if(static_cast<size_t>(value) >= ubound)
         {
@@ -593,7 +593,7 @@ void iota_modulo(ForwardIt first, ForwardIt last, T lbound, const size_t ubound)
     const T value_mod = static_cast<size_t>(lbound) < ubound ? lbound : 0;
     using value_type  = rocprim::half;
 
-    for(T value = value_mod; first != last; value++, static_cast<void>(*first++))
+    for(T value = value_mod; first != last; value++, static_cast<void>(first++))
     {
         if(static_cast<float>(static_cast<value_type>(value)) >= ubound)
         {
