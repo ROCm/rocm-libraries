@@ -1760,7 +1760,7 @@ class Solution(collections.abc.Mapping):
                 ldsPadA = 0
                 if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
                   ldsPadA = int(((16 * state["VectorWidthA"] * numBytesA + state["MacroTile0"] * numBytesA * lrvwA) % 128) // numBytesA)
-                if state["GlobalReadVectorWidthA"] * state["ProblemType"]["MacDataTypeA"] == 32 and ldsPadA == 0:
+                if state["GlobalReadVectorWidthA"] * numBytesA == 32 and ldsPadA == 0:
                   ldsPadA = int(16 // numBytesA)
                 if state["DirectToLdsA"]:
                   # TODO: Check if there are cases which benefit from padding, currently set to zero by default
@@ -1786,7 +1786,7 @@ class Solution(collections.abc.Mapping):
                 ldsPadB = 0
                 if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
                   ldsPadB = int(((16 * state["VectorWidthB"] * numBytesB + state["MacroTile1"] * numBytesB * lrvwB) % 128) // numBytesB)
-                if state["GlobalReadVectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes() == 32 and ldsPadB == 0:
+                if state["GlobalReadVectorWidthB"] * numBytesB == 32 and ldsPadB == 0:
                   ldsPadB = int(16 // numBytesB)
                 if state["DirectToLdsB"]:
                   # TODO: Check if there are cases which benefit from padding, currently set to zero by default
