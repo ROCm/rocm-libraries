@@ -74,10 +74,9 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 
         auto epilogue_args = typename GridwiseGemm::EpilogueCShuffle{};
 
-        GridwiseGemm::template Run<GridwiseGemm::ConvRegime::GENERIC,
+        GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BWD_WEIGHT,
                                    AGridDesc_AK0_M_K1,
                                    BGridDesc_BK0_N_K1,
-                                   typename GridwiseGemm::EmptyType,
                                    typename GridwiseGemm::EmptyType,
                                    CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
                                    typename GridwiseGemm::EmptyType,
@@ -85,7 +84,6 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                    typename GridwiseGemm::EmptyType,
                                    1,
                                    HasMainKBlockLoop,
-                                   InMemoryDataOperationEnum::Set,
                                    CGlobalMemoryDataOperation,
                                    false,
                                    TailNum,
@@ -93,7 +91,6 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             p_shared,
             a_grid_desc_ak0_m_ak1,
             b_grid_desc_bk0_n_bk1,
-            GridwiseGemm::emptyArgument,
             GridwiseGemm::emptyArgument,
             c_grid_desc_mblock_mperblock_nblock_nperblock,
             GridwiseGemm::emptyArgument,

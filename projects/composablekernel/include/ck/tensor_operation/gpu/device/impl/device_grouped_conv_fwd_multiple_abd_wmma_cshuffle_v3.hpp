@@ -106,13 +106,11 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                    DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock,
                                    EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
                                    typename GridwiseGemm::EmptyType,
-                                   typename GridwiseGemm::EmptyType,
                                    ComputePtrOffset,
                                    ComputePtrOffset,
                                    0,
                                    HasMainKBlockLoop,
                                    EGlobalMemoryDataOperation,
-                                   InMemoryDataOperationEnum::Set,
                                    false,
                                    TailNum,
                                    decltype(epilogue_args)>(
@@ -121,8 +119,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             b_grid_desc_bk0_n_bk1,
             ds_grid_desc_mblock_mperblock_nblock_nperblock,
             e_grid_desc_mblock_mperblock_nblock_nperblock,
-            GridwiseGemm::emptyArgument, // Variable used in generic grouped convolution
-            GridwiseGemm::emptyArgument, // Variable used in bwd grouped convolution
+            GridwiseGemm::emptyArgument,
             compute_ptr_offset_of_batch,
             compute_ptr_offset_of_n,
             num_k_per_block,
