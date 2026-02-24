@@ -205,6 +205,7 @@ TEST(StableSortTests, TestStableSortDevice)
       thrust::stable_sort(h_data.begin(), h_data.end());
       hipLaunchKernelGGL(
         StableSortKernel, dim3(1, 1, 1), dim3(128, 1, 1), 0, 0, size, thrust::raw_pointer_cast(&d_data[0]));
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(h_data, d_data);
     }

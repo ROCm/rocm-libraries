@@ -83,6 +83,7 @@ const auto TEST_PLUGIN_DIR = std::filesystem::path(plugin_constants::getTestPlug
 
 const auto PLUGIN_PATH1 = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN1_NAME;
 const auto PLUGIN_PATH2 = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN2_NAME;
+const auto NO_API_VERSION_PLUGIN_PATH = ".." / TEST_PLUGIN_DIR / TEST_NO_API_VERSION_PLUGIN_NAME;
 
 const auto FULL_PLUGIN_PATH1
     = hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
@@ -395,4 +396,25 @@ TEST(TestPluginCore, GetPluginSearchPathsWithEmptyEnvVar)
 
     ASSERT_EQ(result.size(), 3);
     EXPECT_EQ(result, defaultPaths);
+}
+
+TEST(TestPluginCore, GetVersion)
+{
+    Plugin plugin{plugin::SharedLibrary{PLUGIN_PATH1}};
+
+    EXPECT_EQ(plugin.version(), "1.0");
+}
+
+TEST(TestPluginCore, GetApiVersion)
+{
+    Plugin plugin{plugin::SharedLibrary{PLUGIN_PATH1}};
+
+    EXPECT_EQ(plugin.apiVersion(), "0.1.0");
+}
+
+TEST(TestPluginCore, GetApiVersionUndefinedFunction)
+{
+    Plugin plugin(plugin::SharedLibrary{NO_API_VERSION_PLUGIN_PATH});
+
+    EXPECT_EQ(plugin.apiVersion(), "0.0.0");
 }
