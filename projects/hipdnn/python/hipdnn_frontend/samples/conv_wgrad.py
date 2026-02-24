@@ -50,7 +50,7 @@ def run_convolution_wgrad():
 
     # Create a handle for backend operations
     print("\nCreating hipdnn handle...")
-    handle = hipdnn.Handle()
+    handle = hipdnn.create_handle()
 
     # Create a graph
     graph = hipdnn.Graph()

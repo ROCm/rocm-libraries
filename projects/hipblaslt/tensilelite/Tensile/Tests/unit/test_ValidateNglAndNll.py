@@ -71,7 +71,7 @@ class TestValidateNgl(CMSValidationTestBase):
         shift_value = 3 + 3 - 1  # 3 GRAs and 3 GRBs - 1
         optSchedule, syncCode = self.make_simple_schedule_and_sync()
         self.validate(optSchedule, syncCode, 1, shift_value, shift_value, 0,
-                                         "GRB at index 2 is not valid. There are no guarantees on when it will be done.")
+                                         "GRB @ idx=2 is not valid. There are no guarantees on when it will be done.")
 
     def test_simple_case_success_too_high(self):
         """

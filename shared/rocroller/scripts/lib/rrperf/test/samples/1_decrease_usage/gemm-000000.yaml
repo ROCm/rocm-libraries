@@ -19,7 +19,7 @@ types:
   scale_B: Separate
   scaleType_B: E8M0
   scaleBlockSize: 32
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
   scaleShuffleTileA:
     []
   scaleShuffleTileB:
@@ -53,7 +53,6 @@ prefetchMixMemOps: true
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeightedSimple
-matchMemoryAccess: true
 types:
   type_A: fp4
   type_B: fp4
@@ -67,7 +66,7 @@ types:
   scale_B: Separate
   scaleType_B: E8M0
   scaleBlockSize: 32
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
   scaleShuffleTileA:
     []
   scaleShuffleTileB:

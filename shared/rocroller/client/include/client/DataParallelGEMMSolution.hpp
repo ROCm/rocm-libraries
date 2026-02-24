@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -153,7 +130,18 @@ namespace rocRoller
 
                         auto scaleInputA = m_tagLoadScaleA;
 
-                        if(solutionParams.types.scaleSkipPermlane)
+                        if(solutionParams.types.scaleSkipPermlane
+                           == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                        {
+                            AssertFatal(
+                                not solutionParams.types.scalePretileA.empty()
+                                    && not solutionParams.types.scalePretileB.empty(),
+                                "PreSwizzleScaleGFX950 requires pretile scale (scalePretileA and "
+                                "scalePretileB non-empty).");
+                        }
+
+                        if(solutionParams.types.scaleSkipPermlane
+                           != rocRoller::ScaleSkipPermlaneMode::None)
                         {
                             AssertFatal(solutionParams.types.scaleShuffleTileA.size() == 3,
                                         ShowValue(solutionParams.types.scaleShuffleTileA));
@@ -210,7 +198,8 @@ namespace rocRoller
 
                         auto scaleInputB = m_tagLoadScaleB;
 
-                        if(solutionParams.types.scaleSkipPermlane)
+                        if(solutionParams.types.scaleSkipPermlane
+                           != rocRoller::ScaleSkipPermlaneMode::None)
                         {
                             AssertFatal(solutionParams.types.scaleShuffleTileB.size() == 3);
 
@@ -580,13 +569,10 @@ namespace rocRoller
                         params->prefetch = false;
                     }
 
-                    if(solutionParams.matchMemoryAccess)
-                    {
-                        params->transposeMemoryAccess.set(
-                            LayoutType::MATRIX_A, solutionParams.types.transA == TransposeType::T);
-                        params->transposeMemoryAccess.set(
-                            LayoutType::MATRIX_B, solutionParams.types.transB == TransposeType::T);
-                    }
+                    params->transposeMemoryAccess.set(
+                        LayoutType::MATRIX_A, solutionParams.types.transA == TransposeType::T);
+                    params->transposeMemoryAccess.set(
+                        LayoutType::MATRIX_B, solutionParams.types.transB == TransposeType::T);
 
                     uint workgroup_size_x
                         = solutionParams.workgroupSizeX * solutionParams.workgroupSizeY;

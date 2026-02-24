@@ -277,11 +277,6 @@ struct runtime_options {
   double heuristics_variance;
 
   /**
-   * @brief Default constructor that reads from environment variables.
-   */
-  runtime_options();
-
-  /**
    * @brief Constructor with explicit values (does not read from environment).
    */
   runtime_options(bool debug, bool heuristics, double variance);
@@ -311,7 +306,7 @@ struct runtime_options {
 
   /**
    * @brief Read heuristics variance from environment variable.
-   * @return double Variance value from ANALYTICAL_GEMM_HEURISTICS_VARIANCE, or 0.0 if not set
+   * @return double Variance value from ANALYTICAL_GEMM_HEURISTICS_VARIANCE, or 0.01 if not set
    */
   static double read_heuristics_variance_from_env();
 
@@ -319,6 +314,14 @@ struct runtime_options {
    * @brief Update runtime options from environment variables.
    */
   void update_from_env();
+
+  private:
+  /**
+   * @brief Default constructor that reads from environment variables.
+   *
+   * This is made private because it should only be used through the static get() member.
+   */
+  runtime_options();
 };
 
 /**
@@ -442,6 +445,22 @@ struct workgroup_mapping_t {
 
   /// Workgroup mapping size.
   int32_t wgm = 1;
+};
+
+/**
+ * @brief Struct to define various staggerU parameters.
+ *
+ * Contains all the parameters needed to describe various staggerU parameters.
+ */
+ struct staggerU_t {
+  /// StaggerU mapping size.
+  std::size_t staggerUMapping = 0;
+
+  /// StaggerU size.
+  std::size_t staggerU = 0;
+
+  /// StaggerUStrideShift size.
+  std::size_t staggerUStrideShift = 0;
 };
 
 /**
