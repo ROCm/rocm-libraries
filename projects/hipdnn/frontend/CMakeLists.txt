@@ -4,7 +4,7 @@
 include(CMakePackageConfigHelpers)
 
 # Read data_sdk version for minimum requirement
-hipdnn_get_data_sdk_version(HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION)
+hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION)
 
 set(HIP_DNN_FRONTEND_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 

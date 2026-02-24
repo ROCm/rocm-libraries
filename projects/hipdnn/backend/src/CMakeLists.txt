@@ -3,6 +3,12 @@
 
 include(CMakePackageConfigHelpers)
 
+# Version handling
+hipdnn_setup_version(hipdnn_backend)
+
+# Set project with version
+project(hipdnn_backend VERSION ${HIPDNN_BACKEND_VERSION} LANGUAGES CXX)
+
 find_package(hip REQUIRED)
 
 set(HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR "${PROJECT_BINARY_DIR}/backend/include/")
@@ -35,7 +41,7 @@ add_library(
 
 target_include_directories(
     hipdnn_backend_private PUBLIC ${HIP_DNN_BACKEND_INCLUDE_DIR} ${HIP_DNN_BACKEND_SRC_DIR}
-                                  ${HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR}
+                                  ${HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/include/
 )
 
 target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -50,6 +56,8 @@ hipdnn_enable_spdlog(hipdnn_backend_private)
 clang_tidy_check(hipdnn_backend_private)
 
 add_library(hipdnn_backend SHARED HipdnnBackend.cpp)
+
+hipdnn_generate_version_header(hipdnn_backend)
 
 target_include_directories(
     hipdnn_backend
@@ -120,6 +128,15 @@ configure_package_config_file(
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend
 )
 
-install(FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfig.cmake"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend COMPONENT Development
+# Generate package version file for find_package version checking
+write_basic_package_version_file(
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfigVersion.cmake"
+    VERSION ${HIPDNN_BACKEND_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfig.cmake"
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend COMPONENT Development
 )
