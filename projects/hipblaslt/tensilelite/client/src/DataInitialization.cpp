@@ -1772,8 +1772,40 @@ namespace TensileLite
 
         void DataInitialization::initializeMXDataForFP4(ContractionProblemGemm const& problem)
         {
-            std::vector<size_t> emptySwizzle;
-            std::vector<size_t> emptyTile;
+            // Compute preSwizzle parameters from the current solution's matrix instruction.
+            // PreSwizzle rearranges the scale tensor into the memory layout expected by the
+            // GPU kernel.  The format is:
+            //   preSwizzle: {swizzleTileMN, 256/swizzleTileMN, MiK/mxBlock}
+            //   preTile:    {256/swizzleTileMN, swizzleTileMN}
+            // swizzleTileMN is the wave-level MN span for scale access: 2 SIMDs * 16 lanes = 32.
+            // This is fixed for all current FP4 MX kernels (gfx950) regardless of MiM.
+            // subTileK is derived from MiK (matrixInstruction[2]) and the scale block size.
+            std::vector<size_t> preSwizzleA, preTileA, preSwizzleB, preTileB;
+
+            if(m_currentSolution != nullptr)
+            {
+                auto const&      mi            = m_currentSolution->sizeMapping.matrixInstruction;
+                size_t           MiK           = static_cast<size_t>(mi[2]);
+                constexpr size_t swizzleTileMN = 32; // 2 SIMDs * 16 lanes per wave for MN access
+                constexpr size_t tileK         = 256 / swizzleTileMN; // scale blocks per wave in K
+
+                if(MiK > 0)
+                {
+                    if(problem.mxBlockA() > 0 && MiK % problem.mxBlockA() == 0)
+                    {
+                        size_t subTileK = MiK / problem.mxBlockA();
+                        preSwizzleA     = {swizzleTileMN, tileK, subTileK};
+                        preTileA        = {tileK, swizzleTileMN};
+                    }
+
+                    if(problem.mxBlockB() > 0 && MiK % problem.mxBlockB() == 0)
+                    {
+                        size_t subTileK = MiK / problem.mxBlockB();
+                        preSwizzleB     = {swizzleTileMN, tileK, subTileK};
+                        preTileB        = {tileK, swizzleTileMN};
+                    }
+                }
+            }
 
             if(problem.mxBlockA() > 0 && problem.a().dataType() == rocisa::DataType::Float4)
             {
@@ -1794,8 +1826,8 @@ namespace TensileLite
                                 cols,
                                 stride,
                                 problem.transA(),
-                                emptySwizzle,
-                                emptyTile,
+                                preSwizzleA,
+                                preTileA,
                                 problem.mxBlockA(),
                                 1,
                                 true,
@@ -1823,8 +1855,8 @@ namespace TensileLite
                                 cols,
                                 stride,
                                 problem.transB(),
-                                emptySwizzle,
-                                emptyTile,
+                                preSwizzleB,
+                                preTileB,
                                 problem.mxBlockB(),
                                 1,
                                 false,

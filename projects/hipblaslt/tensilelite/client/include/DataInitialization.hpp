@@ -827,9 +827,41 @@ namespace TensileLite
             }
             virtual void preBenchmarkRun() override {}
             virtual void postBenchmarkRun() override {}
-            virtual void preProblem(ContractionProblem* const problem) override {}
+            virtual void preProblem(ContractionProblem* const problem) override
+            {
+                m_currentGemmProblem
+                    = dynamic_cast<ContractionProblemGemm const*>(problem);
+            }
             virtual void postProblem() override {}
-            virtual void preSolution(ContractionSolution* const solution) override {}
+            virtual void preSolution(ContractionSolution* const solution) override
+            {
+                m_currentSolution = solution;
+                // Re-initialize MX FP4 scale data with preSwizzle now that the solution
+                // is known.  The earlier prepareGPUInputs() call (before preSolution) had
+                // to generate scale data without preSwizzle because m_currentSolution was
+                // null at that point.  Push the corrected, pre-shuffled data to the GPU
+                // working buffers so the kernel sees the expected memory layout.
+                if(m_currentSolution != nullptr && m_currentGemmProblem != nullptr
+                   && !m_gpuPtrs.empty())
+                {
+                    bool isMXFP4
+                        = (m_currentGemmProblem->a().dataType() == rocisa::DataType::Float4
+                           && m_currentGemmProblem->mxBlockA() > 0)
+                          || (m_currentGemmProblem->b().dataType() == rocisa::DataType::Float4
+                              && m_currentGemmProblem->mxBlockB() > 0);
+                    if(isMXFP4)
+                    {
+                        initializeMXDataForFP4(*m_currentGemmProblem);
+                        copyValidToGPUBuffer(*m_currentGemmProblem);
+                        copyInputs(m_gpuPtrs,
+                                   m_gpuBatchPtrs,
+                                   m_maxElements,
+                                   m_groupedOffsets,
+                                   *m_currentGemmProblem,
+                                   hipMemcpyDeviceToDevice);
+                    }
+                }
+            }
             virtual void postSolution() override {}
             virtual bool needMoreRunsInSolution() const override
             {
@@ -1039,6 +1071,9 @@ namespace TensileLite
             int64_t                         m_rotatingBuffer = 0;
             std::shared_ptr<RotatingMemory> m_rm;
             int32_t                         m_rotatingMode = 0;
+
+            ContractionSolution const*  m_currentSolution   = nullptr;
+            ContractionProblemGemm const* m_currentGemmProblem = nullptr;
         };
 
         template <>
