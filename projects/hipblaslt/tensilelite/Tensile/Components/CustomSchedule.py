@@ -2769,8 +2769,8 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
         optSchedule = {
             'SYNC': [syncTable[::2]], # 6
             
-            'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]], # 9
-            'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]], # 9
+            'GRIncA': [[0, 0, 1, 1, 2, 2, 3, 3, 4]], # 9
+            'GRIncB': [[4, 5, 5, 6, 6, 7, 7, 8, 8]], # 9
             
             'LRA0': [[0, 2, 4, 6, 8 , 10, 14, 18, 20, 24, 26],
                      [1, 3, 5, 7, 9, 11, 15, 17, 21, 25, 27]], # 11
@@ -2789,7 +2789,7 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
             'LRA1': [[87, 90, 92, 94, 96, 98, 100, 102, 104, 106, 114]], # 11
             'LRB1': [[118, 120, 122, 124, 127, 130]], # 6 
  
-            'LCC': [[numMfma-1, numMfma-1]], # 2
+            'LCC': [[numMfma-3, numMfma-3]], # 2
         }
         syncCode = syncTable[1::2]
         nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
