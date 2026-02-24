@@ -336,6 +336,61 @@ void conv_internal::DebugPrintTensorStrides(const TensorDescriptor& inDesc,
     printOneStrideVec("outDesc = ", outDesc.GetStrides());
 }
 
+// Maximum grid size to avoid uint32_t overflow in hipExtModuleLaunchKernel.
+// The HIP API uses uint32_t for grid dimensions, so we must ensure:
+// grid_size * block_size < 2^32
+// max_grid_size = 2^32 / block_size = 4,294,967,296 / 256 = 16,777,216
+constexpr size_t MAX_GRID_SIZE = static_cast<size_t>(16) * 1024 * 1024; // 16M work groups max
+
+// Helper function to calculate batch chunk size to prevent grid size overflow.
+// Keeps the original if/else structure for layout handling.
+// Parameters are passed by reference for speed.
+inline void
+CalculateBatchChunkSize(size_t grid_size_per_batch, int n, int& batch_chunk_size, size_t& grid_size)
+{
+    batch_chunk_size = static_cast<int>(MAX_GRID_SIZE / grid_size_per_batch);
+    if(batch_chunk_size < 1)
+        batch_chunk_size = 1;
+    if(batch_chunk_size > n)
+        batch_chunk_size = n;
+
+    grid_size = grid_size_per_batch * batch_chunk_size;
+}
+
+// Helper function to prepare batch iteration for chunked kernel execution.
+// Calculates offsets, pointers, grid size and updates kernel configuration.
+// Parameters are passed by reference for speed.
+inline void PrepareBatchedKernelRun(int batch_start,
+                                    int batch_chunk_size,
+                                    int n,
+                                    size_t in_batch_stride,
+                                    size_t out_batch_stride,
+                                    size_t in_type_size,
+                                    size_t out_type_size,
+                                    size_t grid_size_per_batch,
+                                    size_t block_size,
+                                    const void* in_base,
+                                    void* out_base,
+                                    Kernel& kern_copy,
+                                    const void*& in_ptr,
+                                    void*& out_ptr,
+                                    int& current_batch_size)
+{
+    current_batch_size = std::min(batch_chunk_size, n - batch_start);
+
+    // Calculate byte offsets for input and output tensors
+    size_t in_offset_bytes  = static_cast<size_t>(batch_start) * in_batch_stride * in_type_size;
+    size_t out_offset_bytes = static_cast<size_t>(batch_start) * out_batch_stride * out_type_size;
+
+    // Cast to char* for byte-level pointer arithmetic
+    in_ptr  = static_cast<const char*>(in_base) + in_offset_bytes;
+    out_ptr = static_cast<char*>(out_base) + out_offset_bytes;
+
+    // Calculate and set grid size for this chunk
+    size_t current_grid_size = grid_size_per_batch * current_batch_size;
+    kern_copy.gdims[0]       = current_grid_size * block_size;
+}
+
 namespace conv_internal {
 ::miopen::solver::ConvSolution
 GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
@@ -361,43 +416,26 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     int c_per_group = c / group;
     int k_per_group = k / group;
 
-    // Calculate batch chunk size to avoid uint32_t overflow in hipExtModuleLaunchKernel.
-    // The HIP API uses uint32_t for grid dimensions, so we must ensure:
-    // grid_size * block_size < 2^32
-    // max_grid_size = 2^32 / block_size = 4,294,967,296 / 256 = 16,777,216
-    constexpr size_t MAX_GRID_SIZE = static_cast<size_t>(16) * 1024 * 1024; // 16M work groups max
-    size_t block_size              = 256;
-
+    size_t block_size          = 256;
     int batch_chunk_size       = 1;
     size_t grid_size_per_batch = 1;
+    size_t grid_size           = 1;
     bool is_layout_default     = problem.IsLayoutDefault();
 
     if(is_layout_default)
     {
         grid_size_per_batch = static_cast<size_t>(k);
-        // Calculate how many batches we can process per kernel launch
-        batch_chunk_size = static_cast<int>(MAX_GRID_SIZE / grid_size_per_batch);
-        if(batch_chunk_size < 1)
-            batch_chunk_size = 1;
-        if(batch_chunk_size > n)
-            batch_chunk_size = n;
+        CalculateBatchChunkSize(grid_size_per_batch, n, batch_chunk_size, grid_size);
     }
     else if(problem.IsLayoutNHWC())
     {
         grid_size_per_batch = static_cast<size_t>(ho);
-        batch_chunk_size    = static_cast<int>(MAX_GRID_SIZE / grid_size_per_batch);
-        if(batch_chunk_size < 1)
-            batch_chunk_size = 1;
-        if(batch_chunk_size > n)
-            batch_chunk_size = n;
+        CalculateBatchChunkSize(grid_size_per_batch, n, batch_chunk_size, grid_size);
     }
     else
     {
         MIOPEN_THROW("Unsupported layout");
     }
-
-    // Use chunk size for kernel configuration
-    size_t grid_size = grid_size_per_batch * batch_chunk_size;
 
     KernelInfo kernel;
 
@@ -449,32 +487,26 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
                 // FP8 path: process batches in chunks
                 for(int batch_start = 0; batch_start < n; batch_start += batch_chunk_size)
                 {
-                    int current_batch_size = std::min(batch_chunk_size, n - batch_start);
+                    const void* in_ptr = nullptr;
+                    void* out_ptr      = nullptr;
+                    int current_batch_size;
+                    auto kern_copy = kern;
 
-                    // Calculate byte offsets for input and output tensors
-                    size_t in_offset_bytes =
-                        static_cast<size_t>(batch_start) * in_batch_stride * in_type_size;
-                    size_t out_offset_bytes =
-                        static_cast<size_t>(batch_start) * out_batch_stride * out_type_size;
-
-                    // Cast to char* for byte-level pointer arithmetic
-                    const void* in_ptr = static_cast<const char*>(tensors.in) + in_offset_bytes;
-                    void* out_ptr      = static_cast<char*>(tensors.out) + out_offset_bytes;
-
-                    // Recalculate grid size for this chunk
-                    size_t current_grid_size = 0;
-                    if(is_layout_default)
-                    {
-                        current_grid_size = static_cast<size_t>(current_batch_size) * k;
-                    }
-                    else // NHWC
-                    {
-                        current_grid_size = static_cast<size_t>(current_batch_size) * ho;
-                    }
-
-                    // Update kernel configuration for this chunk
-                    auto kern_copy     = kern;
-                    kern_copy.gdims[0] = current_grid_size * block_size;
+                    PrepareBatchedKernelRun(batch_start,
+                                            batch_chunk_size,
+                                            n,
+                                            in_batch_stride,
+                                            out_batch_stride,
+                                            in_type_size,
+                                            out_type_size,
+                                            grid_size_per_batch,
+                                            block_size,
+                                            tensors.in,
+                                            tensors.out,
+                                            kern_copy,
+                                            in_ptr,
+                                            out_ptr,
+                                            current_batch_size);
 
                     handle.Run(kern_copy)(in_ptr,
                                           tensors.w,
@@ -514,32 +546,26 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
                 // Process batches in chunks to avoid exceeding GPU grid limits
                 for(int batch_start = 0; batch_start < n; batch_start += batch_chunk_size)
                 {
-                    int current_batch_size = std::min(batch_chunk_size, n - batch_start);
+                    const void* in_ptr = nullptr;
+                    void* out_ptr      = nullptr;
+                    int current_batch_size;
+                    auto kern_copy = kern;
 
-                    // Calculate byte offsets for input and output tensors
-                    size_t in_offset_bytes =
-                        static_cast<size_t>(batch_start) * in_batch_stride * in_type_size;
-                    size_t out_offset_bytes =
-                        static_cast<size_t>(batch_start) * out_batch_stride * out_type_size;
-
-                    // Cast to char* for byte-level pointer arithmetic
-                    const void* in_ptr = static_cast<const char*>(tensors.in) + in_offset_bytes;
-                    void* out_ptr      = static_cast<char*>(tensors.out) + out_offset_bytes;
-
-                    // Recalculate grid size for this chunk
-                    size_t current_grid_size = 0;
-                    if(is_layout_default)
-                    {
-                        current_grid_size = static_cast<size_t>(current_batch_size) * k;
-                    }
-                    else // NHWC
-                    {
-                        current_grid_size = static_cast<size_t>(current_batch_size) * ho;
-                    }
-
-                    // Update kernel configuration for this chunk
-                    auto kern_copy     = kern;
-                    kern_copy.gdims[0] = current_grid_size * block_size;
+                    PrepareBatchedKernelRun(batch_start,
+                                            batch_chunk_size,
+                                            n,
+                                            in_batch_stride,
+                                            out_batch_stride,
+                                            in_type_size,
+                                            out_type_size,
+                                            grid_size_per_batch,
+                                            block_size,
+                                            tensors.in,
+                                            tensors.out,
+                                            kern_copy,
+                                            in_ptr,
+                                            out_ptr,
+                                            current_batch_size);
 
                     handle.Run(kern_copy)(in_ptr,
                                           tensors.w,
@@ -613,43 +639,26 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     int c_per_group = c / group;
     int k_per_group = k / group;
 
-    // Calculate batch chunk size to avoid uint32_t overflow in hipExtModuleLaunchKernel.
-    // The HIP API uses uint32_t for grid dimensions, so we must ensure:
-    // grid_size * block_size < 2^32
-    // max_grid_size = 2^32 / block_size = 4,294,967,296 / 256 = 16,777,216
-    constexpr size_t MAX_GRID_SIZE = static_cast<size_t>(16) * 1024 * 1024; // 16M work groups max
-    size_t block_size              = 256;
-
+    size_t block_size          = 256;
     int batch_chunk_size       = 1;
     size_t grid_size_per_batch = 1;
+    size_t grid_size           = 1;
     bool is_layout_default     = problem.IsLayoutDefault();
 
     if(is_layout_default)
     {
         grid_size_per_batch = static_cast<size_t>(k);
-        // Calculate how many batches we can process per kernel launch
-        batch_chunk_size = static_cast<int>(MAX_GRID_SIZE / grid_size_per_batch);
-        if(batch_chunk_size < 1)
-            batch_chunk_size = 1;
-        if(batch_chunk_size > n)
-            batch_chunk_size = n;
+        CalculateBatchChunkSize(grid_size_per_batch, n, batch_chunk_size, grid_size);
     }
     else if(problem.IsLayoutNHWC())
     {
         grid_size_per_batch = static_cast<size_t>(group) * do_;
-        batch_chunk_size    = static_cast<int>(MAX_GRID_SIZE / grid_size_per_batch);
-        if(batch_chunk_size < 1)
-            batch_chunk_size = 1;
-        if(batch_chunk_size > n)
-            batch_chunk_size = n;
+        CalculateBatchChunkSize(grid_size_per_batch, n, batch_chunk_size, grid_size);
     }
     else
     {
         MIOPEN_THROW("Unsupported layout");
     }
-
-    // Use chunk size for kernel configuration
-    size_t grid_size = grid_size_per_batch * batch_chunk_size;
 
     KernelInfo kernel;
 
@@ -700,32 +709,26 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
             // Process batches in chunks to avoid exceeding GPU grid limits
             for(int batch_start = 0; batch_start < n; batch_start += batch_chunk_size)
             {
-                int current_batch_size = std::min(batch_chunk_size, n - batch_start);
+                const void* in_ptr = nullptr;
+                void* out_ptr      = nullptr;
+                int current_batch_size;
+                auto kern_copy = kern;
 
-                // Calculate byte offsets for input and output tensors
-                size_t in_offset_bytes =
-                    static_cast<size_t>(batch_start) * in_batch_stride * in_type_size;
-                size_t out_offset_bytes =
-                    static_cast<size_t>(batch_start) * out_batch_stride * out_type_size;
-
-                // Cast to char* for byte-level pointer arithmetic
-                const void* in_ptr = static_cast<const char*>(tensors.in) + in_offset_bytes;
-                void* out_ptr      = static_cast<char*>(tensors.out) + out_offset_bytes;
-
-                // Recalculate grid size for this chunk (may be smaller for last chunk)
-                size_t current_grid_size = 0;
-                if(is_layout_default)
-                {
-                    current_grid_size = static_cast<size_t>(current_batch_size) * k;
-                }
-                else // NHWC
-                {
-                    current_grid_size = static_cast<size_t>(group) * current_batch_size * do_;
-                }
-
-                // Update kernel configuration for this chunk
-                auto kern_copy     = kern;
-                kern_copy.gdims[0] = current_grid_size * block_size;
+                PrepareBatchedKernelRun(batch_start,
+                                        batch_chunk_size,
+                                        n,
+                                        in_batch_stride,
+                                        out_batch_stride,
+                                        in_type_size,
+                                        out_type_size,
+                                        grid_size_per_batch,
+                                        block_size,
+                                        tensors.in,
+                                        tensors.out,
+                                        kern_copy,
+                                        in_ptr,
+                                        out_ptr,
+                                        current_batch_size);
 
                 handle.Run(kern_copy)(in_ptr,
                                       tensors.w,
