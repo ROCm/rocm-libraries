@@ -25,17 +25,6 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
     )
     FetchContent_MakeAvailable(nanobind)
 
-    find_package(yaml-cpp 0.7.0 REQUIRED)
-
-    # Optional inclusion of external shared/stinkytofu CMake project
-    set(STINKYTOFU_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
-    if(EXISTS "${STINKYTOFU_DIR}/CMakeLists.txt")
-        # Add the external directory; build output goes into a local binary dir 'stinkytofu'
-        add_subdirectory("${STINKYTOFU_DIR}" stinkytofu)
-    else()
-        message(FATAL_ERROR "External directory not found: ${STINKYTOFU_DIR} (skipping)")
-    endif()
-
     set(ROCISAINST_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/instruction.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/common.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/branch.cpp"
@@ -69,19 +58,17 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/register.cpp"
                             ${ROCISAINST_SOURCE}
                             ${ROCISAPASS_SOURCE}
-                            ${ROCISAFUNC_SOURCE}
-                            ${ROCISA_TO_STINKYTOFU_SOURCES})
+                            ${ROCISAFUNC_SOURCE})
 
+    # Optional inclusion of external shared/stinkytofu CMake project
+    set(STINKYTOFU_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
+    if(EXISTS "${STINKYTOFU_DIR}/CMakeLists.txt")
+        # Add the external directory; build output goes into a local binary dir 'stinkytofu'
+        add_subdirectory("${STINKYTOFU_DIR}" stinkytofu)
+    else()
+        message(FATAL_ERROR "External directory not found: ${STINKYTOFU_DIR} (skipping)")
+    endif()
 
-    target_include_directories(rocisa PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
-        "${STINKYTOFU_INCLUDE_DIRS}"
-        "${TABLEGEN_OUTPUT_DIR}"
-        "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu/hardware/include"
-    )
-    message(STATUS "CMAKE_CURRENT_BINARY_DIR: ${CMAKE_CURRENT_BINARY_DIR}/stinkytofu")
-
+    target_include_directories(rocisa PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include")
     set_target_properties(rocisa PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib")
-    target_link_libraries(rocisa PRIVATE yaml-cpp stinkytofu)
 endif()

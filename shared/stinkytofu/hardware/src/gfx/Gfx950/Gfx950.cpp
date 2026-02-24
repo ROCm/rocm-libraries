@@ -25,7 +25,6 @@
 #include <string>
 #include <utility>
 
-#include "gfx/CommonInstsDSL.hpp"
 #include "gfx/InstDefDSL.hpp"
 
 namespace stinkytofu

@@ -24,6 +24,7 @@
 #pragma once
 #include <cassert>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -43,6 +44,19 @@ namespace stinkytofu
         // for debugging
         std::string definedFile;
         int         definedLine = 0;
+
+        GfxInstDef() = default;
+
+        explicit GfxInstDef(InstFlagSet flags)
+            : hwInstDesc()
+        {
+            hwInstDesc.flags = flags;
+        }
+
+        explicit GfxInstDef(std::initializer_list<InstFlag> flags)
+            : GfxInstDef(makeFlagSet(flags))
+        {
+        }
 
         static std::string getFlagStr(InstFlag flag)
         {
@@ -268,6 +282,24 @@ namespace stinkytofu
         return ptr;
     }
 
-#define DEF_T(T, name, ...) defT<T>(name, registry, __FILE__, __LINE__, ##__VA_ARGS__)
+    // Overload: create GfxInstDef with flags (no subclass). Used by generated _init.inc.
+    inline GfxInstDef* defT(const std::string&              name,
+                            GpuArch&                        registry,
+                            const char*                     file,
+                            size_t                          line,
+                            std::initializer_list<InstFlag> flags)
+    {
+        auto        inst = std::make_unique<GfxInstDef>(makeFlagSet(flags));
+        GfxInstDef* ptr  = inst.get();
+
+        inst->name        = name;
+        inst->definedFile = getReducedFilename(file, 0);
+        inst->definedLine = static_cast<int>(line);
+        registry.add(std::move(inst));
+
+        return ptr;
+    }
+
+#define DEF_T(name, ...) defT(name, registry, __FILE__, __LINE__, {__VA_ARGS__})
 
 } // namespace stinkytofu

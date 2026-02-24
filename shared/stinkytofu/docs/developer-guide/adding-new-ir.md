@@ -18,7 +18,7 @@ This guide shows you how to add a new instruction from bottom (Assembly IR) to t
 | **Non-default cost** | Add `.cost = {cycle, latency}` to the same `DEF_T` in the .def. No .cpp edit. |
 | **Operand requirements** (e.g. 4 SGPRs, 8 SGPRs) | Add `.operand_widths = { {0, 4, false, S}, {1, 8, false, S} }` to the same `DEF_T` in the .def. Tablegen generates `*_operands.inc`; GfxXXX.hpp already includes and applies it. No manual .hpp edit. |
 | **New flag or format** | Add flag in `include/stinkytofu/hardware/Flags.def` and/or format in `hardware/src/gfx/GfxXXX/GfxXXXFormats.def`; then use in DEF_T. |
-| **Custom instruction class** (optional) | Add struct in `hardware/include/gfx/CommonInstsDSL.hpp` and reference via flags. |
+| **New instruction flag** | Add flag in `include/stinkytofu/hardware/Flags.def` and use in DEF_T `.flags`. |
 
 **Single place to add a normal instruction:** `hardware/src/gfx/GfxXXX/GfxXXXInstructions.def` (one DEF_T). Rebuild. If it must be visible to Logical IR, also add the Logical def and the LogicalToArch mapping in the .cpp.
 
@@ -29,7 +29,6 @@ This guide shows you how to add a new instruction from bottom (Assembly IR) to t
 To add a new StinkyTofu assembly IR, you'll need to access the following files:
 
 ```bash
-hardware/include/gfx/CommonInstsDSL.hpp    # Common instruction structures (optional)
 include/stinkytofu/hardware/Flags.def                  # Instruction flags (optional)
 hardware/src/gfx/GfxXXX/GfxXXXInstructions.def   # Instruction definitions + costs + .operand_widths (DEF_T)
 hardware/src/gfx/GfxXXX/GfxXXXFormats.def        # Format definitions (if new format needed)
@@ -46,19 +45,9 @@ Add a flag in `include/stinkytofu/hardware/Flags.def` for a new instruction type
 MACRO(IF_WaitTensorCnt)
 ```
 
-### Step 2. Create a new instruction structure (Optional)
+### Step 2. Use the flag in DEF_T (Optional)
 
-Add a new instruction type in `hardware/include/gfx/CommonInstsDSL.hpp` if needed.
-
-```c++
-struct WaitTensorCntInst : GfxInstDef
-{
-    WaitTensorCntInst()
-    {
-        hwInstDesc.flags.set(IF_WaitTensorCnt);
-    }
-};
-```
+If you added a new flag in Step 1, use it in the instruction's `.flags` in the .def file. Tablegen will emit `DEF_T("mnemonic", IF_WaitTensorCnt)` in the generated _init.inc. No separate struct needed.
 
 **Note**: If your instruction is commutative (e.g., `v_add_f32` where `a+b = b+a`), mark it as such:
 

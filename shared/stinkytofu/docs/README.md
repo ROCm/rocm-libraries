@@ -32,6 +32,12 @@ Technical design documents explaining the architecture and implementation of cor
 - [Redundant Mov Elimination](design/redundant-mov-elimination.md) - Block-local redundant mov instruction elimination pass
 - [StinkyConfigurableWaitCntPass](design/stinky-configurable-waitcnt-pass.md) - Wait count insertion pass design
 
+## Known Issues
+
+See [Known Issues and Limitations](known-issues.md) for current limitations (e.g., cross-block use-def not tracked properly).
+
+---
+
 ## Quick Links
 
 ### For Users
