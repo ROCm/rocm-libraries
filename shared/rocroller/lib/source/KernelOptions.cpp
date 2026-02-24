@@ -115,7 +115,7 @@ namespace rocRoller
 
     std::string toString(KernelOptionValues const& values)
     {
-        static_assert(sizeof(KernelOptionValues) == 76,
+        static_assert(sizeof(KernelOptionValues) == 80,
                       "Edit the toString() function when adding a kernel option!");
 
         std::string rv = "Kernel Options:\n";
@@ -130,8 +130,8 @@ namespace rocRoller
         ShowOption(alwaysWaitAfterStore);
         ShowOption(alwaysWaitBeforeBranch);
         ShowOption(alwaysWaitZeroBeforeBarrier);
-        ShowOption(lazyLoadKernelArguments);
         ShowOption(systemPreloadedKernelArguments);
+        ShowOption(lazyLoadKernelArguments);
         ShowOption(maxACCVGPRs);
         ShowOption(maxSGPRs);
         ShowOption(maxVGPRs);
