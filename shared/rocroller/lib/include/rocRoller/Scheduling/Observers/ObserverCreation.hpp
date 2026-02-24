@@ -51,12 +51,26 @@ namespace rocRoller
                                        const PotentialObservers<Current, TypesRemaining...>&,
                                        const Done&... observers)
         {
-            static_assert(CObserverRuntime<Current> || CObserverConst<Current>);
+            static_assert(
+                CObserverRuntime<
+                    Current> || CObserverRuntimeWithContext<Current> || CObserverConst<Current>);
             PotentialObservers<TypesRemaining...> remaining;
 
             if constexpr(CObserverConst<Current>)
             {
                 if constexpr(Current::required(Target))
+                {
+                    Current obs(ctx);
+                    return createMetaObserverFiltered<Target>(ctx, remaining, observers..., obs);
+                }
+                else
+                {
+                    return createMetaObserverFiltered<Target>(ctx, remaining, observers...);
+                }
+            }
+            else if constexpr(CObserverRuntimeWithContext<Current>)
+            {
+                if(Current::runtimeRequired(ctx))
                 {
                     Current obs(ctx);
                     return createMetaObserverFiltered<Target>(ctx, remaining, observers..., obs);
