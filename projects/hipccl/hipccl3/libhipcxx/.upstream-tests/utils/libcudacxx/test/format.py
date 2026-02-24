@@ -8,7 +8,7 @@
 
 # MIT License
 #
-# Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Modifications Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -209,7 +209,9 @@ class LibcxxTestFormat(object):
             time_out_detected = False
             compile_cmd = "None"
             out = "None"
-            for retry_count in range(max_retry):
+            retry_count = 0
+            while retry_count < max_retry:
+                retry_count += 1
                 try:
                     # Compile the test
                     cmd, out, err, rc = test_cxx.compileLinkTwoSteps(
@@ -219,7 +221,7 @@ class LibcxxTestFormat(object):
                     if rc != 0:
                         report = libcudacxx.util.makeReport(cmd, out, err, rc)
                         report += "Compilation failed unexpectedly!"
-                        if retry_count + 1 == max_retry:
+                        if retry_count >= max_retry:
                             return lit.Test.Result(lit.Test.FAIL, report)
                         else:
                             continue
@@ -259,11 +261,11 @@ class LibcxxTestFormat(object):
                     rc != 0 and "hipErrorNoDevice" in out and max_retry <= 5
                 ):
                     max_retry += 1
-                elif retry_count + 1 == max_retry:
+                elif retry_count >= max_retry:
                     if run_should_pass:
-                        report += "Compiled test failed unexpectedly!"
+                        report += f"Compiled test failed unexpectedly after {retry_count} attempt(s)!"
                     else:
-                        report += "Compiled test succeeded unexpectedly!"
+                        report += f"Compiled test succeeded unexpectedly after {retry_count} attempt(s)!"
                     if time_out_detected:
                         return lit.Test.Result(lit.Test.TIMEOUT, report)
                     return lit.Test.Result(lit.Test.FAIL, report)
