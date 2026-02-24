@@ -7,8 +7,6 @@
 
 namespace hip_kernel_plugin
 {
-namespace batchnorm
-{
 
 /// Note: Values match hip_kernel_utils::ActivationMode in HipKernelUtils.hpp
 enum class ActivationMode : int
@@ -38,7 +36,7 @@ __forceinline__ __device__ T applyActivation(T const& value, T const& alpha, T c
 {
     static_assert(Mode == ActivationMode::PASTHRU || Mode == ActivationMode::RELU
                       || Mode == ActivationMode::CLIPPED_RELU || Mode == ActivationMode::CLAMP,
-                  "Unsupported activation mode for batchnorm fusion");
+                  "Unsupported activation mode");
 
     if constexpr(Mode == ActivationMode::PASTHRU)
     {
@@ -74,7 +72,7 @@ __forceinline__ __device__ T applyActivationGradient(
 {
     static_assert(Mode == ActivationMode::PASTHRU || Mode == ActivationMode::RELU
                       || Mode == ActivationMode::CLIPPED_RELU || Mode == ActivationMode::CLAMP,
-                  "Unsupported activation mode for batchnorm fusion");
+                  "Unsupported activation mode");
 
     if constexpr(Mode == ActivationMode::PASTHRU)
     {
@@ -97,5 +95,4 @@ __forceinline__ __device__ T applyActivationGradient(
     }
 }
 
-} // namespace batchnorm
 } // namespace hip_kernel_plugin
