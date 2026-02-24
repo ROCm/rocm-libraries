@@ -36,7 +36,7 @@ rocblas_status rocsolver_gecon_impl(rocblas_handle handle,
                                     T* A,
                                     const I lda,
                                     const S* anorm,
-                                    S* rcond, //rcond is a host allocation
+                                    S* rcond,
                                     const I max_iter = 5)
 {
     ROCSOLVER_ENTER_TOP("gecon", "--norm_type", norm_type, "-n", n, "--lda", lda);
