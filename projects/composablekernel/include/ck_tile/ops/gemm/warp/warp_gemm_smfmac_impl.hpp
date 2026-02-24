@@ -6,6 +6,39 @@
 #include "ck_tile/core.hpp"
 namespace ck_tile {
 
+//----------------------------------------------------------------------------------------------
+/// @brief      Compress A vector for 2:4 structured sparsity instruction by moving all non-zero
+///             elements into lower part of a_vec to half its effective size.
+///
+/// @param      a_vec  Vector to be compressed.
+///
+/// @return     Four 2-bit indexes of non-zero elements locations
+///
+template <typename ADataType, typename AVec>
+static CK_TILE_DEVICE int32_t compress_a_impl(AVec& a_vec)
+{
+    int32_t idx = 0b11101110;
+
+    static_for<0, 2, 1>{}([&](auto i) {
+        ADataType nonzero_elems[2] = {a_vec[i * 4 + 2], a_vec[i * 4 + 3]};
+        int32_t non_zero_pos       = 0;
+
+        static_for<0, 3, 1>{}([&](auto j) {
+            if(a_vec[i * 4 + j] != 0.0f)
+            {
+                nonzero_elems[non_zero_pos] = a_vec[i * 4 + j];
+                idx &= ~(0b11 << 2 * (i * 2 + non_zero_pos));
+                idx |= j << 2 * (i * 2 + non_zero_pos);
+                ++non_zero_pos;
+            }
+        });
+        a_vec[i * 2]     = nonzero_elems[0];
+        a_vec[i * 2 + 1] = nonzero_elems[1];
+    });
+
+    return idx;
+}
+
 template <typename WarpGemmAttribute_>
 struct WarpGemmSmfmacImpl
 {
@@ -41,37 +74,10 @@ struct WarpGemmSmfmacImpl
         return WarpGemmAttribute_::get_num_of_access();
     }
 
-    //----------------------------------------------------------------------------------------------
-    /// @brief      Compress A vector for 2:4 structured sparsity instruction by moving all non-zero
-    ///             elements into lower part of a_vec to half its effective size.
-    ///
-    /// @param      a_vec  Vector to be compressed.
-    ///
-    /// @return     Four 2-bit indexes of non-zero elements locations
-    ///
     template <typename AVec>
-    CK_TILE_DEVICE int32_t compress_a(AVec& a_vec) const
+    CK_TILE_DEVICE int32_t compress_a_vec(AVec& a_vec)
     {
-        int32_t idx = 0b11101110;
-
-        static_for<0, 2, 1>{}([&](auto i) {
-            ADataType nonzero_elems[2] = {a_vec[i * 4 + 2], a_vec[i * 4 + 3]};
-            int32_t non_zero_pos       = 0;
-
-            static_for<0, 3, 1>{}([&](auto j) {
-                if(a_vec[i * 4 + j] != 0.0f)
-                {
-                    nonzero_elems[non_zero_pos] = a_vec[i * 4 + j];
-                    idx &= ~(0b11 << 2 * (i * 2 + non_zero_pos));
-                    idx |= j << 2 * (i * 2 + non_zero_pos);
-                    ++non_zero_pos;
-                }
-            });
-            a_vec[i * 2]     = nonzero_elems[0];
-            a_vec[i * 2 + 1] = nonzero_elems[1];
-        });
-
-        return idx;
+        return compress_a_impl<ADataType>(a_vec);
     }
 
     template <typename CTensor, typename ATensor, typename BTensor, bool post_nop_ = false>
@@ -95,7 +101,7 @@ struct WarpGemmSmfmacImpl
         const auto b_vec = b.get_thread_buffer().template get_as<BVec>()[I0];
         auto c_vec       = c.get_thread_buffer().template get_as<CVec>()[I0];
 
-        const int32_t idx = compress_a(a_vec);
+        const int32_t idx = compress_a_vec(a_vec);
 
         // @TODO can we simply set a_vec_pruned to a_vec[0:3]?
         const AVecCompressed a_vec_pruned = {a_vec[0], a_vec[1], a_vec[2], a_vec[3]};
