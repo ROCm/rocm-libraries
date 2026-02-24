@@ -130,11 +130,11 @@ namespace rocisa
         case rocisa::DataType::BFloat8Float8_fnuz:
             return TensileLite::TypeInfo<BFloat8Float8_fnuz>::ElementSize;
         case rocisa::DataType::Float6:
-            return TensileLite::TypeInfo<TensileLite::Float6x32>::ElementSize;
+            return TensileLite::TypeInfo<TensileLite::Float6>::ElementSize;
         case rocisa::DataType::BFloat6:
-            return TensileLite::TypeInfo<TensileLite::BFloat6x32>::ElementSize;
+            return TensileLite::TypeInfo<TensileLite::BFloat6>::ElementSize;
         case rocisa::DataType::Float4:
-            return TensileLite::TypeInfo<TensileLite::Float4x2>::ElementSize;
+            return TensileLite::TypeInfo<TensileLite::Float4>::ElementSize;
         case rocisa::DataType::MXScale:
             return TensileLite::TypeInfo<TensileLite::MXScale>::ElementSize;
         case rocisa::DataType::Count:
@@ -257,9 +257,9 @@ namespace TensileLite
         registerTypeInfo<BFloat8Float8>();
         registerTypeInfo<Float8BFloat8_fnuz>();
         registerTypeInfo<BFloat8Float8_fnuz>();
-        registerTypeInfo<Float6x32>();
-        registerTypeInfo<BFloat6x32>();
-        registerTypeInfo<Float4x2>();
+        registerTypeInfo<Float6>();
+        registerTypeInfo<BFloat6>();
+        registerTypeInfo<Float4>();
         registerTypeInfo<MXScale>();
     }
 

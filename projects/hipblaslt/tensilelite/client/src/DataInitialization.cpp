@@ -1925,31 +1925,17 @@ namespace TensileLite
                     case rocisa::DataType::BFloat8_fnuz:
                         prop.value = getValue<BFloat8_fnuz>(prop.init, prop.freeValue);
                         break;
-#ifdef TENSILE_USE_FP6
-                    case rocisa::DataType::Float6:
-                        prop.value = getValue<Float6x32>(prop.init, prop.freeValue);
-                        break;
-#endif // #ifdef TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
-                    case rocisa::DataType::BFloat6:
-                        prop.value = getValue<BFloat6x32>(prop.init, prop.freeValue);
-                        break;
-#endif // #ifdef TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
-                    case rocisa::DataType::Float4:
-                        prop.value = getValue<Float4x2>(prop.init, prop.freeValue);
-                        break;
-#endif // #ifdef TENSILE_USE_FP4
-                    case rocisa::DataType::MXScale:
-                        prop.value = getValue<MXScale>(prop.init, prop.freeValue);
-                        break;
                     case rocisa::DataType::Int64:
                     case rocisa::DataType::XFloat32:
                     case rocisa::DataType::Count:
                     case rocisa::DataType::Float8BFloat8:
                     case rocisa::DataType::BFloat8Float8:
                     case rocisa::DataType::Float8BFloat8_fnuz:
-                    case rocisa::DataType::BFloat8Float8_fnuz:;
+                    case rocisa::DataType::BFloat8Float8_fnuz:
+                    case rocisa::DataType::Float6:
+                    case rocisa::DataType::BFloat6:
+                    case rocisa::DataType::Float4:
+                    case rocisa::DataType::MXScale:;
                     }
                 }
                 if(Debug::Instance().printTensorInfo() && prop.dataType != rocisa::DataType::None)

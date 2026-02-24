@@ -284,40 +284,4 @@ namespace TensileLite
         = TypedGemm<Float8_fnuz, Half, Float8_fnuz, Float8_fnuz, float, float, Float8_fnuz>;
 #endif // TENSILE_USE_HALF
 #endif // TENSILE_USE_FP8_BF8
-
-#ifdef TENSILE_USE_FP6
-    using TypedGemm_F6_S_S = TypedGemm<Float6x32, Float6x32, float, float>;
-    using TypedGemm_F8F6_S_S
-        = TypedGemm<Float8, Float6x32, float, float, float, float, Float8, Float6x32>;
-    using TypedGemm_F6F8_S_S
-        = TypedGemm<Float6x32, Float8, float, float, float, float, Float6x32, Float8>;
-#endif // TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
-    using TypedGemm_BF6_S_S = TypedGemm<BFloat6x32, BFloat6x32, float, float>;
-#endif // TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
-    using TypedGemm_F4_S_S = TypedGemm<Float4x2, Float4x2, float, float>;
-    using TypedGemm_F8F4_S_S
-        = TypedGemm<Float8, Float4x2, float, float, float, float, Float8, Float4x2>;
-    using TypedGemm_F4F8_S_S
-        = TypedGemm<Float4x2, Float8, float, float, float, float, Float4x2, Float8>;
-#endif // TENSILE_USE_FP4
-#if defined(TENSILE_USE_FP6) && defined(TENSILE_USE_BF6)
-    using TypedGemm_F6B6_S_S
-        = TypedGemm<Float6x32, BFloat6x32, float, float, float, float, Float6x32, BFloat6x32>;
-    using TypedGemm_B6F6_S_S
-        = TypedGemm<BFloat6x32, Float6x32, float, float, float, float, BFloat6x32, Float6x32>;
-#endif // defined(TENSILE_USE_FP6) && defined(TENSILE_USE_BF6)
-#if defined(TENSILE_USE_FP6) && defined(TENSILE_USE_FP4)
-    using TypedGemm_F6F4_S_S
-        = TypedGemm<Float6x32, Float4x2, float, float, float, float, Float6x32, Float4x2>;
-    using TypedGemm_F4F6_S_S
-        = TypedGemm<Float4x2, Float6x32, float, float, float, float, Float4x2, Float6x32>;
-#endif // defined(TENSILE_USE_FP6) && defined(TENSILE_USE_FP4)
-#if defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4)
-    using TypedGemm_B6F4_S_S
-        = TypedGemm<BFloat6x32, Float4x2, float, float, float, float, BFloat6x32, Float4x2>;
-    using TypedGemm_F4B6_S_S
-        = TypedGemm<Float4x2, BFloat6x32, float, float, float, float, Float4x2, BFloat6x32>;
-#endif // defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4)
 } // namespace TensileLite

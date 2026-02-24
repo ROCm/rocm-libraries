@@ -303,15 +303,15 @@ namespace TensileLite
     };
 
     template <>
-    struct TypeInfo<Float6x32> : public BaseTypeInfo<Float6x32, rocisa::DataType::Float6, 32, false, false>
+    struct TypeInfo<Float6> : public BaseTypeInfo<Float6, rocisa::DataType::Float6, 1, false, false>
     {
     };
     template <>
-    struct TypeInfo<BFloat6x32> : public BaseTypeInfo<BFloat6x32, rocisa::DataType::BFloat6, 32, false, false>
+    struct TypeInfo<BFloat6> : public BaseTypeInfo<BFloat6, rocisa::DataType::BFloat6, 1, false, false>
     {
     };
     template <>
-    struct TypeInfo<Float4x2> : public BaseTypeInfo<Float4x2, rocisa::DataType::Float4, 2, false, false>
+    struct TypeInfo<Float4> : public BaseTypeInfo<Float4, rocisa::DataType::Float4, 1, false, false>
     {
     };
     template <>
@@ -335,9 +335,6 @@ namespace TensileLite
                                          Float8_fnuz,
                                          BFloat8_fnuz,
                                          int8_t,
-                                         Float6x32,
-                                         BFloat6x32,
-                                         Float4x2,
                                          MXScale
                                         >;
 
@@ -405,48 +402,6 @@ namespace TensileLite
         constVariantCast(const ConstantVariant& val)
     {
         return static_cast<T>(*std::get_if<Int8x4>(&val));
-    }
-
-    // Convert variants to type T
-    template <typename T>
-    typename std::enable_if<std::is_same<Float6x32, T>::value, T>::type
-        constVariantCast(const ConstantVariant& val)
-    {
-        switch(val.index())
-        {
-        case static_cast<int>(rocisa::DataType::Float6):
-            return static_cast<T>(*std::get_if<Float6x32>(&val));
-        default:
-            throw std::runtime_error("Unsupported variant cast type.");
-        }
-    }
-
-    // Convert variants to type T
-    template <typename T>
-    typename std::enable_if<std::is_same<BFloat6x32, T>::value, T>::type
-        constVariantCast(const ConstantVariant& val)
-    {
-        switch(val.index())
-        {
-        case static_cast<int>(rocisa::DataType::BFloat6):
-            return static_cast<T>(*std::get_if<BFloat6x32>(&val));
-        default:
-            throw std::runtime_error("Unsupported variant cast type.");
-        }
-    }
-
-    // Convert variants to type T
-    template <typename T>
-    typename std::enable_if<std::is_same<Float4x2, T>::value, T>::type
-        constVariantCast(const ConstantVariant& val)
-    {
-        switch(val.index())
-        {
-        case static_cast<int>(rocisa::DataType::Float4):
-            return static_cast<T>(*std::get_if<Float4x2>(&val));
-        default:
-            throw std::runtime_error("Unsupported variant cast type.");
-        }
     }
 
     std::string ToString(ConstantVariant d);
