@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef DATA_LAYOUT_H
-#define DATA_LAYOUT_H
+#ifndef CLIENT_DATA_LAYOUT_HELPERS_H
+#define CLIENT_DATA_LAYOUT_HELPERS_H
 
 #include "fft_enums.h"
 #include <algorithm>
@@ -585,4 +585,4 @@ using hipfftw_ionembed_t          = ionembed_t<int, false>;
 using fftw_ionembed_t             = ionembed_t<int, false>;
 using hipfftw_internal_ionembed_t = ionembed_t<ptrdiff_t, false>;
 
-#endif // DATA_LAYOUT_H
+#endif // CLIENT_DATA_LAYOUT_HELPERS_H
