@@ -27,7 +27,7 @@ endif()
 string(REPLACE "." "_" _fb_version_tag "${HIPDNN_FLATBUFFERS_VERSION}")
 set(HIPDNN_FLATBUFFERS_VERSION_DIR "v${_fb_version_tag}")
 set(HIP_DNN_DATA_SDK_GENERATED_INCLUDE_DIR
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/generated/${HIPDNN_FLATBUFFERS_VERSION_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_data_sdk/data_objects/${HIPDNN_FLATBUFFERS_VERSION_DIR}"
 )
 
 # For dependencies we are going to check if they weren't imported, and then install it along with
@@ -144,7 +144,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
         PRIMARY_VERSION ${HIPDNN_FLATBUFFERS_VERSION}
         SUPPORTED_VERSIONS ${HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS}
-        GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/generated"
+        GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_data_sdk/data_objects"
     )
 endif()
 
@@ -184,6 +184,9 @@ install(EXPORT hipdnn_data_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake
 # that uses find_package to find the dependencies.
 if(_hipdnn_data_sdk_local_export_includes)
     # cmake-lint: disable=E1122
+    # Install FlatBuffers headers to data_sdk/flatbuffers/ (not hipdnn_data_sdk/flatbuffers/)
+    # so they're findable from the base include path without adding extra include directories
+    # Exclude code generation utilities (codegen/, pch/) that aren't needed at runtime
     install(
         DIRECTORY ${_hipdnn_data_sdk_local_export_includes}/
         DESTINATION ${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}
@@ -191,6 +194,7 @@ if(_hipdnn_data_sdk_local_export_includes)
         FILES_MATCHING
         PATTERN "*.h"
         PATTERN "*.hpp"
+        PATTERN "codegen" EXCLUDE
     )
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_data_sdkConfig_local.cmake.in"

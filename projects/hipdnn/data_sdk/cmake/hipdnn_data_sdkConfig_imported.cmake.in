@@ -71,7 +71,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_data_sdkTargets.cmake")
 if(flatbuffers_VERSION)
     string(REPLACE "." "_" _hipdnn_fb_version_tag "${flatbuffers_VERSION}")
     set_property(TARGET hipdnn_data_sdk APPEND PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-        "${PACKAGE_PREFIX_DIR}/@HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR@/generated/v${_hipdnn_fb_version_tag}")
+        "${PACKAGE_PREFIX_DIR}/@HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR@/hipdnn_data_sdk/data_objects/v${_hipdnn_fb_version_tag}")
     message(STATUS "hipDNN Data SDK: Using FlatBuffers ${flatbuffers_VERSION} headers (v${_hipdnn_fb_version_tag})")
 endif()
 
