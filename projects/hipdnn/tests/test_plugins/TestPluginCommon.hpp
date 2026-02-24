@@ -16,6 +16,7 @@
 #include <hipdnn_plugin_sdk/PluginHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/version.h>
 
 struct HipdnnEnginePluginHandle
 {
@@ -27,6 +28,14 @@ struct HipdnnEnginePluginExecutionContext
 {
 };
 
+inline const char* apiVersionWithoutTweak()
+{
+    static std::string s_versionStr = std::to_string(HIPDNN_PLUGIN_SDK_VERSION_MAJOR) + "."
+                                      + std::to_string(HIPDNN_PLUGIN_SDK_VERSION_MINOR) + "."
+                                      + std::to_string(HIPDNN_PLUGIN_SDK_VERSION_PATCH);
+    return s_versionStr.c_str();
+}
+
 // Base class for test plugins
 class TestPluginBase
 {
@@ -36,6 +45,7 @@ public:
     // Virtual methods to be overridden by derived classes
     virtual const char* getPluginName() const = 0;
     virtual const char* getPluginVersion() const = 0;
+    virtual const char* getPluginApiVersion() const = 0;
     virtual int64_t getEngineId() const = 0;
     virtual uint32_t getNumEngines() const = 0;
     virtual uint32_t getNumApplicableEngines() const = 0;
@@ -85,6 +95,20 @@ public:
             hipdnn_plugin_sdk::throwIfNull(getInstance());
 
             *version = getInstance()->getPluginVersion();
+
+            LOG_API_SUCCESS(apiName, "version=" << static_cast<const void*>(version));
+        });
+    }
+
+    static hipdnnPluginStatus_t pluginGetApiVersion(const char** version)
+    {
+        LOG_API_ENTRY("versionPtr=" << static_cast<const void*>(version));
+
+        return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin_sdk::throwIfNull(version);
+            hipdnn_plugin_sdk::throwIfNull(getInstance());
+
+            *version = getInstance()->getPluginApiVersion();
 
             LOG_API_SUCCESS(apiName, "version=" << static_cast<const void*>(version));
         });
@@ -457,6 +481,11 @@ private:
     hipdnnPluginStatus_t hipdnnPluginGetVersion(const char** version)                             \
     {                                                                                             \
         return TestPluginBase::pluginGetVersion(version);                                         \
+    }                                                                                             \
+                                                                                                  \
+    hipdnnPluginStatus_t hipdnnPluginGetApiVersion(const char** version)                          \
+    {                                                                                             \
+        return TestPluginBase::pluginGetApiVersion(version);                                      \
     }                                                                                             \
                                                                                                   \
     hipdnnPluginStatus_t hipdnnPluginGetType(hipdnnPluginType_t* type)                            \
