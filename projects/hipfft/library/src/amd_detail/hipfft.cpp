@@ -31,8 +31,6 @@
 #include <string>
 #include <vector>
 
-#include <iostream> // FIXME: temp
-
 #ifdef HIPFFT_MPI_ENABLE
 #include "hipfft/hipfftMp.h"
 #endif
@@ -57,24 +55,6 @@
             return code;              \
         }                             \
     }
-
-// check plan creation - some might fail for specific placement, so
-// maintain a count of how many got created, and clean up the plans
-// if some failed.
-template <typename... Params>
-static void
-    ROC_FFT_CHECK_PLAN_CREATE(rocfft_plan& plan, unsigned int& plans_created, Params&&... params)
-{
-    if(rocfft_plan_create(&plan, std::forward<Params>(params)...) == rocfft_status_success)
-    {
-        ++plans_created;
-    }
-    else
-    {
-        rocfft_plan_destroy(plan);
-        plan = nullptr;
-    }
-}
 
 struct hipfftIOType
 {
@@ -303,6 +283,8 @@ struct hipfftHandle_t
     std::vector<size_t>       inLength;
     std::vector<size_t>       outLength;
     hipfft_ionembed_t<size_t> ionembed;
+
+    // FIXME: remove this stuff
     // FIXME: the following members are relevant to hipfftXtMemcpy but their
     // initialization in hipfftMakePlanMany_internal is not very well defined
     // (always set to the out-of-place values, which may be wrong in case of
@@ -359,7 +341,6 @@ catch(...)
 hipfftResult hipfftPlan2d(hipfftHandle* plan, int nx, int ny, hipfftType type)
 try
 {
-
     hipfftHandle handle = nullptr;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&handle));
     *plan = handle;
@@ -508,8 +489,8 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                               rm_lengths_vec,
                               number_of_transforms);
 
-            ROC_FFT_CHECK_INVALID_VALUE(
-                rocfft_plan_description_set_data_layout(plan_desc,
+            
+            auto ret = rocfft_plan_description_set_data_layout(plan_desc,
                                                         iotype.array_type(fft_io::fft_io_in),
                                                         iotype.array_type(fft_io::fft_io_out),
                                                         0,
@@ -519,7 +500,11 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                                                         inDist,
                                                         dim,
                                                         o_strides.data(),
-                                                        outDist));
+                                                        outDist);
+            if(ret != rocfft_status_success)
+            {
+                return HIPFFT_INVALID_VALUE;
+            }
         }
     }
     
@@ -529,105 +514,96 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         // Only in-place is allowed for real/complex transforms.
         // Complex/complex transforms can be in-place or not, but complex/complex data formats are
         // quite general.
-        auto dft_kind = fft_transform_type_complex_forward;
-        if(iotype.is_real_to_complex())
-            dft_kind = fft_transform_type_real_forward;
-        if(iotype.is_complex_to_real())
-            dft_kind = fft_transform_type_real_inverse;
-        
-        plan->inStrides = default_strides(dft_kind,
-                                          fft_placement_inplace,
-                                          fft_io_in,
-                                          rm_lengths_vec);
-        plan->iDist = default_distance(dft_kind,
-                                       fft_placement_inplace,
-                                       fft_io_in,
-                                       rm_lengths_vec,
-                                       plan->batch);
-        plan->outStrides = default_strides(dft_kind,
-                                           fft_placement_inplace,
-                                           fft_io_out,
-                                           rm_lengths_vec);
-        plan->oDist = default_distance(dft_kind,
-                                       fft_placement_inplace,
-                                       fft_io_out,
-                                       rm_lengths_vec,
-                                       plan->batch);
-        // FIXME: row-major vs column-major for strides?
-        
+
         // Problem dimensions and strides are known, set up the bricks for single-proc multi-GPU
-        set_io_bricks(
-            plan->inLength, plan->outLength, plan->batch, plan->inBricks, plan->outBricks);
-    }    
 
-    // create fields for the bricks
-    if(!plan->inBricks.empty())
+        std::vector<size_t> batchlength = {plan->batch};
+        batchlength.insert(batchlength.end(), rm_lengths_vec.begin(), rm_lengths_vec.end());
+        
+        const bool isrealcomplex = iotype.is_real_to_complex() || iotype.is_complex_to_real();
+
+        const hipfftXtSubFormat isubformat
+            = isrealcomplex ? HIPFFT_XT_FORMAT_INPLACE : HIPFFT_XT_FORMAT_INPUT;
+        hipfftxt_bricks(batchlength, plan->inBricks, isrealcomplex, isubformat);
+        
+        const hipfftXtSubFormat osubformat
+            = isrealcomplex ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED : HIPFFT_XT_FORMAT_OUTPUT;
+        hipfftxt_bricks(batchlength, plan->outBricks, isrealcomplex, osubformat);
+
+        // TODO: what about in-place c2c?  Are the data layouts from enums actually just the same?
+    }
+
+    // FIXME: need to delete these as well
+
+
+    if(plan->singleProcMultiDevice)
     {
-        rocfft_field inField = nullptr;
-        if(rocfft_field_create(&inField) != rocfft_status_success)
-            throw std::runtime_error("input field create failed");
-
+        rocfft_field spaceField = nullptr;
+        rocfft_field frequencyField = nullptr;
+        
+        if(rocfft_field_create(&spaceField) != rocfft_status_success)
+            throw std::runtime_error("space field create failed");
         for(const auto& brick : plan->inBricks)
         {
+            // rm -> cm
+            auto cm_lower = brick.field_lower;
+            std::reverse(cm_lower.begin(), cm_lower.end());
+            auto cm_upper = brick.field_upper;
+            std::reverse(cm_upper.begin(), cm_upper.end());
+            auto cm_stride = brick.brick_stride;
+            std::reverse(cm_stride.begin(), cm_stride.end());
+            
             rocfft_brick rbrick = nullptr;
             if(rocfft_brick_create(&rbrick,
-                                   brick.field_lower.data(),
-                                   brick.field_upper.data(),
-                                   brick.brick_stride.data(),
-                                   brick.field_lower.size(),
+                                   cm_lower.data(),
+                                   cm_upper.data(),
+                                   cm_stride.data(),
+                                   cm_lower.size(),
                                    brick.device)
                != rocfft_status_success)
                 throw std::runtime_error("create input brick failed");
-
-            if(rocfft_field_add_brick(inField, rbrick) != rocfft_status_success)
-                throw std::runtime_error("add input brick failed");
-            rocfft_brick_destroy(rbrick);
-        }
-
-        // inBricks are used for out-of-place transforms
-        for(auto rocfft_desc : {op_forward_desc, op_inverse_desc})
-        {
-            rocfft_plan_description_add_infield(rocfft_desc, inField);
-        }
-
-        (void)rocfft_field_destroy(inField);
-    }
-    if(!plan->outBricks.empty())
-    {
-        rocfft_field outField = nullptr;
-        if(rocfft_field_create(&outField) != rocfft_status_success)
-            throw std::runtime_error("output field create failed");
-
-        for(const auto& brick : plan->outBricks)
-        {
-            rocfft_brick rbrick = nullptr;
-            if(rocfft_brick_create(&rbrick,
-                                   brick.field_lower.data(),
-                                   brick.field_upper.data(),
-                                   brick.brick_stride.data(),
-                                   brick.field_lower.size(),
-                                   brick.device)
-               != rocfft_status_success)
-                throw std::runtime_error("create output brick failed");
-
-            if(rocfft_field_add_brick(outField, rbrick) != rocfft_status_success)
+            if(rocfft_field_add_brick(spaceField, rbrick) != rocfft_status_success)
                 throw std::runtime_error("add output brick failed");
             rocfft_brick_destroy(rbrick);
         }
 
-        // outBricks are used for both sides of in-place transforms,
-        // and output of out-of-place transforms
-        for(auto rocfft_desc : {ip_forward_desc, ip_inverse_desc})
+        if(rocfft_field_create(&frequencyField) != rocfft_status_success)
+            throw std::runtime_error("frequency field create failed");
+        for(const auto& brick : plan->outBricks)
         {
-            rocfft_plan_description_add_infield(rocfft_desc, outField);
-            rocfft_plan_description_add_outfield(rocfft_desc, outField);
+            // rm -> cm
+            auto cm_lower = brick.field_lower;
+            std::reverse(cm_lower.begin(), cm_lower.end());
+            auto cm_upper = brick.field_upper;
+            std::reverse(cm_upper.begin(), cm_upper.end());
+            auto cm_stride = brick.brick_stride;
+            std::reverse(cm_stride.begin(), cm_stride.end());
+
+            rocfft_brick rbrick = nullptr;            
+            if(rocfft_brick_create(&rbrick,
+                                   cm_lower.data(),
+                                   cm_upper.data(),
+                                   cm_stride.data(),
+                                   cm_lower.size(),
+                                   brick.device)
+               != rocfft_status_success)
+                throw std::runtime_error("create input brick failed");
+            rocfft_brick_destroy(rbrick);
         }
-        for(auto rocfft_desc : {op_forward_desc, op_inverse_desc})
+    
+        for(auto rocfft_desc : {ip_forward_desc, op_forward_desc})
         {
-            rocfft_plan_description_add_outfield(rocfft_desc, outField);
+            rocfft_plan_description_add_infield(rocfft_desc, spaceField);
+            rocfft_plan_description_add_outfield(rocfft_desc, frequencyField);
+        }
+        for(auto rocfft_desc : {ip_inverse_desc, op_inverse_desc})
+        {
+            rocfft_plan_description_add_infield(rocfft_desc, spaceField);
+            rocfft_plan_description_add_outfield(rocfft_desc, frequencyField);
         }
 
-        (void)rocfft_field_destroy(outField);
+        (void)rocfft_field_destroy(spaceField);
+        (void)rocfft_field_destroy(frequencyField);
     }
 
     if(plan->scale_factor != 1.0)
@@ -647,6 +623,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         }
     }
 
+
     // count the number of plans that got created - it's possible to
     // have parameters that are valid for out-place but not for
     // in-place, so some of these rocfft_plan_creates could
@@ -654,30 +631,34 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     unsigned int plans_created = 0;
     for(auto t : iotype.transform_types())
     {
-        // in-place
-        auto& ip_plan_ptr  = iotype.is_forward(t) ? plan->ip_forward : plan->ip_inverse;
-        auto& ip_plan_desc = iotype.is_forward(t) ? ip_forward_desc : ip_inverse_desc;
-        ROC_FFT_CHECK_PLAN_CREATE(ip_plan_ptr,
-                                  plans_created,
-                                  rocfft_placement_inplace,
-                                  t,
-                                  iotype.precision(),
-                                  dim,
-                                  cm_lengths_vec.data(),
-                                  number_of_transforms,
-                                  ip_plan_desc);
-        // out-of-place
-        auto& op_plan_ptr  = iotype.is_forward(t) ? plan->op_forward : plan->op_inverse;
-        auto& op_plan_desc = iotype.is_forward(t) ? op_forward_desc : op_inverse_desc;
-        ROC_FFT_CHECK_PLAN_CREATE(op_plan_ptr,
-                                  plans_created,
-                                  rocfft_placement_notinplace,
-                                  t,
-                                  iotype.precision(),
-                                  dim,
-                                  cm_lengths_vec.data(),
-                                  number_of_transforms,
-                                  op_plan_desc);
+        for(const auto inplace : {true, false})
+        {
+            const bool forward = iotype.is_forward(t);
+            auto& plan_ptr  = inplace
+                ? (forward ? plan->ip_forward : plan->ip_inverse)
+                : (forward ? plan->op_forward : plan->op_inverse);
+            auto& plan_desc = inplace
+                ? (forward ? ip_forward_desc : ip_inverse_desc) 
+                : (forward ? op_forward_desc : op_inverse_desc);
+            const auto placement = inplace ? rocfft_placement_inplace : rocfft_placement_notinplace;
+            const auto ret = rocfft_plan_create(&plan_ptr,
+                                                placement,
+                                                t,
+                                                iotype.precision(),
+                                                dim,
+                                                cm_lengths_vec.data(),
+                                                number_of_transforms,
+                                                plan_desc);                         
+            if(ret == rocfft_status_success)
+            {
+                ++plans_created;
+            }
+            else
+            {
+                rocfft_plan_destroy(plan_ptr);
+                plan_ptr = nullptr;
+            }
+        }
     }
 
     // if no plans got created, fail
@@ -1743,6 +1724,7 @@ try
         plan->outBricks[i].device = gpus[i];
     }
 
+    // FIXME: what if only 1 gpu is provided?
     plan->singleProcMultiDevice = true;
 
     return HIPFFT_SUCCESS;
@@ -1909,7 +1891,8 @@ try
         case HIPFFT_XT_FORMAT_INPUT: 
         case HIPFFT_XT_FORMAT_INPLACE:
             return plan->inBricks;
-            // FIXME: are inbricks always HIPFFT_XT_FORMAT_INPUT?  What about inverse transforms?
+            // FIXME: are inbricks always HIPFFT_XT_FORMAT_INPUT?  what about
+            // inverse transforms?
         case HIPFFT_XT_FORMAT_OUTPUT:
         case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
             return plan->outBricks;

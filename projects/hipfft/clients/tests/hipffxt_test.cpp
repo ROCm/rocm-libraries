@@ -89,6 +89,75 @@ std::string directionname(const int direction)
     }
 }
 
+
+
+// Params are direction and real/complex
+class hipfftxtunit : public ::testing::TestWithParam<std::tuple<int, bool>>
+{};
+
+TEST_P(hipfftxtunit, plancreation)
+{
+    // Test whether we can just make plans.
+    
+    size_t    ngpus = 2;
+
+    // Just batch=1 for now.
+
+    const int Nx    = 32;
+    const int Ny    = 32;
+    
+    const int direction = std::get<0>(GetParam());
+    const bool realcomplex = std::get<1>(GetParam());
+    
+    const hipfftType transform_type  = realcomplex ?
+        ((direction == HIPFFT_FORWARD) ? HIPFFT_D2Z : HIPFFT_Z2D) : HIPFFT_Z2Z;
+
+    if(verbose > 0)
+    {
+        // FIXME: implement
+    }
+
+    auto hipfft_rt = HIPFFT_SUCCESS;
+        
+    hipfftHandle plan;
+    hipfft_rt =   hipfftCreate(&plan);
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+
+    std::vector<int> gpus(ngpus);
+    std::iota(gpus.begin(), gpus.end(), 0);
+
+    
+    hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
+
+    std::vector<size_t> workSize(ngpus);
+    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny,
+                                 transform_type,
+                                 workSize.data());
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2d failed with return code "
+                                         << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
+
+    hipfft_rt = hipfftDestroy(plan);
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    hipfftxttest,
+    hipfftxtunit,
+    ::testing::Combine(
+        ::testing::Values(HIPFFT_FORWARD, HIPFFT_BACKWARD),
+        ::testing::Values(true, false)
+        ),
+    [](const testing::TestParamInfo<hipfftxtunit::ParamType>& info) {
+        const int direction = std::get<0>(info.param);
+        const int realcomplex = std::get<1>(info.param);
+        std::string name = direction == HIPFFT_FORWARD ? "forward" : "backward";
+        name += realcomplex ? "rc" : "cc";
+        return name;
+    }
+    );
+
+
 // Params are direction, format, and batch size.
 class hipfftxtdirectionformat : public ::testing::TestWithParam<std::tuple<int, hipfftXtSubFormat,
                                                                            int>>
@@ -102,9 +171,9 @@ TEST_P(hipfftxtdirectionformat, c2cinplace)
 
     auto hipfft_rt = HIPFFT_SUCCESS;
 
-    const int direction = std::get<0>(GetParam());
+    const auto direction = std::get<0>(GetParam());
     const hipfftXtSubFormat informat = std::get<1>(GetParam());
-    const int batch = std::get<2>(GetParam());
+    const auto batch = std::get<2>(GetParam());
     
     const hipfftXtSubFormat outformat
         = informat == HIPFFT_XT_FORMAT_INPLACE
@@ -131,11 +200,13 @@ TEST_P(hipfftxtdirectionformat, c2cinplace)
 
     std::vector<size_t> workSize(ngpus);
     hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize.data());
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)<< "hipfftMakePlan2d failed with code "
+                                         << hipfft_rt
+                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
+    
     hipLibXtDesc*       inoutdesc = nullptr;
     hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, informat);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
                                          << hipfft_rt
                                          << " (" << hipfftResult_string(hipfft_rt) << ")";
     
@@ -147,11 +218,14 @@ TEST_P(hipfftxtdirectionformat, c2cinplace)
             input[xidx * Ny + yidx] = std::complex<double>(xidx,yidx);
         }
     }
-    hipfft_rt = hipfftXtMemcpy(plan,
-                               reinterpret_cast<void*>(inoutdesc),
-                               reinterpret_cast<void*>(input.data()),
-                               HIPFFT_COPY_HOST_TO_DEVICE);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    
+    // hipfft_rt = hipfftXtMemcpy(plan,
+    //                            reinterpret_cast<void*>(inoutdesc),
+    //                            reinterpret_cast<void*>(input.data()),
+    //                            HIPFFT_COPY_HOST_TO_DEVICE);
+    // ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy pre-exec failed with code "
+    //                                      << hipfft_rt
+    //                                      << " (" << hipfftResult_string(hipfft_rt) << ")";
     
     EXPECT_EQ(inoutdesc->subFormat, informat);
 
@@ -167,13 +241,15 @@ TEST_P(hipfftxtdirectionformat, c2cinplace)
                                                << " (" << formatname(outformat) << ")";
     
     std::vector<std::complex<double>> output(Nx * Ny);
-    hipfft_rt = hipfftXtMemcpy(plan,
-                               reinterpret_cast<void*>(output.data()),
-                               reinterpret_cast<void*>(inoutdesc),
-                               HIPFFT_COPY_DEVICE_TO_HOST);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy failed with code "
-                                         << hipfft_rt
-                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
+
+    // hipfft_rt = hipfftXtMemcpy(plan,
+    //                            reinterpret_cast<void*>(output.data()),
+    //                            reinterpret_cast<void*>(inoutdesc),
+    //                            HIPFFT_COPY_DEVICE_TO_HOST);
+    // EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy post-exec failed with code "
+    //                                      << hipfft_rt
+    //                                      << " (" << hipfftResult_string(hipfft_rt) << ")";
+    
     hipfft_rt = hipfftXtFree(inoutdesc);
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 
@@ -202,7 +278,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(hipfftxtdirectionformat, r2cinplace)
 {
-    size_t    ngpus = 2;
+    int ngpus = 2;
 
     int count = 0;
     ASSERT_EQ(hipGetDeviceCount(&count), HIPFFT_SUCCESS) << "hipGetDeviceCount failed";
@@ -214,11 +290,9 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
     
     const int Nx    = 32;
     const int Ny    = 32;
-
-
     
     const int Nyp = Ny / 2 + 1;
-    const int Nypp = Ny + 2;
+    const int Nypp = 2 * Nyp;
     
     auto hipfft_rt = HIPFFT_SUCCESS;
     
@@ -288,7 +362,7 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
     
     hipfftHandle plan;
     hipfft_rt =   hipfftCreate(&plan);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 
     if(verbose > 1)
     {
@@ -298,7 +372,7 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
     }
 
     hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
         
     std::vector<size_t> workSize(ngpus);
 

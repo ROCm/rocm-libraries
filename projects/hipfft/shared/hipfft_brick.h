@@ -118,7 +118,7 @@ static void set_bricks(const std::vector<size_t>& length,
 }
 
 // FIXME: documentation.
-static void hipfftxt_bricks(const std::vector<size_t>& length,
+static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
                             std::vector<hipfft_brick>& bricks,
                             const bool isrealcomplex,
                             const hipfftXtSubFormat subformat)
@@ -129,14 +129,14 @@ static void hipfftxt_bricks(const std::vector<size_t>& length,
         throw std::runtime_error("Bricks vector needs to be allocated before passing");        
     
     // Format is row-major.
-
-    // length includes the (single) batch dimension, so the lengths are {batch, X, Y, Z},
+    
+    // batchlength includes the (single) batch dimension, so the batchlengths are {batch, X, Y, Z},
     // {batch, X, Y}, or {batch, X}.
-    const size_t dim = length.size();
+    const size_t dim = batchlength.size();
     if(dim < 2)
         throw std::runtime_error("Need at least 1 length and batch dim");
     
-    const size_t         nbatch   = length[length.size() - 1];
+    const size_t         nbatch   = batchlength[0];
     fft_result_placement placement;
     fft_io               io;
     fft_transform_type   dft_type = isrealcomplex ? fft_transform_type_real_forward : fft_transform_type_complex_forward;
@@ -187,26 +187,16 @@ static void hipfftxt_bricks(const std::vector<size_t>& length,
         throw std::runtime_error("Multi-batch multi-gpu transforms not implimented");
     }
 
-    // datalength is the data dimensions, not the FFT lengths.  That is, we need to /2+1 for the
-    // Hermitian-symmetric dimension.
-    auto datalength = length;
-    if(isrealcomplex)
+    // We are going to put the Hermitian-symmetric length change here:
+    auto batchlengthdata = batchlength;
+    if(isrealcomplex && subformat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
     {
-        switch(subformat)
-        {
-        case HIPFFT_XT_FORMAT_INPLACE:
-            // This is real data for an in-place transform, so it needs padding.
-            break;
-        case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-            // This is complex-Hermitian data.
-            datalength[1] = datalength[1] / 2 + 1; // FIXME: taken care of by the set_strides?
-            break;
-        default:
-            // TODO: can multi-batch real/complex transforms accept other subformats?
-            throw std::runtime_error("Invalid subformat for real/complex multi-gpu transform");
-        }
+        // We have Hermitian-symmetric data
+        const auto hindex = batchlengthdata.size() - 1;
+        const auto hlength = batchlengthdata[hindex];
+        batchlengthdata[hindex] = hlength / 2 + 1;
     }
-
+    
     const auto ngpus = bricks.size();;
     for(size_t ibrick = 0; ibrick < bricks.size(); ++ibrick)
     {
@@ -217,23 +207,21 @@ static void hipfftxt_bricks(const std::vector<size_t>& length,
         if(ibrick > 0)
             brick.field_lower[splitidx] = bricks[ibrick-1].field_lower[splitidx];
 
-        const size_t splitlen = datalength[splitidx];
-        const size_t bricksplitlen = splitlen / ngpus + (ibrick < splitlen % ibrick ? 1 : 0);
-        brick.field_upper = datalength;
+        const size_t splitlen = batchlengthdata[splitidx];
+        const size_t bricksplitlen = splitlen / ngpus + (ibrick < splitlen %  bricks.size()? 1 : 0);
+        brick.field_upper = batchlengthdata;
+        if(ibrick > 0)
+        {
+            brick.field_lower[splitidx] = bricks[ibrick - 1].field_upper[splitidx];
+        }
         brick.field_upper[splitidx] = brick.field_lower[splitidx] + bricksplitlen;
 
         brick.brick_stride = default_strides(dft_type, placement, io, brick.field_lower,
-                                        brick.field_upper);
-        // FIXME: strides, taking into account realpadding for r/c stuff
+                                             brick.field_upper);
     }
-
-    // FIXME: do we need to reverse everything now?
-
-    // FIXME: for hipfftxtmemcp, we would like to actually copy the passing as well.
-
-    // FIXME: real padding.
 }
 
+// FIXME: remove this.
 // length/strides are column-major.  in/out brick vectors are
 // allocated by caller, but coordinates/strides of those bricks are
 // filled in by this function
