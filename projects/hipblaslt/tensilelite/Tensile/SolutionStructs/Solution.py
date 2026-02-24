@@ -1725,20 +1725,15 @@ class Solution(collections.abc.Mapping):
         ldsPadA = state["LdsPadA"]
         ldsPadB = state["LdsPadB"]
         ldsPadM = state["LdsPadMetadata"]
-        lrvwA = lrvwB = None
-        optPadA = optPadB = None
-        readRegsA = readRegsB = None
-        if isMX:
-          lrvwA = state["LocalReadVectorWidthA"]
-          lrvwB = state["LocalReadVectorWidthB"]
-          optPadA = lrvwA
-          optPadB = lrvwB
-          readRegsA = int(lrvwA * state["ProblemType"]["MacDataTypeA"].numBytes() // 4)
-          readRegsB = int(lrvwB * state["ProblemType"]["MacDataTypeB"].numBytes() // 4)
-        else:
-          lrvwA = lrvwB = lrvw
-          optPadA = optPadB = lrvw
-          readRegsA = readRegsB = lrvw * state["ProblemType"]["DataType"].numBytes() // 4
+        lrvwA = state["LocalReadVectorWidthA"] if isMX else lrvw
+        lrvwB = state["LocalReadVectorWidthB"] if isMX else lrvw
+        optPadA = lrvwA if isMX else lrvw
+        optPadB = lrvwB if isMX else lrvw
+        numBytesA = state["ProblemType"]["MacDataTypeA"].numBytes() if isMX else state["ProblemType"]["DataType"].numBytes()
+        numBytesB = state["ProblemType"]["MacDataTypeB"].numBytes() if isMX else state["ProblemType"]["DataType"].numBytes()
+        readRegsA = int(lrvwA * numBytesA // 4)
+        readRegsB = int(lrvwB * numBytesB // 4)
+
         if state["ProblemType"]["Sparse"]:
           if state["ProblemType"]["Sparse"] == 2:
             optPadB //= 2
@@ -1764,17 +1759,10 @@ class Solution(collections.abc.Mapping):
               if state["EnableMatrixInstruction"]:
                 ldsPadA = 0
                 if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
-                  ldsPadA = int(((16 * state["VectorWidthA"] * state["ProblemType"]["MacDataTypeA"].numBytes() + state["MacroTile0"] * state["ProblemType"]["MacDataTypeA"].numBytes() * lrvwA) % 128) // state["ProblemType"]["MacDataTypeA"].numBytes()) \
-                            if isMX else \
-                            ((16 * state["VectorWidthA"] * state["ProblemType"]["DataType"].numBytes() + state["MacroTile0"] * state["ProblemType"]["DataType"].numBytes() * state["LocalReadVectorWidth"]) % 128) // state["ProblemType"]["DataType"].numBytes()
-                if state["GlobalReadVectorWidthA"] * state["ProblemType"]["MacDataTypeA"].numBytes() == 32 and ldsPadA == 0:
-                  ldsPadA = int(16 // state["ProblemType"]["MacDataTypeA"].numBytes()) \
-                            if isMX else \
-                            16 // state["ProblemType"]["DataType"].numBytes()
-                if state["DirectToLdsA"]:
-                  # TODO: Check if there are cases which benefit from padding, currently set to zero by default
-                  ldsPadA = state["MatrixInstM"] if state["enableLDSTrA"] else 0
-              else:
+                  ldsPadA = int(((16 * state["VectorWidthA"] * numBytesA + state["MacroTile0"] * numBytesA * lrvwA) % 128) // numBytesA)
+                if state["GlobalReadVectorWidthA"] * state["ProblemType"]["MacDataTypeA"] == 32 and ldsPadA == 0:
+                  ldsPadA = int(16 // numBytesA)
+              else: # mac instruction
                 if state["ProblemType"]["TLUA"]:
                   ldsPadA = 0
                 else:
@@ -1794,24 +1782,17 @@ class Solution(collections.abc.Mapping):
               if state["EnableMatrixInstruction"]:
                 ldsPadB = 0
                 if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
-                  ldsPadB = int(((16 * state["VectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes() + state["MacroTile1"] * state["ProblemType"]["MacDataTypeB"].numBytes() * lrvwB) % 128) // state["ProblemType"]["MacDataTypeB"].numBytes()) \
-                            if isMX else \
-                            ((16 * state["VectorWidthB"] * state["ProblemType"]["DataType"].numBytes() + state["MacroTile1"] * state["ProblemType"]["DataType"].numBytes() * state["LocalReadVectorWidth"]) % 128) // state["ProblemType"]["DataType"].numBytes()
+                  ldsPadB = int(((16 * state["VectorWidthB"] * numBytesB + state["MacroTile1"] * numBytesB * lrvwB) % 128) // numBytesB)
                 if state["GlobalReadVectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes() == 32 and ldsPadB == 0:
-                  ldsPadB = int(16 // state["ProblemType"]["MacDataTypeB"].numBytes()) \
-                            if isMX else \
-                            16 // state["ProblemType"]["DataType"].numBytes()
-                if state["DirectToLdsB"]:
-                  # TODO: Check if there are cases which benefit from padding, currently set to zero by default
-                  ldsPadB = state["MatrixInstM"] if state["enableLDSTrB"] else 0
-              else:
+                  ldsPadB = int(16 // numBytesB)
+              else: # mac instruction
                 if state["ProblemType"]["TLUB"]:
                   ldsPadB = 0
                 else:
                   ldsPadB = state["VectorWidthB"]
             else:
               if state["DirectToLdsB"]:
-                ldsPadB = max(lrvw, optPadB) if not state["ProblemType"]["TLUB"] else 0
+                ldsPadB = max(lrvwB, optPadB) if not state["ProblemType"]["TLUB"] else 0
               else:
                 ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
           assert(ldsPadB >= 0)
@@ -1860,16 +1841,12 @@ class Solution(collections.abc.Mapping):
         isMX = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
         LdsBlockSizePerPadA = state["LdsBlockSizePerPadA"]
         LdsBlockSizePerPadB = state["LdsBlockSizePerPadB"]
-        tmpBpe = None
-        lrvwA = lrvwB = None
-        if isMX:
-          lrvwA = state["LocalReadVectorWidthA"]
-          lrvwB = state["LocalReadVectorWidthB"]
-        else:
-          lrvwA = lrvwB = lrvw
-        tmpBpe = state["ProblemType"]["DataTypeA"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataTypeA"].numBytes() \
-                 if isMX else \
-                 state["ProblemType"]["DataTypeA"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["DataType"].numBytes()
+        lrvwA = state["LocalReadVectorWidthA"] if isMX else lrvw
+        lrvwB = state["LocalReadVectorWidthB"] if isMX else lrvw
+        numBytesA = state["ProblemType"]["MacDataTypeA"].numBytes() if isMX else state["ProblemType"]["DataType"].numBytes()
+        numBytesB = state["ProblemType"]["MacDataTypeB"].numBytes() if isMX else state["ProblemType"]["DataType"].numBytes()
+
+        tmpBpe = state["ProblemType"]["DataTypeA"].numBytes() if state["ConvertAfterDS"] else numBytesA
         if LdsBlockSizePerPadA == -1:
           if state["EnableMatrixInstruction"]:
             if isMX and state["ProblemType"]["DataTypeA"].is6bitFloat():
@@ -1886,9 +1863,8 @@ class Solution(collections.abc.Mapping):
                   LdsBlockSizePerPadA = 0
           else:
             LdsBlockSizePerPadA = 0
-        tmpBpe = state["ProblemType"]["DataTypeB"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataTypeB"].numBytes() \
-                 if isMX else \
-                 state["ProblemType"]["DataTypeB"].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["DataType"].numBytes()
+
+        tmpBpe = state["ProblemType"]["DataTypeB"].numBytes() if state["ConvertAfterDS"] else numBytesB
         if LdsBlockSizePerPadB == -1:
           if state["EnableMatrixInstruction"]:
             if isMX and state["ProblemType"]["DataTypeB"].is6bitFloat():
@@ -3272,7 +3248,7 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["MXBlockA"]:
         state["StoreSwapAddr"] = False
       else:
-      # Original logic (disabled):
+        # Original logic:
         state["StoreSwapAddr"] = (state["PrefetchGlobalRead"] == 2) and \
           (state["1LDSBuffer"] == 0) and \
           (offsetBlk + int(2**(math.ceil(math.log(offsetBlk, 2)))) > state["MaxLDS"])
