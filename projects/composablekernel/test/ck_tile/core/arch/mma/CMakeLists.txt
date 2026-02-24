@@ -9,6 +9,7 @@ endif()
 
 if(GPU_TARGETS MATCHES "gfx9")
     add_gtest_executable(test_amdgcn_mma test_amdgcn_mma.cpp)
+    add_gtest_executable(test_amdgcn_sparse_mma test_amdgcn_sparse_mma.cpp)
     target_compile_options(test_amdgcn_mma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
 else()
     message(DEBUG "Skipping ck_tile_gemm tests for current target")
