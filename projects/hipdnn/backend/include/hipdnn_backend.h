@@ -1,5 +1,41 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file hipdnn_backend.h
+ * @brief hipDNN Backend C API
+ *
+ * This file defines the public C API for hipDNN backend operations.
+ * The backend provides handle management, descriptor operations, and
+ * execution of computational graphs.
+ *
+ * @section backend_usage Basic Usage
+ *
+ * 1. Create a handle:
+ *    @code{.c}
+ *    hipdnnHandle_t handle;
+ *    hipdnnCreate(&handle);
+ *    @endcode
+ *
+ * 2. Create and configure descriptors:
+ *    @code{.c}
+ *    hipdnnBackendDescriptor_t graphDesc;
+ *    hipdnnBackendCreateAndDeserializeGraph_ext(&graphDesc, serializedGraph, size);
+ *    @endcode
+ *
+ * 3. Execute operations:
+ *    @code{.c}
+ *    hipdnnBackendExecute(handle, executionPlan, variantPack);
+ *    @endcode
+ *
+ * 4. Clean up:
+ *    @code{.c}
+ *    hipdnnBackendDestroyDescriptor(graphDesc);
+ *    hipdnnDestroy(handle);
+ *    @endcode
+ *
+ * @see hipdnn_frontend.hpp for the C++ frontend API
+ */
 
 #pragma once
 
