@@ -64,32 +64,37 @@ namespace rocrand_device
 {
 
 template<typename value>
-__forceinline__ __device__ __host__ value rotl(value x, int d);
+__forceinline__ __device__ __host__
+value rotl(value x, int d);
 
 template<>
-__forceinline__ __device__ __host__ unsigned long long
-    rotl<unsigned long long>(unsigned long long x, int d)
+__forceinline__ __device__ __host__
+unsigned long long rotl<unsigned long long>(unsigned long long x, int d)
 {
     return (x << (d & 63)) | (x >> ((64 - d) & 63));
 };
 
 template<>
-__forceinline__ __device__ __host__ unsigned int rotl<unsigned int>(unsigned int x, int d)
+__forceinline__ __device__ __host__
+unsigned int rotl<unsigned int>(unsigned int x, int d)
 {
     return (x << (d & 31)) | (x >> ((32 - d) & 31));
 };
 
 template<typename value>
-__forceinline__ __device__ __host__ value skein_ks_parity();
+__forceinline__ __device__ __host__
+value skein_ks_parity();
 
 template<>
-__forceinline__ __device__ __host__ unsigned int skein_ks_parity<unsigned int>()
+__forceinline__ __device__ __host__
+unsigned int skein_ks_parity<unsigned int>()
 {
     return SKEIN_KS_PARITY32;
 }
 
 template<>
-__forceinline__ __device__ __host__ unsigned long long skein_ks_parity<unsigned long long>()
+__forceinline__ __device__ __host__
+unsigned long long skein_ks_parity<unsigned long long>()
 {
     return SKEIN_KS_PARITY64;
 }
