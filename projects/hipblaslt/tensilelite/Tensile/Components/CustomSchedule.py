@@ -810,8 +810,8 @@ class RegisterSchedule:
                 LocalReadVectorWidth=self.vector_widths[2],
                 MatrixInstruction=list(self.matrix_inst),
                 MIWaveGroup=list(self.mfma_wave_group),
-                LDSTrInst=_TLDS,
-                TransposeLDS=_useLDSTr,
+                LDSTrInst=_useLDSTr,
+                TransposeLDS=_TLDS,
             ))
         
         # Return original function unchanged (so it can still be called directly)
