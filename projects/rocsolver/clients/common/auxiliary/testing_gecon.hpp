@@ -158,7 +158,10 @@ void gecon_getError(const rocblas_handle handle,
     hrcond[0][0] = cpu_gecon<T, S>(norm, n, hA[0], lda, hanorm[0][0], work.data(), rwork.data(),
                                    iwork.data());
 
-    *max_err = std::abs(hrcond[0][0] - hrcond_res[0][0]) / std::abs(hrcond[0][0]);
+    *max_err = std::abs(hrcond[0][0] - hrcond_res[0][0]);
+    if (hrcond[0][0] != 0) {
+        *max_err /= hrcond[0][0];
+    }
 }
 
 template <typename T, typename I, typename S, typename Td, typename Sd, typename Th, typename Ih, typename Sh>
