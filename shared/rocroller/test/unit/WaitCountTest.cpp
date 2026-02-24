@@ -120,10 +120,20 @@ TEST_F(WaitCountTest, Combine)
     EXPECT_THAT(stringValue, testing::HasSubstr("s_waitcnt_vscnt 2"));
 
     {
-        WaitCount wc = WaitCount::EmptyQueue(
+        WaitCount wc = WaitCount::SyncQueue(
             arch, GPUWaitQueueType::SMemQueue, "DEBUG: Wait for scalar queue");
-        EXPECT_EQ(wc.queuesToEmpty().count(), 1);
-        EXPECT_EQ(wc.queuesToEmpty()[GPUWaitQueueType::SMemQueue], true);
+        EXPECT_EQ(wc.queuesToSync().count(), 1);
+        EXPECT_EQ(wc.queuesToSync()[GPUWaitQueueType::SMemQueue], true);
+    }
+
+    {
+        WaitCount wc = WaitCount::SyncQueues(
+            arch,
+            EnumBitset<GPUWaitQueueType>{GPUWaitQueueType::SMemQueue, GPUWaitQueueType::DSQueue},
+            "DEBUG: Wait for scalar and LDS queues");
+        EXPECT_EQ(wc.queuesToSync().count(), 2);
+        EXPECT_EQ(wc.queuesToSync()[GPUWaitQueueType::SMemQueue], true);
+        EXPECT_EQ(wc.queuesToSync()[GPUWaitQueueType::DSQueue], true);
     }
 }
 

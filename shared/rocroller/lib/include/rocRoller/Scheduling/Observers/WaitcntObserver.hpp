@@ -114,18 +114,18 @@ namespace rocRoller
              * @return WaitCount
              */
             WaitCount computeZeroBarrierWaitCount(Instruction const& inst,
-                                               std::string*       explanation = nullptr) const;
+                                                  std::string*       explanation = nullptr) const;
 
             /**
              * Determines if there's a waitcount that's needed due to the instruction having a
-             * WaitCount::EmptyQueue() wait attached.
+             * WaitCount::SyncQueue() wait attached.
              *
              * @param inst
              * @param[out] explanation is an output parameter for an explanation of the wait count required.
              * @return WaitCount
              */
-            WaitCount computeEmptyQueueWaitCount(Instruction const& inst,
-                                               std::string*       explanation = nullptr) const;
+            WaitCount computeSyncQueueWaitCount(Instruction const& inst,
+                                                std::string*       explanation = nullptr) const;
 
             /**
              * Determines if there's a waitcount that's needed due to a register dependency 
@@ -142,7 +142,6 @@ namespace rocRoller
              */
             WaitCount computeRegisterWaitCount(Instruction const& inst,
                                                std::string*       explanation = nullptr) const;
-
 
             /**
              * @brief This function determines if an instruction needs a wait count inserted before

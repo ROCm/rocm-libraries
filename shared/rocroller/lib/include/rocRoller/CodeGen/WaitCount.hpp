@@ -70,15 +70,17 @@ namespace rocRoller
         static WaitCount Max(GPUArchitecture const& arch, std::string const& message = " ");
 
         /**
-         * This means to empty the specified queue, i.e. include a waitcount of 0 if that queue is not empty.
+         * This means to empty the specified queue, i.e. include a waitcount of 0 if that queue
+         * is not empty.
          */
-        static WaitCount EmptyQueue(GPUArchitecture const& arch,
-                                    GPUWaitQueueType       queue,
-                                    std::string const&     message = "");
+        static WaitCount SyncQueue(GPUArchitecture const& arch,
+                                   GPUWaitQueueType       queue,
+                                   std::string const&     message = "");
         /**
-         * This means to empty the specified queues, i.e. include a waitcount of 0 if any of the specified queues are not empty.
+         * This means to empty the specified queues, i.e. include a waitcount of 0 if any of the
+         * specified queues are not empty.
          */
-        static WaitCount EmptyQueue(GPUArchitecture const&       arch,
+        static WaitCount SyncQueues(GPUArchitecture const&       arch,
                                     EnumBitset<GPUWaitQueueType> queues,
                                     std::string const&           message = "");
 
@@ -124,7 +126,7 @@ namespace rocRoller
 
         WaitCount getAsSaturatedWaitCount(GPUArchitecture const& arch) const;
 
-        EnumBitset<GPUWaitQueueType> const& queuesToEmpty() const;
+        EnumBitset<GPUWaitQueueType> const& queuesToSync() const;
 
     private:
         /**
@@ -146,7 +148,7 @@ namespace rocRoller
         bool m_hasVSCnt       = false;
         bool m_hasEXPCnt      = false;
 
-        EnumBitset<GPUWaitQueueType> m_queuesToEmpty;
+        EnumBitset<GPUWaitQueueType> m_queuesToSync;
     };
 
     std::ostream& operator<<(std::ostream& stream, WaitCount const& wait);

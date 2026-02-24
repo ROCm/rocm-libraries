@@ -27,10 +27,10 @@ namespace rocRoller
         using Base::operator[];
         using Base::at;
 
-        constexpr T& operator[](Enum val);
+        constexpr T&       operator[](Enum val);
         constexpr T const& operator[](Enum val) const;
 
-        constexpr T& at(Enum val);
+        constexpr T&       at(Enum val);
         constexpr T const& at(Enum val) const;
     };
 }

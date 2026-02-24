@@ -44,7 +44,7 @@ TEST_CASE("EmptyQueue adds s_waitcnt only when queue is not empty", "[observer][
             context->schedule(s_load);
 
             auto emptyQueueWait
-                = Instruction::Wait(WaitCount::EmptyQueue(arch, GPUWaitQueueType::SMemQueue));
+                = Instruction::Wait(WaitCount::SyncQueue(arch, GPUWaitQueueType::SMemQueue));
             context->schedule(emptyQueueWait);
 
             CHECK_THAT(context.output(), ContainsSubstring("s_waitcnt"));
@@ -53,9 +53,8 @@ TEST_CASE("EmptyQueue adds s_waitcnt only when queue is not empty", "[observer][
 
         SECTION("Queue empty: no s_waitcnt is added")
         {
-
             auto emptyQueueWait
-                = Instruction::Wait(WaitCount::EmptyQueue(arch, GPUWaitQueueType::SMemQueue));
+                = Instruction::Wait(WaitCount::SyncQueue(arch, GPUWaitQueueType::SMemQueue));
             context->schedule(emptyQueueWait);
 
             CHECK_THAT(context.output(), !ContainsSubstring("s_waitcnt"));

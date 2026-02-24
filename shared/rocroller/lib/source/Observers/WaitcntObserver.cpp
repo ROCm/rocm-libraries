@@ -296,16 +296,16 @@ namespace rocRoller
             return rv;
         }
 
-        WaitCount WaitcntObserver::computeEmptyQueueWaitCount(Instruction const& inst,
-                                                              std::string*       explanation) const
+        WaitCount WaitcntObserver::computeSyncQueueWaitCount(Instruction const& inst,
+                                                             std::string*       explanation) const
         {
             auto context = m_context.lock();
 
             WaitCount rv;
 
-            auto queuesToEmpty = inst.getWaitCount().queuesToEmpty();
+            auto queuesToSync = inst.getWaitCount().queuesToSync();
 
-            if(queuesToEmpty.any())
+            if(queuesToSync.any())
             {
                 const auto& architecture = context->targetArchitecture();
 
@@ -314,7 +314,7 @@ namespace rocRoller
                     GPUWaitQueueType queueType = static_cast<GPUWaitQueueType>(i);
                     GPUWaitQueue     queue     = fromWaitQueueType(queueType);
 
-                    if(queuesToEmpty[queueType])
+                    if(queuesToSync[queueType])
                     {
                         if(!m_instructionQueues.at(queue).empty()
                            && (m_typeInQueue.at(queue) == queueType || m_needsWaitZero.at(queue)))
@@ -326,7 +326,7 @@ namespace rocRoller
                                 *explanation += fmt::format("Wait for Queue {} {}: empty: {}, "
                                                             "needsWaitZero: {}, typeInQueue: {}",
                                                             toString(queueType),
-                                                            queuesToEmpty[queueType],
+                                                            queuesToSync[queueType],
                                                             m_instructionQueues.at(queue).empty(),
                                                             m_needsWaitZero.at(queue),
                                                             toString(m_typeInQueue.at(queue)));
@@ -404,7 +404,7 @@ namespace rocRoller
             const auto& architecture = context->targetArchitecture();
 
             WaitCount retval = computeZeroBarrierWaitCount(inst, explanation);
-            retval.combine(computeEmptyQueueWaitCount(inst, explanation));
+            retval.combine(computeSyncQueueWaitCount(inst, explanation));
             retval.combine(computeRegisterWaitCount(inst, explanation));
 
             return retval.getAsSaturatedWaitCount(architecture);
