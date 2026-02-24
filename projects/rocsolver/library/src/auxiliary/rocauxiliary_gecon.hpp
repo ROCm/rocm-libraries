@@ -208,6 +208,8 @@ rocblas_status rocsolver_gecon_template(rocblas_handle handle,
     }
 
     // iterate over each batch
+    // TODO: make a version that operates on batches efficiently
+    // preferably, one that remains entirely on the GPU, and potentially simplifies into a single kernel
     std::vector<S> h_anorm(batch_count);
     HIP_CHECK(hipMemcpyAsync(h_anorm.data(), anorm, sizeof(S) * batch_count, hipMemcpyDeviceToHost,
                              stream));
