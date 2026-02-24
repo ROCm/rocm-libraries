@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <mutex>
 #include <vector>
 
@@ -78,6 +79,62 @@ std::set<std::filesystem::path> EnginePluginResourceManager::getPluginPaths()
 {
     std::lock_guard<std::mutex> lock(pluginMutex);
     return pluginConfig.paths;
+}
+
+size_t EnginePluginResourceManager::getEngineCount() const
+{
+    return getEngineInfos().size();
+}
+
+std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
+{
+    if(_cachedEngineInfos.has_value())
+    {
+        return *_cachedEngineInfos;
+    }
+
+    std::vector<EngineInfo> infos;
+    if(!_pm)
+    {
+        _cachedEngineInfos = infos;
+        return infos;
+    }
+
+    const auto& plugins = _pm->getPlugins();
+    for(const auto& plugin : plugins)
+    {
+        auto pluginVersion = std::string(plugin->version());
+        auto pluginType = std::string(::toString(plugin->type()));
+        auto pluginName = std::string(plugin->name());
+
+        auto engineIds = plugin->getAllEngineIds();
+        for(const auto id : engineIds)
+        {
+            EngineInfo info;
+            info.engineId = id;
+            info.version = pluginVersion;
+            info.type = pluginType;
+            info.pluginName = pluginName;
+
+            try
+            {
+                info.engineName = hipdnn_data_sdk::utilities::getEngineNameFromId(id);
+            }
+            catch(const std::out_of_range&)
+            {
+                info.engineName = hipdnn_data_sdk::utilities::formatEngineIdHex(id);
+            }
+
+            infos.push_back(std::move(info));
+        }
+    }
+
+    std::sort(infos.begin(), infos.end(), [](const EngineInfo& a, const EngineInfo& b) {
+        return a.engineName < b.engineName;
+    });
+
+    _cachedEngineInfos = infos;
+    return infos;
 }
 
 void EnginePluginResourceManager::setPluginUnloadingMode(hipdnnPluginUnloadingMode_ext_t mode)
@@ -287,6 +344,7 @@ EnginePluginResourceManager::EnginePluginResourceManager(
     : _pm(std::move(other._pm))
     , _handleToPlugin(std::move(other._handleToPlugin))
     , _engineIdToHandle(std::move(other._engineIdToHandle))
+    , _cachedEngineInfos(std::move(other._cachedEngineInfos))
 {
 }
 
@@ -298,6 +356,7 @@ EnginePluginResourceManager&
         _pm = std::move(other._pm);
         _handleToPlugin = std::move(other._handleToPlugin);
         _engineIdToHandle = std::move(other._engineIdToHandle);
+        _cachedEngineInfos = std::move(other._cachedEngineInfos);
     }
     return *this;
 }
