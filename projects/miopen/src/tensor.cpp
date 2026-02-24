@@ -924,8 +924,7 @@ std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t)
     LogRange(stream << "{", t.strides, ", ") << "}, ";
     if(t.packed)
     {
-        stream << "packed"
-               << ", ";
+        stream << "packed" << ", ";
     }
 
     if(t.cast_type)
@@ -1096,7 +1095,7 @@ void SetTensor(const Handle& handle,
     }
     else
     {
-        std::string program_name = "MIOpenSubTensorOpWithScalarKernel.cl";
+        std::string program_name = "MIOpenSubTensorOpWithScalarKernel.cpp";
 
         std::vector<std::size_t> worker_sizes = get_worker_sizes(yDesc_flat.GetLengths());
 
@@ -1107,8 +1106,11 @@ void SetTensor(const Handle& handle,
 
         std::size_t wld = 256 < wgd ? 256 : wgd;
         std::stringstream ss;
-        ss << "-DSUBTENSOR_OP_WITH_SCALAR=SUBTENSOR_OP_WITH_SCALAR_SET"
-           << GetDataTypeKernelParams(dataType);
+        // SUBTENSOR_OP_WITH_SCALAR set to 0 for set operation, and 1 for multiply operation
+        ss << "-DSUBTENSOR_OP_WITH_SCALAR=0";
+        ss << GetDataTypeKernelParams(dataType);
+        ss << " -DLOCAL_SIZE=" << std::to_string(wld);
+
         for(int i = 0; i < yDim_flat; ++i)
         {
             ss << " -DWORK_LENGTH_" << std::to_string(i) << "=" << std::to_string(worker_sizes[i]);
@@ -1259,7 +1261,7 @@ void ScaleTensor(const Handle& handle,
     }
     else
     {
-        std::string program_name = "MIOpenSubTensorOpWithScalarKernel.cl";
+        std::string program_name = "MIOpenSubTensorOpWithScalarKernel.cpp";
 
         std::vector<std::size_t> worker_sizes = get_worker_sizes(lens);
 
@@ -1270,8 +1272,10 @@ void ScaleTensor(const Handle& handle,
 
         std::size_t wld = 256 < wgd ? 256 : wgd;
 
-        std::string parms = "-DSUBTENSOR_OP_WITH_SCALAR=SUBTENSOR_OP_WITH_SCALAR_MULTIPLY" +
-                            GetDataTypeKernelParams(dataType);
+        // SUBTENSOR_OP_WITH_SCALAR set to 0 for set operation, and 1 for multiply operation
+        std::string parms = "-DSUBTENSOR_OP_WITH_SCALAR=1" + GetDataTypeKernelParams(dataType);
+        parms += " -DLOCAL_SIZE=" + std::to_string(wld);
+
         for(int i = 0; i < yDim_flat; ++i)
         {
             parms += " -DWORK_LENGTH_" + std::to_string(i) + "=" + std::to_string(worker_sizes[i]);
@@ -1435,7 +1439,7 @@ void CopyTensor(const Handle& handle,
         }
         else
         {
-            std::string program_name = "MIOpenSubTensorOpWithSubTensorKernel.cl";
+            std::string program_name = "MIOpenSubTensorOpWithSubTensorKernel.cpp";
 
             std::vector<std::size_t> worker_sizes = get_worker_sizes(lens);
 
@@ -1446,8 +1450,10 @@ void CopyTensor(const Handle& handle,
 
             std::size_t wld = 256 < wgd ? 256 : wgd;
 
-            std::string parms = "-DSUBTENSOR_OP_WITH_SUBTENSOR=SUBTENSOR_OP_WITH_SUBTENSOR_COPY" +
-                                GetDataTypeKernelParams(srcDesc_flat.GetType());
+            std::string parms = GetDataTypeKernelParams(srcDesc_flat.GetType());
+
+            parms += " -DLOCAL_SIZE=" + std::to_string(wld);
+
             for(std::size_t i = 0; i < srcDim_flat; ++i)
             {
                 parms +=
@@ -1655,7 +1661,7 @@ void CastTensor(const Handle& handle,
         }
         else
         {
-            std::string program_name = "MIOpenSubTensorOpWithCastTensorKernel.cl";
+            std::string program_name = "MIOpenSubTensorOpWithCastTensorKernel.cpp";
 
             std::vector<std::size_t> worker_sizes = get_worker_sizes(lens);
 
@@ -1669,6 +1675,8 @@ void CastTensor(const Handle& handle,
             std::string parms =
                 GetCastTensorBuildOptionFromType(" -DMIOPEN_SRC_TYPE=", srcDesc_flat.GetType()) +
                 GetCastTensorBuildOptionFromType(" -DMIOPEN_DST_TYPE=", dstDesc_flat.GetType());
+
+            parms += " -DLOCAL_SIZE=" + std::to_string(wld);
 
             for(std::size_t i = 0; i < srcDim_flat; ++i)
             {
@@ -1963,7 +1971,7 @@ void TransformTensor(const Handle& handle,
         }
         else
         {
-            std::string program_name = "MIOpenSubTensorOpWithTransformKernel.cl";
+            std::string program_name = "MIOpenSubTensorOpWithTransformKernel.cpp";
 
             std::vector<std::size_t> worker_sizes = get_worker_sizes(lens);
 
@@ -1975,9 +1983,10 @@ void TransformTensor(const Handle& handle,
             std::size_t wld = 256 < wgd ? 256 : wgd;
 
             std::string parms =
-                GetDataTypeKernelParams(dataTypey)                                           //
-                + " -DMIOPEN_BETA_IS_ZERO=" + std::to_string(static_cast<int>(is_beta_zero)) //
-                + " -DMIOPEN_ALPHA_IS_ONE=" + std::to_string(static_cast<int>(is_alpha_one));
+                GetDataTypeKernelParams(dataTypey) +
+                " -DMIOPEN_BETA_IS_ZERO=" + std::to_string(static_cast<int>(is_beta_zero)) +
+                " -DMIOPEN_ALPHA_IS_ONE=" + std::to_string(static_cast<int>(is_alpha_one));
+            parms += " -DLOCAL_SIZE=" + std::to_string(wld);
 
             for(int i = 0; i < yDim_flat; ++i)
             {

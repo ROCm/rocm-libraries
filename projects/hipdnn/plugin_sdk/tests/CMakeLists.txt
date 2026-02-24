@@ -19,6 +19,8 @@ add_executable(hipdnn_plugin_sdk_tests
     TestPluginHelpers.cpp
     TestPluginLastErrorManager.cpp
     TestKnobFactory.cpp
+    TestEngineManager.cpp
+    TestEnginePluginContainer.cpp
     TestKnobSettingFactory.cpp
     TestSdkLogging.cpp
 )

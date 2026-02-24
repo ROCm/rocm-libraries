@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -36,6 +13,7 @@
 
 namespace DGen
 {
+
     /**
      * @brief Helper to compute product of elements in a range
      */
@@ -376,6 +354,84 @@ namespace DGen
 
         auto srcStrides = computeStrides(srcSizes);
         auto dstStrides = computeShuffledStrides(srcSizes, dimOrder);
+
+        return shuffleDims(input, srcSizes, dstStrides, srcStrides);
+    }
+
+    /**
+     * @brief Pre-swizzle scale data.
+     *
+     * This implements the e8m0_shuffle algorithm from:
+     * https://github.com/ROCm/aiter/blob/main/aiter/utility/fp4_utils.py
+     *
+     * The algorithm is:
+     *   scale = scale.view(sm // 32, 2, 16, sn // 8, 2, 4)
+     *   scale = scale.permute(0, 3, 5, 2, 4, 1).contiguous()
+     *   scale = scale.view(sm, sn)
+     *
+     * For output position (outRow, outCol), we compute the source position
+     * by decomposing into 6D indices and applying the inverse permutation.
+     *
+     * @param input The input scale data vector (row-major, M x numScaleCols)
+     * @param sizes The dimension sizes {numScaleRows, numScaleCols} where numScaleRows = M
+     * @return The swizzled scale data
+     */
+    template <typename T>
+    inline std::vector<T> preSwizzleScalesGFX950(std::vector<T> const&      input,
+                                                 std::vector<size_t> const& sizes)
+    {
+        if(sizes.size() != 2)
+        {
+            std::ostringstream msg;
+            msg << "preSwizzleAITER: sizes must have 2 elements, got " << sizes.size();
+            throw std::runtime_error(msg.str());
+        }
+
+        size_t numRows = sizes[0]; // M dimension (number of scale rows)
+        size_t numCols = sizes[1]; // K/32 dimension (number of scale columns)
+
+        size_t totalElements = numRows * numCols;
+        if(totalElements != input.size())
+        {
+            std::ostringstream msg;
+            msg << "preSwizzleAITER: input size " << input.size() << " doesn't match sizes product "
+                << totalElements;
+            throw std::runtime_error(msg.str());
+        }
+
+        if(numRows % 32 != 0)
+        {
+            std::ostringstream msg;
+            msg << "preSwizzleAITER: numRows must be a multiple of 32, got " << numRows;
+            throw std::runtime_error(msg.str());
+        }
+
+        if(numCols % 8 != 0)
+        {
+            std::ostringstream msg;
+            msg << "preSwizzleAITER: numCols must be a multiple of 8, got " << numCols;
+            throw std::runtime_error(msg.str());
+        }
+
+        // AITER shuffle algorithm using shuffleDims:
+        // view as (numRows // 32, 2, 16, numCols // 8, 2, 4)
+        // permute (0, 3, 5, 2, 4, 1)
+        // view as (numRows, numCols)
+
+        // 6D view of the 2D row-major input
+        std::vector<size_t> srcSizes = {numRows / 32, 2, 16, numCols / 8, 2, 4};
+
+        // Row-major strides for the 6D view:
+        // row = d0*32 + d1*16 + d2, col = d3*8 + d4*4 + d5
+        // linear = row*numCols + col
+        std::vector<size_t> srcStrides = {32 * numCols, 16 * numCols, numCols, 8, 4, 1};
+
+        // Dimension order derived from inverse of permute(0, 3, 5, 2, 4, 1).
+        // The inverse permutation is {0, 5, 3, 1, 4, 2}.
+        // For row-major output (last dimension fastest), we process dimensions
+        // in the order that makes the output contiguous: {1, 4, 2, 5, 3, 0}
+        std::vector<size_t> dimOrder = {1, 4, 2, 5, 3, 0};
+        auto                dstStrides = computeShuffledStrides(srcSizes, dimOrder);
 
         return shuffleDims(input, srcSizes, dstStrides, srcStrides);
     }

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include "MiopenBatchnormBwdPlan.hpp"
-#include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenUtils.hpp"
 
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
@@ -116,26 +115,26 @@ const std::optional<MiopenTensor>& BatchnormBwdParams::optBias() const
     return _optBias;
 }
 
-BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params, bool benchmarkingEnabled)
+BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params,
+                                   const HipdnnMiopenSettings& executionSettings)
     : _params(std::move(params))
-    , _benchmarkingEnabled(benchmarkingEnabled)
+    , _executionSettings(executionSettings)
 {
 }
 
-size_t BatchnormBwdPlan::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+size_t BatchnormBwdPlan::getWorkspaceSize([[maybe_unused]] const HipdnnMiopenHandle& handle) const
 {
     // No workspace needed for batchnorm backward
     return 0;
 }
 
-void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
+void BatchnormBwdPlan::execute(const HipdnnMiopenHandle& handle,
                                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                uint32_t numDeviceBuffers,
                                [[maybe_unused]] void* workspace) const
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
 
     float alphaDataDiff = 1.0f;
     float betaDataDiff = 0.0f;

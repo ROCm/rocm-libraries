@@ -5,12 +5,9 @@
 
 #include <functional>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp8.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 #include <iostream>
 #include <numeric>
 #include <random>
@@ -524,6 +521,7 @@ protected:
 };
 
 // NOLINTEND(portability-template-virtual-member-function)
+
 template <class T, class HostAlloc = HostAllocator<T>, class DeviceAlloc = DeviceAllocator<T>>
 class Tensor : public TensorBase<T>
 {
@@ -669,9 +667,9 @@ inline std::unique_ptr<utilities::ITensor> createTensor(data_objects::DataType d
     case data_objects::DataType::FLOAT:
         return std::make_unique<Tensor<float>>(dims, strides);
     case data_objects::DataType::HALF:
-        return std::make_unique<Tensor<half>>(dims, strides);
+        return std::make_unique<Tensor<types::half>>(dims, strides);
     case data_objects::DataType::BFLOAT16:
-        return std::make_unique<Tensor<hip_bfloat16>>(dims, strides);
+        return std::make_unique<Tensor<types::bfloat16>>(dims, strides);
     case data_objects::DataType::DOUBLE:
         return std::make_unique<Tensor<double>>(dims, strides);
     case data_objects::DataType::UINT8:
@@ -681,9 +679,9 @@ inline std::unique_ptr<utilities::ITensor> createTensor(data_objects::DataType d
     case data_objects::DataType::INT8:
         return std::make_unique<Tensor<int8_t>>(dims, strides);
     case data_objects::DataType::FP8_E4M3:
-        return std::make_unique<Tensor<hip_fp8_e4m3>>(dims, strides);
+        return std::make_unique<Tensor<types::fp8_e4m3>>(dims, strides);
     case data_objects::DataType::FP8_E5M2:
-        return std::make_unique<Tensor<hip_fp8_e5m2>>(dims, strides);
+        return std::make_unique<Tensor<types::fp8_e5m2>>(dims, strides);
     default:
         throw std::runtime_error("Unsupported data type for tensor");
     }
