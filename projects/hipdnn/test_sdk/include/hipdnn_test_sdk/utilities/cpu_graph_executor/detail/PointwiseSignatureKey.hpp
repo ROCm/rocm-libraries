@@ -223,6 +223,18 @@ private:
                             InputDataTypeEnum,
                             ComputeDataTypeEnum,
                             OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::GELU_FWD,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::SWISH_FWD,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
     }
 
     template <hipdnn_data_sdk::data_objects::DataType Input0DataTypeEnum,

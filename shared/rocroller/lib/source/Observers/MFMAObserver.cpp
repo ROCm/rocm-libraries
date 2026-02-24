@@ -97,7 +97,7 @@ namespace rocRoller
             }
             else
             {
-                int myCycles = inst.numExecutedInstructions() + inst.peekedStatus().stallCycles;
+                int myCycles      = inst.totalCycles();
                 m_remainingCycles = std::max(0, m_remainingCycles - myCycles);
             }
         }
@@ -222,7 +222,7 @@ namespace rocRoller
 
         void MFMACoexecObserver::observe(Instruction const& inst)
         {
-            int myCycles = inst.numExecutedInstructions() + inst.peekedStatus().stallCycles;
+            int myCycles = inst.totalCycles();
             m_programCycle += myCycles;
 
             auto iter = m_disallowedOps.upper_bound(m_programCycle);
