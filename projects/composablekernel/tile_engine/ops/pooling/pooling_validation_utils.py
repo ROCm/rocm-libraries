@@ -32,8 +32,11 @@ MAX_LDS_BYTES = 65536  # 64 KB LDS per workgroup
 ELEMENT_SIZE_MAP = {
     "fp8": 1,
     "bf8": 1,
+    "int8": 1,
     "fp16": 2,
     "bf16": 2,
+    "int4": 0.5,
+    "int32": 4,
     "fp32": 4,
     "fp64": 8,
 }
