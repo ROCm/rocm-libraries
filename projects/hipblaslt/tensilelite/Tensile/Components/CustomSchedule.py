@@ -77,7 +77,6 @@ class CMSKernelInfo:
     """
     name: str
     dtype: str
-    supported_layouts: list[str]
     MacroTile0: int
     MacroTile1: int
     DepthU: int
@@ -92,6 +91,10 @@ class CMSKernelInfo:
     LocalReadVectorWidth: int
     MatrixInstruction: list[int]
     MIWaveGroup: list[int]
+    LDSTrInst: bool
+    TrasposeLDS: bool
+    TransposeA: bool
+    TransposeB: bool
 
     def matches(self, dtype: Optional[str] = None, layout: Optional[str] = None) -> bool:
         """Check if this kernel info matches the given dtype and/or layout filter.
@@ -724,7 +727,8 @@ class RegisterSchedule:
                     try:
                         found, _ = func(probe, useLDSTr, TLDS)
                         if found:
-                            detected.add(as_str(transA) + as_str(transB))
+                            detected_info_tuple = (as_str(transA) + as_str(transB), useLDSTr, TLDS)
+                            detected.add(detected_info_tuple)
                     except (ValueError, KeyError) as e:
                         layout = as_str(transA) + as_str(transB)
                         printWarning(
@@ -778,30 +782,35 @@ class RegisterSchedule:
         _SCHEDULE_REGISTRY.append(wrapped_func)
 
         # Auto-detect supported layouts by probing the inner function
-        detected_layouts = self._detect_supported_layouts(func)
+        detected_infos = self._detect_supported_layouts(func)
 
         # Store metadata for query API
         dtype_name = _DTYPE_PREDICATE_NAMES.get(self.dtype_predicate, str(self.dtype_predicate))
         tc = self.tile_config
-        _SCHEDULE_METADATA.append(CMSKernelInfo(
-            name=func.__name__,
-            dtype=dtype_name,
-            supported_layouts=detected_layouts,
-            MacroTile0=tc.macro_tile_size_0,
-            MacroTile1=tc.macro_tile_size_1,
-            DepthU=tc.depth_u,
-            PrefetchGlobalRead=tc.prefetch_global_read,
-            PrefetchLocalRead=tc.prefetch_local_read,
-            DirectToLds=tc.direct_to_lds,
-            DtlPlusLdsBuf=tc.dtl_plus_lds_buf,
-            WaveSeparateGlobalReadA=tc.wave_separate_global_read_a,
-            WaveSeparateGlobalReadB=tc.wave_separate_global_read_b,
-            GlobalReadVectorWidthA=self.vector_widths[0],
-            GlobalReadVectorWidthB=self.vector_widths[1],
-            LocalReadVectorWidth=self.vector_widths[2],
-            MatrixInstruction=list(self.matrix_inst),
-            MIWaveGroup=list(self.mfma_wave_group),
-        ))
+        for detected_info in detected_infos:
+            _transA, _transB, _useLDSTr, _TLDS = detected_info
+            _SCHEDULE_METADATA.append(CMSKernelInfo(
+                name=func.__name__,
+                dtype=dtype_name,
+                TransposeA=_transA,
+                TransposeB=_transB,
+                MacroTile0=tc.macro_tile_size_0,
+                MacroTile1=tc.macro_tile_size_1,
+                DepthU=tc.depth_u,
+                PrefetchGlobalRead=tc.prefetch_global_read,
+                PrefetchLocalRead=tc.prefetch_local_read,
+                DirectToLds=tc.direct_to_lds,
+                DtlPlusLdsBuf=tc.dtl_plus_lds_buf,
+                WaveSeparateGlobalReadA=tc.wave_separate_global_read_a,
+                WaveSeparateGlobalReadB=tc.wave_separate_global_read_b,
+                GlobalReadVectorWidthA=self.vector_widths[0],
+                GlobalReadVectorWidthB=self.vector_widths[1],
+                LocalReadVectorWidth=self.vector_widths[2],
+                MatrixInstruction=list(self.matrix_inst),
+                MIWaveGroup=list(self.mfma_wave_group),
+                LDSTrInst=_TLDS,
+                TransposeLDS=_useLDSTr,
+            ))
         
         # Return original function unchanged (so it can still be called directly)
         return func
