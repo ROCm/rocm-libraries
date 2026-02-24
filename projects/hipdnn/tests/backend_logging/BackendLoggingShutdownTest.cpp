@@ -51,7 +51,7 @@
 
 #include <hipdnn_backend.h>
 
-#ifdef __linux__
+#ifndef _WIN32
 #include <unistd.h>
 #endif
 
@@ -67,6 +67,16 @@
 
 namespace
 {
+
+// Cross-platform setenv wrapper for this test.
+void setTestEnv(const char* var, const char* value)
+{
+#ifdef _WIN32
+    _putenv_s(var, value);
+#else
+    setenv(var, value, 1);
+#endif
+}
 
 constexpr size_t NUM_PLAIN_WORKERS = 2;
 constexpr size_t NUM_CALLBACK_WORKERS = 4;
@@ -286,7 +296,9 @@ struct TestLoggerShutdown
         if(!allCallbacksReceived)
         {
             std::cerr << "[Test] FAIL: One or more callback workers received no callbacks\n";
-            _Exit(1);
+            // Use std::abort() to signal test failure. We intentionally avoid exit() and
+            // _Exit() here: std::abort() is C++ standard and produces a clear crash signal.
+            std::abort();
         }
 
         // Step 4: Delay after joining all workers.
@@ -314,7 +326,7 @@ int main()
 {
     // Set log level via environment variable so the backend logger will produce output.
     // Must be set before any hipDNN function is called (i.e., before worker threads start).
-    setenv("HIPDNN_LOG_LEVEL", "info", 1);
+    setTestEnv("HIPDNN_LOG_LEVEL", "info");
 
 #ifdef __linux__
     // Create a temporary file for HIPDNN_LOG_FILE. The file is removed before main()
@@ -332,7 +344,7 @@ int main()
         return 1;
     }
     close(logFd); // Close the fd; spdlog will reopen it by path.
-    setenv("HIPDNN_LOG_FILE", logFilePath.c_str(), 1);
+    setTestEnv("HIPDNN_LOG_FILE", logFilePath.c_str());
     std::cout << "[Test] Created temp log file: " << logFilePath << "\n";
 #endif
 

@@ -451,6 +451,8 @@ typedef enum
  *
  * @note When a synchronous callback is registered, the synchronous callbacks will delay hipDNN
  *       until the callback returns, regardless of any async log callbacks also being registered.
+ *       Synchronous callbacks are recommended only for debugging or testing purposes due to
+ *       their blocking nature. Use async callbacks for production workloads.
  *
  * Behavior:
  * - If (callback, userHandle) already registered: UPDATES settings (level and/or sync/async mode)
@@ -464,11 +466,11 @@ typedef enum
  * - After this function returns, user can safely destroy data referenced by userHandle
  *
  * @param[in] callback   The callback function to invoke
- * @param[in] minLevel   Minimum severity level (SEV_OFF removes the callback)
  * @param[in] minLevel   Minimum severity level (SEV_OFF removes the callback). Note that
- * the logs produced on this callback will be limited by the global log level set either by
- * the HIPDNN_LOG_LEVEL environment variable or the setGlobalLogLevel() API function.
-* @param[in] mode       Sync or async invocation mode
+ *                        the logs produced on this callback will be limited by the global log
+ *                        level set either by the HIPDNN_LOG_LEVEL environment variable or
+ *                        the setGlobalLogLevel() API function.
+ * @param[in] mode       Sync or async invocation mode
  * @param[in] userHandle Non-null user data (also serves as unique callback ID)
  *
  * @retval HIPDNN_STATUS_SUCCESS           The callback was set/updated/removed successfully

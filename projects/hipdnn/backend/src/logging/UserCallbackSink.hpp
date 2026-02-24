@@ -10,7 +10,6 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <thread>
 
 namespace hipdnn_backend
 {
@@ -21,8 +20,7 @@ namespace logging
  * Custom spdlog sink that invokes user callback with user handle.
  *
  * Uses atomic callback pointer to allow instant disable when unregistering.
- * Uses atomic _isExecuting flag to provide synchronous guarantee that no
- * callback is in progress when unregister returns.
+ * Inherits from base_sink<std::mutex> which protects sink_it_() with a mutex.
  */
 class UserCallbackSink : public spdlog::sinks::base_sink<std::mutex>
 {
@@ -31,31 +29,24 @@ public:
                      hipdnnUserLogCallbackHandle_t userHandle)
         : _callbackHolder(std::move(callbackHolder))
         , _userHandle(userHandle)
-        , _isExecuting(false)
     {
     }
 
     // Wait until any in-progress callback invocation completes.
     // Call this after setting callback to nullptr to wait for any
-    // in-progress sink_it_() function call to complete before returning.
-    void waitForIdle() const
+    // in-progress sink_it_() call to complete.
+    // Blocks on the base_sink mutex, which is held during sink_it_().
+    void waitForIdle()
     {
-        while(_isExecuting.load(std::memory_order_acquire))
-        {
-            std::this_thread::yield();
-        }
+        std::lock_guard<std::mutex> lock(mutex_);
     }
 
 protected:
     void sink_it_(const spdlog::details::log_msg& msg) override
     {
-        // Mark execution as started
-        _isExecuting.store(true, std::memory_order_release);
-
         auto callback = _callbackHolder->load(std::memory_order_acquire);
         if(callback == nullptr)
         {
-            _isExecuting.store(false, std::memory_order_release);
             return;
         }
 
@@ -80,9 +71,6 @@ protected:
         {
             std::cerr << "[hipDNN] User log callback threw unknown exception\n";
         }
-
-        // Mark execution as complete
-        _isExecuting.store(false, std::memory_order_release);
     }
 
     void flush_() override
@@ -93,7 +81,6 @@ protected:
 private:
     std::shared_ptr<std::atomic<hipdnnUserLogCallback_t>> _callbackHolder;
     hipdnnUserLogCallbackHandle_t _userHandle;
-    mutable std::atomic<bool> _isExecuting;
 
     static hipdnnSeverity_t fromSpdlogLevel(spdlog::level::level_enum level)
     {

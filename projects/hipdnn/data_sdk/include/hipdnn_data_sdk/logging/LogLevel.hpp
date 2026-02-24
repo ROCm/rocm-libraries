@@ -157,16 +157,11 @@ inline bool isLogLevelEnabled(hipdnnSeverity_t severity)
  *
  * @note This will effectively erase any log level that may have been set
  * using setLogLevel() since the log level was first initialized, and the system will
- * revert to the value set in the environment unless anoter call to setLogLevel()
+ * revert to the value set in the environment unless another call to setLogLevel()
  * is made after calling this function.
  */
-inline void resetLogLevel()
+inline void resetLogLevelCache()
 {
-    // Reset the cached value to off before clearing the initialized flag to avoid races
-    // between threads seeing initialized=false and correctly updating the cache with the getEnv()
-    // value (settign initialized=true), and then this function wrongly overwriting that correctly
-    // cached value with an incorrect value.
-    detail::getLogLevelCache().store(HIPDNN_SEV_OFF, std::memory_order_release);
     detail::getLogLevelInitialized().store(false, std::memory_order_release);
 }
 

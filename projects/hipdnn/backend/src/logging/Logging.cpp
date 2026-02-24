@@ -69,6 +69,7 @@ struct BackendLogState
     // Sync user callback logger with dist_sink
     std::shared_ptr<spdlog::logger> syncLogger;
     std::shared_ptr<spdlog::sinks::dist_sink_mt> syncSharedDistSink;
+    std::atomic<int> syncCallbackCount{0}; // Number of registered sync callbacks
 
     struct UserCallbackInfo
     {
@@ -311,7 +312,7 @@ void loggerShutdown()
     // Logging may be re-started after loggerShutdown() is called; Clear the cached log
     // level so that if/when the logger is restarted it will reread the value from the
     // environment, following the original start-up behavior.
-    hipdnn_data_sdk::logging::resetLogLevel();
+    hipdnn_data_sdk::logging::resetLogLevelCache();
 
     state.loggerInitialized = false;
 }
@@ -363,6 +364,7 @@ hipdnnStatus_t lockedAddUserCallback(BackendLogState& state,
     else
     {
         state.syncSharedDistSink->add_sink(sink);
+        state.syncCallbackCount.fetch_add(1, std::memory_order_release);
     }
 
     // Track callback
@@ -394,6 +396,7 @@ hipdnnStatus_t lockedUpdateUserCallback(BackendLogState& state,
         else
         {
             state.syncSharedDistSink->remove_sink(info.sink);
+            state.syncCallbackCount.fetch_sub(1, std::memory_order_release);
         }
 
         // Add to new dist_sink (loggers already created in initialize())
@@ -404,6 +407,7 @@ hipdnnStatus_t lockedUpdateUserCallback(BackendLogState& state,
         else
         {
             state.syncSharedDistSink->add_sink(info.sink);
+            state.syncCallbackCount.fetch_add(1, std::memory_order_release);
         }
 
         info.mode = newMode;
@@ -447,6 +451,7 @@ hipdnnStatus_t lockedRemoveUserCallback(BackendLogState& state,
     else
     {
         state.syncSharedDistSink->remove_sink(info.sink);
+        state.syncCallbackCount.fetch_sub(1, std::memory_order_release);
     }
 
     // Remove from tracking
@@ -519,8 +524,9 @@ void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg)
         return;
     }
 
-    // Detect and prevent reentrant logging (synchronous mode) to avoid stack overflow.
-    // If a sync generates another log, detect the recursion and print to stderr instead.
+    // Detect and prevent reentrant logging to avoid stack overflow. This can occur when
+    // a user's synchronous log callback triggers another log message (e.g., by calling a
+    // hipDNN API that logs, or by directly invoking the logger from within the callback).
     thread_local int s_recursionDepth = 0;
 
     if(s_recursionDepth > 0)
@@ -555,12 +561,14 @@ void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg)
     std::shared_ptr<spdlog::logger> asyncLogger;
     std::shared_ptr<spdlog::logger> syncLogger;
     std::shared_ptr<spdlog::logger> oldCallbackLogger; // OLD API (to be removed)
+    bool hasSyncCallbacks = false;
     {
         auto& state = getBackendLogState();
         std::shared_lock<std::shared_mutex> lock(state.loggerStateMutex);
 
         asyncLogger = state.asyncLogger;
         syncLogger = state.syncLogger;
+        hasSyncCallbacks = state.syncCallbackCount.load(std::memory_order_acquire) > 0;
         oldCallbackLogger = state.callbackLogger; // OLD API (to be removed)
     } // Lock released here
 
@@ -570,8 +578,9 @@ void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg)
         asyncLogger->log(spdlogLevel, msg);
     }
 
-    // Log to sync user callback logger (sync user callbacks)
-    if(syncLogger)
+    // Log to sync user callback logger only when sync callbacks are registered.
+    // Skip entirely when no sync callbacks exist to avoid lock overhead on every log call.
+    if(hasSyncCallbacks && syncLogger)
     {
         syncLogger->log(spdlogLevel, msg);
     }
