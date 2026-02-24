@@ -67,7 +67,7 @@ def run_test_command(command: List[str], cwd: Optional[Path] = None) -> TestResu
 
         duration = time.time() - start_time
 
-        print(f"? Completed in {duration:.2f}s (exit code: {result.returncode})")
+        print(f"✓ Completed in {duration:.2f}s (exit code: {result.returncode})")
 
         return TestResult(
             command=command,
@@ -80,7 +80,7 @@ def run_test_command(command: List[str], cwd: Optional[Path] = None) -> TestResu
 
     except Exception as e:
         duration = time.time() - start_time
-        print(f"? Failed after {duration:.2f}s: {e}")
+        print(f"✗ Failed after {duration:.2f}s: {e}")
 
         return TestResult(
             command=command,
@@ -137,7 +137,7 @@ def print_summary(results: List[TestResult], sort_by: str = "order"):
 
     # Print individual results
     for i, result in enumerate(sorted_results, 1):
-        status = "?" if result.success else "?"
+        status = "✓" if result.success else "✗"
         print(
             f"{i:2d}. {status} {result.command[0]:40s} {format_duration(result.duration_seconds):>10s}"
         )
@@ -201,7 +201,7 @@ Examples:
             # Check if we've exceeded max time
             if args.max_time and total_test_time > args.max_time:
                 print(
-                    f"\n? Skipping remaining tests (exceeded --max-time {args.max_time}s)"
+                    f"\n⚠ Skipping remaining tests (exceeded --max-time {args.max_time}s)"
                 )
                 break
 
