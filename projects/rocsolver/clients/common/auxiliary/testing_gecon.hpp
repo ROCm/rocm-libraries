@@ -159,7 +159,8 @@ void gecon_getError(const rocblas_handle handle,
                                    iwork.data());
 
     *max_err = std::abs(hrcond[0][0] - hrcond_res[0][0]);
-    if (hrcond[0][0] != 0) {
+    if(hrcond[0][0] != 0)
+    {
         *max_err /= hrcond[0][0];
     }
 }
