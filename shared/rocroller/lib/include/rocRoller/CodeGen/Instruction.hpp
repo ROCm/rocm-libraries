@@ -4,7 +4,9 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include <rocRoller/CodeGen/WaitCount.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
@@ -202,10 +204,36 @@ namespace rocRoller
          */
         int numExecutedInstructions() const;
 
+        /**
+         * Get the total number of cycles for this instruction.
+         * This includes executed instructions, stall cycles, and additional cycles.
+         *
+         * An estimation as stall cycles are an estimation.
+         *
+         * Used for observers to keep track of cycles (in terms of time).
+         */
+        int totalCycles() const;
+
         void allocateNow();
 
         using AllocationArray = std::array<std::shared_ptr<Register::Allocation>, MaxAllocations>;
         AllocationArray allocations() const;
+
+        /**
+         * Set the modelled per-workitem addresses (only for select LDS instructions for now)
+         */
+        const std::optional<std::vector<size_t>>& getModelledAddresses() const
+        {
+            return m_addresses;
+        }
+
+        /**
+         * Set the modelled per-workitem addresses
+         */
+        void setModelledAddresses(const std::vector<size_t>& addresses)
+        {
+            m_addresses = addresses;
+        }
 
     private:
         /**
@@ -275,6 +303,8 @@ namespace rocRoller
         bool m_operandsAreInout = false;
 
         Scheduling::InstructionStatus m_peekedStatus;
+
+        std::optional<std::vector<size_t>> m_addresses;
     };
 }
 
