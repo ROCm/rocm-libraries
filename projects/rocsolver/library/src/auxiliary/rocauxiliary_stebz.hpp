@@ -235,7 +235,6 @@ __device__ void run_stebz_splitting(const int tid,
     }
     __syncthreads();
 
-
     // local helper variables
     T tmp, tmp2, vl, vu;
     rocblas_int j, nu, nl;
