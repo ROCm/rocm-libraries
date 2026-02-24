@@ -19,9 +19,9 @@ Use sparse checkout when cloning the Composable Kernel project:
 
 Then use ``git checkout`` to check out the branch you need.
 
-The develop branch is intended for users who want to preview new features or contribute to the Composable Kernel code base.
+The develop branch is intended for users who want to preview new features or contribute to the Composable Kernel codebase.
 
-If you don't intend to contribute to the code base and won't be previewing features, use a branch that matches the version of ROCm installed on your system.
+If you don't intend to contribute to the codebase and won't be previewing features, use a branch that matches the version of ROCm installed on your system.
 
 Create the ``build`` directory under ``rocm-libraries/projects/composablekernel``:
 
@@ -83,5 +83,6 @@ After running ``make install``, the Composable Kernel files will be saved to the
 For information about ckProfiler, see `the ckProfiler readme file <https://github.com/ROCm/rocm-libraries/tree/develop/projects/composablekernel/profiler/README.md>`_.
 
 For information about running the examples and tests, see :doc:`Composable Kernel examples and tests <../tutorial/Composable-Kernel-examples>`.
+
 
 
