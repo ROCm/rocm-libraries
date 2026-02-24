@@ -3365,7 +3365,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
         }
 
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
-    elif isNN(kernel) and TLDS==1:
+    elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
@@ -3647,7 +3647,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
 
-    elif isNN(kernel) and TLDS==1:
+    elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
         
