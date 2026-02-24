@@ -34,10 +34,13 @@ namespace rocRoller
                   int                    dscnt,
                   int                    kmcnt,
                   int                    expcnt);
-        WaitCount(GPUArchitecture const& arch, GPUWaitQueue, int count);
 
+        /// Issues a waitcnt with the given count for the given queue.
+        WaitCount(GPUArchitecture const& arch, GPUWaitQueue queueForCount, int count);
+
+        /// Instructs the WaitcntObserver to sync the given queues.
         WaitCount(GPUArchitecture const&       arch,
-                  EnumBitset<GPUWaitQueueType> queuesToEmpty,
+                  EnumBitset<GPUWaitQueueType> queuesToSync,
                   std::string const&           message = "");
 
         ~WaitCount() = default;
