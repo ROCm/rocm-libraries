@@ -31,50 +31,15 @@ from Tensile.Components.CustomSchedule import (
 from Tensile.Components.CMSValidator import isValid
 from Tensile.Common import IsaVersion
 
-# Helper to create a mock data type
-def _mock_dtype(is_16bit=False, is_8bit=False, num_bytes=4):
-    mock = MagicMock()
-    mock.isHalf.return_value = is_16bit
-    mock.isBFloat16.return_value = False # Assuming isHalf is enough for is16bit
-    mock.isInt8.return_value = is_8bit
-    mock.is8bitFloat.return_value = False # Assuming isInt8 is enough for is8bit
-    mock.numBytes.return_value = num_bytes
-    return mock
 
-# Base kernel configuration factory
-def create_base_kernel():
-    kernel = {
-        "UseCustomMainLoopSchedule": True,
-        "EnableMatrixInstruction": True,
-        "UnrollLoopSwapGlobalReadOrder": False,
-        "ISA": IsaVersion(9,5,0),
-        "WavefrontSize": 64,
-        "ProblemType": {
-            "DataType": _mock_dtype(),
-            "DataTypeA": _mock_dtype(),
-            "DataTypeB": _mock_dtype(),
-            "TransposeA": False,
-            "TransposeB": False,
-        },
-        "MacroTile0": 0, "MacroTile1": 0, "DepthU": 64,
-        "PrefetchGlobalRead": 0, "PrefetchLocalRead": 0, "DirectToLds": 1,  "DtlPlusLdsBuf": False,
-        "GlobalReadVectorWidthA": 0, "GlobalReadVectorWidthB": 0,
-        "LocalReadVectorWidth": 0,
-        "WaveSeparateGlobalReadA": 0,
-        "WaveSeparateGlobalReadB": 0,
-        "Use64bShadowLimit" : 1,
-        "MatrixInstruction": [16,16,32,1],
-        "MIWaveGroup": [],
-        "LDSTrInst": False,
-        "TransposeLDS": 0,
-        "ForceUnrollSubIter": False,
-        "SwapGlobalReadOrder": False, # For asserting it gets set
-        "UsePLRPack": False, # For asserting it gets set
-        "UseF32XEmulation": False,
-        "MIWaveTileA": 2,
-        "MIWaveTileB": 2,
-    }
-    return kernel
+def _get_layouts_for(func_name):
+    """Collect unique layout strings for a function from _SCHEDULE_METADATA."""
+    layouts = set()
+    for info in _SCHEDULE_METADATA:
+        if info.name == func_name:
+            layout = ("T" if info.TransposeA else "N") + ("T" if info.TransposeB else "N")
+            layouts.add(layout)
+    return sorted(layouts)
 
 class TestLayoutAutoDetection:
     """Tests for automatic supported_layouts detection in RegisterSchedule."""
@@ -105,8 +70,7 @@ class TestLayoutAutoDetection:
                 return True, None
             return False, None
 
-        info = _SCHEDULE_METADATA[-1]
-        assert sorted(info.supported_layouts) == ["TN"]
+        assert _get_layouts_for("_fake_tn_only") == ["TN"]
 
     def test_detect_tn_and_nn(self):
         """A function that handles TN and NN should detect both."""
@@ -124,8 +88,7 @@ class TestLayoutAutoDetection:
                 return True, None
             return False, None
 
-        info = _SCHEDULE_METADATA[-1]
-        assert sorted(info.supported_layouts) == ["NN", "TN"]
+        assert _get_layouts_for("_fake_tn_nn") == ["NN", "TN"]
 
     def test_detect_all_four_layouts(self):
         """A function that handles all four layouts should detect all four."""
@@ -147,8 +110,7 @@ class TestLayoutAutoDetection:
                 return True, None
             return False, None
 
-        info = _SCHEDULE_METADATA[-1]
-        assert sorted(info.supported_layouts) == ["NN", "NT", "TN", "TT"]
+        assert _get_layouts_for("_fake_all_layouts") == ["NN", "NT", "TN", "TT"]
 
     def test_detect_no_layouts(self):
         """A function that always returns False should detect no layouts."""
@@ -162,8 +124,7 @@ class TestLayoutAutoDetection:
         def _fake_no_layouts(kernel, useLDSTr, TLDS):
             return False, None
 
-        info = _SCHEDULE_METADATA[-1]
-        assert info.supported_layouts == []
+        assert _get_layouts_for("_fake_no_layouts") == []
 
     def test_mutation_isolation(self):
         """Kernel mutations in one probe must not leak into another probe."""
@@ -184,8 +145,7 @@ class TestLayoutAutoDetection:
                 return True, None
             return False, None
 
-        info = _SCHEDULE_METADATA[-1]
-        assert sorted(info.supported_layouts) == ["NN", "TN"]
+        assert _get_layouts_for("_fake_mutating") == ["NN", "TN"]
 
     def test_detect_layouts_logs_on_value_error(self, capsys):
         """When the inner function raises ValueError, the probe should log a warning and skip that combo."""
@@ -203,8 +163,7 @@ class TestLayoutAutoDetection:
                 return True, None
             return False, None
 
-        info = _SCHEDULE_METADATA[-1]
-        assert sorted(info.supported_layouts) == ["TN"]
+        assert _get_layouts_for("_fake_raises_on_nt") == ["TN"]
 
         captured = capsys.readouterr()
 
@@ -213,7 +172,6 @@ class TestLayoutAutoDetection:
 
     def test_consistency_with_existing_schedules(self):
         """Auto-detected layouts must match the previously hand-declared layouts for all existing schedules."""
-        # Expected layouts from the original manual annotations (prior to auto-detection)
         EXPECTED = {
             "_get_schedule_256x96x64_16bit": ["NN", "TN"],
             "_get_schedule_192x256x64_16bit": ["NN", "NT", "TN"],
@@ -252,53 +210,42 @@ class TestLayoutAutoDetection:
             "_get_schedule_128x256x64_16bit": ["NN"],
         }
 
-        for info in _SCHEDULE_METADATA:
-            if info.name in EXPECTED:
-                assert sorted(info.supported_layouts) == EXPECTED[info.name], \
-                    f"{info.name}: auto-detected {sorted(info.supported_layouts)}, expected {EXPECTED[info.name]}"
+        for name, expected_layouts in EXPECTED.items():
+            detected = _get_layouts_for(name)
+            assert detected == expected_layouts, \
+                f"{name}: auto-detected {detected}, expected {expected_layouts}"
 
-        # Verify all expected schedules were found in the registry
         found_names = {info.name for info in _SCHEDULE_METADATA}
         for name in EXPECTED:
             assert name in found_names, f"{name} not found in _SCHEDULE_METADATA"
 
     def test_cms_api_query(self):
         """Test the CMS API query function."""
-        # test all 16 bit types and layouts
-        
+        REQUIRED_KEYS = {"name", "dtype", "TransposeA", "TransposeB",
+                         "MacroTile0", "MacroTile1", "DepthU"}
+
         results = query_cms_kernels()
         assert len(results) > 0
         assert all(isinstance(result, dict) for result in results)
-        assert all("name" in result for result in results)
-        assert all("dtype" in result for result in results)
-        assert all("supported_layouts" in result for result in results)
-        assert all("MacroTile0" in result for result in results)
-        assert all("MacroTile1" in result for result in results)
-        assert all("DepthU" in result for result in results)
-
+        for result in results:
+            assert REQUIRED_KEYS.issubset(result.keys()), \
+                f"Missing keys in {result.get('name', '?')}: {REQUIRED_KEYS - result.keys()}"
 
         for dtype in ["16bit", "TF32"]:
             results = query_cms_kernels(dtype=dtype)
             assert len(results) > 0
             assert all(isinstance(result, dict) for result in results)
-            assert all("name" in result for result in results)
-            assert all("dtype" in result for result in results)
-            assert all("supported_layouts" in result for result in results)
-            assert all("MacroTile0" in result for result in results)
-            assert all("MacroTile1" in result for result in results)
-            assert all("DepthU" in result for result in results)
+            for result in results:
+                assert REQUIRED_KEYS.issubset(result.keys())
+                assert result["dtype"].lower() == dtype.lower()
 
         for layout in ["TN", "NT", "NN"]:
             results = query_cms_kernels(dtype="16bit", layout=layout)
             assert len(results) > 0
             assert all(isinstance(result, dict) for result in results)
-            assert all("name" in result for result in results)
-            assert all("dtype" in result for result in results)
-            assert all("supported_layouts" in result for result in results)
-            assert all("MacroTile0" in result for result in results)
-            assert all("MacroTile1" in result for result in results)
-            assert all("DepthU" in result for result in results)
-
-            
-
-        
+            expected_a = layout[0] == "T"
+            expected_b = layout[1] == "T"
+            for result in results:
+                assert REQUIRED_KEYS.issubset(result.keys())
+                assert result["TransposeA"] == expected_a
+                assert result["TransposeB"] == expected_b

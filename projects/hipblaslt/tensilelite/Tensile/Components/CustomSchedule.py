@@ -92,7 +92,7 @@ class CMSKernelInfo:
     MatrixInstruction: list[int]
     MIWaveGroup: list[int]
     LDSTrInst: bool
-    TrasposeLDS: bool
+    TransposeLDS: bool
     TransposeA: bool
     TransposeB: bool
 
@@ -108,8 +108,10 @@ class CMSKernelInfo:
         """
         if dtype is not None and self.dtype.lower() != dtype.lower():
             return False
-        if layout is not None and layout.upper() not in (l.upper() for l in self.supported_layouts):
-            return False
+        if layout is not None:
+            layout = layout.upper()
+            if self.TransposeA != (layout[0] == "T") or self.TransposeB != (layout[1] == "T"):
+                return False
         return True
 
 
@@ -524,7 +526,7 @@ def query_cms_kernels(dtype: Optional[str] = None, layout: Optional[str] = None)
         needed for a matching CMS kernel. Each dict includes:
             - name:                     Schedule function name
             - dtype:                    Data type string
-            - supported_layouts:        List of all layouts this kernel supports
+            - TransposeA, TransposeB:   Layout booleans (e.g. TN = TransposeA=True, TransposeB=False)
             - MacroTile0, MacroTile1, DepthU
             - PrefetchGlobalRead, PrefetchLocalRead, DirectToLds
             - WaveSeparateGlobalReadA, WaveSeparateGlobalReadB
@@ -727,7 +729,7 @@ class RegisterSchedule:
                     try:
                         found, _ = func(probe, useLDSTr, TLDS)
                         if found:
-                            detected_info_tuple = (as_str(transA) + as_str(transB), useLDSTr, TLDS)
+                            detected_info_tuple = (transA, transB, useLDSTr, TLDS)
                             detected.add(detected_info_tuple)
                     except (ValueError, KeyError) as e:
                         layout = as_str(transA) + as_str(transB)
