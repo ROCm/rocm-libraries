@@ -1061,7 +1061,7 @@ def fp4_small():
             scale_B="Separate",
             scaleType_B="E8M0",
             scaleBlockSize=32,
-            scaleSkipPermlane=True,
+            scaleSkipPermlane="PreSwizzleScaleGFX950",
         ),
         swizzleTileSize=MKNLTuple(32, 8, 32, 8),
         numOuter=1,
