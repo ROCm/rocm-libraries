@@ -1,3 +1,5 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CodeGen/Arithmetic/BitFieldExtract.hpp>
 #include <rocRoller/CodeGen/ExchangeGenerator.hpp>
@@ -111,7 +113,9 @@ namespace rocRoller
 
             auto packedVariableType = DataTypeInfo::Get(exchange.varType).packedVariableType();
 
-            if(packedVariableType && !m_context->kernelOptions()->scaleSkipPermlane)
+            if(packedVariableType
+               && m_context->kernelOptions()->scaleSkipPermlane
+                      == rocRoller::ScaleSkipPermlaneMode::None)
             {
                 auto               allocOptions = Register::AllocationOptions::FullyContiguous();
                 Register::ValuePtr temp;
@@ -132,7 +136,8 @@ namespace rocRoller
                 vgpr = temp;
             }
 
-            if(m_context->kernelOptions()->scaleSkipPermlane)
+            if(m_context->kernelOptions()->scaleSkipPermlane
+               != rocRoller::ScaleSkipPermlaneMode::None)
             {
                 AssertFatal(m_context->registerTagManager()->hasRegister(oMacTileTag),
                             ShowValue(oMacTileTag));

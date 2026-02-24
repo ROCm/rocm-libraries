@@ -42,13 +42,13 @@ protected:
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
         // Note: The plugin paths has to be set before we create the hipdnn handle.
-        // auto pluginPath = std::filesystem::weakly_canonical(
-        //     hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
-        // const std::string pluginPathStr = pluginPath.string();
-        // const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
-        // ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-        //               paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-        //           HIPDNN_STATUS_SUCCESS);
+        auto pluginPath = std::filesystem::weakly_canonical(
+            hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
+        const std::string pluginPathStr = pluginPath.string();
+        const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
+        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
+                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                  HIPDNN_STATUS_SUCCESS);
 
         // Create handle and stream
         ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
