@@ -28,4 +28,25 @@ struct RmsnormFwdTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBu
     }
 };
 
+struct RmsnormFwdWithBiasTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBundle
+{
+    RmsnormFwdWithBiasTensorBundle(
+        const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& node,
+        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+            tensorMap,
+        unsigned int seed)
+        : hipdnn_test_sdk::utilities::GraphTensorBundle(tensorMap)
+    {
+        const auto& attributes
+            = node.attributesAs<hipdnn_data_sdk::data_objects::RMSNormAttributes>();
+
+        randomizeTensor(attributes.x_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.scale_tensor_uid(), 0.0f, 1.0f, seed);
+        if(attributes.bias_tensor_uid().has_value())
+        {
+            randomizeTensor(attributes.bias_tensor_uid().value(), -0.5f, 0.5f, seed);
+        }
+    }
+};
+
 } // namespace hipdnn_sdk_test_utils

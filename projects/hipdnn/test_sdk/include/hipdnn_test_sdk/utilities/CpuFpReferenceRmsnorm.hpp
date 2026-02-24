@@ -16,13 +16,14 @@ namespace hipdnn_test_sdk::utilities
 class CpuFpReferenceRmsnorm
 {
 public:
-    /// RMSNorm forward: y = x / sqrt(mean(x^2) + epsilon) * scale
+    /// RMSNorm forward: y = x / sqrt(mean(x^2) + epsilon) * scale [+ bias]
     ///
     /// @param x           Input tensor (NCHW or NHWC layout)
     /// @param scale       Per-channel scale tensor, shape [1, C, 1, ..., 1]
     /// @param y           Output tensor (same shape as x)
     /// @param epsilon     Small scalar for numerical stability
     /// @param invRms      Optional output: 1 / sqrt(mean(x^2) + epsilon) per channel
+    /// @param bias        Optional per-channel bias tensor, shape [1, C, 1, ..., 1]
     template <class XDataType,
               class ScaleDataType,
               class YDataType,
@@ -32,7 +33,8 @@ public:
         const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>& scale,
         hipdnn_data_sdk::utilities::TensorBase<YDataType>& y,
         double epsilon,
-        hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms = nullptr)
+        hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms = nullptr,
+        const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* bias  = nullptr)
     {
         if(x.dims().size() < 2)
         {
@@ -74,10 +76,13 @@ public:
                     auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
                     auto xNorm = xVal * invRmsValue;
 
-                    y.setHostValue(
-                        static_cast<YDataType>(
-                            static_cast<ComputeDataType>(scale.getHostValue(0, cidx)) * xNorm),
-                        fullIndices);
+                    ComputeDataType yVal
+                        = static_cast<ComputeDataType>(scale.getHostValue(0, cidx)) * xNorm;
+                    if(bias != nullptr)
+                    {
+                        yVal += static_cast<ComputeDataType>(bias->getHostValue(0, cidx));
+                    }
+                    y.setHostValue(static_cast<YDataType>(yVal), fullIndices);
                 });
 
             // Save inverse RMS for backward pass if provided

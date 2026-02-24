@@ -275,3 +275,73 @@ TEST(TestCpuFpReferenceRmsnormFp64, RmsnormFwdConstantInput)
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 0), expectedY, tolerance);
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 1), expectedY, tolerance);
 }
+
+TEST(TestCpuFpReferenceRmsnorm, RmsnormFwdWithBias)
+{
+    // bias is added per-channel after scale multiplication:
+    // y = x / rms * scale + bias
+    const std::vector<int64_t> dims = {1, 2, 2, 2};
+
+    Tensor<float> inputTensor(dims);
+    Tensor<float> outputTensor(dims);
+    Tensor<float> scaleTensor({1, 2});
+    Tensor<float> biasTensor({1, 2});
+
+    // Constant input: all 1s so rms = 1 + eps ~ 1
+    inputTensor.fillWithValue(1.0f);
+    scaleTensor.setHostValue(2.0f, 0, 0); // channel 0: scale=2, bias=0.5
+    scaleTensor.setHostValue(3.0f, 0, 1); // channel 1: scale=3, bias=-1.0
+    biasTensor.setHostValue(0.5f, 0, 0);
+    biasTensor.setHostValue(-1.0f, 0, 1);
+
+    double epsilon = 0.0; // zero epsilon so inv_rms = 1
+
+    Tensor<float>* noInvRms = nullptr;
+    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputTensor, epsilon, noInvRms,
+                                   &biasTensor);
+
+    // y = x * invRms * scale + bias = 1 * 1 * scale + bias
+    float expectedC0 = 2.0f + 0.5f;  // 2.5
+    float expectedC1 = 3.0f + -1.0f; // 2.0
+
+    auto tolerance = 1e-5f;
+    // Channel 0 outputs
+    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 0), expectedC0, tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 1), expectedC0, tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 0), expectedC0, tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 1), expectedC0, tolerance);
+    // Channel 1 outputs
+    EXPECT_NEAR(outputTensor.getHostValue(0, 1, 0, 0), expectedC1, tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 1, 0, 1), expectedC1, tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 1, 1, 0), expectedC1, tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 1, 1, 1), expectedC1, tolerance);
+}
+
+TEST(TestCpuFpReferenceRmsnorm, RmsnormFwdBiasIsOptional)
+{
+    // Passing nullptr bias should give the same result as no-bias call
+    const std::vector<int64_t> dims = {1, 1, 2, 2};
+
+    Tensor<float> inputTensor(dims);
+    Tensor<float> outputNoBias(dims);
+    Tensor<float> outputNullBias(dims);
+    Tensor<float> scaleTensor({1, 1});
+
+    inputTensor.fillWithValue(2.0f);
+    scaleTensor.setHostValue(1.5f, 0, 0);
+    double epsilon = 1e-5;
+
+    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputNoBias, epsilon);
+    Tensor<float>* noInvRms2  = nullptr;
+    Tensor<float>* noBias     = nullptr;
+    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputNullBias, epsilon, noInvRms2,
+                                   noBias);
+
+    auto tolerance = 1e-6f;
+    EXPECT_NEAR(outputNoBias.getHostValue(0, 0, 0, 0),
+                outputNullBias.getHostValue(0, 0, 0, 0),
+                tolerance);
+    EXPECT_NEAR(outputNoBias.getHostValue(0, 0, 1, 1),
+                outputNullBias.getHostValue(0, 0, 1, 1),
+                tolerance);
+}
