@@ -1125,7 +1125,7 @@ hipsparseStatus_t hipsparseLtSpMMACompressedSize2(const hipsparseLtHandle_t*    
  *  @param[in]
  *  sparseMatDescr     structured (sparse) matrix descriptor.
  *  @param[in]
- *  isSparseA          specify whether the structured (or sparse) matrix is in the first position (matA or matB). (The HIP backend only supports matA.)
+ *  isSparseA          specify whether the structured (or sparse) matrix is in the first position (matA or matB).
  *  @param[in]
  *  op                 operation that will be applied to the structured (or sparse) matrix in the multiplication.
  *  @param[in]
