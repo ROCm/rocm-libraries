@@ -14,7 +14,7 @@ hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 
 # Supported FlatBuffers versions - update this list when adding new version support.
 # Each version must have pre-generated headers in include/generated/v<version_tag>/
-set(HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS "24.12.23" "25.9.23")
+set(HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS "24.12.23" "${HIPDNN_FLATBUFFERS_VERSION}")
 
 if(NOT HIPDNN_FLATBUFFERS_VERSION IN_LIST HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS)
     message(FATAL_ERROR
@@ -64,14 +64,11 @@ function(_hipdnn_data_sdk_process_dependency TARGET_NAME ALIAS_NAME)
         set(_hipdnn_data_sdk_local_export_targets ${_hipdnn_data_sdk_local_export_targets} PARENT_SCOPE)
 
         # Add include directory if specified
+        # When INCLUDE_SUBDIR is specified, we want to install the subdirectory WITH its name preserved
+        # (e.g., .../include/flatbuffers/ should install as flatbuffers/ not flatten its contents)
+        # So we use INCLUDE_DIR (the parent) in the list, and the install command will copy subdirs
         if(ARG_INCLUDE_DIR)
-            if(ARG_INCLUDE_SUBDIR)
-                list(APPEND _hipdnn_data_sdk_local_export_includes
-                     ${ARG_INCLUDE_DIR}/${ARG_INCLUDE_SUBDIR}
-                )
-            else()
-                list(APPEND _hipdnn_data_sdk_local_export_includes ${ARG_INCLUDE_DIR})
-            endif()
+            list(APPEND _hipdnn_data_sdk_local_export_includes ${ARG_INCLUDE_DIR})
             set(_hipdnn_data_sdk_local_export_includes ${_hipdnn_data_sdk_local_export_includes} PARENT_SCOPE)
         endif()
     endif()
@@ -168,17 +165,6 @@ install(
     PATTERN "*.h"
     PATTERN "*.hpp"
     PATTERN "*.h.in" EXCLUDE
-    PATTERN "generated" EXCLUDE
-)
-
-# Install ALL versions of generated FlatBuffer headers
-# The Config file will select the correct version based on detected FlatBuffers version
-install(
-    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/generated/"
-    DESTINATION ${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}/generated
-    COMPONENT Development
-    FILES_MATCHING
-    PATTERN "*.h"
 )
 
 # Install generated version header
