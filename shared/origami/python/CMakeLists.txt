@@ -172,6 +172,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         FILES_MATCHING
         PATTERN "*.py"
         PATTERN "*.csv"
+        PATTERN "*.yaml"
         PATTERN "*.md"
     )
 endif()
