@@ -145,11 +145,11 @@ if(NOT HIPDNN_SKIP_TESTS)
 
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    # Skip finalize_test_targets() in superbuild mode to avoid target name collisions with hipdnn
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        finalize_test_targets()
+    # Finalize test targets with prefix to avoid collisions in superbuild mode
+    finalize_test_targets("hipblaslt-provider")
 
-        # For standalone builds we need to install the ctest files
+    # For standalone builds we need to install the ctest files
+    if(NOT ROCM_LIBS_SUPERBUILD)
         install_hipblaslt_plugin_ctest_files()
     endif()
 endif()

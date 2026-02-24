@@ -226,7 +226,7 @@ endif()
 if(NOT HIPDNN_SKIP_TESTS)
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets()
+    finalize_test_targets("hipdnn")
 endif()
 
 # keep this after all the targets have been added that could use the HIP language compiler.
