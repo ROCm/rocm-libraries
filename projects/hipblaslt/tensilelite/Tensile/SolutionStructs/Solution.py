@@ -1607,6 +1607,8 @@ class Solution(collections.abc.Mapping):
         state["UseDirect32XEmulation"] = False
 
     # Check if CMS is available for this solution
+    if type(state['UseCustomMainLoopSchedule']) == bool:
+      reject(state, printRejectionReason, "Detected boolean, UseCustomMainLoopSchedule should be -1, 0 or 1")
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       hasCMS,_ = hasCustomSchedule(state)
       if state["UseCustomMainLoopSchedule"] == 1 and not hasCMS:
