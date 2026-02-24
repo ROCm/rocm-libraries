@@ -326,8 +326,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
             hip_kernel_plugin::batchnorm::Direction::FORWARD_TRAINING,
             config);
 
-    // variant = config.variant;
-    variant = 0;
+    variant = config.variant;
     vectorsize = config.vectorsize;
     // Activate these only for variant 2!
     // xlocalsize = config.xlocalsize;
@@ -475,6 +474,11 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_LDS_SIZE=") + std::to_string(ldsnogcn));
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_LDSGCN_SIZE=") + std::to_string(ldsgcn));
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_N=") + std::to_string(n));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_C=") + std::to_string(c));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_HW=") + std::to_string(in_cstride));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_NHW=") + std::to_string(in_nhw));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_CHW=") + std::to_string(c * in_cstride));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_NCHW=") + std::to_string(c * in_nhw));
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_NGRPS=")
                          + std::to_string(ygridsize / ylocalsize));
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_NGRPS2=")

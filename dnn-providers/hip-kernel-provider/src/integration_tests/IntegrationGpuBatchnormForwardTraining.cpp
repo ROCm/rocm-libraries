@@ -6,7 +6,6 @@
 
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
