@@ -7,7 +7,12 @@
 #include "ck_tile/host/host_tensor.hpp"
 
 #include <cassert>
-#include <numbers>
+#include <cmath>
+
+#ifndef M_PI // Not there on windows...
+#define M_PI 3.141592653589793238462643383279502884
+#endif
+
 #include <functional>
 #include <iterator>
 #include <optional>
@@ -45,7 +50,7 @@ generate_rotary_cos_sin(ck_tile::index_t seqlen,
 
     ck_tile::HostTensor<float> angle({num_rows, num_cols});
     std::generate(begin(angle), end(angle), [&] {
-        return generator(random_engine) * 2 * std::numbers::pi_v<float>;
+        return generator(random_engine) * 2 * M_PI;
     });
 
     ck_tile::HostTensor<DataType> cos({num_rows, num_cols});
