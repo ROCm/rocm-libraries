@@ -3,6 +3,7 @@
 
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
+#include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>
 
 #include <rocRoller/AssertOpKinds.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -147,7 +148,7 @@ namespace rocRoller
              values.maxConcurrentControlOps ? std::to_string(*values.maxConcurrentControlOps)
                                             : "none");
         ShowOption(enableFullDivision);
-        ShowOption(scaleSkipPermlane);
+        ShowString(scaleSkipPermlane);
         ShowString(assertOpKind);
         ShowOption(removeSetCoordinate);
 
