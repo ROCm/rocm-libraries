@@ -985,7 +985,7 @@ class FmhaBwdApiPool:
             )
         if not per_arch:
             # empty string we add some ignore to suppress warning in api
-            per_arch = "(void)t; (void)s; (void)a;"
+            per_arch = ("(void)t; (void)s; (void)a;", "(void)t;")[variant]
         return per_arch
     @property
     def api(self) -> str:
