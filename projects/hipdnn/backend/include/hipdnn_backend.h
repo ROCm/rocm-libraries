@@ -383,6 +383,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                                                                           char** pluginPaths,
                                                                           size_t* maxStringLen);
 
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version);
+
 #ifdef __cplusplus
 }
 #endif
