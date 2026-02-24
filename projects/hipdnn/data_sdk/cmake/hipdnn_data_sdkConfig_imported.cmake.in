@@ -75,18 +75,7 @@ if(flatbuffers_VERSION)
     message(STATUS "hipDNN Data SDK: Using FlatBuffers ${flatbuffers_VERSION} headers (v${_hipdnn_fb_version_tag})")
 endif()
 
-# Add FlatBuffers includes with high priority to ensure correct version is used
-# when multiple FlatBuffers installations exist on the system
-if(TARGET flatbuffers::flatbuffers)
-    get_target_property(_fb_includes flatbuffers::flatbuffers INTERFACE_INCLUDE_DIRECTORIES)
-    if(_fb_includes)
-        # Add as compile option with -I to ensure it comes before system includes
-        foreach(_include_dir IN LISTS _fb_includes)
-            set_property(TARGET hipdnn_data_sdk APPEND PROPERTY INTERFACE_COMPILE_OPTIONS
-                "$<$<COMPILE_LANGUAGE:CXX>:-I$<SHELL_PATH:${_include_dir}>>")
-        endforeach()
-    endif()
-endif()
+hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
 hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
 
 message(STATUS "hipDNN Data SDK: Engine plugin build directory is ${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
