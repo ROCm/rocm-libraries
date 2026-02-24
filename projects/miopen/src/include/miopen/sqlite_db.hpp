@@ -17,7 +17,6 @@
 #include <miopen/lock_file.hpp>
 #include <miopen/env.hpp>
 
-#include <boost/core/explicit_operator_bool.hpp>
 #include "sqlite3.h"
 #include <mutex>
 
