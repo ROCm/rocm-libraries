@@ -156,6 +156,11 @@ target_link_libraries(hipsparse-test PRIVATE
     GTest::gtest
 )
 
+# GTest requires pthread on Unix platforms
+if(NOT WIN32)
+    target_link_libraries(hipsparse-test PRIVATE pthread)
+endif()
+
 if(HIPSPARSE_ENABLE_OPENMP)
     target_link_libraries(hipsparse-test PRIVATE OpenMP::OpenMP_CXX)
 endif()

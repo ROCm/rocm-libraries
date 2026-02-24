@@ -4,6 +4,7 @@
 #pragma once
 
 #include "KernelOptions.hpp"
+#include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>
 
 namespace rocRoller
 {
@@ -98,7 +99,7 @@ namespace rocRoller
          * This is experimental and requires that the input be specifically
          * modified, but will show better performance.
          */
-        bool scaleSkipPermlane = false;
+        ScaleSkipPermlaneMode scaleSkipPermlane = ScaleSkipPermlaneMode::None;
 
         /**
          * Which method to use to crash the kernel if an assertion fails.

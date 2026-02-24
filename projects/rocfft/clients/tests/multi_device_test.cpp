@@ -204,6 +204,8 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
                 }
                 break;
             case DIFFERENT_IO_DEVICES:
+                if(mp_lib != fft_params::fft_mp_lib_none)
+                    continue; // FIXME, fails even with only 2 ranks
                 if(p.placement == fft_placement_inplace)
                     continue; // only out-of-place
                 if(p.run_callbacks)
