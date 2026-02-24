@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include "MiopenContainer.hpp"
-#include "EngineManager.hpp"
 #include "engines/MiopenEngine.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
@@ -40,7 +39,9 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
     static const std::vector<EngineDefinition> s_engineDefinitions = {
         // MIOPEN_ENGINE (non-deterministic, default)
         {MIOPEN_ENGINE_ID,
-         []() -> std::unique_ptr<IEngine> {
+         []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle,
+                                                            HipdnnMiopenSettings,
+                                                            HipdnnMiopenContext>> {
              auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_ID);
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>());
@@ -51,7 +52,9 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
 
         // MIOPEN_ENGINE_DETERMINISTIC (convolution-only)
         {MIOPEN_ENGINE_DETERMINISTIC_ID,
-         []() -> std::unique_ptr<IEngine> {
+         []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle,
+                                                            HipdnnMiopenSettings,
+                                                            HipdnnMiopenContext>> {
              auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_DETERMINISTIC_ID);
              // Only include conv plan builders - batchnorm doesn't support deterministic mode
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(true));
@@ -111,7 +114,9 @@ MiopenContainer::MiopenContainer()
 {
     HIPDNN_PLUGIN_LOG_INFO("Creating MiopenContainer");
 
-    _engineManager = std::make_unique<EngineManager>();
+    _engineManager = std::make_unique<hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle,
+                                                                       HipdnnMiopenSettings,
+                                                                       HipdnnMiopenContext>>();
 
     for(const auto& engineDefinition : getEngineDefinitions())
     {
@@ -124,7 +129,8 @@ MiopenContainer::~MiopenContainer()
     HIPDNN_PLUGIN_LOG_INFO("Destroying MiopenContainer");
 }
 
-EngineManager& MiopenContainer::getEngineManager()
+hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>&
+    MiopenContainer::getEngineManager()
 {
     return *_engineManager;
 }

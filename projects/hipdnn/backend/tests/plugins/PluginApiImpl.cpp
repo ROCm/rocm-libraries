@@ -40,6 +40,16 @@ extern "C" hipdnnPluginStatus_t hipdnnPluginGetVersion(const char** version)
     });
 }
 
+#ifndef HIPDNN_API_VERSION_UNDEFINED
+extern "C" hipdnnPluginStatus_t hipdnnPluginGetApiVersion(const char** version)
+{
+    return hipdnn_plugin_sdk::tryCatch([&]() {
+        THROW_IF_NULL(version);
+        *version = PLUGIN_API_VERSION;
+    });
+}
+#endif
+
 extern "C" hipdnnPluginStatus_t hipdnnPluginGetType(hipdnnPluginType_t* type)
 {
     return hipdnn_plugin_sdk::tryCatch([&]() {

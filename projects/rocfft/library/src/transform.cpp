@@ -311,7 +311,7 @@ void rocfft_plan_t::Execute(void* in_buffer[], void* out_buffer[], rocfft_execut
     // Vector of topologically sorted indexes to the items in multiPlan
     auto sortedIdx = MultiPlanTopologicalSort();
 
-    const auto local_comm_rank = get_local_comm_rank();
+    const auto local_comm_rank = desc.get_local_comm_rank();
 
     // Log input/output pointers
     if(LOG_PLAN_ENABLED())
@@ -451,7 +451,7 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
 
     if(mgpuPlan)
     {
-        auto local_comm_rank = plan->get_local_comm_rank();
+        auto local_comm_rank = plan->desc.get_local_comm_rank();
         std::copy_n(
             in_buffer,
             plan->desc.count_pointers(plan->desc.inFields, plan->desc.inArrayType, local_comm_rank),
