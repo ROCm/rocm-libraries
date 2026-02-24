@@ -42,7 +42,7 @@ class SchedulePosition:
     # Which VMFMA slot within the loop
     #   * 0 to num_vmfma-1 for normal positions
     #   * -1 for wrap-around between iterations 
-    #     (occurs after the last VMFMA in the loop but before the first VMFMA in the next loop)
+    #     (occurs before the first VMFMA in this loop but after the last VMFMA of the previous loop)
     vmfma_index: int
     # Ordering among instructions issued at the same (loop_index, vmfma_index).
     # Multiple instructions can share a VMFMA slot; this field breaks ties.
