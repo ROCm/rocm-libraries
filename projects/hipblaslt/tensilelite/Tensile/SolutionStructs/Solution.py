@@ -3358,7 +3358,7 @@ class Solution(collections.abc.Mapping):
 
       if state["LdsBlockSizePerPadB"] and not state["UseGeneralizedNLCOneB"]:
         if state["UnrollMajorLDSB"]:
-          if state["LdsBlockSizePerPadB"] % state["_DepthUB"] * state["ProblemType"]["DataTypeB"].numBytes() != 0:
+          if state["LdsBlockSizePerPadB"] % (state["_DepthUB"] * state["ProblemType"]["DataTypeB"].numBytes()) != 0:
             reject(state, printRejectionReason, "reject: LdsBlockSizePerPadB %u %% depthU %u x bpeB != 0" % (state["LdsBlockSizePerPadB"],state["_DepthUB"]))
           if (state["LdsBlockSizePerPadB"] // (state["_DepthUB"] * state["ProblemType"]["MacDataTypeB"].numBytes())) % state["LSPB"] != 0 and \
               state["LSPB"] % (state["LdsBlockSizePerPadB"] // (state["_DepthUB"] * state["ProblemType"]["MacDataTypeB"].numBytes())) != 0:
