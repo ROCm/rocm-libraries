@@ -316,6 +316,7 @@ TEST(ReduceTests, TestReduceDevice)
         size,
         thrust::raw_pointer_cast(&d_data[0]),
         thrust::raw_pointer_cast(&d_output[0]));
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(h_output, d_output[0]);
     }

@@ -2,20 +2,20 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_data_sdk::types;
 
 // ============================================================================
 // Type Definitions
 // ============================================================================
 
-using DataTypes = ::testing::Types<float, half, hip_bfloat16, double>;
+using DataTypes = ::testing::Types<float, half, bfloat16, double>;
 
 // ============================================================================
 // Test Fixture
@@ -27,7 +27,7 @@ class CpuFpReferenceBatchnormWithVariance : public ::testing::Test
 protected:
     // Helper to get parameter type for mixed precision
     using ParamType
-        = std::conditional_t<std::is_same_v<T, half> || std::is_same_v<T, hip_bfloat16>, float, T>;
+        = std::conditional_t<std::is_same_v<T, half> || std::is_same_v<T, bfloat16>, float, T>;
 };
 
 TYPED_TEST_SUITE(CpuFpReferenceBatchnormWithVariance, DataTypes, );
@@ -175,7 +175,7 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, ZeroVarianceHandling)
     // When variance is 0, inv_variance = 1/sqrt(epsilon)
     // For all elements: y = 2.0 * (3.0 - 3.0) * (1/sqrt(epsilon)) + 0.5 = 0.5
     double tolerance
-        = std::is_same_v<DataType, half> || std::is_same_v<DataType, hip_bfloat16> ? 1e-3 : 1e-5;
+        = std::is_same_v<DataType, half> || std::is_same_v<DataType, bfloat16> ? 1e-3 : 1e-5;
 
     EXPECT_NEAR(static_cast<double>(outputTensor.getHostValue(0, 0, 0, 0)), 0.5, tolerance);
     EXPECT_NEAR(static_cast<double>(outputTensor.getHostValue(0, 0, 0, 1)), 0.5, tolerance);
@@ -232,7 +232,7 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, CustomEpsilonSmall)
     };
 
     double tolerance
-        = std::is_same_v<DataType, half> || std::is_same_v<DataType, hip_bfloat16> ? 1e-2 : 1e-6;
+        = std::is_same_v<DataType, half> || std::is_same_v<DataType, bfloat16> ? 1e-2 : 1e-6;
 
     EXPECT_NEAR(
         static_cast<double>(outputTensor.getHostValue(0, 0, 0, 0)), expectedOutput[0], tolerance);
@@ -286,7 +286,7 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, CustomEpsilonLarge)
     };
 
     double tolerance
-        = std::is_same_v<DataType, half> || std::is_same_v<DataType, hip_bfloat16> ? 1e-2 : 1e-6;
+        = std::is_same_v<DataType, half> || std::is_same_v<DataType, bfloat16> ? 1e-2 : 1e-6;
 
     EXPECT_NEAR(
         static_cast<double>(outputTensor.getHostValue(0, 0, 0, 0)), expectedOutput[0], tolerance);
@@ -312,8 +312,8 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, EpsilonProducesDifferentResults)
     Tensor<ParamType> meanTensor({1, 3});
     Tensor<ParamType> varianceTensor({1, 3});
 
-    auto min = staticCast<DataType>(-5.0f);
-    auto max = staticCast<DataType>(5.0f);
+    auto min = static_cast<DataType>(-5.0f);
+    auto max = static_cast<DataType>(5.0f);
     inputTensor.fillWithRandomValues(min, max, 42);
 
     for(int i = 0; i < 3; i++)
@@ -343,7 +343,7 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, EpsilonProducesDifferentResults)
                 {
                     auto valSmall = static_cast<double>(outputSmallEps.getHostValue(b, c, h, w));
                     auto valLarge = static_cast<double>(outputLargeEps.getHostValue(b, c, h, w));
-                    if(std::abs(valSmall - valLarge) > 0.001)
+                    if(hipdnn_data_sdk::types::abs(valSmall - valLarge) > 0.001)
                     {
                         foundDifference = true;
                     }
@@ -388,7 +388,8 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, NoNaNOrInfProduced)
         for(int j = 0; j < 2; j++)
         {
             auto val = static_cast<double>(outputTensor.getHostValue(0, 0, i, j));
-            EXPECT_TRUE(std::isfinite(val)) << "NaN/Inf detected at [" << i << "," << j << "]";
+            EXPECT_TRUE(hipdnn_data_sdk::types::isfinite(val))
+                << "NaN/Inf detected at [" << i << "," << j << "]";
         }
     }
 }
@@ -473,7 +474,9 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp32, CompareVarianceVsInvVarianceIm
         // Set variance and compute corresponding inv_variance
         auto var = 2.0f + (static_cast<float>(i) * 0.5f);
         varianceTensor.setHostValue(var, 0, i);
-        auto invVar = 1.0f / std::sqrt(var + static_cast<float>(BATCHNORM_DEFAULT_EPSILON));
+        auto invVar
+            = 1.0f
+              / hipdnn_data_sdk::types::sqrt(var + static_cast<float>(BATCHNORM_DEFAULT_EPSILON));
         invVarianceTensor.setHostValue(invVar, 0, i);
     }
 

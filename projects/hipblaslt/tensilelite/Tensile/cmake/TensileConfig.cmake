@@ -232,7 +232,16 @@ function(TensileCreateLibraryFiles
           OUTPUT_VARIABLE ASAN_LIB_PATH
           COMMAND_ECHO STDOUT)
         string(STRIP ${ASAN_LIB_PATH} ASAN_LIB_PATH)
-        set(CommandLine env LD_PRELOAD=${ASAN_LIB_PATH} ${CommandLine})
+        set(CommandLine env LD_PRELOAD=${LD_PRELOAD}:${ASAN_LIB_PATH} ${CommandLine})
+      elseif($ENV{ENABLE_THREAD_SANITIZER})
+        # Must populate LD_PRELOAD with TSAN runtime if TSAN is being used.
+        # Find the TSAN RT with compiler and update env for Tensile call.
+        execute_process(
+          COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.tsan-x86_64.so
+          OUTPUT_VARIABLE TSAN_LIB_PATH
+          COMMAND_ECHO STDOUT)
+        string(STRIP ${TSAN_LIB_PATH} TSAN_LIB_PATH)
+        set(CommandLine env LD_PRELOAD=${LD_PRELOAD}:${TSAN_LIB_PATH} ${CommandLine})
       endif()
 
       add_custom_command(
