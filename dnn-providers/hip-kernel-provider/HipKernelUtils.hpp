@@ -51,4 +51,6 @@ const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     int64_t uid);
+
+bool isChannelLastLayout(const hipdnn_data_sdk::data_objects::TensorAttributes* tensor);
 }
