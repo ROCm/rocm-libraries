@@ -670,99 +670,6 @@ namespace stinkytofu
             return true;
         }
 
-        // Map flags to appropriate C++ instruction class
-        std::string mapFlagsToClass(const std::vector<std::string>& flags,
-                                    const std::string&              mnemonic = "")
-        {
-            // Helper to check if a flag exists
-            auto hasFlag = [&](const std::string& flag) {
-                return std::find(flags.begin(), flags.end(), flag) != flags.end();
-            };
-
-            // Priority-based mapping (most specific first)
-
-            // Control flow
-            if(hasFlag("ConditionalBranch"))
-                return "ConditionalBranchInst";
-            if(hasFlag("Branch"))
-                return "BranchInst";
-            if(hasFlag("Barrier"))
-                return "BarrierInst";
-            if(hasFlag("WaitCnt"))
-                return "WaitCntInst";
-            if(hasFlag("WaitTensorCnt"))
-                return "WaitTensorCntInst";
-
-            // Matrix operations (use simple flag-setting wrappers with default ctor)
-            if(hasFlag("MFMA"))
-                return "MFMAInst";
-            if(hasFlag("SMFMA"))
-                return "SMFMAInst";
-            if(hasFlag("WMMA"))
-                return "WMMAInst";
-            if(hasFlag("SWMMA"))
-                return "SWMMAInst";
-            if(hasFlag("MXWMMA"))
-                return "MXWMMAInst";
-
-            // Memory operations (class names match CommonInstsDSL.hpp)
-            if(hasFlag("DSRead"))
-                return "DSRead";
-            if(hasFlag("DSStore"))
-                return "DSWrite";
-            if(hasFlag("DSAtomic"))
-                return "DSAtomic";
-            if(hasFlag("MUBUFLoad"))
-                return "MUBUFLoad";
-            if(hasFlag("MUBUFStore"))
-                return "MUBUFStore";
-            if(hasFlag("MUBUFAtomic"))
-                return "MUBUFAtomic";
-            if(hasFlag("FLATLoad"))
-                return "FLATLoad";
-            if(hasFlag("FLATStore"))
-                return "FLATStore";
-            if(hasFlag("FLATAtomic"))
-                return "FLATAtomic";
-            if(hasFlag("GLOBALLoad"))
-                return "GLOBALLoad";
-            if(hasFlag("GLOBALStore"))
-                return "GLOBALStore";
-            if(hasFlag("SMemLoad"))
-                return "SMemLoad";
-            if(hasFlag("SMemStore"))
-                return "SMemStore";
-            if(hasFlag("SMemAtomic"))
-                return "SMemAtomic";
-            if(hasFlag("TENSORLoadToLds"))
-                return "TensorLoadToLds";
-
-            // Special effects
-            if(hasFlag("HasSideEffect"))
-                return "HasSideEffectInst";
-
-            // VCmpX (v_cmpx) before generic VALU
-            if(hasFlag("VCmpX"))
-                return "VCmpX";
-
-            // ALU with properties
-            if(hasFlag("VALU") && hasFlag("Commutative"))
-                return "CommutativeVALU";
-            if(hasFlag("VALU"))
-                return "VALU";
-            if(hasFlag("SALU"))
-                return "SALU";
-
-            // No mapping: fail so the developer adds a case in mapFlagsToClass and, if needed, a wrapper in CommonInstsDSL.hpp
-            std::cerr << "Error: No class mapping for instruction \"" << mnemonic
-                      << "\" with flags {";
-            for(size_t i = 0; i < flags.size(); ++i)
-                std::cerr << (i ? ", " : "") << flags[i];
-            std::cerr << "}. Add a case in GenInstructions.cpp mapFlagsToClass() and, if needed, a "
-                         "struct in CommonInstsDSL.hpp.\n";
-            return "";
-        }
-
         // Generate initialization file (DEF_T calls)
         bool generateInitFile(const std::string& outputPath)
         {
@@ -778,10 +685,11 @@ namespace stinkytofu
 
             for(const auto& inst : instructions_)
             {
-                std::string className = mapFlagsToClass(inst.finalFlags, inst.mnemonic);
-                if(className.empty())
-                    return false;
-                out << "DEF_T(" << className << ", \"" << inst.mnemonic << "\");\n";
+                std::string flagArgs = flagsToInitArgs(inst.finalFlags);
+                out << "DEF_T(\"" << inst.mnemonic << "\"";
+                if(!flagArgs.empty())
+                    out << ", " << flagArgs;
+                out << ");\n";
             }
 
             out << "\n// Total generated instructions: " << instructions_.size() << "\n";
@@ -789,6 +697,15 @@ namespace stinkytofu
         }
 
     private:
+        static std::string flagsToInitArgs(const std::vector<std::string>& flags)
+        {
+            if(flags.empty())
+                return "";
+            std::ostringstream os;
+            for(size_t i = 0; i < flags.size(); ++i)
+                os << (i ? ", " : "") << "IF_" << flags[i];
+            return os.str();
+        }
         std::string                        arch_;
         const std::vector<InstructionDef>& instructions_;
 

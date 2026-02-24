@@ -809,6 +809,8 @@ The generated code is highly optimized:
 
 ## Limitations
 
+See [Known Issues](../known-issues.md) for cross-block use-def and other limitations.
+
 ### Current Limitations
 
 1. **Pattern Scope:** Limited to 2-3 instructions

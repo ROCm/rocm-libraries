@@ -21,10 +21,8 @@ endforeach()
 
 add_compile_options(-fno-rtti -fno-exceptions)
 
-# Only set PARENT_SCOPE variables if we have a parent scope
-if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    set(STINKYTOFU_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include" PARENT_SCOPE)
-endif()
+# set variable of the top level source directory to STINKYTOFU_TOP_DIR
+set(STINKYTOFU_TOP_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
 ##===----------------------------------------------------------------------===##
 # Architectures
@@ -52,99 +50,41 @@ message(STATUS "Using archs: ${STINKYTOFU_ARCHS}")
 configure_file(hardware/hardware.def.in include/Config/Archs.def @ONLY)
 configure_file(include/stinkytofu/Config.h.in include/stinkytofu/Config/Config.h)
 
-# Note: Stinkytofu library should be built with:
-# (1) No RTTI
-# (2) No exceptions
-#
-# => clang/gcc: -fno-rtti -fno-exceptions
-# => MSVC: /GR- /EHs-c-
-set(STINKYTOFU_SOURCE_FILES
-    core/IRBase.cpp
-    core/BasicBlock.cpp
-    core/Function.cpp
-    core/PassManager.cpp
-    bindings/python/LogicalModule.cpp
-    bindings/python/Module.cpp
-    ir/logical/LogicalToFunctionConverter.cpp
-    ir/logical/LogicalOpcode.cpp
-    serialization/logical/IRSerializer.cpp
-    ir/logical/IntrinsicLibrary.cpp
-    ir/logical/IntrinsicRegistry.cpp
-    ir/logical/IntrinsicPatternConverter.cpp
-    transforms/logical/IntrinsicExpansionPass.cpp
-    transforms/logical/ToStinkyAsmPass.cpp
-    transforms/logical/CompositeInstructionLoweringPass.cpp
-    transforms/logical/LogicalPeepholePass.cpp
-    transforms/asm/CFGBuilderPass.cpp
-    transforms/asm/PeepholeOptimizationPass.cpp
-    transforms/asm/DeadCodeEliminationPass.cpp
-    transforms/asm/RedundantMovEliminationPass.cpp
-    transforms/asm/DelayAluInsertionPass.cpp
-    transforms/asm/LegalizationUtils.cpp
-    pipeline/OptimizationPipeline.cpp
-    transforms/asm/ScheduleLastLRsPass.cpp
-    transforms/asm/StinkyDAGSchedulerPass.cpp
-    transforms/asm/StinkyConfigurableWaitCntPass.cpp
-    transforms/asm/ScheduleFirstLRsPass.cpp
-    ir/asm/StinkyAsmIR.cpp
-    serialization/asm/StinkyAsmPrinter.cpp
-    serialization/asm/StinkyAsmEmitter.cpp
-    ir/asm/StinkySignature.cpp
-    serialization/asm/IRLexer.cpp
-    serialization/asm/IRParser.cpp
-    serialization/asm/IRConverter.cpp
-    serialization/asm/PatternParser.cpp
-    analysis/asm/AsmVerifierPass.cpp
-    analysis/logical/IRVerifierPass.cpp
-    hardware/ArchHelper.cpp
-)
-
-list(TRANSFORM STINKYTOFU_SOURCE_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/src/")
-
+##===----------------------------------------------------------------------===##
+# ROCm ISA to StinkyTofu conversion
+##===----------------------------------------------------------------------===##
+# Include rocisa conversion sources (separate target, not stinkytofu library)
 # Note: Do not add rocisa sources to the stinkytofu library target.
 # They are built as a separate rocisa target defined in rocisa/CMakeLists.txt.
 #
 # This is a temporary solution until:
 # (1) stinkytofu designs a new rocisa IR to replace the original ones, or
 # (2) stinkytofu completely replaces rocisa IR with stinkyAsm IR.
-set(ROCISA_TO_STINKYTOFU_SOURCE_FILES
-    conversion/rocisa/AllHwMappings.cpp
-    conversion/rocisa/ToStinkyTofuUtils.cpp
-)
-list(TRANSFORM ROCISA_TO_STINKYTOFU_SOURCE_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/src/")
-
-# Only set PARENT_SCOPE variables if we have a parent scope
-if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    set(ROCISA_TO_STINKYTOFU_SOURCES ${ROCISA_TO_STINKYTOFU_SOURCE_FILES} PARENT_SCOPE)
+if(TARGET rocisa)
+    add_subdirectory(src/conversion/rocisa)
 endif()
 
+##===----------------------------------------------------------------------===##
+# Hardware library and tablegen tools
+##===----------------------------------------------------------------------===##
 # Add subdirectories first to define gfxisa, tablegen, and tablegen_generated targets
 add_subdirectory(hardware)
 add_subdirectory(tools/tablegen)
+
 # gfxisa needs generated instruction .inc files (hardware/generated/*.inc)
 target_include_directories(gfxisa PUBLIC ${TABLEGEN_OUTPUT_DIR})
 add_dependencies(gfxisa instruction_generated)
 add_subdirectory(tools/stinkytofu-opt)
-# Note: intrinsic-compiler is added later after libstinkytofu is built
 
-# Option to build unit tests
-option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ON)
-if(STINKYTOFU_BUILD_TESTS)
-    enable_testing()
-    add_subdirectory(tests)
-endif()
-
-# Option to build examples
-# option(STINKYTOFU_BUILD_EXAMPLES "Build StinkyTofu examples" ON)
-# if(STINKYTOFU_BUILD_EXAMPLES)
-#     add_subdirectory(examples)
-# endif()
-
-# Option to build Python bindings
-option(STINKYTOFU_BUILD_PYTHON "Build StinkyTofu Python bindings" ON)
-if(STINKYTOFU_BUILD_PYTHON)
-    add_subdirectory(python_module)
-endif()
+##===----------------------------------------------------------------------===##
+# StinkyTofu library
+##===----------------------------------------------------------------------===##
+# Note: Stinkytofu library should be built with:
+# (1) No RTTI
+# (2) No exceptions
+#
+# => clang/gcc: -fno-rtti -fno-exceptions
+# => MSVC: /GR- /EHs-c-
 
 # Now create stinkytofu library which depends on tablegen_generated
 # Add generated source files
@@ -155,7 +95,7 @@ set(STINKYTOFU_GENERATED_SOURCES
 # Mark generated files so CMake knows they will be created during build
 set_source_files_properties(${STINKYTOFU_GENERATED_SOURCES} PROPERTIES GENERATED TRUE)
 
-add_library(stinkytofu SHARED "${STINKYTOFU_SOURCE_FILES}" "${STINKYTOFU_GENERATED_SOURCES}")
+add_library(stinkytofu SHARED ${STINKYTOFU_GENERATED_SOURCES})
 target_include_directories(stinkytofu
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -170,8 +110,27 @@ target_include_directories(stinkytofu
 # This ensures the build order is: gfxisa -> tablegen -> run tablegen -> stinkytofu
 add_dependencies(stinkytofu tablegen_generated)
 
-# Backend-related sources are added by the backend subdirectory
-add_subdirectory(src/pipeline/backend)
+# Add source files from src/ subdirectory
+add_subdirectory(src)
+
+##===----------------------------------------------------------------------===##
+# Unit tests
+##===----------------------------------------------------------------------===##
+# Option to build unit tests
+option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ON)
+if(STINKYTOFU_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+##===----------------------------------------------------------------------===##
+# Python bindings
+##===----------------------------------------------------------------------===##
+# Option to build Python bindings
+option(STINKYTOFU_BUILD_PYTHON "Build StinkyTofu Python bindings" ON)
+if(STINKYTOFU_BUILD_PYTHON)
+    add_subdirectory(python_module)
+endif()
 
 ##===----------------------------------------------------------------------===##
 # Intrinsic Compiler Tool

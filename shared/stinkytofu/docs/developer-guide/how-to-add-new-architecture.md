@@ -74,7 +74,6 @@ Here's the actual structure from **Gfx942** (CDNA3/MI300):
 #include <iostream>
 #include <string>
 
-#include "gfx/CommonInstsDSL.hpp"
 #include "gfx/InstDefDSL.hpp"
 
 namespace stinkytofu
@@ -190,8 +189,7 @@ namespace stinkytofu
 
 **Tips for Instruction Definitions:**
 
-- Use `DEF_T` macro for standard instructions
-- Use `GEN_MFMA` / `GEN_WMMA` for matrix instructions
+- Add instructions in `GfxXXXInstructions.def` with `DEF_T(ClassName, "mnemonic", .format = X, .flags = {...})`; tablegen generates `DEF_T("mnemonic", IF_X)` in _init.inc
 - **Copy from existing architectures:**
   - `hardware/src/gfx/Gfx942/Gfx942.cpp` - ~986 lines, CDNA3 with MFMA
   - `hardware/src/gfx/Gfx950/Gfx950.cpp` - CDNA5 with WMMA

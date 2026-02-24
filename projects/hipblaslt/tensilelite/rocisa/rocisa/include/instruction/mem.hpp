@@ -248,6 +248,16 @@ namespace rocisa
             return {dst, vaddr, saddr};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {vaddr, saddr};
+        }
+
         virtual std::string getArgStr() const
         {
             return dst->toString() + ", " + vaddr->toString() + ", " + saddr->toString();

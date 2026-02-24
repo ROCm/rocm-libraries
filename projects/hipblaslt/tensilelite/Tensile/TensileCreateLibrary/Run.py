@@ -119,13 +119,12 @@ def memCompress(obj):
 def memDecompress(byt):
     return pickle.loads(zlib.decompress(byt))
 
-def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, sharedFolderPath, kernel, compress = False) -> KernelCodeGenResult:
+def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress = False) -> KernelCodeGenResult:
     """
     Generate source for a single kernel.
     Returns (error, source, header, kernelName).
     """
     kernelWriter = kernelWriterAssembly
-    kernelWriter.setSharedFolderPath(sharedFolderPath)
     kernelWriter.setRocIsa(data, outOptions)
     asmFilename = getKernelFileBase(splitGSU, kernel)
     err, src = kernelWriter.getSourceFileString(kernel)
@@ -323,7 +322,6 @@ def writeSolutionsAndKernels(
     kernelHelperObjs,
     kernelWriterAssembly,
     splitGSU: bool,
-    sharedFolderPath: str,
     cmdlineArchs: List[str],
     disableAsmComments: bool=False,
     errorTolerant: bool=False,
@@ -450,7 +448,6 @@ def writeSolutionsAndKernelsTCL(
     kernels,
     kernelHelperObjs,
     kernelWriterAssembly,
-    sharedFolderPath: str,
     cmdlineArchs: List[str],
     disableAsmComments: bool=False,
     compress: bool=True,
@@ -501,7 +498,6 @@ def writeSolutionsAndKernelsTCL(
         rocisa.rocIsa.getInstance().getData(),
         outOptions,
         splitGSU,
-        sharedFolderPath,
         compress = memcompress,
     )
 
@@ -861,7 +857,6 @@ def run():
         kernels,
         kernelHelperObjs,
         kernelWriterAssembly,
-        globalParameters["SharedFolderPath"],
         archs,
         arguments["DisableAsmComments"],
         compress=arguments["UseCompression"],

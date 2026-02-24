@@ -47,6 +47,8 @@ namespace stinkytofu
     ///
     /// Note: This function assumes instructions are in top-down order.
     ///       It handles multiple consecutive registers (e.g., regIdx 0,1,2,3).
+    ///       Chains are built per block only. Cross-block def-use is not tracked properly;
+    ///       treat block edges as side-effects. See docs/known-issues.md.
     inline void buildUseDefChain(BasicBlock& bb)
     {
         struct RegisterKey
@@ -129,7 +131,9 @@ namespace stinkytofu
         }
     }
 
-    /// Builds use-def chain for all BasicBlocks in a Function
+    /// Builds use-def chain for all BasicBlocks in a Function.
+    /// Each block is processed independently. Cross-block def-use is not tracked properly;
+    /// treat block edges as side-effects. See docs/known-issues.md.
     inline void buildUseDefChain(Function& func)
     {
         for(BasicBlock& bb : func)

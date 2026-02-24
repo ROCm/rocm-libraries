@@ -305,8 +305,6 @@ globalParameters["AsmDebug"] = (
 globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the performance metric
 
 globalParameters["DisableAsmComments"] = False  # Set to True to disable assembly comments in generated assembly code
-SHARED_FOLDER_PATH = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, os.pardir, os.pardir, os.pardir, os.pardir, "shared"))
-globalParameters["SharedFolderPath"] = SHARED_FOLDER_PATH  # Path to the stinkytofu root directory
 
 globalParameters["RocProfCounter"] = None # No rocprof counter
 globalParameters["UseStinkyTofu"] = True  # Enable StinkyTofu IR conversion for supported architectures

@@ -420,8 +420,8 @@ namespace
         // Create and add MFMA modifiers with MXMFMA-specific fields
         MFMAModifiers mfmaModifiers(inputPermuteStr,
                                     "" /* negStr */,
-                                    mxmfmaInst->reuseA,
-                                    mxmfmaInst->reuseB,
+                                    false /* reuseA */,
+                                    false /* reuseB */,
                                     static_cast<int>(mxmfmaInst->instType),
                                     static_cast<int>(mxmfmaInst->mxScaleAType),
                                     static_cast<int>(mxmfmaInst->mxScaleBType),
@@ -450,10 +450,7 @@ namespace
         // Extract neg_lo/neg_hi modifiers
         auto [negStr, hasNegLo, hasNegHi] = extractNegModifiers(instString);
 
-        // Only set reuseA and reuseB if the instruction type is not f8f6f4
-        bool reuseA = mfmaInst->typeConvert(mfmaInst->instType) != "f8f6f4" && mfmaInst->reuseA;
-        bool reuseB = mfmaInst->typeConvert(mfmaInst->instType) != "f8f6f4" && mfmaInst->reuseB;
-        MFMAModifiers mfmaModifiers(inputPermuteStr, negStr, reuseA, reuseB, hasNegLo, hasNegHi);
+        MFMAModifiers mfmaModifiers(inputPermuteStr, negStr, false, false, hasNegLo, hasNegHi);
         stinkyInst->addModifier<MFMAModifiers>(mfmaModifiers);
     }
 
@@ -1075,7 +1072,7 @@ namespace stinkytofu
                 AsmDirective* directive = IRBase::createIR<AsmDirective>();
                 directive->kind         = AsmDirectiveKind::IF;
                 directive->name         = ".if";
-                directive->symbol       = std::to_string(valueIf->value);
+                directive->symbol       = valueIf->value;
                 directive->value        = itemToString(item);
                 currentBB->appendIR(directive);
                 stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);

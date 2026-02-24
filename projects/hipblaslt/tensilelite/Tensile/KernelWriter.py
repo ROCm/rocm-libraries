@@ -574,8 +574,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.exclasses = ExternClasses()
 
-    self.sharedFolderPath = ""
-
   ##############################################################################
   # makeSchedule:  Schedule work into interations.
 
@@ -8480,9 +8478,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     ti = rocIsa.getInstance()
     ti.setData(data)
     ti.setOutputOptions(outOptions)
-
-  def setSharedFolderPath(self, path):
-    self.sharedFolderPath = path
 
   def updateBranchPlaceHolder(self, module, placeholders, targets, operations):
     phs = [ ph for ph in placeholders ]

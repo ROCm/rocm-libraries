@@ -64,7 +64,6 @@ hardware/
 +-- CMakeLists.txt          # Builds gfxisa library
 +-- include/gfx/
 |   +-- GpuArchManager.hpp  # Architecture manager and common definitions
-|   +-- CommonInstsDSL.hpp  # Instruction type definitions (shared across architectures)
 |   +-- InstDefDSL.hpp      # Instruction definition DSL with cost map system
 +-- src/gfx/
     +-- GpuArchManager.cpp  # Architecture registration and management
@@ -88,36 +87,12 @@ hardware/
 Instructions are defined using a declarative C++ DSL:
 
 ```cpp
-// Define instruction types with specific flags (from CommonInstsDSL.hpp)
-struct DSRead : GfxInstDef {
-    DSRead() {
-        hwInstDesc.flags.set(IF_DSRead);
-    }
-};
-
-struct MFMA : GfxInstDef {
-    int M, N, K, B;
-    std::string outTy, inTy;
-    bool sparse;
-    // Constructor sets IF_MFMA or IF_SMFMA flag
-};
-
-// Define instructions for an architecture (in Gfx942.cpp)
-void defineGfx942Insts(GpuArch& registry) {
-    // Simple ALU instructions
-    DEF_T(SALU, "s_add_i32");
-    DEF_T(SALU, "s_mul_i32");
-
-    // Memory instructions
-    DEF_T(DSRead, "ds_read_b32");
-    DEF_T(DSWrite, "ds_write_b32");
-    DEF_T(GLOBALLoad, "global_load_b32");
-
-    // Complex MFMA instructions with helper macro
-    MatInstDesc desc = {16, 16, 16, 1, "f32", "f16"};
-    MFMA* mfma = GEN_MFMA(registry, desc, /*sparse=*/false);
-    // Latency is automatically computed based on matrix dimensions
-}
+// Instructions are defined in GfxXXXInstructions.def with DEF_T(ClassName, "mnemonic", .flags = {...}).
+// Tablegen generates _init.inc with DEF_T("mnemonic", IF_X, IF_Y) - flags come from .def.
+// Example .def entry:
+//   DEF_T(BufferLoadB32Inst, "buffer_load_b32", .format = MUBUF, .flags = {MUBUFLoad})
+// Generated _init.inc:
+//   DEF_T("buffer_load_b32", IF_MUBUFLoad);
 ```
 
 ## Adding a New Architecture
@@ -136,7 +111,6 @@ void defineGfx942Insts(GpuArch& registry) {
    ```cpp
    // hardware/src/gfx/Gfx1000/Gfx1000.cpp
    #include "gfx/GpuArchManager.hpp"
-   #include "gfx/CommonInstsDSL.hpp"  // For instruction type definitions
    #include "gfx/InstDefDSL.hpp"
 
    namespace stinkytofu {
@@ -316,7 +290,6 @@ if (inst->is(IF_MFMA) || inst->is(IF_SMFMA)) {
 
 - `hardware/include/gfx/InstDefDSL.hpp` - DSL implementation and API reference
 - `hardware/include/gfx/GpuArchManager.hpp` - Architecture manager API
-- `hardware/include/gfx/CommonInstsDSL.hpp` - Instruction type definitions
 - `tools/tablegen/GenIsa.cpp` - ISA table generation implementation
 - `tools/tablegen/GenRocisaHwMapping.cpp` - Rocisa mapping generation
 - Generated Rocisa mappings: `stinkytofu/ir/rocisa/Rocisa<arch>Mappings.inc` (build output). Rocisa conversion sources and AllHwMappings live under `src/conversion/rocisa/` (internal).
