@@ -624,7 +624,8 @@ namespace rocRoller
                 replaceWith(graph, topOp, graph.control.addElement(NOP()), false);
                 nextIterPrefetch[subiter].push_back(topOp);
 
-                if(context->kernelOptions()->scaleSkipPermlane)
+                if(context->kernelOptions()->scaleSkipPermlane
+                   != rocRoller::ScaleSkipPermlaneMode::None)
                 {
                     auto [copyTag, destMacTileTag]
                         = CreateCopy(graph, context, loadTag, macTileTag, copyInfo);
