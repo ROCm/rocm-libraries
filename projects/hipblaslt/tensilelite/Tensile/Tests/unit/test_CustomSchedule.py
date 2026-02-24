@@ -726,8 +726,11 @@ class TestCustomScheduleTF32:
         )
         return numMfma
     
-    @pytest.mark.parametrize("transA, transB", [(True, False), (False, False)])
-    def test_schedule_192x256x32_TF32(self, transA, transB):
+    @pytest.mark.parametrize("transA, transB, vwa", [
+        (True, False, 1), 
+        (False, False, 1),
+        ])
+    def test_schedule_192x256x32_TF32(self, transA, transB, vwa):
         """Tests the 192x256x32 TF32 schedule."""        
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
@@ -743,6 +746,8 @@ class TestCustomScheduleTF32:
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
             "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 6, "MIWaveTileB": 8,
         })
+        if vwa is not None:
+            kernel.update({"VectorWidthA": vwa})
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
@@ -833,12 +838,12 @@ class TestCustomScheduleTF32:
 
     @pytest.mark.parametrize(
         # fmt: off
-        "transA, transB", [
-        (  True,  False),
-        ( False,   False),
+        "transA, transB, vwa", [
+        (  True,  False, 1),
+        ( False,  False, 1),
         # fmt: on
         ])
-    def test_schedule_256x192x32_TF32(self, transA, transB):
+    def test_schedule_256x192x32_TF32(self, transA, transB, vwa):
         """Tests the 256x192x32 TF32 TN schedule."""
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
@@ -854,6 +859,8 @@ class TestCustomScheduleTF32:
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
             "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 6,
         })
+        if vwa is not None:
+            kernel.update({"VectorWidthA": vwa})
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
