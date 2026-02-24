@@ -174,9 +174,9 @@ public:
 
         solutions.resize(16);
 
-        EXPECT_EQUAL(miopenFindSolutions(
-                         &handle, problem, nullptr, solutions.data(), &found, solutions.size()),
-                     miopenStatusSuccess);
+        EXPECT_EQ(miopenFindSolutions(
+                      &handle, problem, nullptr, solutions.data(), &found, solutions.size()),
+                  miopenStatusSuccess);
         EXPECT_TRUE(found > 0);
 
         solutions.resize(found);
@@ -195,10 +195,10 @@ public:
             std::size_t workspace_size;
             uint64_t solver_id;
 
-            EXPECT_EQUAL(miopenGetSolutionTime(solution, &time), miopenStatusSuccess);
-            EXPECT_EQUAL(miopenGetSolutionWorkspaceSize(solution, &workspace_size),
-                         miopenStatusSuccess);
-            EXPECT_EQUAL(miopenGetSolutionSolverId(solution, &solver_id), miopenStatusSuccess);
+            EXPECT_EQ(miopenGetSolutionTime(solution, &time), miopenStatusSuccess);
+            EXPECT_EQ(miopenGetSolutionWorkspaceSize(solution, &workspace_size),
+                      miopenStatusSuccess);
+            EXPECT_EQ(miopenGetSolutionSolverId(solution, &solver_id), miopenStatusSuccess);
         }
 
         std::cerr << "Finished testing miopenGetSolution<Attribute>." << std::endl;
@@ -269,13 +269,13 @@ public:
             workspace.resize(workspace_size);
 
             std::cerr << "Run a solution." << std::endl;
-            EXPECT_EQUAL(miopenRunSolution(&handle,
-                                           solution,
-                                           numberOfBuffers,
-                                           arguments.get(),
-                                           workspace.ptr(),
-                                           workspace.size()),
-                         miopenStatusSuccess);
+            EXPECT_EQ(miopenRunSolution(&handle,
+                                        solution,
+                                        numberOfBuffers,
+                                        arguments.get(),
+                                        workspace.ptr(),
+                                        workspace.size()),
+                      miopenStatusSuccess);
 
             std::cerr << "Solution executed." << std::endl;
 
@@ -319,7 +319,7 @@ public:
         std::cerr << "Finished testing solution functions." << std::endl;
     }
 
-    void Finalize() { EXPECT_EQUAL(miopenDestroyProblem(problem), miopenStatusSuccess); }
+    void Finalize() { EXPECT_EQ(miopenDestroyProblem(problem), miopenStatusSuccess); }
 
 private:
     bool IsInt64TensorId(miopenTensorArgumentId_t id) const
@@ -336,7 +336,7 @@ private:
         tensors[id] = std::make_unique<TensorStruct>(
             IsInt64TensorId(id) ? TensorType::Int64 : TensorType::Float, n, h, s, d);
 
-        EXPECT_EQUAL(
+        EXPECT_EQ(
             miopenSetProblemTensorDescriptor(problem, id, &tensors[id]->GetTensorDescriptor()),
             miopenStatusSuccess);
 
@@ -347,11 +347,11 @@ private:
     {
         mha_descriptor.SetParams(scale);
 
-        EXPECT_EQUAL(miopenCreateMhaProblem(&problem,
-                                            &mha_descriptor,
-                                            isForward ? miopenProblemDirectionForward
-                                                      : miopenProblemDirectionBackward),
-                     miopenStatusSuccess);
+        EXPECT_EQ(miopenCreateMhaProblem(&problem,
+                                         &mha_descriptor,
+                                         isForward ? miopenProblemDirectionForward
+                                                   : miopenProblemDirectionBackward),
+                  miopenStatusSuccess);
 
         CreateTensor(miopenTensorMhaK, test_n, test_h, test_s, test_d).InitWithRandom();
 

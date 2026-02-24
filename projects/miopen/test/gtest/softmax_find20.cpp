@@ -63,8 +63,8 @@ public:
 
         auto test_set_tensor_descriptor = [this](miopenTensorArgumentId_t name,
                                                  TensorDescriptor& desc) {
-            EXPECT_EQUAL(miopenSetProblemTensorDescriptor(problem, name, &desc),
-                         miopenStatusSuccess);
+            EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, name, &desc),
+                      miopenStatusSuccess);
         };
 
         if(isForward)
@@ -93,9 +93,9 @@ public:
         // enough value
         solutions.resize(16);
 
-        EXPECT_EQUAL(miopenFindSolutions(
-                         &handle, problem, nullptr, solutions.data(), &found, solutions.size()),
-                     miopenStatusSuccess);
+        EXPECT_EQ(miopenFindSolutions(
+                      &handle, problem, nullptr, solutions.data(), &found, solutions.size()),
+                  miopenStatusSuccess);
         EXPECT_TRUE(found > 0);
 
         solutions.resize(found);
@@ -114,10 +114,10 @@ public:
             std::size_t workspace_size;
             uint64_t solver_id;
 
-            EXPECT_EQUAL(miopenGetSolutionTime(solution, &time), miopenStatusSuccess);
-            EXPECT_EQUAL(miopenGetSolutionWorkspaceSize(solution, &workspace_size),
-                         miopenStatusSuccess);
-            EXPECT_EQUAL(miopenGetSolutionSolverId(solution, &solver_id), miopenStatusSuccess);
+            EXPECT_EQ(miopenGetSolutionTime(solution, &time), miopenStatusSuccess);
+            EXPECT_EQ(miopenGetSolutionWorkspaceSize(solution, &workspace_size),
+                      miopenStatusSuccess);
+            EXPECT_EQ(miopenGetSolutionSolverId(solution, &solver_id), miopenStatusSuccess);
         }
 
         std::cerr << "Finished testing miopenGetSolution<Attribute>." << std::endl;
@@ -151,7 +151,7 @@ public:
             }
 
             std::cerr << "Run a solution." << std::endl;
-            EXPECT_EQUAL(
+            EXPECT_EQ(
                 miopenRunSolution(&handle, solution, numTensors, arguments.get(), nullptr, 0),
                 miopenStatusSuccess);
 
@@ -164,16 +164,16 @@ public:
             auto out_gpu_ref = handle.Write(yTensorRef.data);
 
             // Run softmax in a usual way (which is tested) and compare results
-            EXPECT_EQUAL(miopenSoftmaxForward_V2(&handle,
-                                                 &alpha,
-                                                 x_desc,
-                                                 in_gpu.get(),
-                                                 &beta,
-                                                 &yTensorRef.desc,
-                                                 out_gpu_ref.get(),
-                                                 softmax_descriptor.GetAlgorithm(),
-                                                 softmax_descriptor.GetMode()),
-                         miopenStatusSuccess);
+            EXPECT_EQ(miopenSoftmaxForward_V2(&handle,
+                                              &alpha,
+                                              x_desc,
+                                              in_gpu.get(),
+                                              &beta,
+                                              &yTensorRef.desc,
+                                              out_gpu_ref.get(),
+                                              softmax_descriptor.GetAlgorithm(),
+                                              softmax_descriptor.GetMode()),
+                      miopenStatusSuccess);
 
             yTensor.data    = handle.Read<T>(out_gpu, yTensor.data.size());
             yTensorRef.data = handle.Read<T>(out_gpu_ref, yTensorRef.data.size());
@@ -228,7 +228,7 @@ public:
             }
 
             std::cerr << "Run a solution." << std::endl;
-            EXPECT_EQUAL(
+            EXPECT_EQ(
                 miopenRunSolution(&handle, solution, numTensors, arguments.get(), nullptr, 0),
                 miopenStatusSuccess);
 
@@ -242,18 +242,18 @@ public:
             auto out_gpu_ref = handle.Write(dxTensorRef.data);
 
             // Run softmax in a usual way (which is tested) and compare results
-            EXPECT_EQUAL(miopenSoftmaxBackward_V2(&handle,
-                                                  &alpha,
-                                                  y_desc,
-                                                  in1_gpu.get(),
-                                                  dy_desc,
-                                                  in2_gpu.get(),
-                                                  &beta,
-                                                  &dxTensorRef.desc,
-                                                  out_gpu_ref.get(),
-                                                  softmax_descriptor.GetAlgorithm(),
-                                                  softmax_descriptor.GetMode()),
-                         miopenStatusSuccess);
+            EXPECT_EQ(miopenSoftmaxBackward_V2(&handle,
+                                               &alpha,
+                                               y_desc,
+                                               in1_gpu.get(),
+                                               dy_desc,
+                                               in2_gpu.get(),
+                                               &beta,
+                                               &dxTensorRef.desc,
+                                               out_gpu_ref.get(),
+                                               softmax_descriptor.GetAlgorithm(),
+                                               softmax_descriptor.GetMode()),
+                      miopenStatusSuccess);
 
             dxTensorRef.data = handle.Read<T>(out_gpu_ref, dxTensorRef.data.size());
 
@@ -280,7 +280,7 @@ public:
         std::cerr << "Finished testing solution functions." << std::endl;
     }
 
-    void Finalize() { EXPECT_EQUAL(miopenDestroyProblem(problem), miopenStatusSuccess); }
+    void Finalize() { EXPECT_EQ(miopenDestroyProblem(problem), miopenStatusSuccess); }
 
 private:
     void Initialize()
@@ -297,9 +297,9 @@ private:
             xTensor = tensor<T>{test_n, test_c, test_h, test_w}.generate(gen_value_fwd);
             yTensor = tensor<T>{test_n, test_c, test_h, test_w};
 
-            EXPECT_EQUAL(miopenCreateSoftmaxProblem(
-                             &problem, &softmax_descriptor, miopenProblemDirectionForward),
-                         miopenStatusSuccess);
+            EXPECT_EQ(miopenCreateSoftmaxProblem(
+                          &problem, &softmax_descriptor, miopenProblemDirectionForward),
+                      miopenStatusSuccess);
 
             outhost = std::vector<Tref>(yTensor.data.size(), static_cast<Tref>(0));
         }
@@ -324,9 +324,9 @@ private:
 
             dinhost = std::vector<Tref>(yTensor.data.size(), static_cast<Tref>(0));
 
-            EXPECT_EQUAL(miopenCreateSoftmaxProblem(
-                             &problem, &softmax_descriptor, miopenProblemDirectionBackward),
-                         miopenStatusSuccess);
+            EXPECT_EQ(miopenCreateSoftmaxProblem(
+                          &problem, &softmax_descriptor, miopenProblemDirectionBackward),
+                      miopenStatusSuccess);
         }
 
         AddTensorDescriptors();

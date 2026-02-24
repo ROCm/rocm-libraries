@@ -192,7 +192,7 @@ TEST(CPU_FusionCreateOpConvForward_FP32, TestInvalidConvLayout)
 
     miopenFusionOpDescriptor_t convOp;
     auto status = miopenCreateOpConvForward(fusionPlanDesc, &convOp, convDesc, wDesc);
-    EXPECT_EQUAL(status, miopenStatusUnknownError);
+    EXPECT_EQ(status, miopenStatusUnknownError);
 }
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1)

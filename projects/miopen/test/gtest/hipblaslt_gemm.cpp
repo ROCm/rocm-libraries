@@ -200,29 +200,29 @@ static void RunGemmDescriptors(const TestCase& testCase, miopenDataType_t dataTy
 
         if(desc.batch_count == 1)
         {
-            EXPECT_EQUAL(CallGemm(handle,
-                                  desc,
-                                  workspaceA_device.ptr(),
-                                  0,
-                                  workspaceB_device.ptr(),
-                                  0,
-                                  workspaceC_device.ptr(),
-                                  0,
-                                  GemmBackend_t::hipblaslt),
-                         miopenStatus_t::miopenStatusSuccess);
+            EXPECT_EQ(CallGemm(handle,
+                               desc,
+                               workspaceA_device.ptr(),
+                               0,
+                               workspaceB_device.ptr(),
+                               0,
+                               workspaceC_device.ptr(),
+                               0,
+                               GemmBackend_t::hipblaslt),
+                      miopenStatus_t::miopenStatusSuccess);
         }
         else
         {
-            EXPECT_EQUAL(CallGemmStridedBatched(handle,
-                                                desc,
-                                                workspaceA_device.ptr(),
-                                                0,
-                                                workspaceB_device.ptr(),
-                                                0,
-                                                workspaceC_device.ptr(),
-                                                0,
-                                                GemmBackend_t::hipblaslt),
-                         miopenStatus_t::miopenStatusSuccess);
+            EXPECT_EQ(CallGemmStridedBatched(handle,
+                                             desc,
+                                             workspaceA_device.ptr(),
+                                             0,
+                                             workspaceB_device.ptr(),
+                                             0,
+                                             workspaceC_device.ptr(),
+                                             0,
+                                             GemmBackend_t::hipblaslt),
+                      miopenStatus_t::miopenStatusSuccess);
         }
 
         miopen::gemm_cpu_util::CallGemm<T>(

@@ -817,7 +817,7 @@ if(MIOPEN_BACKEND STREQUAL "HIPNOGPU")
         )
 endif()
 
-if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND MATCHES "^HIP")
+if(MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND MATCHES "^HIP")
     set(KERNELS_SRC_BATCH_FACTOR 50 CACHE STRING "Amount of kernel source files to inline to a single object file.")
     set(KERNELS_BATCH_ID 0)
 
