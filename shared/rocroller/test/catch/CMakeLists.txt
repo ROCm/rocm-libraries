@@ -75,7 +75,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphSimplifyTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphUtilsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSAllocationTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/LDSBankModelTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LDSModelTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LargerLDSTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LoadPackedTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MEMObserverTest.cpp"
