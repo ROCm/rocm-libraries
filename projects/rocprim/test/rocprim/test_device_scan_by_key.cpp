@@ -101,7 +101,7 @@ struct DeviceScanByKeyParams
 template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
 constexpr hipError_t invoke_inclusive_scan_by_key(Args&&... args)
 {
-    if(Deterministic)
+    if constexpr(Deterministic)
     {
         return rocprim::deterministic_inclusive_scan_by_key<Config>(std::forward<Args>(args)...);
     }
@@ -114,7 +114,7 @@ constexpr hipError_t invoke_inclusive_scan_by_key(Args&&... args)
 template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
 constexpr hipError_t invoke_exclusive_scan_by_key(Args&&... args)
 {
-    if(Deterministic)
+    if constexpr(Deterministic)
     {
         return rocprim::deterministic_exclusive_scan_by_key<Config>(std::forward<Args>(args)...);
     }

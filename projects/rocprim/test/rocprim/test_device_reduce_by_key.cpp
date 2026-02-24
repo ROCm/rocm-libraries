@@ -146,7 +146,7 @@ using Params = ::testing::Types<
 template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
 constexpr hipError_t invoke_reduce_by_key(Args&&... args)
 {
-    if(Deterministic)
+    if constexpr(Deterministic)
     {
         return rocprim::deterministic_reduce_by_key<Config>(std::forward<Args>(args)...);
     }
