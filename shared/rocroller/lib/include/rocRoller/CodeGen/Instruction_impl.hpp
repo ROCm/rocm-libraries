@@ -348,6 +348,12 @@ namespace rocRoller
         return rv;
     }
 
+    inline int Instruction::totalCycles() const
+    {
+        return numExecutedInstructions() + m_peekedStatus.stallCycles
+               + m_peekedStatus.additionalCycles;
+    }
+
     inline constexpr bool Instruction::isLabel() const
     {
         return !m_label.empty();

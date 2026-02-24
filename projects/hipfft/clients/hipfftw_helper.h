@@ -22,7 +22,7 @@
 #define HIPFFTW_HELPER_H
 
 #include "../shared/array_validator.h"
-#include "../shared/data_layout.h"
+#include "../shared/client_data_layout_helpers.h"
 #include "../shared/environment.h"
 #include "../shared/fft_params.h"
 #include <algorithm>

@@ -10,7 +10,8 @@ namespace rocRoller
 {
     struct KernelOptionValues
     {
-        LogLevel logLevel = LogLevel::Verbose;
+        DSObserverType dsObserver = DSObserverType::DSMEMObserver;
+        LogLevel       logLevel   = LogLevel::Verbose;
 
         bool alwaysWaitAfterLoad         = false;
         bool alwaysWaitAfterStore        = false;

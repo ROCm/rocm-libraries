@@ -30,7 +30,8 @@ namespace rocRoller
          */
         struct InstructionStatus
         {
-            unsigned int stallCycles = 0;
+            unsigned int stallCycles      = 0;
+            unsigned int additionalCycles = 0;
             WaitCount    waitCount;
             unsigned int nops = 0;
 
@@ -108,6 +109,17 @@ namespace rocRoller
             //> This observer is required in ctx, determined at runtime.
             {
                 a.runtimeRequired()
+                } -> std::convertible_to<bool>;
+        };
+
+        template <typename T>
+        concept CObserverRuntimeWithContext = requires(T a, ContextPtr const& ctx)
+        {
+            requires CObserver<T>;
+
+            //> This observer requires ctx to determine if it's required at runtime.
+            {
+                a.runtimeRequired(ctx)
                 } -> std::convertible_to<bool>;
         };
 
