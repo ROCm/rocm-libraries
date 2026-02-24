@@ -123,9 +123,9 @@ void rocsolver_gecon_getMemorySize(const I n,
     *size_scalar_jump = sizeof(rocblas_int);
 
     // workspace for trsm (solving triangular systems directly)
-    rocsolver_trsm_mem<false, false, T, I>(
-        rocblas_side_left, rocblas_operation_none, n, (I)1, batch_count, size_work_trsm_1,
-        size_work_trsm_2, size_work_trsm_3, size_work_trsm_4, optim_mem, false, lda, n, (I)1, (I)1);
+    rocsolver_trsm_mem<false, false, T, I>(rocblas_side_left, rocblas_operation_none, n, (I)1,
+                                           batch_count, size_work_trsm_1, size_work_trsm_2,
+                                           size_work_trsm_3, size_work_trsm_4, optim_mem);
 }
 
 template <typename T, typename I, typename S>
