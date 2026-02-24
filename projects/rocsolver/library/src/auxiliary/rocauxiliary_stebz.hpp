@@ -251,7 +251,7 @@ __device__ void run_stebz_splitting(const int tid,
         tmp = E[j];
         tmp2 = tmp * tmp;
 
-        if(std::abs((D[j] * eps) * (D[j+1] * eps)) + sfmin > tmp2)
+        if(std::abs((D[j] * eps) * (D[j + 1] * eps)) + sfmin > tmp2)
         {
             // found split
             tmpIS[tmpns] = j;
