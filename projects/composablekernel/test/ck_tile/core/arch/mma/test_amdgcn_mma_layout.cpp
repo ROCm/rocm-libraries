@@ -86,9 +86,9 @@ struct MmaLayoutTestKernel
         using AVecType                = typename MmaTraits::AVecType;
         using BVecType                = typename MmaTraits::BVecType;
         using CVecType                = typename MmaTraits::CVecType;
-        constexpr uint32_t a_vec_size = sizeof(AVecType) / sizeof(ADataType);
-        constexpr uint32_t b_vec_size = sizeof(BVecType) / sizeof(BDataType);
-        constexpr uint32_t c_vec_size = sizeof(CVecType) / sizeof(CDataType);
+        constexpr uint32_t a_vec_size = vector_traits<AVecType>::vector_size;
+        constexpr uint32_t b_vec_size = vector_traits<BVecType>::vector_size;
+        constexpr uint32_t c_vec_size = vector_traits<CVecType>::vector_size;
 
         const uint32_t lane = threadIdx.x;
 
@@ -278,4 +278,3 @@ TYPED_TEST(TestMmaLayout, Mma_16x16x16_F16_F16_F32)
         GTEST_SKIP() << "No supported HIP device found. Skipping test.";
     }
 }
-

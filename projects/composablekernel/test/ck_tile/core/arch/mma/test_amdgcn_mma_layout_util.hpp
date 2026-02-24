@@ -133,26 +133,21 @@ struct RegisterMapTraits<ck_tile::core::arch::mma::amdgcn_mma<
     CompilerTarget,
     ck_tile::core::arch::enable_if_target_family_gfx12_t<CompilerTarget>>>
 {
-    using MmaOp = ck_tile::core::arch::mma::amdgcn_mma<
-        ck_tile::fp16_t,
-        ck_tile::fp16_t,
-        ck_tile::fp32_t,
-        16u,
-        16u,
-        16u,
-        CtrlFlags,
-        CompilerTarget,
-        ck_tile::core::arch::enable_if_target_family_gfx12_t<CompilerTarget>>;
+    using MmaOp = ck_tile::core::arch::mma::amdgcn_mma<ck_tile::fp16_t,
+                                                       ck_tile::fp16_t,
+                                                       ck_tile::fp32_t,
+                                                       16u,
+                                                       16u,
+                                                       16u,
+                                                       CtrlFlags,
+                                                       CompilerTarget>;
 
     using MmaTraits = ck_tile::core::arch::mma::MmaOpTraits<MmaOp>;
     static constexpr index_t WaveSize =
         static_cast<index_t>(MmaTraits::CompilerTarget::WAVE_SIZE_ID);
-    static constexpr index_t AVecSize =
-        sizeof(typename MmaTraits::AVecType) / sizeof(typename MmaTraits::ADataType);
-    static constexpr index_t BVecSize =
-        sizeof(typename MmaTraits::BVecType) / sizeof(typename MmaTraits::BDataType);
-    static constexpr index_t CVecSize =
-        sizeof(typename MmaTraits::CVecType) / sizeof(typename MmaTraits::CDataType);
+    static constexpr index_t AVecSize = vector_traits<typename MmaTraits::AVecType>::vector_size;
+    static constexpr index_t BVecSize = vector_traits<typename MmaTraits::BVecType>::vector_size;
+    static constexpr index_t CVecSize = vector_traits<typename MmaTraits::CVecType>::vector_size;
 
     using kABPs2RHssMajor = sequence<2, 1>;
     using kABPs2RHssMinor = sequence<1, 0>;
@@ -217,26 +212,21 @@ struct RegisterMapTraits<ck_tile::core::arch::mma::amdgcn_mma<
     CompilerTarget,
     ck_tile::core::arch::enable_if_target_family_gfx9_t<CompilerTarget>>>
 {
-    using MmaOp = ck_tile::core::arch::mma::amdgcn_mma<
-        ck_tile::fp16_t,
-        ck_tile::fp16_t,
-        ck_tile::fp32_t,
-        16u,
-        16u,
-        16u,
-        CtrlFlags,
-        CompilerTarget,
-        ck_tile::core::arch::enable_if_target_family_gfx9_t<CompilerTarget>>;
+    using MmaOp = ck_tile::core::arch::mma::amdgcn_mma<ck_tile::fp16_t,
+                                                       ck_tile::fp16_t,
+                                                       ck_tile::fp32_t,
+                                                       16u,
+                                                       16u,
+                                                       16u,
+                                                       CtrlFlags,
+                                                       CompilerTarget>;
 
     using MmaTraits = ck_tile::core::arch::mma::MmaOpTraits<MmaOp>;
     static constexpr index_t WaveSize =
         static_cast<index_t>(MmaTraits::CompilerTarget::WAVE_SIZE_ID);
-    static constexpr index_t AVecSize =
-        sizeof(typename MmaTraits::AVecType) / sizeof(typename MmaTraits::ADataType);
-    static constexpr index_t BVecSize =
-        sizeof(typename MmaTraits::BVecType) / sizeof(typename MmaTraits::BDataType);
-    static constexpr index_t CVecSize =
-        sizeof(typename MmaTraits::CVecType) / sizeof(typename MmaTraits::CDataType);
+    static constexpr index_t AVecSize = vector_traits<typename MmaTraits::AVecType>::vector_size;
+    static constexpr index_t BVecSize = vector_traits<typename MmaTraits::BVecType>::vector_size;
+    static constexpr index_t CVecSize = vector_traits<typename MmaTraits::CVecType>::vector_size;
 
     using kABPs2RHssMajor = sequence<2, 1>;
     using kABPs2RHssMinor = sequence<0, 0>;
@@ -287,26 +277,21 @@ struct RegisterMapTraits<ck_tile::core::arch::mma::amdgcn_mma<
     CompilerTarget,
     ck_tile::core::arch::enable_if_target_family_gfx11_t<CompilerTarget>>>
 {
-    using MmaOp = ck_tile::core::arch::mma::amdgcn_mma<
-        ck_tile::fp16_t,
-        ck_tile::fp16_t,
-        ck_tile::fp32_t,
-        16u,
-        16u,
-        16u,
-        CtrlFlags,
-        CompilerTarget,
-        ck_tile::core::arch::enable_if_target_family_gfx11_t<CompilerTarget>>;
+    using MmaOp = ck_tile::core::arch::mma::amdgcn_mma<ck_tile::fp16_t,
+                                                       ck_tile::fp16_t,
+                                                       ck_tile::fp32_t,
+                                                       16u,
+                                                       16u,
+                                                       16u,
+                                                       CtrlFlags,
+                                                       CompilerTarget>;
 
     using MmaTraits = ck_tile::core::arch::mma::MmaOpTraits<MmaOp>;
     static constexpr index_t WaveSize =
         static_cast<index_t>(MmaTraits::CompilerTarget::WAVE_SIZE_ID);
-    static constexpr index_t AVecSize =
-        sizeof(typename MmaTraits::AVecType) / sizeof(typename MmaTraits::ADataType);
-    static constexpr index_t BVecSize =
-        sizeof(typename MmaTraits::BVecType) / sizeof(typename MmaTraits::BDataType);
-    static constexpr index_t CVecSize =
-        sizeof(typename MmaTraits::CVecType) / sizeof(typename MmaTraits::CDataType);
+    static constexpr index_t AVecSize = vector_traits<typename MmaTraits::AVecType>::vector_size;
+    static constexpr index_t BVecSize = vector_traits<typename MmaTraits::BVecType>::vector_size;
+    static constexpr index_t CVecSize = vector_traits<typename MmaTraits::CVecType>::vector_size;
 
     using kABPs2RHssMajor = sequence<0, 1>;
     using kABPs2RHssMinor = sequence<0, 0>;
@@ -358,4 +343,3 @@ struct RegisterMapTraits<ck_tile::core::arch::mma::amdgcn_mma<
 // ========================================================================
 
 } // namespace
-
