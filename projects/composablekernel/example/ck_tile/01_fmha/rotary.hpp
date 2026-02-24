@@ -44,7 +44,9 @@ generate_rotary_cos_sin(ck_tile::index_t seqlen,
     using std::begin, std::end;
 
     ck_tile::HostTensor<float> angle({num_rows, num_cols});
-    std::generate(begin(angle), end(angle), [&] { return generator(random_engine) * 2 * std::numbers::pi_v<float>; });
+    std::generate(begin(angle), end(angle), [&] {
+        return generator(random_engine) * 2 * std::numbers::pi_v<float>;
+    });
 
     ck_tile::HostTensor<DataType> cos({num_rows, num_cols});
     std::transform(begin(angle), end(angle), begin(cos), [](float origin_value) {
