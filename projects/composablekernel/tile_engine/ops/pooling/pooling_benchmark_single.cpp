@@ -294,10 +294,11 @@ static int benchmark_pooling(int argc, char* argv[])
         d_out.SetZero();
         d_out_index.SetZero();
 
-        auto input_shape      = ck_tile::make_tuple(N, D, H, W, C);
-        auto output_shape     = ck_tile::make_tuple(N, Do, Ho, Wo, C);
-        auto input_strides    = ck_tile::make_tuple(D * H * W * C, H * W * C, W * C, C, ck_tile::index_t{1});
-        auto output_strides   =
+        auto input_shape  = ck_tile::make_tuple(N, D, H, W, C);
+        auto output_shape = ck_tile::make_tuple(N, Do, Ho, Wo, C);
+        auto input_strides =
+            ck_tile::make_tuple(D * H * W * C, H * W * C, W * C, C, ck_tile::index_t{1});
+        auto output_strides =
             ck_tile::make_tuple(Do * Ho * Wo * C, Ho * Wo * C, Wo * C, C, ck_tile::index_t{1});
         auto window_lengths   = ck_tile::make_tuple(Z, Y, X);
         auto window_strides   = ck_tile::make_tuple(Sz, Sy, Sx);
