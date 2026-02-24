@@ -37,6 +37,7 @@
 #include "lib_device_helpers.hpp"
 #include "rocblas.hpp"
 #include "rocblas_utility.hpp"
+#include "rocsolver_hybrid_storage.hpp"
 #include "rocsolver_run_specialized_kernels.hpp"
 #include <algorithm>
 #include <vector>
@@ -207,6 +208,10 @@ rocblas_status rocsolver_gecon_template(rocblas_handle handle,
         return rocblas_status_success;
     }
 
+    // Use hybrid storage to get pointers for batched arrays
+    rocsolver_hybrid_storage<T, I, U> hA;
+    ROCBLAS_CHECK(hA.init_pointers_only(A, shiftA, strideA, batch_count, stream));
+
     // iterate over each batch
     // TODO: make a version that operates on batches efficiently
     // preferably, one that remains entirely on the GPU, and potentially simplifies into a single kernel
@@ -269,26 +274,26 @@ rocblas_status rocsolver_gecon_template(rocblas_handle handle,
                 // Solve L*y = x (unit lower triangular), then U*x = y (non-unit upper triangular)
                 rocsolver_trsm_lower<false, false, T, I>(
                     handle, rocblas_side_left, rocblas_operation_none, rocblas_diagonal_unit, n,
-                    (I)1, A, shiftA + batch * strideA, inca, lda, strideA, (U)x, 0, (I)1, n,
-                    strideA, (I)1, optim_mem, work_trsm_1, work_trsm_2, work_trsm_3, work_trsm_4);
+                    (I)1, (U)hA[batch], 0, inca, lda, strideA, (U)x, 0, (I)1, n, strideA, (I)1,
+                    optim_mem, work_trsm_1, work_trsm_2, work_trsm_3, work_trsm_4);
 
                 rocsolver_trsm_upper<false, false, T, I>(
                     handle, rocblas_side_left, rocblas_operation_none, rocblas_diagonal_non_unit, n,
-                    (I)1, A, shiftA + batch * strideA, inca, lda, strideA, (U)x, 0, (I)1, n,
-                    strideA, (I)1, optim_mem, work_trsm_1, work_trsm_2, work_trsm_3, work_trsm_4);
+                    (I)1, (U)hA[batch], 0, inca, lda, strideA, (U)x, 0, (I)1, n, strideA, (I)1,
+                    optim_mem, work_trsm_1, work_trsm_2, work_trsm_3, work_trsm_4);
             }
             else
             {
                 // Solve U^H*y = x, then L^H*x = y (conjugate transpose for complex, transpose for real)
                 rocsolver_trsm_upper<false, false, T, I>(
-                    handle, rocblas_side_left, opr, rocblas_diagonal_non_unit, n, (I)1, A,
-                    shiftA + batch * strideA, inca, lda, strideA, (U)x, 0, (I)1, n, strideA, (I)1,
-                    optim_mem, work_trsm_1, work_trsm_2, work_trsm_3, work_trsm_4);
+                    handle, rocblas_side_left, opr, rocblas_diagonal_non_unit, n, (I)1,
+                    (U)hA[batch], 0, inca, lda, strideA, (U)x, 0, (I)1, n, strideA, (I)1, optim_mem,
+                    work_trsm_1, work_trsm_2, work_trsm_3, work_trsm_4);
 
                 rocsolver_trsm_lower<false, false, T, I>(
-                    handle, rocblas_side_left, opr, rocblas_diagonal_unit, n, (I)1, A,
-                    shiftA + batch * strideA, inca, lda, strideA, (U)x, 0, (I)1, n, strideA, (I)1,
-                    optim_mem, work_trsm_1, work_trsm_2, work_trsm_3, work_trsm_4);
+                    handle, rocblas_side_left, opr, rocblas_diagonal_unit, n, (I)1, (U)hA[batch], 0,
+                    inca, lda, strideA, (U)x, 0, (I)1, n, strideA, (I)1, optim_mem, work_trsm_1,
+                    work_trsm_2, work_trsm_3, work_trsm_4);
             }
         } while(h_kase != 0);
 
