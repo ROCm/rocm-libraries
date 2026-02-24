@@ -47,10 +47,12 @@ struct amdgcn_mma<fp32_t,
                   16u,
                   DummyCtrlFlags,
                   CompilerTarget,
+                  MmaOpFamily::DENSE,
                   enable_if_target_id_dummy_t<CompilerTarget>>
 {
     // Mfma operation type
-    using OpType = DummyOpType;
+    using OpType                          = DummyOpType;
+    static constexpr MmaOpFamily OpFamily = MmaOpFamily::DENSE;
 
     // Register types
     using AVecType = ext_vector_t<fp32_t, 4>;
@@ -81,8 +83,15 @@ struct amdgcn_mma<fp32_t,
 // Have an alias so we can test supported arch vs unsupported arch
 // TODO: c++20 template <amdgcn_target_arch_id CompilerTarget>
 template <typename CompilerTarget>
-using DummyAmdgcnMma =
-    amdgcn_mma<fp32_t, fp32_t, fp32_t, 16u, 16u, 16u, DummyCtrlFlags, CompilerTarget>;
+using DummyAmdgcnMma = amdgcn_mma<fp32_t,
+                                  fp32_t,
+                                  fp32_t,
+                                  16u,
+                                  16u,
+                                  16u,
+                                  DummyCtrlFlags,
+                                  CompilerTarget,
+                                  MmaOpFamily::DENSE>;
 
 /*! @struct MmaDefaultSelector
  * @brief For dummy Id only, instantiate tests for both MFMA and WMMA selectors so we can them both
@@ -93,6 +102,7 @@ using DummyAmdgcnMma =
  * @tparam FragN Size of the N dimension of the fragment to decompose
  * @tparam FragK Size of the K dimension of the fragment to decompose
  * @tparam CompilerTarget The compiler target
+ * @tparam OpFamily The MMA operation family
  */
 template <typename ADataType,
           typename BDataType,
@@ -100,7 +110,8 @@ template <typename ADataType,
           uint32_t FragM,
           uint32_t FragN,
           uint32_t FragK,
-          typename CompilerTarget>
+          typename CompilerTarget,
+          MmaOpFamily OpFamily>
 // TODO: c++20 amdgcn_target_arch_id CompilerTarget>
 // TODO: requires
 struct MmaDefaultSelector<ADataType,
@@ -110,7 +121,9 @@ struct MmaDefaultSelector<ADataType,
                           FragN,
                           FragK,
                           CompilerTarget,
-                          enable_if_target_id_dummy_t<CompilerTarget>>
+                          OpFamily,
+                          enable_if_all<enable_if_target_id_dummy_t<CompilerTarget>,
+                                        std::enable_if_t<OpFamily == MmaOpFamily::DENSE>>>
 {
     using SelectedOp = DummyAmdgcnMma<CompilerTarget>;
 };
@@ -128,6 +141,8 @@ TEST(TestAmdgcnMma, ArchSupported)
     // Check OpType
     EXPECT_TRUE(
         (std::is_same<typename MmaOp::OpType, DummyOpType>::value)); // OpType is DummyOpType
+    // Check OpFamily
+    EXPECT_TRUE((is_mma_op_of_family_v<MmaOpFamily::DENSE, MmaOp>));
 
     // Check AVecType, BVecType, CVecType
     EXPECT_TRUE((std::is_same<typename MmaOp::AVecType, ext_vector_t<fp32_t, 4>>::value));
@@ -157,6 +172,8 @@ TEST(TestAmdgcnMma, ArchUnsupported)
 
     // OpType should be Unsupported
     EXPECT_TRUE((std::is_same<typename MmaOp::OpType, Unsupported>::value));
+    // OpFamily should be Undefined
+    EXPECT_TRUE((is_mma_op_of_family_v<MmaOpFamily::UNDEFINED, MmaOp>));
 
     // AVecType, BVecType, CVecType should match default
     EXPECT_TRUE((std::is_same<typename MmaOp::AVecType, ext_vector_t<fp32_t, 1>>::value));
@@ -367,6 +384,7 @@ TEST(TestAmdgcnMma, MmaOpTraitsUnsupportedMembers)
     EXPECT_TRUE((std::is_same<typename Traits::AVecType, ext_vector_t<fp32_t, 1>>::value));
     EXPECT_TRUE((std::is_same<typename Traits::BVecType, ext_vector_t<fp32_t, 1>>::value));
     EXPECT_TRUE((std::is_same<typename Traits::CVecType, ext_vector_t<fp32_t, 1>>::value));
+    EXPECT_EQ(Traits::OpFamily, MmaOpFamily::UNDEFINED);
     EXPECT_EQ(Traits::kAMBlock, 0);
     EXPECT_EQ(Traits::kBNBlock, 0);
     EXPECT_EQ(Traits::kAMLane, 0);
@@ -386,9 +404,14 @@ TEST(TestAmdgcnMma, MmaOpTraitsUnsupportedMembers)
 TEST(TestAmdgcnMma, MmaDefaultSelectorSupported)
 {
     // Direct selection of the supported dummy instruction
-    using SelectedMma =
-        typename MmaDefaultSelector<fp32_t, fp32_t, fp32_t, 16u, 16u, 16u, DummyCompilerTarget>::
-            SelectedOp;
+    using SelectedMma = typename MmaDefaultSelector<fp32_t,
+                                                    fp32_t,
+                                                    fp32_t,
+                                                    16u,
+                                                    16u,
+                                                    16u,
+                                                    DummyCompilerTarget,
+                                                    MmaOpFamily::DENSE>::SelectedOp;
     // Should select DummyAmdgcnMma specialization
     EXPECT_TRUE((std::is_same<SelectedMma, DummyAmdgcnMma<DummyCompilerTarget>>::value));
     // OpType should be DummyOpType
@@ -401,8 +424,14 @@ TEST(TestAmdgcnMma, MmaDefaultSelectorSupported)
 TEST(TestAmdgcnMma, MmaDefaultSelectorUnsupported)
 {
     // Direct selection of the unsupported dummy instruction
-    using SelectedMma =
-        MmaDefaultSelector<fp32_t, fp32_t, fp32_t, 16u, 16u, 16u, amdgcn_target<>>::SelectedOp;
+    using SelectedMma = MmaDefaultSelector<fp32_t,
+                                           fp32_t,
+                                           fp32_t,
+                                           16u,
+                                           16u,
+                                           16u,
+                                           amdgcn_target<>,
+                                           MmaOpFamily::UNDEFINED>::SelectedOp;
     // OpType should be Unsupported
     EXPECT_TRUE((std::is_same<typename SelectedMma::OpType, Unsupported>::value));
     // IsSupported should be false
@@ -414,9 +443,14 @@ TEST(TestAmdgcnMma, MmaDefaultSelectorUnsupported)
 TEST(TestAmdgcnMma, MmaDefaultSelectorSupportedFragment)
 {
     // Select indirectly with a fragment size of 256x128x64
-    using SelectedMma =
-        MmaDefaultSelector<fp32_t, fp32_t, fp32_t, 256u, 128u, 64u, DummyCompilerTarget>::
-            SelectedOp;
+    using SelectedMma = MmaDefaultSelector<fp32_t,
+                                           fp32_t,
+                                           fp32_t,
+                                           256u,
+                                           128u,
+                                           64u,
+                                           DummyCompilerTarget,
+                                           MmaOpFamily::DENSE>::SelectedOp;
     // Should select DummyAmdgcnMma specialization
     EXPECT_TRUE((std::is_same<SelectedMma, DummyAmdgcnMma<DummyCompilerTarget>>::value));
     // OpType should be DummyOpType
@@ -429,8 +463,14 @@ TEST(TestAmdgcnMma, MmaDefaultSelectorSupportedFragment)
 TEST(TestAmdgcnMma, MmaDefaultSelectorUnsupportedFragment)
 {
     // This should fall back to unsupported since DummyAmdgcnMma only supports 16x16x16
-    using SelectedMma =
-        MmaDefaultSelector<fp32_t, fp32_t, fp32_t, 8u, 8u, 8u, DummyCompilerTarget>::SelectedOp;
+    using SelectedMma = MmaDefaultSelector<fp32_t,
+                                           fp32_t,
+                                           fp32_t,
+                                           8u,
+                                           8u,
+                                           8u,
+                                           DummyCompilerTarget,
+                                           MmaOpFamily::DENSE>::SelectedOp;
     EXPECT_FALSE((std::is_same<typename SelectedMma::OpType, Unsupported>::value));
     EXPECT_TRUE(MmaOpTraits<SelectedMma>::IsSupported);
 }
@@ -438,8 +478,14 @@ TEST(TestAmdgcnMma, MmaDefaultSelectorUnsupportedFragment)
 // Test MmaDefaultSelector for a different data type (fp16_t) and unsupported arch
 TEST(TestAmdgcnMma, MmaDefaultSelectorFp16Unsupported)
 {
-    using SelectedMma =
-        MmaDefaultSelector<fp16_t, fp16_t, fp16_t, 16u, 16u, 16u, amdgcn_target<>>::SelectedOp;
+    using SelectedMma = MmaDefaultSelector<fp16_t,
+                                           fp16_t,
+                                           fp16_t,
+                                           16u,
+                                           16u,
+                                           16u,
+                                           amdgcn_target<>,
+                                           MmaOpFamily::UNDEFINED>::SelectedOp;
     // Should select default amdgcn_mma (Unsupported)
     EXPECT_TRUE((std::is_same<typename SelectedMma::OpType, Unsupported>::value));
     EXPECT_FALSE(MmaOpTraits<SelectedMma>::IsSupported);
@@ -464,7 +510,8 @@ __global__ void test_accum_over_k(void* a, void* b, void* c, void* out)
                                         FragM,
                                         FragN,
                                         FragK,
-                                        decltype(get_compiler_target())>;
+                                        decltype(get_compiler_target()),
+                                        MmaOpFamily::DENSE>;
 
     using MmaOp     = typename Selector::SelectedOp;
     using MmaTraits = MmaOpTraits<MmaOp>;
