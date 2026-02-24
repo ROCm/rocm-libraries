@@ -11,11 +11,7 @@ hipBLASLt Provider Plugin currently supports only stand-alone Matmul (GEMM, gene
 - Compute data type: FP32
 - Transposed inputs: supported
 - Batched matmuls: only equal batch sizes are supported, or broadcasting when one input has a single batch (batch=1)
-
-## Notes
-
-> [!NOTE]
-> **Fused Operations:** Currently the kernel provider doesn't support any fusions.
+- Fused operations: Matmul supports fused bias, forward activation (ReLU, clamp, GELU with tanh approximation, and Swish with unit beta), and fused bias + forward activation (same supported activations).
 
 ## Legend
 
