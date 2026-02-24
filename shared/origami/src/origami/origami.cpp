@@ -532,33 +532,38 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const std::vector<config_t>& configs) {
   if (configs.empty()) { throw std::runtime_error("No configurations provided."); }
 
-  std::vector<prediction_result_t> results(configs.size());
+  struct prediction_result_wrapper_t {
+    double latency;
+    std::reference_wrapper<const config_t> config;
+  };
 
-  std::transform(configs.begin(),
-                 configs.end(),
-                 results.begin(),
-                 [&](const config_t& config) -> prediction_result_t {
-                   if (!check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype)) {
-                     return {std::numeric_limits<double>::max(), config};
-                   }
-                   double latency = compute_total_latency(problem, hardware, config, hardware.N_CU);
-                   return {latency, config};
-                 });
+  std::vector<prediction_result_wrapper_t> latencies_configs;
+  latencies_configs.reserve(configs.size());
 
-  results.erase(std::remove_if(results.begin(),
-                               results.end(),
-                               [](const prediction_result_t& p) {
-                                 return p.latency == std::numeric_limits<double>::max();
-                               }),
-                results.end());
+  for (auto& config : configs) {
+    if (!check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype))
+      continue;
+    double latency = compute_total_latency(problem, hardware, config, hardware.N_CU);
+    if (latency != std::numeric_limits<double>::max())
+      latencies_configs.push_back({latency, std::cref(config)});
+  }
 
-  std::stable_sort(results.begin(),
-                   results.end(),
-                   [](const prediction_result_t& a, const prediction_result_t& b) {
+  if (latencies_configs.empty()) { throw std::runtime_error("No valid configs found."); }
+
+  std::stable_sort(latencies_configs.begin(),
+                   latencies_configs.end(),
+                   [](const auto& a, const auto& b) {
                      return a.latency < b.latency;
                    });
 
-  if (results.empty()) { throw std::runtime_error("No valid configs found."); }
+  std::vector<prediction_result_t> results;
+  results.reserve(latencies_configs.size());
+  std::transform(latencies_configs.begin(),
+                 latencies_configs.end(),
+                 std::back_inserter(results),
+                 [&](const auto& r) -> prediction_result_t {
+                   return {r.latency, r.config.get()};
+                 });
 
   // Compute arithmetic intensity for tie-breaking
   // Flops = 2 * MT_M * MT_N * MT_K, Memory traffic = MT_M*MT_K + MT_K*MT_N + MT_M*MT_N

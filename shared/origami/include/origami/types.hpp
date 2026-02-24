@@ -365,6 +365,9 @@ struct config_t {
   /// Grid selection algorithm.
   grid_selection_t grid_selection = grid_selection_t::k_split_aware;
 
+  /// Index of config, not used by Origami but can be used by the user
+  std::size_t index = 0;
+
   constexpr bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
            cache_hints_a == o.cache_hints_a && cache_hints_b == o.cache_hints_b &&
