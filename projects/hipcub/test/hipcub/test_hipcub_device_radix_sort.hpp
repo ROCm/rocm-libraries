@@ -242,7 +242,8 @@ void sort_keys()
     
 #if defined(_WIN32) && defined(HIPCUB_ROCPRIM_API)
     rocprim::detail::target_arch arch;
-    rocprim::detail::host_target_arch(stream, arch);
+    if (rocprim::detail::host_target_arch(stream, arch) != HIP_SUCCESS)
+        GTEST_FAIL() << "Unable to retrieve GPU architecture";
     if (arch == rocprim::detail::target_arch::gfx1151)
         GTEST_SKIP() << "Temporarily skipping test on gfx1151.";
 #endif
@@ -508,6 +509,15 @@ void sort_pairs()
     constexpr bool         check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0; // default
+
+#if defined(_WIN32) && defined(HIPCUB_ROCPRIM_API)
+    rocprim::detail::target_arch arch;
+    if (rocprim::detail::host_target_arch(stream, arch) != HIP_SUCCESS)
+        GTEST_FAIL() << "Unable to retrieve GPU architecture";
+    if (arch == rocprim::detail::target_arch::gfx1151)
+        GTEST_SKIP() << "Temporarily skipping test on gfx1151.";
+#endif
+
     if(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
@@ -805,6 +815,15 @@ void sort_keys_double_buffer()
     constexpr bool         check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0; // default
+
+#if defined(_WIN32) && defined(HIPCUB_ROCPRIM_API)
+    rocprim::detail::target_arch arch;
+    if (rocprim::detail::host_target_arch(stream, arch) != HIP_SUCCESS)
+        GTEST_FAIL() << "Unable to retrieve GPU architecture";
+    if (arch == rocprim::detail::target_arch::gfx1151)
+        GTEST_SKIP() << "Temporarily skipping test on gfx1151.";
+#endif
+
     if(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
@@ -1045,6 +1064,15 @@ void sort_pairs_double_buffer()
     constexpr bool         check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0; // default
+
+#if defined(_WIN32) && defined(HIPCUB_ROCPRIM_API)
+    rocprim::detail::target_arch arch;
+    if (rocprim::detail::host_target_arch(stream, arch) != HIP_SUCCESS)
+        GTEST_FAIL() << "Unable to retrieve GPU architecture";
+    if (arch == rocprim::detail::target_arch::gfx1151)
+        GTEST_SKIP() << "Temporarily skipping test on gfx1151.";
+#endif
+
     if(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
@@ -1248,6 +1276,14 @@ inline void sort_keys_over_4g()
     hipDeviceProp_t dev_prop;
     HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
 
+#if defined(_WIN32) && defined(HIPCUB_ROCPRIM_API)
+    rocprim::detail::target_arch arch;
+    if (rocprim::detail::host_target_arch(stream, arch) != HIP_SUCCESS)
+        GTEST_FAIL() << "Unable to retrieve GPU architecture";
+    if (arch == rocprim::detail::target_arch::gfx1151)
+        GTEST_SKIP() << "Temporarily skipping test on gfx1151.";
+#endif
+
     // Radix sort requires 2 buffers of `size`, so a minimum of 8 GB of vram for this test.
     // This is more than some cards provide.
     if(static_cast<size_t>(dev_prop.totalGlobalMem * 0.9) < size * 2 * sizeof(key_type))
@@ -1350,6 +1386,13 @@ inline void sort_keys_large_sizes()
     constexpr unsigned int end_bit    = 8;
 
     hipStream_t stream = 0;
+#if defined(_WIN32) && defined(HIPCUB_ROCPRIM_API)
+    rocprim::detail::target_arch arch;
+    if (rocprim::detail::host_target_arch(stream, arch) != HIP_SUCCESS)
+        GTEST_FAIL() << "Unable to retrieve GPU architecture";
+    if (arch == rocprim::detail::target_arch::gfx1151)
+        GTEST_SKIP() << "Temporarily skipping test on gfx1151.";
+#endif
 
     // Workaround: `hipMalloc` always returns `hipSuccess` even when allocation fails.
     // We limit the maximum size so this bug doesn't occur.
