@@ -35,7 +35,7 @@ set(PACKAGE_NAME libhipcxx)
 set(PACKAGE_VERSION 11.0)
 set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
 
-project(libhipcxx LANGUAGES CXX VERSION 2.7.0)
+project(libhipcxx LANGUAGES CXX VERSION 3.0.2)
 
 # rocm-cmake contains common cmake code for rocm projects to help
 # setup and install
