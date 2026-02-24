@@ -1,5 +1,41 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file hipdnn_backend.h
+ * @brief hipDNN Backend C API
+ *
+ * This file defines the public C API for hipDNN backend operations.
+ * The backend provides handle management, descriptor operations, and
+ * execution of computational graphs.
+ *
+ * @section backend_usage Basic Usage
+ *
+ * 1. Create a handle:
+ *    @code{.c}
+ *    hipdnnHandle_t handle;
+ *    hipdnnCreate(&handle);
+ *    @endcode
+ *
+ * 2. Create and configure descriptors:
+ *    @code{.c}
+ *    hipdnnBackendDescriptor_t graphDesc;
+ *    hipdnnBackendCreateAndDeserializeGraph_ext(&graphDesc, serializedGraph, size);
+ *    @endcode
+ *
+ * 3. Execute operations:
+ *    @code{.c}
+ *    hipdnnBackendExecute(handle, executionPlan, variantPack);
+ *    @endcode
+ *
+ * 4. Clean up:
+ *    @code{.c}
+ *    hipdnnBackendDestroyDescriptor(graphDesc);
+ *    hipdnnDestroy(handle);
+ *    @endcode
+ *
+ * @see hipdnn_frontend.hpp for the C++ frontend API
+ */
 
 #pragma once
 
@@ -15,6 +51,7 @@
 #include "HipdnnBackendHeuristicType.h"
 #include "HipdnnBackendLimits.h"
 #include "HipdnnBackendPluginLoadingMode.h"
+#include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnStatus.h"
 
 // NOLINTBEGIN
@@ -337,6 +374,25 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
     size_t numPaths, const char* const* pluginPaths, hipdnnPluginLoadingMode_ext_t loadingMode);
 
 /**
+ * @brief Sets the plugin unloading mode for hipDNN.
+ *
+ * This function controls when plugins are unloaded from memory. By default, lazy unloading (HIPDNN_PLUGIN_UNLOAD_LAZY)
+ * is used, which keeps plugins loaded until the application exits or until
+ * hipdnnSetEnginePluginPaths_ext is called. This avoids expensive plugin reloading when
+ * handles are frequently created and destroyed.
+ *
+ * This function can be called at any time. When switching from lazy to eager mode (HIPDNN_PLUGIN_UNLOAD_EAGER) while
+ * no handles exist, plugins will be unloaded immediately.
+ *
+ * @param[in] unloadingMode  Specifies when plugins should be unloaded from memory.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS    The operation was successful.
+ * @retval HIPDNN_STATUS_BAD_PARAM  An invalid unloading mode was specified.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetPluginUnloadMode_ext(hipdnnPluginUnloadingMode_ext_t unloadingMode);
+
+/**
  * @brief Gets file paths of loaded engine plugins for a given handle.
  *
  * This function must be called twice:
@@ -362,6 +418,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                                                                           size_t* numPluginPaths,
                                                                           char** pluginPaths,
                                                                           size_t* maxStringLen);
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version);
 
 #ifdef __cplusplus
 }

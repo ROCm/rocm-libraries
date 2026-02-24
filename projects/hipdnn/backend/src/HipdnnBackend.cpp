@@ -13,6 +13,7 @@
 #include "logging/Logging.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
 
+#include <hipdnn_backend/version.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 using namespace hipdnn_backend;
@@ -328,6 +329,18 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
     });
 }
 
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetPluginUnloadMode_ext(hipdnnPluginUnloadingMode_ext_t unloadingMode)
+{
+    LOG_API_ENTRY("unloadingMode={}", unloadingMode);
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        hipdnn_backend::plugin::EnginePluginResourceManager::setPluginUnloadingMode(unloadingMode);
+        LOG_API_SUCCESS(apiName, "set_plugin_unloading_mode={}", unloadingMode);
+        return HIPDNN_STATUS_SUCCESS;
+    });
+}
+
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnnHandle_t handle,
                                                                           size_t* numPluginPaths,
                                                                           char** pluginPaths,
@@ -352,5 +365,13 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                         "retrieved_numPluginPaths={}, retrieved_maxStringLen={}",
                         *numPluginPaths,
                         *maxStringLen);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version)
+{
+    return hipdnn_backend::tryCatch([&]() {
+        throwIfNull(version);
+        *version = HIPDNN_BACKEND_VERSION_STRING;
     });
 }
