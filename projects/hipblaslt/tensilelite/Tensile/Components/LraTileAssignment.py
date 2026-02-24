@@ -22,6 +22,8 @@
 #
 ################################################################################
 
+import math
+
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, ContinuousRegister
 from rocisa.instruction import VAddU32, VAndB32, VLShiftLeftB32, VLShiftRightB32
@@ -227,10 +229,10 @@ class LraTileAssignmentMFMA(LraTileAssignment):
 
         strideK          = offsetK if umlds else (mt + LdsPad) * offsetK
 
-        # Workaround: StrideK might be a float value and causes function
-        #             signature error later (the function expected an int)
-        if not isinstance(strideK, int):
-           strideK = int(strideK) if strideK.is_integer() else strideK
+        # StrideK might be a float value due to sub-byte data types (e.g. fp4)
+        # and causes function signature error later.
+        # Use ceil to ensure no overlap between adjacent K groups in LDS.
+        strideK = int(math.ceil(strideK))
 
         if enableLDSTr:
            if kernel["UseGeneralizedNLCOne%s"%tc] and perpStride > 1:
