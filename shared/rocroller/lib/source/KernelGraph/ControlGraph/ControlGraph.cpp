@@ -298,7 +298,10 @@ namespace rocRoller::KernelGraph::ControlGraph
 
             return std::visit(
                 rocRoller::overloaded{
-                    [&](auto const&) { return NodeOrdering::Undefined; },
+                    [&](auto const&) {
+                        AssertFatal(false, "Unhandled edge type in getOrderOfDescendants");
+                        return NodeOrdering::Undefined;
+                    },
                     [&](Body const&) {
                         return std::holds_alternative<Initialize>(edgeBElem)
                                    ? opposite(NodeOrdering::LeftFirst)
