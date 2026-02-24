@@ -1,5 +1,14 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file Knob.hpp
+ * @brief Engine configuration knobs for hipDNN execution plans
+ *
+ * This file defines the Knob class which describes tunable configuration
+ * parameters for execution engines. Knobs allow fine-grained control over
+ * how operations are executed on the GPU.
+ */
 
 #pragma once
 
@@ -29,7 +38,33 @@
 namespace hipdnn_frontend
 {
 
-// Knob information class - describes available knobs for an engine
+/**
+ * @class Knob
+ * @brief Describes a tunable configuration parameter for an execution engine
+ *
+ * Knobs are engine-specific configuration options that can be adjusted to
+ * tune performance. Each knob has:
+ * - An identifier (knobId)
+ * - A description of what it controls
+ * - A default value
+ * - Optional constraints (valid ranges, allowed values)
+ *
+ * Knobs are retrieved from engine descriptors and can be used to create
+ * custom execution plans.
+ *
+ * @code{.cpp}
+ * // Get available knobs for an engine
+ * auto engines = graph.get_available_engines(handle);
+ * auto knobs = engines[0].getKnobs();
+ *
+ * for(const auto& knob : knobs)
+ * {
+ *     std::cout << knob.knobId() << ": " << knob.description() << std::endl;
+ * }
+ * @endcode
+ *
+ * @see KnobSetting, IConstraint, Graph::get_available_engines()
+ */
 class Knob
 {
 public:
@@ -37,39 +72,65 @@ public:
     // Returns {Error, Knob}. On error, the Knob is default-constructed (should be ignored).
     static std::pair<Error, Knob> tryFromFlatbuffer(hipdnnBackendFlatbufferData_t fbData);
 
-    // Accessors
+    /**
+     * @brief Get the knob identifier
+     * @return The unique identifier string for this knob
+     */
     const std::string& knobId() const
     {
         return _knobId;
     }
 
+    /**
+     * @brief Get the knob description
+     * @return Human-readable description of what this knob controls
+     */
     const std::string& description() const
     {
         return _description;
     }
 
+    /**
+     * @brief Check if this knob is deprecated
+     * @return true if the knob is deprecated and should not be used
+     */
     bool isDeprecated() const
     {
         return _deprecated;
     }
 
+    /**
+     * @brief Get the value type of this knob
+     * @return The KnobValueType (INT64, FLOAT64, or STRING)
+     */
     KnobValueType valueType() const
     {
         return getKnobValueTypeFromVariant(_defaultValue);
     }
 
+    /**
+     * @brief Get the default value for this knob
+     * @return The default value as a variant
+     */
     const KnobValueVariant& defaultValue() const
     {
         return _defaultValue;
     }
 
-    // Get constraint
+    /**
+     * @brief Get the constraint for this knob
+     * @return Pointer to the constraint, or nullptr if no constraint
+     */
     const IConstraint* constraint() const
     {
         return _constraint.get();
     }
 
-    // Validate a knob setting against this knob's constraints
+    /**
+     * @brief Validate a knob setting against this knob's constraints
+     * @param setting The KnobSetting to validate
+     * @return Error indicating success or describing the validation failure
+     */
     Error validate(const KnobSetting& setting) const
     {
         // Validate against constraint if present
@@ -81,7 +142,10 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    // String representation for logging
+    /**
+     * @brief Get a string representation of this knob
+     * @return Human-readable string for debugging/logging
+     */
     std::string toString() const
     {
         std::ostringstream oss;
@@ -133,13 +197,12 @@ private:
             variant);
     }
 
-    std::string _knobId;
-    std::string _description;
-    KnobValueVariant _defaultValue;
-    bool _deprecated;
+    std::string _knobId; ///< Unique knob identifier
+    std::string _description; ///< Human-readable description
+    KnobValueVariant _defaultValue; ///< Default value
+    bool _deprecated; ///< Whether this knob is deprecated
 
-    // Constraint (polymorphic)
-    std::shared_ptr<IConstraint> _constraint;
+    std::shared_ptr<IConstraint> _constraint; ///< Optional constraint
 };
 
 // Factory method implementation

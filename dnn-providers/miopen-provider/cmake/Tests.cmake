@@ -6,8 +6,11 @@ if(HIPDNN_SKIP_TESTS)
 endif()
 
 include(GoogleTest)
+include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
 
 find_package(Python3 COMPONENTS Interpreter)
+
+findandcheckllvmsymbolizer()
 
 set(CHECK_DEPENDS_GLOBAL "" CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE)
 set(CHECK_EXECUTABLE_PATHS_GLOBAL "" CACHE INTERNAL "Accumulated global check executable paths" FORCE)
