@@ -448,6 +448,22 @@ struct workgroup_mapping_t {
 };
 
 /**
+ * @brief Struct to define various staggerU parameters.
+ *
+ * Contains all the parameters needed to describe various staggerU parameters.
+ */
+ struct staggerU_t {
+  /// StaggerU mapping size.
+  std::size_t staggerUMapping = 0;
+
+  /// StaggerU size.
+  std::size_t staggerU = 0;
+
+  /// StaggerUStrideShift size.
+  std::size_t staggerUStrideShift = 0;
+};
+
+/**
  * @brief Get runtime options (always uses global singleton).
  *
  * @param config Configuration struct (unused, kept for API compatibility)

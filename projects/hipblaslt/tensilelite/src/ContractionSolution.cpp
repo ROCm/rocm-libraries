@@ -560,6 +560,8 @@ namespace TensileLite
         TensorDescriptor const& metadata   = problem.metadata();
 
         auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problem, hardware, sk.grid);
+        auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
+            = calculateAutoStaggerU(problem, hardware, sk.grid, autoWGM);
         uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
 
@@ -791,6 +793,9 @@ namespace TensileLite
                                           autoWGM,
                                           autoWGMXCC,
                                           autoWGMXCCCHUNK,
+                                          autoStaggerUMapping,
+                                          autoStaggerU,
+                                          autoStaggerUStrideShift,
                                           autoGsuVal);
 
         if(!problemType.useScaleAB.empty()) //kernel input data
@@ -956,34 +961,35 @@ namespace TensileLite
         return (double)(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount)
                / std::ceil(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount);
     }
-    
-    std::tuple<int32_t, uint32_t, uint32_t> ContractionSolution::calculateAutoWGM(
-        Problem const&  problem,
-        Hardware const* hardware,
-        uint32_t const  skgrid) const
+
+    std::tuple<int32_t, size_t, size_t> ContractionSolution::calculateAutoWGM(
+        Problem const& problem, Hardware const* hardware, uint32_t const skgrid) const
     {
         // Hardware
         AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
         hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
 
         // Default WGM
-        int32_t defaultWGM;
-        uint32_t defaultWGMXCC;
-        uint32_t defaultWGMXCCCHUNK;
+        int32_t  defaultWGM         = 0;
+        uint32_t defaultWGMXCC      = 0;
+        uint32_t defaultWGMXCCCHUNK = 0;
+
+        // If any of the problem sizes are less than 1, return 0 for all values
+        auto sizes = problem.problemSizes();
+        if(sizes[0] < 1 || sizes[1] < 1 || sizes[2] < 1 || sizes[3] < 1)
+        {
+            return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK);
+        }
 
         // Dynamically pick the values
         if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
            && sizeMapping.workGroupMappingXCC == -1)
         {
-            int32_t c_wgm = 0;
-            uint32_t c_wgmxcc = 0;
-            uint32_t c_wgmxccchunk = 0;
             // Try to find cached WGM and WGMXCC and WGMXCCCHUNK
-            std::tie(c_wgm, c_wgmxcc, c_wgmxccchunk) = paramsCache.find(problem);
+            auto cachedWGMParams = wgmParamsCache.find(problem);
 
-            if(!c_wgm && !c_wgmxcc && !c_wgmxccchunk)
-            { 
-                auto sizes = problem.problemSizes();
+            if(cachedWGMParams == std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX))
+            {
                 if(sizes.size() >= 4)
                 {
                     origami::problem_t origami_problem = {
@@ -997,30 +1003,29 @@ namespace TensileLite
                         .cache_hints_a = sizeMapping.nonTemporalA,
                         .cache_hints_b = sizeMapping.nonTemporalB,
                     };
-                    
-                    origami::workgroup_mapping_t prediction_results = 
-                        origami::select_workgroup_mapping(origami_problem, 
-                                                          *(hipAMDGPU->analyticalHardware), 
-                                                          origami_config, 
-                                                          skgrid);
-                    
+
+                    origami::workgroup_mapping_t prediction_results
+                        = origami::select_workgroup_mapping(origami_problem,
+                                                            *(hipAMDGPU->analyticalHardware),
+                                                            origami_config,
+                                                            skgrid);
+
                     defaultWGM         = prediction_results.wgm;
                     defaultWGMXCC      = prediction_results.wgmxcc;
                     defaultWGMXCCCHUNK = prediction_results.wgmxccchunk;
 
                     // Add to cache only if dynamically calculated.
-                    paramsCache.add(std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK), problem);
+                    wgmParamsCache.add(
+                        std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK), problem);
                     if(Debug::Instance().printPropertyEvaluation())
-                        std::cout << "Dynamic WGM "<< defaultWGM 
-                                  << ", WGMXCC " << defaultWGMXCC
-                                  << ", WGMXCCCHUNK " << defaultWGMXCCCHUNK << std::endl;
+                        std::cout << "AutoWGM - WGM: " << defaultWGM
+                                  << ", WGMXCC: " << defaultWGMXCC
+                                  << ", WGMXCCCHUNK: " << defaultWGMXCCCHUNK << std::endl;
                 }
             }
             else
             {
-                defaultWGM    = c_wgm;
-                defaultWGMXCC = c_wgmxcc;
-                defaultWGMXCCCHUNK = c_wgmxccchunk;
+                std::tie(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK) = cachedWGMParams;
             }
         }
         else
@@ -1038,9 +1043,7 @@ namespace TensileLite
 
             // Default WGMXCC
             if(sizeMapping.workGroupMappingXCC == -1)
-            {
                 defaultWGMXCC = hipAMDGPU->analyticalHardware->NUM_XCD;
-            }
             else
                 defaultWGMXCC = sizeMapping.workGroupMappingXCC;
 
@@ -1048,19 +1051,13 @@ namespace TensileLite
             defaultWGMXCCCHUNK = 0;
         }
 
-        // If WGM and WGMXCC are explicitly specified at runtime, they override default and predictions
+        // If values are explicitly specified at runtime, they override predictions and default values
         if(pAMDGPU->fixedWGM != std::numeric_limits<int>::max())
-        {
             defaultWGM = pAMDGPU->fixedWGM;
-        }
         if(pAMDGPU->fixedWGMXCC != std::numeric_limits<size_t>::max())
-        {
             defaultWGMXCC = pAMDGPU->fixedWGMXCC;
-        }
         if(pAMDGPU->fixedWGMXCCCHUNK != std::numeric_limits<size_t>::max())
-        {
             defaultWGMXCCCHUNK = pAMDGPU->fixedWGMXCCCHUNK;
-        }
 
         // These range assertions only apply when SpaceFillingCurve (SFC) is not used.
         // When SFC is enabled, workGroupMapping contains a packed 32-bit encoding of
@@ -1074,8 +1071,107 @@ namespace TensileLite
             // WGMXCCCHUNK should be in this range: [0, 1, 2, 3, ..., 1023]
             assert(defaultWGMXCCCHUNK >= 0 && defaultWGMXCCCHUNK < 1024);
         }
-        
+
         return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK);
+    }
+
+    std::tuple<size_t, size_t, size_t> ContractionSolution::calculateAutoStaggerU(
+        Problem const& problem, Hardware const* hardware, uint32_t skgrid, int32_t autoWGM) const
+    {
+        // Hardware
+        AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
+        hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+
+        // Default StaggerU
+        size_t defaultStaggerUMapping     = 0;
+        size_t defaultStaggerU            = 0;
+        size_t defaultStaggerUStrideShift = 0;
+
+        // If any of the problem sizes are less than 1, return 0 for all values
+        auto sizes = problem.problemSizes();
+        if(sizes[0] < 1 || sizes[1] < 1 || sizes[2] < 1 || sizes[3] < 1)
+        {
+            return std::make_tuple(
+                defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
+        }
+
+        // Dynamically pick the values
+        if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
+           && sizeMapping.workGroupMappingXCC == -1)
+        {
+            // Try to find cached StaggerUMapping, StaggerU and StaggerUStrideShift
+            auto cachedStaggerUParams = staggerUParamsCache.find(problem);
+
+            if(cachedStaggerUParams == std::make_tuple(SIZE_MAX, SIZE_MAX, SIZE_MAX))
+            {
+                if(sizes.size() >= 4)
+                {
+                    origami::problem_t origami_problem = {
+                        .size    = {sizes[0], sizes[1], sizes[3]},
+                        .batch   = sizes[2],
+                        .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                    };
+                    origami::config_t origami_config = {
+                        .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                          static_cast<size_t>(sizeMapping.macroTile.y),
+                                          static_cast<size_t>(sizeMapping.depthU)},
+                        .cache_hints_a = sizeMapping.nonTemporalA,
+                        .cache_hints_b = sizeMapping.nonTemporalB,
+                    };
+
+                    origami::staggerU_t prediction_results
+                        = origami::select_staggerU(origami_problem,
+                                                   *(hipAMDGPU->analyticalHardware),
+                                                   origami_config,
+                                                   skgrid,
+                                                   autoWGM);
+
+                    defaultStaggerUMapping     = prediction_results.staggerUMapping;
+                    defaultStaggerU            = prediction_results.staggerU;
+                    defaultStaggerUStrideShift = prediction_results.staggerUStrideShift;
+
+                    // Add to cache only if dynamically calculated.
+                    staggerUParamsCache.add(std::make_tuple(defaultStaggerUMapping,
+                                                            defaultStaggerU,
+                                                            defaultStaggerUStrideShift),
+                                            problem);
+                    if(Debug::Instance().printPropertyEvaluation())
+                        std::cout << "AutoStaggerU - Mapping: " << defaultStaggerUMapping
+                                  << ", StaggerU: " << defaultStaggerU
+                                  << ", StaggerUStrideShift: " << defaultStaggerUStrideShift
+                                  << std::endl;
+                }
+            }
+            else
+            {
+                std::tie(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift)
+                    = cachedStaggerUParams;
+            }
+        }
+        else
+        {
+            defaultStaggerUMapping     = sizeMapping.staggerUMapping;
+            defaultStaggerU            = sizeMapping.staggerU;
+            defaultStaggerUStrideShift = sizeMapping.staggerStrideShift;
+        }
+
+        // If values are explicitly specified at runtime, they override predictions and default values
+        if(pAMDGPU->fixedStaggerUMapping != std::numeric_limits<size_t>::max())
+            defaultStaggerUMapping = pAMDGPU->fixedStaggerUMapping;
+        if(pAMDGPU->fixedStaggerU != std::numeric_limits<size_t>::max())
+            defaultStaggerU = pAMDGPU->fixedStaggerU;
+        if(pAMDGPU->fixedStaggerUStrideShift != std::numeric_limits<size_t>::max())
+            defaultStaggerUStrideShift = pAMDGPU->fixedStaggerUStrideShift;
+
+        // Mapping should be in this range: [0, 1, 2, 3]
+        assert(defaultStaggerUMapping < 4);
+        // StaggerU should be power of 2 and less than 65: [0, 2, 4, 8, 16, 32, 64]
+        assert((defaultStaggerU & (defaultStaggerU - 1)) == 0 && defaultStaggerU < 65);
+        // StaggerUStrideShift should be in [0, 5] (shift of 5 = stride multiplier of 32)
+        assert(defaultStaggerUStrideShift <= 5);
+
+        return std::make_tuple(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
     }
 
     uint32_t ContractionSolution::calculateAutoGSU(Problem const&  problem,
@@ -1153,9 +1249,12 @@ namespace TensileLite
                                          Hardware const*                     hardware,
                                          const ContractionProblemParameters& param,
                                          int32_t                             autoWGM,
-                                         uint32_t                            autoWGMXCC,
-                                         uint32_t                            autoWGMXCCCHUNK,
-                                         uint32_t                            autoGsuVal) const
+                                         size_t                              autoWGMXCC,
+                                         size_t                              autoWGMXCCCHUNK,
+                                         size_t                              autoStaggerUMapping,
+                                         size_t                              autoStaggerU,
+                                         size_t   autoStaggerUStrideShift,
+                                         uint32_t autoGsuVal) const
     {
         if constexpr(!Legacy)
         {
@@ -1165,18 +1264,21 @@ namespace TensileLite
             args.template append<uint32_t>("gemm_count", gemmCount);
         }
 
-        uint32_t       gsu          = param.gsu() > 0 ? param.gsu() : autoGsuVal;
-        bool           gsuc         = false; // initialized false
-        bool           gsuwgmrr     = false; // initialized false
-        int32_t        wgm          = param.wgm() != 0 ? param.wgm() : autoWGM;
-        uint32_t       wgmxcc       = param.wgmxcc() != 0 ? param.wgmxcc() : autoWGMXCC;
-        uint32_t       wgmxccchunk  = autoWGMXCCCHUNK;
-        int32_t        wgmxccg      = -1;
-        const uint32_t mask16       = 0xFFFF;
-        const uint32_t mask14       = 0x3FFF;
-        const uint32_t mask8        = 0xFF;
-        uint32_t       internalArg0 = 0;
-        uint32_t       internalArg1 = 0;
+        uint32_t       gsu                 = param.gsu() > 0 ? param.gsu() : autoGsuVal;
+        bool           gsuc                = false; // initialized false
+        bool           gsuwgmrr            = false; // initialized false
+        int32_t        wgm                 = param.wgm() != 0 ? param.wgm() : autoWGM;
+        size_t         wgmxcc              = param.wgmxcc() != 0 ? param.wgmxcc() : autoWGMXCC;
+        size_t         wgmxccchunk         = autoWGMXCCCHUNK;
+        int32_t        wgmxccg             = -1; // initialized -1
+        size_t         staggerUMapping     = autoStaggerUMapping;
+        size_t         staggerU            = autoStaggerU;
+        size_t         staggerUStrideShift = autoStaggerUStrideShift;
+        const uint32_t mask16              = 0xFFFF;
+        const uint32_t mask14              = 0x3FFF;
+        const uint32_t mask8               = 0xFF;
+        uint32_t       internalArg0        = 0;
+        uint32_t       internalArg1        = 0;
 
         if(internalArgsSupport.wgm && internalArgsSupport.version == 0)
         {
@@ -1207,6 +1309,7 @@ namespace TensileLite
                     assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
                     wgmxccg = pAMDGPU->computeUnitCount;
                 }
+                // if using WGMXCCn1, wgmxccg is not used. Repurpose it for wgmxccchunk
                 if(sizeMapping.workGroupMappingXCC == -1)
                 {
                     wgmxccg = wgmxccchunk;
@@ -1233,15 +1336,15 @@ namespace TensileLite
         // StaggerU
         if(internalArgsSupport.staggerU)
         {
-            const uint32_t staggerMask1    = 0x1F00;
-            uint32_t       staggerUMapping = (sizeMapping.staggerUMapping << 13);
-            uint32_t       staggerUShift   = staggerMask1 & ((sizeMapping.staggerStrideShift) << 8);
-            uint32_t       staggerU        = mask8 & sizeMapping.staggerU;
+            constexpr size_t staggerMask1 = 0x1F00;
+            size_t           sum          = staggerUMapping << 13;
+            size_t           sus          = staggerMask1 & (staggerUStrideShift << 8);
+            size_t           su           = mask8 & staggerU;
             if(Debug::Instance().disableStaggerU())
-                staggerU = 0;
-            staggerU     = staggerU | staggerUShift;
-            staggerU     = staggerU | staggerUMapping;
-            internalArg0 = internalArg0 | (staggerU << 16);
+                su = 0;
+            su           = su | sus;
+            su           = su | sum;
+            internalArg0 = internalArg0 | (su << 16);
         }
         else if(T_Debug && Debug::Instance().disableStaggerU())
             std::cout << "solution doesn't support configurable staggerU" << std::endl;
@@ -1358,15 +1461,31 @@ namespace TensileLite
 
         if(internalArgsSupport.useUniversalArgs)
         {
-            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problem, &hardware, sk.grid);
+            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK]
+                = calculateAutoWGM(problem, &hardware, sk.grid);
+            auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
+                = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
             if(T_Debug)
             {
-                std::cout << "AutoWGM: " << autoWGM << std::endl;
-                std::cout << "AutoWGMXCC: " << autoWGMXCC << std::endl;
-                std::cout << "AutoWGMXCCCHUNK: " << autoWGMXCCCHUNK << std::endl;
+                std::cout << "WGM: " << autoWGM << ", WGMXCC: " << autoWGMXCC
+                          << ", WGMXCCCHUNK: " << autoWGMXCCCHUNK << std::endl;
+                std::cout << "StaggerUMapping: " << autoStaggerUMapping
+                          << ", StaggerU: " << autoStaggerU
+                          << ", StaggerUStrideShift: " << autoStaggerUStrideShift << std::endl;
             }
-            kernelArgs<T_Debug, false>(
-                1, 0, rv.args, getNumWorkGroups(rv), &hardware, problem.getParams(), autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoGsuVal);
+            kernelArgs<T_Debug, false>(1,
+                                       0,
+                                       rv.args,
+                                       getNumWorkGroups(rv),
+                                       &hardware,
+                                       problem.getParams(),
+                                       autoWGM,
+                                       autoWGMXCC,
+                                       autoWGMXCCCHUNK,
+                                       autoStaggerUMapping,
+                                       autoStaggerU,
+                                       autoStaggerUStrideShift,
+                                       autoGsuVal);
         }
         singleCallArgs<T_Debug, true>(
             problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args, sk);
@@ -1531,7 +1650,10 @@ namespace TensileLite
 
         if constexpr(!std::is_same<KA, KernelArgumentsCounter>::value)
         {
-            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problems[0], &hardware, 0);
+            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK]
+                = calculateAutoWGM(problems[0], &hardware, 0);
+            auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
+                = calculateAutoStaggerU(problems[0], &hardware, 0, autoWGM);
 
             if(internalArgsSupport.useUniversalArgs)
             {
@@ -1549,6 +1671,9 @@ namespace TensileLite
                                            autoWGM,
                                            autoWGMXCC,
                                            autoWGMXCCCHUNK,
+                                           autoStaggerUMapping,
+                                           autoStaggerU,
+                                           autoStaggerUStrideShift,
                                            autoGsuVal);
                 // For user input
                 if(argType == KERNELARGTYPE::USERARGS)
@@ -1578,6 +1703,9 @@ namespace TensileLite
                                           autoWGM,
                                           autoWGMXCC,
                                           autoWGMXCCCHUNK,
+                                          autoStaggerUMapping,
+                                          autoStaggerU,
+                                          autoStaggerUStrideShift,
                                           autoGsuVal);
             }
 
@@ -1991,8 +2119,8 @@ namespace TensileLite
                       < DataTypeInfo::Get(rocisa::DataType::Double).elementSize)
                 vw = 4;
             else if(problem.freeSizeA(0) % 2 == 0
-                && DataTypeInfo::Get(problemType.aType).elementSize
-                      < DataTypeInfo::Get(rocisa::DataType::ComplexDouble).elementSize)
+                    && DataTypeInfo::Get(problemType.aType).elementSize
+                           < DataTypeInfo::Get(rocisa::DataType::ComplexDouble).elementSize)
                 vw = 2;
         }
 
@@ -2649,7 +2777,8 @@ namespace TensileLite
 
             if(sk.reduction == origami::reduction_t::parallel && sk.grid / tiles < 2)
             {
-                throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with StreamK kernel with splitting factor < 2\n");
+                throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
+                                         "StreamK kernel with splitting factor < 2\n");
             }
         }
 
@@ -3497,7 +3626,7 @@ namespace TensileLite
         return pp;
     }
 
-    double ContractionSolution::calculateDimensionM(Problem const&  problem) const
+    double ContractionSolution::calculateDimensionM(Problem const& problem) const
     {
         double M = 1.0;
         if(problem.freeIndicesA().size() > 1 || sizeMapping.packBatchDims & 0x1)
@@ -3514,7 +3643,7 @@ namespace TensileLite
         return M;
     }
 
-    double ContractionSolution::calculateDimensionN(Problem const&  problem) const
+    double ContractionSolution::calculateDimensionN(Problem const& problem) const
     {
         double N = 1.0;
         if(problem.freeIndicesB().size() > 1 || sizeMapping.packBatchDims & 0x2)
@@ -3529,7 +3658,7 @@ namespace TensileLite
         return N;
     }
 
-    double ContractionSolution::calculateNumBatches(Problem const&  problem) const
+    double ContractionSolution::calculateNumBatches(Problem const& problem) const
     {
         double NumBatches = 1;
         if(sizeMapping.packBatchDims == 0)
@@ -3540,7 +3669,7 @@ namespace TensileLite
         return NumBatches;
     }
 
-    origami::data_type_t ContractionSolution::getOrigamiDatatype(Problem const&  problem) const
+    origami::data_type_t ContractionSolution::getOrigamiDatatype(Problem const& problem) const
     {
         return datatypeToAnalyticalDatatype(problem.computeInputType());
     }
