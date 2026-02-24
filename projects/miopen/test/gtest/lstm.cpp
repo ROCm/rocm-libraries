@@ -1,7 +1,8 @@
 /*******************************************************************************
  *
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- * SPDX-License-Identifier: MIT
+ * MIT License
+ *
+ * Copyright (c) 2023 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,43 +25,19 @@
  *******************************************************************************/
 
 #include "lstm.hpp"
-#include <hip/hip_runtime.h>
 
-struct GPU_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<std::tuple<int, int, int, int, int>>
+int main(int argc, const char* argv[])
 {
-};
+#if(MIO_RNN_TIME_EVERYTHING > 0)
+    auto t_start = std::chrono::high_resolution_clock::now();
+#endif
+    test_drive<lstm_driver>(argc, argv);
 
-TEST_P(GPU_LSTM_FP32, FloatTest)
-{
-    int device_count{0};
-    if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
-    {
-        GTEST_SKIP() << "No HIP devices available for testing";
-    }
+#if(MIO_RNN_TIME_EVERYTHING > 0)
+    auto t_end = std::chrono::high_resolution_clock::now();
 
-    int batchSize{17};
-    int seqLength{2};
-
-    auto [usePadding, inputMode, biasMode, dirMode, algoMode] = GetParam();
-
-    this->batchSize  = batchSize;
-    this->seqLength  = seqLength;
-    this->inVecLen   = batchSize;
-    this->batchSeq   = generate_batchSeq(batchSize, seqLength)[0];
-    this->hiddenSize = 67;
-    this->usePadding = usePadding;
-    this->inputMode  = inputMode;
-    this->biasMode   = biasMode;
-    this->dirMode    = dirMode;
-    this->algoMode   = algoMode;
-
-    RunTest();
+    std::cout << "Wall clock: RNN test pass time: "
+              << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
+#endif
+    exit(0); // NOLINT (concurrency-mt-unsafe)
 }
-
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_LSTM_FP32,
-                         testing::Combine(testing::Values(0, 1),
-                                          testing::Values(0, 1),
-                                          testing::Values(0, 1),
-                                          testing::Values(0, 1),
-                                          testing::Values(0, 1)));

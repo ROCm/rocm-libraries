@@ -26,7 +26,7 @@
 #ifndef GUARD_GEMM_HPP
 #define GUARD_GEMM_HPP
 
-#include <string>
+#include <iostream>
 #include <miopen/ford.hpp>
 #include <miopen/errors.hpp>
 

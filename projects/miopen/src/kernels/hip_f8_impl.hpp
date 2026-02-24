@@ -23,16 +23,18 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+// #include <miopen/bfloat16.hpp>
+// #include <half.hpp>
+
 #include "miopen_cstdint.hpp"
 #include "miopen_type_traits.hpp"
 
-#include <half/half.hpp>
-using half = half_float::half;
-
-#include <miopen/bfloat16.hpp>
-using hip_bfloat16 = bfloat16;
-
 namespace miopen_hip_f8_impl {
+
+#ifndef __HIP_PLATFORM_AMD__
+using hip_bfloat16 = bfloat16;
+using half         = half_float::half;
+#endif
 
 enum class BitOp
 {

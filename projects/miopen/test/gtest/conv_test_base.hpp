@@ -101,7 +101,7 @@ struct GroupConvTestConfig<2u> : GroupConvTestConfigBase
     std::vector<size_t> GetInput() { return {N, C, img.y, img.x}; }
     std::vector<size_t> GetWeights()
     {
-        EXPECT_EQ(C % G, 0);
+        EXPECT_EQUAL(C % G, 0);
         return {k, C / G, filter.y, filter.x};
     }
 
@@ -201,7 +201,7 @@ struct GroupConvTestConfig<3u>
     std::vector<size_t> GetInput() { return {N, C, img.z, img.y, img.x}; }
     std::vector<size_t> GetWeights()
     {
-        EXPECT_EQ(C % G, 0);
+        EXPECT_EQUAL(C % G, 0);
         return {k, C / G, filter.z, filter.y, filter.x};
     }
 

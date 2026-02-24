@@ -34,13 +34,11 @@
 #include "tensor_holder.hpp"
 #include "test.hpp"
 #include "verify.hpp"
-#include "random.hpp"
 
 #include <functional>
 #include <deque>
-#include <type_traits>
 #include <half/half.hpp>
-
+#include <type_traits>
 #include <miopen/filesystem.hpp>
 #include <miopen/functional.hpp>
 #include <miopen/expanduser.hpp>
@@ -49,7 +47,6 @@
 #include <miopen/env.hpp>
 #include <miopen/rank.hpp>
 #include <miopen/bfloat16.hpp>
-
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/split.hpp>
 

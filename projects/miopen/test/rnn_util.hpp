@@ -33,10 +33,10 @@
 #include <set>
 #include <vector>
 #include <cstdlib>
+#include "random.hpp"
 #include <numeric>
 
-#include "gemm.hpp"
-#include "random.hpp"
+#include "../test/gemm.hpp"
 
 #include <miopen/tensor.hpp>
 
@@ -207,6 +207,7 @@ inline std::vector<int> get_gru_hidden_size() { return {67}; }
 
 inline std::vector<std::vector<int>> generate_batchSeq(const int batchSize, const int seqLength)
 {
+
     static constexpr int modval = 3;
 
     int currentval = batchSize;

@@ -26,11 +26,18 @@
 
 #pragma once
 
-#include "get_handle.hpp"
-#include "verify.hpp"
-#include "../lib_env_var.hpp"
-
+#include <algorithm>
 #include <gtest/gtest.h>
+#include <iostream>
+#include <iterator>
+#include <miopen/env.hpp>
+#include <tuple>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "../driver.hpp"
+#include "../lib_env_var.hpp"
 
 template <typename T>
 class ScopedEnvironment
@@ -280,22 +287,27 @@ std::vector<std::string> get_args(const Case& param)
     return {begin, end};
 }
 
-// TODO: GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built
-#define MIOPEN_ENABLE_TEST_DRIVE_WITH_GTEST 0
+template <template <class...> class Driver, typename TestCase, typename Check>
+void invoke_with_params(Check&& check)
+{
+    for(const auto& test_value : TestCase::GetParam())
+    {
+        std::vector<std::string> tokens = get_args(test_value);
+        std::vector<const char*> ptrs;
+        ptrs.reserve(tokens.size() + 1);
+        ptrs.emplace_back(TestCase::fp_args.data());
 
-#if MIOPEN_ENABLE_TEST_DRIVE_WITH_GTEST
-#define MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE()
-#else
-#define MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE()                                                \
-protected:                                                                                    \
-    void SetUp() override                                                                     \
-    {                                                                                         \
-        GTEST_SKIP() << "-> GTests using test_drive<> disabled until gtest-aware version of " \
-                        "test/driver.hpp is built ";                                          \
+        std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
+            return str.data();
+        });
+
+        testing::internal::CaptureStderr();
+        test_drive<Driver>(ptrs.size(), ptrs.data(), "unnamed");
+        check(testing::internal::GetCapturedStderr());
     }
-#endif
+}
 
-/// replacement of gtest's FAIL() because FAIL() returns void and messes up the
+/// repalcement of gtest's FAIL() because FAIL() returns void and messes up the
 /// return type deduction
 #define MIOPEN_FRIENDLY_FAIL(MSG)   \
     do                              \
@@ -314,6 +326,21 @@ MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_GEMM)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM)
 MIOPEN_LIB_ENV_VAR(MIOPEN_LOG_LEVEL)
 MIOPEN_LIB_ENV_VAR(MIOPEN_FIND_ENFORCE)
+
+// TODO: GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built
+#define MIOPEN_ENABLE_TEST_DRIVE_WITH_GTEST 0
+
+#if MIOPEN_ENABLE_TEST_DRIVE_WITH_GTEST
+#define MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE()
+#else
+#define MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE()                                                \
+protected:                                                                                    \
+    void SetUp() override                                                                     \
+    {                                                                                         \
+        GTEST_SKIP() << "-> GTests using test_drive<> disabled until gtest-aware version of " \
+                        "test/driver.hpp is built ";                                          \
+    }
+#endif
 
 /// \todo Remove workarounds
 namespace wa {

@@ -24,12 +24,11 @@
  *
  *******************************************************************************/
 
-#include <miopen/reducetensor.hpp>
 #include "gtest_common.hpp"
-#include "tensor_util.hpp"
+#include <tensor_util.hpp>
+#include <miopen/reducetensor.hpp>
 #include "cpu_reduce_util.hpp"
 #include "workspace.hpp"
-#include "checkboard_sign.hpp"
 
 // Recently added FP16, BFP16 and I8 reduce custom test cases fail compiler staging tests
 #define WORKAROUND_ISSUE_895 1

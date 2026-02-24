@@ -23,72 +23,89 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <utility>
 
 #include "lstm.hpp"
-#include <hip/hip_runtime.h>
+#include "get_handle.hpp"
+#include <gtest/gtest_common.hpp>
+#include <gtest/gtest.h>
+#include "gtest_common.hpp"
 
-namespace {
+namespace deepbench_lstm {
 
-auto GetTestCases()
+void GetArgs(const std::string& param, std::vector<std::string>& tokens)
 {
-    return std::vector{
-        // clang-format off
-        //            batch-size seq-len vector-len hidden-size
-        std::make_tuple( 16,       25,      512,       512 ),
-        std::make_tuple( 32,       25,      512,       512 ),
-        std::make_tuple( 64,       25,      512,       512 ),
-        std::make_tuple(128,       25,      512,       512 ),
-        std::make_tuple( 16,       25,     1024,      1024 ),
-        std::make_tuple( 32,       25,     1024,      1024 ),
-        std::make_tuple( 64,       25,     1024,      1024 ),
-        std::make_tuple(128,       25,     1024,      1024 ),
-        std::make_tuple( 16,       25,     2048,      2048 ),
-        std::make_tuple( 32,       25,     2048,      2048 ),
-        std::make_tuple( 64,       25,     2048,      2048 ),
-        std::make_tuple(128,       25,     2048,      2048 ),
-        std::make_tuple( 16,       25,     4096,      4096 ),
-        std::make_tuple( 32,       25,     4096,      4096 ),
-        std::make_tuple( 64,       25,     4096,      4096 ),
-        std::make_tuple(128,       25,     4096,      4096 ),
-        std::make_tuple(  8,       50,     1536,      1536 ),
-        std::make_tuple( 16,       50,     1536,      1536 ),
-        std::make_tuple( 32,       50,     1536,      1536 ),
-        std::make_tuple( 16,      150,      256,       256 ),
-        std::make_tuple( 32,      150,      256,       256 ),
-        std::make_tuple( 64,      150,      256,       256 )
-        // clang-format on
-    };
+    std::stringstream ss(param);
+    std::istream_iterator<std::string> begin(ss);
+    std::istream_iterator<std::string> end;
+    while(begin != end)
+        tokens.push_back(*begin++);
 }
 
-} // namespace
-
-using TestCase = decltype(GetTestCases())::value_type;
-struct GPU_DeepBench_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<TestCase>
+auto GetTestCases(std::string precision)
 {
+    std::string flags = "test_lstm --verbose " + precision;
+    std::string commonFlags =
+        " --num-layers 1 --in-mode 1 --bias-mode 0 -dir-mode 0 --rnn-mode 0 --flat-batch-fill";
+
+    // clang-format off
+    return std::vector<std::string>{
+        {flags + " --batch-size 16 --seq-len 25 --vector-len 512 --hidden-size 512" + commonFlags},
+        {flags + " --batch-size 32 --seq-len 25 --vector-len 512 --hidden-size 512" + commonFlags},
+        {flags + " --batch-size 64 --seq-len 25 --vector-len 512 --hidden-size 512" + commonFlags},
+        {flags + " --batch-size 128 --seq-len 25 --vector-len 512 --hidden-size 512" + commonFlags},
+        {flags + " --batch-size 16 --seq-len 25 --vector-len 1024 --hidden-size 1024" + commonFlags},
+        {flags + " --batch-size 32 --seq-len 25 --vector-len 1024 --hidden-size 1024" + commonFlags},
+        {flags + " --batch-size 64 --seq-len 25 --vector-len 1024 --hidden-size 1024" + commonFlags},
+        {flags + " --batch-size 128 --seq-len 25 --vector-len 1024 --hidden-size 1024" + commonFlags},
+        {flags + " --batch-size 16 --seq-len 25 --vector-len 2048 --hidden-size 2048" + commonFlags},
+        {flags + " --batch-size 32 --seq-len 25 --vector-len 2048 --hidden-size 2048" + commonFlags},
+        {flags + " --batch-size 64 --seq-len 25 --vector-len 2048 --hidden-size 2048" + commonFlags},
+        {flags + " --batch-size 128 --seq-len 25 --vector-len 2048 --hidden-size 2048" + commonFlags},
+        {flags + " --batch-size 16 --seq-len 25 --vector-len 4096 --hidden-size 4096" + commonFlags},
+        {flags + " --batch-size 32 --seq-len 25 --vector-len 4096 --hidden-size 4096" + commonFlags},
+        {flags + " --batch-size 64 --seq-len 25 --vector-len 4096 --hidden-size 4096" + commonFlags},
+        {flags + " --batch-size 128 --seq-len 25 --vector-len 4096 --hidden-size 4096" + commonFlags},
+        {flags + " --batch-size 8 --seq-len 50 --vector-len 1536 --hidden-size 1536" + commonFlags},
+        {flags + " --batch-size 16 --seq-len 50 --vector-len 1536 --hidden-size 1536" + commonFlags},
+        {flags + " --batch-size 32 --seq-len 50 --vector-len 1536 --hidden-size 1536" + commonFlags},
+        {flags + " --batch-size 16 --seq-len 150 --vector-len 256 --hidden-size 256" + commonFlags},
+        {flags + " --batch-size 32 --seq-len 150 --vector-len 256 --hidden-size 256" + commonFlags},
+        {flags + " --batch-size 64 --seq-len 150 --vector-len 256 --hidden-size 256" + commonFlags}
+    };
+    // clang-format on
+}
+
+using TestCase = decltype(GetTestCases({}))::value_type;
+
+class GPU_DeepBench_lstm_FP32 : public testing::TestWithParam<std::vector<TestCase>>
+{
+    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-TEST_P(GPU_DeepBench_LSTM_FP32, FloatTest)
+void Run2dDriverFloat(void)
 {
-    int device_count{0};
-    if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
+    std::vector<std::string> params = GPU_DeepBench_lstm_FP32::GetParam();
+
+    for(const auto& test_value : params)
     {
-        GTEST_SKIP() << "No HIP devices available for testing";
+        std::vector<std::string> tokens;
+        GetArgs(test_value, tokens);
+        std::vector<const char*> ptrs;
+
+        std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
+            return str.data();
+        });
+        testing::internal::CaptureStderr();
+        test_drive<lstm_driver>(ptrs.size(), ptrs.data());
+        auto capture = testing::internal::GetCapturedStderr();
+        std::cout << capture;
     }
-
-    this->numLayers     = 1;
-    this->inputMode     = 1;
-    this->biasMode      = 0;
-    this->dirMode       = 0;
-    this->flatBatchFill = 1;
-
-    auto [batchSize, seqLength, inVecLen, hiddenSize] = GetParam();
-
-    this->batchSize  = batchSize;
-    this->seqLength  = seqLength;
-    this->inVecLen   = inVecLen;
-    this->hiddenSize = hiddenSize;
-
-    RunTest();
 };
+} // namespace deepbench_lstm
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_DeepBench_LSTM_FP32, testing::ValuesIn(GetTestCases()));
+using namespace deepbench_lstm;
+
+TEST_P(GPU_DeepBench_lstm_FP32, FloatTest_deepbench_lstm) { Run2dDriverFloat(); };
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_DeepBench_lstm_FP32, testing::Values(GetTestCases("--float")));
