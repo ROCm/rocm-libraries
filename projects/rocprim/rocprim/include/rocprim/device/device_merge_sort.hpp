@@ -46,6 +46,52 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+template<class KeysInputIterator, class OffsetT, class BinaryFunction>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+OffsetT compute_global_partition_point(KeysInputIterator keys_input,
+                                       const OffsetT     size,
+                                       const OffsetT     current_run_len,
+                                       const OffsetT     global_offset,
+                                       BinaryFunction    compare_function)
+{
+    // The total length of two merged runs.
+    const OffsetT merged_run_length = 2 * current_run_len;
+
+    // Find the start of the current Merge Group (aligned to merged_run_length).
+    const OffsetT group_base = (global_offset / merged_run_length) * merged_run_length;
+
+    // Left Run starts at the group base, Right Run starts immediately after Left Run.
+    const OffsetT run_base_L = group_base;
+
+    // Calculate bounds, clamping to input size
+    const OffsetT run_beg_L = rocprim::min(size, run_base_L);
+    const OffsetT run_end_L = rocprim::min(size, run_base_L + current_run_len);
+
+    const OffsetT run_beg_R = run_end_L; // Start of R is End of L
+    const OffsetT run_end_R = rocprim::min(size, run_beg_R + current_run_len);
+
+    // Calculate how many items we need to consume from this group to reach the current partition point.
+    // diag = Current_Global_Position - Group_Start_Position
+    const OffsetT diag_local = global_offset - group_base;
+
+    // Clamp diagonal to the total number of available items in this pair.
+    const OffsetT count_L = run_end_L - run_beg_L;
+    const OffsetT count_R = run_end_R - run_beg_R;
+
+    const OffsetT diag_clamped = rocprim::min(count_L + count_R, diag_local);
+
+    // Calculate the partition point using binary search
+    const OffsetT consumed_L = ::rocprim::detail::merge_path(keys_input + run_beg_L,
+                                                             keys_input + run_beg_R,
+                                                             count_L,
+                                                             count_R,
+                                                             diag_clamped,
+                                                             compare_function);
+
+    // Record the global index in Left Run where this block should start reading.
+    return run_beg_L + consumed_L;
+}
+
 template<class Config,
          class Selector,
          class KeysInputIterator,
@@ -85,10 +131,10 @@ inline hipError_t launch_mergepath_kernels(KeysInputIterator    keys_input_,
     // Calculates the specific split points (diagonals) for each thread block in the global arrays.
     // This step divides the massive merge workload into independent, balanced chunks so the
     // next kernel can merge them in parallel without inter-block communication.
-    auto device_block_merge_mergepath_partition_kernel = [=](auto arch_config)
+    auto device_block_merge_mergepath_partition_kernel = [=](auto target_config)
     {
         static constexpr merge_sort_block_merge_config_params params
-            = decltype(arch_config)::params;
+            = decltype(target_config)::params;
         static constexpr unsigned int items_per_block
             = params.merge_mergepath_config.block_size
               * params.merge_mergepath_config.items_per_thread;
@@ -104,40 +150,11 @@ inline hipError_t launch_mergepath_kernels(KeysInputIterator    keys_input_,
         // Calculate the absolute starting index in the global output array for this partition.
         const OffsetT global_offset = static_cast<OffsetT>(partition_idx) * items_per_block;
 
-        // The total length of two merged runs.
-        const OffsetT merged_run_length = 2 * current_run_len;
-
-        // Find the start of the current Merge Group (aligned to merged_run_length).
-        const OffsetT group_base = (global_offset / merged_run_length) * merged_run_length;
-
-        // Left Run starts at the group base, Right Run starts immediately after Left Run.
-        const OffsetT run_base_L = group_base;
-
-        // Calculate bounds, clamping to input size
-        const OffsetT run_beg_L = rocprim::min(size, run_base_L);
-        const OffsetT run_end_L = rocprim::min(size, run_base_L + current_run_len);
-
-        const OffsetT run_beg_R = run_end_L; // Start of R is End of L
-        const OffsetT run_end_R = rocprim::min(size, run_beg_R + current_run_len);
-
-        // Calculate how many items we need to consume from this group to reach the current partition point.
-        // diag = Current_Global_Position - Group_Start_Position
-        const OffsetT diag_local = global_offset - group_base;
-
-        // Clamp diagonal to the total number of available items in this pair.
-        const OffsetT count_L = run_end_L - run_beg_L;
-        const OffsetT count_R = run_end_R - run_beg_R;
-
-        const OffsetT diag_clamped = rocprim::min(count_L + count_R, diag_local);
-
-        const OffsetT consumed_L = ::rocprim::detail::merge_path(keys_input_ + run_beg_L,
-                                                                 keys_input_ + run_beg_R,
-                                                                 count_L,
-                                                                 count_R,
-                                                                 diag_clamped,
-                                                                 compare_function);
-
-        d_merge_partitions[partition_idx] = run_beg_L + consumed_L;
+        d_merge_partitions[partition_idx] = compute_global_partition_point(keys_input_,
+                                                                           size,
+                                                                           current_run_len,
+                                                                           global_offset,
+                                                                           compare_function);
     };
 
     ROCPRIM_RETURN_ON_ERROR(
@@ -161,15 +178,17 @@ inline hipError_t launch_mergepath_kernels(KeysInputIterator    keys_input_,
     // Performs the actual merge operation. Each block reads partition boundaries calculated
     // in Phase 1, loads the corresponding sub-intervals into Shared Memory, and executes a
     // high-speed local merge.
-    auto device_block_merge_mergepath_kernel = [=](auto arch_config) mutable
+    auto device_block_merge_mergepath_kernel = [=](auto target_config) mutable
     {
-        static constexpr merge_sort_block_merge_config_params params
-            = decltype(arch_config)::params;
+        using TargetConfig = decltype(target_config);
+
+        static constexpr merge_sort_block_merge_config_params params = TargetConfig::params;
 
         using merge_impl = block_merge_impl<key_type,
                                             value_type,
                                             params.merge_mergepath_config.block_size,
-                                            params.merge_mergepath_config.items_per_thread>;
+                                            params.merge_mergepath_config.items_per_thread,
+                                            TargetConfig::wavefront>;
 
         using VSmemHelperT = detail::vsmem_helper_impl<merge_impl>;
         ROCPRIM_SHARED_MEMORY
@@ -239,10 +258,11 @@ inline hipError_t launch_mergepath_fused_kernel(KeysInputIterator    keys_input_
     // TODO: May also be added to config params and tuned.
     constexpr unsigned int tiles_per_block_limit = 4;
 
-    auto device_merge_kernel = [=](auto arch_config) mutable
+    auto device_merge_kernel = [=](auto target_config) mutable
     {
-        static constexpr merge_sort_block_merge_config_params params
-            = decltype(arch_config)::params;
+        using TargetConfig = decltype(target_config);
+
+        static constexpr merge_sort_block_merge_config_params params = TargetConfig::params;
 
         static constexpr unsigned int items_per_block
             = params.merge_mergepath_config.block_size
@@ -251,7 +271,8 @@ inline hipError_t launch_mergepath_fused_kernel(KeysInputIterator    keys_input_
         using merge_impl   = block_merge_fused_impl<key_type,
                                                     value_type,
                                                     params.merge_mergepath_config.block_size,
-                                                    params.merge_mergepath_config.items_per_thread>;
+                                                    params.merge_mergepath_config.items_per_thread,
+                                                    TargetConfig::wavefront>;
         using VSmemHelperT = detail::vsmem_helper_impl<merge_impl>;
 
         ROCPRIM_SHARED_MEMORY
@@ -265,90 +286,34 @@ inline hipError_t launch_mergepath_fused_kernel(KeysInputIterator    keys_input_
                                                        merge_mergepath_number_of_blocks);
 
         if(start_tile_idx >= merge_mergepath_number_of_blocks)
+        {
             return;
-
-        const OffsetT merged_run_length = 2 * current_run_len;
-
-        OffsetT partition_beg;
+        }
 
         // Dynamically compute the global partition point for the starting tile.
         // This determines exactly where in the Left Run this block should begin merging.
-        {
-            const OffsetT global_offset = static_cast<OffsetT>(start_tile_idx) * items_per_block;
-            // Calculate the base of the current merge group
-            const OffsetT group_base = (global_offset / merged_run_length) * merged_run_length;
+        const OffsetT initial_global_offset
+            = static_cast<OffsetT>(start_tile_idx) * items_per_block;
 
-            const OffsetT run_base_L = group_base;
-
-            // The Left Run starts at the beginning of current merge group.
-            const OffsetT run_beg_L = rocprim::min(size, run_base_L);
-            const OffsetT run_end_L = rocprim::min(size, run_base_L + current_run_len);
-
-            // The Right Run starts immediately after the Left Run.
-            const OffsetT run_beg_R = run_end_L;
-            const OffsetT run_end_R = rocprim::min(size, run_beg_R + current_run_len);
-
-            // Calculate the cross-diagonal intersection to find the exact split point.
-            const OffsetT diag_local   = global_offset - group_base;
-            const OffsetT count_L      = run_end_L - run_beg_L;
-            const OffsetT count_R      = run_end_R - run_beg_R;
-            const OffsetT diag_clamped = rocprim::min(count_L + count_R, diag_local);
-
-            // Binary search to find the split point in Run L.
-            const OffsetT consumed_L = ::rocprim::detail::merge_path(keys_input_ + run_beg_L,
-                                                                     keys_input_ + run_beg_R,
-                                                                     count_L,
-                                                                     count_R,
-                                                                     diag_clamped,
-                                                                     compare_function);
-
-            // Record the global index in Left Run where this block should start reading.
-            partition_beg = run_beg_L + consumed_L;
-        }
+        OffsetT partition_beg = compute_global_partition_point(keys_input_,
+                                                               size,
+                                                               current_run_len,
+                                                               initial_global_offset,
+                                                               compare_function);
 
         for(unsigned int tile_idx = start_tile_idx; tile_idx < end_tile_idx; ++tile_idx)
         {
             // Calculate global offset for the current tile
-            const OffsetT global_offset = static_cast<OffsetT>(tile_idx) * items_per_block;
-
-            // Recalculate group_base because we might cross a merge group boundary between tiles.
-            const OffsetT group_base = (global_offset / merged_run_length) * merged_run_length;
-            const OffsetT diag       = global_offset - group_base;
+            const OffsetT next_global_offset = static_cast<OffsetT>(tile_idx) * items_per_block;
 
             // Calculate the end point of the current tile.
             // This will become the Partition Begin for the next tile.
-            OffsetT partition_end;
-            {
-                // The diagonal position for the *end* of the current tile (start of next)
-                const OffsetT next_global_offset = global_offset + items_per_block;
-                const OffsetT merged_run_length  = 2 * current_run_len;
-                const OffsetT group_base
-                    = (next_global_offset / merged_run_length) * merged_run_length;
+            OffsetT partition_end = compute_global_partition_point(keys_input_,
+                                                                   size,
+                                                                   current_run_len,
+                                                                   next_global_offset,
+                                                                   compare_function);
 
-                const OffsetT run_base_L = group_base;
-                const OffsetT run_end_L  = rocprim::min(size, run_base_L + current_run_len);
-
-                // Note: Boundaries must be recalculated here.
-                // If the loop crosses a Merge Group boundary, the Run's base address changes.
-                const OffsetT run_beg_L = rocprim::min(size, run_base_L);
-                const OffsetT run_beg_R = run_end_L;
-                const OffsetT run_end_R = rocprim::min(size, run_beg_R + current_run_len);
-
-                const OffsetT diag_local   = next_global_offset - group_base;
-                const OffsetT count_L      = run_end_L - run_beg_L;
-                const OffsetT count_R      = run_end_R - run_beg_R;
-                const OffsetT diag_clamped = rocprim::min(count_L + count_R, diag_local);
-
-                // Calculate the partition point using binary search
-                const OffsetT consumed_L = ::rocprim::detail::merge_path(keys_input_ + run_beg_L,
-                                                                         keys_input_ + run_beg_R,
-                                                                         count_L,
-                                                                         count_R,
-                                                                         diag_clamped,
-                                                                         compare_function);
-
-                partition_end = run_beg_L + consumed_L;
-            }
             // Synchronize threads before processing the next tile to ensure all threads  have
             // finished using the shared memory from the previous tile's process_tile() call.
             // The very first tile does not need this barrier.
@@ -363,11 +328,9 @@ inline hipError_t launch_mergepath_fused_kernel(KeysInputIterator    keys_input_
                                       values_output_,
                                       size,
                                       current_run_len,
-                                      global_offset,
+                                      next_global_offset,
                                       partition_beg,
                                       partition_end,
-                                      group_base,
-                                      diag,
                                       compare_function,
                                       storage);
 
@@ -505,7 +468,7 @@ inline hipError_t merge_sort_block_merge_impl(
         {
             if(use_mergepath)
             {
-                if(UseFusedKernel)
+                if(use_fused_kernel)
                 {
                     ROCPRIM_RETURN_ON_ERROR((launch_mergepath_fused_kernel<Config, selector>(
                         keys_input_,
