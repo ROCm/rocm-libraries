@@ -333,9 +333,6 @@ namespace rocRoller::KernelGraph::ControlGraph
 
             for(auto edge : getNeighbours<GD::Upstream>(node))
             {
-                if(std::holds_alternative<Dependence>(getEdge(edge)))
-                    continue;
-
                 for(auto parent : getNeighbours<GD::Upstream>(edge))
                 {
                     if(parent == nodeB)
@@ -364,9 +361,6 @@ namespace rocRoller::KernelGraph::ControlGraph
 
             for(auto edge : getNeighbours<GD::Upstream>(node))
             {
-                if(std::holds_alternative<Dependence>(getEdge(edge)))
-                    continue;
-
                 for(auto parent : getNeighbours<GD::Upstream>(edge))
                 {
                     if(parent == nodeA)
