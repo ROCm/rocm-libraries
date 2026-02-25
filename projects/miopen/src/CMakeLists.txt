@@ -808,7 +808,8 @@ endif()
 if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     list(APPEND MIOpen_Source
         hip/hiperrors.cpp
-        nogpu/handle.cpp
+#        nogpu/handle.cpp
+hip/handlehip.cpp
         hipoc/hipoc_kernel.cpp
         hipoc/hipoc_program.cpp
         )

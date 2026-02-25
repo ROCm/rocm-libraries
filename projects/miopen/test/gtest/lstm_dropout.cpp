@@ -1,8 +1,7 @@
 /*******************************************************************************
  *
- * MIT License
- *
- * Copyright (c) 2020 Advanced Micro Devices, Inc.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,46 +23,39 @@
  *
  *******************************************************************************/
 
-#include "lstm_common.hpp"
+#include "lstm.hpp"
 
-template <class T>
-struct lstm_dropout_driver : lstm_basic_driver<T>
+struct GPU_LSTM_dropout_FP32 : LSTM_test<float>, testing::TestWithParam<std::tuple<int, int>>
 {
-    lstm_dropout_driver() : lstm_basic_driver<T>()
-    {
-        std::vector<int> modes(2, 0);
-        modes[1] = 1;
-        std::vector<int> defaultBS(1);
-
-        this->add(this->batchSize, "batch-size", this->generate_data({17}));
-        this->add(this->seqLength, "seq-len", this->generate_data({25}));
-        this->add(this->inVecLen, "vector-len", this->generate_data({17}));
-        this->add(this->hiddenSize, "hidden-size", this->generate_data({67}));
-        this->add(this->numLayers, "num-layers", this->generate_data({3}));
-        this->add(this->nohx, "no-hx", this->generate_data({false}));
-        this->add(this->nodhy, "no-dhy", this->generate_data({false}));
-        this->add(this->nocx, "no-cx", this->generate_data({false}));
-        this->add(this->nodcy, "no-dcy", this->generate_data({false}));
-        this->add(this->nohy, "no-hy", this->generate_data({false}));
-        this->add(this->nodhx, "no-dhx", this->generate_data({false}));
-        this->add(this->nocy, "no-cy", this->generate_data({false}));
-        this->add(this->nodcx, "no-dcx", this->generate_data({false}));
-        this->add(this->flatBatchFill, "flat-batch-fill", this->generate_data({false, true}));
-        this->add(this->useDropout, "use-dropout", this->generate_data({1}));
-
-#if(MIO_LSTM_TEST_DEBUG == 3)
-        biasMode  = 0;
-        dirMode   = 0;
-        inputMode = 0;
-        algoMode  = 0;
-#else
-        this->add(this->inputMode, "in-mode", this->generate_data({0}));
-        this->add(this->biasMode, "bias-mode", this->generate_data({1}));
-        this->add(this->dirMode, "dir-mode", this->generate_data(modes));
-        this->add(this->algoMode, "algo-mode", this->generate_data({0}));
-#endif
-        this->add(this->batchSeq, "batch-seq", this->generate_data(defaultBS));
-    }
 };
 
-int main(int argc, const char* argv[]) { test_drive<lstm_dropout_driver>(argc, argv); }
+TEST_P(GPU_LSTM_dropout_FP32, FloatTest)
+{
+    int device_count{0};
+    if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
+    {
+        GTEST_SKIP() << "No HIP devices available for testing";
+    }
+
+    int useDropout{1};
+    int batchSize{17};
+    int seqLength{25};
+
+    auto [dirMode, flatBatchFill] = GetParam();
+
+    this->useDropout    = useDropout;
+    this->batchSize     = batchSize;
+    this->seqLength     = seqLength;
+    this->inVecLen      = batchSize;
+    this->batchSeq      = generate_batchSeq(batchSize, seqLength)[0];
+    this->numLayers     = 3;
+    this->hiddenSize    = 67;
+    this->dirMode       = dirMode;
+    this->flatBatchFill = flatBatchFill;
+
+    RunTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_LSTM_dropout_FP32,
+                         testing::Combine(testing::Values(0, 1), testing::Values(0, 1)));

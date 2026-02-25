@@ -25,105 +25,85 @@
  *******************************************************************************/
 
 #include "lstm.hpp"
-#include "get_handle.hpp"
-#include <gtest/gtest_common.hpp>
-#include <gtest/gtest.h>
-#include <boost/algorithm/string.hpp>
 
-namespace lstm_extra {
-void GetArgs(const std::string& param, std::vector<std::string>& tokens)
+namespace {
+
+auto GetTestCases()
 {
-    std::stringstream ss(param);
-    std::istream_iterator<std::string> begin(ss);
-    std::istream_iterator<std::string> end;
-    while(begin != end)
-        tokens.push_back(*begin++);
-}
-
-auto GetTestCases(std::string precision)
-{
-    std::string flags       = "test_lstm --verbose " + precision;
-    std::string commonFlags = " --batch-size 32 --seq-len 3 --batch-seq 32 32 32 --vector-len 128 "
-                              "--hidden-size 128 --num-layers 1 --in-mode 0 --bias-mode 0";
-
-    // clang-format off
-    return std::vector<std::string>{
-        {flags + commonFlags + " -dir-mode 0 --no-hx"},
-        {flags + commonFlags + " -dir-mode 0 --no-dhy"},
-        {flags + commonFlags + " -dir-mode 0 --no-hx --no-dhy"},
-        {flags + commonFlags + " -dir-mode 0 --no-cx"},
-        {flags + commonFlags + " -dir-mode 0 --no-hx --no-cx"},
-        {flags + commonFlags + " -dir-mode 0 --no-dcy"},
-        {flags + commonFlags + " -dir-mode 0 --no-cx --no-dcy"},
-        {flags + commonFlags + " -dir-mode 1 --no-hx"},
-        {flags + commonFlags + " -dir-mode 1 --no-dhy"},
-        {flags + commonFlags + " -dir-mode 1 --no-hx --no-dhy"},
-        {flags + commonFlags + " -dir-mode 1 --no-cx"},
-        {flags + commonFlags + " -dir-mode 1 --no-hx --no-cx"},
-        {flags + commonFlags + " -dir-mode 1 --no-dcy"},
-        {flags + commonFlags + " -dir-mode 1 --no-cx --no-dcy"},
-        {flags + commonFlags + " -dir-mode 0 --no-hy"},
-        {flags + commonFlags + " -dir-mode 0 --no-dhx"},
-        {flags + commonFlags + " -dir-mode 0 --no-hy --no-dhx"},
-        {flags + commonFlags + " -dir-mode 0 --no-cy"},
-        {flags + commonFlags + " -dir-mode 0 --no-hy --no-cy"},
-        {flags + commonFlags + " -dir-mode 0 --no-dcx"},
-        {flags + commonFlags + " -dir-mode 0 --no-cy --no-dcx"},
-        {flags + commonFlags + " -dir-mode 1 --no-hy"},
-        {flags + commonFlags + " -dir-mode 1 --no-dhx"},
-        {flags + commonFlags + " -dir-mode 1 --no-hy --no-dhx"},
-        {flags + commonFlags + " -dir-mode 1 --no-cy"},
-        {flags + commonFlags + " -dir-mode 1 --no-hy --no-cy"},
-        {flags + commonFlags + " -dir-mode 1 --no-dcx"},
-        {flags + commonFlags + " -dir-mode 1 --no-cy --no-dcx"},
-	    {flags + commonFlags + " -dir-mode 0 --no-hx --no-dhy --no-cx --no-dcy --no-hy --no-dhx --no-cy --no-dcx"},
-	    {flags + commonFlags + " -dir-mode 1 --no-hx --no-dhy --no-cx --no-dcy --no-hy --no-dhx --no-cy --no-dcx"}
+    return std::vector{
+        // clang-format off
+        //          dir-mode no-hx no-dhy no-cx no-dcy no-hy no-dhx no-cy no-dcx
+        std::make_tuple(0,     1,    0,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(0,     0,    1,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(0,     1,    1,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(0,     0,    0,     1,    0,     0,    0,     0,    0),
+        std::make_tuple(0,     1,    0,     1,    0,     0,    0,     0,    0),
+        std::make_tuple(0,     0,    0,     0,    1,     0,    0,     0,    0),
+        std::make_tuple(0,     0,    0,     1,    1,     0,    0,     0,    0),
+        std::make_tuple(1,     1,    0,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(1,     0,    1,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(1,     1,    1,     0,    0,     0,    0,     0,    0),
+        std::make_tuple(1,     0,    0,     1,    0,     0,    0,     0,    0),
+        std::make_tuple(1,     1,    0,     1,    0,     0,    0,     0,    0),
+        std::make_tuple(1,     0,    0,     0,    1,     0,    0,     0,    0),
+        std::make_tuple(1,     0,    0,     1,    1,     0,    0,     0,    0),
+        std::make_tuple(0,     0,    0,     0,    0,     1,    0,     0,    0),
+        std::make_tuple(0,     0,    0,     0,    0,     0,    1,     0,    0),
+        std::make_tuple(0,     0,    0,     0,    0,     1,    1,     0,    0),
+        std::make_tuple(0,     0,    0,     0,    0,     0,    0,     1,    0),
+        std::make_tuple(0,     0,    0,     0,    0,     1,    0,     1,    0),
+        std::make_tuple(0,     0,    0,     0,    0,     0,    0,     0,    1),
+        std::make_tuple(0,     0,    0,     0,    0,     0,    0,     1,    1),
+        std::make_tuple(1,     0,    0,     0,    0,     1,    0,     0,    0),
+        std::make_tuple(1,     0,    0,     0,    0,     0,    1,     0,    0),
+        std::make_tuple(1,     0,    0,     0,    0,     1,    1,     0,    1),
+        std::make_tuple(1,     0,    0,     0,    0,     0,    0,     1,    0),
+        std::make_tuple(1,     0,    0,     0,    0,     1,    0,     1,    0),
+        std::make_tuple(1,     0,    0,     0,    0,     0,    0,     0,    1),
+        std::make_tuple(1,     0,    0,     0,    0,     0,    0,     1,    1),
+        std::make_tuple(0,     1,    1,     1,    1,     1,    1,     1,    1),
+        std::make_tuple(1,     1,    1,     1,    1,     1,    1,     1,    1)
+        // clang-format on
     };
-    // clang-format on
 }
 
-using TestCase = decltype(GetTestCases({}))::value_type;
+} // namespace
 
-class GPU_lstm_extra_FP32 : public testing::TestWithParam<std::vector<TestCase>>
+using TestCase = decltype(GetTestCases())::value_type;
+struct GPU_LSTM_extra_FP32 : LSTM_test<float>, testing::TestWithParam<TestCase>
 {
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-bool IsTestSupportedForDevice()
+TEST_P(GPU_LSTM_extra_FP32, FloatTest)
 {
-    using namespace miopen::debug;
-    using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X>;
-    using d_mask = disabled<Gpu::Default>;
-    return ::IsTestSupportedForDevMask<d_mask, e_mask>();
-}
-
-void Run2dDriver(miopenDataType_t prec)
-{
-    if(!IsTestSupportedForDevice())
+    int device_count{0};
+    if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
     {
-        GTEST_SKIP();
+        GTEST_SKIP() << "No HIP devices available for testing";
     }
-    std::vector<std::string> params = GPU_lstm_extra_FP32::GetParam();
 
-    for(const auto& test_value : params)
-    {
-        std::vector<std::string> tokens;
-        GetArgs(test_value, tokens);
-        std::vector<const char*> ptrs;
+    this->batchSize  = 32;
+    this->seqLength  = 3;
+    this->batchSeq   = {32, 32, 32};
+    this->inVecLen   = 128;
+    this->hiddenSize = 128;
+    this->numLayers  = 1;
+    this->inputMode  = 0;
+    this->biasMode   = 0;
 
-        std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
-            return str.data();
-        });
-        testing::internal::CaptureStderr();
-        test_drive<lstm_driver>(ptrs.size(), ptrs.data());
-        auto capture = testing::internal::GetCapturedStderr();
-        std::cout << capture;
-    }
+    auto [dirMode, nohx, nodhy, nocx, nodcy, nohy, nodhx, nocy, nodcx] = GetParam();
+
+    this->dirMode = dirMode;
+    this->nohx    = bool(nohx);
+    this->nodhy   = bool(nodhy);
+    this->nocx    = bool(nocx);
+    this->nodcy   = bool(nodcy);
+    this->nohy    = bool(nohy);
+    this->nodhx   = bool(nodhx);
+    this->nocy    = bool(nocy);
+    this->nodcx   = bool(nodcx);
+
+    RunTest();
 };
 
-} // namespace lstm_extra
-using namespace lstm_extra;
-
-TEST_P(GPU_lstm_extra_FP32, FloatTest_lstm_extra) { Run2dDriver(miopenFloat); };
-
-INSTANTIATE_TEST_SUITE_P(Full, GPU_lstm_extra_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_extra_FP32, testing::ValuesIn(GetTestCases()));
