@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck/ck.hpp"
+#include "ck/utility/array.hpp"
 #include "ck/utility/env.hpp"
 #include "ck/utility/common_header.hpp"
 #include "ck/tensor_description/multi_index_transform_helper.hpp"
@@ -864,35 +865,31 @@ struct GridwiseGemm_wmma_cshuffle_v3
     template <ConvRegime Regime,
               typename AGridDesc_AK0_M_K1,
               typename BGridDesc_BK0_N_K1,
-              typename DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock =
-                  EmptyType, // Defined for bwd_data & fwd convolution // TODO Tuple with standard
-                             // length
+              typename DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock, // Defined for bwd_data &
+                                                                           // fwd convolution
               typename CEGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
               typename Block2CTileMapExt = EmptyType, // Defined for bwd_data convolution
               typename ComputePtrOffsetOfBatch,
-              typename ComputePtrOffsetOfN = EmptyType, // Defined for bwd_data & fwd convolution
-              index_t NumGroupsToMerge,                 // Defined for generic convolution
+              typename ComputePtrOffsetOfN, // Defined for bwd_data & fwd convolution
+              index_t NumGroupsToMerge,     // Defined for bwd_weight convolution
               bool HasMainKBlockLoop,
               InMemoryDataOperationEnum GlobalMemoryDataOperation,
               bool CTranspose, // Defined for bwd_data convolution
               TailNumber TailNum,
               typename EpilogueArgument>
-    __device__ static void
-    Run(void* p_shared,
-        const AGridDesc_AK0_M_K1 a_grid_desc_ak0_m_ak1,
-        const BGridDesc_BK0_N_K1 b_grid_desc_bk0_n_bk1,
-        const DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock&
-            ds_grid_desc_mblock_mperblock_nblock_nperblock_, // Defined for bwd_data & fwd
-                                                             // convolution
-        const CEGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
-            ce_grid_desc_mblock_mperblock_nblock_nperblock,
-        const Block2CTileMapExt& block_2_ctile_map_, // Defined for bwd_data convolution
-        const ComputePtrOffsetOfBatch& compute_ptr_offset_of_batch,
-        const ComputePtrOffsetOfN&
-            compute_ptr_offset_of_n, // Defined for bwd_data & fwd convolution
-        const index_t num_k_per_block,
-        Argument& karg,
-        EpilogueArgument& epilogue_args)
+    __device__ static void Run(void* p_shared,
+                               const AGridDesc_AK0_M_K1 a_grid_desc_ak0_m_ak1,
+                               const BGridDesc_BK0_N_K1 b_grid_desc_bk0_n_bk1,
+                               const DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock&
+                                   ds_grid_desc_mblock_mperblock_nblock_nperblock_,
+                               const CEGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
+                                   ce_grid_desc_mblock_mperblock_nblock_nperblock,
+                               const Block2CTileMapExt& block_2_ctile_map_,
+                               const ComputePtrOffsetOfBatch& compute_ptr_offset_of_batch,
+                               const ComputePtrOffsetOfN& compute_ptr_offset_of_n,
+                               const index_t num_k_per_block,
+                               Argument& karg,
+                               EpilogueArgument& epilogue_args)
     {
 
         // Resolve the current regime at compile time:
@@ -901,8 +898,6 @@ struct GridwiseGemm_wmma_cshuffle_v3
         constexpr bool is_fwd        = (Regime == ConvRegime::FORWARD);
 
         // ======== Index =========
-        // TODO In device code: check how block indices are defined,
-        // so that both expressions become the same
         const auto g_idx = [&]() -> index_t {
             if constexpr(is_bwd_data || is_fwd)
             {
@@ -914,17 +909,10 @@ struct GridwiseGemm_wmma_cshuffle_v3
             }
         }();
 
-        // TODO In device code: check how block indices are defined,
-        // so that both expressions become the same
-        const auto n_idx = [&]() -> index_t {
-            return (is_bwd_data || is_fwd)
-                       ? __builtin_amdgcn_readfirstlane(blockIdx.z / karg.KBatch)
-                       : 0;
-        }();
+        const index_t n_idx =
+            (is_bwd_data || is_fwd) ? __builtin_amdgcn_readfirstlane(blockIdx.z / karg.KBatch) : 0;
 
         // Using a lambda for better clang compliance than nested ternary operators
-        // TODO In device code: check how block indices are defined,
-        // so that both expressions become the same
         const auto k_idx = [&]() -> index_t {
             if constexpr(is_bwd_data)
             {
@@ -968,15 +956,8 @@ struct GridwiseGemm_wmma_cshuffle_v3
             }
         }();
 
-        // a_n_offset
         const auto a_n_offset = [&]() -> long_index_t {
-            if constexpr(is_bwd_data)
-            {
-                return CTranspose
-                           ? 0
-                           : amd_wave_read_first_lane(compute_ptr_offset_of_n.GetAPtrOffset(n_idx));
-            }
-            else if constexpr(is_fwd)
+            if constexpr((is_bwd_data && !CTranspose) || is_fwd)
             {
                 return amd_wave_read_first_lane(compute_ptr_offset_of_n.GetAPtrOffset(n_idx));
             }
@@ -1043,7 +1024,6 @@ struct GridwiseGemm_wmma_cshuffle_v3
                 static_cast<const BDataType_*>(karg.p_bs_grid[i]) + b_batch_offset + b_n_offset;
         });
 
-        // TODO Check if we can treat all 3 cases as one
         DsGridPointer p_ds_grid_grp;
         static_for<0, NumDTensor, 1>{}([&](auto i) {
             if constexpr(is_bwd_data)
@@ -1060,7 +1040,6 @@ struct GridwiseGemm_wmma_cshuffle_v3
 
         // ======== Grid descriptors ======== //
 
-        // TODO Check if we can treat all 3 cases as one
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock = [&]() {
             if constexpr(is_bwd_weight)
             {

@@ -29,6 +29,7 @@
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
 #include "ck/host_utility/flush_cache.hpp"
+#include "ck/utility/tuple.hpp"
 
 #ifdef CK_EXPERIMENTAL_BUILDER
 #include "ck_tile/builder/reflect/description.hpp"
@@ -77,11 +78,11 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BWD_WEIGHT,
                                    AGridDesc_AK0_M_K1,
                                    BGridDesc_BK0_N_K1,
-                                   typename GridwiseGemm::EmptyType,
+                                   ck::Tuple<>, // Empty tuple
                                    CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
                                    typename GridwiseGemm::EmptyType,
                                    ComputePtrOffsetOfBatch,
-                                   typename GridwiseGemm::EmptyType,
+                                   ComputePtrOffsetOfBatch, // placeholder
                                    1,
                                    HasMainKBlockLoop,
                                    CGlobalMemoryDataOperation,
@@ -91,11 +92,11 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             p_shared,
             a_grid_desc_ak0_m_ak1,
             b_grid_desc_bk0_n_bk1,
-            GridwiseGemm::emptyArgument,
+            ck::Tuple<>(), // placeholder
             c_grid_desc_mblock_mperblock_nblock_nperblock,
             GridwiseGemm::emptyArgument,
             compute_ptr_offset_of_batch,
-            GridwiseGemm::emptyArgument,
+            ComputePtrOffsetOfBatch{}, // placeholder
             num_k_per_block,
             karg,
             epilogue_args);
