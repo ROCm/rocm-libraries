@@ -845,14 +845,6 @@ struct GridwiseGemm_wmma_cshuffle_v3
         return Block2CTileMap{M, N, 4};
     }
 
-    // Helper struct for unused template parameters
-    struct EmptyType
-    {
-    }; // because std::optional<void> does not exist
-
-    // Constexpr instance of EmptyType to be used as default argument for unused template parameters
-    static constexpr auto emptyArgument = EmptyType{};
-
     // Grouped convolution regime
     enum class ConvRegime
     {
@@ -868,7 +860,7 @@ struct GridwiseGemm_wmma_cshuffle_v3
               typename DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock, // Defined for bwd_data &
                                                                            // fwd convolution
               typename CEGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-              typename Block2CTileMapExt = EmptyType, // Defined for bwd_data convolution
+              typename Block2CTileMapExt, // Defined for bwd_data convolution
               typename ComputePtrOffsetOfBatch,
               typename ComputePtrOffsetOfN, // Defined for bwd_data & fwd convolution
               index_t NumGroupsToMerge,     // Defined for bwd_weight convolution

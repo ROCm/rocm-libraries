@@ -80,7 +80,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                    BGridDesc_BK0_N_K1,
                                    ck::Tuple<>, // Empty tuple
                                    CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                   typename GridwiseGemm::EmptyType,
+                                   typename GridwiseGemm::Block2CTileMap,
                                    ComputePtrOffsetOfBatch,
                                    ComputePtrOffsetOfBatch, // placeholder
                                    1,
@@ -94,7 +94,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             b_grid_desc_bk0_n_bk1,
             ck::Tuple<>(), // placeholder
             c_grid_desc_mblock_mperblock_nblock_nperblock,
-            GridwiseGemm::emptyArgument,
+            GridwiseGemm::DefaultBlock2CTileMap(1, 1), // placeholder
             compute_ptr_offset_of_batch,
             ComputePtrOffsetOfBatch{}, // placeholder
             num_k_per_block,
