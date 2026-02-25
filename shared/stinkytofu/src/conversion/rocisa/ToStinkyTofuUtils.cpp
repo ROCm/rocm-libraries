@@ -419,6 +419,7 @@ namespace
 
         // Create and add MFMA modifiers with MXMFMA-specific fields
         MFMAModifiers mfmaModifiers(inputPermuteStr,
+                                    "" /* scaleStr */,
                                     "" /* negStr */,
                                     false /* reuseA */,
                                     false /* reuseB */,
@@ -450,7 +451,12 @@ namespace
         // Extract neg_lo/neg_hi modifiers
         auto [negStr, hasNegLo, hasNegHi] = extractNegModifiers(instString);
 
-        MFMAModifiers mfmaModifiers(inputPermuteStr, negStr, false, false, hasNegLo, hasNegHi);
+        std::string scaleStr;
+        if(mfmaInst->forceScaledWMMA())
+            scaleStr = ", 0, 0";
+
+        MFMAModifiers mfmaModifiers(
+            inputPermuteStr, scaleStr, negStr, false, false, hasNegLo, hasNegHi);
         stinkyInst->addModifier<MFMAModifiers>(mfmaModifiers);
     }
 
@@ -463,6 +469,7 @@ namespace
         auto [negStr, hasNegLo, hasNegHi] = extractNegModifiers(instString);
 
         MFMAModifiers mfmaModifiers("" /* inputPermuteStr */,
+                                    "" /* scaleStr */,
                                     negStr,
                                     false /* reuseA */,
                                     false /* reuseB */,
@@ -704,6 +711,12 @@ namespace
         }
     }
 
+    enum VgprMsbValue : int
+    {
+        NOT_REQUIRED = -1,
+        LABEL_BEGIN  = -2,
+    };
+
     /// Compute required MSB setVal from StinkyInstruction's VGPR register usage.
     /// Uses same encoding as rocisa: setVal = msbSrc[0] + (msbSrc[1]<<2) + (msbSrc[2]<<4) + (msbDst<<6)
     /// \return (setVal, hasVgpr). setVal is -1 when hasVgpr is false.
@@ -719,7 +732,7 @@ namespace
            || inst->is(InstFlag::IF_Branch) || inst->is(InstFlag::IF_Barrier)
            || inst->is(InstFlag::IF_WaitCnt) || inst->is(InstFlag::IF_HasSideEffect))
         {
-            return {-1, false};
+            return {VgprMsbValue::NOT_REQUIRED, false};
         }
 
         int  msbSrc[3] = {0, 0, 0};
@@ -729,7 +742,7 @@ namespace
         collectVgprMsbFromStinkyInst(inst, msbSrc, msbDst, hasVgpr);
 
         if(!hasVgpr)
-            return {-1, false};
+            return {VgprMsbValue::NOT_REQUIRED, false};
 
         int setVal = msbSrc[0] + (msbSrc[1] << 2) + (msbSrc[2] << 4) + (msbDst << 6);
         return {setVal, true};
@@ -747,13 +760,34 @@ namespace
     {
         if(!hasVgpr || requiredSetVal == currentVgprMsb)
         {
+            if(currentVgprMsb == VgprMsbValue::LABEL_BEGIN)
+                currentVgprMsb = VgprMsbValue::NOT_REQUIRED;
             return;
         }
+
+        if(currentVgprMsb == VgprMsbValue::LABEL_BEGIN)
+        {
+            StinkyInstruction* nopInst
+                = irBuilder.create(getMCIDByUOp(GFX::s_nop, archId), insertBefore);
+            nopInst->addSrcReg(StinkyRegister(0));
+        }
+
+        int combinedSetVal = requiredSetVal;
+        if(currentVgprMsb != VgprMsbValue::NOT_REQUIRED
+           && currentVgprMsb != VgprMsbValue::LABEL_BEGIN)
+            combinedSetVal += (currentVgprMsb << 8);
 
         const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
         assert(desc != nullptr && "s_set_vgpr_msb is not supported on this architecture");
         StinkyInstruction* msbInst = irBuilder.create(desc, insertBefore);
-        msbInst->addSrcReg(StinkyRegister(requiredSetVal));
+        msbInst->addSrcReg(StinkyRegister(combinedSetVal));
+
+        std::string msbComment
+            = std::string("src0: " + std::to_string(requiredSetVal & 0x3)
+                          + ", src1: " + std::to_string((requiredSetVal >> 2) & 0x3)
+                          + ", src2: " + std::to_string((requiredSetVal >> 4) & 0x3)
+                          + ", dst: " + std::to_string((requiredSetVal >> 6) & 0x3));
+        msbInst->addModifier<CommentData>(CommentData{msbComment});
         currentVgprMsb = requiredSetVal;
     }
 
@@ -998,7 +1032,7 @@ namespace stinkytofu
         std::map<std::string, int> asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
         bool hasVgprMsb = asmCaps.count("HasVgprMSB") && asmCaps.at("HasVgprMSB");
 
-        int  currentVgprMsb = -1;
+        int  currentVgprMsb = VgprMsbValue::NOT_REQUIRED;
         auto processItem    = [&](rocisa::Item*                          item,
                                const std::vector<const std::string*>& moduleNames) {
             const auto instsCountBefore = currentBB->size();
@@ -1017,7 +1051,8 @@ namespace stinkytofu
             // Handle labels
             if(rocisa::Label* rocLabel = dynamic_cast<rocisa::Label*>(item))
             {
-                StinkyInstruction* labelInst = irBuilder.createLabel(rocLabel->getLabelName());
+                StinkyInstruction* labelInst
+                    = irBuilder.createLabel(rocLabel->getLabelName(), rocLabel->alignment);
 
                 // Add comment if present
                 if(!rocLabel->comment.empty())
@@ -1026,7 +1061,7 @@ namespace stinkytofu
                 }
 
                 stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
-                currentVgprMsb = -1;
+                currentVgprMsb = VgprMsbValue::LABEL_BEGIN;
                 return;
             }
 

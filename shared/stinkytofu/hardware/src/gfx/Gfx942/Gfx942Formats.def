@@ -24,6 +24,15 @@
 //==============================================================================
 // GFX942 (CDNA3) INSTRUCTION FORMAT DEFINITIONS
 //
+// Architecture metadata (must appear before DEF_FORMAT)
+//------------------------------------------------------------------------------
+DEF_ARCH(Gfx942,
+    .major = 9, .minor = 4, .stepping = 2,
+    .wavefront = 64,
+    .maxVGPR = 256, .maxSGPR = 102, .maxAGPR = 256,
+    .defaultCycle = 4, .defaultLatency = 4)
+
+//------------------------------------------------------------------------------
 // This file defines default properties for each instruction encoding format.
 // Instructions using a format inherit its defaults and can optionally override them.
 //

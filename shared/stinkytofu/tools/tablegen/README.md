@@ -97,121 +97,15 @@ Instructions are defined using a declarative C++ DSL:
 
 ## Adding a New Architecture
 
-1. **Declare architecture function:**
-   ```cpp
-   // hardware/include/gfx/GpuArchManager.hpp
-   namespace stinkytofu {
-       void defineGfx942Insts(GpuArch& registry);
-       void defineGfx950Insts(GpuArch& registry);
-       void defineGfx1000Insts(GpuArch& registry);  // Add declaration
-   }
-   ```
+See the full guide: [How to Add a New Architecture](../../docs/developer-guide/how-to-add-new-architecture.md).
 
-2. **Implement instruction set:**
-   ```cpp
-   // hardware/src/gfx/Gfx1000/Gfx1000.cpp
-   #include "gfx/GpuArchManager.hpp"
-   #include "gfx/InstDefDSL.hpp"
+**Summary:** Add your arch to `cmake/StinkytofuArchList.cmake` and `Config.h.in`. Create `hardware/src/gfx/GfxYourArch/` with:
+- `arch.cmake` -- ARCH_MAJOR, ARCH_WAVEFRONT, ARCH_DEFAULT_CYCLE, ARCH_MAX_VGPR, etc.
+- `GfxYourArchInstructions.def` -- DEF_T for all instructions (tablegen generates `*_init.inc`, `*_costs.inc`)
+- `GfxYourArchFormats.def`
+- `GfxYourArch.cpp` -- only `setGfxYourArchLogicalToArchMap`, `setGfxYourArchRocisaToArchMap`, `setGfxYourArchConversionMap`
 
-   namespace stinkytofu {
-       void defineGfx1000Insts(GpuArch& registry) {
-           DEF_T(SALU, "s_add_i32");
-           DEF_T(SALU, "s_mul_i32");
-           DEF_T(DSRead, "ds_read_b32");
-           // ... more instructions
-       }
-   }
-   ```
-
-3. **Register architecture:**
-   ```cpp
-   // hardware/src/gfx/GpuArchManager.cpp
-   bool GpuArchManager::initAllArchs(GpuArchManager& manager,
-                                     const std::string& hardwareDir) {
-       manager.addArch("gfx942", defineGfx942Insts, hardwareDir);
-       manager.addArch("gfx950", defineGfx950Insts, hardwareDir);
-       manager.addArch("gfx1000", defineGfx1000Insts, hardwareDir);  // Add here
-
-       manager.enumAllOpcodes();
-       // ... error checking
-   }
-   ```
-
-4. **Add logical-to-architecture instruction mappings:**
-   ```cpp
-   // tools/tablegen/GenRocisaHwMapping.cpp
-   static Map getGfx1000LogicalToArchMappings() {
-       return {
-           {"SAddI32", "s_add_i32"},
-           {"DSReadB32", "ds_read_b32"},
-           // ... more simple one-to-one mappings
-       };
-   }
-
-   static Map getGfx1000Conversion() {
-       return {
-           {"MFMAInstruction", "lowerRocisaMFMA"},
-           // ... complex conversion functions
-       };
-   }
-
-   bool genAllArchRocisaMappings(GpuArchManager& manager, const std::string& outdir) {
-       // ... existing architectures
-       success &= genRocisaMappings(
-           manager, "gfx1000", outdir,
-           getGfx1000LogicalToArchMappings(),
-           getGfx1000Conversion());
-       return success;
-   }
-   ```
-
-5. **Add instruction costs in the architecture file:**
-   ```cpp
-   // In hardware/src/gfx/Gfx1000/Gfx1000.cpp
-   namespace {
-       struct InstructionCost {
-           const char* opcode;
-           uint16_t cycle;
-           uint16_t latency;
-       };
-
-       constexpr InstructionCost GFX1000_COSTS[] = {
-           {"buffer_load_dword", 12, 108},
-           {"ds_read_b32", 4, 48},
-           // ... add exception costs
-       };
-
-       constexpr uint16_t GFX1000_DEFAULT_CYCLE = 1;
-       constexpr uint16_t GFX1000_DEFAULT_LATENCY = 1;
-   }
-
-   void defineGfx1000Insts(GpuArch& registry) {
-       registry.setDefaultCosts(GFX1000_DEFAULT_CYCLE, GFX1000_DEFAULT_LATENCY);
-
-       // ... define instructions
-
-       for(const auto& cost : GFX1000_COSTS) {
-           registry.setInstructionCost(cost.opcode, cost.cycle, cost.latency);
-       }
-
-       if(!registry.applyInstructionCosts()) {
-           std::cerr << "FATAL: Failed to apply instruction costs\n";
-           return;
-       }
-   }
-   ```
-
-6. **Update build:**
-   ```cmake
-   # hardware/CMakeLists.txt
-   set(GFX_SOURCES
-      src/gfx/Gfx942/Gfx942.cpp
-      src/gfx/Gfx950/Gfx950.cpp
-      src/gfx/Gfx1000/Gfx1000.cpp  # Add new arch folder + file
-       src/gfx/GpuArchManager.cpp
-       src/gfx/InstDefDSL.cpp
-   )
-   ```
+Update `tools/tablegen/CMakeLists.txt` to add your arch to INSTRUCTION_GEN_FILES and INSTRUCTION_DEF_FILES. The `defineGfxYourArchInsts` and cost application are **auto-generated** from templates.
 
 ## Build Integration
 

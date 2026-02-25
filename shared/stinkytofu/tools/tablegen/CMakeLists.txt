@@ -71,9 +71,14 @@ foreach(arch Gfx1250 Gfx942 Gfx950)
     list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/${arch}_costs.inc")
     list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/${arch}_init.inc")
     list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/${arch}_operands.inc")
+    list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/${arch}_block.inc")
     list(APPEND INSTRUCTION_GEN_FILES "${TABLEGEN_OUTPUT_DIR}/hardware/${arch}Isa.inc")
+    list(APPEND INSTRUCTION_GEN_FILES "${TABLEGEN_OUTPUT_DIR}/hardware/arch_headers/${arch}.hpp")
 endforeach()
 list(APPEND INSTRUCTION_GEN_FILES "${TABLEGEN_OUTPUT_DIR}/hardware/gfxIsa.inc")
+list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/GfxArchDefines.cpp")
+list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/GfxLogicalMaps.cpp")
+list(APPEND INSTRUCTION_GEN_FILES "${TABLEGEN_OUTPUT_DIR}/hardware/arch_headers/ArchHelper_includes.inc")
 list(APPEND TABLEGEN_GENERATED_FILES ${INSTRUCTION_GEN_FILES})
 set(INSTRUCTION_DEF_FILES
     "${INSTRUCTION_DEF_BASE_DIR}/Gfx1250/Gfx1250Formats.def"
@@ -88,6 +93,7 @@ set(INSTRUCTION_DEF_FILES
 add_custom_command(
     OUTPUT ${INSTRUCTION_GEN_FILES}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/hardware/generated"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/hardware/arch_headers"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/hardware"
     COMMAND $<TARGET_FILE:tablegen_inst_gen> --input-dir="${INSTRUCTION_DEF_BASE_DIR}" --output-dir="${TABLEGEN_OUTPUT_DIR}"
     DEPENDS tablegen_inst_gen ${INSTRUCTION_DEF_FILES}

@@ -77,6 +77,21 @@ namespace stinkytofu
         }
     };
 
+    // Architecture metadata (from DEF_ARCH in Formats.def)
+    struct ArchDef
+    {
+        std::string name;
+        int         major          = 0;
+        int         minor          = 0;
+        int         stepping       = 0;
+        int         wavefront      = 64;
+        int         maxVGPR        = 256;
+        int         maxSGPR        = 102;
+        int         maxAGPR        = 0;
+        int         defaultCycle   = 4;
+        int         defaultLatency = 4;
+    };
+
     // Format definition (provides defaults for instructions)
     // Hardware formats (VOP1, VOP3P, MUBUF, SMRD, etc.) are defined first; opcode-family
     // formats (e.g. MFMA on CDNA) can inherit from a hardware format via .parent.
@@ -114,9 +129,11 @@ namespace stinkytofu
         std::vector<OperandSpec>       operands; // Operand specifications
         std::vector<OperandWidthEntry> operandWidths; // Register width/type for verifier
         std::vector<std::string>       flags; // Instruction-specific flags
-        std::string                    unit; // Override format unit
-        std::string                    pipeline; // Override format pipeline
-        std::vector<std::string>       modifiers; // Override/restrict format modifiers
+        std::vector<std::string>
+            logical; // Logical IR names mapping to this mnemonic: .logical = {"A", "B"} or .logical = "A"
+        std::string              unit; // Override format unit
+        std::string              pipeline; // Override format pipeline
+        std::vector<std::string> modifiers; // Override/restrict format modifiers
 
         // After format inheritance applied
         std::vector<std::string> finalFlags; // Merged format + instance flags
@@ -133,8 +150,9 @@ namespace stinkytofu
     {
     public:
         DefTParser(const std::string& arch)
-            : arch_(arch)
+            : archName_(arch)
         {
+            arch_.name = arch;
         }
 
         // Parse format definitions file
@@ -242,6 +260,10 @@ namespace stinkytofu
         }
 
         // Get parsed data
+        const ArchDef& getArch() const
+        {
+            return arch_;
+        }
         const std::map<std::string, FormatDef>& getFormats() const
         {
             return formats_;
@@ -252,13 +274,54 @@ namespace stinkytofu
         }
 
     private:
-        std::string                      arch_;
+        std::string                      archName_;
+        ArchDef                          arch_;
         std::map<std::string, FormatDef> formats_;
         std::vector<InstructionDef>      instructions_;
 
         bool parseFormatContent(const std::string& content)
         {
-            // Minimal parser for proof-of-concept
+            // Parse DEF_ARCH(...) first (optional; overrides arch name and metadata)
+            size_t defArchPos = content.find("DEF_ARCH(");
+            if(defArchPos != std::string::npos)
+            {
+                size_t nameStart = defArchPos + 9;
+                size_t nameEnd   = content.find(",", nameStart);
+                if(nameEnd != std::string::npos)
+                {
+                    arch_.name = content.substr(nameStart, nameEnd - nameStart);
+                    arch_.name.erase(0, arch_.name.find_first_not_of(" \t\n\r"));
+                    arch_.name.erase(arch_.name.find_last_not_of(" \t\n\r") + 1);
+
+                    size_t blockEnd = findMatchingParen(content, nameEnd);
+                    if(blockEnd != std::string::npos)
+                    {
+                        std::string block = content.substr(nameEnd, blockEnd - nameEnd);
+                        parseFieldInt(block, ".major", arch_.major);
+                        parseFieldInt(block, ".minor", arch_.minor);
+                        parseFieldInt(block, ".stepping", arch_.stepping);
+                        parseFieldInt(block, ".wavefront", arch_.wavefront);
+                        parseFieldInt(block, ".maxVGPR", arch_.maxVGPR);
+                        parseFieldInt(block, ".maxSGPR", arch_.maxSGPR);
+                        parseFieldInt(block, ".maxAGPR", arch_.maxAGPR);
+                        parseFieldInt(block, ".defaultCycle", arch_.defaultCycle);
+                        parseFieldInt(block, ".defaultLatency", arch_.defaultLatency);
+                    }
+                }
+            }
+            else
+            {
+                arch_.major          = 9;
+                arch_.minor          = 4;
+                arch_.stepping       = 0;
+                arch_.wavefront      = 64;
+                arch_.maxVGPR        = 256;
+                arch_.maxSGPR        = 102;
+                arch_.maxAGPR        = 0;
+                arch_.defaultCycle   = 4;
+                arch_.defaultLatency = 4;
+            }
+
             // Parse DEF_FORMAT(...) blocks
             size_t pos = 0;
             while((pos = content.find("DEF_FORMAT(", pos)) != std::string::npos)
@@ -344,6 +407,7 @@ namespace stinkytofu
                 parseFieldCost(block, ".cost", inst.cycle, inst.latency);
                 parseFieldFlags(block, ".flags", inst.flags);
                 parseFieldOperandWidths(block, inst.operandWidths);
+                parseFieldLogical(block, inst.logical);
 
                 instructions_.push_back(inst);
                 pos = blockEnd;
@@ -390,6 +454,9 @@ namespace stinkytofu
             out = block.substr(valStart, valEnd - valStart);
             out.erase(0, out.find_first_not_of(" \t\n\r"));
             out.erase(out.find_last_not_of(" \t\n\r,") + 1);
+            // Strip surrounding quotes for string values (e.g. .logical = "VCmpEQF32")
+            if(out.size() >= 2 && out.front() == '"' && out.back() == '"')
+                out = out.substr(1, out.size() - 2);
         }
 
         // Helper: Parse integer field
@@ -457,6 +524,52 @@ namespace stinkytofu
                     flags.push_back(flag);
 
                 start = end + 1;
+            }
+        }
+
+        // Helper: Parse .logical = "X" or .logical = {"X", "Y"}
+        void parseFieldLogical(const std::string& block, std::vector<std::string>& out)
+        {
+            size_t pos = block.find(".logical");
+            if(pos == std::string::npos)
+                return;
+
+            size_t eqPos = block.find("=", pos);
+            if(eqPos == std::string::npos)
+                return;
+
+            size_t valStart = eqPos + 1;
+            valStart        = block.find_first_not_of(" \t\n\r", valStart);
+            if(valStart == std::string::npos)
+                return;
+
+            if(block[valStart] == '{')
+            {
+                // .logical = {"X", "Y"}
+                size_t rbrace = block.find("}", valStart);
+                if(rbrace == std::string::npos)
+                    return;
+                std::string inner = block.substr(valStart + 1, rbrace - valStart - 1);
+                size_t      start = 0;
+                while(start < inner.size())
+                {
+                    size_t end = inner.find(",", start);
+                    if(end == std::string::npos)
+                        end = inner.size();
+                    std::string s = inner.substr(start, end - start);
+                    s.erase(0, s.find_first_not_of(" \t\n\r\""));
+                    s.erase(s.find_last_not_of(" \t\n\r\"") + 1);
+                    if(!s.empty())
+                        out.push_back(s);
+                    start = end + 1;
+                }
+            }
+            else if(block[valStart] == '"')
+            {
+                // .logical = "X"
+                size_t endQuote = block.find('"', valStart + 1);
+                if(endQuote != std::string::npos)
+                    out.push_back(block.substr(valStart + 1, endQuote - valStart - 1));
             }
         }
 
@@ -867,6 +980,237 @@ namespace stinkytofu
         return true;
     }
 
+    // Emit GfxXXX.hpp (ArchInfo class) - replaces GfxArch.hpp.in
+    static bool emitArchHeader(const ArchDef& arch, const std::string& outputPath)
+    {
+        std::ofstream out(outputPath);
+        if(!out)
+        {
+            std::cerr << "Error: Cannot write " << outputPath << "\n";
+            return false;
+        }
+        out << "/* ************************************************************************\n"
+            << " * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.\n"
+            << " *\n"
+            << " * Permission is hereby granted, free of charge, to any person obtaining a copy\n"
+            << " * of this software and associated documentation files (the \"Software\"), to "
+               "deal\n"
+            << " * in the Software without restriction, including without limitation the rights\n"
+            << " * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n"
+            << " * copies of the Software, and to permit persons to whom the Software is\n"
+            << " * furnished to do so, subject to the following conditions:\n"
+            << " *\n"
+            << " * THE SOFTWARE IS PROVIDED \"AS IS\" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n"
+            << " * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n"
+            << " * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.\n"
+            << " * ************************************************************************ */\n"
+            << "#pragma once\n\n"
+            << "#include \"stinkytofu/hardware/ArchHelper.hpp\"\n"
+            << "#include \"stinkytofu/ir/asm/StinkyAsmIR.hpp\"\n\n"
+            << "#include <mutex>\n\n"
+            << "// Auto-generated from Formats.def + Instructions.def - do not edit manually.\n\n"
+            << "namespace\n{\n\n"
+            << "#define GET_ISAINFO_UOP_MAPPINGS\n"
+            << "#include \"hardware/" << arch.name << "Isa.inc\"\n\n"
+            << "}\n\n"
+            << "using namespace stinkytofu;\n\n"
+            << "// clang-format off\n"
+            << "struct " << arch.name << "ArchInfo : public ArchHelper::ArchInfo\n"
+            << "{\n"
+            << "    " << arch.name << "ArchInfo()\n"
+            << "        : ArchInfo(" << arch.major << ", " << arch.minor << ", " << arch.stepping
+            << ", " << arch.wavefront << " /* waveFrontSize */)\n"
+            << "    {\n"
+            << "    }\n\n"
+            << "    IsaOpcode getIsaOpcode(UnifiedOpcode unifiedOpcode) const override\n"
+            << "    {\n"
+            << "        return get" << arch.name << "Opcode(unifiedOpcode);\n"
+            << "    }\n\n"
+            << "    const HwInstDesc* getMCIDTable() const override\n"
+            << "    {\n"
+            << "#define GET_ISAINFO_HWINSTDESC_TABLE\n"
+            << "#include \"hardware/" << arch.name << "Isa.inc\"\n"
+            << "#include \"hardware/generated/" << arch.name << "_operands.inc\"\n\n"
+            << "        static std::once_flag once;\n"
+            << "        std::call_once(once, [] {\n"
+            << "            for(const auto& req : instRequirements)\n"
+            << "            {\n"
+            << "                for(size_t i = 0; i < sizeof(MCIDTable) / sizeof(MCIDTable[0]); "
+               "++i)\n"
+            << "                {\n"
+            << "                    if(MCIDTable[i].mnemonic && std::string(MCIDTable[i].mnemonic) "
+               "== req.mnemonic)\n"
+            << "                    {\n"
+            << "                        const_cast<HwInstDesc&>(MCIDTable[i]).operandWidths = "
+               "req.requirements;\n"
+            << "                        break;\n"
+            << "                    }\n"
+            << "                }\n"
+            << "            }\n"
+            << "        });\n\n"
+            << "        return MCIDTable;\n"
+            << "    }\n\n"
+            << "    const std::unordered_map<std::string, uint16_t>& getMnemonicToIsaOpcodeMap() "
+               "const override\n"
+            << "    {\n"
+            << "#define GET_ISAINFO_MNEMONIC_TO_OPCODE_MAPPINGS\n"
+            << "#include \"hardware/" << arch.name << "Isa.inc\"\n"
+            << "        return MnemonicToIsaOpcodeMap;\n"
+            << "    }\n"
+            << "};\n"
+            << "// clang-format on\n";
+        return true;
+    }
+
+    // Emit GfxXXX_block.inc (defineGfxXXXInsts) - replaces GfxArchDefines_block.inc.in
+    static bool emitArchDefinesBlock(const ArchDef& arch, const std::string& outputPath)
+    {
+        std::ofstream out(outputPath);
+        if(!out)
+        {
+            std::cerr << "Error: Cannot write " << outputPath << "\n";
+            return false;
+        }
+        out << "// clang-format off\n"
+            << "// Per-arch block: costs + define" << arch.name << "Insts().\n"
+            << "namespace {\n"
+            << "#include \"hardware/generated/" << arch.name << "_costs.inc\"\n"
+            << "}\n\n"
+            << "void define" << arch.name << "Insts(GpuArch& registry)\n"
+            << "{\n"
+            << "    registry.setWaveFrontSize(" << arch.wavefront << ");\n"
+            << "    GpuArch::RegisterLimits limits;\n"
+            << "    limits.maxVGPR = " << arch.maxVGPR << ";\n"
+            << "    limits.maxSGPR = " << arch.maxSGPR << ";\n"
+            << "    limits.maxAGPR = " << arch.maxAGPR << ";\n"
+            << "    if(limits.maxVGPR == 0 || limits.maxSGPR == 0)\n"
+            << "    {\n"
+            << "        std::cerr << \"FATAL: " << arch.name
+            << " must define maxVGPR, maxSGPR > 0 in Formats.def (maxAGPR may be 0)\\n\";\n"
+            << "        return;\n"
+            << "    }\n"
+            << "    registry.setRegisterLimits(limits);\n"
+            << "    // Instruction definitions: generated from " << arch.name
+            << "Instructions.def\n"
+            << "#include \"hardware/generated/" << arch.name << "_init.inc\"\n"
+            << "    registry.setDefaultCosts(" << arch.defaultCycle << ", " << arch.defaultLatency
+            << ");\n"
+            << "    for(const auto& cost : " << arch.name << "_GENERATED_COSTS)\n"
+            << "    {\n"
+            << "        registry.setInstructionCost(cost.opcode, cost.cycle, cost.latency);\n"
+            << "    }\n"
+            << "    if(!registry.applyInstructionCosts())\n"
+            << "    {\n"
+            << "        std::cerr << \"FATAL: Failed to apply instruction costs for " << arch.name
+            << "\\n\";\n"
+            << "        return;\n"
+            << "    }\n"
+            << "}\n"
+            << "// clang-format on\n";
+        return true;
+    }
+
+    // Emit GfxArchDefines.cpp - replaces GfxArchDefines.cpp.in
+    static bool emitGfxArchDefinesCpp(const std::vector<std::string>& archs,
+                                      const std::string&              outputPath)
+    {
+        std::ofstream out(outputPath);
+        if(!out)
+        {
+            std::cerr << "Error: Cannot write " << outputPath << "\n";
+            return false;
+        }
+        out << "/* ************************************************************************\n"
+            << " * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.\n"
+            << " * ...\n"
+            << " * ************************************************************************ */\n\n"
+            << "#include <iostream>\n\n"
+            << "#include \"gfx/InstDefDSL.hpp\"\n"
+            << "#include \"gfx/InstructionCost.hpp\"\n\n"
+            << "// clang-format off\n"
+            << "namespace stinkytofu\n"
+            << "{\n";
+        for(const auto& arch : archs)
+            out << "    #include \"hardware/generated/" << arch << "_block.inc\"\n";
+        out << "}\n"
+            << "// clang-format on\n";
+        return true;
+    }
+
+    // Emit GfxLogicalMaps.cpp - setGfxXXXLogicalToArchMap from .logical in DEF_T
+    static bool emitGfxLogicalMapsCpp(
+        const std::map<std::string, std::vector<InstructionDef>>& archInstructions,
+        const std::vector<std::string>&                           archs,
+        const std::string&                                        outputPath)
+    {
+        std::ofstream out(outputPath);
+        if(!out)
+        {
+            std::cerr << "Error: Cannot write " << outputPath << "\n";
+            return false;
+        }
+        out << "/* ************************************************************************\n"
+            << " * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.\n"
+            << " * Auto-generated from .logical in Instructions.def - do not edit manually.\n"
+            << " * ************************************************************************ */\n\n"
+            << "#include <string>\n"
+            << "#include <unordered_map>\n\n"
+            << "#include \"gfx/InstDefDSL.hpp\"\n\n"
+            << "namespace stinkytofu\n{\n";
+
+        for(const auto& arch : archs)
+        {
+            auto it = archInstructions.find(arch);
+            if(it == archInstructions.end())
+                continue;
+            const auto& insts = it->second;
+            out << "\nvoid set" << arch << "LogicalToArchMap(GpuArch& registry)\n{\n"
+                << "    std::unordered_map<std::string, std::string> logicalToHwInstMap = {\n";
+            size_t count = 0;
+            for(const auto& inst : insts)
+            {
+                for(const auto& logicalName : inst.logical)
+                {
+                    if(!logicalName.empty())
+                    {
+                        if(count > 0)
+                            out << ",\n";
+                        out << "        {\"" << logicalName << "\", \"" << inst.mnemonic << "\"}";
+                        count++;
+                    }
+                }
+            }
+            out << "\n    };\n"
+                << "    registry.setLogicalToArchMap(std::move(logicalToHwInstMap));\n"
+                << "}\n";
+        }
+        out << "}\n";
+        return true;
+    }
+
+    // Emit ArchHelper_includes.inc
+    static bool emitArchHelperIncludes(const std::vector<std::string>& archs,
+                                       const std::string&              outputPath)
+    {
+        std::ofstream out(outputPath);
+        if(!out)
+        {
+            std::cerr << "Error: Cannot write " << outputPath << "\n";
+            return false;
+        }
+        out << "/* Architecture-specific ArchInfo headers. */\n";
+        for(const auto& arch : archs)
+        {
+            std::string archUpper = arch;
+            for(char& c : archUpper)
+                c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            out << "#ifdef STINKYTOFU_ARCH_" << archUpper << "\n"
+                << "#include \"" << arch << ".hpp\"\n"
+                << "#endif\n\n";
+        }
+        return true;
+    }
+
     //==========================================================================
     // MAIN ENTRY POINT
     //==========================================================================
@@ -929,12 +1273,13 @@ namespace stinkytofu
     }
 
     // Generate for all archs from .def and emit ISA .inc (so full tablegen does not need gfxisa for ISA).
-    // Single run: *.def -> costs, init, operands, *Isa.inc, gfxIsa.inc -> one build.
+    // Single run: *.def -> costs, init, operands, *Isa.inc, gfxIsa.inc, GfxXXX.hpp, *_block.inc, GfxArchDefines.cpp -> one build.
     bool genAllInstructions(const std::string& inputDir, const std::string& outputDir)
     {
         const std::vector<std::string> archs = {"Gfx1250", "Gfx942", "Gfx950"};
 
         std::map<std::string, std::vector<InstructionDef>> archInstructions;
+        std::map<std::string, ArchDef>                     archDefs;
         for(const std::string& arch : archs)
         {
             std::string formatFile = inputDir + "/" + arch + "/" + arch + "Formats.def";
@@ -952,6 +1297,7 @@ namespace stinkytofu
             }
             parser.applyFormatDefaults();
             archInstructions[arch] = parser.getInstructions();
+            archDefs[arch]         = parser.getArch();
         }
 
         // Build unified mnemonic list (sorted, + LABEL, INVALID) and map mnemonic -> index
@@ -970,11 +1316,13 @@ namespace stinkytofu
         std::filesystem::path outPath(outputDir);
         if(!outPath.is_absolute())
             outPath = std::filesystem::absolute(outPath);
-        std::filesystem::path hwDir  = outPath / "hardware";
-        std::filesystem::path genDir = hwDir / "generated";
+        std::filesystem::path hwDir      = outPath / "hardware";
+        std::filesystem::path genDir     = hwDir / "generated";
+        std::filesystem::path archHdrDir = hwDir / "arch_headers";
         std::error_code       ec;
         std::filesystem::create_directories(hwDir, ec);
         std::filesystem::create_directories(genDir, ec);
+        std::filesystem::create_directories(archHdrDir, ec);
         if(!std::filesystem::is_directory(genDir) || !std::filesystem::is_directory(hwDir))
         {
             std::cerr << "Error: Output directories missing or not usable: " << genDir.string()
@@ -986,6 +1334,7 @@ namespace stinkytofu
         for(const std::string& arch : archs)
         {
             const std::vector<InstructionDef>& insts = archInstructions[arch];
+            const ArchDef&                     ad    = archDefs[arch];
             InstructionCodeGen                 codegen(arch, insts);
             success &= codegen.generateCostTable((genDir / (arch + "_costs.inc")).string());
             success &= codegen.generateOperandRequirements(
@@ -993,8 +1342,14 @@ namespace stinkytofu
             success &= codegen.generateInitFile((genDir / (arch + "_init.inc")).string());
             success &= emitArchIsaFile(
                 arch, insts, unifiedOpcodeMap, (hwDir / (arch + "Isa.inc")).string());
+            success &= emitArchHeader(ad, (archHdrDir / (arch + ".hpp")).string());
+            success &= emitArchDefinesBlock(ad, (genDir / (arch + "_block.inc")).string());
         }
         success &= emitGfxIsaFile(unifiedList, (hwDir / "gfxIsa.inc").string());
+        success &= emitGfxArchDefinesCpp(archs, (genDir / "GfxArchDefines.cpp").string());
+        success &= emitGfxLogicalMapsCpp(
+            archInstructions, archs, (genDir / "GfxLogicalMaps.cpp").string());
+        success &= emitArchHelperIncludes(archs, (archHdrDir / "ArchHelper_includes.inc").string());
 
         if(success)
             std::cout << "Successfully generated instruction metadata and ISA for all archs\n";
