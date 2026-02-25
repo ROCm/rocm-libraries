@@ -12,11 +12,7 @@
 #include "../workspace.hpp"
 
 #include <math.h>
-
-#define MIO_GRU_TEST_DEBUG 1
-
-namespace
-{
+namespace {
 /**********************************************
  * CPU verification functions
  *
@@ -1758,7 +1754,6 @@ inline std::vector<int> GenBatchSeq(const int batchSize, const int seqLength)
     return batchSeq;
 }
 
-
 //****************************************************
 // FORWARD INFERENCE
 //****************************************************
@@ -1823,11 +1818,6 @@ struct verify_forward_infer_gru
 
     std::tuple<std::vector<T>> cpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-
         auto&& handle = get_handle();
 
         int bi        = dirMode != 0 ? 2 : 1;
@@ -1857,10 +1847,6 @@ struct verify_forward_infer_gru
         std::vector<T> output(out_sz / sizeof(T));
         std::vector<T> hiddenState(initHidden.size());
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
-
         GRUFwdCPUVerify(handle,
                         false,
                         miopen::deref(miopen::deref(rnnDesc).dropoutDesc),
@@ -1886,38 +1872,11 @@ struct verify_forward_infer_gru
                         inputMode,
                         reserveSpace,
                         nohx);
-
-#if(MIO_GRU_TEST_DEBUG == 2)
-        for(int i = 0; i < output.size(); i++)
-        {
-            std::cout << "CPU outdata[" << i << "]: "output[i] << "\n";
-        }
-#endif
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: CPU forward inference GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-
-        std::cout << "Wall clock: CPU forward inference GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU forward inference CPU" << std::endl;
-        std::cout << "---------------------------------\n" << std::endl;
-#endif
         return std::make_tuple(output);
     }
 
     std::tuple<std::vector<T>> gpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
         auto&& handle = get_handle();
 
         size_t out_sz         = 0;
@@ -1959,11 +1918,6 @@ struct verify_forward_infer_gru
         std::vector<int> wlen(1, 0);
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
-
         miopenRNNForwardInference(&handle,
                                   rnnDesc,
                                   seqLength,
@@ -1983,29 +1937,6 @@ struct verify_forward_infer_gru
                                   nullptr,
                                   wspace.ptr(),
                                   wspace.size());
-
-#if(MIO_GRU_TEST_DEBUG == 2)
-        auto outdata = handle.Read<T>(output_dev, output.size());
-        for(int i = 0; i < outdata.size(); i++)
-        {
-            std::cout << "GPU outdata[" << i << "]: " << outdata[i] << "\n";
-        }
-#endif
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: GPU forward_infer GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-
-        std::cout << "Wall clock: GPU forward_infer GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU forward inference GPU" << std::endl;
-#endif
         return std::make_tuple((handle.Read<T>(output_dev, output.size())));
     }
 
@@ -2024,14 +1955,14 @@ struct verify_forward_infer_gru
                 ss << batch_seq.at(i);
             }
         }
-        ss << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen
-                  << " -l " << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p "
-                  << inputMode << std::endl;
+        ss << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
+           << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p " << inputMode
+           << std::endl;
 
-        ss << "inputMode: " << inputMode << " biasMode: " << biasMode
-                  << " dirMode: " << dirMode << std::endl;
+        ss << "inputMode: " << inputMode << " biasMode: " << biasMode << " dirMode: " << dirMode
+           << std::endl;
         ss << "hz: " << hiddenSize << " batch_n: " << batch_n << " seqLength: " << seqLength
-                  << " inputLen: " << inputVecLen << " numLayers: " << nLayers << std::endl;
+           << " inputLen: " << inputVecLen << " numLayers: " << nLayers << std::endl;
         ss << "Forward Inference GRU: " << std::endl;
         ss << "Output tensor output failed verification." << std::endl;
         GTEST_FAIL() << ss.str();
@@ -2106,11 +2037,6 @@ struct verify_forward_train_gru
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> cpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-
         auto&& handle = get_handle();
 
         int bi        = dirMode != 0 ? 2 : 1;
@@ -2139,10 +2065,6 @@ struct verify_forward_train_gru
         std::vector<T> output(out_sz / sizeof(T));
         std::vector<T> hiddenState(initHidden.size());
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
-
         GRUFwdCPUVerify(handle,
                         use_dropout,
                         miopen::deref(miopen::deref(rnnDesc).dropoutDesc),
@@ -2169,40 +2091,12 @@ struct verify_forward_train_gru
                         reserveSpace,
                         nohx);
 
-#if(MIO_GRU_TEST_DEBUG == 2)
-        for(int i = 0; i < output.size(); i++)
-        {
-            std::cout << "CPU outdata[" << i << "]: " << output[i] << "\n";
-        }
-#endif
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: CPU forward train GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-        std::cout << "Wall clock: CPU forward train GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-
         auto retSet = std::make_tuple(output, (nohy ? initHidden : hiddenState), reserveSpace);
-
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU forward train CPU" << std::endl;
-        std::cout << "---------------------------------\n" << std::endl;
-#endif
         return retSet;
     }
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> gpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-
         auto&& handle = get_handle();
 
         size_t out_sz           = 0;
@@ -2253,10 +2147,6 @@ struct verify_forward_train_gru
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
-
         miopenRNNForwardTraining(&handle,
                                  rnnDesc,
                                  seqLength,
@@ -2280,31 +2170,10 @@ struct verify_forward_train_gru
                                  rspace.size());
 
         auto outdata = handle.Read<T>(output_dev, output.size());
-#if(MIO_GRU_TEST_DEBUG == 2)
-        for(int i = 0; i < outdata.size(); i++)
-        {
-            std::cout << "GPU outdata[" << i << "]: " << outdata[i] << "\n";
-        }
-#endif
 
         auto retSet = std::make_tuple(outdata,
                                       (nohy ? initHidden : handle.Read<T>(hy_dev, hy.size())),
                                       rspace.Read<std::vector<T>>());
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: GPU forward_train GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-
-        std::cout << "Wall clock: GPU forward_train GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with RNN forward train GPU" << std::endl;
-#endif
         return retSet;
     }
 
@@ -2323,15 +2192,15 @@ struct verify_forward_train_gru
                 ss << batch_seq.at(i);
             }
         }
-        ss << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen
-                  << " -l " << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p "
-                  << inputMode << std::endl;
+        ss << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
+           << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p " << inputMode
+           << std::endl;
 
-        ss << "inputMode: " << inputMode << " biasMode: " << biasMode
-                  << " dirMode: " << dirMode << std::endl;
+        ss << "inputMode: " << inputMode << " biasMode: " << biasMode << " dirMode: " << dirMode
+           << std::endl;
         ss << "hz: " << hiddenSize << " batch_n: " << batch_n << " seqLength: " << seqLength
-                  << " inputLen: " << inputVecLen << " numLayers: " << nLayers
-                  << " useDropout: " << int(use_dropout) << std::endl;
+           << " inputLen: " << inputVecLen << " numLayers: " << nLayers
+           << " useDropout: " << int(use_dropout) << std::endl;
         ss << "Forward Train GRU: " << std::endl;
         GTEST_FAIL() << ss.str();
     }
@@ -2422,11 +2291,6 @@ struct verify_backward_data_gru
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>> cpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-
         auto&& handle = get_handle();
 
         int bi        = dirMode != 0 ? 2 : 1;
@@ -2446,10 +2310,6 @@ struct verify_backward_data_gru
         std::vector<T> workSpace(workspace_size / sizeof(T));
         std::vector<T> dx(in_sz / sizeof(T));
         std::vector<T> dhx(initHidden.size());
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
 
         GRUBwdDataCPUVerify(use_dropout,
                             miopen::deref(miopen::deref(rnnDesc).dropoutDesc),
@@ -2479,33 +2339,11 @@ struct verify_backward_data_gru
                             workSpace,
                             nohx,
                             nodhy);
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: CPU backward data GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-
-        std::cout << "Wall clock: CPU backward data GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU backward data CPU" << std::endl;
-        std::cout << "---------------------------------\n" << std::endl;
-#endif
         return std::make_tuple(dx, (nodhx ? initHidden : dhx), reserveSpace, workSpace);
     }
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>> gpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-
         auto&& handle = get_handle();
 
         size_t out_sz = 0;
@@ -2553,10 +2391,6 @@ struct verify_backward_data_gru
         std::vector<T> dhx(initHidden.size());
         auto dhx_dev = handle.Write(dhx);
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
-
         miopenRNNBackwardData(&handle,
                               rnnDesc,
                               seqLength,
@@ -2584,25 +2418,10 @@ struct verify_backward_data_gru
                               wspace.size(),
                               rspace.ptr(),
                               rspace.size());
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: GPU backward data GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-
-        std::cout << "Wall clock: GPU backward data GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU backward data GPU" << std::endl;
-#endif
         return std::make_tuple(handle.Read<T>(dx_dev, dx.size()),
-                                      (nodhx ? initHidden : handle.Read<T>(dhx_dev, dhx.size())),
-                                      rspace.Read<std::vector<T>>(),
-                                      wspace.Read<std::vector<T>>());
+                               (nodhx ? initHidden : handle.Read<T>(dhx_dev, dhx.size())),
+                               rspace.Read<std::vector<T>>(),
+                               wspace.Read<std::vector<T>>());
     }
 
     void fail() const
@@ -2620,14 +2439,14 @@ struct verify_backward_data_gru
                 ss << batch_seq.at(i);
             }
         }
-        ss << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen
-                  << " -l " << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p "
-                  << inputMode << std::endl;
-        ss << "inputMode: " << inputMode << " biasMode: " << biasMode
-                  << " dirMode: " << dirMode << std::endl;
+        ss << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
+           << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p " << inputMode
+           << std::endl;
+        ss << "inputMode: " << inputMode << " biasMode: " << biasMode << " dirMode: " << dirMode
+           << std::endl;
         ss << "hz: " << hiddenSize << " batch_n: " << batch_n << " seqLength: " << seqLength
-                  << " inputLen: " << inputVecLen << " numLayers: " << nLayers
-                  << " useDropout: " << int(use_dropout) << std::endl;
+           << " inputLen: " << inputVecLen << " numLayers: " << nLayers
+           << " useDropout: " << int(use_dropout) << std::endl;
         ss << "Backward Data GRU: " << std::endl;
         GTEST_FAIL() << ss.str();
     }
@@ -2707,17 +2526,8 @@ struct verify_backward_weights_gru
 
     std::tuple<std::vector<T>> cpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
         int bi = dirMode ? 2 : 1;
         std::vector<T> dweights(weightSize);
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
-
         GRUBwdWeightCPUVerify(use_dropout,
                               input,
                               dweights,        // (output) [ input_state_weight_trans
@@ -2740,31 +2550,11 @@ struct verify_backward_weights_gru
                               reserveSpace,
                               workSpace,
                               nohx);
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: CPU backward_weights GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-        std::cout << "Wall clock: CPU backward_weights GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU backward weights CPU" << std::endl;
-        std::cout << "---------------------------------\n" << std::endl;
-#endif
         return std::make_tuple(dweights);
     }
 
     std::tuple<std::vector<T>> gpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-
         auto&& handle = get_handle();
 
         std::vector<miopen::TensorDescriptor> inputCPPDescs;
@@ -2797,10 +2587,6 @@ struct verify_backward_weights_gru
         auto dy_dev    = handle.Write(dy);
         auto input_dev = handle.Write(input);
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
-
         miopenRNNBackwardWeights(&handle,
                                  rnnDesc,
                                  seqLength,
@@ -2816,21 +2602,6 @@ struct verify_backward_weights_gru
                                  wspace.size(),
                                  rspace.ptr(),
                                  rspace.size());
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: GPU backwards_weights GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-
-        std::cout << "Wall clock: GPU backwards_weights GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU backward weights GPU" << std::endl;
-#endif
         auto retvec = handle.Read<T>(dweights_dev, dweights.size());
         return std::make_tuple(retvec);
     }
@@ -2850,14 +2621,14 @@ struct verify_backward_weights_gru
                 ss << batch_seq.at(i);
             }
         }
-        ss << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen
-                  << " -l " << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p "
-                  << inputMode << std::endl;
-        ss << "inputMode: " << inputMode << " biasMode: " << biasMode
-                  << " dirMode: " << dirMode << std::endl;
+        ss << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
+           << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p " << inputMode
+           << std::endl;
+        ss << "inputMode: " << inputMode << " biasMode: " << biasMode << " dirMode: " << dirMode
+           << std::endl;
         ss << "hz: " << hiddenSize << " batch_n: " << batch_n << " seqLength: " << seqLength
-                  << " inputLen: " << inputVecLen << " numLayers: " << nLayers
-                  << " useDropout: " << int(use_dropout) << std::endl;
+           << " inputLen: " << inputVecLen << " numLayers: " << nLayers
+           << " useDropout: " << int(use_dropout) << std::endl;
         ss << "Backward Weights GRU: " << std::endl;
         GTEST_FAIL() << ss.str();
     }
@@ -2887,26 +2658,24 @@ std::vector<TestCase> dropout_full_cases = {
     TestCase{17, 23, 13, 67, 3, 0, 0, 0, true, false, false, false, false, false, {0}},
     TestCase{17, 23, 13, 67, 3, 0, 0, 1, true, false, false, false, false, false, {0}},
     TestCase{17, 23, 13, 67, 3, 0, 0, 0, true, false, false, false, false, true, {0}},
-    TestCase{17, 23, 13, 67, 3, 0, 0, 1, true, false, false, false, false, true, {0}}
-};
+    TestCase{17, 23, 13, 67, 3, 0, 0, 1, true, false, false, false, false, true, {0}}};
 
 std::vector<TestCase> deepbench_cases = {
-    TestCase{32, 1500, 216, 216, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{32, 750, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{32, 375, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{32, 10, 2816, 2816, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{32, 1500, 248, 248, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{32, 12, 2048, 2048, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{32, 1500, 156, 156, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{32, 500, 156, 156, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{32, 12, 1536, 1536, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{32, 1500, 256, 256, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{32, 500, 256, 256, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{32, 10, 2560, 2560, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{32, 1, 512, 512, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{32, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
-    TestCase{64, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0} }
-};
+    TestCase{32, 1500, 216, 216, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{32, 750, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{32, 375, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{32, 10, 2816, 2816, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{32, 1500, 248, 248, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{32, 12, 2048, 2048, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{32, 1500, 156, 156, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{32, 500, 156, 156, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{32, 12, 1536, 1536, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{32, 1500, 256, 256, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{32, 500, 256, 256, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{32, 10, 2560, 2560, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{32, 1, 512, 512, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{32, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    TestCase{64, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0}}};
 
 std::vector<TestCase> extra_cases = {
     TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, true, false, false, false, false, {32, 32, 32}},
@@ -2921,14 +2690,13 @@ std::vector<TestCase> extra_cases = {
     TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, false, false, false, true, false, {32, 32, 32}},
     TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, false, false, true, true, false, {32, 32, 32}},
     TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, true, true, true, true, false, {32, 32, 32}},
-    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, true, true, true, true, false, {32, 32, 32}}
-};
+    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, true, true, true, true, false, {32, 32, 32}}};
 
 static std::vector<TestCase> base_cases = {
     TestCase{1, 1, 13, 67, 1, 0, 0, 0, false, false, false, false, false, false, {0}},
-    TestCase{1, 1, 13, 67, 1, 0, 0, 1, false, false, false, false, false, false, {1}}, 
+    TestCase{1, 1, 13, 67, 1, 0, 0, 1, false, false, false, false, false, false, {1}},
     TestCase{1, 1, 13, 67, 1, 0, 1, 0, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 1, 0, 1, 1, false, false, false, false, false, false, {1}}, 
+    TestCase{1, 1, 13, 67, 1, 0, 1, 1, false, false, false, false, false, false, {1}},
     TestCase{1, 1, 13, 67, 1, 1, 0, 0, false, false, false, false, false, false, {1}},
     TestCase{1, 1, 13, 67, 1, 1, 0, 1, false, false, false, false, false, false, {1}},
     TestCase{1, 1, 13, 67, 1, 1, 1, 0, false, false, false, false, false, false, {1}},
@@ -2941,22 +2709,278 @@ static std::vector<TestCase> base_cases = {
     TestCase{1, 1, 13, 67, 3, 1, 0, 1, false, false, false, false, false, false, {1}},
     TestCase{1, 1, 13, 67, 3, 1, 1, 0, false, false, false, false, false, false, {1}},
     TestCase{1, 1, 13, 67, 3, 1, 1, 1, false, false, false, false, false, false, {1}},
-    TestCase{1, 23, 13, 67, 1, 0, 0, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 1, 0, 0, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 1, 0, 1, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 1, 0, 1, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 1, 1, 0, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 1, 1, 0, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 1, 1, 1, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 1, 1, 1, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 3, 0, 0, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 3, 0, 0, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 3, 0, 1, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 3, 0, 1, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 3, 1, 0, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 3, 1, 0, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 3, 1, 1, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
-    TestCase{1, 23, 13, 67, 3, 1, 1, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1,
+             23,
+             13,
+             67,
+             1,
+             0,
+             0,
+             0,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             1,
+             0,
+             0,
+             1,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             1,
+             0,
+             1,
+             0,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             1,
+             0,
+             1,
+             1,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             1,
+             1,
+             0,
+             0,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             1,
+             1,
+             0,
+             1,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             1,
+             1,
+             1,
+             0,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             1,
+             1,
+             1,
+             1,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             3,
+             0,
+             0,
+             0,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             3,
+             0,
+             0,
+             1,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             3,
+             0,
+             1,
+             0,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             3,
+             0,
+             1,
+             1,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             3,
+             1,
+             0,
+             0,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             3,
+             1,
+             0,
+             1,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             3,
+             1,
+             1,
+             0,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
+    TestCase{1,
+             23,
+             13,
+             67,
+             3,
+             1,
+             1,
+             1,
+             false,
+             false,
+             false,
+             false,
+             false,
+             false,
+             {
+                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+             }},
     TestCase{17, 1, 13, 67, 1, 0, 0, 0, false, false, false, false, false, false, {17}},
     TestCase{17, 1, 13, 67, 1, 0, 0, 1, false, false, false, false, false, false, {17}},
     TestCase{17, 1, 13, 67, 1, 0, 1, 0, false, false, false, false, false, false, {17}},
@@ -2973,23 +2997,102 @@ static std::vector<TestCase> base_cases = {
     TestCase{17, 1, 13, 67, 3, 1, 0, 1, false, false, false, false, false, false, {17}},
     TestCase{17, 1, 13, 67, 3, 1, 1, 0, false, false, false, false, false, false, {17}},
     TestCase{17, 1, 13, 67, 3, 1, 1, 1, false, false, false, false, false, false, {17}},
-    TestCase{17, 23, 13, 67, 1, 0, 0, 0, false, false, false, false, false, false, {17, 15, 14, 14, 12, 10, 9, 9, 9, 7, 5, 5, 3, 3, 2, 2, 1, 1, 1, 1, 1, 1, 1}},
-    TestCase{17, 23, 13, 67, 1, 0, 0, 1, false, false, false, false, false, false, {17, 15, 13, 12, 10, 9, 8, 6, 6, 6, 4, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
-    TestCase{17, 23, 13, 67, 1, 0, 1, 0, false, false, false, false, false, false, {17, 17, 17, 16, 16, 16, 15, 14, 14, 12, 11, 11, 11, 11, 11, 10, 9, 8, 6, 4, 3, 2, 1}},
-    TestCase{17, 23, 13, 67, 1, 0, 1, 1, false, false, false, false, false, false, {17, 15, 13, 12, 11, 11, 10, 8, 7, 5, 5, 4, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
-    TestCase{17, 23, 13, 67, 1, 1, 0, 0, false, false, false, false, false, false, {17, 15, 15, 13, 12, 11, 10, 8, 6, 6, 4, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
-    TestCase{17, 23, 13, 67, 1, 1, 0, 1, false, false, false, false, false, false, {17, 15, 14, 14, 14, 13, 13, 13, 11, 9, 9, 7, 6, 4, 4, 4, 4, 4, 4, 4, 4, 2, 1}},
-    TestCase{17, 23, 13, 67, 1, 1, 1, 0, false, false, false, false, false, false, {17, 17, 17, 15, 14, 12, 12, 12, 10, 8, 6, 4, 4, 4, 4, 3, 1, 1, 1, 1, 1, 1, 1}},
-    TestCase{17, 23, 13, 67, 1, 1, 1, 1, false, false, false, false, false, false, {17, 15, 13, 11, 11, 10, 10, 10, 8, 7, 6, 4, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
-    TestCase{17, 23, 13, 67, 3, 0, 0, 0, false, false, false, false, false, false, {17, 15, 13, 13, 11, 10, 8, 7, 5, 4, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
-    TestCase{17, 23, 13, 67, 3, 0, 0, 1, false, false, false, false, false, false, {17, 16, 15, 14, 12, 11, 9, 8, 6, 6, 6, 4, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
-    TestCase{17, 23, 13, 67, 3, 0, 1, 0, false, false, false, false, false, false, {17, 15, 15, 15, 15, 15, 14, 13, 11, 10, 9, 7, 5, 3, 2, 2, 1, 1, 1, 1, 1, 1, 1}},
-    TestCase{17, 23, 13, 67, 3, 0, 1, 1, false, false, false, false, false, false, {17, 17, 15, 15, 13, 12, 10, 9, 8, 6, 5, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
-    TestCase{17, 23, 13, 67, 3, 1, 0, 0, false, false, false, false, false, false, {17, 17, 16, 16, 16, 15, 15, 13, 13, 11, 11, 10, 10, 10, 8, 7, 7, 7, 5, 4, 3, 3, 3}},
-    TestCase{17, 23, 13, 67, 3, 1, 0, 1, false, false, false, false, false, false, {17, 17, 16, 16, 15, 13, 12, 12, 10, 10, 9, 8, 7, 7, 7, 5, 4, 4, 4, 4, 3, 2, 1}},
-    TestCase{17, 23, 13, 67, 3, 1, 1, 0, false, false, false, false, false, false, {17, 16, 14, 14, 14, 13, 13, 13, 12, 11, 10, 9, 9, 7, 7, 5, 4, 4, 2, 1, 1, 1, 1}},
-    TestCase{17, 23, 13, 67, 3, 1, 1, 1, false, false, false, false, false, false, {17, 17, 17, 16, 16, 15, 13, 11, 11, 11, 9, 7, 7, 7, 6, 6, 5, 3, 3, 2, 1, 1, 1}}
-};
+    TestCase{17, 23, 13, 67, 1, 0, 0, 0, false, false, false, false, false, false, {17, 15, 14, 14,
+                                                                                    12, 10, 9,  9,
+                                                                                    9,  7,  5,  5,
+                                                                                    3,  3,  2,  2,
+                                                                                    1,  1,  1,  1,
+                                                                                    1,  1,  1}},
+    TestCase{17, 23, 13, 67, 1, 0, 0, 1, false, false, false, false, false, false, {17, 15, 13, 12,
+                                                                                    10, 9,  8,  6,
+                                                                                    6,  6,  4,  2,
+                                                                                    1,  1,  1,  1,
+                                                                                    1,  1,  1,  1,
+                                                                                    1,  1,  1}},
+    TestCase{17, 23, 13, 67, 1, 0, 1, 0, false, false, false, false, false, false, {17, 17, 17, 16,
+                                                                                    16, 16, 15, 14,
+                                                                                    14, 12, 11, 11,
+                                                                                    11, 11, 11, 10,
+                                                                                    9,  8,  6,  4,
+                                                                                    3,  2,  1}},
+    TestCase{17, 23, 13, 67, 1, 0, 1, 1, false, false, false, false, false, false, {17, 15, 13, 12,
+                                                                                    11, 11, 10, 8,
+                                                                                    7,  5,  5,  4,
+                                                                                    2,  2,  1,  1,
+                                                                                    1,  1,  1,  1,
+                                                                                    1,  1,  1}},
+    TestCase{17, 23, 13, 67, 1, 1, 0, 0, false, false, false, false, false, false, {17, 15, 15, 13,
+                                                                                    12, 11, 10, 8,
+                                                                                    6,  6,  4,  3,
+                                                                                    3,  3,  1,  1,
+                                                                                    1,  1,  1,  1,
+                                                                                    1,  1,  1}},
+    TestCase{17, 23, 13, 67, 1, 1, 0, 1, false, false, false, false, false, false, {17, 15, 14, 14,
+                                                                                    14, 13, 13, 13,
+                                                                                    11, 9,  9,  7,
+                                                                                    6,  4,  4,  4,
+                                                                                    4,  4,  4,  4,
+                                                                                    4,  2,  1}},
+    TestCase{17, 23, 13, 67, 1, 1, 1, 0, false, false, false, false, false, false, {17, 17, 17, 15,
+                                                                                    14, 12, 12, 12,
+                                                                                    10, 8,  6,  4,
+                                                                                    4,  4,  4,  3,
+                                                                                    1,  1,  1,  1,
+                                                                                    1,  1,  1}},
+    TestCase{17, 23, 13, 67, 1, 1, 1, 1, false, false, false, false, false, false, {17, 15, 13, 11,
+                                                                                    11, 10, 10, 10,
+                                                                                    8,  7,  6,  4,
+                                                                                    2,  2,  1,  1,
+                                                                                    1,  1,  1,  1,
+                                                                                    1,  1,  1}},
+    TestCase{17, 23, 13, 67, 3, 0, 0, 0, false, false, false, false, false, false, {17, 15, 13, 13,
+                                                                                    11, 10, 8,  7,
+                                                                                    5,  4,  2,  2,
+                                                                                    1,  1,  1,  1,
+                                                                                    1,  1,  1,  1,
+                                                                                    1,  1,  1}},
+    TestCase{17, 23, 13, 67, 3, 0, 0, 1, false, false, false, false, false, false, {17, 16, 15, 14,
+                                                                                    12, 11, 9,  8,
+                                                                                    6,  6,  6,  4,
+                                                                                    3,  1,  1,  1,
+                                                                                    1,  1,  1,  1,
+                                                                                    1,  1,  1}},
+    TestCase{17, 23, 13, 67, 3, 0, 1, 0, false, false, false, false, false, false, {17, 15, 15, 15,
+                                                                                    15, 15, 14, 13,
+                                                                                    11, 10, 9,  7,
+                                                                                    5,  3,  2,  2,
+                                                                                    1,  1,  1,  1,
+                                                                                    1,  1,  1}},
+    TestCase{17, 23, 13, 67, 3, 0, 1, 1, false, false, false, false, false, false, {17, 17, 15, 15,
+                                                                                    13, 12, 10, 9,
+                                                                                    8,  6,  5,  3,
+                                                                                    2,  1,  1,  1,
+                                                                                    1,  1,  1,  1,
+                                                                                    1,  1,  1}},
+    TestCase{17, 23, 13, 67, 3, 1, 0, 0, false, false, false, false, false, false, {17, 17, 16, 16,
+                                                                                    16, 15, 15, 13,
+                                                                                    13, 11, 11, 10,
+                                                                                    10, 10, 8,  7,
+                                                                                    7,  7,  5,  4,
+                                                                                    3,  3,  3}},
+    TestCase{17, 23, 13, 67, 3, 1, 0, 1, false, false, false, false, false, false, {17, 17, 16, 16,
+                                                                                    15, 13, 12, 12,
+                                                                                    10, 10, 9,  8,
+                                                                                    7,  7,  7,  5,
+                                                                                    4,  4,  4,  4,
+                                                                                    3,  2,  1}},
+    TestCase{17, 23, 13, 67, 3, 1, 1, 0, false, false, false, false, false, false, {17, 16, 14, 14,
+                                                                                    14, 13, 13, 13,
+                                                                                    12, 11, 10, 9,
+                                                                                    9,  7,  7,  5,
+                                                                                    4,  4,  2,  1,
+                                                                                    1,  1,  1}},
+    TestCase{17, 23, 13, 67, 3, 1, 1, 1, false, false, false, false, false, false, {17, 17, 17, 16,
+                                                                                    16, 15, 13, 11,
+                                                                                    11, 11, 9,  7,
+                                                                                    7,  7,  6,  6,
+                                                                                    5,  3,  3,  2,
+                                                                                    1,  1,  1}}};
 
 auto GenCases(bool gen_dropout)
 {
@@ -3000,14 +3103,14 @@ auto GenCases(bool gen_dropout)
     std::vector<TestCase> cases{};
 
     TestCase single{};
-    single.batchSize = 17;
-    single.seqLength = 2;
-    single.inVecLen = 13;
-    single.hiddenSize = 67;
-    single.numLayers = 1;
-    single.inputMode = 0;
-    single.biasMode = 0;
-    single.dirMode = 1;
+    single.batchSize     = 17;
+    single.seqLength     = 2;
+    single.inVecLen      = 13;
+    single.hiddenSize    = 67;
+    single.numLayers     = 1;
+    single.inputMode     = 0;
+    single.biasMode      = 0;
+    single.dirMode       = 1;
     single.useDropout    = gen_dropout;
     single.nohx          = false;
     single.nodhy         = false;
@@ -3015,38 +3118,26 @@ auto GenCases(bool gen_dropout)
     single.nodhx         = false;
     single.flatBatchFill = false;
     single.batchSeq      = defaultBS;
-
-#if MIO_GRU_TEST_DEBUG == 3
-    cases.push_back(single);
-    return cases;
-#else // MIO_GRU_TEST_DEBUG == 3
-    for(int i =0; i < modes.size(); ++i)
+    for(int i = 0; i < modes.size(); ++i)
     {
         for(int j = 0; j < modes.size(); ++j)
         {
             for(int k = 0; k < modes.size(); ++k)
             {
-                TestCase copy = single;
+                TestCase copy  = single;
                 copy.inputMode = modes[i];
-                copy.biasMode = modes[j];
-                copy.dirMode = modes[k];
+                copy.biasMode  = modes[j];
+                copy.dirMode   = modes[k];
                 cases.push_back(copy);
             }
         }
     }
     return cases;
-#endif // MIO_GRU_TEST_DEBUG == 3
 }
 
-auto const& GetFullBaseTests()
-{
-    return base_cases;
-}
+auto const& GetFullBaseTests() { return base_cases; }
 
-auto const& GetDropoutTests()
-{
-    return dropout_full_cases;
-}
+auto const& GetDropoutTests() { return dropout_full_cases; }
 
 auto const& GetDropoutSmokeTests()
 {
@@ -3054,15 +3145,9 @@ auto const& GetDropoutSmokeTests()
     return cases;
 }
 
-auto const& GetDeepbenchTests()
-{
-    return deepbench_cases;
-}
+auto const& GetDeepbenchTests() { return deepbench_cases; }
 
-auto const& GetExtraTests()
-{
-    return extra_cases;
-}
+auto const& GetExtraTests() { return extra_cases; }
 
 auto const& GetSmokeTests()
 {
@@ -3141,7 +3226,6 @@ public:
         prng::reset_seed();
     }
 
-
     void SetUp() override
     {
         prng::reset_seed();
@@ -3152,8 +3236,8 @@ public:
     {
         if(param.batchSeq.empty() || 0 == param.batchSeq[0])
         {
-            std::cout << "Empty batch sequence. Filling uniformly with batch size: " << param.batchSize
-                      << std::endl;
+            std::cout << "Empty batch sequence. Filling uniformly with batch size: "
+                      << param.batchSize << std::endl;
             if(param.flatBatchFill)
             {
                 param.batchSeq.clear();
@@ -3175,7 +3259,7 @@ public:
         auto&& handle = get_handle();
 
         batch_n = std::accumulate(param.batchSeq.begin(), param.batchSeq.end(), 0);
-        
+
         miopenRNNDescriptor_t rnnDesc;
         miopenCreateRNNDescriptor(&rnnDesc);
         miopenRNNAlgo_t algoMode = miopenRNNdefault;
@@ -3233,9 +3317,10 @@ public:
         // If we are in skip mode, take the real input size to be the vector length.
         auto inVecReal    = (param.inputMode != 0) ? param.hiddenSize : param.inVecLen;
         std::size_t in_sz = static_cast<std::size_t>(inVecReal) * batch_n;
-        std::size_t hx_sz = ((param.dirMode != 0) ? 2ULL : 1ULL) * param.hiddenSize * param.batchSize * param.numLayers;
+        std::size_t hx_sz = ((param.dirMode != 0) ? 2ULL : 1ULL) * param.hiddenSize *
+                            param.batchSize * param.numLayers;
 
-        std::vector<T> input(in_sz), hx(hx_sz), dhyin(hx_sz);        
+        std::vector<T> input(in_sz), hx(hx_sz), dhyin(hx_sz);
 
         size_t wei_bytes = [&]() {
             size_t filter_bytes;
@@ -3270,7 +3355,8 @@ public:
         miopenGetRNNTrainingReserveSize(
             &handle, rnnDesc, param.seqLength, inputDescs.data(), &reserveSpaceSize);
         size_t workspace_size;
-        miopenGetRNNWorkspaceSize(&handle, rnnDesc, param.seqLength, inputDescs.data(), &workspace_size);
+        miopenGetRNNWorkspaceSize(
+            &handle, rnnDesc, param.seqLength, inputDescs.data(), &workspace_size);
 
         size_t total_mem = statesSizeInBytes + reserveSpaceSize + workspace_size + 2 * out_sz +
                            (in_sz + wei_sz + (param.nohx ? 0 : hx_sz) + (param.nohy ? 0 : hx_sz) +
@@ -3280,13 +3366,14 @@ public:
         if(total_mem >= device_mem)
         {
             GTEST_SKIP() << "Config requires " << total_mem
-                      << " Bytes to write all necessary tensors to GPU. GPU has " << device_mem
-                      << " Bytes of memory." << std::endl;
+                         << " Bytes to write all necessary tensors to GPU. GPU has " << device_mem
+                         << " Bytes of memory." << std::endl;
         }
 
         fill_buffers(input, hx, weights);
 
-        auto fwdTrainOutputPair = test_helpers::CompareResults(verify_forward_train_gru<T>{rnnDesc,
+        auto fwdTrainOutputPair =
+            test_helpers::CompareResults(verify_forward_train_gru<T>{rnnDesc,
                                                                      input,
                                                                      hx,
                                                                      weights,
@@ -3302,7 +3389,8 @@ public:
                                                                      hx_sz,
                                                                      param.nohx,
                                                                      param.nohy,
-                                                                     param.useDropout}, tolerance);
+                                                                     param.useDropout},
+                                         tolerance);
 
         /// RETURNS std::make_tuple(output, hiddenState, reserveSpace);
         auto yin = std::get<0>(fwdTrainOutputPair.second);
@@ -3313,53 +3401,74 @@ public:
 
         fill_bwd_buffers(dyin, dhyin);
 
-        auto bwdDataOutputPair = test_helpers::CompareResults(verify_backward_data_gru<T>{
-            rnnDesc,   yin,        dyin,    dhyin,     hx,        weights,  reserveSpaceFwdTrain,
-            param.batchSeq,  param.hiddenSize, batch_n, param.seqLength, param.numLayers, param.biasMode, param.dirMode,
-            param.inputMode, inVecReal,  hx_sz,   param.nohx,      param.nodhy,     param.nodhx,    param.useDropout}, tolerance);
+        auto bwdDataOutputPair =
+            test_helpers::CompareResults(verify_backward_data_gru<T>{rnnDesc,
+                                                                     yin,
+                                                                     dyin,
+                                                                     dhyin,
+                                                                     hx,
+                                                                     weights,
+                                                                     reserveSpaceFwdTrain,
+                                                                     param.batchSeq,
+                                                                     param.hiddenSize,
+                                                                     batch_n,
+                                                                     param.seqLength,
+                                                                     param.numLayers,
+                                                                     param.biasMode,
+                                                                     param.dirMode,
+                                                                     param.inputMode,
+                                                                     inVecReal,
+                                                                     hx_sz,
+                                                                     param.nohx,
+                                                                     param.nodhy,
+                                                                     param.nodhx,
+                                                                     param.useDropout},
+                                         tolerance);
 
         // RETURNS:  std::make_tuple(dx, dhx, reserveSpace, workSpace);
         auto reserveSpaceBwdData = std::get<2>(bwdDataOutputPair.second);
         auto workSpaceBwdData    = std::get<3>(bwdDataOutputPair.second);
         // auto dweights_pair       =
         test_helpers::CompareResults(verify_backward_weights_gru<T>{rnnDesc,
-                                              input,
-                                              dyin,
-                                              hx,
-                                              reserveSpaceBwdData,
-                                              workSpaceBwdData,
-                                              param.batchSeq,
-                                              param.hiddenSize,
-                                              static_cast<int>(wei_sz),
-                                              batch_n,
-                                              param.seqLength,
-                                              param.numLayers,
-                                              param.biasMode,
-                                              param.dirMode,
-                                              param.inputMode,
-                                              inVecReal,
-                                              hx_sz,
-                                              param.nohx,
-                                              param.useDropout}, tolerance);
+                                                                    input,
+                                                                    dyin,
+                                                                    hx,
+                                                                    reserveSpaceBwdData,
+                                                                    workSpaceBwdData,
+                                                                    param.batchSeq,
+                                                                    param.hiddenSize,
+                                                                    static_cast<int>(wei_sz),
+                                                                    batch_n,
+                                                                    param.seqLength,
+                                                                    param.numLayers,
+                                                                    param.biasMode,
+                                                                    param.dirMode,
+                                                                    param.inputMode,
+                                                                    inVecReal,
+                                                                    hx_sz,
+                                                                    param.nohx,
+                                                                    param.useDropout},
+                                     tolerance);
 
         if(!param.useDropout)
         {
             test_helpers::CompareResults(verify_forward_infer_gru<T>{rnnDesc,
-                                               input,
-                                               hx,
-                                               weights,
-                                               param.batchSeq,
-                                               param.hiddenSize,
-                                               batch_n,
-                                               param.seqLength,
-                                               param.numLayers,
-                                               param.biasMode,
-                                               param.dirMode,
-                                               param.inputMode,
-                                               inVecReal,
-                                               hx_sz,
-                                               param.nohx,
-                                               param.nohy}, tolerance);
+                                                                     input,
+                                                                     hx,
+                                                                     weights,
+                                                                     param.batchSeq,
+                                                                     param.hiddenSize,
+                                                                     batch_n,
+                                                                     param.seqLength,
+                                                                     param.numLayers,
+                                                                     param.biasMode,
+                                                                     param.dirMode,
+                                                                     param.inputMode,
+                                                                     inVecReal,
+                                                                     hx_sz,
+                                                                     param.nohx,
+                                                                     param.nohy},
+                                         tolerance);
         }
         // DLOWELL: Subtracting delta weights may produce NAN and infinities. Further investigation
         // is needed.
@@ -3381,10 +3490,7 @@ struct TestNameGenerator
     std::string operator()(const ::testing::TestParamInfo<TestCase>& param_info)
     {
         std::stringstream ss{};
-        auto print_bool = [](bool value)
-        {
-            return value ? "true" : "false";
-        };
+        auto print_bool = [](bool value) { return value ? "true" : "false"; };
 
         auto print_batch_seq = [](std::vector<int> const& vec) {
             std::stringstream vec_ss{};
@@ -3395,40 +3501,37 @@ struct TestNameGenerator
             return vec_ss.str();
         };
 
-        ss << "batchSize_" << param_info.param.batchSize << "_seqLength_" <<  param_info.param.seqLength <<
-              "_inVecLen_" << param_info.param.inVecLen <<
-              "_hiddenSize_" << param_info.param.hiddenSize <<
-              "_numLayers_" << param_info.param.numLayers <<
-              "_inputMode_" << param_info.param.inputMode <<
-              "_biasMode_" << param_info.param.biasMode <<
-              "_dirMode_" << param_info.param.dirMode <<
-              "_useDropout_" << print_bool(param_info.param.useDropout) <<
-              "_nohx_" << print_bool(param_info.param.nohx) <<
-              "_nodhy_" << print_bool(param_info.param.nodhy) <<
-              "_nohy_" << print_bool(param_info.param.nohy) <<
-              "_nodhx_" << print_bool(param_info.param.nodhx) <<
-              "_flatBatchFill_" << print_bool(param_info.param.flatBatchFill) <<
-              "_batch_seq_" << print_batch_seq(param_info.param.batchSeq);
+        ss << "batchSize_" << param_info.param.batchSize << "_seqLength_"
+           << param_info.param.seqLength << "_inVecLen_" << param_info.param.inVecLen
+           << "_hiddenSize_" << param_info.param.hiddenSize << "_numLayers_"
+           << param_info.param.numLayers << "_inputMode_" << param_info.param.inputMode
+           << "_biasMode_" << param_info.param.biasMode << "_dirMode_" << param_info.param.dirMode
+           << "_useDropout_" << print_bool(param_info.param.useDropout) << "_nohx_"
+           << print_bool(param_info.param.nohx) << "_nodhy_" << print_bool(param_info.param.nodhy)
+           << "_nohy_" << print_bool(param_info.param.nohy) << "_nodhx_"
+           << print_bool(param_info.param.nodhx) << "_flatBatchFill_"
+           << print_bool(param_info.param.flatBatchFill) << "_batch_seq_"
+           << print_batch_seq(param_info.param.batchSeq);
         return ss.str();
     }
 };
 
-template<typename T>
+template <typename T>
 struct gru_dropout_test : public gru_test<T>
 {
-// intentionally empty
+    // intentionally empty
 };
 
-template<typename T>
+template <typename T>
 struct gru_deepbench_test : public gru_test<T>
 {
-// intentionally empty
+    // intentionally empty
 };
 
-template<typename T>
+template <typename T>
 struct gru_extra_test : public gru_test<T>
 {
-// intentionally empty
+    // intentionally empty
 };
 
 } // anonymous namespace
@@ -3449,32 +3552,68 @@ TEST_P(GPU_GRU_Base_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_GRU_Base_FP16, TestFloat16) { Run(); }
 
 // Base tests
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Base_FP32, ::testing::ValuesIn(GetFullBaseTests()), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Base_FP32, ::testing::ValuesIn(GetSmokeTests()), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GRU_Base_FP32,
+                         ::testing::ValuesIn(GetFullBaseTests()),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GRU_Base_FP32,
+                         ::testing::ValuesIn(GetSmokeTests()),
+                         TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Base_FP16, ::testing::ValuesIn(GetFullBaseTests()), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Base_FP16, ::testing::ValuesIn(GetSmokeTests()), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GRU_Base_FP16,
+                         ::testing::ValuesIn(GetFullBaseTests()),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GRU_Base_FP16,
+                         ::testing::ValuesIn(GetSmokeTests()),
+                         TestNameGenerator{});
 
 // Dropout tests
 TEST_P(GPU_GRU_Dropout_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_GRU_Dropout_FP16, TestFloat16) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Dropout_FP32, ::testing::ValuesIn(GetDropoutTests()), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Dropout_FP32, ::testing::ValuesIn(GetDropoutSmokeTests()), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GRU_Dropout_FP32,
+                         ::testing::ValuesIn(GetDropoutTests()),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GRU_Dropout_FP32,
+                         ::testing::ValuesIn(GetDropoutSmokeTests()),
+                         TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Dropout_FP16, ::testing::ValuesIn(GetDropoutTests()), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Dropout_FP16, ::testing::ValuesIn(GetDropoutSmokeTests()), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GRU_Dropout_FP16,
+                         ::testing::ValuesIn(GetDropoutTests()),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GRU_Dropout_FP16,
+                         ::testing::ValuesIn(GetDropoutSmokeTests()),
+                         TestNameGenerator{});
 
 // Deepbench tests
 TEST_P(GPU_GRU_Deepbench_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_GRU_Deepbench_FP16, TestFloat16) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Deepbench_FP32, ::testing::ValuesIn(GetDeepbenchTests()), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Deepbench_FP16, ::testing::ValuesIn(GetDeepbenchTests()), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GRU_Deepbench_FP32,
+                         ::testing::ValuesIn(GetDeepbenchTests()),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GRU_Deepbench_FP16,
+                         ::testing::ValuesIn(GetDeepbenchTests()),
+                         TestNameGenerator{});
 
 // Extra tests
 TEST_P(GPU_GRU_Extra_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_GRU_Extra_FP16, TestFloat16) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Extra_FP32, ::testing::ValuesIn(GetExtraTests()), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Extra_FP16, ::testing::ValuesIn(GetExtraTests()), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GRU_Extra_FP32,
+                         ::testing::ValuesIn(GetExtraTests()),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GRU_Extra_FP16,
+                         ::testing::ValuesIn(GetExtraTests()),
+                         TestNameGenerator{});
