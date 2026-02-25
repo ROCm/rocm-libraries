@@ -45,6 +45,7 @@ add_executable(
     utilities/TestTensor.cpp
     utilities/TestTensorIterator.cpp
     utilities/TestTensorView.cpp
+    utilities/TestVersionUtils.cpp
     utilities/TestVisitor.cpp
 )
 
