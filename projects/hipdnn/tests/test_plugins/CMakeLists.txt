@@ -16,6 +16,7 @@ set(TEST_INCOMPLETE_API_PLUGIN_NAME "test_incomplete_api_plugin")
 set(TEST_GOOD_DEFAULT_PLUGIN_NAME "test_good_default_plugin")
 set(TEST_KNOBS_PLUGIN_NAME "test_knobs_plugin")
 set(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME "test_knob_constraint_validation_plugin")
+set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "test_incompatible_version_plugin")
 
 # Function to create a test plugin with common configuration
 function(add_test_plugin target_name)
@@ -82,6 +83,9 @@ add_test_plugin(${TEST_KNOBS_PLUGIN_NAME} TestKnobsPlugin.cpp)
 # test_knob_constraint_validation_plugin is a plugin that validates knob constraint types
 add_test_plugin(${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME} TestKnobConstraintValidationPlugin.cpp)
 
+# test_incompatible_version_plugin is a plugin that returns an incompatible plugin API version
+add_test_plugin(${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME} TestIncompatibleVersionPlugin.cpp)
+
 # Create the default plugin in test_plugins/default
 set(test_good_default_plugin_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/default")
 set(test_good_default_plugin_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/default")
@@ -102,3 +106,4 @@ set(TEST_INCOMPLETE_API_PLUGIN_NAME "${TEST_INCOMPLETE_API_PLUGIN_NAME}" PARENT_
 set(TEST_GOOD_DEFAULT_PLUGIN_NAME "${TEST_GOOD_DEFAULT_PLUGIN_NAME}" PARENT_SCOPE)
 set(TEST_KNOBS_PLUGIN_NAME "${TEST_KNOBS_PLUGIN_NAME}" PARENT_SCOPE)
 set(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME "${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}" PARENT_SCOPE)
+set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME}" PARENT_SCOPE)

@@ -627,16 +627,9 @@ struct tile_window_with_static_distribution
                 const auto lds_coord =
                     make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
 
-                constexpr auto IMM_RANGE =
-                    (1 << 12) / sizeof(typename Base::DataType) * Traits::PackedSize;
-                constexpr auto imm_total    = lds_ys_offset;
-                constexpr auto imm_valid    = imm_total % IMM_RANGE;
-                constexpr auto imm_overflow = imm_total - imm_valid;
-
                 // Calculate SMEM address using base pointer
-                CK_TILE_LDS_ADDR LdsDataType* smem = lds_base_ptr +
-                                                     lds_coord.get_offset() / Traits::PackedSize +
-                                                     imm_overflow / Traits::PackedSize;
+                CK_TILE_LDS_ADDR LdsDataType* smem =
+                    lds_base_ptr + (lds_coord.get_offset() + lds_ys_offset) / Traits::PackedSize;
 
                 const auto dram_ys_offset = [&]() {
                     if constexpr(static_move_ys)
@@ -656,13 +649,14 @@ struct tile_window_with_static_distribution
                         offset + dram_ys_offset,
                         bool_constant<oob_conditional_check>{});
                 else
+                {
                     this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
                         smem,
                         bottom_tensor_thread_coord.get_offset() + offset,
-                        dram_ys_offset - imm_valid,
-                        number<imm_valid>{},
+                        dram_ys_offset,
+                        number<0>{},
                         bool_constant<oob_conditional_check>{});
-
+                }
                 // Move thread coordinate if not last access
                 if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
                 {
@@ -742,7 +736,7 @@ struct tile_window_with_static_distribution
                         .template get_transpose_vectorized_elements<vector_t>(
                             bottom_tensor_thread_coord, offset);
                 // write into distributed tensor
-                static_for<0, Traits::ScalarPerVector, 1>{}([&](auto j) {
+                static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
                     constexpr auto orig_idx_ys = generate_tuple(
                         [&](auto jj) {
                             return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
@@ -753,10 +747,12 @@ struct tile_window_with_static_distribution
                     constexpr auto grouped_idx_ys = group_func(orig_idx_ys);
 
                     constexpr index_t linear_distributed_index =
-                        tile_dstr.get_ys_to_d_descriptor().calculate_offset(grouped_idx_ys);
+                        tile_dstr.get_ys_to_d_descriptor().calculate_offset(grouped_idx_ys) /
+                        Traits::PackedSize;
 
                     dst_tensor.get_thread_buffer().template at<linear_distributed_index>() =
-                        vec_value.template get_as<typename Base::DataType>()[j];
+                        vec_value
+                            .template get_as<typename Base::DataType>()[j / Traits::PackedSize];
                 });
                 // move thread coordinate
                 if constexpr(iCoordAccess != (NumAccessPerCoord - 1))

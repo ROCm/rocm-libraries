@@ -135,13 +135,15 @@ class ProblemTiming:
 
 def parse_timing_line(line: str) -> Optional[TimingRecord]:
     """Parse a TIMING: line and return a TimingRecord."""
-    match = re.match(r'TIMING:(\w+):([\d.]+)', line)
-    if match:
-        return TimingRecord(
-            category=match.group(1),
-            duration_ms=float(match.group(2))
-        )
-    return None
+    if not line.startswith('TIMING:'):
+        return None
+    parts = line.split(':', 2)
+    if len(parts) != 3:
+        return None
+    try:
+        return TimingRecord(category=parts[1], duration_ms=float(parts[2]))
+    except ValueError:
+        return None
 
 
 def parse_context_line(line: str) -> Optional[Dict[str, str]]:
