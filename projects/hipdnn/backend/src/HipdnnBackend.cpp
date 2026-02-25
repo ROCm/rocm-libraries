@@ -296,7 +296,7 @@ HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t m
 
 HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext(hipdnnSeverity_t severity, const char* msg)
 {
-    hipdnn_backend::logging::hipdnnLoggingCallback(severity, msg);
+    hipdnn_backend::logging::backendLoggingCallback(severity, msg);
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(

@@ -271,6 +271,34 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenSyncAndAsync)
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Async mode message"));
 }
 
+// Test: Switch from async to sync mode
+TEST_F(IntegrationFrontendUserLogging, SwitchBetweenAsyncAndSync)
+{
+    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    // Start with ASYNC mode
+    registerUserCallback(HIPDNN_SEV_INFO, LogCallbackMode::ASYNC);
+    auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
+    ASSERT_EQ(error.code, ErrorCode::OK);
+
+    HIPDNN_FE_LOG_INFO("Async mode message");
+
+    // Async: need delay
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    size_t asyncLogs = recorder.getRecordedLogCount();
+    EXPECT_GT(asyncLogs, 0);
+
+    // Switch to SYNC mode (same callback, same handle, different mode)
+    registerUserCallback(HIPDNN_SEV_INFO, LogCallbackMode::SYNC);
+
+    HIPDNN_FE_LOG_INFO("Sync mode message");
+
+    // Sync: logs immediately available
+    size_t afterSwitch = recorder.getRecordedLogCount();
+    EXPECT_GT(afterSwitch, asyncLogs);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Sync mode message"));
+}
+
 // Test: Null callback parameter is rejected
 TEST_F(IntegrationFrontendUserLogging, RejectsNullCallback)
 {
@@ -342,4 +370,72 @@ TEST_F(IntegrationFrontendUserLogging, SyncGuaranteeOnUnregister)
     // Count should not have increased after unregister
     EXPECT_EQ(s_callbackCount.load(), countAfterUnregister)
         << "No new callbacks should execute after unregister";
+}
+
+// Test: Multiple callbacks (2 async + 2 sync) all receive logs independently
+TEST_F(IntegrationFrontendUserLogging, MultipleCallbacksAllReceiveLogs)
+{
+    auto countingCallback
+        = [](hipdnnUserLogCallbackHandle_t userHandle, hipdnnSeverity_t, const char*) {
+              static_cast<std::atomic<int>*>(userHandle)->fetch_add(1);
+          };
+
+    std::atomic<int> asyncCount1{0};
+    std::atomic<int> asyncCount2{0};
+    std::atomic<int> syncCount1{0};
+    std::atomic<int> syncCount2{0};
+
+    auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
+    ASSERT_EQ(error.code, ErrorCode::OK);
+
+    // Register 4 callbacks: 2 async, 2 sync
+    error = setUserLogCallback(
+        countingCallback, HIPDNN_SEV_INFO, LogCallbackMode::ASYNC, &asyncCount1);
+    ASSERT_EQ(error.code, ErrorCode::OK);
+    error = setUserLogCallback(
+        countingCallback, HIPDNN_SEV_INFO, LogCallbackMode::ASYNC, &asyncCount2);
+    ASSERT_EQ(error.code, ErrorCode::OK);
+    error
+        = setUserLogCallback(countingCallback, HIPDNN_SEV_INFO, LogCallbackMode::SYNC, &syncCount1);
+    ASSERT_EQ(error.code, ErrorCode::OK);
+    error
+        = setUserLogCallback(countingCallback, HIPDNN_SEV_INFO, LogCallbackMode::SYNC, &syncCount2);
+    ASSERT_EQ(error.code, ErrorCode::OK);
+
+    // Trigger logging
+    HIPDNN_FE_LOG_INFO("Test message for multiple callbacks");
+
+    // Wait for async callbacks to process
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // All 4 callbacks should have received logs
+    EXPECT_GT(asyncCount1.load(), 0) << "First async callback should receive logs";
+    EXPECT_GT(asyncCount2.load(), 0) << "Second async callback should receive logs";
+    EXPECT_GT(syncCount1.load(), 0) << "First sync callback should receive logs";
+    EXPECT_GT(syncCount2.load(), 0) << "Second sync callback should receive logs";
+
+    // Unregister all 4
+    setUserLogCallback(countingCallback, HIPDNN_SEV_OFF, LogCallbackMode::ASYNC, &asyncCount1);
+    setUserLogCallback(countingCallback, HIPDNN_SEV_OFF, LogCallbackMode::ASYNC, &asyncCount2);
+    setUserLogCallback(countingCallback, HIPDNN_SEV_OFF, LogCallbackMode::SYNC, &syncCount1);
+    setUserLogCallback(countingCallback, HIPDNN_SEV_OFF, LogCallbackMode::SYNC, &syncCount2);
+
+    // Capture counts after unregistering
+    int async1After = asyncCount1.load();
+    int async2After = asyncCount2.load();
+    int sync1After = syncCount1.load();
+    int sync2After = syncCount2.load();
+
+    // Trigger more logging — none of the callbacks should be invoked
+    HIPDNN_FE_LOG_INFO("Message after all callbacks unregistered");
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    EXPECT_EQ(asyncCount1.load(), async1After)
+        << "First async callback should not receive logs after unregister";
+    EXPECT_EQ(asyncCount2.load(), async2After)
+        << "Second async callback should not receive logs after unregister";
+    EXPECT_EQ(syncCount1.load(), sync1After)
+        << "First sync callback should not receive logs after unregister";
+    EXPECT_EQ(syncCount2.load(), sync2After)
+        << "Second sync callback should not receive logs after unregister";
 }

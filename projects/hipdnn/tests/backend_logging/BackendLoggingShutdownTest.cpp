@@ -41,7 +41,7 @@
  *
  *   The atexit handler is the primary safety mechanism:
  *     - Sets s_loggingShutdown flag (an independent std::atomic<bool>)
- *     - Both initialize() and hipdnnLoggingCallback() check this flag first
+ *     - Both initialize() and backendLoggingCallback() check this flag first
  *       and return early if set, before touching getBackendLogState()
  *     - This prevents any thread (existing or new) from accessing the
  *       destroyed s_state shared_ptr or BackendLogState infrastructure
@@ -256,7 +256,7 @@ struct TestLoggerShutdown
         // This thread has never called getBackendLogState() and has no
         // thread_local s_tlRef. The atexit handler (log level OFF) prevents
         // it from reaching getBackendLogState() — isLogLevelEnabled() returns
-        // false, so hipdnnLoggingCallback() returns early.
+        // false, so backendLoggingCallback() returns early.
         spawnAndJoinOneShot("pre-join");
 
         // Step 2: Signal all worker threads to stop.

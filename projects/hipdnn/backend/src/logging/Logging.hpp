@@ -58,7 +58,7 @@ void initialize();
 
 void loggerShutdown();
 
-void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg);
+void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg);
 
 void logHipDeviceInfo(hipStream_t stream);
 

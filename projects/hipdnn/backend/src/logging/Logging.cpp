@@ -31,7 +31,7 @@ namespace
 
 // Independent shutdown flag. Set by the atexit handler to prevent any thread from accessing
 // BackendLogState after static destruction has begun. This is checked at the top of both
-// initialize() and hipdnnLoggingCallback() to short-circuit before touching the state object.
+// initialize() and backendLoggingCallback() to short-circuit before touching the state object.
 std::atomic<bool> sLoggingShutdown{false};
 
 const std::string S_BACKEND_ASYNC_LOGGER_NAME = "hipdnn_backend_async";
@@ -67,7 +67,8 @@ struct BackendLogState
     // Sync user callback logger with dist_sink
     std::shared_ptr<spdlog::logger> syncLogger;
     std::shared_ptr<spdlog::sinks::dist_sink_mt> syncSharedDistSink;
-    std::atomic<int> syncCallbackCount{0}; // Number of registered sync callbacks
+    std::atomic<int> syncSinkCount{0}; // Number of sinks in syncSharedDistSink
+    std::atomic<int> asyncSinkCount{0}; // Number of sinks in asyncSharedDistSink
 
     struct UserCallbackInfo
     {
@@ -189,7 +190,7 @@ void initialize()
         }
 
         // Register the backend logging callback with the backend's data SDK based logger.
-        hipdnn_data_sdk::logging::registerLoggingCallback(hipdnnLoggingCallback);
+        hipdnn_data_sdk::logging::registerLoggingCallback(backendLoggingCallback);
 
         if(!state.sharedThreadPool)
         {
@@ -235,6 +236,7 @@ void initialize()
                 state.fileSink->set_level(spdlog::level::trace);
                 state.fileSink->set_pattern(BACKEND_LOGGER_PATTERN);
                 state.asyncSharedDistSink->add_sink(state.fileSink);
+                state.asyncSinkCount.fetch_add(1, std::memory_order_release);
             }
             else
             {
@@ -242,6 +244,7 @@ void initialize()
                 state.consoleSink->set_level(spdlog::level::trace);
                 state.consoleSink->set_pattern(BACKEND_LOGGER_PATTERN);
                 state.asyncSharedDistSink->add_sink(state.consoleSink);
+                state.asyncSinkCount.fetch_add(1, std::memory_order_release);
             }
         }
 
@@ -352,11 +355,12 @@ hipdnnStatus_t lockedAddUserCallback(BackendLogState& state,
     if(isAsync)
     {
         state.asyncSharedDistSink->add_sink(sink);
+        state.asyncSinkCount.fetch_add(1, std::memory_order_release);
     }
     else
     {
         state.syncSharedDistSink->add_sink(sink);
-        state.syncCallbackCount.fetch_add(1, std::memory_order_release);
+        state.syncSinkCount.fetch_add(1, std::memory_order_release);
     }
 
     // Track callback
@@ -384,22 +388,24 @@ hipdnnStatus_t lockedUpdateUserCallback(BackendLogState& state,
         if(info.mode == HIPDNN_LOG_CALLBACK_ASYNC)
         {
             state.asyncSharedDistSink->remove_sink(info.sink);
+            state.asyncSinkCount.fetch_sub(1, std::memory_order_release);
         }
         else
         {
             state.syncSharedDistSink->remove_sink(info.sink);
-            state.syncCallbackCount.fetch_sub(1, std::memory_order_release);
+            state.syncSinkCount.fetch_sub(1, std::memory_order_release);
         }
 
         // Add to new dist_sink (loggers already created in initialize())
         if(newMode == HIPDNN_LOG_CALLBACK_ASYNC)
         {
             state.asyncSharedDistSink->add_sink(info.sink);
+            state.asyncSinkCount.fetch_add(1, std::memory_order_release);
         }
         else
         {
             state.syncSharedDistSink->add_sink(info.sink);
-            state.syncCallbackCount.fetch_add(1, std::memory_order_release);
+            state.syncSinkCount.fetch_add(1, std::memory_order_release);
         }
 
         info.mode = newMode;
@@ -439,11 +445,12 @@ hipdnnStatus_t lockedRemoveUserCallback(BackendLogState& state,
     if(isAsync)
     {
         state.asyncSharedDistSink->remove_sink(info.sink);
+        state.asyncSinkCount.fetch_sub(1, std::memory_order_release);
     }
     else
     {
         state.syncSharedDistSink->remove_sink(info.sink);
-        state.syncCallbackCount.fetch_sub(1, std::memory_order_release);
+        state.syncSinkCount.fetch_sub(1, std::memory_order_release);
     }
 
     // Remove from tracking
@@ -501,7 +508,7 @@ hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
     return lockedAddUserCallback(state, key, callback, userHandle, minLevel, mode);
 }
 
-void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg)
+void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg)
 {
     // Check the shutdown flag before accessing BackendLogState. The atexit handler sets this
     // flag to prevent any thread from accessing logging infrastructure during static destruction.
@@ -552,25 +559,27 @@ void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg)
     // concurrent readers. The copied shared_ptr keeps the shared logger alive.
     std::shared_ptr<spdlog::logger> asyncLogger;
     std::shared_ptr<spdlog::logger> syncLogger;
-    bool hasSyncCallbacks = false;
+
     {
         auto& state = getBackendLogState();
         std::shared_lock<std::shared_mutex> lock(state.loggerStateMutex);
 
-        asyncLogger = state.asyncLogger;
-        syncLogger = state.syncLogger;
-        hasSyncCallbacks = state.syncCallbackCount.load(std::memory_order_acquire) > 0;
+        if(state.asyncSinkCount.load(std::memory_order_acquire) > 0)
+        {
+            asyncLogger = state.asyncLogger;
+        }
+        if(state.syncSinkCount.load(std::memory_order_acquire) > 0)
+        {
+            syncLogger = state.syncLogger;
+        }
     } // Lock released here
 
-    // Log to async shared logger (console/file + async user callbacks)
     if(asyncLogger)
     {
         asyncLogger->log(spdlogLevel, msg);
     }
 
-    // Log to sync user callback logger only when sync callbacks are registered.
-    // Skip entirely when no sync callbacks exist to avoid lock overhead on every log call.
-    if(hasSyncCallbacks && syncLogger)
+    if(syncLogger)
     {
         syncLogger->log(spdlogLevel, msg);
     }
