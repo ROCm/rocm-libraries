@@ -281,6 +281,7 @@ set( MIOpen_Source
     solver/kthvalue/forward_kthvalue.cpp
     solver/layernorm/backward_layernorm.cpp
     solver/layernorm/backward_t5layernorm.cpp
+    solver/layernorm/common_layernorm.cpp
     solver/layernorm/forward_addlayernorm.cpp
     solver/layernorm/forward_layernorm.cpp
     solver/layernorm/forward_t5layernorm.cpp
