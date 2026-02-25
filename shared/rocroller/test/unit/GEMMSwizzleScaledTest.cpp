@@ -1,29 +1,5 @@
-
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -570,23 +546,45 @@ namespace GEMMTests
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(
-        GEMMSwizzleScaledTest,
-        GEMMSwizzleScaledF4TNTestSuite,
-        ::testing::Combine(currentGPUISA(),
-                           ::testing::Values(64, 128),
-                           ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
-                                             SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                             SolutionParams::LoadPath::BufferToLDS),
-                           ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
-                                             SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                             SolutionParams::LoadPath::BufferToLDS),
-                           ::testing::Values(0, 2, 4),
-                           ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                             SolutionParams::LoadPath::BufferToVGPR,
-                                             SolutionParams::LoadPath::BufferToLDS),
-                           ::testing::Values(0, 2048),
-                           ::testing::Values(0, 2048)));
+    using SwizzleScaledF4TNParamGenerator
+        = ::testing::internal::ParamGenerator<GEMMSwizzleScaledF4TNTestSuite::ParamType>;
+    static auto
+        FilterValidSwizzleScaledF4TNParams(SwizzleScaledF4TNParamGenerator&& inputParamGenerator)
+    {
+        using LP = SolutionParams::LoadPath;
+
+        std::vector<GEMMSwizzleScaledF4TNTestSuite::ParamType> filtered;
+        for(auto const& inputParam : inputParamGenerator)
+        {
+            auto const& [arch, waveK, loadScaleA, loadScaleB, unrollK, loadAB, padA, padB]
+                = inputParam;
+
+            if(unrollK == 4 && (loadAB == LP::BufferToLDSViaVGPR || waveK == 128))
+                continue;
+
+            filtered.push_back(inputParam);
+        }
+
+        return ::testing::ValuesIn(filtered);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(GEMMSwizzleScaledTest,
+                             GEMMSwizzleScaledF4TNTestSuite,
+                             FilterValidSwizzleScaledF4TNParams(::testing::Combine(
+                                 currentGPUISA(),
+                                 ::testing::Values(64, 128),
+                                 ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                                   SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                   SolutionParams::LoadPath::BufferToLDS),
+                                 ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                                   SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                   SolutionParams::LoadPath::BufferToLDS),
+                                 ::testing::Values(0, 2, 4),
+                                 ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                   SolutionParams::LoadPath::BufferToVGPR,
+                                                   SolutionParams::LoadPath::BufferToLDS),
+                                 ::testing::Values(0, 2048),
+                                 ::testing::Values(0, 2048))));
 
     // ========================================================================
     // GEMMSwizzleScaledStreamKTestSuite

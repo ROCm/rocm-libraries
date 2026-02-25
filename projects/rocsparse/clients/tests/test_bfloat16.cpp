@@ -25,44 +25,59 @@
 #include <gtest/gtest.h>
 #include <rocsparse/rocsparse.h>
 
+#include "rocsparse_data.hpp"
+
 #include <cmath>
 #include <sstream>
+
+// Fixture that skips tests when --yaml filter is active (non-yaml tests)
+class bfloat16_pre_checkin : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        if(RocSPARSE_TestData::is_yaml_filter_active())
+        {
+            GTEST_SKIP() << "Skipping non-yaml test when --yaml filter is active";
+        }
+    }
+};
 
 // =============================================================================
 // Test Constructors
 // =============================================================================
-TEST(bfloat16_pre_checkin, DefaultConstructor)
+TEST_F(bfloat16_pre_checkin, DefaultConstructor)
 {
     rocsparse_bfloat16 bf;
     // Default constructed, value is undefined but should not crash
     (void)bf;
 }
 
-TEST(bfloat16_pre_checkin, FloatConstructor)
+TEST_F(bfloat16_pre_checkin, FloatConstructor)
 {
     rocsparse_bfloat16 bf(3.14f);
     EXPECT_NEAR(float(bf), 3.14f, 0.01f);
 }
 
-TEST(bfloat16_pre_checkin, DoubleConstructor)
+TEST_F(bfloat16_pre_checkin, DoubleConstructor)
 {
     rocsparse_bfloat16 bf(2.71828);
     EXPECT_NEAR(float(bf), 2.71828f, 0.01f);
 }
 
-TEST(bfloat16_pre_checkin, Int32Constructor)
+TEST_F(bfloat16_pre_checkin, Int32Constructor)
 {
     rocsparse_bfloat16 bf(42);
     EXPECT_FLOAT_EQ(float(bf), 42.0f);
 }
 
-TEST(bfloat16_pre_checkin, Int64Constructor)
+TEST_F(bfloat16_pre_checkin, Int64Constructor)
 {
     rocsparse_bfloat16 bf(int64_t(100));
     EXPECT_FLOAT_EQ(float(bf), 100.0f);
 }
 
-TEST(bfloat16_pre_checkin, RoundingModeConstructors)
+TEST_F(bfloat16_pre_checkin, RoundingModeConstructors)
 {
     float test_val = 3.14159f;
 
@@ -78,7 +93,7 @@ TEST(bfloat16_pre_checkin, RoundingModeConstructors)
 // =============================================================================
 // Test Assignment
 // =============================================================================
-TEST(bfloat16_pre_checkin, AssignmentFromFloat)
+TEST_F(bfloat16_pre_checkin, AssignmentFromFloat)
 {
     rocsparse_bfloat16 bf;
     bf = 2.5f;
@@ -91,35 +106,35 @@ TEST(bfloat16_pre_checkin, AssignmentFromFloat)
 // =============================================================================
 // Test Conversions
 // =============================================================================
-TEST(bfloat16_pre_checkin, ConversionToFloat)
+TEST_F(bfloat16_pre_checkin, ConversionToFloat)
 {
     rocsparse_bfloat16 bf(42.0f);
     float              f = float(bf);
     EXPECT_FLOAT_EQ(f, 42.0f);
 }
 
-TEST(bfloat16_pre_checkin, ConversionToDouble)
+TEST_F(bfloat16_pre_checkin, ConversionToDouble)
 {
     rocsparse_bfloat16 bf(42.0f);
     double             d = static_cast<double>(bf);
     EXPECT_NEAR(d, 42.0, 1.0);
 }
 
-TEST(bfloat16_pre_checkin, ConversionToInt32)
+TEST_F(bfloat16_pre_checkin, ConversionToInt32)
 {
     rocsparse_bfloat16 bf(42.0f);
     int32_t            i32 = static_cast<int32_t>(bf);
     EXPECT_EQ(i32, 42);
 }
 
-TEST(bfloat16_pre_checkin, ConversionToInt64)
+TEST_F(bfloat16_pre_checkin, ConversionToInt64)
 {
     rocsparse_bfloat16 bf(42.0f);
     int64_t            i64 = static_cast<int64_t>(bf);
     EXPECT_EQ(i64, 42);
 }
 
-TEST(bfloat16_pre_checkin, ConversionToBool)
+TEST_F(bfloat16_pre_checkin, ConversionToBool)
 {
     rocsparse_bfloat16 bf_zero(0.0f);
     rocsparse_bfloat16 bf_nonzero(1.0f);
@@ -131,21 +146,21 @@ TEST(bfloat16_pre_checkin, ConversionToBool)
 // =============================================================================
 // Test Arithmetic Operators
 // =============================================================================
-TEST(bfloat16_pre_checkin, UnaryPlus)
+TEST_F(bfloat16_pre_checkin, UnaryPlus)
 {
     rocsparse_bfloat16 a(5.0f);
     rocsparse_bfloat16 result = +a;
     EXPECT_FLOAT_EQ(float(result), 5.0f);
 }
 
-TEST(bfloat16_pre_checkin, UnaryMinus)
+TEST_F(bfloat16_pre_checkin, UnaryMinus)
 {
     rocsparse_bfloat16 a(5.0f);
     rocsparse_bfloat16 result = -a;
     EXPECT_FLOAT_EQ(float(result), -5.0f);
 }
 
-TEST(bfloat16_pre_checkin, Addition)
+TEST_F(bfloat16_pre_checkin, Addition)
 {
     rocsparse_bfloat16 a(5.0f);
     rocsparse_bfloat16 b(3.0f);
@@ -153,7 +168,7 @@ TEST(bfloat16_pre_checkin, Addition)
     EXPECT_FLOAT_EQ(float(sum), 8.0f);
 }
 
-TEST(bfloat16_pre_checkin, Subtraction)
+TEST_F(bfloat16_pre_checkin, Subtraction)
 {
     rocsparse_bfloat16 a(5.0f);
     rocsparse_bfloat16 b(3.0f);
@@ -161,7 +176,7 @@ TEST(bfloat16_pre_checkin, Subtraction)
     EXPECT_FLOAT_EQ(float(diff), 2.0f);
 }
 
-TEST(bfloat16_pre_checkin, Multiplication)
+TEST_F(bfloat16_pre_checkin, Multiplication)
 {
     rocsparse_bfloat16 a(5.0f);
     rocsparse_bfloat16 b(3.0f);
@@ -169,7 +184,7 @@ TEST(bfloat16_pre_checkin, Multiplication)
     EXPECT_FLOAT_EQ(float(prod), 15.0f);
 }
 
-TEST(bfloat16_pre_checkin, MultiplicationFloatBFloat16)
+TEST_F(bfloat16_pre_checkin, MultiplicationFloatBFloat16)
 {
     float              a = 2.0f;
     rocsparse_bfloat16 b(5.0f);
@@ -177,7 +192,7 @@ TEST(bfloat16_pre_checkin, MultiplicationFloatBFloat16)
     EXPECT_FLOAT_EQ(prod, 10.0f);
 }
 
-TEST(bfloat16_pre_checkin, Division)
+TEST_F(bfloat16_pre_checkin, Division)
 {
     rocsparse_bfloat16 a(15.0f);
     rocsparse_bfloat16 b(3.0f);
@@ -188,7 +203,7 @@ TEST(bfloat16_pre_checkin, Division)
 // =============================================================================
 // Test Comparison Operators
 // =============================================================================
-TEST(bfloat16_pre_checkin, LessThan)
+TEST_F(bfloat16_pre_checkin, LessThan)
 {
     rocsparse_bfloat16 a(5.0f);
     rocsparse_bfloat16 b(3.0f);
@@ -198,7 +213,7 @@ TEST(bfloat16_pre_checkin, LessThan)
     EXPECT_FALSE(a < a);
 }
 
-TEST(bfloat16_pre_checkin, Equality)
+TEST_F(bfloat16_pre_checkin, Equality)
 {
     rocsparse_bfloat16 a(5.0f);
     rocsparse_bfloat16 b(5.0f);
@@ -208,7 +223,7 @@ TEST(bfloat16_pre_checkin, Equality)
     EXPECT_FALSE(a == c);
 }
 
-TEST(bfloat16_pre_checkin, GreaterThan)
+TEST_F(bfloat16_pre_checkin, GreaterThan)
 {
     rocsparse_bfloat16 a(5.0f);
     rocsparse_bfloat16 b(3.0f);
@@ -218,7 +233,7 @@ TEST(bfloat16_pre_checkin, GreaterThan)
     EXPECT_FALSE(a > a);
 }
 
-TEST(bfloat16_pre_checkin, LessThanOrEqual)
+TEST_F(bfloat16_pre_checkin, LessThanOrEqual)
 {
     rocsparse_bfloat16 a(5.0f);
     rocsparse_bfloat16 b(3.0f);
@@ -229,7 +244,7 @@ TEST(bfloat16_pre_checkin, LessThanOrEqual)
     EXPECT_FALSE(a <= b);
 }
 
-TEST(bfloat16_pre_checkin, NotEqual)
+TEST_F(bfloat16_pre_checkin, NotEqual)
 {
     rocsparse_bfloat16 a(5.0f);
     rocsparse_bfloat16 b(3.0f);
@@ -239,7 +254,7 @@ TEST(bfloat16_pre_checkin, NotEqual)
     EXPECT_FALSE(a != c);
 }
 
-TEST(bfloat16_pre_checkin, NotEqualInt)
+TEST_F(bfloat16_pre_checkin, NotEqualInt)
 {
     rocsparse_bfloat16 a(5.0f);
 
@@ -247,7 +262,7 @@ TEST(bfloat16_pre_checkin, NotEqualInt)
     EXPECT_FALSE(a != 5);
 }
 
-TEST(bfloat16_pre_checkin, GreaterThanOrEqual)
+TEST_F(bfloat16_pre_checkin, GreaterThanOrEqual)
 {
     rocsparse_bfloat16 a(5.0f);
     rocsparse_bfloat16 b(3.0f);
@@ -261,84 +276,84 @@ TEST(bfloat16_pre_checkin, GreaterThanOrEqual)
 // =============================================================================
 // Test Compound Assignment Operators
 // =============================================================================
-TEST(bfloat16_pre_checkin, AddAssignBFloat16)
+TEST_F(bfloat16_pre_checkin, AddAssignBFloat16)
 {
     rocsparse_bfloat16 a(5.0f);
     a += rocsparse_bfloat16(3.0f);
     EXPECT_FLOAT_EQ(float(a), 8.0f);
 }
 
-TEST(bfloat16_pre_checkin, AddAssignFloat)
+TEST_F(bfloat16_pre_checkin, AddAssignFloat)
 {
     rocsparse_bfloat16 a(5.0f);
     a += 3.0f;
     EXPECT_FLOAT_EQ(float(a), 8.0f);
 }
 
-TEST(bfloat16_pre_checkin, FloatAddAssignBFloat16)
+TEST_F(bfloat16_pre_checkin, FloatAddAssignBFloat16)
 {
     float a = 5.0f;
     a += rocsparse_bfloat16(3.0f);
     EXPECT_FLOAT_EQ(a, 8.0f);
 }
 
-TEST(bfloat16_pre_checkin, SubtractAssignBFloat16)
+TEST_F(bfloat16_pre_checkin, SubtractAssignBFloat16)
 {
     rocsparse_bfloat16 a(5.0f);
     a -= rocsparse_bfloat16(3.0f);
     EXPECT_FLOAT_EQ(float(a), 2.0f);
 }
 
-TEST(bfloat16_pre_checkin, SubtractAssignFloat)
+TEST_F(bfloat16_pre_checkin, SubtractAssignFloat)
 {
     rocsparse_bfloat16 a(5.0f);
     a -= 3.0f;
     EXPECT_FLOAT_EQ(float(a), 2.0f);
 }
 
-TEST(bfloat16_pre_checkin, FloatSubtractAssignBFloat16)
+TEST_F(bfloat16_pre_checkin, FloatSubtractAssignBFloat16)
 {
     float a = 5.0f;
     a -= rocsparse_bfloat16(3.0f);
     EXPECT_FLOAT_EQ(a, 2.0f);
 }
 
-TEST(bfloat16_pre_checkin, MultiplyAssignBFloat16)
+TEST_F(bfloat16_pre_checkin, MultiplyAssignBFloat16)
 {
     rocsparse_bfloat16 a(5.0f);
     a *= rocsparse_bfloat16(3.0f);
     EXPECT_FLOAT_EQ(float(a), 15.0f);
 }
 
-TEST(bfloat16_pre_checkin, MultiplyAssignFloat)
+TEST_F(bfloat16_pre_checkin, MultiplyAssignFloat)
 {
     rocsparse_bfloat16 a(5.0f);
     a *= 3.0f;
     EXPECT_FLOAT_EQ(float(a), 15.0f);
 }
 
-TEST(bfloat16_pre_checkin, FloatMultiplyAssignBFloat16)
+TEST_F(bfloat16_pre_checkin, FloatMultiplyAssignBFloat16)
 {
     float a = 5.0f;
     a *= rocsparse_bfloat16(3.0f);
     EXPECT_FLOAT_EQ(a, 15.0f);
 }
 
-TEST(bfloat16_pre_checkin, DivideAssignBFloat16)
+TEST_F(bfloat16_pre_checkin, DivideAssignBFloat16)
 {
     rocsparse_bfloat16 a(15.0f);
     a /= rocsparse_bfloat16(3.0f);
     EXPECT_FLOAT_EQ(float(a), 5.0f);
 }
 
-TEST(bfloat16_pre_checkin, DivideAssignFloat)
+TEST_F(bfloat16_pre_checkin, DivideAssignFloat)
 {
     rocsparse_bfloat16 a(15.0f);
     a /= 3.0f;
     EXPECT_FLOAT_EQ(float(a), 5.0f);
 }
 
-TEST(bfloat16_pre_checkin, FloatDivideAssignBFloat16)
+TEST_F(bfloat16_pre_checkin, FloatDivideAssignBFloat16)
 {
     float a = 15.0f;
     a /= rocsparse_bfloat16(3.0f);
@@ -348,21 +363,21 @@ TEST(bfloat16_pre_checkin, FloatDivideAssignBFloat16)
 // =============================================================================
 // Test Increment/Decrement Operators
 // =============================================================================
-TEST(bfloat16_pre_checkin, PreIncrement)
+TEST_F(bfloat16_pre_checkin, PreIncrement)
 {
     rocsparse_bfloat16 a(5.0f);
     ++a;
     EXPECT_FLOAT_EQ(float(a), 6.0f);
 }
 
-TEST(bfloat16_pre_checkin, PreDecrement)
+TEST_F(bfloat16_pre_checkin, PreDecrement)
 {
     rocsparse_bfloat16 a(5.0f);
     --a;
     EXPECT_FLOAT_EQ(float(a), 4.0f);
 }
 
-TEST(bfloat16_pre_checkin, PostIncrement)
+TEST_F(bfloat16_pre_checkin, PostIncrement)
 {
     rocsparse_bfloat16 a(5.0f);
     rocsparse_bfloat16 b = a++;
@@ -370,7 +385,7 @@ TEST(bfloat16_pre_checkin, PostIncrement)
     EXPECT_FLOAT_EQ(float(a), 6.0f);
 }
 
-TEST(bfloat16_pre_checkin, PostDecrement)
+TEST_F(bfloat16_pre_checkin, PostDecrement)
 {
     rocsparse_bfloat16 a(5.0f);
     rocsparse_bfloat16 b = a--;
@@ -381,7 +396,7 @@ TEST(bfloat16_pre_checkin, PostDecrement)
 // =============================================================================
 // Test std namespace functions
 // =============================================================================
-TEST(bfloat16_pre_checkin, StdIsInf)
+TEST_F(bfloat16_pre_checkin, StdIsInf)
 {
     rocsparse_bfloat16 inf;
     inf.data = 0x7f80; // Positive infinity
@@ -391,7 +406,7 @@ TEST(bfloat16_pre_checkin, StdIsInf)
     EXPECT_FALSE(std::isinf(finite));
 }
 
-TEST(bfloat16_pre_checkin, StdIsNan)
+TEST_F(bfloat16_pre_checkin, StdIsNan)
 {
     rocsparse_bfloat16 nan;
     nan.data = 0x7fc0; // NaN
@@ -401,7 +416,7 @@ TEST(bfloat16_pre_checkin, StdIsNan)
     EXPECT_FALSE(std::isnan(finite));
 }
 
-TEST(bfloat16_pre_checkin, StdIsZero)
+TEST_F(bfloat16_pre_checkin, StdIsZero)
 {
     rocsparse_bfloat16 zero(0.0f);
     EXPECT_TRUE(std::iszero(zero));
@@ -410,7 +425,7 @@ TEST(bfloat16_pre_checkin, StdIsZero)
     EXPECT_FALSE(std::iszero(nonzero));
 }
 
-TEST(bfloat16_pre_checkin, StdAbs)
+TEST_F(bfloat16_pre_checkin, StdAbs)
 {
     rocsparse_bfloat16 neg(-5.0f);
     rocsparse_bfloat16 abs_neg = std::abs(neg);
@@ -421,21 +436,21 @@ TEST(bfloat16_pre_checkin, StdAbs)
     EXPECT_FLOAT_EQ(float(abs_pos), 5.0f);
 }
 
-TEST(bfloat16_pre_checkin, StdSin)
+TEST_F(bfloat16_pre_checkin, StdSin)
 {
     rocsparse_bfloat16 angle(0.0f);
     rocsparse_bfloat16 sin_val = std::sin(angle);
     EXPECT_NEAR(float(sin_val), 0.0f, 0.01f);
 }
 
-TEST(bfloat16_pre_checkin, StdCos)
+TEST_F(bfloat16_pre_checkin, StdCos)
 {
     rocsparse_bfloat16 angle(0.0f);
     rocsparse_bfloat16 cos_val = std::cos(angle);
     EXPECT_NEAR(float(cos_val), 1.0f, 0.01f);
 }
 
-TEST(bfloat16_pre_checkin, StdReal)
+TEST_F(bfloat16_pre_checkin, StdReal)
 {
     rocsparse_bfloat16 val(3.14f);
     rocsparse_bfloat16 real_val = std::real(val);
@@ -445,25 +460,25 @@ TEST(bfloat16_pre_checkin, StdReal)
 // =============================================================================
 // Test Special Values
 // =============================================================================
-TEST(bfloat16_pre_checkin, Zero)
+TEST_F(bfloat16_pre_checkin, Zero)
 {
     rocsparse_bfloat16 zero(0.0f);
     EXPECT_FLOAT_EQ(float(zero), 0.0f);
 }
 
-TEST(bfloat16_pre_checkin, NegativeZero)
+TEST_F(bfloat16_pre_checkin, NegativeZero)
 {
     rocsparse_bfloat16 neg_zero(-0.0f);
     EXPECT_FLOAT_EQ(float(neg_zero), -0.0f);
 }
 
-TEST(bfloat16_pre_checkin, SmallValues)
+TEST_F(bfloat16_pre_checkin, SmallValues)
 {
     rocsparse_bfloat16 small(0.001f);
     EXPECT_NEAR(float(small), 0.001f, 0.0001f);
 }
 
-TEST(bfloat16_pre_checkin, LargeValues)
+TEST_F(bfloat16_pre_checkin, LargeValues)
 {
     rocsparse_bfloat16 large(30000.0f);
     EXPECT_NEAR(float(large), 30000.0f, 500.0f);
@@ -472,7 +487,7 @@ TEST(bfloat16_pre_checkin, LargeValues)
 // =============================================================================
 // Test Stream Output
 // =============================================================================
-TEST(bfloat16_pre_checkin, StreamOutput)
+TEST_F(bfloat16_pre_checkin, StreamOutput)
 {
     rocsparse_bfloat16 bf(3.14f);
     std::ostringstream oss;
