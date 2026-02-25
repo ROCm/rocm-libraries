@@ -7,18 +7,21 @@
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/TensorAttributesWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <string>
 
-#define LOG_ON_HIPBLASLT_FAILURE(status)                                                           \
-    do                                                                                             \
-    {                                                                                              \
-        if(status != HIPBLAS_STATUS_SUCCESS)                                                       \
-        {                                                                                          \
-            HIPDNN_LOG_ERROR("hipBLASLt error occurred: {}",                                       \
-                             hipblaslt_plugin::hipblaslt_utils::hipblas_status_to_string(status)); \
-        }                                                                                          \
+#define LOG_ON_HIPBLASLT_FAILURE(status)                                                 \
+    do                                                                                   \
+    {                                                                                    \
+        if(status != HIPBLAS_STATUS_SUCCESS)                                             \
+        {                                                                                \
+            HIPDNN_PLUGIN_LOG_ERROR(                                                     \
+                "hipBLASLt error occurred: "                                             \
+                << hipblaslt_plugin::hipblaslt_utils::hipblas_status_to_string(status)); \
+        }                                                                                \
     } while(0)
 
 #define THROW_ON_HIPBLASLT_FAILURE(status)                                                     \
@@ -76,6 +79,25 @@ inline const char* hipblas_status_to_string(hipblasStatus_t status)
 #undef CASE
 }
 
+struct EpilogueParams
+{
+    hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_DEFAULT;
+    float act0 = 0;
+    float act1 = 0;
+};
+
+EpilogueParams mapPointwiseModeToHipblasLtEpilogue(
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes* attrs, bool withBias);
+
 hipDataType tensorDataTypeToHipDataType(const hipdnn_data_sdk::data_objects::DataType& dataType);
+
+hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
+                                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                            uint32_t numDeviceBuffers);
+
+hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensorAttributes(
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    int64_t uid);
 
 } // namespace hipblaslt_plugin::hipblaslt_utils

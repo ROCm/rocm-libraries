@@ -58,7 +58,10 @@ CK_TILE_HOST_DEVICE index_t
 StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::get_flags_buffer_size()
     const noexcept
 {
-    return sizeof(index_t) * sk_ctas_;
+    constexpr index_t alignment  = 128;
+    const index_t required_bytes = sizeof(index_t) * sk_ctas_;
+    const index_t padded_bytes   = ck_tile::integer_least_multiple(required_bytes, alignment);
+    return padded_bytes;
 }
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
@@ -150,8 +153,8 @@ CK_TILE_HOST_DEVICE index_t
 StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::get_workspace_size(
     index_t acc_element_bytes) const noexcept
 {
-    if constexpr(ReductionStrategy == StreamKReductionStrategy::Reduction ||
-                 ReductionStrategy == StreamKReductionStrategy::TreeReduction)
+    if constexpr(ReductionStrategy == StreamKReductionStrategy::Linear ||
+                 ReductionStrategy == StreamKReductionStrategy::Tree)
     {
 
         return get_partials_buffer_size(acc_element_bytes) + get_flags_buffer_size();

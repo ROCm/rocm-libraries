@@ -3,13 +3,14 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
-#include <set>
+#include <vector>
 
-namespace miopen_legacy_plugin
+#include "HipdnnMiopenHandle.hpp"
+
+namespace miopen_plugin
 {
-
-class EngineManager;
 
 /*
  * Container class to manage the intantiation and ownership of all MIOpen plan builders and engines.
@@ -26,10 +27,31 @@ public:
     MiopenContainer();
     ~MiopenContainer();
 
-    EngineManager& getEngineManager();
+    // Copy engine IDs into a buffer.
+    // If maxEngines == 0: Does not copy, only queries total count.
+    // If maxEngines > 0: Copies up to maxEngines IDs into *engineIds, sets numEngines to number copied.
+    // Returns: Total number of available engines (regardless of maxEngines value).
+    static uint32_t copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines);
+
+    hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>&
+        getEngineManager();
 
 private:
-    std::unique_ptr<EngineManager> _engineManager;
+    struct EngineDefinition
+    {
+        int64_t id; // Set id using EngineNames.hpp.
+        std::function<std::unique_ptr<hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle,
+                                                                 HipdnnMiopenSettings,
+                                                                 HipdnnMiopenContext>>()>
+            createEngine;
+    };
+
+    static const std::vector<EngineDefinition>& getEngineDefinitions();
+
+    std::unique_ptr<hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle,
+                                                     HipdnnMiopenSettings,
+                                                     HipdnnMiopenContext>>
+        _engineManager;
 };
 
 }

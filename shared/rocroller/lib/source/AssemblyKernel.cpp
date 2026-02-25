@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 
@@ -283,7 +260,7 @@ namespace rocRoller
         auto restored           = restoreCommandArguments(exp);
         auto restoredSimplified = simplify(restored);
 
-        auto match = [exp, simplified, restored, restoredSimplified](auto const& arg) {
+        auto match = [this, exp, simplified, restored, restoredSimplified](auto const& arg) {
             auto equivalentToAny = [exp, simplified, restored, restoredSimplified](
                                        Expression::ExpressionPtr const& anExpression) {
                 return equivalent(anExpression, exp) || equivalent(anExpression, simplified)
@@ -291,20 +268,16 @@ namespace rocRoller
                        || equivalent(anExpression, restoredSimplified);
             };
 
-            if(equivalentToAny(arg.expression))
+            if(equivalentToAny(arg.getExpression()))
                 return true;
 
-            auto simpleArg = simplify(arg.expression);
-            if(equivalentToAny(simpleArg))
+            if(arg.getSimplifiedExpr() && equivalentToAny(arg.getSimplifiedExpr()))
                 return true;
 
-            auto restoredArg = restoreCommandArguments(arg.expression);
-
-            if(equivalentToAny(restoredArg))
+            if(arg.getRestoredExpr() && equivalentToAny(arg.getRestoredExpr()))
                 return true;
 
-            auto restoredSimplifiedArg = simplify(restoredArg);
-            if(equivalentToAny(restoredSimplifiedArg))
+            if(arg.getSimplifiedRestoredExpr() && equivalentToAny(arg.getSimplifiedRestoredExpr()))
                 return true;
 
             return false;
@@ -327,44 +300,47 @@ namespace rocRoller
 
     Expression::ExpressionPtr AssemblyKernel::addArgument(AssemblyKernelArgument arg)
     {
-        AssertFatal(m_argumentNames.find(arg.name) == m_argumentNames.end(),
-                    "Error: Two arguments with the same name: " + arg.name);
+        auto const  argName       = arg.getName();
+        auto const& argExpression = arg.getExpression();
 
-        if(arg.expression)
-            AssertFatal(resultVariableType(arg.expression) == arg.variableType,
-                        ShowValue(resultVariableType(arg.expression)),
-                        ShowValue(arg.variableType),
+        AssertFatal(m_argumentNames.find(argName) == m_argumentNames.end(),
+                    "Error: Two arguments with the same name: " + argName);
+
+        if(argExpression)
+            AssertFatal(resultVariableType(argExpression) == arg.getVariableType(),
+                        ShowValue(resultVariableType(argExpression)),
+                        ShowValue(arg.getVariableType()),
                         ShowValue(arg));
 
-        if(arg.expression && m_context.lock()->kernelOptions()->deduplicateArguments)
+        if(argExpression && m_context.lock()->kernelOptions()->deduplicateArguments)
         {
             ptrdiff_t idx;
-            auto      existingArg = findArgumentForExpression(arg.expression, idx);
+            auto      existingArg = findArgumentForExpression(argExpression, idx);
             if(existingArg)
             {
-                m_argumentNames[arg.name] = idx;
+                m_argumentNames[argName] = idx;
                 return existingArg;
             }
         }
 
-        auto typeInfo = DataTypeInfo::Get(arg.variableType);
+        auto typeInfo = DataTypeInfo::Get(arg.getVariableType());
         if(isScaleType(typeInfo.variableType.dataType))
         {
             auto packedVarType = typeInfo.packedVariableType();
             AssertFatal(packedVarType, "Scale types must have a packed variable type.");
             typeInfo = DataTypeInfo::Get(packedVarType.value());
         }
-        if(arg.offset == -1)
+        if(arg.getOffset() == -1)
         {
-            arg.offset = RoundUpToMultiple<int>(m_argumentSize, typeInfo.alignment);
+            arg.setOffset(RoundUpToMultiple<int>(m_argumentSize, typeInfo.alignment));
         }
-        if(arg.size == -1)
+        if(arg.getSize() == -1)
         {
-            arg.size = CeilDivide(typeInfo.elementBits, 8u);
+            arg.setSize(CeilDivide(typeInfo.elementBits, 8u));
         }
-        m_argumentSize = std::max(m_argumentSize, arg.offset + arg.size);
 
-        m_argumentNames[arg.name] = m_arguments.size();
+        m_argumentSize           = std::max(m_argumentSize, arg.getOffset() + arg.getSize());
+        m_argumentNames[argName] = m_arguments.size();
         m_arguments.push_back(std::move(arg));
 
         return Expression::fromKernelArgument(m_arguments.back());

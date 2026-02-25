@@ -303,6 +303,9 @@ namespace
         case ROCBLASLT_EPILOGUE_DGELU:
         case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
             return TensileLite::ActivationType::DGelu;
+        case ROCBLASLT_EPILOGUE_DRELU:
+        case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
+            return TensileLite::ActivationType::DRelu;
         case ROCBLASLT_EPILOGUE_SWISH_EXT:
         case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
             return TensileLite::ActivationType::Silu;
@@ -346,6 +349,7 @@ namespace
         case ROCBLASLT_EPILOGUE_GELU_BIAS:
         case ROCBLASLT_EPILOGUE_GELU_AUX_BIAS:
         case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
+        case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
         case ROCBLASLT_EPILOGUE_BIAS:
         case ROCBLASLT_EPILOGUE_BGRADA:
         case ROCBLASLT_EPILOGUE_BGRADB:
@@ -653,6 +657,7 @@ namespace
         case TensileLite::ActivationType::Gelu:
             return "gelu";
             break;
+        case TensileLite::ActivationType::DRelu:
         case TensileLite::ActivationType::Relu:
             return "relu";
             break;
@@ -2634,8 +2639,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             return rocblaslt_status_invalid_value;
         }
 
-        if(getenv("HIPBLASLT_BENCH_PERF") != nullptr
-           || getenv("HIPBLASLT_BENCH_PERF_ALL") != nullptr)
+        if(getenv("HIPBLASLT_BENCH_PERF") != nullptr)
         {
             auto autoGsuVal  = solution->calculateAutoGSU(data->problem, &(*hardware));
             auto Granularity = solution->computeGranularities(
@@ -3626,7 +3630,7 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
         for(size_t i = 0; i < algoCount; ++i)
         {
             auto& solution = solutions[i];
-            msg << "getBestSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+            msg << "getBestSolutions(): sol-idx = " << solution->index << ", (require TENSILE_DB set 0x2|0x4) sol-tag = " << solution->matchingTag() << std::endl;
         }
         log_info(__func__, msg.str());
     }
@@ -3731,7 +3735,7 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
         if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
         {
             std::ostringstream msg;
-            msg << "getAllSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+            msg << "getAllSolutions(): sol-idx = " << solution->index << ", (require TENSILE_DB set 0x2|0x4) sol-tag = " << solution->matchingTag() << std::endl;
             log_info(__func__, msg.str());
         }
 
@@ -4218,7 +4222,7 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
             for(size_t i = 0; i < algoCount; ++i)
             {
                 auto& solution = solutions[i];
-                msg << "getBestSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+                msg << "getBestSolutions(): sol-idx = " << solution->index << ", (require TENSILE_DB set 0x2|0x4) sol-tag = " << solution->matchingTag() << std::endl;
             }
             log_info(__func__, msg.str());
         }

@@ -36,5 +36,6 @@ TEST_ROUTINE(bsrsv2,
              arg.solve_policy,
              arg.transA,
              arg.dirA,
-             arg.baseA);
+             arg.baseA,
+             arg.graph_test);
 #endif

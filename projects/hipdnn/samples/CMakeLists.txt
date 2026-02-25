@@ -40,6 +40,8 @@ add_hipdnn_sample(bn_inference_with_variance batchnorm/BnInferenceWithVariance.c
 add_hipdnn_sample(bn_training batchnorm/BnTraining.cpp)
 add_hipdnn_sample(fused_bn_training_activ batchnorm/FusedBnTrainingActiv.cpp)
 add_hipdnn_sample(bn_backward batchnorm/BnBackward.cpp)
+add_hipdnn_sample(fused_bn_inference_activ batchnorm/FusedBnInferenceActiv.cpp)
+add_hipdnn_sample(fused_bn_inference_variance_activ batchnorm/FusedBnInferenceVarianceActiv.cpp)
 add_hipdnn_sample(fused_bn_inference_drelu_bn_backward batchnorm/FusedBnInfDReluBnBwd.cpp)
 
 add_hipdnn_sample(conv_dgrad convolution/ConvDgrad.cpp)
@@ -49,6 +51,8 @@ add_hipdnn_sample(fused_conv_fprop_bias_activ convolution/FusedConvFpropBiasActi
 add_hipdnn_sample(conv_wgrad convolution/ConvWgrad.cpp)
 
 add_hipdnn_sample(serialization_roundtrip serialization/SerializationRoundTrip.cpp)
+
+add_hipdnn_sample(knobs_usage knobs/KnobsUsage.cpp)
 
 # Enable testing and add sample tests
 enable_testing()
@@ -82,8 +86,12 @@ endfunction()
 add_hipdnn_sample_test(conv_fprop)
 add_hipdnn_sample_test(conv_dgrad)
 add_hipdnn_sample_test(conv_wgrad)
-add_hipdnn_sample_test(fused_conv_fprop_activ)
-add_hipdnn_sample_test(fused_conv_fprop_bias_activ)
+
+if(NOT WIN32)
+    # Some fused conv samples are not supported on windows due to lack of CK support
+    add_hipdnn_sample_test(fused_conv_fprop_activ)
+    add_hipdnn_sample_test(fused_conv_fprop_bias_activ)
+endif()
 
 # Register batchnorm samples as tests
 add_hipdnn_sample_test(bn_inference)
@@ -91,10 +99,16 @@ add_hipdnn_sample_test(bn_inference_with_variance)
 add_hipdnn_sample_test(bn_training)
 add_hipdnn_sample_test(fused_bn_training_activ)
 add_hipdnn_sample_test(bn_backward)
+add_hipdnn_sample_test(fused_bn_inference_activ)
 add_hipdnn_sample_test(fused_bn_inference_drelu_bn_backward)
+add_hipdnn_sample_test(fused_bn_inference_variance_activ)
 
 # Register serialization samples as tests
 add_hipdnn_sample_test(serialization_roundtrip)
+
+# Register knobs sample
+# Note: knobs_usage is informational/educational, not validation
+install(TARGETS knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # Install the generated CTestTestfile.cmake to HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH
 install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH}

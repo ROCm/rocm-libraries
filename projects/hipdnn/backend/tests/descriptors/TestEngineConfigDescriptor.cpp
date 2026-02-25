@@ -286,12 +286,17 @@ TEST_F(TestEngineConfigDescriptor, GetEngineDescriptorMaxWorkspaceSize)
 }
 
 // Helper function to create a serialized KnobSetting
-static flatbuffers::DetachedBuffer createSerializedKnobSetting(int64_t knobId, int64_t value)
+static flatbuffers::DetachedBuffer createSerializedKnobSetting(const std::string& knobId,
+                                                               int64_t value)
 {
     flatbuffers::FlatBufferBuilder builder;
+    auto knobIdOffset = builder.CreateString(knobId);
     auto intValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, value);
     auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
-        builder, knobId, hipdnn_data_sdk::data_objects::KnobValue::IntValue, intValue.Union());
+        builder,
+        knobIdOffset,
+        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+        intValue.Union());
     builder.Finish(knobSetting);
     return builder.Release();
 }
@@ -300,7 +305,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceInvalidType)
 {
     auto engineConfig = getEngineConfigDescriptor();
 
-    auto knobBuffer = createSerializedKnobSetting(100, 42);
+    auto knobBuffer = createSerializedKnobSetting("test_knob_100", 42);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     // Wrong attribute type
@@ -314,7 +319,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceInvalidCount)
 {
     auto engineConfig = getEngineConfigDescriptor();
 
-    auto knobBuffer = createSerializedKnobSetting(100, 42);
+    auto knobBuffer = createSerializedKnobSetting("test_knob_100", 42);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     // Element count < 1
@@ -356,7 +361,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceZeroSize)
 {
     auto engineConfig = getEngineConfigDescriptor();
 
-    auto knobBuffer = createSerializedKnobSetting(100, 42);
+    auto knobBuffer = createSerializedKnobSetting("test_knob_100", 42);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), 0};
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -379,7 +384,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceSuccess)
         HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper));
 
     // Now set a knob choice
-    auto knobBuffer = createSerializedKnobSetting(100, 42);
+    auto knobBuffer = createSerializedKnobSetting("test_knob_100", 42);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     ASSERT_NO_THROW(engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
@@ -400,8 +405,8 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceMultipleKnobs)
         HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper));
 
     // Create multiple knob settings
-    auto knobBuffer1 = createSerializedKnobSetting(100, 42);
-    auto knobBuffer2 = createSerializedKnobSetting(101, 84);
+    auto knobBuffer1 = createSerializedKnobSetting("test_knob_100", 42);
+    auto knobBuffer2 = createSerializedKnobSetting("test_knob_101", 84);
 
     std::vector<hipdnnBackendFlatbufferData_t> knobDataArray
         = {{knobBuffer1.data(), knobBuffer1.size()}, {knobBuffer2.data(), knobBuffer2.size()}};
@@ -417,7 +422,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceOnFinalizedDescriptor)
     auto engineConfig = getEngineConfigDescriptor();
     makeEngineConfigFinalized();
 
-    auto knobBuffer = createSerializedKnobSetting(100, 42);
+    auto knobBuffer = createSerializedKnobSetting("test_knob_100", 42);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     ASSERT_THROW_HIPDNN_STATUS(

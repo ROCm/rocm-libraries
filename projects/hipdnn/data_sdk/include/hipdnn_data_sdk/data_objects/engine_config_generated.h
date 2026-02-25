@@ -33,7 +33,7 @@ bool operator!=(const EngineConfigT &lhs, const EngineConfigT &rhs);
 
 struct KnobSettingT : public ::flatbuffers::NativeTable {
   typedef KnobSetting TableType;
-  int64_t knob_id = 0;
+  std::string knob_id{};
   hipdnn_data_sdk::data_objects::KnobValueUnion value{};
 };
 
@@ -45,11 +45,11 @@ struct KnobSetting FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_VALUE_TYPE = 6,
     VT_VALUE = 8
   };
-  int64_t knob_id() const {
-    return GetField<int64_t>(VT_KNOB_ID, 0);
+  const ::flatbuffers::String *knob_id() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_KNOB_ID);
   }
-  bool mutate_knob_id(int64_t _knob_id = 0) {
-    return SetField<int64_t>(VT_KNOB_ID, _knob_id, 0);
+  ::flatbuffers::String *mutable_knob_id() {
+    return GetPointer<::flatbuffers::String *>(VT_KNOB_ID);
   }
   hipdnn_data_sdk::data_objects::KnobValue value_type() const {
     return static_cast<hipdnn_data_sdk::data_objects::KnobValue>(GetField<uint8_t>(VT_VALUE_TYPE, 0));
@@ -72,7 +72,8 @@ struct KnobSetting FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<int64_t>(verifier, VT_KNOB_ID, 8) &&
+           VerifyOffset(verifier, VT_KNOB_ID) &&
+           verifier.VerifyString(knob_id()) &&
            VerifyField<uint8_t>(verifier, VT_VALUE_TYPE, 1) &&
            VerifyOffset(verifier, VT_VALUE) &&
            VerifyKnobValue(verifier, value(), value_type()) &&
@@ -99,8 +100,8 @@ struct KnobSettingBuilder {
   typedef KnobSetting Table;
   ::flatbuffers::FlatBufferBuilder &fbb_;
   ::flatbuffers::uoffset_t start_;
-  void add_knob_id(int64_t knob_id) {
-    fbb_.AddElement<int64_t>(KnobSetting::VT_KNOB_ID, knob_id, 0);
+  void add_knob_id(::flatbuffers::Offset<::flatbuffers::String> knob_id) {
+    fbb_.AddOffset(KnobSetting::VT_KNOB_ID, knob_id);
   }
   void add_value_type(hipdnn_data_sdk::data_objects::KnobValue value_type) {
     fbb_.AddElement<uint8_t>(KnobSetting::VT_VALUE_TYPE, static_cast<uint8_t>(value_type), 0);
@@ -121,14 +122,27 @@ struct KnobSettingBuilder {
 
 inline ::flatbuffers::Offset<KnobSetting> CreateKnobSetting(
     ::flatbuffers::FlatBufferBuilder &_fbb,
-    int64_t knob_id = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> knob_id = 0,
     hipdnn_data_sdk::data_objects::KnobValue value_type = hipdnn_data_sdk::data_objects::KnobValue::NONE,
     ::flatbuffers::Offset<void> value = 0) {
   KnobSettingBuilder builder_(_fbb);
-  builder_.add_knob_id(knob_id);
   builder_.add_value(value);
+  builder_.add_knob_id(knob_id);
   builder_.add_value_type(value_type);
   return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<KnobSetting> CreateKnobSettingDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const char *knob_id = nullptr,
+    hipdnn_data_sdk::data_objects::KnobValue value_type = hipdnn_data_sdk::data_objects::KnobValue::NONE,
+    ::flatbuffers::Offset<void> value = 0) {
+  auto knob_id__ = knob_id ? _fbb.CreateString(knob_id) : 0;
+  return hipdnn_data_sdk::data_objects::CreateKnobSetting(
+      _fbb,
+      knob_id__,
+      value_type,
+      value);
 }
 
 ::flatbuffers::Offset<KnobSetting> CreateKnobSetting(::flatbuffers::FlatBufferBuilder &_fbb, const KnobSettingT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -240,7 +254,7 @@ inline KnobSettingT *KnobSetting::UnPack(const ::flatbuffers::resolver_function_
 inline void KnobSetting::UnPackTo(KnobSettingT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
   (void)_o;
   (void)_resolver;
-  { auto _e = knob_id(); _o->knob_id = _e; }
+  { auto _e = knob_id(); if (_e) _o->knob_id = _e->str(); }
   { auto _e = value_type(); _o->value.type = _e; }
   { auto _e = value(); if (_e) _o->value.value = hipdnn_data_sdk::data_objects::KnobValueUnion::UnPack(_e, value_type(), _resolver); }
 }
@@ -253,7 +267,7 @@ inline ::flatbuffers::Offset<KnobSetting> CreateKnobSetting(::flatbuffers::FlatB
   (void)_rehasher;
   (void)_o;
   struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const KnobSettingT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
-  auto _knob_id = _o->knob_id;
+  auto _knob_id = _o->knob_id.empty() ? 0 : _fbb.CreateString(_o->knob_id);
   auto _value_type = _o->value.type;
   auto _value = _o->value.Pack(_fbb);
   return hipdnn_data_sdk::data_objects::CreateKnobSetting(

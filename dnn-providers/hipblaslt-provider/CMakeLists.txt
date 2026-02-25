@@ -104,16 +104,18 @@ add_library(
     HipblasltContainer.cpp
     HipblasltPlugin.cpp
     HipblasltUtils.cpp
-)
-target_compile_definitions(
-    hipblaslt_plugin_private PRIVATE COMPONENT_NAME="hipblaslt_plugin"
+    # Matmul-related files
+    engines/plans/HipblasltMatmulPlan.cpp
+    engines/plans/HipblasltMatmulPlanBuilder.cpp
+    HipblasltMatmulDesc.cpp
+    HipblasltMatrixLayout.cpp
 )
 target_include_directories(hipblaslt_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_plugin_sdk hip::host)
+
 target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 add_library(hipblaslt_plugin SHARED HipblasltPluginPublic.cpp)
-target_compile_definitions(hipblaslt_plugin PRIVATE COMPONENT_NAME="hipblaslt_plugin")
 target_link_libraries(hipblaslt_plugin PRIVATE hipblaslt_plugin_private)
 target_link_libraries(
     hipblaslt_plugin PRIVATE "-Xlinker --exclude-libs=ALL"
@@ -132,6 +134,14 @@ set_target_properties(
 
 if(NOT HIPDNN_SKIP_TESTS)
     add_subdirectory(tests)
+    add_subdirectory(integration_tests)
+
+    # Keep this after all build folders have been added so they have a chance to register their tests
+    # using add_*_test_target()
+    finalize_test_targets()
+
+    # For standalone builds we need to install the ctest files
+    install_hipblaslt_plugin_ctest_files()
 endif()
 
 install(TARGETS hipblaslt_plugin EXPORT hipblaslt-plugin

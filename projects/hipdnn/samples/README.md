@@ -4,16 +4,17 @@
 
 1. **Prerequisites:**
 
+   - If you're new to hipDNN, see the [Consumer Quick Start](../docs/ConsumerQuickStart.md) for project setup basics.
    - Follow the instructions in [Building.md](../docs/Building.md) to install the needed dependencies, compilers, and libraries for building hipDNN projects. Specifically:
      * CMake
      * Ninja
-     * ROCm / TheRock
+     * ROCm (for HIP runtime)
    - A ROCm-compatible GPU is required to run the samples
 
 2. **Build Samples:** From this `samples` directory:
    ```bash
    mkdir build && cd build
-   cmake -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ -G Ninja ..
+   cmake -G Ninja ..
    ninja
    ```
    - Note: If you have installed hipdnn to a custom location you just need to specify the `CMAKE_PREFIX_PATH` to point to the install location.  Ensure you specify the full path and not a relative one.
@@ -80,6 +81,27 @@ Executes the forward pass of a batch normalization training graph on a 4D input 
     ```
 - The graph outputs the normalized tensor `y`, along with the batch mean/variance (`mean`, `inv_variance`) required for the backward pass, and the updated population statistics (`next_running_mean`, `next_running_variance`) required for inference.
 
+### [**`FusedBnTrainingActiv`**](./batchnorm/FusedBnTrainingActiv.cpp)
+
+Executes a fused batch normalization training and activation graph.
+
+The fused graph consists of two operations:
+
+1. **Batchnorm Training**: Normalizes input `x` using batch statistics, updates running statistics (optional), and outputs saved mean and inverse variance.
+   ```python
+   y_bn = scale * ((x - mean) * inv_variance) + bias
+   ```
+
+2. **Activation (ReLU)**: Applies ReLU activation
+   ```python
+   y = relu(y_bn) = max(y_bn, 0)
+   ```
+
+**Key Features:**
+- Demonstrates fusion of batch normalization training and activation
+- Supports both full training (updating running stats) and batch-stats-only modes
+- Uses `CpuReferenceGraphExecutor` for validation
+
 ### [**`BnBackward`**](./batchnorm/BnBackward.cpp)
 
 Executes the backward pass of a batch normalization graph to compute gradients of the loss function.
@@ -134,6 +156,46 @@ Inputs: x, dy, scale, bias, mean, inv_variance
         ↓
 Outputs: dx, dscale, dbias
 ```
+
+### [**`FusedBnInferenceActiv`**](./batchnorm/FusedBnInferenceActiv.cpp)
+
+Executes a fused batch normalization inference and activation graph.
+
+The fused graph consists of two operations:
+
+1. **Batchnorm Inference**: Normalizes input `x` using saved statistics (mean and inverse variance)
+   ```python
+   bn_y = scale * ((x - mean) * inv_variance) + bias
+   ```
+
+2. **Activation (ReLU)**: Applies ReLU activation
+   ```python
+   y = relu(bn_y) = max(bn_y, 0)
+   ```
+
+**Key Features:**
+- Demonstrates fusion of batch normalization inference and activation
+- Uses `CpuReferenceGraphExecutor` for validation
+
+### [**`FusedBnInferenceVarianceActiv`**](./batchnorm/FusedBnInferenceVarianceActiv.cpp)
+
+Executes a fused batch normalization inference (with variance) and activation graph.
+
+The fused graph consists of two operations:
+
+1. **Batchnorm Inference (with Variance)**: Normalizes input `x` using saved statistics (mean and variance)
+   ```python
+   bn_y = scale * ((x - mean) / sqrt(variance + epsilon)) + bias
+   ```
+
+2. **Activation (ReLU)**: Applies ReLU activation
+   ```python
+   y = relu(bn_y) = max(bn_y, 0)
+   ```
+
+**Key Features:**
+- Demonstrates fusion of batch normalization inference (using variance input) and activation
+- Uses `CpuReferenceGraphExecutor` for validation
 
 ### [**`ConvFprop`**](./convolution/ConvFprop.cpp)
 
@@ -260,3 +322,49 @@ Output: y (activated convolution result)
 - Reduces memory bandwidth by avoiding intermediate tensor writes/reads
 - Eliminates kernel launch overhead between operations
 - Enables better cache utilization by processing data in a single pass
+
+### [**`KnobsUsage`**](./knobs/KnobsUsage.cpp)
+
+Demonstrates how to use hipDNN's engine configuration knobs system for runtime parameter tuning.
+
+**What This Sample Shows:**
+1. **Querying Available Knobs**: How to discover what knobs an engine supports
+2. **Knob Metadata**: Understanding knob types, constraints, and default values
+3. **Setting Knob Values**: Creating execution plans with custom knob settings
+4. **Knob Validation**: Validating settings against knob constraints
+5. **Knob Value Types**: Using integer, float, and string knobs
+6. **Real Execution**: Running graphs with different knob configurations
+
+**Common Knobs:**
+- `global.benchmarking` (int64, 0-1): Enable MIOpen kernel benchmarking for optimal performance
+- `global.workspace_size_limit` (int64, dynamic): Limit workspace memory for convolution operations
+
+**Usage:**
+```bash
+./knobs_usage                # Run all demonstrations including graph execution
+./knobs_usage --skip-execution  # Show knob API demonstrations only (faster)
+```
+
+**Key Features:**
+- Comprehensive demonstration of the knobs API
+- Shows both query and configuration workflows
+- Demonstrates validation and error handling
+- Includes real graph execution with different knob configurations
+- Educational sample with detailed console output
+
+**Sample Output Sections:**
+- Section 1: Query available knobs and their metadata
+- Section 2: Use knob lookup map for specific knobs
+- Section 3: Create execution plan with default knobs
+- Section 4: Set custom knob values
+- Section 5: Validate knob settings against constraints
+- Section 6: Demonstrate different knob value types
+- Section 7-8: Execute graphs with different knob configurations
+
+**Related Documentation:**
+- [hipDNN Knobs Documentation](../docs/Knobs.md) - Complete knobs guide
+- [HowTo Guide](../docs/HowTo.md#configuring-engine-knobs) - Quick start
+- [MIOpen Provider Knobs](../../dnn-providers/miopen-provider/docs/Knobs.md) - Provider-specific knobs
+
+> [!NOTE]
+> This sample is educational and demonstrates the knobs API. It is not a performance benchmark or validation test.
