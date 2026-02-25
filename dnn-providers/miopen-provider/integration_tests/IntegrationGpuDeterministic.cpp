@@ -273,21 +273,21 @@ protected:
     }
 };
 
-using DeterministicConvFwdNchwFp32 = DeterministicConvForward<float>;
-using DeterministicConvFwdNchwBfp16 = DeterministicConvForward<bfloat16>;
-using DeterministicConvFwdNchwFp16 = DeterministicConvForward<half>;
+using IntegrationGpuDeterministicConvFwdNchwFp32 = DeterministicConvForward<float>;
+using IntegrationGpuDeterministicConvFwdNchwBfp16 = DeterministicConvForward<bfloat16>;
+using IntegrationGpuDeterministicConvFwdNchwFp16 = DeterministicConvForward<half>;
 
-using DeterministicConvFwdNhwcFp32 = DeterministicConvForward<float>;
-using DeterministicConvFwdNhwcBfp16 = DeterministicConvForward<bfloat16>;
-using DeterministicConvFwdNhwcFp16 = DeterministicConvForward<half>;
+using IntegrationGpuDeterministicConvFwdNhwcFp32 = DeterministicConvForward<float>;
+using IntegrationGpuDeterministicConvFwdNhwcBfp16 = DeterministicConvForward<bfloat16>;
+using IntegrationGpuDeterministicConvFwdNhwcFp16 = DeterministicConvForward<half>;
 
-using DeterministicConvFwd5dNcdhwFp32 = DeterministicConvForward<float>;
-using DeterministicConvFwd5dNcdhwBfp16 = DeterministicConvForward<bfloat16>;
-using DeterministicConvFwd5dNcdhwFp16 = DeterministicConvForward<half>;
+using IntegrationGpuDeterministicConvFwd5dNcdhwFp32 = DeterministicConvForward<float>;
+using IntegrationGpuDeterministicConvFwd5dNcdhwBfp16 = DeterministicConvForward<bfloat16>;
+using IntegrationGpuDeterministicConvFwd5dNcdhwFp16 = DeterministicConvForward<half>;
 
-using DeterministicConvFwd5dNdhwcFp32 = DeterministicConvForward<float>;
-using DeterministicConvFwd5dNdhwcBfp16 = DeterministicConvForward<bfloat16>;
-using DeterministicConvFwd5dNdhwcFp16 = DeterministicConvForward<half>;
+using IntegrationGpuDeterministicConvFwd5dNdhwcFp32 = DeterministicConvForward<float>;
+using IntegrationGpuDeterministicConvFwd5dNdhwcBfp16 = DeterministicConvForward<bfloat16>;
+using IntegrationGpuDeterministicConvFwd5dNdhwcFp16 = DeterministicConvForward<half>;
 
 // ============================================================================
 // Convolution Backward Data (Dgrad) Determinism Test
@@ -355,21 +355,21 @@ protected:
     }
 };
 
-using DeterministicConvDgradNchwFp32 = DeterministicConvDgrad<float>;
-using DeterministicConvDgradNchwBfp16 = DeterministicConvDgrad<bfloat16>;
-using DeterministicConvDgradNchwFp16 = DeterministicConvDgrad<half>;
+using IntegrationGpuDeterministicConvDgradNchwFp32 = DeterministicConvDgrad<float>;
+using IntegrationGpuDeterministicConvDgradNchwBfp16 = DeterministicConvDgrad<bfloat16>;
+using IntegrationGpuDeterministicConvDgradNchwFp16 = DeterministicConvDgrad<half>;
 
-using DeterministicConvDgradNhwcFp32 = DeterministicConvDgrad<float>;
-using DeterministicConvDgradNhwcBfp16 = DeterministicConvDgrad<bfloat16>;
-using DeterministicConvDgradNhwcFp16 = DeterministicConvDgrad<half>;
+using IntegrationGpuDeterministicConvDgradNhwcFp32 = DeterministicConvDgrad<float>;
+using IntegrationGpuDeterministicConvDgradNhwcBfp16 = DeterministicConvDgrad<bfloat16>;
+using IntegrationGpuDeterministicConvDgradNhwcFp16 = DeterministicConvDgrad<half>;
 
-using DeterministicConvDgrad5dNcdhwFp32 = DeterministicConvDgrad<float>;
-using DeterministicConvDgrad5dNcdhwBfp16 = DeterministicConvDgrad<bfloat16>;
-using DeterministicConvDgrad5dNcdhwFp16 = DeterministicConvDgrad<half>;
+using IntegrationGpuDeterministicConvDgrad5dNcdhwFp32 = DeterministicConvDgrad<float>;
+using IntegrationGpuDeterministicConvDgrad5dNcdhwBfp16 = DeterministicConvDgrad<bfloat16>;
+using IntegrationGpuDeterministicConvDgrad5dNcdhwFp16 = DeterministicConvDgrad<half>;
 
-using DeterministicConvDgrad5dNdhwcFp32 = DeterministicConvDgrad<float>;
-using DeterministicConvDgrad5dNdhwcBfp16 = DeterministicConvDgrad<bfloat16>;
-using DeterministicConvDgrad5dNdhwcFp16 = DeterministicConvDgrad<half>;
+using IntegrationGpuDeterministicConvDgrad5dNdhwcFp32 = DeterministicConvDgrad<float>;
+using IntegrationGpuDeterministicConvDgrad5dNdhwcBfp16 = DeterministicConvDgrad<bfloat16>;
+using IntegrationGpuDeterministicConvDgrad5dNdhwcFp16 = DeterministicConvDgrad<half>;
 
 // ============================================================================
 // Convolution Backward Weights (Wgrad) Determinism Test
@@ -437,21 +437,21 @@ protected:
     }
 };
 
-using DeterministicConvWgradNchwFp32 = DeterministicConvWgrad<float>;
-using DeterministicConvWgradNchwBfp16 = DeterministicConvWgrad<bfloat16>;
-using DeterministicConvWgradNchwFp16 = DeterministicConvWgrad<half>;
+using IntegrationGpuDeterministicConvWgradNchwFp32 = DeterministicConvWgrad<float>;
+using IntegrationGpuDeterministicConvWgradNchwBfp16 = DeterministicConvWgrad<bfloat16>;
+using IntegrationGpuDeterministicConvWgradNchwFp16 = DeterministicConvWgrad<half>;
 
-using DeterministicConvWgradNhwcFp32 = DeterministicConvWgrad<float>;
-using DeterministicConvWgradNhwcBfp16 = DeterministicConvWgrad<bfloat16>;
-using DeterministicConvWgradNhwcFp16 = DeterministicConvWgrad<half>;
+using IntegrationGpuDeterministicConvWgradNhwcFp32 = DeterministicConvWgrad<float>;
+using IntegrationGpuDeterministicConvWgradNhwcBfp16 = DeterministicConvWgrad<bfloat16>;
+using IntegrationGpuDeterministicConvWgradNhwcFp16 = DeterministicConvWgrad<half>;
 
-using DeterministicConvWgrad5dNcdhwFp32 = DeterministicConvWgrad<float>;
-using DeterministicConvWgrad5dNcdhwBfp16 = DeterministicConvWgrad<bfloat16>;
-using DeterministicConvWgrad5dNcdhwFp16 = DeterministicConvWgrad<half>;
+using IntegrationGpuDeterministicConvWgrad5dNcdhwFp32 = DeterministicConvWgrad<float>;
+using IntegrationGpuDeterministicConvWgrad5dNcdhwBfp16 = DeterministicConvWgrad<bfloat16>;
+using IntegrationGpuDeterministicConvWgrad5dNcdhwFp16 = DeterministicConvWgrad<half>;
 
-using DeterministicConvWgrad5dNdhwcFp32 = DeterministicConvWgrad<float>;
-using DeterministicConvWgrad5dNdhwcBfp16 = DeterministicConvWgrad<bfloat16>;
-using DeterministicConvWgrad5dNdhwcFp16 = DeterministicConvWgrad<half>;
+using IntegrationGpuDeterministicConvWgrad5dNdhwcFp32 = DeterministicConvWgrad<float>;
+using IntegrationGpuDeterministicConvWgrad5dNdhwcBfp16 = DeterministicConvWgrad<bfloat16>;
+using IntegrationGpuDeterministicConvWgrad5dNdhwcFp16 = DeterministicConvWgrad<half>;
 
 // ============================================================================
 // Fused Convolution Forward + Bias + Activation Determinism Test
@@ -548,16 +548,17 @@ protected:
     }
 };
 
-using DeterministicConvFwdBiasActivNchwFp32 = DeterministicConvFwdBiasActiv<float>;
-using DeterministicConvFwdBiasActivNchwBfp16 = DeterministicConvFwdBiasActiv<bfloat16>;
-using DeterministicConvFwdBiasActivNchwFp16 = DeterministicConvFwdBiasActiv<half>;
+using IntegrationGpuDeterministicConvFwdBiasActivNchwFp32 = DeterministicConvFwdBiasActiv<float>;
+using IntegrationGpuDeterministicConvFwdBiasActivNchwBfp16
+    = DeterministicConvFwdBiasActiv<bfloat16>;
+using IntegrationGpuDeterministicConvFwdBiasActivNchwFp16 = DeterministicConvFwdBiasActiv<half>;
 
 // ============================================================================
 // Batchnorm No-Solver Test
 // Verifies that deterministic engine does not support batchnorm operations
 // ============================================================================
 
-class DeterministicBnNoSolver : public DeterministicTestBase<BatchnormTestCase>
+class IntegrationGpuDeterministicBnNoSolver : public DeterministicTestBase<BatchnormTestCase>
 {
 protected:
     void runNoSolverTest()
@@ -566,7 +567,7 @@ protected:
         auto derivedDims = getDerivedShape(testCase.dims);
 
         Graph graphObj;
-        graphObj.set_name("DeterministicBnNoSolverTest");
+        graphObj.set_name("IntegrationGpuDeterministicBnNoSolverTest");
         graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
         auto dataType = hipdnn_frontend::DataType::FLOAT;
@@ -625,387 +626,387 @@ protected:
 // Convolution Forward Determinism Tests
 // ============================================================================
 
-TEST_P(DeterministicConvFwdNchwFp32, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwdNchwFp32, Determinism)
 {
     runDeterminismTest(TensorLayout::NCHW);
 }
 
-TEST_P(DeterministicConvFwdNchwBfp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwdNchwBfp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCHW);
 }
 
-TEST_P(DeterministicConvFwdNchwFp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwdNchwFp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwdNchwFp32,
+                         IntegrationGpuDeterministicConvFwdNchwFp32,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwdNchwBfp16,
+                         IntegrationGpuDeterministicConvFwdNchwBfp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwdNchwFp16,
+                         IntegrationGpuDeterministicConvFwdNchwFp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 // NHWC Layout Tests
-TEST_P(DeterministicConvFwdNhwcFp32, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwdNhwcFp32, Determinism)
 {
     runDeterminismTest(TensorLayout::NHWC);
 }
 
-TEST_P(DeterministicConvFwdNhwcBfp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwdNhwcBfp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NHWC);
 }
 
-TEST_P(DeterministicConvFwdNhwcFp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwdNhwcFp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwdNhwcFp32,
+                         IntegrationGpuDeterministicConvFwdNhwcFp32,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwdNhwcBfp16,
+                         IntegrationGpuDeterministicConvFwdNhwcBfp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwdNhwcFp16,
+                         IntegrationGpuDeterministicConvFwdNhwcFp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 // 5D NCDHW Layout Tests
-TEST_P(DeterministicConvFwd5dNcdhwFp32, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwd5dNcdhwFp32, Determinism)
 {
     runDeterminismTest(TensorLayout::NCDHW);
 }
 
-TEST_P(DeterministicConvFwd5dNcdhwBfp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwd5dNcdhwBfp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCDHW);
 }
 
-TEST_P(DeterministicConvFwd5dNcdhwFp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwd5dNcdhwFp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwd5dNcdhwFp32,
+                         IntegrationGpuDeterministicConvFwd5dNcdhwFp32,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwd5dNcdhwBfp16,
+                         IntegrationGpuDeterministicConvFwd5dNcdhwBfp16,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwd5dNcdhwFp16,
+                         IntegrationGpuDeterministicConvFwd5dNcdhwFp16,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 // 5D NDHWC Layout Tests
-TEST_P(DeterministicConvFwd5dNdhwcFp32, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwd5dNdhwcFp32, Determinism)
 {
     runDeterminismTest(TensorLayout::NDHWC);
 }
 
-TEST_P(DeterministicConvFwd5dNdhwcBfp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwd5dNdhwcBfp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NDHWC);
 }
 
-TEST_P(DeterministicConvFwd5dNdhwcFp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwd5dNdhwcFp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwd5dNdhwcFp32,
+                         IntegrationGpuDeterministicConvFwd5dNdhwcFp32,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwd5dNdhwcBfp16,
+                         IntegrationGpuDeterministicConvFwd5dNdhwcBfp16,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwd5dNdhwcFp16,
+                         IntegrationGpuDeterministicConvFwd5dNdhwcFp16,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 // ============================================================================
 // Convolution Backward Data (Dgrad) Determinism Tests
 // ============================================================================
 
-TEST_P(DeterministicConvDgradNchwFp32, Determinism)
+TEST_P(IntegrationGpuDeterministicConvDgradNchwFp32, Determinism)
 {
     runDeterminismTest(TensorLayout::NCHW);
 }
 
-TEST_P(DeterministicConvDgradNchwBfp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvDgradNchwBfp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCHW);
 }
 
-TEST_P(DeterministicConvDgradNchwFp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvDgradNchwFp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvDgradNchwFp32,
+                         IntegrationGpuDeterministicConvDgradNchwFp32,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvDgradNchwBfp16,
+                         IntegrationGpuDeterministicConvDgradNchwBfp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvDgradNchwFp16,
+                         IntegrationGpuDeterministicConvDgradNchwFp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 // NHWC Layout Tests
-TEST_P(DeterministicConvDgradNhwcFp32, Determinism)
+TEST_P(IntegrationGpuDeterministicConvDgradNhwcFp32, Determinism)
 {
     runDeterminismTest(TensorLayout::NHWC);
 }
 
-TEST_P(DeterministicConvDgradNhwcBfp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvDgradNhwcBfp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NHWC);
 }
 
-TEST_P(DeterministicConvDgradNhwcFp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvDgradNhwcFp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvDgradNhwcFp32,
+                         IntegrationGpuDeterministicConvDgradNhwcFp32,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvDgradNhwcBfp16,
+                         IntegrationGpuDeterministicConvDgradNhwcBfp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvDgradNhwcFp16,
+                         IntegrationGpuDeterministicConvDgradNhwcFp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 // 5D NCDHW Layout Tests
-TEST_P(DeterministicConvDgrad5dNcdhwFp32, Determinism)
+TEST_P(IntegrationGpuDeterministicConvDgrad5dNcdhwFp32, Determinism)
 {
     runDeterminismTest(TensorLayout::NCDHW);
 }
 
-TEST_P(DeterministicConvDgrad5dNcdhwBfp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvDgrad5dNcdhwBfp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCDHW);
 }
 
-TEST_P(DeterministicConvDgrad5dNcdhwFp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvDgrad5dNcdhwFp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvDgrad5dNcdhwFp32,
+                         IntegrationGpuDeterministicConvDgrad5dNcdhwFp32,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvDgrad5dNcdhwBfp16,
+                         IntegrationGpuDeterministicConvDgrad5dNcdhwBfp16,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvDgrad5dNcdhwFp16,
+                         IntegrationGpuDeterministicConvDgrad5dNcdhwFp16,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 // 5D NDHWC Layout Tests
-TEST_P(DeterministicConvDgrad5dNdhwcFp32, Determinism)
+TEST_P(IntegrationGpuDeterministicConvDgrad5dNdhwcFp32, Determinism)
 {
     runDeterminismTest(TensorLayout::NDHWC);
 }
 
-TEST_P(DeterministicConvDgrad5dNdhwcBfp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvDgrad5dNdhwcBfp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NDHWC);
 }
 
-TEST_P(DeterministicConvDgrad5dNdhwcFp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvDgrad5dNdhwcFp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvDgrad5dNdhwcFp32,
+                         IntegrationGpuDeterministicConvDgrad5dNdhwcFp32,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvDgrad5dNdhwcBfp16,
+                         IntegrationGpuDeterministicConvDgrad5dNdhwcBfp16,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvDgrad5dNdhwcFp16,
+                         IntegrationGpuDeterministicConvDgrad5dNdhwcFp16,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 // ============================================================================
 // Convolution Backward Weights (Wgrad) Determinism Tests
 // ============================================================================
 
-TEST_P(DeterministicConvWgradNchwFp32, Determinism)
+TEST_P(IntegrationGpuDeterministicConvWgradNchwFp32, Determinism)
 {
     runDeterminismTest(TensorLayout::NCHW);
 }
 
-TEST_P(DeterministicConvWgradNchwBfp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvWgradNchwBfp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCHW);
 }
 
-TEST_P(DeterministicConvWgradNchwFp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvWgradNchwFp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvWgradNchwFp32,
+                         IntegrationGpuDeterministicConvWgradNchwFp32,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvWgradNchwBfp16,
+                         IntegrationGpuDeterministicConvWgradNchwBfp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvWgradNchwFp16,
+                         IntegrationGpuDeterministicConvWgradNchwFp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 // NHWC Layout Tests
-TEST_P(DeterministicConvWgradNhwcFp32, Determinism)
+TEST_P(IntegrationGpuDeterministicConvWgradNhwcFp32, Determinism)
 {
     runDeterminismTest(TensorLayout::NHWC);
 }
 
-TEST_P(DeterministicConvWgradNhwcBfp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvWgradNhwcBfp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NHWC);
 }
 
-TEST_P(DeterministicConvWgradNhwcFp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvWgradNhwcFp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvWgradNhwcFp32,
+                         IntegrationGpuDeterministicConvWgradNhwcFp32,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvWgradNhwcBfp16,
+                         IntegrationGpuDeterministicConvWgradNhwcBfp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvWgradNhwcFp16,
+                         IntegrationGpuDeterministicConvWgradNhwcFp16,
                          testing::ValuesIn(getDeterministicConvTestCases4D()));
 
 // 5D NCDHW Layout Tests
-TEST_P(DeterministicConvWgrad5dNcdhwFp32, Determinism)
+TEST_P(IntegrationGpuDeterministicConvWgrad5dNcdhwFp32, Determinism)
 {
     runDeterminismTest(TensorLayout::NCDHW);
 }
 
-TEST_P(DeterministicConvWgrad5dNcdhwBfp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvWgrad5dNcdhwBfp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCDHW);
 }
 
-TEST_P(DeterministicConvWgrad5dNcdhwFp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvWgrad5dNcdhwFp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvWgrad5dNcdhwFp32,
+                         IntegrationGpuDeterministicConvWgrad5dNcdhwFp32,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvWgrad5dNcdhwBfp16,
+                         IntegrationGpuDeterministicConvWgrad5dNcdhwBfp16,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvWgrad5dNcdhwFp16,
+                         IntegrationGpuDeterministicConvWgrad5dNcdhwFp16,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 // 5D NDHWC Layout Tests
-TEST_P(DeterministicConvWgrad5dNdhwcFp32, Determinism)
+TEST_P(IntegrationGpuDeterministicConvWgrad5dNdhwcFp32, Determinism)
 {
     runDeterminismTest(TensorLayout::NDHWC);
 }
 
-TEST_P(DeterministicConvWgrad5dNdhwcBfp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvWgrad5dNdhwcBfp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NDHWC);
 }
 
-TEST_P(DeterministicConvWgrad5dNdhwcFp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvWgrad5dNdhwcFp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvWgrad5dNdhwcFp32,
+                         IntegrationGpuDeterministicConvWgrad5dNdhwcFp32,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvWgrad5dNdhwcBfp16,
+                         IntegrationGpuDeterministicConvWgrad5dNdhwcBfp16,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvWgrad5dNdhwcFp16,
+                         IntegrationGpuDeterministicConvWgrad5dNdhwcFp16,
                          testing::ValuesIn(getDeterministicConvTestCases5D()));
 
 // ============================================================================
 // Fused Convolution Forward + Bias + Activation Determinism Tests
 // ============================================================================
 
-TEST_P(DeterministicConvFwdBiasActivNchwFp32, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwdBiasActivNchwFp32, Determinism)
 {
     runDeterminismTest(TensorLayout::NCHW);
 }
 
-TEST_P(DeterministicConvFwdBiasActivNchwBfp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwdBiasActivNchwBfp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCHW);
 }
 
-TEST_P(DeterministicConvFwdBiasActivNchwFp16, Determinism)
+TEST_P(IntegrationGpuDeterministicConvFwdBiasActivNchwFp16, Determinism)
 {
     runDeterminismTest(TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwdBiasActivNchwFp32,
+                         IntegrationGpuDeterministicConvFwdBiasActivNchwFp32,
                          testing::ValuesIn(getDeterministicFusedConvTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwdBiasActivNchwBfp16,
+                         IntegrationGpuDeterministicConvFwdBiasActivNchwBfp16,
                          testing::ValuesIn(getDeterministicFusedConvTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicConvFwdBiasActivNchwFp16,
+                         IntegrationGpuDeterministicConvFwdBiasActivNchwFp16,
                          testing::ValuesIn(getDeterministicFusedConvTestCases()));
 
 // ============================================================================
 // Batchnorm No-Solver Tests
 // ============================================================================
 
-TEST_P(DeterministicBnNoSolver, NoSolverAvailable)
+TEST_P(IntegrationGpuDeterministicBnNoSolver, NoSolverAvailable)
 {
     runNoSolverTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         DeterministicBnNoSolver,
+                         IntegrationGpuDeterministicBnNoSolver,
                          testing::ValuesIn(getDeterministicBnTestCases()));
