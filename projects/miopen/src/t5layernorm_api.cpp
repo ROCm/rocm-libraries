@@ -164,6 +164,7 @@ extern "C" miopenStatus_t miopenT5LayerNormBackward(miopenHandle_t handle,
                         rstd,
                         dxDesc,
                         dx,
+                        dwDesc,
                         dw);
 
     LogCmdT5LayerNorm(dyDesc, mode, true);
