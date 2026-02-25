@@ -2003,57 +2003,42 @@ class Solution(collections.abc.Mapping):
 
       # This function calculates LRVW by separating MX and non-MX types
       def calLRVWForMX() -> int:
+        # Determine if we need to infer LRVW. Returns True if,
+        #   - state["LocalReadVectorWidth{tc}"] is -1, and,
+        #   - state["ProblemType"]["MacDataType{tc}"] is not 6-bit float
+        # If the LRVW is set by the user, validate the configuration and rejects if,
+        #   - state["LocalReadVectorWidth{tc}"] * state["ProblemType"]["MacDataType{tc}"].numRegisters() < 1 if not sparse
+        #   - state["LocalReadVectorWidth{tc}"] // 2 * state["ProblemType"]["MacDataType{tc}"].numRegisters() < 1 is sparse
+        #   - state["LocalReadVectorWidth{tc}"] > state["MIInputPerThread"] and LDS is not transposed 
+        def isAutoLRVW(tc) -> bool:
+          autoLRVW = False
+          if state[f"LocalReadVectorWidth{tc}"] != -1:
+            tmplrvw = (state[f"LocalReadVectorWidth{tc}"] // 2) if state["ProblemType"]["Sparse"] else state[f"LocalReadVectorWidth{tc}"]
+            if tmplrvw * state["ProblemType"][f"MacDataType{tc}"].numRegisters() < 1:
+              reject(state, "LocalReadVectorWidth * dataRegister < 1")
+            if state[f"LocalReadVectorWidth{tc}"] > state["MIInputPerThread"] and not state["TransposeLDS"]:
+              reject(state, "LocalReadVectorWidth require Transpose LDS")
+          else:
+            if state["ProblemType"][f"MacDataType{tc}"].is6bitFloat():
+              state[f"LocalReadVectorWidth{tc}"] = 32 if state[f"UnrollMajorLDS{tc}"] else 16
+            else:
+              autoLRVW = True
+              if state["TransposeLDS"] and (not state["DirectToLds"]):
+                state[f"LocalReadVectorWidth{tc}"] = int(16 // state["ProblemType"][f"MacDataType{tc}"].numBytes())
+              else:
+                if state["ProblemType"]["Sparse"] and state["MIInputPerThread"] * state["ProblemType"][f"MacDataType{tc}"].numBytes() > 16:
+                  state[f"LocalReadVectorWidth{tc}"] = int(16 // state["ProblemType"][f"MacDataType{tc}"].numBytes())
+                else:
+                  state[f"LocalReadVectorWidth{tc}"] = state["MIInputPerThread"]
+              if state[f"LocalReadVectorWidth{tc}"] // state["MIInputPerThread"] > 1:
+                if (state["DepthU"] // state["MatrixInstK"] <= state[f"LocalReadVectorWidth{tc}"] // state["MIInputPerThread"]):
+                  # if only have 1 iteration with wider local read, reduce LRVW to have better scheduling (at least 2 iterations)
+                  state[f"LocalReadVectorWidth{tc}"] //= 2
+          return autoLRVW
+
         if state["EnableMatrixInstruction"]:
-          autoLRVWA = 0
-          if state["LocalReadVectorWidthA"] != -1:
-            tmplrvw = (state["LocalReadVectorWidthA"] // 2) if state["ProblemType"]["Sparse"] else state["LocalReadVectorWidthA"]
-            if tmplrvw * state["ProblemType"]["MacDataTypeA"].numRegisters() < 1:
-              reject(state, "LocalReadVectorWidth * dataRegister < 1")
-            if state["LocalReadVectorWidthA"] > state["MIInputPerThread"] and not state["TransposeLDS"]:
-              reject(state, "LocalReadVectorWidth require Transpose LDS")
-          else:
-            if state["ProblemType"]["MacDataTypeA"].is6bitFloat():
-              state["LocalReadVectorWidthA"] = 32 if state["UnrollMajorLDSA"] else 16
-            else:
-              autoLRVWA = 1
-              if state["TransposeLDS"] and (not state["DirectToLds"]):
-                state["LocalReadVectorWidthA"] = int(16 // state["ProblemType"]["MacDataTypeA"].numBytes())
-              else:
-                if state["ProblemType"]["Sparse"] and state["MIInputPerThread"] * state["ProblemType"]["MacDataTypeA"].numBytes() > 16:
-                  state["LocalReadVectorWidthA"] = int(16 // state["ProblemType"]["MacDataTypeA"].numBytes())
-                else:
-                  state["LocalReadVectorWidthA"] = state["MIInputPerThread"]
-
-              if state["LocalReadVectorWidthA"] // state["MIInputPerThread"] > 1:
-                if (state["DepthU"] // state["MatrixInstK"] <= state["LocalReadVectorWidthA"] // state["MIInputPerThread"]):
-                  # if only have 1 iteration with wider local read, reduce LRVW to have better scheduling (at least 2 iterations)
-                  state["LocalReadVectorWidthA"] //= 2
-
-          autoLRVWB = 0
-          if state["LocalReadVectorWidthB"] != -1:
-            tmplrvw = (state["LocalReadVectorWidthB"] // 2) if state["ProblemType"]["Sparse"] else state["LocalReadVectorWidthB"]
-            if tmplrvw * state["ProblemType"]["MacDataTypeB"].numRegisters() < 1:
-              reject(state, "LocalReadVectorWidth * dataRegister < 1")
-            if state["LocalReadVectorWidthB"] > state["MIInputPerThread"] and not state["TransposeLDS"]:
-              reject(state, "LocalReadVectorWidth require Transpose LDS")
-          else:
-            if state["ProblemType"]["MacDataTypeB"].is6bitFloat():
-              state["LocalReadVectorWidthB"] = 32 if state["UnrollMajorLDSB"] else 16
-            else:
-              autoLRVWB = 1
-              if state["TransposeLDS"] and (not state["DirectToLds"]):
-                state["LocalReadVectorWidthB"] = int(16 // state["ProblemType"]["MacDataTypeB"].numBytes())
-              else:
-                if state["ProblemType"]["Sparse"] and state["MIInputPerThread"] * state["ProblemType"]["MacDataTypeB"].numBytes() > 16:
-                  state["LocalReadVectorWidthB"] = int(16 // state["ProblemType"]["MacDataTypeB"].numBytes())
-                else:
-                  state["LocalReadVectorWidthB"] = state["MIInputPerThread"]
-
-              if state["LocalReadVectorWidthB"] // state["MIInputPerThread"] > 1:
-                if (state["DepthU"] // state["MatrixInstK"] <= state["LocalReadVectorWidthB"] // state["MIInputPerThread"]):
-                  # if only have 1 iteration with wider local read, reduce LRVW to have better scheduling (at least 2 iterations)
-                  state["LocalReadVectorWidthB"] //= 2
-
+          autoLRVWA = isAutoLRVW("A")
+          autoLRVWB = isAutoLRVW("B")
           if autoLRVWA or autoLRVWB:
             wlrA = max(state["LocalReadVectorWidthA"] // state["MIInputPerThread"], 1)
             wlrB = max(state["LocalReadVectorWidthB"] // state["MIInputPerThread"], 1)
@@ -2105,7 +2090,6 @@ class Solution(collections.abc.Mapping):
             if state["LocalReadVectorWidth"] != state["VectorWidthA"] or \
                state["LocalReadVectorWidth"] != state["VectorWidthB"]:
               reject(state, printRejectionReason, "LocalReadVectorWidth must equal VectorWidthA/B for MAC kernels")
-
 
       def calLRVWForNonMX() -> int:
         if state["EnableMatrixInstruction"]:
