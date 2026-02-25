@@ -15,8 +15,9 @@ set(HIP_DNN_DATA_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
 hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 
-# Supported FlatBuffers versions - update this list when adding new version support.
-# Each version must have pre-generated headers in include/generated/v<version_tag>/
+# Supported FlatBuffers versions (oldest to newest) - update this list when adding new version support.
+# Each version must have pre-generated headers in include/hipdnn_data_sdk/data_objects/v<version_tag>/
+# 24.12.23 matches PyTorch's FlatBuffers version for compatibility
 set(HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS "24.12.23" "${HIPDNN_FLATBUFFERS_VERSION}")
 
 if(NOT HIPDNN_FLATBUFFERS_VERSION IN_LIST HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS)
