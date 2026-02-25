@@ -31,15 +31,15 @@ std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
 }
 
 /**
- * @brief Selects the best workgroup mapping parameters (maximizing cache hits) given fixed macro tile sizes.
+ * @brief Selects the best workgroup mapping parameters (maximizing cache hits) given fixed macro
+ * tile sizes.
  *
- * @param[in] problem Problem description (M, N, K, etc.)
- * @param[in] hardware Hardware characteristics
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics
  * @param config Kernel configuration.
- *
+ * @param skGrid SK grid.
  * @return A workgroup_mapping_t struct: best predicted (wgmxccchunk, wgmxcc, wgm).
  */
-
 workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
                                              const hardware_t& hardware,
                                              const config_t& config,
@@ -58,22 +58,22 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   int ntb = config.cache_hints_b;
 
   // Default values
-  size_t numCUs = hardware.N_CU;
-  size_t numXCD = hardware.NUM_XCD;
-  size_t numCUsPerXCD = numCUs / numXCD;
+  size_t numCUs             = hardware.N_CU;
+  size_t numXCD             = hardware.NUM_XCD;
+  size_t numCUsPerXCD       = numCUs / numXCD;
   size_t defaultWGMXCCCHUNK = 0;
-  size_t defaultWGMXCC = hardware.NUM_XCD;
-  int32_t defaultWGM = ceil(std::sqrt(numCUsPerXCD));
+  size_t defaultWGMXCC      = hardware.NUM_XCD;
+  int32_t defaultWGM        = ceil(std::sqrt(numCUsPerXCD));
 
   // Number of output MTs per split and batch
   size_t numMT_M = math::safe_ceil_div(M, MT_M);
   size_t numMT_N = math::safe_ceil_div(N, MT_N);
-  size_t numMTs = numMT_M * numMT_N;
+  size_t numMTs  = numMT_M * numMT_N;
 
   // What SK does -- we already have skGrid so just compute num_timesteps and split_factor
-  auto num_timesteps = skGrid > numMTs ? math::safe_ceil_div(skGrid, numCUs)
-                                       : math::safe_ceil_div(numMTs, numCUs);
-  auto split_factor  = math::safe_ceil_div(skGrid, numMTs);
+  auto num_timesteps =
+      skGrid > numMTs ? math::safe_ceil_div(skGrid, numCUs) : math::safe_ceil_div(numMTs, numCUs);
+  auto split_factor = math::safe_ceil_div(skGrid, numMTs);
 
   // -------------------
   // NonTemporal Cases
@@ -107,29 +107,28 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
 
   // -------------------
   // Batch Case
-  // -------------------    
+  // -------------------
   if (batch > 1) {
     // Total tiles including batch count
     size_t numTotalTiles = numMTs * batch;
-    
+
     size_t wgmxccchunk, wgmxcc;
     int32_t wgm;
 
     if (numMTs == 1 || numTotalTiles <= numXCD) {
       wgmxccchunk = 0;
-      wgmxcc = 0;
-      wgm = 1;
+      wgmxcc      = 0;
+      wgm         = 1;
     }
     // This gives a nice strided read pattern for batched GEMMs
     else if (numMTs % numXCD == 0) {
       wgmxccchunk = 0;
-      wgmxcc = 0;
-      wgm = 1;
-    }
-    else {
+      wgmxcc      = 0;
+      wgm         = 1;
+    } else {
       wgmxccchunk = (numCUsPerXCD / numMTs) * numMTs;
-      wgmxcc = numXCD;
-      wgm = 1;
+      wgmxcc      = numXCD;
+      wgm         = 1;
     }
 
     return workgroup_mapping_t{wgmxccchunk, wgmxcc, wgm};
@@ -142,11 +141,8 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
 
   // For large square-ish GEMMs, we can benefit from chunking.
   constexpr size_t skinnyFactor = 12;
-  bool isMallImportant = (batch == 1 &&
-                          split_factor == 1 && 
-                          numMTs > 4 * numCUs &&
-                          numMT_M > 16 &&
-                          numMT_N > 16);
+  bool isMallImportant =
+      (batch == 1 && split_factor == 1 && numMTs > 4 * numCUs && numMT_M > 16 && numMT_N > 16);
   bool isSkinnyCase = std::min(numMT_M, numMT_N) <= skinnyFactor * std::max(numMT_M, numMT_N);
   if (isMallImportant && !isSkinnyCase)
     out_wgmxccchunk = numCUsPerXCD;
@@ -158,8 +154,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // -------------------
   size_t out_wgmxcc = defaultWGMXCC;
 
-  if (split_factor % numXCD == 0)
-    out_wgmxcc = 0;
+  if (split_factor % numXCD == 0) out_wgmxcc = 0;
   // Small GEMMs
   else if (numMTs <= numXCD)
     out_wgmxcc = 0;
@@ -174,8 +169,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // shortcut:
   // 1. if we have decided to not remap xcc, there is no reason to use wgm
   // 2. GEMMs that only have one tile in one dimension don't need wgm
-  if (out_wgmxcc == 0 || numMT_M == 1 || numMT_N == 1)
-    out_wgm = 1;
+  if (out_wgmxcc == 0 || numMT_M == 1 || numMT_N == 1) out_wgm = 1;
   // For tall cases (M >> N), if we have enough tiles to schedule, we use the number of tiles
   // in the smaller dimension as WGM value
   else if (numMTs >= numCUs && numMT_N <= 8)
@@ -203,74 +197,73 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     // Setup
     size_t numWGs, q, r;
     numWGs = num_timesteps * split_factor * numMT_M * numMT_N;
-    q = numWGs / numXCD;
-    r = numWGs % numXCD;
+    q      = numWGs / numXCD;
+    r      = numWGs % numXCD;
 
     // Loop through all WGM values and find the best one
     int bestWGM = 1;
-    int bestL2 = std::numeric_limits<int>::max();
+    int bestL2  = std::numeric_limits<int>::max();
     for (auto wgm : wgmList) {
       auto wgmL2Estimate = 0;
-      auto slabTiles = numMT_M * std::min(wgm, static_cast<int>(numMT_N));
-      auto slabCount = math::safe_ceil_div(numMT_N, wgm);
+      auto slabTiles     = numMT_M * std::min(wgm, static_cast<int>(numMT_N));
+      auto slabCount     = math::safe_ceil_div(numMT_N, wgm);
       auto edgeSlabWidth = numMT_N - (slabCount - 1) * wgm;
-      auto numXCDUsed = std::min(numXCD, numWGs);
+      auto numXCDUsed    = std::min(numXCD, numWGs);
 
       // Compute unique loads per L2 tile
       for (uint32_t w = 0; w < num_timesteps; ++w) {
         // offset for this wave
         auto remainder = q % numCUsPerXCD;
-        auto adjustedEndTileInRound = (w == num_timesteps - 1 && remainder != 0) ? remainder : numCUsPerXCD;
+        auto adjustedEndTileInRound =
+            (w == num_timesteps - 1 && remainder != 0) ? remainder : numCUsPerXCD;
         for (uint32_t x = 0; x < numXCDUsed; ++x) {
           // Range of "output tiles" that this xcd takes.
           size_t xccStart, xccEnd;
           if (out_wgmxccchunk > 0) {
             // CHUNKED MODE: XCD x owns tiles [x*C, (x+1)*C)
             xccStart = x * out_wgmxccchunk + w * numCUsPerXCD;
-            xccEnd = xccStart + adjustedEndTileInRound - 1;
+            xccEnd   = xccStart + adjustedEndTileInRound - 1;
           } else {
             // NON-CHUNK MODE: XCD x owns tiles [q*x + min(x,r), q*(x+1) + min(x+1,r))
             // However, not all of these tiles are in the same wave/round.
             // only the first numCUsPerXCD tiles are in the same wave/round.
             xccStart = w * numCUsPerXCD + q * x + (x < r ? x : r);
-            xccEnd = xccStart + adjustedEndTileInRound - 1 + (x < r ? 1 : 0);
+            xccEnd   = xccStart + adjustedEndTileInRound - 1 + (x < r ? 1 : 0);
           }
-          
+
           // xccStart and xccEnd are supposed to be tile IDs
           // In case of splitting, they are WG IDs. Modify to get tile IDs
           xccStart /= split_factor;
           xccEnd /= split_factor;
 
           auto slabStart = xccStart / slabTiles;
-          auto slabEnd = xccEnd / slabTiles;
+          auto slabEnd   = xccEnd / slabTiles;
 
-          auto firstSlabWidth = (slabStart == slabCount - 1 ? edgeSlabWidth : wgm);
+          auto firstSlabWidth      = (slabStart == slabCount - 1 ? edgeSlabWidth : wgm);
           auto firstSlabStartIndex = xccStart % slabTiles;
-          auto firstSlabStartRow = firstSlabStartIndex / firstSlabWidth;
-          auto firstSlabEndRow = std::min(
-              (firstSlabStartIndex + (xccEnd - xccStart)) / firstSlabWidth, numMT_M - 1);
+          auto firstSlabStartRow   = firstSlabStartIndex / firstSlabWidth;
+          auto firstSlabEndRow =
+              std::min((firstSlabStartIndex + (xccEnd - xccStart)) / firstSlabWidth, numMT_M - 1);
           auto rowsInFirstSlab = firstSlabEndRow - firstSlabStartRow + 1;
 
-          auto lastSlabWidth = (slabEnd == slabCount - 1 ? edgeSlabWidth : wgm);
+          auto lastSlabWidth    = (slabEnd == slabCount - 1 ? edgeSlabWidth : wgm);
           auto lastSlabEndIndex = xccEnd % slabTiles;
-          auto lastSlabEndRow = lastSlabEndIndex / lastSlabWidth;
-          auto colsInLastRow = (lastSlabEndIndex % lastSlabWidth) + 1;
-          auto colsInLastSlab = (lastSlabEndRow > 0 ? lastSlabWidth : colsInLastRow);
+          auto lastSlabEndRow   = lastSlabEndIndex / lastSlabWidth;
+          auto colsInLastRow    = (lastSlabEndIndex % lastSlabWidth) + 1;
+          auto colsInLastSlab   = (lastSlabEndRow > 0 ? lastSlabWidth : colsInLastRow);
 
           size_t uniqueRows = 0;
           size_t uniqueCols = 0;
           if (slabEnd == slabStart) {
             uniqueRows = lastSlabEndRow - firstSlabStartRow + 1;
             uniqueCols = firstSlabWidth;
-            if (rowsInFirstSlab <= 2)
-                uniqueCols = std::min(xccEnd - xccStart + 1, firstSlabWidth);
+            if (rowsInFirstSlab <= 2) uniqueCols = std::min(xccEnd - xccStart + 1, firstSlabWidth);
           } else {
-            auto colsInFirstRow = firstSlabWidth - (xccStart % firstSlabWidth);
+            auto colsInFirstRow  = firstSlabWidth - (xccStart % firstSlabWidth);
             auto colsInFirstSlab = (rowsInFirstSlab > 1 ? firstSlabWidth : colsInFirstRow);
-            auto fullSlabs = slabEnd - slabStart - 1;
+            auto fullSlabs       = slabEnd - slabStart - 1;
             uniqueRows =
-                (fullSlabs > 0 ? numMT_M
-                                : std::min(rowsInFirstSlab + lastSlabEndRow + 1, numMT_M));
+                (fullSlabs > 0 ? numMT_M : std::min(rowsInFirstSlab + lastSlabEndRow + 1, numMT_M));
             uniqueCols = colsInFirstSlab + colsInLastSlab + fullSlabs * wgm;
           }
 
@@ -284,8 +277,8 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
 
       // If we have found a better WGM
       if (wgmL2Estimate < bestL2) {
-          bestL2 = wgmL2Estimate;
-          bestWGM = wgm;
+        bestL2  = wgmL2Estimate;
+        bestWGM = wgm;
       }
     }
     // Set the best WGM
@@ -293,6 +286,233 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   }
 
   return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, out_wgm};
+}
+
+/**
+ * @brief Selects the best staggerU parameters (maximizing cache hits) given fixed macro tile sizes.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics
+ * @param config Kernel configuration.
+ * @param skGrid SK grid.
+ * @param wgm WGM.
+ * @return staggerU_t struct: best predicted (staggerUMapping, staggerU, staggerUStrideShift).
+ */
+staggerU_t select_staggerU(const problem_t& problem,
+                           const hardware_t& hardware,
+                           const config_t& config,
+                           size_t skGrid,
+                           int32_t wgm) {
+  // StaggerU offsets the starting K-position per workgroup so that CUs on the same
+  // XCD don't all hammer the same K-slice simultaneously. This function selects:
+  //   - StaggerUMapping (SUM): which WG dimension determines the K-offset (0=M, 1=N)
+  //   - StaggerU: number of unique K-offset positions (power of 2, <= 32)
+  //   - StaggerUStrideShift: stride multiplier ensuring each step crosses an L2 cache line
+  //
+  // Approach:
+  //   1. Compute max stagger from K-dimension (must fit within numMT_K iterations).
+  //   2. Estimate the L2 tile shape (tiles per XCD) from WGM and XCD count.
+  //   3. Choose the L2-optimal mapping direction using a contention model:
+  //      - With row-major WGM, consecutive WGs form a row sharing A data. Their
+  //        temporal overlap amplifies A contention (squared term). Compare against
+  //        B contention from "column-mates" to pick SUM0 (distribute B) or SUM1 (distribute A).
+  //   4. Validate the L2 working set: stagger only expands the shared matrix
+  //      (the one whose reads are distributed). If it exceeds L2 capacity, disable.
+  //   5. Optionally override the direction for MALL (inter-XCD) benefit when the
+  //      L2 tile is asymmetric and enough intra-XCD offsets survive the switch.
+
+  // Extract parameters from structured types
+  size_t M     = problem.size.m;
+  size_t N     = problem.size.n;
+  size_t K     = problem.size.k;
+  size_t batch = problem.batch;
+
+  size_t MT_M = config.mt.m;
+  size_t MT_N = config.mt.n;
+  size_t MT_K = config.mt.k;
+
+  int nta = config.cache_hints_a;
+  int ntb = config.cache_hints_b;
+
+  // Default values
+  size_t numCUs       = hardware.N_CU;
+  size_t numXCD       = hardware.NUM_XCD;
+  size_t numCUsPerXCD = numCUs / numXCD;
+
+  // Number of output MTs per split and batch
+  size_t numMT_M = math::safe_ceil_div(M, MT_M);
+  size_t numMT_N = math::safe_ceil_div(N, MT_N);
+  size_t numMT_K = math::safe_ceil_div(K, MT_K);
+  size_t numMTs  = numMT_M * numMT_N;
+
+  // What SK does -- we already have skGrid so just compute num_timesteps and split_factor
+  auto num_timesteps =
+      skGrid > numMTs ? math::safe_ceil_div(skGrid, numCUs) : math::safe_ceil_div(numMTs, numCUs);
+  auto split_factor = math::safe_ceil_div(skGrid, numMTs);
+
+  // Early Exit: Batch is not supported yet
+  if (batch != 1) return staggerU_t{0, 0, 0};
+
+  // Early Exit: no staggerU needed
+  if (numMT_K > 64)
+    return staggerU_t{0, 0, 0};
+
+  // Early Exit: splitK
+  // TODO: support splitK
+  if (split_factor > 1)     
+      return staggerU_t{0, 0, 0};
+
+  // helper function to round up to power of 2
+  auto next_pow2 = [](size_t v) -> size_t {
+    size_t p = 2;
+    while (p < v) p <<= 1;
+    return p;
+  };
+
+  // Compute stride shift and max staggerU from K
+  constexpr size_t L2_CACHE_LINE_BYTES = 128;
+  size_t bpe_a = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
+  size_t bpe_b = static_cast<size_t>(data_type_to_bytes(problem.b_dtype));
+  double min_bpe = std::min(bpe_a, bpe_b);
+  size_t bytes_per_k_iter = static_cast<size_t>(MT_K * min_bpe);
+  size_t min_shift = 0;
+  while ((bytes_per_k_iter << min_shift) < L2_CACHE_LINE_BYTES && min_shift < 5)
+    min_shift++;
+  size_t out_staggerUStrideShift = min_shift;
+  size_t max_staggerU = numMT_K >> out_staggerUStrideShift;
+  // Round down to power of 2 and cap at 32
+  {
+    size_t p = 1;
+    while (p * 2 <= max_staggerU) p <<= 1;
+    max_staggerU = std::min(p, static_cast<size_t>(32));
+  }
+
+  // Early Exit: few K-slices
+  if (max_staggerU == 1)
+    return staggerU_t{0, 0, 0};
+
+  // Early Exit: Non-temporal cases
+  if (nta > 3)
+    return staggerU_t{0, max_staggerU, out_staggerUStrideShift};
+  if (ntb > 3)
+    return staggerU_t{1, max_staggerU, out_staggerUStrideShift};
+
+  // Find WGM
+  size_t abs_wgm = std::abs(wgm);
+
+  // Find L2 Tile (the tile that is accessed by CUs on one XCD in one time step)
+  size_t L2Tile_M = 0;
+  size_t L2Tile_N = 0;
+  size_t numWGsPerL2Tile =
+      skGrid > numMTs ? math::safe_ceil_div(skGrid, numXCD) : math::safe_ceil_div(numMTs, numXCD);
+  numWGsPerL2Tile = (numWGsPerL2Tile < numCUsPerXCD) ? numWGsPerL2Tile : numCUsPerXCD;
+  if (wgm > 0) {
+    // Positive WGM: row-major mapping
+    L2Tile_N             = (abs_wgm < numMT_N) ? abs_wgm : numMT_N;
+    size_t L2Tile_M_temp = math::safe_ceil_div(numWGsPerL2Tile, L2Tile_N);
+    L2Tile_M             = (L2Tile_M_temp < numMT_M) ? L2Tile_M_temp : numMT_M;
+    while (L2Tile_M * L2Tile_N < numWGsPerL2Tile && L2Tile_N < numMT_N) L2Tile_N++;
+    // Account for XCD misalignment: when tiles don't fill exact rows,
+    // some XCDs start mid-row and span an extra row.
+    if (numWGsPerL2Tile % L2Tile_N != 0)
+      L2Tile_M = std::min(L2Tile_M + 1, numMT_M);
+  } else if (wgm < 0) {
+    // Negative WGM: column-major mapping
+    L2Tile_M             = (abs_wgm < numMT_M) ? abs_wgm : numMT_M;
+    size_t L2Tile_N_temp = math::safe_ceil_div(numWGsPerL2Tile, L2Tile_M);
+    L2Tile_N             = (L2Tile_N_temp < numMT_N) ? L2Tile_N_temp : numMT_N;
+    while (L2Tile_M * L2Tile_N < numWGsPerL2Tile && L2Tile_M < numMT_M) L2Tile_M++;
+    // Account for XCD misalignment: when tiles don't fill exact columns,
+    // some XCDs start mid-column and span an extra column.
+    if (numWGsPerL2Tile % L2Tile_M != 0)
+      L2Tile_N = std::min(L2Tile_N + 1, numMT_N);
+  } else {
+    std::cerr << "[ORIGAMI]: Invalid WGM value " << wgm << " in select_staggerU" << std::endl;
+    return staggerU_t{0, 0, 0};
+  }
+
+  // Compute L2 optimal direction.
+  // Row-major WGM: consecutive WGs share A (row-mates). Their temporal overlap
+  // amplifies A contention -> the consecutive dimension (N) gets squared.
+  // Column-major WGM: consecutive WGs share B (column-mates): M gets squared.
+  size_t A_contention, B_contention;
+  if (wgm > 0) {
+    // Positive WGM (row-major): N is the consecutive dimension
+    A_contention = L2Tile_N * L2Tile_N * MT_M * bpe_a;
+    B_contention = L2Tile_M * MT_N * bpe_b;
+  } else {
+    // Negative WGM (column-major): M is the consecutive dimension
+    A_contention = L2Tile_N * MT_M * bpe_a;
+    B_contention = L2Tile_M * L2Tile_M * MT_N * bpe_b;
+  }
+  size_t L2_mapping = (B_contention > A_contention) ? 0 : 1;
+  size_t L2_value   = (L2_mapping == 0) ? std::min(L2Tile_M, numMT_M)
+                                        : std::min(L2Tile_N, numMT_N);
+  L2_value = std::min(L2_value, max_staggerU);
+  // L2 capacity check.
+  // Stagger only expands the SHARED matrix — the other matrix's footprint is unchanged:
+  //   SUM0: A unchanged (each M-position already reads different A data),
+  //         B expanded by min(stagger, L2Tile_M) K-offsets (B sharing is broken).
+  //   SUM1: B unchanged, A expanded by min(stagger, L2Tile_N) K-offsets.
+  size_t working_set;
+  if (L2_mapping == 0) {
+    working_set = MT_K * (L2Tile_M * MT_M * bpe_a +
+                          std::min(L2_value, L2Tile_M) * L2Tile_N * MT_N * bpe_b);
+  } else {
+    working_set = MT_K * (std::min(L2_value, L2Tile_N) * L2Tile_M * MT_M * bpe_a +
+                          L2Tile_N * MT_N * bpe_b);
+  }
+  // 0.95 is a heuristic to make sure we don't exceed L2 capacity and if we are not
+  // underestimating the working set. The effect of a false prediction is more severe
+  // than not predicting at all.
+  if (working_set > 0.95 * hardware.L2_capacity)
+    return staggerU_t{0, 0, 0};
+  // Early Exit: L2 value is already max_staggerU
+  if (L2_value == max_staggerU)
+    return staggerU_t{L2_mapping, max_staggerU, out_staggerUStrideShift};
+  
+  // Compute MALL optimal direction
+  // Prefer direction with more XCD groups
+  size_t numXCD_M = math::safe_ceil_div(numMT_M, L2Tile_M);
+  size_t numXCD_N = math::safe_ceil_div(numMT_N, L2Tile_N);
+  size_t Mall_mapping;
+  if (numXCD_M > numXCD_N) {
+    Mall_mapping = 0; 
+  } else {
+    Mall_mapping = 1; 
+  }
+
+  // Decide L2 vs MALL direction
+  // If they agree, use that direction. If they disagree, check how many intra-XCD
+  // offsets survive switching to MALL direction. Otherwise the L2 loss is too 
+  // severe, keep L2 direction.
+  size_t out_staggerUMapping = 0;
+  size_t out_staggerU = 0;
+  if (L2_mapping == Mall_mapping) {
+    out_staggerUMapping = L2_mapping;
+    out_staggerU = max_staggerU;
+  } else {
+    // L2 and MALL disagree. Only switch when BOTH conditions hold:
+    // 1. Contention is close (ratio < 2)
+    // 2. L2 tile is asymmetric (ratio > 2)
+    size_t L2_winner = std::max(A_contention, B_contention);
+    size_t L2_loser  = std::min(A_contention, B_contention);
+    bool contention_close = (L2_winner < 2 * L2_loser);
+    bool tile_asymmetric  = (std::max(L2Tile_M, L2Tile_N) > 2 * std::min(L2Tile_M, L2Tile_N));
+    if (contention_close && tile_asymmetric) {
+      out_staggerUMapping = Mall_mapping;
+      out_staggerU = max_staggerU;
+    } else {
+      out_staggerUMapping = L2_mapping;
+      out_staggerU = L2_value;
+    }
+  }
+
+  // Sanity checks
+  out_staggerU = std::min(next_pow2(out_staggerU), max_staggerU);
+  if (out_staggerU <= 2) return staggerU_t{0, 0, 0};
+
+  return staggerU_t{out_staggerUMapping, out_staggerU, out_staggerUStrideShift};
 }
 
 std::vector<prediction_result_t> rank_configs(const problem_t& problem,

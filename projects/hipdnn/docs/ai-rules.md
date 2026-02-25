@@ -123,3 +123,9 @@ TestConvolutionHeuristicsFp32              TestConvolutionHeuristics
 **Multi-declarations**: Use explicit type aliases (`using ConvTestFp32 = ConvTest<float>`) with separate `TEST_P` and `INSTANTIATE_TEST_SUITE_P` per type. Prefer this over macros for debuggability.
 
 **TypePair pattern**: For testing type combinations (e.g., input + compute type), define a `TypePair<T1, T2>` struct with `InputType`/`ComputeType` aliases and use with `TYPED_TEST_SUITE`.
+
+---
+
+## Conditional Guidelines
+
+When modifying public API headers (under `backend/include/`, `frontend/include/hipdnn_frontend/`, `plugin_sdk/include/`), add Doxygen comments (`/** @brief ... */` for classes/functions/files, `///<` for enum values) to any new or changed public API. Exclude `detail/` subdirectories and generated files. For full style details, see `docs/doxygen-guidelines.md`.

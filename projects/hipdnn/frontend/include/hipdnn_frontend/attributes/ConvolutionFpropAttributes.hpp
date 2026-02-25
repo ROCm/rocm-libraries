@@ -1,5 +1,14 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file ConvolutionFpropAttributes.hpp
+ * @brief Attributes for forward convolution operations
+ *
+ * This file defines the ConvFpropAttributes class for configuring forward
+ * convolution (fprop) operations in hipDNN computational graphs.
+ */
+
 #pragma once
 
 #include "Attributes.hpp"
@@ -12,51 +21,75 @@
 
 namespace hipdnn_frontend::graph
 {
+
+/**
+ * @class ConvFpropAttributes
+ * @brief Configuration for forward convolution operations
+ *
+ * ConvFpropAttributes specifies the parameters for a forward convolution (fprop)
+ * operation: y = conv(x, w). The operation computes the convolution of input tensor
+ * x with filter tensor w.
+ *
+ * @code{.cpp}
+ * // Create a 2D convolution with 3x3 kernel, padding=1, stride=1
+ * auto y = graph.conv_fprop(x, w, ConvFpropAttributes()
+ *              .set_padding({1, 1})
+ *              .set_stride({1, 1})
+ *              .set_dilation({1, 1}));
+ * @endcode
+ *
+ * @see Graph::conv_fprop(), ConvDgradAttributes, ConvWgradAttributes
+ */
 class ConvFpropAttributes : public Attributes<ConvFpropAttributes>
 {
 public:
+    /// Input tensor identifiers
     enum class InputNames
     {
-        X = 0, // Input tensor
-        W = 1 // Weights/filter tensor
+        X = 0, ///< Input activation tensor (NCHW or NHWC)
+        W = 1 ///< Weight/filter tensor (KCRS or KRSC)
     };
-    typedef InputNames input_names; // NOLINT(readability-identifier-naming)
+    typedef InputNames input_names; ///< @brief Type alias for InputNames
 
+    /// Output tensor identifiers
     enum class OutputNames
     {
-        Y = 0 // Output tensor
+        Y = 0 ///< Output activation tensor
     };
-    typedef OutputNames output_names; // NOLINT(readability-identifier-naming)
+    typedef OutputNames output_names; ///< @brief Type alias for OutputNames
 
-    std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs;
-    std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs;
+    std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs; ///< Input tensors
+    std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs; ///< Output tensors
 
-    // Convolution parameters
-    std::vector<int64_t> pre_padding; // NOLINT(readability-identifier-naming)
-    std::vector<int64_t> post_padding; // NOLINT(readability-identifier-naming)
-    std::vector<int64_t> stride;
-    std::vector<int64_t> dilation;
-    // NOLINTNEXTLINE(readability-identifier-naming)
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::vector<int64_t> pre_padding; ///< Padding before convolution (per spatial dim)
+    std::vector<int64_t> post_padding; ///< Padding after convolution (per spatial dim)
+    std::vector<int64_t> stride; ///< Stride (per spatial dim)
+    std::vector<int64_t> dilation; ///< Dilation (per spatial dim)
+    /// Convolution mode (CROSS_CORRELATION or CONVOLUTION)
     ConvolutionMode math_mode = ConvolutionMode::CROSS_CORRELATION;
+    // NOLINTEND(readability-identifier-naming)
 
-    // Getters for tensors
+    /// @brief Get the input activation tensor
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_x() const
     {
         return getInput(InputNames::X);
     }
+    /// @brief Get the weight/filter tensor
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_w() const
     {
         return getInput(InputNames::W);
     }
+    /// @brief Get the output activation tensor
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_y() const
     {
         return getOutput(OutputNames::Y);
     }
 
-    // Setters for tensor
+    /// @brief Set the input activation tensor
     // NOLINTNEXTLINE(readability-identifier-naming)
     ConvFpropAttributes& set_x(std::shared_ptr<TensorAttributes>&& value)
     {
@@ -87,6 +120,11 @@ public:
     {
         return setOutput(OutputNames::Y, value);
     }
+    /**
+     * @brief Set symmetric padding (same for pre and post)
+     * @param padding Padding values for each spatial dimension
+     * @return Reference to this for method chaining
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     ConvFpropAttributes& set_padding(std::vector<int64_t> padding)
     {
@@ -95,6 +133,11 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Set pre-convolution padding
+     * @param padding Padding before the input (per spatial dimension)
+     * @return Reference to this for method chaining
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     ConvFpropAttributes& set_pre_padding(const std::vector<int64_t>& padding)
     {
@@ -123,6 +166,11 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Set convolution stride
+     * @param strideVals Stride values for each spatial dimension
+     * @return Reference to this for method chaining
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     ConvFpropAttributes& set_stride(const std::vector<int64_t>& strideVals)
     {
@@ -137,6 +185,11 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Set filter dilation
+     * @param dilationVals Dilation values for each spatial dimension
+     * @return Reference to this for method chaining
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     ConvFpropAttributes& set_dilation(const std::vector<int64_t>& dilationVals)
     {
@@ -151,6 +204,11 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Set convolution mode
+     * @param mode CROSS_CORRELATION (default) or CONVOLUTION
+     * @return Reference to this for method chaining
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     ConvFpropAttributes& set_convolution_mode(ConvolutionMode mode)
     {
@@ -158,7 +216,7 @@ public:
         return *this;
     }
 
-    // Getters for convolution parameters
+    /// @brief Get pre-convolution padding
     // NOLINTNEXTLINE(readability-identifier-naming)
     const std::vector<int64_t>& get_pre_padding() const
     {
@@ -236,5 +294,5 @@ public:
         return attr;
     }
 };
-typedef ConvFpropAttributes Conv_fprop_attributes;
+typedef ConvFpropAttributes Conv_fprop_attributes; ///< @brief cuDNN compatibility alias
 } // namespace hipdnn_frontend::graph
