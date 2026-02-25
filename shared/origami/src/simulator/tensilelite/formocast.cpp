@@ -845,25 +845,27 @@ namespace origami
 
         int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, int lrStallLatencyBuffer)
         {
-            int finalCycle = currentCycle;
-
-            if (fifo.size() < (16 / numWaves)) {
-                fifo.push(currentCycle);
+            int lengthOfQueuePerWave = 16 / numWaves;
+            int finalCycle = currentCycle + lrStallLatencyBuffer;
+            if (fifo.size() < lengthOfQueuePerWave) {
+                fifo.push(finalCycle);
+                return currentCycle;
             } else {
                 int oldCycle = fifo.front();
-                if ((currentCycle - oldCycle) >= lrStallLatencyBuffer) {
-                    fifo.pop();
-                    fifo.push(currentCycle);
-                } else {
-                    // stall happens
-                    int wavesPerFifo = 16 / numWaves;
-                    int stallCycles = safe_ceil_div(lrStallLatencyBuffer + 1, wavesPerFifo);
-                    finalCycle = std::max(currentCycle, fifo.back() + stallCycles);
+                if (currentCycle >= oldCycle) {
                     fifo.pop();
                     fifo.push(finalCycle);
+                    return currentCycle;
+                } else {
+                    // stall happens
+                    int stallCycles = safe_ceil_div(lrStallLatencyBuffer, lengthOfQueuePerWave);
+                    currentCycle = std::max(currentCycle + stallCycles, oldCycle);
+                    finalCycle = currentCycle + lrStallLatencyBuffer;
+                    fifo.pop();
+                    fifo.push(finalCycle);
+                    return currentCycle;
                 }
             }
-            return finalCycle;
         }
 
         /**
@@ -879,26 +881,17 @@ namespace origami
             return baseLatency + conflictPenalty;
         }
 
-        void pushLocalRead(int currentCycle, std::queue<int>& fifo, int bpr, bool isGfx950)
+        /**
+         * @brief Calculate local write latency based on base latency, conflict multiplier, and bank conflicts
+         * @param baseLatency Base latency for local write operation (from HardwareConstants: LocalWriteBaseLatencyB128/B64/B32)
+         * @param conflictMultiplier Multiplier applied to bank conflict penalty (from HardwareConstants: LocalWriteConflictMultiplierB128/B64/B32)
+         * @param bankConflict Bank conflict factor (typically 1.0 for no conflict, >1.0 for conflicts)
+         * @return Calculated latency in cycles (baseLatency + conflict penalty based on bank conflicts)
+         */
+        int getLocalWriteLatency(int baseLatency, int conflictMultiplier, double bankConflict)
         {
-            std::vector<int> latency(5);
-            if (isGfx950)
-            {
-                latency = {11,11,11,11,21};
-            }
-            else
-            {
-                latency = {12,12,12,21,27};
-            }
-            int lrMemLatency;
-            if (bpr == 16) {
-                lrMemLatency = latency[4];
-            } else if (bpr == 8) {
-                lrMemLatency = latency[3];
-            } else {
-                lrMemLatency = latency[2];
-            }
-            fifo.push(currentCycle + lrMemLatency);
+            int conflictPenalty = bankConflict * conflictMultiplier;
+            return baseLatency + conflictPenalty;
         }
 
         double analyzeBankConflictsFromVGPR(
