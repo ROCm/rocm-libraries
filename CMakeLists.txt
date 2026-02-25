@@ -21,6 +21,7 @@ set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fuse-ld=lld")
 
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
 find_package(hip REQUIRED)
+find_package(libhipcxx REQUIRED)
 
 # # Used for automatic generation of LLVM IR (by dissasembling bitcode generated during compilation from the "-save-temps" option)
 # find_program(LLVM_DIS llvm-dis REQUIRED HINTS /opt/rocm/llvm/bin)

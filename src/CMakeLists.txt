@@ -35,7 +35,7 @@ target_link_libraries(hipthreads PRIVATE "-fgpu-rdc")
 target_compile_definitions(hipthreads PUBLIC __HIP__)
 
 
-# target_link_libraries(hipthreads PRIVATE libhipcxx::libhipcxx)
+target_link_libraries(hipthreads PUBLIC libhipcxx::libhipcxx)
 
 
 # add_custom_command(TARGET hipthreads POST_BUILD
