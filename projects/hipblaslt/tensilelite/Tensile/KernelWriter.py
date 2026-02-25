@@ -1469,7 +1469,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               iterCode.add(waitDsRead)
         else:
           if kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"]):
-            if iteration == 0 and i == kernel["MIWaveTileA"]:
+            if iteration == 0 and i == (kernel["MIWaveTileA"] // kernel["numSubTiles"]):
               # add 1 more waitcnt before using ds read data
               waitCode2 = deepcopy(waitCode)
               waitCode2.dscnt = localReadsIssuedInThisIter
@@ -5878,13 +5878,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # reads Per Iteration
     ########################################
     if kernel["EnableMatrixInstruction"]:
+      factorSubIterA = kernel["numSubTiles"]
       if kernel["UnrollMajorLDSA"] or kernel["enableLDSTrA"]:
         self.states.numReadsPerUnrollA = ceil(tensorParametersA["bpe"] * kernel["MIInputPerThreadA"] / int(tensorParametersA["localReadInstruction"].blockWidth * 4))
       else:
         self.states.numReadsPerUnrollA = kernel["MIInputPerThreadA"]
+        if kernel["ForceUnrollSubIter"] and self.states.numReadsPerUnrollA > 1:
+          self.states.numReadsPerUnrollA //= kernel["numSubTiles"]
+          factorSubIterA = 1
       numA = kernel["InnerUnroll"]*(kernel["MIWaveTile"][0] * self.states.numReadsPerUnrollA) // tensorParametersA["localReadInstruction"].numOffsets
       if self.states.lrvwTileA > 1:
         numA = numA // kernel["VectorWidthA"]
+      if kernel["ForceUnrollSubIter"]:
+        numA = numA // factorSubIterA
 
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.numReadsPerUnrollMXSA = 1
@@ -5900,13 +5906,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
         tileM = kernel["MIWaveTile"][1] if kernel["ProblemType"]["Sparse"] == 2 else kernel["MIWaveTile"][0]
         numM = kernel["InnerUnroll"]*(tileM * self.states.numReadsPerUnrollMetadata) // tensorParametersM["localReadInstruction"].numOffsets
 
+      factorSubIterB = kernel["numSubTiles"]
       if kernel["UnrollMajorLDSB"] or kernel["enableLDSTrB"]:
         self.states.numReadsPerUnrollB = ceil(tensorParametersB["bpe"] * kernel["MIInputPerThreadB"] / int(tensorParametersB["localReadInstruction"].blockWidth * 4))
       else:
         self.states.numReadsPerUnrollB = kernel["MIInputPerThreadB"]
+        if kernel["ForceUnrollSubIter"] and self.states.numReadsPerUnrollB > 1:
+          self.states.numReadsPerUnrollB //= kernel["numSubTiles"]
+          factorSubIterB = 1
       numB = kernel["InnerUnroll"]*(kernel["MIWaveTile"][1] * self.states.numReadsPerUnrollB) // tensorParametersB["localReadInstruction"].numOffsets
       if self.states.lrvwTileB > 1:
         numB = numB // kernel["VectorWidthB"]
+      if kernel["ForceUnrollSubIter"]:
+        numB = numB // factorSubIterB
 
       if kernel["ProblemType"]["MXBlockB"]:
         self.states.numReadsPerUnrollMXSB = 1
