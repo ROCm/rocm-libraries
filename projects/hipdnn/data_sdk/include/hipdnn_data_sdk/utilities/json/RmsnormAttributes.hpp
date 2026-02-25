@@ -26,6 +26,11 @@ inline void to_json(nlohmann::json& rmsnormJson, const RMSNormAttributes& rms)
     {
         outputs["inv_rms_tensor_uid"] = rms.inv_rms_tensor_uid().value();
     }
+
+    if(rms.forward_phase() != data_objects::NormFwdPhase::NOT_SET)
+    {
+        rmsnormJson["forward_phase"] = EnumNameNormFwdPhase(rms.forward_phase());
+    }
 }
 
 }
@@ -49,6 +54,20 @@ inline auto to<data_objects::RMSNormAttributes>(flatbuffers::FlatBufferBuilder& 
         biasUid = inputs["bias_tensor_uid"].get<int64_t>();
     }
 
+    auto forwardPhase = data_objects::NormFwdPhase::NOT_SET;
+    if(entry.contains("forward_phase"))
+    {
+        auto phaseStr = entry["forward_phase"].get<std::string>();
+        if(phaseStr == "INFERENCE")
+        {
+            forwardPhase = data_objects::NormFwdPhase::INFERENCE;
+        }
+        else if(phaseStr == "TRAINING")
+        {
+            forwardPhase = data_objects::NormFwdPhase::TRAINING;
+        }
+    }
+
     return data_objects::CreateRMSNormAttributes(
         builder,
         inputs.at("x_tensor_uid").get<int64_t>(),
@@ -56,7 +75,8 @@ inline auto to<data_objects::RMSNormAttributes>(flatbuffers::FlatBufferBuilder& 
         inputs.at("epsilon_tensor_uid").get<int64_t>(),
         entry.at("outputs").at("y_tensor_uid").get<int64_t>(),
         biasUid,
-        invRmsUid);
+        invRmsUid,
+        forwardPhase);
 }
 
 }

@@ -23,6 +23,39 @@ struct RMSNormAttributesT;
 bool operator==(const RMSNormAttributesT &lhs, const RMSNormAttributesT &rhs);
 bool operator!=(const RMSNormAttributesT &lhs, const RMSNormAttributesT &rhs);
 
+enum class NormFwdPhase : int8_t {
+  NOT_SET = 0,
+  INFERENCE = 1,
+  TRAINING = 2,
+  MIN = NOT_SET,
+  MAX = TRAINING
+};
+
+inline const NormFwdPhase (&EnumValuesNormFwdPhase())[3] {
+  static const NormFwdPhase values[] = {
+    NormFwdPhase::NOT_SET,
+    NormFwdPhase::INFERENCE,
+    NormFwdPhase::TRAINING
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesNormFwdPhase() {
+  static const char * const names[4] = {
+    "NOT_SET",
+    "INFERENCE",
+    "TRAINING",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameNormFwdPhase(NormFwdPhase e) {
+  if (::flatbuffers::IsOutRange(e, NormFwdPhase::NOT_SET, NormFwdPhase::TRAINING)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesNormFwdPhase()[index];
+}
+
 struct RMSNormAttributesT : public ::flatbuffers::NativeTable {
   typedef RMSNormAttributes TableType;
   int64_t x_tensor_uid = 0;
@@ -31,6 +64,7 @@ struct RMSNormAttributesT : public ::flatbuffers::NativeTable {
   int64_t y_tensor_uid = 0;
   ::flatbuffers::Optional<int64_t> bias_tensor_uid = ::flatbuffers::nullopt;
   ::flatbuffers::Optional<int64_t> inv_rms_tensor_uid = ::flatbuffers::nullopt;
+  hipdnn_data_sdk::data_objects::NormFwdPhase forward_phase = hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET;
 };
 
 struct RMSNormAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -42,7 +76,8 @@ struct RMSNormAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table 
     VT_EPSILON_TENSOR_UID = 8,
     VT_Y_TENSOR_UID = 10,
     VT_BIAS_TENSOR_UID = 12,
-    VT_INV_RMS_TENSOR_UID = 14
+    VT_INV_RMS_TENSOR_UID = 14,
+    VT_FORWARD_PHASE = 16
   };
   int64_t x_tensor_uid() const {
     return GetField<int64_t>(VT_X_TENSOR_UID, 0);
@@ -80,6 +115,12 @@ struct RMSNormAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table 
   bool mutate_inv_rms_tensor_uid(int64_t _inv_rms_tensor_uid) {
     return SetField<int64_t>(VT_INV_RMS_TENSOR_UID, _inv_rms_tensor_uid);
   }
+  hipdnn_data_sdk::data_objects::NormFwdPhase forward_phase() const {
+    return static_cast<hipdnn_data_sdk::data_objects::NormFwdPhase>(GetField<int8_t>(VT_FORWARD_PHASE, 0));
+  }
+  bool mutate_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase _forward_phase = static_cast<hipdnn_data_sdk::data_objects::NormFwdPhase>(0)) {
+    return SetField<int8_t>(VT_FORWARD_PHASE, static_cast<int8_t>(_forward_phase), 0);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_X_TENSOR_UID, 8) &&
@@ -88,6 +129,7 @@ struct RMSNormAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table 
            VerifyField<int64_t>(verifier, VT_Y_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_BIAS_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_INV_RMS_TENSOR_UID, 8) &&
+           VerifyField<int8_t>(verifier, VT_FORWARD_PHASE, 1) &&
            verifier.EndTable();
   }
   RMSNormAttributesT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -117,6 +159,9 @@ struct RMSNormAttributesBuilder {
   void add_inv_rms_tensor_uid(int64_t inv_rms_tensor_uid) {
     fbb_.AddElement<int64_t>(RMSNormAttributes::VT_INV_RMS_TENSOR_UID, inv_rms_tensor_uid);
   }
+  void add_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase forward_phase) {
+    fbb_.AddElement<int8_t>(RMSNormAttributes::VT_FORWARD_PHASE, static_cast<int8_t>(forward_phase), 0);
+  }
   explicit RMSNormAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -135,7 +180,8 @@ inline ::flatbuffers::Offset<RMSNormAttributes> CreateRMSNormAttributes(
     int64_t epsilon_tensor_uid = 0,
     int64_t y_tensor_uid = 0,
     ::flatbuffers::Optional<int64_t> bias_tensor_uid = ::flatbuffers::nullopt,
-    ::flatbuffers::Optional<int64_t> inv_rms_tensor_uid = ::flatbuffers::nullopt) {
+    ::flatbuffers::Optional<int64_t> inv_rms_tensor_uid = ::flatbuffers::nullopt,
+    hipdnn_data_sdk::data_objects::NormFwdPhase forward_phase = hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET) {
   RMSNormAttributesBuilder builder_(_fbb);
   if(inv_rms_tensor_uid) { builder_.add_inv_rms_tensor_uid(*inv_rms_tensor_uid); }
   if(bias_tensor_uid) { builder_.add_bias_tensor_uid(*bias_tensor_uid); }
@@ -143,6 +189,7 @@ inline ::flatbuffers::Offset<RMSNormAttributes> CreateRMSNormAttributes(
   builder_.add_epsilon_tensor_uid(epsilon_tensor_uid);
   builder_.add_scale_tensor_uid(scale_tensor_uid);
   builder_.add_x_tensor_uid(x_tensor_uid);
+  builder_.add_forward_phase(forward_phase);
   return builder_.Finish();
 }
 
@@ -156,7 +203,8 @@ inline bool operator==(const RMSNormAttributesT &lhs, const RMSNormAttributesT &
       (lhs.epsilon_tensor_uid == rhs.epsilon_tensor_uid) &&
       (lhs.y_tensor_uid == rhs.y_tensor_uid) &&
       (lhs.bias_tensor_uid == rhs.bias_tensor_uid) &&
-      (lhs.inv_rms_tensor_uid == rhs.inv_rms_tensor_uid);
+      (lhs.inv_rms_tensor_uid == rhs.inv_rms_tensor_uid) &&
+      (lhs.forward_phase == rhs.forward_phase);
 }
 
 inline bool operator!=(const RMSNormAttributesT &lhs, const RMSNormAttributesT &rhs) {
@@ -179,6 +227,7 @@ inline void RMSNormAttributes::UnPackTo(RMSNormAttributesT *_o, const ::flatbuff
   { auto _e = y_tensor_uid(); _o->y_tensor_uid = _e; }
   { auto _e = bias_tensor_uid(); _o->bias_tensor_uid = _e; }
   { auto _e = inv_rms_tensor_uid(); _o->inv_rms_tensor_uid = _e; }
+  { auto _e = forward_phase(); _o->forward_phase = _e; }
 }
 
 inline ::flatbuffers::Offset<RMSNormAttributes> RMSNormAttributes::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const RMSNormAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -195,6 +244,7 @@ inline ::flatbuffers::Offset<RMSNormAttributes> CreateRMSNormAttributes(::flatbu
   auto _y_tensor_uid = _o->y_tensor_uid;
   auto _bias_tensor_uid = _o->bias_tensor_uid;
   auto _inv_rms_tensor_uid = _o->inv_rms_tensor_uid;
+  auto _forward_phase = _o->forward_phase;
   return hipdnn_data_sdk::data_objects::CreateRMSNormAttributes(
       _fbb,
       _x_tensor_uid,
@@ -202,7 +252,8 @@ inline ::flatbuffers::Offset<RMSNormAttributes> CreateRMSNormAttributes(::flatbu
       _epsilon_tensor_uid,
       _y_tensor_uid,
       _bias_tensor_uid,
-      _inv_rms_tensor_uid);
+      _inv_rms_tensor_uid,
+      _forward_phase);
 }
 
 }  // namespace data_objects

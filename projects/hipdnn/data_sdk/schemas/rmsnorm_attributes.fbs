@@ -3,6 +3,12 @@
 
 namespace hipdnn_data_sdk.data_objects;
 
+enum NormFwdPhase : byte {
+    NOT_SET = 0,
+    INFERENCE = 1,
+    TRAINING = 2
+}
+
 table RMSNormAttributes {
     x_tensor_uid: long;
     scale_tensor_uid: long;
@@ -10,4 +16,5 @@ table RMSNormAttributes {
     y_tensor_uid: long;
     bias_tensor_uid: long = null;
     inv_rms_tensor_uid: long = null;
+    forward_phase: NormFwdPhase = NOT_SET;
 }
