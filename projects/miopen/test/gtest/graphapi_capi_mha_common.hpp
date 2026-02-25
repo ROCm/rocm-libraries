@@ -36,7 +36,7 @@
 #include "gtest_common.hpp"
 #include "get_handle.hpp"
 #include "tensor_holder.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 #include "../workspace.hpp"
 #include "gtest/mha_helper.hpp"
 

@@ -32,7 +32,7 @@
 
 #include <iostream>
 
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 #include "../tensor_holder.hpp"
 
 namespace test_helpers {

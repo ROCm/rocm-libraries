@@ -38,7 +38,7 @@
 #include <miopen/fusion_plan.hpp>
 #include "get_handle.hpp"
 #include "tensor_holder.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 
 template <class T>
 void convHostForward(const tensor<T>& input,

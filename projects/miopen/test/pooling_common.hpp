@@ -47,7 +47,7 @@
 #include "driver.hpp"
 #include "get_handle.hpp"
 #include "tensor_holder.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 #include "cpu_conv.hpp"
 #include "workspace.hpp"
 

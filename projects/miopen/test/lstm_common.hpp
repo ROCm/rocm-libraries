@@ -33,7 +33,7 @@
 #include "get_handle.hpp"
 #include "tensor_holder.hpp"
 #include "test.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 #include "rnn_util.hpp"
 #include "random.hpp"
 #include "cpu_rnn.hpp"

@@ -33,7 +33,7 @@
 #include <miopen/conv/data_invoke_params.hpp>
 #include "conv_common.hpp"
 #include "hip_float8.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 #include "../random.hpp"
 
 #include "conv_test_base.hpp"

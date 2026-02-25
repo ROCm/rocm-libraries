@@ -35,7 +35,7 @@
 #include <miopen/tensor.hpp>
 #include <utility>
 #include <fusionHost.hpp>
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 #include "gtest/gtest.h"
 #include <half/half.hpp>
 

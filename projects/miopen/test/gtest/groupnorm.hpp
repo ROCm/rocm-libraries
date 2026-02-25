@@ -32,7 +32,7 @@
 #include "get_handle.hpp"
 #include "random.hpp"
 #include "../driver/tensor_driver.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 #include <random>
 
 struct GroupNormTestCase

@@ -36,7 +36,7 @@
 #include "util_driver.hpp"
 #include "conv_common.hpp"
 
-#include "../test/verify.hpp"
+#include "verify.hpp"
 #include "../test/cpu_conv.hpp"
 #include "../test/cpu_bias.hpp"
 

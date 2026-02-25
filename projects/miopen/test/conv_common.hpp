@@ -48,7 +48,7 @@
 #include "driver.hpp"
 #include "get_handle.hpp"
 #include "tensor_holder.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 #include <miopen/stringutils.hpp>
 #include "tensor_util.hpp"
 #include <miopen/algorithm.hpp>

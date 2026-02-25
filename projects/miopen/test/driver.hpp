@@ -33,7 +33,7 @@
 #include "serialize.hpp"
 #include "tensor_holder.hpp"
 #include "test.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 
 #include <functional>
 #include <deque>

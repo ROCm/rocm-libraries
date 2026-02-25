@@ -32,7 +32,7 @@
 
 #include "gtest_common.hpp"
 #include "test_parameter_name_generator.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 
 namespace {
 

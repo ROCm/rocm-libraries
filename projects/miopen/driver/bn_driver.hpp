@@ -35,7 +35,7 @@
 #include "util_driver.hpp"
 #include "rocrand_wrapper.hpp"
 
-#include "../test/verify.hpp"
+#include "verify.hpp"
 #include "../test/random.hpp"
 #include "../test/fusionHost.hpp"
 

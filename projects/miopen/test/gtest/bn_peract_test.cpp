@@ -49,7 +49,7 @@
 #include "tensor_holder.hpp"
 #include "test.hpp"
 #include "test_parameter_name_generator.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 
 // Run CPU emulations in hierarchical reduction mode.
 // #define MIO_HEIRARCH_SEL 0

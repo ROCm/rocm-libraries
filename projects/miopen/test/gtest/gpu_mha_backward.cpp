@@ -28,7 +28,7 @@
 #include "get_handle.hpp"
 #include "mha_helper.hpp"
 #include "tensor_holder.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 #include "gtest_common.hpp"
 #include "../workspace.hpp"
 #include "../tensor_util.hpp"

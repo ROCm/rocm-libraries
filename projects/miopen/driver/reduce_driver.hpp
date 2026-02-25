@@ -35,7 +35,7 @@
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
-#include "../test/verify.hpp"
+#include "verify.hpp"
 
 #include <miopen/miopen.h>
 #include <miopen/reduce_common.hpp>

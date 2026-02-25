@@ -32,7 +32,7 @@
 #include "get_handle.hpp"
 #include "tensor_holder.hpp"
 #include "tensor_util.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 
 namespace {
 using UnaryTensorOpsCase = std::tuple<std::vector<size_t>, int>;

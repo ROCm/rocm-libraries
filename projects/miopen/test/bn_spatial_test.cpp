@@ -28,7 +28,7 @@
 #include "get_handle.hpp"
 #include "tensor_holder.hpp"
 #include "test.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 #include "random.hpp"
 #include <array>
 #include <cmath>

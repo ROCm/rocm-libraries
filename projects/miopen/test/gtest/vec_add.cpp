@@ -26,7 +26,7 @@
 
 #include "get_handle.hpp"
 #include "random.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 #include <gtest/gtest.h>
 #include <miopen/miopen.h>
 #include <miopen/kernel_build_params.hpp>

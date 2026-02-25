@@ -29,7 +29,7 @@
 #include "get_handle.hpp"
 #include "tensor_holder.hpp"
 #include "../driver/mloSoftmaxHost.hpp"
-#include "verify.hpp"
+#include "../driver/verify.hpp"
 
 #include <miopen/softmax.hpp>
 
