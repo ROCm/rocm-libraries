@@ -2072,24 +2072,7 @@ class Solution(collections.abc.Mapping):
           if state["ProblemType"]["MXBlockB"]:
             state["LocalReadVectorWidthMXSB"] = 1 # TODO: check if need to fomulization
         else:
-          if state["UseDotInstruction"]:
-            # dot2: LRVW should be equal to NumDotElements * InnerUnroll
-            if state["LocalReadVectorWidth"] not in [-1, state["NumDotElements"] * state["InnerUnroll"]]:
-              reject(state, printRejectionReason, "dot kernel requires LocalReadVectorWidth = NumDotElements(%u) * InnerUnroll(%u)" % (state["NumDotElements"], state["InnerUnroll"]))
-              return
-            state["LocalReadVectorWidth"] = state["NumDotElements"] * state["InnerUnroll"]
-            state["LocalReadVectorWidthA"] = state["NumDotElements"] * state["InnerUnroll"]
-            state["LocalReadVectorWidthB"] = state["NumDotElements"] * state["InnerUnroll"]
-          else:
-            if state["LocalReadVectorWidth"] == -1:
-              state["LocalReadVectorWidth"] = state["VectorWidthA"]
-            if state["LocalReadVectorWidthA"] == -1:
-              state["LocalReadVectorWidthA"] = state["VectorWidthA"]
-            if state["LocalReadVectorWidthB"] == -1:
-              state["LocalReadVectorWidthB"] = state["VectorWidthB"]
-            if state["LocalReadVectorWidth"] != state["VectorWidthA"] or \
-               state["LocalReadVectorWidth"] != state["VectorWidthB"]:
-              reject(state, printRejectionReason, "LocalReadVectorWidth must equal VectorWidthA/B for MAC kernels")
+          assert False, "expecting MFMA for MX datatypes"
 
       def calLRVWForNonMX() -> int:
         if state["EnableMatrixInstruction"]:
