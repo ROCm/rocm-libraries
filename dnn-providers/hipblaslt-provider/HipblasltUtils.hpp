@@ -79,6 +79,16 @@ inline const char* hipblas_status_to_string(hipblasStatus_t status)
 #undef CASE
 }
 
+struct EpilogueParams
+{
+    hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_DEFAULT;
+    float act0 = 0;
+    float act1 = 0;
+};
+
+EpilogueParams mapPointwiseModeToHipblasLtEpilogue(
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes* attrs, bool withBias);
+
 hipDataType tensorDataTypeToHipDataType(const hipdnn_data_sdk::data_objects::DataType& dataType);
 
 hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,

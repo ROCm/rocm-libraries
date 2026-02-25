@@ -1485,6 +1485,129 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
+inline flatbuffers::FlatBufferBuilder
+    createValidMatmulBiasActivGraph(const std::vector<int64_t>& aDims = {4, 8},
+                                    const std::vector<int64_t>& aStrides = {8, 1},
+                                    const std::vector<int64_t>& bDims = {8, 5},
+                                    const std::vector<int64_t>& bStrides = {5, 1},
+                                    const std::vector<int64_t>& cDims = {4, 5},
+                                    const std::vector<int64_t>& cStrides = {5, 1},
+                                    bool doBias = true,
+                                    hipdnn_data_sdk::data_objects::PointwiseMode activMode
+                                    = hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+                                    std::optional<float> reluLowerClip = std::nullopt,
+                                    std::optional<float> reluUpperClip = std::nullopt,
+                                    std::optional<float> swishBeta = std::nullopt,
+                                    hipdnn_data_sdk::data_objects::DataType dataType
+                                    = hipdnn_data_sdk::data_objects::DataType::FLOAT)
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+    int64_t tensorUid = 1;
+
+    const auto aTensorUid = tensorUid++;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, aTensorUid, "A", dataType, &aStrides, &aDims));
+
+    const auto bTensorUid = tensorUid++;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, bTensorUid, "B", dataType, &bStrides, &bDims));
+
+    const auto cMatmulTensorUid = tensorUid++;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, cMatmulTensorUid, "C_matmul", dataType, &cStrides, &cDims));
+
+    int64_t biasTensorUid;
+    int64_t cBiasTensorUid;
+    if(doBias)
+    {
+        const auto biasDims = hipdnn_data_sdk::utilities::getDerivedShape(cDims);
+        const auto biasStrides = hipdnn_data_sdk::utilities::generateStrides(
+            biasDims, hipdnn_data_sdk::utilities::extractStrideOrder(cDims));
+
+        biasTensorUid = tensorUid++;
+        tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+            builder, biasTensorUid, "bias", dataType, &biasStrides, &biasDims));
+        cBiasTensorUid = tensorUid++;
+        tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+            builder, cBiasTensorUid, "C_bias", dataType, &cStrides, &cDims));
+    }
+
+    const auto cTensorUid = tensorUid;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, cTensorUid, "C", dataType, &cStrides, &cDims));
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+
+    // Node 0: MatMul
+    auto matmulAttributes = hipdnn_data_sdk::data_objects::CreateMatmulAttributes(
+        builder, aTensorUid, bTensorUid, cMatmulTensorUid);
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "matmul",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes,
+        matmulAttributes.Union()));
+
+    // Node 1: Bias (optional)
+    if(doBias)
+    {
+        auto biasAttributes = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
+            builder,
+            hipdnn_data_sdk::data_objects::PointwiseMode::ADD,
+            flatbuffers::nullopt,
+            flatbuffers::nullopt,
+            flatbuffers::nullopt,
+            flatbuffers::nullopt,
+            cMatmulTensorUid,
+            biasTensorUid,
+            flatbuffers::nullopt,
+            cBiasTensorUid);
+        nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+            builder,
+            "bias",
+            hipdnn_data_sdk::data_objects::DataType::FLOAT,
+            hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+            biasAttributes.Union()));
+    }
+
+    // Node 2: Activation (supports RELU_FWD, GELU_FWD, SWISH_FWD, etc.)
+    if(activMode != hipdnn_data_sdk::data_objects::PointwiseMode::UNSET)
+    {
+        auto activAttributes = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
+            builder,
+            activMode,
+            reluLowerClip,
+            reluUpperClip,
+            flatbuffers::nullopt, // relu_lower_clip_slope
+            flatbuffers::nullopt, // axis_tensor_uid
+            doBias ? cBiasTensorUid : cMatmulTensorUid,
+            flatbuffers::nullopt, // in_1_tensor_uid
+            flatbuffers::nullopt, // in_2_tensor_uid
+            cTensorUid,
+            swishBeta); // swish_beta
+        nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+            builder,
+            "activation",
+            hipdnn_data_sdk::data_objects::DataType::FLOAT,
+            hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+            activAttributes.Union()));
+    }
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 inline flatbuffers::FlatBufferBuilder createValidEngineDetails(int64_t engineId)
 {
     flatbuffers::FlatBufferBuilder builder;

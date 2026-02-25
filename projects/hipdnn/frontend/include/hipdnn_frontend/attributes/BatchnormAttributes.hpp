@@ -1,5 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file BatchnormAttributes.hpp
+ * @brief Attributes for batch normalization forward training operation
+ *
+ * This file defines the BatchnormAttributes class used to configure
+ * batch normalization operations during training, including computing
+ * mean and variance statistics.
+ */
+
 #pragma once
 
 #include "Attributes.hpp"
@@ -11,6 +21,45 @@
 
 namespace hipdnn_frontend::graph
 {
+
+/**
+ * @class BatchnormAttributes
+ * @brief Configuration attributes for batch normalization forward training
+ *
+ * BatchnormAttributes configures a batch normalization operation for training.
+ * This operation normalizes the input tensor across the batch dimension and
+ * computes running statistics for inference.
+ *
+ * **Required inputs:**
+ * - X: Input tensor to normalize (NCHW format)
+ * - Scale: Per-channel scale (gamma) tensor
+ * - Bias: Per-channel bias (beta) tensor
+ *
+ * **Optional inputs (for running statistics):**
+ * - prev_running_mean: Previous running mean (for exponential moving average)
+ * - prev_running_variance: Previous running variance
+ * - momentum: Momentum for running statistics update
+ *
+ * **Outputs:**
+ * - Y: Normalized output tensor
+ * - Mean: Computed batch mean
+ * - Inv_variance: Computed inverse variance (1/sqrt(var + epsilon))
+ * - next_running_mean: Updated running mean (optional)
+ * - next_running_variance: Updated running variance (optional)
+ *
+ * @code{.cpp}
+ * BatchnormAttributes attr;
+ * attr.set_x(inputTensor)
+ *     .set_scale(scaleTensor)
+ *     .set_bias(biasTensor)
+ *     .set_epsilon(epsilonTensor);
+ *
+ * auto [y, mean, invVar, nextMean, nextVar] = graph.batchnorm(x, scale, bias, attr);
+ * @endcode
+ *
+ * @see BatchnormInferenceAttributes for inference-only batch normalization
+ * @see BatchnormBackwardAttributes for backward pass
+ */
 class BatchnormAttributes : public Attributes<BatchnormAttributes>
 {
 public:
