@@ -12,31 +12,10 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_test_sdk::utilities;
 
-// Adapter to use IsolatedLogRecorder with user callback API
-namespace
-{
-struct UserCallbackContext
-{
-    hipdnnCallback_t oldStyleCallback;
-};
-
-void userCallbackAdapter(hipdnnUserLogCallbackHandle_t userHandle,
-                         hipdnnSeverity_t severity,
-                         const char* message)
-{
-    auto* ctx = static_cast<UserCallbackContext*>(userHandle);
-    if(ctx != nullptr && ctx->oldStyleCallback != nullptr)
-    {
-        ctx->oldStyleCallback(severity, message);
-    }
-}
-} // namespace
-
 class IntegrationFrontendUserLogging : public ::testing::Test
 {
 protected:
     hipdnnSeverity_t _originalLogLevel = HIPDNN_SEV_OFF;
-    UserCallbackContext _callbackCtx;
 
     void SetUp() override
     {
@@ -44,11 +23,8 @@ protected:
         auto error = getGlobalLogLevel(_originalLogLevel);
         ASSERT_EQ(error.code, ErrorCode::OK);
 
-        // Clear any previous user callback
-        _callbackCtx.oldStyleCallback = nullptr;
-        error = setUserLogCallback(
-            &userCallbackAdapter, HIPDNN_SEV_OFF, LogCallbackMode::ASYNC, &_callbackCtx);
-        // Ignore status - callback might not be registered
+        // Clear any previous user callback (may fail if not registered — that's OK)
+        setIsolatedUserCallback(HIPDNN_SEV_OFF, LogCallbackMode::ASYNC);
 
         // Reset log level
         error = setGlobalLogLevel(HIPDNN_SEV_OFF);
@@ -57,22 +33,25 @@ protected:
 
     void TearDown() override
     {
-        // Clear user callback
-        auto error = setUserLogCallback(
-            &userCallbackAdapter, HIPDNN_SEV_OFF, LogCallbackMode::ASYNC, &_callbackCtx);
-        // Ignore status
+        // Clear user callback (may fail if not registered — that's OK)
+        setIsolatedUserCallback(HIPDNN_SEV_OFF, LogCallbackMode::ASYNC);
 
         // Restore original log level
-        error = setGlobalLogLevel(_originalLogLevel);
+        auto error = setGlobalLogLevel(_originalLogLevel);
         ASSERT_EQ(error.code, ErrorCode::OK);
     }
 
-    // Helper to register callback with IsolatedLogRecorder
+    // Set the isolated user callback. Returns the error without asserting.
+    Error setIsolatedUserCallback(hipdnnSeverity_t minLevel, LogCallbackMode mode)
+    {
+        return setUserLogCallback(
+            IsolatedLogRecorder::getIsolatedUserRecordingCallback(), minLevel, mode, this);
+    }
+
+    // Register/update/unregister the isolated user callback. Asserts success.
     void registerUserCallback(hipdnnSeverity_t minLevel, LogCallbackMode mode)
     {
-        _callbackCtx.oldStyleCallback = IsolatedLogRecorder::getIsolatedRecordingCallback();
-        auto error = setUserLogCallback(&userCallbackAdapter, minLevel, mode, &_callbackCtx);
-        ASSERT_EQ(error.code, ErrorCode::OK);
+        ASSERT_EQ(setIsolatedUserCallback(minLevel, mode).code, ErrorCode::OK);
     }
 };
 
@@ -161,9 +140,7 @@ TEST_F(IntegrationFrontendUserLogging, UnregisterWithSevOffStopsCallbacks)
     EXPECT_GT(logsWithCallback, 0);
 
     // Unregister callback with SEV_OFF
-    error = setUserLogCallback(
-        &userCallbackAdapter, HIPDNN_SEV_OFF, LogCallbackMode::ASYNC, &_callbackCtx);
-    ASSERT_EQ(error.code, ErrorCode::OK);
+    registerUserCallback(HIPDNN_SEV_OFF, LogCallbackMode::ASYNC);
 
     HIPDNN_FE_LOG_INFO("Log after unregistering callback");
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -253,9 +230,7 @@ TEST_F(IntegrationFrontendUserLogging, UpdateCallbackLevel)
     EXPECT_GT(infoLogs, 0);
 
     // Update callback to WARN level (same callback, same handle, different level)
-    error = setUserLogCallback(
-        &userCallbackAdapter, HIPDNN_SEV_WARN, LogCallbackMode::ASYNC, &_callbackCtx);
-    ASSERT_EQ(error.code, ErrorCode::OK);
+    registerUserCallback(HIPDNN_SEV_WARN, LogCallbackMode::ASYNC);
 
     HIPDNN_FE_LOG_INFO("Info after update - should be filtered");
     HIPDNN_FE_LOG_WARN("Warn after update - should pass");
@@ -284,9 +259,7 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenSyncAndAsync)
     EXPECT_GT(syncLogs, 0);
 
     // Switch to ASYNC mode (same callback, same handle, different mode)
-    error = setUserLogCallback(
-        &userCallbackAdapter, HIPDNN_SEV_INFO, LogCallbackMode::ASYNC, &_callbackCtx);
-    ASSERT_EQ(error.code, ErrorCode::OK);
+    registerUserCallback(HIPDNN_SEV_INFO, LogCallbackMode::ASYNC);
 
     HIPDNN_FE_LOG_INFO("Async mode message");
 
@@ -301,16 +274,17 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenSyncAndAsync)
 // Test: Null callback parameter is rejected
 TEST_F(IntegrationFrontendUserLogging, RejectsNullCallback)
 {
-    auto error
-        = setUserLogCallback(nullptr, HIPDNN_SEV_INFO, LogCallbackMode::ASYNC, &_callbackCtx);
+    auto error = setUserLogCallback(nullptr, HIPDNN_SEV_INFO, LogCallbackMode::ASYNC, this);
     EXPECT_NE(error.code, ErrorCode::OK);
 }
 
 // Test: Null userHandle parameter is rejected
 TEST_F(IntegrationFrontendUserLogging, RejectsNullHandle)
 {
-    auto error = setUserLogCallback(
-        &userCallbackAdapter, HIPDNN_SEV_INFO, LogCallbackMode::ASYNC, nullptr);
+    auto error = setUserLogCallback(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+                                    HIPDNN_SEV_INFO,
+                                    LogCallbackMode::ASYNC,
+                                    nullptr);
     EXPECT_NE(error.code, ErrorCode::OK);
 }
 
@@ -329,13 +303,13 @@ TEST_F(IntegrationFrontendUserLogging, SyncGuaranteeOnUnregister)
         s_callbackActive.store(false);
     };
 
-    UserCallbackContext ctx;
+    int handleToken = 0;
     s_callbackCount.store(0);
     s_callbackActive.store(false);
 
     // Register async callback
-    auto error
-        = setUserLogCallback(trackingCallback, HIPDNN_SEV_INFO, LogCallbackMode::ASYNC, &ctx);
+    auto error = setUserLogCallback(
+        trackingCallback, HIPDNN_SEV_INFO, LogCallbackMode::ASYNC, &handleToken);
     ASSERT_EQ(error.code, ErrorCode::OK);
     error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);
@@ -347,7 +321,8 @@ TEST_F(IntegrationFrontendUserLogging, SyncGuaranteeOnUnregister)
     }
 
     // Unregister with SEV_OFF - should provide synchronous guarantee
-    error = setUserLogCallback(trackingCallback, HIPDNN_SEV_OFF, LogCallbackMode::ASYNC, &ctx);
+    error = setUserLogCallback(
+        trackingCallback, HIPDNN_SEV_OFF, LogCallbackMode::ASYNC, &handleToken);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     // Take snapshot AFTER unregister to avoid race with async queue processing

@@ -481,6 +481,20 @@ public:
         return &isolatedRecordingCallback;
     }
 
+    /**
+     * @brief Get the user callback function for registration with user callback APIs
+     *
+     * Register this callback with hipdnnSetUserLogCallback_ext() or the frontend
+     * setUserLogCallback() to capture logs in the ISOLATED recording instance.
+     * The userHandle parameter is ignored — any non-null handle can be used.
+     *
+     * @return User callback function pointer suitable for hipdnnSetUserLogCallback_ext()
+     */
+    static hipdnnUserLogCallback_t getIsolatedUserRecordingCallback()
+    {
+        return &isolatedUserRecordingCallback;
+    }
+
 private:
     IsolatedLogRecorder(hipdnnSeverity_t level, bool shouldChange)
         : LogRecorderBase(level, shouldChange, LogRecording::Id::ISOLATED)
@@ -488,6 +502,17 @@ private:
     }
 
     static void isolatedRecordingCallback(hipdnnSeverity_t severity, const char* message)
+    {
+        if(message != nullptr)
+        {
+            LogRecording::instance(LogRecording::Id::ISOLATED)
+                .recordLog(severity, std::string(message));
+        }
+    }
+
+    static void isolatedUserRecordingCallback(hipdnnUserLogCallbackHandle_t /*userHandle*/,
+                                              hipdnnSeverity_t severity,
+                                              const char* message)
     {
         if(message != nullptr)
         {

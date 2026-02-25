@@ -22,6 +22,7 @@ namespace logging
  * Uses atomic callback pointer to allow instant disable when unregistering.
  * Inherits from base_sink<std::mutex> which protects sink_it_() with a mutex.
  */
+// NOLINTNEXTLINE(portability-template-virtual-member-function)
 class UserCallbackSink : public spdlog::sinks::base_sink<std::mutex>
 {
 public:

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Logging.hpp"
-#include "BackendLogOutputSink.hpp"
 #include "PlatformUtils.hpp"
 #include "UserCallbackSink.hpp"
 
@@ -35,9 +34,8 @@ namespace
 // initialize() and hipdnnLoggingCallback() to short-circuit before touching the state object.
 std::atomic<bool> sLoggingShutdown{false};
 
-const std::string S_BACKEND_LOGGER_NAME = "hipdnn_backend";
-const std::string S_GLOBAL_CALLBACK_SYNC_LOGGER_NAME = "hipdnn_backend_global_callback_sync";
-const std::string S_GLOBAL_CALLBACK_ASYNC_LOGGER_NAME = "hipdnn_backend_global_callback_async";
+const std::string S_BACKEND_ASYNC_LOGGER_NAME = "hipdnn_backend_async";
+const std::string S_BACKEND_SYNC_LOGGER_NAME = "hipdnn_backend_sync";
 
 // Pattern string for the backend logger.
 // Component name is already included in messages (e.g., "[hipdnn_backend] ..."),
@@ -100,9 +98,6 @@ struct BackendLogState
     };
 
     std::map<CallbackKey, UserCallbackInfo> userCallbacks;
-
-    // OLD GLOBAL CALLBACK API (to be removed later)
-    std::shared_ptr<spdlog::logger> callbackLogger; // Dynamic callback logger (sync or async).
 
     BackendLogState()
     {
@@ -208,7 +203,7 @@ void initialize()
         state.asyncSharedDistSink = std::make_shared<spdlog::sinks::dist_sink_mt>();
 
         state.asyncLogger
-            = std::make_shared<spdlog::async_logger>(S_BACKEND_LOGGER_NAME,
+            = std::make_shared<spdlog::async_logger>(S_BACKEND_ASYNC_LOGGER_NAME,
                                                      state.asyncSharedDistSink,
                                                      state.sharedThreadPool,
                                                      spdlog::async_overflow_policy::block);
@@ -219,7 +214,7 @@ void initialize()
         state.syncSharedDistSink = std::make_shared<spdlog::sinks::dist_sink_mt>();
 
         state.syncLogger = std::make_shared<spdlog::logger>(
-            S_BACKEND_LOGGER_NAME, // Use same name as async logger
+            S_BACKEND_SYNC_LOGGER_NAME, // Use same name as async logger
             state.syncSharedDistSink);
         state.syncLogger->set_pattern(BACKEND_LOGGER_PATTERN);
         state.syncLogger->set_level(spdlog::level::trace);
@@ -302,9 +297,6 @@ void loggerShutdown()
     // Clear console/file sink references
     state.consoleSink.reset();
     state.fileSink.reset();
-
-    // Destroy old global callback logger (to be removed)
-    state.callbackLogger.reset();
 
     // Destroy thread pool (joins workers)
     state.sharedThreadPool.reset();
@@ -560,7 +552,6 @@ void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg)
     // concurrent readers. The copied shared_ptr keeps the shared logger alive.
     std::shared_ptr<spdlog::logger> asyncLogger;
     std::shared_ptr<spdlog::logger> syncLogger;
-    std::shared_ptr<spdlog::logger> oldCallbackLogger; // OLD API (to be removed)
     bool hasSyncCallbacks = false;
     {
         auto& state = getBackendLogState();
@@ -569,7 +560,6 @@ void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg)
         asyncLogger = state.asyncLogger;
         syncLogger = state.syncLogger;
         hasSyncCallbacks = state.syncCallbackCount.load(std::memory_order_acquire) > 0;
-        oldCallbackLogger = state.callbackLogger; // OLD API (to be removed)
     } // Lock released here
 
     // Log to async shared logger (console/file + async user callbacks)
@@ -584,70 +574,6 @@ void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg)
     {
         syncLogger->log(spdlogLevel, msg);
     }
-
-    // OLD API: Log to old global callback logger if set (to be removed)
-    if(oldCallbackLogger)
-    {
-        oldCallbackLogger->log(spdlogLevel, msg);
-    }
-}
-
-hipdnnStatus_t initializeGlobalOutputCallbackLogger(hipdnnBackendLogOutputCallback_t callback,
-                                                    bool async)
-{
-    if(callback != nullptr)
-    {
-        // Ensure base infrastructure is initialized
-        initialize();
-    }
-
-    auto& state = getBackendLogState();
-    std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
-
-    if(callback != nullptr && !state.loggerInitialized)
-    {
-        return HIPDNN_STATUS_NOT_INITIALIZED;
-    }
-
-    // Destroy existing callback logger if present
-    if(state.callbackLogger)
-    {
-        // Best-effort flush for async logger (non-blocking)
-        try
-        {
-            state.callbackLogger->flush();
-        }
-        catch(...)
-        {
-            // Ignore flush failures (callback may have thrown)
-        }
-        state.callbackLogger.reset();
-    }
-
-    // Create new callback logger if callback provided
-    if(callback != nullptr)
-    {
-        auto sink = std::make_shared<BackendLogOutputSink>(callback);
-        sink->set_pattern(BACKEND_LOGGER_PATTERN);
-
-        if(async)
-        {
-            state.callbackLogger
-                = std::make_shared<spdlog::async_logger>(S_GLOBAL_CALLBACK_ASYNC_LOGGER_NAME,
-                                                         sink,
-                                                         state.sharedThreadPool,
-                                                         spdlog::async_overflow_policy::block);
-        }
-        else
-        {
-            state.callbackLogger
-                = std::make_shared<spdlog::logger>(S_GLOBAL_CALLBACK_SYNC_LOGGER_NAME, sink);
-        }
-
-        state.callbackLogger->set_level(spdlog::level::trace);
-    }
-
-    return HIPDNN_STATUS_SUCCESS;
 }
 
 hipdnnStatus_t setGlobalLogLevel(hipdnnSeverity_t level)

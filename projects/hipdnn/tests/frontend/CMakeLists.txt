@@ -13,7 +13,6 @@ add_executable(
     IntegrationConvForward.cpp
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
-    IntegrationFrontendBackendLogging.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp

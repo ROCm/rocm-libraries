@@ -62,9 +62,6 @@ void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg);
 
 void logHipDeviceInfo(hipStream_t stream);
 
-hipdnnStatus_t initializeGlobalOutputCallbackLogger(hipdnnBackendLogOutputCallback_t callback,
-                                                    bool async);
-
 hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
                                   hipdnnSeverity_t minLevel,
                                   hipdnnLogCallbackMode_t mode,

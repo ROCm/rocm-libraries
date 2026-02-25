@@ -367,12 +367,6 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
     });
 }
 
-HIPDNN_BACKEND_EXPORT hipdnnStatus_t
-    hipdnnBackendSetGlobalLoggingCallback_ext(hipdnnBackendLogOutputCallback_t callback, bool async)
-{
-    return hipdnn_backend::logging::initializeGlobalOutputCallbackLogger(callback, async);
-}
-
 // NOLINTBEGIN(readability-identifier-naming) - C API function
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     hipdnnSetUserLogCallback_ext(hipdnnUserLogCallback_t callback,

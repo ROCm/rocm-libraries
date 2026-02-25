@@ -146,26 +146,6 @@ HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
 // === Logging Callback and Log Level APIs ===
 
 /**
- * @brief Set global backend log output callback to redirect all logs from console/file.
- *
- * When a global backend log output callback is set, logs are sent ONLY to the callback
- * (console/file output is disabled). Setting callback to nullptr restores default console/file behavior.
- *
- * @param callback   Backend log output callback function, or nullptr to restore default behavior
- * @param async      If true, callback is invoked asynchronously; if false, synchronously
- * @return Error object indicating success or failure
- */
-inline Error setGlobalLoggingCallback(hipdnnBackendLogOutputCallback_t callback, bool async = true)
-{
-    auto status = hipdnnBackendSetGlobalLoggingCallback_ext(callback, async);
-    if(status != HIPDNN_STATUS_SUCCESS)
-    {
-        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to set global logging callback"};
-    }
-    return {};
-}
-
-/**
  * @brief User log callback modes (sync vs async).
  */
 enum class LogCallbackMode

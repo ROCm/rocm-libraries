@@ -20,26 +20,6 @@
 
 using namespace hipdnn_test_sdk::utilities;
 
-// Wrapper to adapt old-style callback to new user callback signature
-namespace
-{
-struct CallbackContext
-{
-    hipdnnCallback_t oldStyleCallback;
-};
-
-void userCallbackWrapper(hipdnnUserLogCallbackHandle_t userHandle,
-                         hipdnnSeverity_t severity,
-                         const char* message)
-{
-    auto* ctx = static_cast<CallbackContext*>(userHandle);
-    if(ctx != nullptr && ctx->oldStyleCallback != nullptr)
-    {
-        ctx->oldStyleCallback(severity, message);
-    }
-}
-} // namespace
-
 // Test fixture for backend user log callback API
 class IntegrationBackendUserLoggingApis : public ::testing::Test
 {
@@ -48,7 +28,6 @@ protected:
     std::string _logFile;
     std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logLevelGuard;
     std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logFileGuard;
-    CallbackContext _callbackCtx;
 
     void SetUp() override
     {
@@ -62,17 +41,14 @@ protected:
         // Save original log level
         ASSERT_EQ(hipdnnBackendGetGlobalLogLevel_ext(&_originalLogLevel), HIPDNN_STATUS_SUCCESS);
 
-        // Clear any previous callback (use SEV_OFF to remove)
-        _callbackCtx.oldStyleCallback = nullptr;
-        hipdnnSetUserLogCallback_ext(
-            &userCallbackWrapper, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_ASYNC, &_callbackCtx);
+        // Clear any previous callback (may fail if not registered — that's OK)
+        setIsolatedUserCallback(HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_ASYNC);
     }
 
     void TearDown() override
     {
-        // Clear callback after each test (SEV_OFF removes callback)
-        hipdnnSetUserLogCallback_ext(
-            &userCallbackWrapper, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_ASYNC, &_callbackCtx);
+        // Clear callback after each test (may fail if not registered — that's OK)
+        setIsolatedUserCallback(HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_ASYNC);
 
         // Restore original log level
         ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(_originalLogLevel), HIPDNN_STATUS_SUCCESS);
@@ -87,12 +63,17 @@ protected:
         }
     }
 
-    // Helper to register callback with IsolatedLogRecorder
+    // Set the isolated user callback. Returns the status without asserting.
+    hipdnnStatus_t setIsolatedUserCallback(hipdnnSeverity_t minLevel, hipdnnLogCallbackMode_t mode)
+    {
+        return hipdnnSetUserLogCallback_ext(
+            IsolatedLogRecorder::getIsolatedUserRecordingCallback(), minLevel, mode, this);
+    }
+
+    // Register/update/unregister the isolated user callback. Asserts success.
     void registerIsolatedCallback(hipdnnSeverity_t minLevel, hipdnnLogCallbackMode_t mode)
     {
-        _callbackCtx.oldStyleCallback = IsolatedLogRecorder::getIsolatedRecordingCallback();
-        ASSERT_EQ(hipdnnSetUserLogCallback_ext(&userCallbackWrapper, minLevel, mode, &_callbackCtx),
-                  HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(setIsolatedUserCallback(minLevel, mode), HIPDNN_STATUS_SUCCESS);
     }
 };
 
@@ -138,9 +119,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
     EXPECT_GT(logsAfterCreate, 0);
 
     // Unregister callback with SEV_OFF
-    ASSERT_EQ(hipdnnSetUserLogCallback_ext(
-                  &userCallbackWrapper, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_ASYNC, &_callbackCtx),
-              HIPDNN_STATUS_SUCCESS);
+    registerIsolatedCallback(HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_ASYNC);
 
     // Further operations should not be captured
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
@@ -175,16 +154,19 @@ TEST_F(IntegrationBackendUserLoggingApis, SyncCallbackImmediate)
 // Test: Null userHandle is rejected
 TEST_F(IntegrationBackendUserLoggingApis, RejectsNullHandle)
 {
-    auto status = hipdnnSetUserLogCallback_ext(
-        &userCallbackWrapper, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, nullptr);
+    auto status
+        = hipdnnSetUserLogCallback_ext(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+                                       HIPDNN_SEV_INFO,
+                                       HIPDNN_LOG_CALLBACK_ASYNC,
+                                       nullptr);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
 }
 
 // Test: Null callback is rejected
 TEST_F(IntegrationBackendUserLoggingApis, RejectsNullCallback)
 {
-    auto status = hipdnnSetUserLogCallback_ext(
-        nullptr, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, &_callbackCtx);
+    auto status
+        = hipdnnSetUserLogCallback_ext(nullptr, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, this);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -192,8 +174,11 @@ TEST_F(IntegrationBackendUserLoggingApis, RejectsNullCallback)
 TEST_F(IntegrationBackendUserLoggingApis, RejectsInvalidMode)
 {
     auto invalidMode = static_cast<hipdnnLogCallbackMode_t>(999);
-    auto status = hipdnnSetUserLogCallback_ext(
-        &userCallbackWrapper, HIPDNN_SEV_INFO, invalidMode, &_callbackCtx);
+    auto status
+        = hipdnnSetUserLogCallback_ext(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+                                       HIPDNN_SEV_INFO,
+                                       invalidMode,
+                                       this);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -238,9 +223,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
     EXPECT_GT(infoLogs, 0);
 
     // Update callback to WARN level (same callback, same handle, different level)
-    ASSERT_EQ(hipdnnSetUserLogCallback_ext(
-                  &userCallbackWrapper, HIPDNN_SEV_WARN, HIPDNN_LOG_CALLBACK_ASYNC, &_callbackCtx),
-              HIPDNN_STATUS_SUCCESS);
+    registerIsolatedCallback(HIPDNN_SEV_WARN, HIPDNN_LOG_CALLBACK_ASYNC);
 
     // Trigger more logging - INFO logs should now be filtered at sink level
     hipdnnHandle_t handle2 = nullptr;
@@ -289,12 +272,12 @@ TEST_F(IntegrationBackendUserLoggingApis, CallbackThrowsException)
         }
     };
 
-    CallbackContext ctx;
+    int handleToken = 0;
     s_shouldThrow = true;
 
     // Set throwing callback
     ASSERT_EQ(hipdnnSetUserLogCallback_ext(
-                  throwingCallback, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_SYNC, &ctx),
+                  throwingCallback, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_SYNC, &handleToken),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
 
@@ -310,7 +293,8 @@ TEST_F(IntegrationBackendUserLoggingApis, CallbackThrowsException)
     }
 
     // Remove callback
-    hipdnnSetUserLogCallback_ext(throwingCallback, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_SYNC, &ctx);
+    hipdnnSetUserLogCallback_ext(
+        throwingCallback, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_SYNC, &handleToken);
 }
 
 // Test: Synchronous guarantee on unregister
@@ -328,13 +312,13 @@ TEST_F(IntegrationBackendUserLoggingApis, SyncGuaranteeOnUnregister)
         s_callbackActive.store(false);
     };
 
-    CallbackContext ctx;
+    int handleToken = 0;
     s_callbackCount.store(0);
     s_callbackActive.store(false);
 
     // Register async callback
     ASSERT_EQ(hipdnnSetUserLogCallback_ext(
-                  trackingCallback, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, &ctx),
+                  trackingCallback, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, &handleToken),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
 
@@ -350,7 +334,8 @@ TEST_F(IntegrationBackendUserLoggingApis, SyncGuaranteeOnUnregister)
     }
 
     // Unregister with SEV_OFF - should provide synchronous guarantee
-    hipdnnSetUserLogCallback_ext(trackingCallback, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_ASYNC, &ctx);
+    hipdnnSetUserLogCallback_ext(
+        trackingCallback, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_ASYNC, &handleToken);
 
     // Take snapshot AFTER unregister to avoid race with async queue processing
     int countAfterUnregister = s_callbackCount.load();
@@ -392,9 +377,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenSyncAndAsync)
     EXPECT_GT(syncLogs, 0);
 
     // Update to ASYNC mode (same callback, same handle, different mode)
-    ASSERT_EQ(hipdnnSetUserLogCallback_ext(
-                  &userCallbackWrapper, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, &_callbackCtx),
-              HIPDNN_STATUS_SUCCESS);
+    registerIsolatedCallback(HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC);
 
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 
@@ -415,9 +398,7 @@ TEST_F(IntegrationBackendUserLoggingApis, DuplicateUpdatesExisting)
 
     // Register again with same callback and handle but different level
     // This should UPDATE, not create second registration
-    ASSERT_EQ(hipdnnSetUserLogCallback_ext(
-                  &userCallbackWrapper, HIPDNN_SEV_WARN, HIPDNN_LOG_CALLBACK_ASYNC, &_callbackCtx),
-              HIPDNN_STATUS_SUCCESS);
+    registerIsolatedCallback(HIPDNN_SEV_WARN, HIPDNN_LOG_CALLBACK_ASYNC);
 
     // Trigger INFO level log
     hipdnnHandle_t handle = nullptr;
@@ -485,9 +466,7 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
         auto mode = (cycle % 2 == 0) ? HIPDNN_LOG_CALLBACK_ASYNC : HIPDNN_LOG_CALLBACK_SYNC;
 
         // With callback registered - logs should be captured
-        ASSERT_EQ(hipdnnSetUserLogCallback_ext(
-                      &userCallbackWrapper, HIPDNN_SEV_INFO, mode, &_callbackCtx),
-                  HIPDNN_STATUS_SUCCESS);
+        registerIsolatedCallback(HIPDNN_SEV_INFO, mode);
 
         size_t countBefore = recorder.getRecordedLogCount();
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -498,9 +477,7 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
             << ", mode=" << (mode == HIPDNN_LOG_CALLBACK_ASYNC ? "async" : "sync") << ")";
 
         // With callback unregistered (SEV_OFF) - logs should NOT be captured
-        ASSERT_EQ(
-            hipdnnSetUserLogCallback_ext(&userCallbackWrapper, HIPDNN_SEV_OFF, mode, &_callbackCtx),
-            HIPDNN_STATUS_SUCCESS);
+        registerIsolatedCallback(HIPDNN_SEV_OFF, mode);
 
         size_t countBeforeDisabled = recorder.getRecordedLogCount();
         std::this_thread::sleep_for(std::chrono::milliseconds(50));

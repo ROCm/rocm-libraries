@@ -384,57 +384,6 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                                                                           size_t* maxStringLen);
 
 /**
- * @brief Backend log output callback function type for receiving logs from hipDNN.
- *
- * @param[in] severity   The severity level of the log message
- * @param[in] message    The log message (null-terminated string, includes component name)
- * @note Callback should return promptly. For blocking operations (network, disk I/O),
- *       queue work to a separate thread to avoid impacting hipDNN performance.
- *
- * @warning If callback blocks indefinitely, shutdown operations may hang.
- */
-
-typedef void (*hipdnnBackendLogOutputCallback_t)(hipdnnSeverity_t severity, const char* message);
-
-/**
- * @brief Set global backend log output callback to redirect all logs from console/file.
- *
- * When a global backend log output callback is set, logs are sent ONLY to the callback
- * (console/file output is disabled). Setting callback to NULL restores default console/file behavior.
- *
- * @param[in] callback   Backend log output callback function, or NULL to restore default behavior
- * @param[in] async      If true, callback is invoked asynchronously; if false, synchronously
- *
- * @retval HIPDNN_STATUS_SUCCESS           The callback was set successfully
- * @retval HIPDNN_STATUS_INTERNAL_ERROR    An internal error occurred
- */
-HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLoggingCallback_ext(
-    hipdnnBackendLogOutputCallback_t callback, bool async);
-
-/**
- * @brief User-defined opaque handle passed to callback and used as unique ID.
- *
- * The userHandle serves two purposes:
- * 1. Passed back as parameter to the user callback function
- * 2. Used as part of the unique identifier for the callback (callback, userHandle)
- */
-typedef void* hipdnnUserLogCallbackHandle_t;
-
-/**
- * @brief User callback signature - includes user handle as first parameter.
- *
- * @param[in] userHandle User-provided context handle
- * @param[in] severity   Log message severity level
- * @param[in] message    The log message (null-terminated string, includes component name)
- *
- * @note Callback should return promptly. For blocking operations (network, disk I/O),
- *       queue work to a separate thread to avoid impacting hipDNN performance.
- */
-typedef void (*hipdnnUserLogCallback_t)(hipdnnUserLogCallbackHandle_t userHandle,
-                                        hipdnnSeverity_t severity,
-                                        const char* message);
-
-/**
  * @brief Callback mode (sync vs async).
  */
 typedef enum

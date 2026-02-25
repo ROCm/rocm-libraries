@@ -570,6 +570,59 @@ TEST_F(TestLogRecorder, IsolatedCallbackRecordsToIsolatedInstance)
     LogRecording::instance(LogRecording::Id::ISOLATED).clearLogs();
 }
 
+TEST_F(TestLogRecorder, IsolatedGetUserCallbackReturnsValidCallback)
+{
+    hipdnnUserLogCallback_t callback = IsolatedLogRecorder::getIsolatedUserRecordingCallback();
+    EXPECT_NE(callback, nullptr);
+}
+
+TEST_F(TestLogRecorder, IsolatedUserCallbackRecordsToIsolatedInstance)
+{
+    // Clear ISOLATED instance
+    LogRecording::instance(LogRecording::Id::ISOLATED).stopRecording();
+    LogRecording::instance(LogRecording::Id::ISOLATED).clearLogs();
+
+    // Start recording on ISOLATED instance
+    LogRecording::instance(LogRecording::Id::ISOLATED).startRecording();
+
+    // Get the user callback and invoke it directly
+    hipdnnUserLogCallback_t callback = IsolatedLogRecorder::getIsolatedUserRecordingCallback();
+    int dummyHandle = 0;
+    callback(&dummyHandle, HIPDNN_SEV_WARN, "test isolated user message");
+
+    // Verify log was recorded to ISOLATED instance
+    EXPECT_EQ(LogRecording::instance(LogRecording::Id::ISOLATED).getRecordedLogCount(), 1);
+    auto logs = LogRecording::instance(LogRecording::Id::ISOLATED).getRecordedLogs();
+    EXPECT_EQ(logs[0].message, "test isolated user message");
+    EXPECT_EQ(logs[0].severity, HIPDNN_SEV_WARN);
+
+    // Cleanup
+    LogRecording::instance(LogRecording::Id::ISOLATED).stopRecording();
+    LogRecording::instance(LogRecording::Id::ISOLATED).clearLogs();
+}
+
+TEST_F(TestLogRecorder, IsolatedUserCallbackIgnoresNullMessage)
+{
+    // Clear ISOLATED instance
+    LogRecording::instance(LogRecording::Id::ISOLATED).stopRecording();
+    LogRecording::instance(LogRecording::Id::ISOLATED).clearLogs();
+
+    // Start recording on ISOLATED instance
+    LogRecording::instance(LogRecording::Id::ISOLATED).startRecording();
+
+    // Invoke user callback with null message
+    hipdnnUserLogCallback_t callback = IsolatedLogRecorder::getIsolatedUserRecordingCallback();
+    int dummyHandle = 0;
+    callback(&dummyHandle, HIPDNN_SEV_INFO, nullptr);
+
+    // Should not record anything
+    EXPECT_EQ(LogRecording::instance(LogRecording::Id::ISOLATED).getRecordedLogCount(), 0);
+
+    // Cleanup
+    LogRecording::instance(LogRecording::Id::ISOLATED).stopRecording();
+    LogRecording::instance(LogRecording::Id::ISOLATED).clearLogs();
+}
+
 TEST_F(TestLogRecorder, IsolatedAndSharedInstancesAreIndependent)
 {
     // Clear both instances
