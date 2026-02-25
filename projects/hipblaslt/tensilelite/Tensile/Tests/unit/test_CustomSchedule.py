@@ -390,7 +390,8 @@ class TestCustomScheduleBF16:
         # fmt: off
         "transA, transB, lds_tr_inst,  tr_lds", [
         (  True,  False,       False,       1),
-        ( False,   True,        True,       0)
+        ( False,   True,        True,       0),
+        ( False,  False,        True,       1)
         # fmt: on
         ])   
     def test_schedule_224x256x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
@@ -810,11 +811,18 @@ class TestCustomScheduleTF32:
         valid, message = isValid(schedule_info, {"kernel": kernel})
         assert valid, message
 
-    def test_schedule_256x256x32_TF32(self):
+    @pytest.mark.parametrize(
+    # fmt: off
+    "transA, transB, lds_tr_inst,  tr_lds,  vwa, vwb", [
+    (  True,  False,       False,       1,  None, None),
+    ( False,   True,       False,       0,  4,    4),
+    # fmt: on
+    ])
+    def test_schedule_256x256x32_TF32(self,transA, transB, lds_tr_inst, tr_lds, vwa, vwb):
         """Tests the 256x256x32 TF32 TN schedule."""
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
-            "TransposeA": True, "TransposeB": False
+            "TransposeA": transA, "TransposeB": transB
         })
         kernel.update({
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
@@ -824,8 +832,13 @@ class TestCustomScheduleTF32:
             "DirectToLds": True,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
-            "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 8,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 8, "MIWaveTileB": 8,
         })
+
+        if vwa is not None:
+            kernel.update({"VectorWidthA": vwa})
+        if vwb is not None:
+            kernel.update({"VectorWidthB": vwb})
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
@@ -904,9 +917,8 @@ class TestCustomScheduleTF32:
         "transA, transB, lds_tr_inst,  tr_lds,  plr,  vwa,       mi    , ncp", [
         (  True,  False,       False,       1,  1,   None, [16,16,32,1],   1),
         (  True,  False,       False,       1,  1,   None, [32,32,16,1],   1),
-        # disable TF32 NN 128x128x32 unit test until fail issue is resolved (TODO: re-enable it)
-        #(  False, False,       False,       1,  1,      2, [32,32,16,1],   2),
-        #(  False, False,        True,       1,  1,      2, [32,32,16,1],   2),
+        (  False, False,       False,       1,  1,      2, [32,32,16,1],   2),
+        (  False, False,        True,       1,  1,      2, [32,32,16,1],   2),
         # fmt: on
         ])
     def test_schedule_128x128x32(self, transA, transB, lds_tr_inst, tr_lds, plr, vwa, mi, ncp):
