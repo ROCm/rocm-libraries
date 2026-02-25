@@ -354,7 +354,14 @@ namespace rocRoller
                 auto conditionResult = m_context->brancher()->resultRegister(expr);
 
                 co_yield Expression::generate(conditionResult, expr, m_context);
-
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across branches
+                {
+                    co_yield Instruction::Wait(WaitCount::Zero(
+                        m_context->targetArchitecture(),
+                        "REMOVEME: Wait before branching into conditional label!"));
+                }
+                // -------------------------------------------------------------------------------
                 co_yield m_context->brancher()->branchIfZero(
                     falseLabel,
                     conditionResult,
@@ -364,6 +371,14 @@ namespace rocRoller
                 co_yield m_context->brancher()->branch(
                     botLabel, concatenate("Condition: Done, jump to ", botLabel->toString()));
 
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across branches
+                {
+                    co_yield Instruction::Wait(WaitCount::Zero(
+                        m_context->targetArchitecture(),
+                        "REMOVEME: Wait before conditional label!"));
+                }
+                // -------------------------------------------------------------------------------
                 co_yield Instruction::Label(falseLabel);
                 auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
                 if(!elseBody.empty())
@@ -371,6 +386,14 @@ namespace rocRoller
                     co_yield generate(elseBody);
                 }
 
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across branches
+                {
+                    co_yield Instruction::Wait(WaitCount::Zero(
+                        m_context->targetArchitecture(),
+                        "REMOVEME: Wait before conditional label!"));
+                }
+                // -------------------------------------------------------------------------------
                 co_yield Instruction::Label(botLabel);
                 co_yield Instruction::Unlock("Unlock Conditional");
             }
