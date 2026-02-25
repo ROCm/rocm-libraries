@@ -114,6 +114,7 @@ exclude_gpu:
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1    # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)
+  # environment: { VAR1: "val1", VAR2: "val2" }   # optional; applied to all category tests
   category_timeouts:
     quick: 300
     standard: 1800
@@ -124,7 +125,8 @@ execution_settings:
 - `timeout_multiplier`: Global multiplier applied to all timeouts (default: 1)
   - Use values like `1.5`, `1.75`, `2` to extend timeouts where needed
 - `category_timeouts`: Timeouts for specific categories (before multiplier is applied)
-```
+
+**Environment (optional):** Under `execution_settings`, an `environment` map sets env vars for all category tests (e.g. `OPENBLAS_NUM_THREADS`, `OMP_NUM_THREADS`). Keys and values are strings; they are passed to CTest as `ENVIRONMENT "VAR1=val1;VAR2=val2"`.
 
 ### **Enhanced Structure (Optional Fields)**
 

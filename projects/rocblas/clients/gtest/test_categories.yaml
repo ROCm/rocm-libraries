@@ -55,6 +55,9 @@ test_categories:
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
+  environment:
+    OPENBLAS_NUM_THREADS: "48"
+    OMP_NUM_THREADS: "48"
   category_timeouts:
     quick: 600    # 10 min (quick suite can exceed 300s on some systems)
     standard: 7200    # ~2 hours (standard can take over an hour)
