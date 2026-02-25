@@ -26,7 +26,7 @@ from unittest.mock import MagicMock
 from Tensile.Components.CustomSchedule import (
     hasCustomSchedule, ScheduleInfo, RegisterSchedule, TileConfig,
     _SCHEDULE_METADATA, _SCHEDULE_REGISTRY,
-    isTN, isNT, isNN, isTT, is16bit, query_cms_kernels
+    isTN, isNT, isNN, isTT, is16bit, query_cms_kernels, get_available_layouts
 )
 from Tensile.Components.CMSValidator import isValid
 from Tensile.Common import IsaVersion
@@ -111,6 +111,10 @@ class TestLayoutAutoDetection:
             return False, None
 
         assert _get_layouts_for("_fake_all_layouts") == ["NN", "NT", "TN", "TT"]
+
+        assert get_available_layouts(dtype="16bit") == ["NN", "NT", "TN", "TT"]
+
+        assert get_available_layouts() == ["NN", "NT", "TN", "TT"]
 
     def test_detect_no_layouts(self):
         """A function that always returns False should detect no layouts."""

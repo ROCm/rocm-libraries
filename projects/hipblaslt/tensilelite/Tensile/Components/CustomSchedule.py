@@ -571,10 +571,13 @@ def get_available_layouts(dtype: Optional[str] = None) -> list[str]:
     Returns:
         Sorted list of unique layout strings (e.g. ["NN", "NT", "TN", "TT"]).
     """
+    def as_str(transpose: bool) -> str:
+            return "T" if transpose else "N"
+
     layouts: set[str] = set()
     for info in _SCHEDULE_METADATA:
         if dtype is None or info.dtype.lower() == dtype.lower():
-            layouts.update(info.supported_layouts)
+            layouts.add(as_str(info.TransposeA) + as_str(info.TransposeB))
     return sorted(layouts)
 
 @CallableGuard
