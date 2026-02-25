@@ -46,6 +46,9 @@ struct InvokeParams : public miopen::InvokeParams
     Data_t rstd            = nullptr;
     float epsilon          = 0;
     int32_t normalized_dim = 0;
+    size_t stride          = 0;
+    size_t outer_size      = 0;
+    size_t inner_size      = 0;
     miopenNormMode_t mode  = MIOPEN_ELEMENTWISE_AFFINE;
 
     std::size_t GetWorkspaceSize() const { return 0; }
@@ -69,6 +72,9 @@ struct BwdInvokeParams : public miopen::InvokeParams
     Data_t workspace       = nullptr;
     int32_t normalized_dim = 0;
     size_t workspace_size  = 0;
+    size_t stride          = 0;
+    size_t outer_size      = 0;
+    size_t inner_size      = 0;
     miopenNormMode_t mode  = MIOPEN_ELEMENTWISE_AFFINE;
 
     std::size_t GetWorkspaceSize() const { return workspace_size; }
@@ -90,6 +96,8 @@ struct AddInvokeParams : public miopen::InvokeParams
     Data_t rstd            = nullptr;
     float epsilon          = 0;
     int32_t normalized_dim = 0;
+    size_t outer_size      = 0;
+    size_t inner_size      = 0;
     miopenNormMode_t mode  = MIOPEN_ELEMENTWISE_AFFINE;
 
     std::size_t GetWorkspaceSize() const { return 0; }
@@ -107,6 +115,8 @@ struct T5InvokeParams : public miopen::InvokeParams
     Data_t y              = nullptr;
     Data_t rstd           = nullptr;
     float epsilon         = 0;
+    size_t outer_size     = 0;
+    size_t inner_size     = 0;
     miopenNormMode_t mode = MIOPEN_ELEMENTWISE_AFFINE;
 
     std::size_t GetWorkspaceSize() const { return 0; }
@@ -127,6 +137,8 @@ struct T5BwdInvokeParams : public miopen::InvokeParams
     Data_t dw                  = nullptr;
     Data_t workspace           = nullptr;
     std::size_t workspace_size = 0;
+    size_t outer_size          = 0;
+    size_t inner_size          = 0;
     miopenNormMode_t mode      = MIOPEN_ELEMENTWISE_AFFINE;
 
     std::size_t GetWorkspaceSize() const { return workspace_size; }
