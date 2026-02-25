@@ -21,10 +21,10 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(tensorMap.at(attributes.x_tensor_uid()))
-    , _y(tensorMap.at(attributes.y_tensor_uid()))
-    , _scale(tensorMap.at(attributes.scale_tensor_uid()))
-    , _bias(tensorMap.at(attributes.bias_tensor_uid()))
+    : _x(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
+    , _y(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.y_tensor_uid())))
+    , _scale(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.scale_tensor_uid())))
+    , _bias(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.bias_tensor_uid())))
     , _activationOut(nullptr)
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
@@ -35,12 +35,14 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     // Save mean and inv_variance are optional
     if(attributes.mean_tensor_uid().has_value())
     {
-        _mean = tensorMap.at(attributes.mean_tensor_uid().value());
+        _mean = &(hip_kernel_utils::findTensorAttributes(tensorMap,
+                                                         attributes.mean_tensor_uid().value()));
     }
 
     if(attributes.inv_variance_tensor_uid().has_value())
     {
-        _invVariance = tensorMap.at(attributes.inv_variance_tensor_uid().value());
+        _invVariance = &(hip_kernel_utils::findTensorAttributes(
+            tensorMap, attributes.inv_variance_tensor_uid().value()));
     }
 
     if(attributes.prev_running_mean_tensor_uid().has_value()
@@ -54,10 +56,14 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
         _momentumValue = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
             momentumTensorAttr, "Momentum");
 
-        _prevRunningMean = tensorMap.at(attributes.prev_running_mean_tensor_uid().value());
-        _prevRunningVariance = tensorMap.at(attributes.prev_running_variance_tensor_uid().value());
-        _nextRunningMean = tensorMap.at(attributes.next_running_mean_tensor_uid().value());
-        _nextRunningVariance = tensorMap.at(attributes.next_running_variance_tensor_uid().value());
+        _prevRunningMean = &(hip_kernel_utils::findTensorAttributes(
+            tensorMap, attributes.prev_running_mean_tensor_uid().value()));
+        _prevRunningVariance = &(hip_kernel_utils::findTensorAttributes(
+            tensorMap, attributes.prev_running_variance_tensor_uid().value()));
+        _nextRunningMean = &(hip_kernel_utils::findTensorAttributes(
+            tensorMap, attributes.next_running_mean_tensor_uid().value()));
+        _nextRunningVariance = &(hip_kernel_utils::findTensorAttributes(
+            tensorMap, attributes.next_running_variance_tensor_uid().value()));
         _hasRunningStats = true;
     }
 }
@@ -67,12 +73,13 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(tensorMap.at(attributes.x_tensor_uid()))
-    , _y(tensorMap.at(attributes.y_tensor_uid()))
-    , _scale(tensorMap.at(attributes.scale_tensor_uid()))
-    , _bias(tensorMap.at(attributes.bias_tensor_uid()))
+    : _x(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
+    , _y(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.y_tensor_uid())))
+    , _scale(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.scale_tensor_uid())))
+    , _bias(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.bias_tensor_uid())))
     , _optActivation(hip_kernel_utils::parseActivation(pointwiseAttributes))
-    , _activationOut(tensorMap.at(pointwiseAttributes.out_0_tensor_uid()))
+    , _activationOut(&(hip_kernel_utils::findTensorAttributes(
+          tensorMap, pointwiseAttributes.out_0_tensor_uid())))
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
     auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
@@ -90,12 +97,14 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     // Save mean and inv_variance are optional
     if(attributes.mean_tensor_uid().has_value())
     {
-        _mean = tensorMap.at(attributes.mean_tensor_uid().value());
+        _mean = &(hip_kernel_utils::findTensorAttributes(tensorMap,
+                                                         attributes.mean_tensor_uid().value()));
     }
 
     if(attributes.inv_variance_tensor_uid().has_value())
     {
-        _invVariance = tensorMap.at(attributes.inv_variance_tensor_uid().value());
+        _invVariance = &(hip_kernel_utils::findTensorAttributes(
+            tensorMap, attributes.inv_variance_tensor_uid().value()));
     }
 
     if(attributes.prev_running_mean_tensor_uid().has_value()
@@ -109,10 +118,14 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
         _momentumValue = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
             momentumTensorAttr, "Momentum");
 
-        _prevRunningMean = tensorMap.at(attributes.prev_running_mean_tensor_uid().value());
-        _prevRunningVariance = tensorMap.at(attributes.prev_running_variance_tensor_uid().value());
-        _nextRunningMean = tensorMap.at(attributes.next_running_mean_tensor_uid().value());
-        _nextRunningVariance = tensorMap.at(attributes.next_running_variance_tensor_uid().value());
+        _prevRunningMean = &(hip_kernel_utils::findTensorAttributes(
+            tensorMap, attributes.prev_running_mean_tensor_uid().value()));
+        _prevRunningVariance = &(hip_kernel_utils::findTensorAttributes(
+            tensorMap, attributes.prev_running_variance_tensor_uid().value()));
+        _nextRunningMean = &(hip_kernel_utils::findTensorAttributes(
+            tensorMap, attributes.next_running_mean_tensor_uid().value()));
+        _nextRunningVariance = &(hip_kernel_utils::findTensorAttributes(
+            tensorMap, attributes.next_running_variance_tensor_uid().value()));
         _hasRunningStats = true;
     }
 }
