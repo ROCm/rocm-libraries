@@ -685,6 +685,37 @@ BenchmarkProblems:
           - Range: [[256], [224], [1], [ 1, 17,  64]]
           - Range: [[256], [224], [1], [32, 64, 256]]
         - BiasTypeArgs: ['b']
+    - # BenchmarkProblemSizeGroup - 256x224x64 NN
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 7, 8, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - LDSTrInst: [1]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - UseCustomMainLoopSchedule: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[224], [256], [1], [ 1, 17,  64]]
+          - Range: [[224], [256], [1], [32, 64, 256]]
+        - BiasTypeArgs: ['b']        
   ########################################
   # HHS NN - standard
   ########################################

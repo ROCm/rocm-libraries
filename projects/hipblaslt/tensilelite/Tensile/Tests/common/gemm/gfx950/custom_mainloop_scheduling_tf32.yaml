@@ -697,7 +697,7 @@ BenchmarkProblems:
         - WorkGroupMapping: [1]
         - WorkGroupMappingXCC: [4]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0] # [1] TODO: re-enable this
+        - UseCustomMainLoopSchedule: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
