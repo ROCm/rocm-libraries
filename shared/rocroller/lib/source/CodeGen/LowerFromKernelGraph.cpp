@@ -357,9 +357,9 @@ namespace rocRoller
                 // -------------------------------------------------------------------------------
                 // TODO: remove this once we better handle data-flow across branches
                 {
-                    co_yield Instruction::Wait(WaitCount::Zero(
-                        m_context->targetArchitecture(),
-                        "REMOVEME: Wait before branching into conditional label!"));
+                    co_yield Instruction::Wait(
+                        WaitCount::Zero(m_context->targetArchitecture(),
+                                        "REMOVEME: Wait before branching into conditional label!"));
                 }
                 // -------------------------------------------------------------------------------
                 co_yield m_context->brancher()->branchIfZero(
@@ -374,9 +374,9 @@ namespace rocRoller
                 // -------------------------------------------------------------------------------
                 // TODO: remove this once we better handle data-flow across branches
                 {
-                    co_yield Instruction::Wait(WaitCount::Zero(
-                        m_context->targetArchitecture(),
-                        "REMOVEME: Wait before conditional label!"));
+                    co_yield Instruction::Wait(
+                        WaitCount::Zero(m_context->targetArchitecture(),
+                                        "REMOVEME: Wait before conditional label!"));
                 }
                 // -------------------------------------------------------------------------------
                 co_yield Instruction::Label(falseLabel);
@@ -389,9 +389,9 @@ namespace rocRoller
                 // -------------------------------------------------------------------------------
                 // TODO: remove this once we better handle data-flow across branches
                 {
-                    co_yield Instruction::Wait(WaitCount::Zero(
-                        m_context->targetArchitecture(),
-                        "REMOVEME: Wait before conditional label!"));
+                    co_yield Instruction::Wait(
+                        WaitCount::Zero(m_context->targetArchitecture(),
+                                        "REMOVEME: Wait before conditional label!"));
                 }
                 // -------------------------------------------------------------------------------
                 co_yield Instruction::Label(botLabel);
