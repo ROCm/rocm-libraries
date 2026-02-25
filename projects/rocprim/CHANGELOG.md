@@ -2,7 +2,7 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM x.y.z for ROCm 8.0
+## rocPRIM 4.3.0 for ROCm 7.12
 
 ### Optimizations
 
@@ -27,6 +27,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Removed unused `equality`, `inequality`, `sum`, `max`, `min` from thread_operator.hpp.
 * Removed duplicate `inequality_operator` from binary_op_warpper.hpp
+
+### Known issues
+
+* benchmark_warp_sort may hang on Navi GPUs on Windows when running logical warp sizes > hardware warp size.
 
 ## rocPRIM 4.2.0 for ROCm 7.2
 

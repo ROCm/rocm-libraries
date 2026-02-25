@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -71,9 +71,9 @@ namespace detail
             start = std::chrono::steady_clock::now();                                             \
         }                                                                                         \
                                                                                                   \
-        auto block_reduce_kernel = [=](auto arch_config) mutable                                  \
+        auto block_reduce_kernel = [=](auto target_config) mutable                                \
         {                                                                                         \
-            block_reduce_kernel_impl<decltype(arch_config),                                       \
+            block_reduce_kernel_impl<decltype(target_config),                                     \
                                      WithInitialValue,                                            \
                                      fit_larger,                                                  \
                                      fit_items,                                                   \
@@ -111,13 +111,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
 
     using Selector = reduce_config_selector<input_type>;
 
-    target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params = get_config<Selector>(Config{}, current_target);
 
@@ -192,9 +186,9 @@ inline hipError_t reduce_impl(void*               temporary_storage,
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto block_reduce_kernel = [=](auto arch_config)
+            auto block_reduce_kernel = [=](auto target_config)
             {
-                block_reduce_kernel_impl<decltype(arch_config), false, true, 1, result_type>(
+                block_reduce_kernel_impl<decltype(target_config), false, true, 1, result_type>(
                     input + offset,
                     current_size,
                     block_prefixes + i * number_of_blocks_limit,
