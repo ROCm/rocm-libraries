@@ -490,8 +490,7 @@ static rocblas_status rocsolver_cholqr_getMemorySize(const rocsolver_alg_select 
 
     if(algo == rocsolver_alg_select1)
     {
-        // storage for iinfo and R1 not needed
-        *size_iinfo = 0;
+        // storage for R1 not needed
         *size_R1 = 0;
     }
     else
