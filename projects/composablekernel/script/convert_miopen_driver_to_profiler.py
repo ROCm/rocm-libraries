@@ -119,8 +119,6 @@ def run_ck_grouped_conv_fwd(args):
     # use int32 by default
     args.index_type = 0
 
-    #args.ck_profier_op = "grouped_conv_fwd_tile"
-
     cmd = [str(args.ck_profiler_cmd), str(args.ck_profier_op)]
     cmd += [str(args.data_type), str(args.layout), str(args.index_type)]
     cmd += [str(args.verify), str(args.init_method)]
@@ -408,7 +406,7 @@ if __name__ == "__main__":
         "-V",
         "--verify",
         "--V",
-        default=0,
+        default=1,
         type=int,
         required=False,
         help="Verify Each Layer (Default=1)",
