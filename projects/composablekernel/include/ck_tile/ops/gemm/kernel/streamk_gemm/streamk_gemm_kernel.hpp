@@ -669,16 +669,19 @@ struct StreamKKernel
                 }
                 else // Tree Reduction
                 {
-                    auto accum_block_tile = c_block_tile;
-                    index_t tile_local_cta_idx =
-                        kargs.tile_partitioner.get_tile_local_cta_index(tile_iter_start, cta_idx);
+                    auto accum_block_tile      = c_block_tile;
+                    index_t tile_local_cta_idx = amd_wave_read_first_lane(
+                        kargs.tile_partitioner.get_tile_local_cta_index(tile_iter_start, cta_idx));
 
-                    for(index_t stride = 1;; stride <<= 1)
+                    index_t stride = amd_wave_read_first_lane(1);
+
+                    for(;; stride <<= 1)
                     {
-                        const index_t partner_cta_idx = cta_idx + stride;
-                        const index_t partner_start_iter =
-                            kargs.tile_partitioner.get_start_iter(partner_cta_idx);
-                        bool partner_in_tile = partner_start_iter < tile_iter_end;
+                        const index_t partner_cta_idx = amd_wave_read_first_lane(cta_idx + stride);
+                        const index_t partner_start_iter = amd_wave_read_first_lane(
+                            kargs.tile_partitioner.get_start_iter(partner_cta_idx));
+                        bool partner_in_tile =
+                            amd_wave_read_first_lane(partner_start_iter < tile_iter_end);
 
                         // If the partner of the workgroup who started the tile is not in this tile,
                         // then the work for this tile is done and results can be stored in the C
