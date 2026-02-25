@@ -104,7 +104,6 @@ TEST_P(hipfftxtunit, plancreation)
     const int Nx    = 32;
     const int Ny    = 32;
 
-    // FIXME: direction isn't used?
     const int direction = std::get<0>(GetParam());
     const bool realcomplex = std::get<1>(GetParam());
     

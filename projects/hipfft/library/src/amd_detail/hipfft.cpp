@@ -469,6 +469,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                 fft_transform_type_from_rocfft_transform_type(dft_type),
                 fft_result_placement_from_rocfft_result_placement(placement),
                 rm_lengths_vec);
+            
             // rm -> cm:
             std::reverse(i_strides.begin(), i_strides.end());
             std::reverse(o_strides.begin(), o_strides.end());
@@ -488,7 +489,6 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                               fft_io::fft_io_out,
                               rm_lengths_vec,
                               number_of_transforms);
-
             
             auto ret = rocfft_plan_description_set_data_layout(plan_desc,
                                                         iotype.array_type(fft_io::fft_io_in),
