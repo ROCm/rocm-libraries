@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -74,12 +74,7 @@ hipError_t search_n_impl(void*          temporary_storage,
         return hipErrorInvalidValue;
     }
 
-    target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto         params           = get_config<Selector>(Config{}, current_target);
     const unsigned int block_size       = params.kernel_config.block_size;
@@ -129,9 +124,9 @@ hipError_t search_n_impl(void*          temporary_storage,
         search_n_init_kernel<<<1, 1, 0, stream>>>(tmp_output, size);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_init_kernel", 1, start);
 
-        auto search_n_normal_kernel = [=](auto arch_config)
+        auto search_n_normal_kernel = [=](auto target_config)
         {
-            static constexpr auto params           = decltype(arch_config)::params;
+            static constexpr auto params           = decltype(target_config)::params;
             static constexpr auto block_size       = params.kernel_config.block_size;
             static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
             static constexpr auto items_per_block  = block_size * items_per_thread;
@@ -220,9 +215,9 @@ hipError_t search_n_impl(void*          temporary_storage,
     // This function processes `possible_head_exist_size` items
     const size_t num_blocks_for_find_heads = ceiling_div(possible_head_exist_size, items_per_block);
 
-    auto search_n_find_heads_kernel = [=](auto arch_config)
+    auto search_n_find_heads_kernel = [=](auto target_config)
     {
-        static constexpr auto params           = decltype(arch_config)::params;
+        static constexpr auto params           = decltype(target_config)::params;
         static constexpr auto block_size       = params.kernel_config.block_size;
         static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
         static constexpr auto items_per_block  = block_size * items_per_thread;
@@ -262,9 +257,9 @@ hipError_t search_n_impl(void*          temporary_storage,
     // This function processes `num_groups` items
     const size_t num_blocks_for_heads_filter = ceiling_div(num_groups, items_per_block);
 
-    auto search_n_heads_filter_kernel = [=](auto arch_config)
+    auto search_n_heads_filter_kernel = [=](auto target_config)
     {
-        static constexpr auto params           = decltype(arch_config)::params;
+        static constexpr auto params           = decltype(target_config)::params;
         static constexpr auto block_size       = params.kernel_config.block_size;
         static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
         static constexpr auto items_per_block  = block_size * items_per_thread;
@@ -340,9 +335,9 @@ hipError_t search_n_impl(void*          temporary_storage,
     const size_t num_blocks_for_discard_heads
         = ceiling_div(h_filtered_heads_size * count, items_per_block);
 
-    auto search_n_discard_heads_kernel = [=](auto arch_config)
+    auto search_n_discard_heads_kernel = [=](auto target_config)
     {
-        static constexpr auto params           = decltype(arch_config)::params;
+        static constexpr auto params           = decltype(target_config)::params;
         static constexpr auto block_size       = params.kernel_config.block_size;
         static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
         static constexpr auto items_per_block  = block_size * items_per_thread;

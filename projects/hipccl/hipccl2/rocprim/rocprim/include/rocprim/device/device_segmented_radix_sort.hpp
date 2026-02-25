@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -156,13 +156,7 @@ inline hipError_t segmented_radix_sort_impl(
 
     using Selector = segmented_radix_sort_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params = get_config<Selector>(Config{}, current_target);
 
@@ -338,9 +332,9 @@ inline hipError_t segmented_radix_sort_impl(
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto segmented_sort_large_kernel = [=](auto arch_config)
+            auto segmented_sort_large_kernel = [=](auto target_config)
             {
-                segmented_sort_large<decltype(arch_config), Descending>(
+                segmented_sort_large<decltype(target_config), Descending>(
                     keys_input,
                     keys_tmp,
                     keys_output,
@@ -376,9 +370,9 @@ inline hipError_t segmented_radix_sort_impl(
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto segmented_sort_medium_kernel = [=](auto arch_config)
+            auto segmented_sort_medium_kernel = [=](auto target_config)
             {
-                segmented_sort_medium<decltype(arch_config), Descending>(
+                segmented_sort_medium<decltype(target_config), Descending>(
                     keys_input,
                     keys_tmp,
                     keys_output,
@@ -417,9 +411,9 @@ inline hipError_t segmented_radix_sort_impl(
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto segmented_sort_small_kernel = [=](auto arch_config)
+            auto segmented_sort_small_kernel = [=](auto target_config)
             {
-                segmented_sort_small<decltype(arch_config), Descending>(
+                segmented_sort_small<decltype(target_config), Descending>(
                     keys_input,
                     keys_tmp,
                     keys_output,
@@ -457,20 +451,20 @@ inline hipError_t segmented_radix_sort_impl(
         {
             start = std::chrono::steady_clock::now();
         }
-        auto segmented_sort_kernel = [=](auto arch_config)
+        auto segmented_sort_kernel = [=](auto target_config)
         {
-            segmented_sort<decltype(arch_config), Descending>(keys_input,
-                                                              keys_tmp,
-                                                              keys_output,
-                                                              values_input,
-                                                              values_tmp,
-                                                              values_output,
-                                                              to_output,
-                                                              begin_offsets,
-                                                              end_offsets,
-                                                              iterations,
-                                                              begin_bit,
-                                                              end_bit);
+            segmented_sort<decltype(target_config), Descending>(keys_input,
+                                                                keys_tmp,
+                                                                keys_output,
+                                                                values_input,
+                                                                values_tmp,
+                                                                values_output,
+                                                                to_output,
+                                                                begin_offsets,
+                                                                end_offsets,
+                                                                iterations,
+                                                                begin_bit,
+                                                                end_bit);
         };
 
         ROCPRIM_RETURN_ON_ERROR(

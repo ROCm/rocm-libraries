@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -79,13 +79,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 
     using Selector = adjacent_difference_config_selector<InPlace, larger_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(detail::host_target_arch(stream, target_arch));
-
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params = get_config<Selector>(Config{}, current_target);
 
@@ -172,9 +166,9 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
             start = std::chrono::steady_clock::now();
         }
 
-        auto adjacent_difference_kernel = [=](auto arch_config)
+        auto adjacent_difference_kernel = [=](auto target_config)
         {
-            adjacent_difference_kernel_impl<decltype(arch_config), InPlace, Right>(
+            adjacent_difference_kernel_impl<decltype(target_config), InPlace, Right>(
                 input + offset,
                 output + offset,
                 size,
