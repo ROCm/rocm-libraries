@@ -61,7 +61,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 16
     DirectToLds: false
     DirectToLdsA: false
@@ -157,7 +157,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 3
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -258,7 +258,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 16
     DirectToLds: false
     DirectToLdsA: false
@@ -354,7 +354,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 3
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -455,7 +455,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 8
     DirectToLds: false
     DirectToLdsA: false
@@ -551,7 +551,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 1
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -652,7 +652,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 8
     DirectToLds: false
     DirectToLdsA: false
@@ -748,7 +748,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 1
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -849,7 +849,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 8
     DirectToLds: false
     DirectToLdsA: false
@@ -945,7 +945,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 1
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -1046,7 +1046,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 8
     DirectToLds: false
     DirectToLdsA: false
@@ -1142,7 +1142,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 1
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -1243,7 +1243,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 8
     DirectToLds: false
     DirectToLdsA: false
@@ -1339,7 +1339,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 1
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -1440,7 +1440,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 16
     DirectToLds: false
     DirectToLdsA: false
@@ -1536,7 +1536,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 3
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -1637,7 +1637,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 16
     DirectToLds: false
     DirectToLdsA: false
@@ -1733,7 +1733,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 3
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -1834,7 +1834,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 16
     DirectToLds: false
     DirectToLdsA: false
@@ -1930,7 +1930,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 3
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -2031,7 +2031,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 8
     DirectToLds: false
     DirectToLdsA: false
@@ -2127,7 +2127,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 1
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -2228,7 +2228,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 8
     DirectToLds: false
     DirectToLdsA: false
@@ -2324,7 +2324,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 1
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -2425,7 +2425,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 8
     DirectToLds: false
     DirectToLdsA: false
@@ -2521,7 +2521,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 1
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -2621,7 +2621,7 @@
     BufferLoad: true
     BufferStore: true
     CodeObjectVersion: default
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     CustomKernelName: ''
     DepthU: 8
     DirectToLds: false
@@ -2718,7 +2718,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 1
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true
@@ -2819,7 +2819,7 @@
     BufferStore: true
     CodeObjectVersion: default
     CustomKernelName: ''
-    ClusterLocalRead: 0
+    ClusterLocalRead: false
     DepthU: 8
     DirectToLds: false
     DirectToLdsA: false
@@ -2915,7 +2915,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 1
-    PreloadKernArgs: false
+    PreloadKernArgs: 0
     ProblemType:
       AllowNoFreeDims: false
       AssignedDerivedParameters: true

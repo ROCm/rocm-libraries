@@ -1489,7 +1489,9 @@
     LocalWriteUseSgprB: false
     LoopIters: 1
     LoopUnroll: 4
+    MFMA_BF16_1K: false
     MIBlock: [16, 16, 4, 1, 1, 1]
+    MIInputPerThread: 1
     MIOutputVectorWidth: 4
     MIWaveGroup: [2, 2]
     MIWaveTile: [1, 1]
@@ -1506,8 +1508,6 @@
     MatrixInstN: 16
     MatrixInstruction: [16, 16, 4, 1]
     MaxOccupancy: 40
-    MIInputPerThread: 1
-    MFMA_BF16_1K: false
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
