@@ -10,6 +10,7 @@
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "../../tests/common/ActivationCommon.hpp"
 #include "../../tests/common/BatchnormCommon.hpp"
 #include "../IntegrationGraphVerificationHarness.hpp"
 
@@ -22,9 +23,10 @@ using namespace hip_kernel_plugin::test_utilities;
 namespace
 {
 
+using test_activation_common::ActivTestCase;
 using test_bn_common::BatchnormTestCase;
 
-struct BatchnormFwdTrainingTensorIds
+struct BatchnormFwdTrainingActivTensorIds
 {
     static constexpr int64_t X_UID = 1;
     static constexpr int64_t SCALE_UID = 2;
@@ -47,54 +49,57 @@ enum class BatchnormTrainingScenario
     FULL_TRAINING // Batch stats + running stats update (canonical training)
 };
 
-template <typename InputType, typename IntermediateType, typename TestCaseType>
-class BatchnormForwardTraining : public IntegrationGraphVerificationHarness<InputType, TestCaseType>
+template <typename InputType, typename IntermediateType>
+class BatchnormFwdTrainingActivation
+    : public IntegrationGraphVerificationHarness<
+          InputType,
+          std::tuple<test_bn_common::BatchnormTestCase, test_activation_common::ActivTestCase>>
 {
 protected:
     void runGraphTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
     {
-        runGraphTestWithScenario(tolerance, BatchnormTrainingScenario::FULL_TRAINING, layout);
+        runGraphTestWithScenario(tolerance, BatchnormTrainingScenario::WITH_BATCH_STATS, layout);
     }
 
     void runGraphTestWithScenario(float tolerance,
                                   BatchnormTrainingScenario scenario,
                                   const TensorLayout& layout = TensorLayout::NCHW)
     {
-        const TestCaseType& testCase = this->GetParam();
+        const auto& [bnTestCase, activTestCase] = this->GetParam();
 
-        HIPDNN_PLUGIN_LOG_INFO("Test is using " << testCase.seed << " for its random seed");
+        HIPDNN_PLUGIN_LOG_INFO("Test is using " << bnTestCase.seed << " for its random seed");
 
         hipdnn_frontend::graph::Graph graphObj;
-        graphObj.set_name("BatchnormForwardTrainingTest");
+        graphObj.set_name("BatchnormFwdTrainingActivTest");
 
         auto inputDataType = getDataTypeEnumFromType<InputType>();
         auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
         graphObj.set_intermediate_data_type(intermediateDataType)
-            .set_compute_data_type(DataType::FLOAT)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(inputDataType);
 
-        auto dims = testCase.dims;
+        auto dims = bnTestCase.dims;
         auto derivedDims = getDerivedShape(dims);
 
         // Create input tensor attributes
         auto xAttr = makeTensorAttributes("X", dims, generateStrides(dims, layout.strideOrder));
-        xAttr.set_uid(BatchnormFwdTrainingTensorIds::X_UID);
+        xAttr.set_uid(BatchnormFwdTrainingActivTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
         auto scaleAttr = makeTensorAttributes(
             "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
-        scaleAttr.set_uid(BatchnormFwdTrainingTensorIds::SCALE_UID);
+        scaleAttr.set_uid(BatchnormFwdTrainingActivTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         auto biasAttr = makeTensorAttributes(
             "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
-        biasAttr.set_uid(BatchnormFwdTrainingTensorIds::BIAS_UID);
+        biasAttr.set_uid(BatchnormFwdTrainingActivTensorIds::BIAS_UID);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         // Epsilon: use pass-by-value with double (matches kernel requirement)
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
-        std::mt19937 gen(testCase.seed);
+        std::mt19937 gen(bnTestCase.seed);
         std::uniform_real_distribution<double> epsilonDist(1e-6, 1e-4);
         epsilonTensorAttr->set_value(epsilonDist(gen)).set_name("epsilon");
 
@@ -109,7 +114,7 @@ protected:
                                                             intermediateDataType,
                                                             derivedDims,
                                                             generateStrides(derivedDims));
-            prevRunningMeanAttr.set_uid(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID);
+            prevRunningMeanAttr.set_uid(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID);
             prevRunningMeanTensorAttr
                 = std::make_shared<graph::TensorAttributes>(std::move(prevRunningMeanAttr));
 
@@ -118,7 +123,7 @@ protected:
                                                                 derivedDims,
                                                                 generateStrides(derivedDims));
             prevRunningVarianceAttr.set_uid(
-                BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID);
+                BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID);
             prevRunningVarianceTensorAttr
                 = std::make_shared<graph::TensorAttributes>(std::move(prevRunningVarianceAttr));
 
@@ -139,17 +144,51 @@ protected:
 
         bnAttrs.set_epsilon(epsilonTensorAttr);
 
-        auto [yTensorAttr,
+        auto [yBnTensorAttr,
               meanTensorAttr,
               invVarianceTensorAttr,
               nextRunningMeanTensorAttr,
               nextRunningVarianceTensorAttr]
             = graphObj.batchnorm(xTensorAttr, scaleTensorAttr, biasTensorAttr, bnAttrs);
 
-        // Set output tensor attributes
-        yTensorAttr->set_output(true);
+        yBnTensorAttr->set_data_type(intermediateDataType);
 
-        // Configure batch statistics outputs if they exist
+        // Add activation node with parameters from test case
+        graph::PointwiseAttributes activAttrs;
+        activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
+
+        // Set activation-specific parameters
+        if(activTestCase.reluLowerClip.has_value())
+        {
+            activAttrs.set_relu_lower_clip(activTestCase.reluLowerClip.value());
+        }
+        if(activTestCase.reluUpperClip.has_value())
+        {
+            activAttrs.set_relu_upper_clip(activTestCase.reluUpperClip.value());
+        }
+        if(activTestCase.reluLowerClipSlope.has_value())
+        {
+            activAttrs.set_relu_lower_clip_slope(activTestCase.reluLowerClipSlope.value());
+        }
+        if(activTestCase.swishBeta.has_value())
+        {
+            activAttrs.set_swish_beta(activTestCase.swishBeta.value());
+        }
+        if(activTestCase.eluAlpha.has_value())
+        {
+            activAttrs.set_elu_alpha(activTestCase.eluAlpha.value());
+        }
+        if(activTestCase.softplusBeta.has_value())
+        {
+            activAttrs.set_softplus_beta(activTestCase.softplusBeta.value());
+        }
+
+        auto yActivTensorAttr = graphObj.pointwise(yBnTensorAttr, activAttrs);
+
+        // Set final activation output tensor
+        yActivTensorAttr->set_output(true);
+
+        // Configure batch statistics outputs
         if(meanTensorAttr)
         {
             meanTensorAttr->set_output(true);
@@ -166,7 +205,8 @@ protected:
         if(nextRunningMeanTensorAttr)
         {
             nextRunningMeanTensorAttr->set_uid(
-                BatchnormFwdTrainingTensorIds::NEXT_RUNNING_MEAN_UID);
+                BatchnormFwdTrainingActivTensorIds::NEXT_RUNNING_MEAN_UID);
+            nextRunningMeanTensorAttr->set_name("next_running_mean");
             nextRunningMeanTensorAttr->set_output(true);
             nextRunningMeanTensorAttr->set_data_type(intermediateDataType);
         }
@@ -174,13 +214,14 @@ protected:
         if(nextRunningVarianceTensorAttr)
         {
             nextRunningVarianceTensorAttr->set_uid(
-                BatchnormFwdTrainingTensorIds::NEXT_RUNNING_VARIANCE_UID);
+                BatchnormFwdTrainingActivTensorIds::NEXT_RUNNING_VARIANCE_UID);
+            nextRunningVarianceTensorAttr->set_name("next_running_variance");
             nextRunningVarianceTensorAttr->set_output(true);
             nextRunningVarianceTensorAttr->set_data_type(intermediateDataType);
         }
 
         // Register validators for all output tensors
-        this->registerValidator(yTensorAttr, tolerance);
+        this->registerValidator(yActivTensorAttr, tolerance);
         this->registerValidator(meanTensorAttr, tolerance);
         this->registerValidator(invVarianceTensorAttr, tolerance);
         if(nextRunningMeanTensorAttr)
@@ -192,84 +233,81 @@ protected:
             this->registerValidator(nextRunningVarianceTensorAttr, tolerance);
         }
 
-        this->verifyGraph(graphObj, testCase.seed);
+        this->verifyGraph(graphObj, bnTestCase.seed);
     }
 
     void initializeBundle([[maybe_unused]] const hipdnn_frontend::graph::Graph& graph,
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        // Note: Epsilon and momentum are pass-by-value (set via set_value()), not buffers
-
         // X input: default range
-        bundle.tensors.at(BatchnormFwdTrainingTensorIds::X_UID)
+        bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::X_UID)
             ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
 
         // Scale and bias: -2.0 to 2.0
-        bundle.tensors.at(BatchnormFwdTrainingTensorIds::SCALE_UID)
+        bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::SCALE_UID)
             ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 1);
-        bundle.tensors.at(BatchnormFwdTrainingTensorIds::BIAS_UID)
+        bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::BIAS_UID)
             ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 2);
 
         // Running mean: prev and next must start with SAME values
-        if(bundle.tensors.find(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID)
+        // because the kernel uses IN/OUT parameter semantics
+        if(bundle.tensors.find(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID)
                != bundle.tensors.end()
-           && bundle.tensors.find(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_MEAN_UID)
+           && bundle.tensors.find(BatchnormFwdTrainingActivTensorIds::NEXT_RUNNING_MEAN_UID)
                   != bundle.tensors.end())
         {
             unsigned runningMeanSeed = seed + 1000;
-            bundle.tensors.at(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID)
+            bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID)
                 ->fillTensorWithRandomValues(-2.0f, 2.0f, runningMeanSeed);
-            bundle.tensors.at(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_MEAN_UID)
+            bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::NEXT_RUNNING_MEAN_UID)
                 ->fillTensorWithRandomValues(-2.0f, 2.0f, runningMeanSeed);
         }
 
         // Running variance: prev and next must start with SAME values
-        if(bundle.tensors.find(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID)
+        if(bundle.tensors.find(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID)
                != bundle.tensors.end()
-           && bundle.tensors.find(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_VARIANCE_UID)
+           && bundle.tensors.find(BatchnormFwdTrainingActivTensorIds::NEXT_RUNNING_VARIANCE_UID)
                   != bundle.tensors.end())
         {
             unsigned runningVarianceSeed = seed + 2000;
-            bundle.tensors.at(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID)
+            bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID)
                 ->fillTensorWithRandomValues(-2.0f, 2.0f, runningVarianceSeed);
-            bundle.tensors.at(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_VARIANCE_UID)
+            bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::NEXT_RUNNING_VARIANCE_UID)
                 ->fillTensorWithRandomValues(-2.0f, 2.0f, runningVarianceSeed);
         }
     }
 };
 
 // NCHW 2D
-using IntegrationGpuBatchnormFwdTrainingNchwFp32
-    = BatchnormForwardTraining<float, float, BatchnormTestCase>;
-using IntegrationGpuBatchnormFwdTrainingNchwFp16
-    = BatchnormForwardTraining<half, float, BatchnormTestCase>;
-using IntegrationGpuBatchnormFwdTrainingNchwBfp16
-    = BatchnormForwardTraining<bfloat16, float, BatchnormTestCase>;
+using IntegrationGpuBatchnormFwdTrainingActivNchwFp32
+    = BatchnormFwdTrainingActivation<float, float>;
+using IntegrationGpuBatchnormFwdTrainingActivNchwFp16 = BatchnormFwdTrainingActivation<half, float>;
+using IntegrationGpuBatchnormFwdTrainingActivNchwBfp16
+    = BatchnormFwdTrainingActivation<bfloat16, float>;
 
 // NHWC 2D
-using IntegrationGpuBatchnormFwdTrainingNhwcFp32
-    = BatchnormForwardTraining<float, float, BatchnormTestCase>;
-using IntegrationGpuBatchnormFwdTrainingNhwcFp16
-    = BatchnormForwardTraining<half, float, BatchnormTestCase>;
-using IntegrationGpuBatchnormFwdTrainingNhwcBfp16
-    = BatchnormForwardTraining<bfloat16, float, BatchnormTestCase>;
+using IntegrationGpuBatchnormFwdTrainingActivNhwcFp32
+    = BatchnormFwdTrainingActivation<float, float>;
+using IntegrationGpuBatchnormFwdTrainingActivNhwcFp16 = BatchnormFwdTrainingActivation<half, float>;
+using IntegrationGpuBatchnormFwdTrainingActivNhwcBfp16
+    = BatchnormFwdTrainingActivation<bfloat16, float>;
 
 // NCDHW 3D
-using IntegrationGpuBatchnormFwdTrainingNcdhwFp32
-    = BatchnormForwardTraining<float, float, BatchnormTestCase>;
-using IntegrationGpuBatchnormFwdTrainingNcdhwFp16
-    = BatchnormForwardTraining<half, float, BatchnormTestCase>;
-using IntegrationGpuBatchnormFwdTrainingNcdhwBfp16
-    = BatchnormForwardTraining<bfloat16, float, BatchnormTestCase>;
+using IntegrationGpuBatchnormFwdTrainingActivNcdhwFp32
+    = BatchnormFwdTrainingActivation<float, float>;
+using IntegrationGpuBatchnormFwdTrainingActivNcdhwFp16
+    = BatchnormFwdTrainingActivation<half, float>;
+using IntegrationGpuBatchnormFwdTrainingActivNcdhwBfp16
+    = BatchnormFwdTrainingActivation<bfloat16, float>;
 
 // NDHWC 3D
-using IntegrationGpuBatchnormFwdTrainingNdhwcFp32
-    = BatchnormForwardTraining<float, float, BatchnormTestCase>;
-using IntegrationGpuBatchnormFwdTrainingNdhwcFp16
-    = BatchnormForwardTraining<half, float, BatchnormTestCase>;
-using IntegrationGpuBatchnormFwdTrainingNdhwcBfp16
-    = BatchnormForwardTraining<bfloat16, float, BatchnormTestCase>;
+using IntegrationGpuBatchnormFwdTrainingActivNdhwcFp32
+    = BatchnormFwdTrainingActivation<float, float>;
+using IntegrationGpuBatchnormFwdTrainingActivNdhwcFp16
+    = BatchnormFwdTrainingActivation<half, float>;
+using IntegrationGpuBatchnormFwdTrainingActivNdhwcBfp16
+    = BatchnormFwdTrainingActivation<bfloat16, float>;
 
 } // namespace
 
@@ -277,42 +315,42 @@ using IntegrationGpuBatchnormFwdTrainingNdhwcBfp16
 // NCHW 2D Tests
 // ============================================================================
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNchwFp32, FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwFp32, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
                              TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNchwFp32, BatchStatsOnly)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwFp32, BatchStatsOnly)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
                              BatchnormTrainingScenario::WITH_BATCH_STATS,
                              TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNchwFp16, FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwFp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
                              TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNchwFp16, BatchStatsOnly)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwFp16, BatchStatsOnly)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
                              BatchnormTrainingScenario::WITH_BATCH_STATS,
                              TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNchwBfp16, FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwBfp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<bfloat16>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
                              TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNchwBfp16, BatchStatsOnly)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwBfp16, BatchStatsOnly)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<bfloat16>(),
                              BatchnormTrainingScenario::WITH_BATCH_STATS,
@@ -323,42 +361,42 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingNchwBfp16, BatchStatsOnly)
 // NHWC 2D Tests
 // ============================================================================
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNhwcFp32, FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcFp32, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
                              TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNhwcFp32, BatchStatsOnly)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcFp32, BatchStatsOnly)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
                              BatchnormTrainingScenario::WITH_BATCH_STATS,
                              TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNhwcFp16, FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcFp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
                              TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNhwcFp16, BatchStatsOnly)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcFp16, BatchStatsOnly)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
                              BatchnormTrainingScenario::WITH_BATCH_STATS,
                              TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNhwcBfp16, FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcBfp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<bfloat16>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
                              TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNhwcBfp16, BatchStatsOnly)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcBfp16, BatchStatsOnly)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<bfloat16>(),
                              BatchnormTrainingScenario::WITH_BATCH_STATS,
@@ -369,42 +407,42 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingNhwcBfp16, BatchStatsOnly)
 // NCDHW 3D Tests
 // ============================================================================
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNcdhwFp32, FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwFp32, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
                              TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNcdhwFp32, BatchStatsOnly)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwFp32, BatchStatsOnly)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
                              BatchnormTrainingScenario::WITH_BATCH_STATS,
                              TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNcdhwFp16, FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwFp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
                              TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNcdhwFp16, BatchStatsOnly)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwFp16, BatchStatsOnly)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
                              BatchnormTrainingScenario::WITH_BATCH_STATS,
                              TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNcdhwBfp16, FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwBfp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<bfloat16>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
                              TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNcdhwBfp16, BatchStatsOnly)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwBfp16, BatchStatsOnly)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<bfloat16>(),
                              BatchnormTrainingScenario::WITH_BATCH_STATS,
@@ -415,42 +453,42 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingNcdhwBfp16, BatchStatsOnly)
 // NDHWC 3D Tests
 // ============================================================================
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNdhwcFp32, FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcFp32, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
                              TensorLayout::NDHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNdhwcFp32, BatchStatsOnly)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcFp32, BatchStatsOnly)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
                              BatchnormTrainingScenario::WITH_BATCH_STATS,
                              TensorLayout::NDHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNdhwcFp16, FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcFp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
                              TensorLayout::NDHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNdhwcFp16, BatchStatsOnly)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcFp16, BatchStatsOnly)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
                              BatchnormTrainingScenario::WITH_BATCH_STATS,
                              TensorLayout::NDHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNdhwcBfp16, FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcBfp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<bfloat16>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
                              TensorLayout::NDHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingNdhwcBfp16, BatchStatsOnly)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcBfp16, BatchStatsOnly)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<bfloat16>(),
                              BatchnormTrainingScenario::WITH_BATCH_STATS,
@@ -462,89 +500,137 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingNdhwcBfp16, BatchStatsOnly)
 // ============================================================================
 
 // 2D NCHW Tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormFwdTrainingNchwFp32,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuBatchnormFwdTrainingNchwFp32,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull2dTestCases()));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingActivNchwFp32,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdTrainingActivNchwFp32,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingFull2dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormFwdTrainingNchwFp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuBatchnormFwdTrainingNchwFp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull2dTestCases()));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingActivNchwFp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdTrainingActivNchwFp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingFull2dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormFwdTrainingNchwBfp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuBatchnormFwdTrainingNchwBfp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull2dTestCases()));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingActivNchwBfp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdTrainingActivNchwBfp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingFull2dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
 // 2D NHWC Tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormFwdTrainingNhwcFp32,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuBatchnormFwdTrainingNhwcFp32,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull2dTestCases()));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingActivNhwcFp32,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdTrainingActivNhwcFp32,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingFull2dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormFwdTrainingNhwcFp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuBatchnormFwdTrainingNhwcFp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull2dTestCases()));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingActivNhwcFp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdTrainingActivNhwcFp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingFull2dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormFwdTrainingNhwcBfp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuBatchnormFwdTrainingNhwcBfp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull2dTestCases()));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingActivNhwcBfp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdTrainingActivNhwcBfp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingFull2dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
 // 3D NCDHW Tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormFwdTrainingNcdhwFp32,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuBatchnormFwdTrainingNcdhwFp32,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull3dTestCases()));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingActivNcdhwFp32,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdTrainingActivNcdhwFp32,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingFull3dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormFwdTrainingNcdhwFp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuBatchnormFwdTrainingNcdhwFp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull3dTestCases()));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingActivNcdhwFp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdTrainingActivNcdhwFp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingFull3dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormFwdTrainingNcdhwBfp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuBatchnormFwdTrainingNcdhwBfp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull3dTestCases()));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingActivNcdhwBfp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdTrainingActivNcdhwBfp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingFull3dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
 // 3D NDHWC Tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormFwdTrainingNdhwcFp32,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuBatchnormFwdTrainingNdhwcFp32,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull3dTestCases()));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingActivNdhwcFp32,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdTrainingActivNdhwcFp32,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingFull3dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormFwdTrainingNdhwcFp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuBatchnormFwdTrainingNdhwcFp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull3dTestCases()));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingActivNdhwcFp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdTrainingActivNdhwcFp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingFull3dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormFwdTrainingNdhwcBfp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuBatchnormFwdTrainingNdhwcBfp16,
-                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull3dTestCases()));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingActivNdhwcBfp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdTrainingActivNdhwcBfp16,
+    testing::Combine(testing::ValuesIn(test_bn_common::getBnFwdTrainingFull3dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
