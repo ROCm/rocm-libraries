@@ -14,7 +14,7 @@ if(HIPDNN_NO_DOWNLOAD)
 endif()
 
 # Dependencies where the local version should be used, if available
-set(_hipdnn_all_local_deps GTest flatbuffers spdlog nlohmann_json)
+set(_hipdnn_all_local_deps GTest flatbuffers fmt spdlog nlohmann_json)
 # Dependencies where we never look for a local version
 set(_hipdnn_all_remote_deps)
 
@@ -181,6 +181,27 @@ function(_fetch_flatbuffers VERSION HASH)
 
     _exclude_from_all(${flatbuffers_SOURCE_DIR})
     _mark_targets_as_system(${flatbuffers_SOURCE_DIR})
+endfunction()
+
+# Fetches fmt
+function(_fetch_fmt VERSION HASH)
+    _determine_git_tag("" 11.1.3)
+
+    fetchcontent_declare(
+        fmt
+        GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+        GIT_TAG ${GIT_TAG}
+        DOWNLOAD_EXTRACT_TIMESTAMP
+        TRUE
+    )
+
+    _save_var(FMT_INSTALL)
+    set(FMT_INSTALL OFF)
+    fetchcontent_makeavailable(fmt)
+    _restore_var(FMT_INSTALL)
+
+    _exclude_from_all(${fmt_SOURCE_DIR})
+    _mark_targets_as_system(${fmt_SOURCE_DIR})
 endfunction()
 
 # Fetches spdlog
