@@ -1497,6 +1497,11 @@ double compute_tile_latency(const problem_t& problem,
   double utilization        = calculate_work_utilization(problem, config);
   double effective_tile_penalty = (utilization > 1e-9) ? (1.0 / (utilization)) : 1.0;
 
+  // main loop iterations and k remainder (tail loop)
+  // number of pipelined iterations minus the no load loop (1 iteration)
+  const size_t main_loop_iters = std::max(static_cast<size_t>(0), k_per_split / MT_K - 1);
+  const size_t k_remainder = k_per_split % MT_K;
+
   // 1) Compute per-tile latencies
   double L_compute = compute_mt_compute_latency(problem, hardware, config);
   double L_mem = compute_memory_latency(problem, hardware, config, context);
@@ -1525,58 +1530,13 @@ double compute_tile_latency(const problem_t& problem,
   double occupancy_factor = pow(real_occupancy, effective_decay) / real_occupancy;
   L_prologue *= occupancy_factor;
 
-  // 4) Epilogue latency
-  // No load loop
-  double L_epilogue = L_compute;
-  // Tail loop
-  const size_t k_remainder = k_per_split % MT_K;
-  double L_tail = 0;
-  if (k_remainder > 0) {
-    // The tail loop processes the K-remainder:
-    //   - ceil((K%MT_K) / MI_K) iterations
-    //   - Each iteration: LDS read (A+B) → waitcnt → v_cndmask zeroing → MFMAs
-    //   - NO prefetching — loads and compute are serial (not overlapped like main loop)
-    // Per tail iteration cost = LDS_read + cndmask_zeroing + compute_per_mi_k
-    const size_t MI_K = config.mi.k;
-    const size_t mfma_per_mi_k = math::safe_ceil_div(MT_K, MI_K);
-    const size_t tail_iters = math::safe_ceil_div(k_remainder, MI_K);
-
-    // Compute per MI_K iteration (fraction of full L_compute)
-    double L_compute_per_mi_k = L_compute / std::max(mfma_per_mi_k, static_cast<size_t>(1));
-
-    // LDS reads per tail iteration depend on MI dimensions:
-    // A needs ceil(MT_M/MI_M) ds_read_b128, B needs ceil(MT_N/MI_N)
-    double lds_reads_A = static_cast<double>(math::safe_ceil_div(MT_M, config.mi.m));
-    double lds_reads_B = static_cast<double>(math::safe_ceil_div(MT_N, config.mi.n));
-    constexpr double cycles_per_lds_read = 4.0;
-    double L_lds_read = (lds_reads_A + lds_reads_B) * cycles_per_lds_read;
-
-    // v_cndmask zeroing: ~32 instructions to zero out-of-bounds K elements
-    constexpr double cndmask_overhead = 32.0;
-
-    // Serial: LDS read + zeroing + compute (no overlap)
-    double L_tail_per_iter = L_lds_read + cndmask_overhead + L_compute_per_mi_k;
-    L_tail = tail_iters * L_tail_per_iter;
-    L_epilogue += L_tail;
-  }
-
-  // Block 5: K-padding penalty — penalizes tiles where K doesn't divide evenly by MT_K.
-  // Fraction of total K that falls into the unrolled tail, scaled by a tuning constant.
-  // Prevents the model from favoring arbitrarily large MT_K values.
-  constexpr double k_padding_penalty = 20000.0;
-  const double problem_k_quant = static_cast<double>(k_remainder) / k_per_split;
-  L_epilogue += problem_k_quant * k_padding_penalty;
-  // Store + reduce latency
-  L_epilogue += compute_epilogue_latency(problem, hardware, config, context);
-
-  // 4) Single-tile latency (apply penalty after finding the bottleneck)
-  // tf32 emu has some more overhead
+  // 4) Single-tile main-loop latency (pipelined: compute overlaps memory)
   double L_cvt = 0;
   if ((problem.mi_dtype == data_type_t::XFloat32) &&
       (hardware.arch == hardware_t::architecture_t::gfx950)) {
     L_cvt = compute_cvt_overhead(problem, hardware, config);
   } else if ((a_bits == 32) && (b_bits == 32) && (problem.mi_dtype == data_type_t::BFloat16) &&
-             (hardware.arch == hardware_t::architecture_t::gfx950))  // SS_BSS on GFX950
+             (hardware.arch == hardware_t::architecture_t::gfx950))
   {
     L_cvt = compute_cvt_overhead_x1(problem, hardware, config);
   }
@@ -1586,15 +1546,49 @@ double compute_tile_latency(const problem_t& problem,
   L_tile_single *= 0.5 * effective_tile_penalty;
   L_tile_single += L_cvt;
 
-  // 5) Number of K-iterations (excluding epilogue), at least 1
-  long num_iter = std::max(static_cast<long>(context.k_iters) - 1, 1L);
+  // 6) Tail loop: processes k_remainder elements serially.
+  // Structure from assembly:
+  //   a) One-time prologue: global load remainder → LDS write → 2 barriers (~L_mem cost)
+  //   b) Per-MI_K iteration: LDS read → cndmask zeroing → MFMAs (no overlap)
+  double L_tail = 0;
+  if (k_remainder > 0) {
+    const size_t MI_K = config.mi.k;
+    const size_t mfma_per_mi_k = math::safe_ceil_div(MT_K, MI_K);
+    const size_t tail_iters = math::safe_ceil_div(k_remainder, MI_K);
 
-  // 6) Total tile latency
-  double L_tile_total = L_tile_single * static_cast<double>(num_iter);
-  L_tile_total += heuristic.weight_prologue * L_prologue;
-  L_tile_total += heuristic.weight_epilogue * L_epilogue;
+    // 6-1) Tail prologue: global load + LDS write + 2 barriers.
+    // Vector loads always fetch a full MT_K chunk (SRD clamps OOB to 0 but
+    // the load instructions still issue), so bandwidth cost is ~L_mem regardless
+    // of how many K elements are actually valid. Two s_barrier calls add fixed cost.
+    constexpr double barrier_cost = 100.0;
+    double tail_prologue = L_mem + 2.0 * barrier_cost;
+
+    // 6-2) Per MI_K iteration: LDS read + cndmask + compute (all serial, no overlap)
+    double L_compute_per_mi_k = L_compute / mfma_per_mi_k;
+    double lds_reads_A = math::safe_ceil_div(MT_M, config.mi.m);
+    double lds_reads_B = math::safe_ceil_div(MT_N, config.mi.n);
+    constexpr double cycles_per_lds_read = 4.0;
+    double L_lds_read = (lds_reads_A + lds_reads_B) * cycles_per_lds_read;
+
+    // 6-3) v_cndmask zeroing: ~128 instructions per iteration
+    constexpr double cndmask_overhead = 128.0;
+
+    double L_tail_per_iter = L_lds_read + cndmask_overhead + L_compute_per_mi_k;
+    L_tail = tail_prologue + tail_iters * L_tail_per_iter;
+  }
+
+  // 7) Epilogue: no load loop + store + reduce
+  double L_epilogue = L_compute;
+  L_epilogue += compute_epilogue_latency(problem, hardware, config, context);
+
+  // 8) Total tile latency
+  double L_tile_total = 0;
   L_tile_total += heuristic.weight_wg_setup * L_WG_setup;
-  L_tile_total += heuristic.weight_loop_overhead * static_cast<double>(num_iter);
+  L_tile_total += heuristic.weight_prologue * L_prologue;
+  L_tile_total += L_tile_single * static_cast<double>(main_loop_iters);
+  L_tile_total += L_tail;
+  L_tile_total += heuristic.weight_epilogue * L_epilogue;
+  L_tile_total += heuristic.weight_loop_overhead * static_cast<double>(main_loop_iters);
 
   // Apply final tile total weight
   L_tile_total *= heuristic.weight_tile_total;
@@ -1602,23 +1596,17 @@ double compute_tile_latency(const problem_t& problem,
   if(debug)
   {
     OLOG_DEBUG("utilization: " << utilization);
-    OLOG_DEBUG("output_utilization: " << output_utilization);
     OLOG_DEBUG("effective_tile_penalty: " << effective_tile_penalty);
     OLOG_DEBUG("config.occupancy: " << config.occupancy);
     OLOG_DEBUG("real_occupancy: " << real_occupancy);
-    OLOG_DEBUG("k_iters (raw main loop): " << k_iters);
-    OLOG_DEBUG("pipeline_depth: " << pipeline_depth);
-    OLOG_DEBUG("iter_blend: " << iter_blend);
-    OLOG_DEBUG("effective_decay: " << effective_decay);
-    OLOG_DEBUG("occupancy_factor: " << occupancy_factor);
+    OLOG_DEBUG("main_loop_iters: " << main_loop_iters);
+    OLOG_DEBUG("k_remainder: " << k_remainder);
 
     OLOG_DEBUG("L_mem: " << L_mem);
     OLOG_DEBUG("L_compute: " << L_compute);
     OLOG_DEBUG("L_cvt: " << L_cvt);
     OLOG_DEBUG("k_per_split: " << k_per_split);
-    OLOG_DEBUG("num_iter: " << int(num_iter));
     OLOG_DEBUG("L_tail: " << L_tail);
-    OLOG_DEBUG("problem_k_quant: " << problem_k_quant);
     OLOG_DEBUG("L_prologue: " << L_prologue);
     OLOG_DEBUG("L_tile_single: " << L_tile_single);
     OLOG_DEBUG("L_epilogue: " << L_epilogue);
@@ -1628,6 +1616,7 @@ double compute_tile_latency(const problem_t& problem,
   return L_tile_total;
 }
 
+// Compute the latency of a timestep.
 double compute_timestep_latency(const problem_t& problem,
                                 const hardware_t& hardware,
                                 const config_t& config,
@@ -1654,15 +1643,16 @@ double compute_parallel_reduction_latency(const problem_t& problem,
     return 0.0;
 
   // Extract parameters
-  const size_t splitting_factor = context.splitting_factor;
   const size_t M = problem.size.m;
   const size_t N = problem.size.n;
   const size_t batch = problem.batch;
   const size_t output_elements = M * N * batch;
-  const size_t compute_bytes = 4; // workspace partials stored as f32
-  const size_t d_bytes = data_type_to_bytes(problem.d_dtype);
 
+  const size_t splitting_factor = context.splitting_factor;
+  const size_t d_bytes = context.d_bytes;
+  
   // Constants
+  const size_t compute_bytes = 4; // workspace partials stored as f32
   constexpr double kernel_launch_overhead = 20000.0;
   constexpr size_t threads_per_wg = 256;
   constexpr size_t wavefront_size = 64;
@@ -1785,24 +1775,22 @@ double compute_total_latency(const problem_t& problem,
   // 2) Compute latency of a timestep
   double L_timestep = compute_timestep_latency(problem, hardware, config, context);
 
-  // Compute latency for all timesteps.
-  // Sublinear scaling: later timesteps benefit from warm caches and steady-state pipeline.
-  // total = L_timestep × num_timesteps^alpha, where alpha < 1.
+  // 3) Compute latency for all timesteps with sublinear scaling
   constexpr double timestep_scaling_alpha = 0.98;
   double effective_timesteps = std::pow(static_cast<double>(context.num_timesteps), timestep_scaling_alpha);
   double total_latency = L_timestep * effective_timesteps;
 
-  // Add parallel reduction kernel cost (separate kernel launch, 0 if not parallel)
+  //  4) Add parallel reduction kernel cost (separate kernel launch, 0 if not parallel)
   double L_parallel_reduce = compute_parallel_reduction_latency(problem, hardware, config, context);
   total_latency += L_parallel_reduce;
 
-  const bool debug = context.debug;
-  if (debug)
+  if (context.debug)
   {
     OLOG_DEBUG("L_parallel_reduce: " << L_parallel_reduce);
     OLOG_DEBUG("total_latency: " << total_latency);
     OLOG_DEBUG("=================================");
   }
+
   return total_latency;
 }
 
