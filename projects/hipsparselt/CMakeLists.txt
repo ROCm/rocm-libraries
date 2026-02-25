@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.25.2)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-project(hipsparselt VERSION 0.2.6 LANGUAGES CXX)
+project(hipsparselt VERSION 0.2.7 LANGUAGES CXX)
 
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
@@ -120,6 +120,12 @@ if(HIPSPARSELT_ENABLE_MARKER)
         message(FATAL_ERROR "rocTracer marker is not supported with CUDA backend.")
     else()
         find_library(ROCTX64_LIBRARY REQUIRED HINTS lib NAMES roctx64 libroctx64)
+        get_filename_component(ROCTRACER_LIB_DIR ${ROCTX64_LIBRARY} DIRECTORY)
+        get_filename_component(ROCTRACER_ROOT_DIR ${ROCTRACER_LIB_DIR} DIRECTORY)
+        find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h"
+            HINTS ${ROCTRACER_ROOT_DIR}
+            PATH_SUFFIXES include
+            REQUIRED)
     endif()
 endif()
 
@@ -170,6 +176,8 @@ if(HIPSPARSELT_ENABLE_HIP)
 
     set(ORIGAMI_ENABLE_INSTALL OFF)
     add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
+    # Hide TensileLite symbols to prevent interposition with hipblaslt's copy
+    target_compile_definitions(tensilelite-host PRIVATE TENSILE_STATIC_ONLY)
     endblock()
 endif()
 

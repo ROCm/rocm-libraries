@@ -21,10 +21,12 @@ try:
         config_t,
         prediction_result_t,
         workgroup_mapping_t,
+        staggerU_t,
         problem_t,
         hardware_t,
         # Hardware functions
         get_hardware_for_device,
+        get_hardware_for_arch,
         # Data type functions
         int_to_data_type,
         datatype_to_bits,
@@ -82,6 +84,7 @@ __all__ = [
     "hardware_t",
     # Hardware functions
     "get_hardware_for_device",
+    "get_hardware_for_arch",
     # Data type functions
     "int_to_data_type",
     "datatype_to_bits",
@@ -113,3 +116,13 @@ __all__ = [
     # Reduction functions
     "int_to_reduction_t",
 ]
+
+try:
+    # Import the python selector if possible (requires torch)
+    from .selector import OrigamiMatmulSelector
+    __all__.append("OrigamiMatmulSelector")
+except ImportError:
+    # Do not raise this error if import fails - compiled Origami bindings still
+    # work without the dedicated Python selector
+    pass
+

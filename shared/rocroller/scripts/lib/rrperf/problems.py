@@ -1,27 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 import pathlib
 from dataclasses import asdict, dataclass, field, fields
@@ -127,7 +105,7 @@ class TypeParameters:
     # If scale_A or scale_B is Separate, scaleBlockSize
     # needs to be set to a valid block size (e.g. 32)
     scaleBlockSize: int = -1
-    scaleSkipPermlane: bool = False
+    scaleSkipPermlane: str = "None"  # None, PreSwizzleScale, PreSwizzleScaleGFX950
 
     def __init__(self, typeParams: Optional[Any] = None, **kwargs):
         if isinstance(typeParams, TypeParameters):
@@ -216,12 +194,9 @@ class GEMMSolution:
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
-    unroll_x: int = 0
-    unroll_y: int = 0
-
     load_A: str = "BufferToLDSViaVGPR"
     load_B: str = "BufferToLDSViaVGPR"
-    storeLDS_D: bool = True
+    store: str = "VGPRToGlobalMemoryViaLDSWithBuffer"
     betaInFma: bool = True
 
     padLDS_A: tuple[int, int] = (0, 0)
@@ -243,13 +218,10 @@ class GEMMSolution:
     prefetchScale: bool = False
     pretileScale: bool = False
 
-    streamK: bool = False
+    streamK: str = "None"
     numWGs: int = 0
-    streamKTwoTile: bool = False
-    streamKTwoTileDPFirst: bool = False
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
-    matchMemoryAccess: bool = True
     tailLoops: bool = True
 
     version: str = ""
@@ -279,8 +251,12 @@ class GEMM(GEMMProblem, GEMMSolution):
 
     @property
     def run_invariant_token(self):
+        # Build metadata (e.g. git commit tag) should not affect cross-run matching.
+        # Excluding version keeps GEMM comparisons stable across different commits.
+        solution_fields = field_dict(GEMMSolution, self)
+        solution_fields.pop("version", None)
         return repr(GEMMProblem(**field_dict(GEMMProblem, self))) + repr(
-            GEMMSolution(**field_dict(GEMMSolution, self))
+            GEMMSolution(**solution_fields)
         )
 
     @property
@@ -415,16 +391,14 @@ class GEMMResult(GEMM, RRPerfResult):
             "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
             "Load_A": TF(self.load_A),
             "Load_B": TF(self.load_B),
-            "Store_D": TF(self.storeLDS_D),
+            "Store_D": self.store,
             "PF": TF(self.prefetch)
             + "/"
             + str(self.prefetchInFlight)
             + "/"
             + str(self.prefetchLDSFactor),
             "SCH": self.scheduler[0],
-            "SK": TF(self.streamK) + "/" + str(self.numWGs),
-            "2TSK": TF(self.streamKTwoTile),
-            "DPFirst": TF(self.streamKTwoTileDPFirst),
+            "SK": self.streamK + "/" + str(self.numWGs),
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
             ),
@@ -601,6 +575,38 @@ def cast_missing_parameters(result):
 
         result["workgroupMappingDim"] = wgmDim
         result["workgroupMappingValue"] = wgmValue
+
+    # Remove old/deprecated
+    for attr in ["unroll_x", "unroll_y"]:
+        if attr in result:
+            del result[attr]
+
+    if "storeLDS_D" in result:
+        storeLDS_D = result["storeLDS_D"]
+        del result["storeLDS_D"]
+        result["store"] = (
+            "VGPRToGlobalMemoryViaLDSWithBuffer"
+            if storeLDS_D
+            else "VGPRToGlobalMemoryWithBuffer"
+        )
+
+    # Convert old streamK bool fields to new streamK string enum
+    if "streamKTwoTile" in result or "streamKTwoTileDPFirst" in result:
+        old_streamK = result.get("streamK", False)
+        old_twoTile = result.pop("streamKTwoTile", False)
+        old_dpFirst = result.pop("streamKTwoTileDPFirst", False)
+
+        if old_twoTile:
+            result["streamK"] = "TwoTile"
+        elif old_dpFirst:
+            result["streamK"] = "TwoTileDPFirst"
+        elif old_streamK:
+            result["streamK"] = "Standard"
+        else:
+            result["streamK"] = "None"
+
+    if "matchMemoryAccess" in result:
+        del result["matchMemoryAccess"]
 
 
 def load_results(path: pathlib.Path):
