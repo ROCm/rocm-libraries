@@ -72,4 +72,3 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_MT19937, T>
 } // namespace rocrand_impl::host
 
 #endif // ROCRAND_RNG_CONFIG_MT19937_HPP_
-
