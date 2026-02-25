@@ -15,6 +15,7 @@ add_executable(
     hipdnn_frontend_tests
     main.cpp
     TestAttributes.cpp
+    TestBackendInterface.cpp
     TestBackendLoggingHelpers.cpp
     TestBatchnormAttributes.cpp
     TestBatchnormBackwardAttributes.cpp
@@ -35,6 +36,8 @@ add_executable(
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
     TestGraphSerialization.cpp
+    TestHandle.cpp
+    TestIncompatibleBackendWrapper.cpp
     TestINode.cpp
     TestKnob.cpp
     TestMatmulAttributes.cpp
@@ -48,6 +51,7 @@ add_executable(
     TestTypes.cpp
     TestUtilities.cpp
     TestTopologicalSortingUtils.cpp
+    TestSdkLogging.cpp
 )
 
 target_compile_options(hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

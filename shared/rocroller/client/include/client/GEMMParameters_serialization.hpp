@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -248,13 +225,11 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "workgroupMappingDim", params.workgroupMappingDim);
             iot::mapRequired(io, "workgroupRemapXCC", params.workgroupRemapXCC);
             iot::mapRequired(io, "workgroupRemapXCCValue", params.workgroupRemapXCCValue);
-            iot::mapRequired(io, "unroll_x", params.unrollX);
-            iot::mapRequired(io, "unroll_y", params.unrollY);
             iot::mapRequired(io, "load_A", params.loadPathA);
             iot::mapRequired(io, "load_B", params.loadPathB);
             iot::mapRequired(io, "padLDS_A", params.padLDSA);
             iot::mapRequired(io, "padLDS_B", params.padLDSB);
-            iot::mapRequired(io, "storeLDS_D", params.storeLDSD);
+            iot::mapRequired(io, "store", params.storePath);
             iot::mapRequired(io, "prefetch", params.prefetch);
             iot::mapRequired(io, "prefetchInFlight", params.prefetchInFlight);
             iot::mapRequired(io, "prefetchLDSFactor", params.prefetchLDSFactor);
@@ -262,7 +237,6 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "betaInFma", params.betaInFma);
             iot::mapRequired(io, "scheduler", params.scheduler);
             iot::mapRequired(io, "schedulerCost", params.schedulerCost);
-            iot::mapRequired(io, "matchMemoryAccess", params.matchMemoryAccess);
 
             iot::mapRequired(io, "tailLoops", params.tailLoops);
 
@@ -275,8 +249,6 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "prefetchScale", params.prefetchScale);
 
             iot::mapRequired(io, "streamK", params.streamK);
-            iot::mapRequired(io, "streamKTwoTile", params.streamKTwoTile);
-            iot::mapRequired(io, "streamKTwoTileDPFirst", params.streamKTwoTileDPFirst);
 
             iot::mapOptional(io, "version", params.version);
         }

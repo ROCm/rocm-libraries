@@ -1,11 +1,27 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file Error.hpp
+ * @brief Error handling types and macros for the hipDNN Frontend API
+ *
+ * This file defines the error handling infrastructure used throughout the hipDNN
+ * frontend. It includes error codes, the Error struct for detailed error information,
+ * and helper macros for error checking and propagation.
+ */
 
 #pragma once
 
 #include "Types.hpp"
 #include <string>
 
+/**
+ * @brief Check an Error return value and propagate if an error occurred
+ * @param x Expression returning an Error object
+ *
+ * This macro evaluates the expression and returns immediately if the result
+ * indicates an error (is_bad() returns true).
+ */
 #define HIPDNN_CHECK_ERROR(x) \
     do                        \
     {                         \
@@ -18,12 +34,16 @@
 
 namespace hipdnn_frontend
 {
+/**
+ * @enum ErrorCode
+ * @brief Error codes returned by hipDNN Frontend operations
+ */
 enum class ErrorCode
 {
-    OK,
-    INVALID_VALUE,
-    HIPDNN_BACKEND_ERROR,
-    ATTRIBUTE_NOT_SET
+    OK, ///< Operation completed successfully
+    INVALID_VALUE, ///< An invalid value was provided
+    HIPDNN_BACKEND_ERROR, ///< An error occurred in the hipDNN backend
+    ATTRIBUTE_NOT_SET ///< A required attribute was not set
 };
 
 // NOLINTNEXTLINE(readability-identifier-naming)
@@ -40,55 +60,100 @@ inline std::ostream& operator<<(std::ostream& os, const ErrorCode& error)
     return os << to_string(error);
 }
 
-typedef ErrorCode error_code_t; // NOLINT(readability-identifier-naming)
+typedef ErrorCode error_code_t; ///< @brief Type alias for ErrorCode
 
+/**
+ * @struct Error
+ * @brief Represents an error with a code and descriptive message
+ *
+ * The Error struct is the primary mechanism for reporting errors in hipDNN Frontend
+ * operations. It combines an ErrorCode with a human-readable message describing
+ * what went wrong.
+ *
+ * @code{.cpp}
+ * Error result = graph.build(handle);
+ * if(result.is_bad())
+ * {
+ *     std::cerr << "Build failed: " << result.get_message() << std::endl;
+ * }
+ * @endcode
+ */
 struct Error
 {
-    ErrorCode code;
-    std::string err_msg; // NOLINT(readability-identifier-naming)
+    ErrorCode code; ///< The error code
+    std::string err_msg; ///< Detailed error message  // NOLINT(readability-identifier-naming)
 
+    /**
+     * @brief Default constructor, creates a success result
+     */
     Error()
         : code(ErrorCode::OK)
     {
     }
 
+    /**
+     * @brief Construct an Error with a specific code and message
+     * @param errorCode The error code
+     * @param message Descriptive message about the error
+     */
     Error(ErrorCode errorCode, std::string message)
         : code(errorCode)
         , err_msg(std::move(message))
     {
     }
 
+    /**
+     * @brief Get the error message
+     * @return The error message string
+     */
     std::string get_message() const // NOLINT(readability-identifier-naming)
     {
         return err_msg;
     }
 
+    /**
+     * @brief Get the error code
+     * @return The ErrorCode value
+     */
     ErrorCode get_code() const // NOLINT(readability-identifier-naming)
     {
         return code;
     }
 
+    /**
+     * @brief Check if the operation succeeded
+     * @return true if code == ErrorCode::OK, false otherwise
+     */
     bool is_good() const // NOLINT(readability-identifier-naming)
     {
         return code == ErrorCode::OK;
     }
+
+    /**
+     * @brief Check if the operation failed
+     * @return true if code != ErrorCode::OK, false otherwise
+     */
     bool is_bad() const // NOLINT(readability-identifier-naming)
     {
         return code != ErrorCode::OK;
     }
 
+    /// @brief Compare error code with an ErrorCode value
     bool operator==(ErrorCode otherCode) const
     {
         return code == otherCode;
     }
+    /// @brief Compare error code with an ErrorCode value (inequality)
     bool operator!=(ErrorCode otherCode) const
     {
         return code != otherCode;
     }
+    /// @brief Compare two Error objects by their error codes
     bool operator==(const Error& other) const
     {
         return code == other.code;
     }
+    /// @brief Compare two Error objects by their error codes (inequality)
     bool operator!=(const Error& other) const
     {
         return code != other.code;
@@ -100,8 +165,8 @@ inline std::ostream& operator<<(std::ostream& os, const Error& error)
     return os << "{" << error.code << ", " << error.get_message() << "}";
 }
 
-typedef Error error_object; // NOLINT(readability-identifier-naming)
-typedef Error error_t; // NOLINT(readability-identifier-naming)
+typedef Error error_object; ///< @brief Type alias for Error (cuDNN compatibility)
+typedef Error error_t; ///< @brief Type alias for Error
 
 #define HIPDNN_RETURN_IF_NE(x, y, error_status, message) \
     do                                                   \

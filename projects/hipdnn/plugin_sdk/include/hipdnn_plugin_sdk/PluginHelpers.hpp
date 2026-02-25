@@ -9,11 +9,10 @@
 
 #include <iostream>
 
-#define LOG_API_ENTRY(format, ...) \
-    HIPDNN_LOG_INFO("API called: [{}] " format, __func__, __VA_ARGS__)
-
-#define LOG_API_SUCCESS(func_name, format, ...) \
-    HIPDNN_LOG_INFO("API success: [{}] " format, func_name, __VA_ARGS__)
+// Logging macros for plugin API entry/exit (stream-style)
+#define LOG_API_ENTRY(msg) HIPDNN_PLUGIN_LOG_INFO("API called: [" << __func__ << "] " << msg)
+#define LOG_API_SUCCESS(func_name, msg) \
+    HIPDNN_PLUGIN_LOG_INFO("API success: [" << func_name << "] " << msg)
 
 namespace hipdnn_plugin_sdk
 {

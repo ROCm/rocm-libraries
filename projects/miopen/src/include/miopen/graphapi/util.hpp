@@ -81,7 +81,7 @@ struct HeapPtrDeleter
     {
     }
 
-    HeapPtrDeleter(const HeapPtrDeleter&) = delete;
+    HeapPtrDeleter(const HeapPtrDeleter&)            = delete;
     HeapPtrDeleter& operator=(const HeapPtrDeleter&) = delete;
 
     friend void swap(HeapPtrDeleter& left, HeapPtrDeleter& right) noexcept
@@ -115,11 +115,11 @@ struct AutoDeleteAllocator
 {
     std::vector<HeapPtrDeleter> mPtrsToFree;
 
-    AutoDeleteAllocator()                           = default;
-    AutoDeleteAllocator(const AutoDeleteAllocator&) = delete;
+    AutoDeleteAllocator()                                      = default;
+    AutoDeleteAllocator(const AutoDeleteAllocator&)            = delete;
     AutoDeleteAllocator& operator=(const AutoDeleteAllocator&) = delete;
 
-    AutoDeleteAllocator(AutoDeleteAllocator&&) = default;
+    AutoDeleteAllocator(AutoDeleteAllocator&&)            = default;
     AutoDeleteAllocator& operator=(AutoDeleteAllocator&&) = default;
     ~AutoDeleteAllocator()                                = default;
 
@@ -202,12 +202,12 @@ private:
     }
 
 public:
-    PatternGraphGenerator()                             = default;
-    PatternGraphGenerator(const PatternGraphGenerator&) = delete;
+    PatternGraphGenerator()                                        = default;
+    PatternGraphGenerator(const PatternGraphGenerator&)            = delete;
     PatternGraphGenerator& operator=(const PatternGraphGenerator&) = delete;
     PatternGraphGenerator(PatternGraphGenerator&&)                 = default;
-    PatternGraphGenerator& operator=(PatternGraphGenerator&&) = default;
-    ~PatternGraphGenerator()                                  = default;
+    PatternGraphGenerator& operator=(PatternGraphGenerator&&)      = default;
+    ~PatternGraphGenerator()                                       = default;
 
     static std::unique_ptr<PatternGraphGenerator>
     Make(const std::vector<DummyNodeGenSpec>& node_specs)

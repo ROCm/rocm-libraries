@@ -26,6 +26,11 @@ public:
         return "1.0.0";
     }
 
+    const char* getPluginApiVersion() const override
+    {
+        return apiVersionWithoutTweak();
+    }
+
     int64_t getEngineId() const override
     {
         return hipdnn_tests::plugin_constants::engineId<KnobConstraintValidationPlugin>();
@@ -43,15 +48,13 @@ public:
 
     // Override enginePluginGetEngineDetails to return knobs
     static hipdnnPluginStatus_t getEngineDetails(hipdnnEnginePluginHandle_t handle,
-                                                 int64_t engineId,
+                                                 [[maybe_unused]] int64_t engineId,
                                                  const hipdnnPluginConstData_t* opGraph,
                                                  hipdnnPluginConstData_t* engineDetails)
     {
-        LOG_API_ENTRY("handle={:p}, engineId={}, opGraph={:p}, engineDetails={:p}",
-                      static_cast<void*>(handle),
-                      engineId,
-                      static_cast<const void*>(opGraph),
-                      static_cast<void*>(engineDetails));
+        LOG_API_ENTRY("handle=" << static_cast<void*>(handle)
+                                << ", opGraph=" << static_cast<const void*>(opGraph)
+                                << ", engineDetails=" << static_cast<void*>(engineDetails));
 
         return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
             hipdnn_plugin_sdk::throwIfNull(handle);
@@ -111,7 +114,7 @@ public:
             engineDetails->ptr = tempBuffer;
             engineDetails->size = serializedDetails.size();
 
-            LOG_API_SUCCESS(apiName, "engineDetails->ptr={:p}", engineDetails->ptr);
+            LOG_API_SUCCESS(apiName, "engineDetails->ptr=" << engineDetails->ptr);
         });
     }
 
@@ -122,11 +125,10 @@ public:
                                const hipdnnPluginConstData_t* opGraph,
                                hipdnnEnginePluginExecutionContext_t* executionContext)
     {
-        LOG_API_ENTRY("handle={:p}, engineConfig={:p}, opGraph={:p}, executionContext={:p}",
-                      static_cast<void*>(handle),
-                      static_cast<const void*>(engineConfig),
-                      static_cast<const void*>(opGraph),
-                      static_cast<void*>(executionContext));
+        LOG_API_ENTRY("handle=" << static_cast<void*>(handle)
+                                << ", engineConfig=" << static_cast<const void*>(engineConfig)
+                                << ", opGraph=" << static_cast<const void*>(opGraph)
+                                << ", executionContext=" << static_cast<void*>(executionContext));
 
         return hipdnn_plugin_sdk::tryCatch([&]() {
             hipdnn_plugin_sdk::throwIfNull(handle);
@@ -199,6 +201,11 @@ hipdnnPluginStatus_t hipdnnPluginGetName(const char** name)
 hipdnnPluginStatus_t hipdnnPluginGetVersion(const char** version)
 {
     return TestPluginBase::pluginGetVersion(version);
+}
+
+hipdnnPluginStatus_t hipdnnPluginGetApiVersion(const char** version)
+{
+    return TestPluginBase::pluginGetApiVersion(version);
 }
 
 hipdnnPluginStatus_t hipdnnPluginGetType(hipdnnPluginType_t* type)

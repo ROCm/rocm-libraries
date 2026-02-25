@@ -48,9 +48,9 @@ union KnobConstraint {
 
 // Knob metadata
 table Knob {
-    knob_id: string;              // Unique identifier (namespaced by plugin)
-    description: string;          // Help text
-    default_value: KnobValue;     // Default setting
-    constraint: KnobConstraint;   // Validation rules
-    deprecated: bool;             // Allow knob deprecation
+    knob_id: string;                      // Unique identifier (namespaced by plugin)
+    description: string;                  // Help text
+    default_value: KnobValue (required);  // Default setting - must be provided (not NONE)
+    constraint: KnobConstraint;           // Validation rules - may be NONE (unconstrained)
+    deprecated: bool;                     // Allow knob deprecation
 }
