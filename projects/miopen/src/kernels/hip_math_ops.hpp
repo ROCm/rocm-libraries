@@ -12,3 +12,7 @@ inline __device__ unsigned int iRemquo(unsigned int x, unsigned int y, unsigned 
     k = x / y;
     return x - __mul24(k, y);
 }
+
+inline __device__ unsigned iMod(unsigned v, unsigned u, unsigned d) { return v - __mul24(u, d); }
+
+inline __device__ unsigned iDiv(unsigned v, unsigned d) { return v / d; }
