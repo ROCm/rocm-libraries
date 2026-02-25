@@ -2447,9 +2447,13 @@ class Solution(collections.abc.Mapping):
         state["StoreVectorWidth"] = state["VectorWidthA"]
       else:
         if state["EnableMatrixInstruction"]:
-          state["StoreVectorWidth"] = state["MIOutputVectorWidth"]
-          if state["VectorWidthA"] * state["MIOutputVectorWidth"] <= 4 / state["ProblemType"]["DestDataType"].numRegisters():
-            state["StoreVectorWidth"] = state["VectorWidthA"] * state["MIOutputVectorWidth"]
+          # Adjusting StoreVectorWidth for larger CGEMM register count
+          if state["ProblemType"]["DestDataType"].isSingleComplex():
+            state["StoreVectorWidth"] = 4 // state["ProblemType"]["DestDataType"].numRegisters()
+          else:
+            state["StoreVectorWidth"] = state["MIOutputVectorWidth"]
+            if state["VectorWidthA"] * state["MIOutputVectorWidth"] <= 4 / state["ProblemType"]["DestDataType"].numRegisters():
+              state["StoreVectorWidth"] = state["VectorWidthA"] * state["MIOutputVectorWidth"]
           if state["LocalSplitU"] > 1:
             state["StoreVectorWidth"] = state["VectorWidthA"]
         else:

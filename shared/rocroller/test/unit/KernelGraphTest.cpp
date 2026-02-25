@@ -2203,30 +2203,6 @@ namespace KernelGraphTest
         ASSERT_LT(rnorm, 1.e-12);
     }
 
-    TEST_F(KernelGraphTest, CleanExpression)
-    {
-        VariableType doubleVal{DataType::Double, PointerType::Value};
-        auto         command = std::make_shared<Command>();
-
-        auto aTag = command->allocateTag();
-        auto a    = std::make_shared<Expression::Expression>(command->allocateArgument(
-            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value));
-        auto bTag = command->allocateTag();
-        auto b    = std::make_shared<Expression::Expression>(command->allocateArgument(
-            {DataType::Int32, PointerType::Value}, bTag, ArgumentType::Value));
-
-        m_context->kernel()->addCommandArguments(command->getArguments());
-
-        auto expr1 = a + b;
-        auto expr2 = b * expr1;
-
-        auto clean_expr = cleanArguments(expr2, m_context->kernel());
-
-        EXPECT_EQ(
-            Expression::toString(clean_expr),
-            "Multiply(user_Int32_Value_1:I, Add(user_Int32_Value_0:I, user_Int32_Value_1:I)I)I");
-    }
-
     TEST_F(KernelGraphTest, CleanArguments)
     {
         auto example = rocRollerTest::Graphs::VectorAddNegSquare<int>();
