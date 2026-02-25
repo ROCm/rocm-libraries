@@ -164,6 +164,7 @@ include(cmake/ClangCheck.cmake)
 include(cmake/ClangTidy.cmake)
 include(cmake/Sanitizers.cmake)
 include(cmake/Tests.cmake)
+include(cmake/Spdlog.cmake)
 
 # Add global compile options
 set(EXTRA_COMPILE_OPTIONS)
@@ -215,6 +216,7 @@ add_subdirectory(test_sdk)
 add_subdirectory(plugin_sdk)
 
 add_subdirectory(tests)
+add_subdirectory(tools)
 
 if(HIPDNN_BUILD_PLUGINS)
     file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})

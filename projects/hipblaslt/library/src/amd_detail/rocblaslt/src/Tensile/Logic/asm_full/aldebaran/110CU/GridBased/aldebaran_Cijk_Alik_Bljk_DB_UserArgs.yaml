@@ -200,7 +200,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_DB_MT16x16x8_MI16x16x4x1_SN_GSU1_MIWT1_1_SS0
     SourceSwap: 0
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -376,7 +376,7 @@
     SolutionNameMin: Cijk_Alik_Bljk_DB_MT16x16x16_MI16x16x4x1_SN_GSU2_MIWT1_1_SS0
     SourceSwap: 0
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0

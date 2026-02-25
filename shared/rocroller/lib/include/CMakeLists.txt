@@ -307,10 +307,12 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar_impl.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Parameters/Solution/LoadOption.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Parameters/Solution/StoreOption.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Parameters/Solution/StreamK.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/CooperativeScheduler.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/CooperativeScheduler_fwd.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/LDSModel.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/MetaObserver.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/MetaObserver_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/PriorityScheduler.hpp"

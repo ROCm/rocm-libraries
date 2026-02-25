@@ -5,7 +5,9 @@ This dictionary is used to map specific file directory changes to the correspond
 import os
 
 subtree_to_project_map = {
+    "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
     "dnn-providers/miopen-provider": "miopen-provider",
+    "projects/composablekernel": "miopen",
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
     "projects/hipblaslt": "blas",
@@ -48,33 +50,14 @@ project_map = {
         "cmake_options": [
             "-DTHEROCK_ENABLE_MIOPEN=ON",
             "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         ],
         "projects_to_test": ["miopen", "miopen_plugin"],
     },
     "fft": {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
         "projects_to_test": ["hipfft", "rocfft"],
-    },
-    "hipdnn": {  # due to MIOpen plugin project being inside the hipDNN directory, we cannot have the MIOpen plugin project as a separate project for now https://github.com/ROCm/rocm-libraries/issues/2316
-        "cmake_options": [
-            "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
-            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
-        ],
-        "projects_to_test": ["hipdnn", "miopen_plugin"],
-    },
-    "miopen-provider": {
-        "cmake_options": [
-            "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
-            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
-        ],
-        "projects_to_test": ["miopen_plugin"],
     },
     "rocwmma": {
         "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
@@ -95,6 +78,40 @@ additional_options = {
     "solver": {
         "cmake_options": ["-DTHEROCK_ENABLE_SOLVER=ON"],
         "projects_to_test": ["rocsolver", "hipsolver"],
+        "project_to_add": "blas",
+    },
+    # due to MIOpen plugin project being inside the hipDNN directory, we cannot have the MIOpen plugin project as a separate project for now https://github.com/ROCm/rocm-libraries/issues/2316
+    "hipdnn": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPBLASLT_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
+            "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
+            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+        ],
+        "projects_to_test": [
+            "hipdnn",
+            "hipdnn_install",
+            "hipdnn-samples",
+            "miopen_plugin",
+            "hipblaslt_plugin",
+        ],
+        "project_to_add": "miopen",
+    },
+    "miopen-provider": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
+            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+        ],
+        "projects_to_test": ["miopen_plugin"],
+        "project_to_add": "miopen",
+    },
+    "hipblaslt-provider": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPBLASLT_PLUGIN=ON",
+        ],
+        "projects_to_test": ["hipblaslt_plugin"],
         "project_to_add": "blas",
     },
 }
@@ -176,6 +193,13 @@ def collect_projects_to_run(subtrees):
 
             # To save time, only build what is needed
             project_map_data["cmake_options"].extend(["-DTHEROCK_ENABLE_ALL=OFF"])
+            # To ensure uniqueness of flags and tests
+            project_map_data["cmake_options"] = list(
+                set(project_map_data["cmake_options"])
+            )
+            project_map_data["projects_to_test"] = list(
+                set(project_map_data["projects_to_test"])
+            )
 
             cmake_flag_options = " ".join(project_map_data["cmake_options"])
             projects_to_test_options = ",".join(project_map_data["projects_to_test"])

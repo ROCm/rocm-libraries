@@ -502,6 +502,13 @@ struct GroupedConvolutionBackwardWeightKernel
     CK_TILE_HOST static bool
     IsSupportedArgument(const GroupedConvBwdWeightKernelArgsSpecialized& kargs)
     {
+        if constexpr(GemmPipeline_::Async)
+        {
+            if(get_device_name() != "gfx950")
+            {
+                return false;
+            }
+        }
         if(kargs.k_batch < 1)
         {
             LogInfo("k_batch must be at least one. Ensure argument is created via MakeKernelArgs.");
@@ -884,7 +891,19 @@ struct GroupedConvolutionBackwardWeightKernel
 
             __shared__ char smem_ptr[GetSmemSize()];
 
-            RunGemm(a_ptr, b_ptr, kargs.ds_ptr, c_ptr, smem_ptr, kargs, num_loop, i_m, i_n, i_k);
+            // Disable Async for other archs than gfx950
+            if constexpr(GemmPipeline_::Async)
+            {
+#if defined(__gfx950__)
+                RunGemm(
+                    a_ptr, b_ptr, kargs.ds_ptr, c_ptr, smem_ptr, kargs, num_loop, i_m, i_n, i_k);
+#endif
+            }
+            else
+            {
+                RunGemm(
+                    a_ptr, b_ptr, kargs.ds_ptr, c_ptr, smem_ptr, kargs, num_loop, i_m, i_n, i_k);
+            }
         }
     }
 };

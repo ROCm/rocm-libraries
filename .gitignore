@@ -3,5 +3,8 @@ __pycache__
 # Build directories
 _build/
 
-# Cline storage
+# Miscellanous tools
+.cline_storage/
+
+# Miscellanous tools
 .cline_storage/

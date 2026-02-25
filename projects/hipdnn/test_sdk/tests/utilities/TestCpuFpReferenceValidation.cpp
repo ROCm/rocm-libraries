@@ -5,14 +5,14 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::helpers;
+using namespace hipdnn_data_sdk::types;
 
 template <typename T>
 void makeTensorsEqual(T& tensor1, T& tensor2)
@@ -60,13 +60,13 @@ TEST(TestCpuFpReferenceValidationFp32, TensorsToleranceDifferent)
 // Additional BasicTensorUsage tests for other data types
 TEST(TestCpuFpReferenceValidationBfp16, BasicTensorUsage)
 {
-    CpuFpReferenceValidation<hip_bfloat16> refValidation;
+    CpuFpReferenceValidation<bfloat16> refValidation;
     std::vector<int64_t> dims = {10, 10};
 
-    Tensor<hip_bfloat16> tensor1(dims);
-    tensor1.fillTensorWithRandomValues(-1.0_bf, 1.0_bf);
-    Tensor<hip_bfloat16> tensor2(dims);
-    makeTensorsEqual<Tensor<hip_bfloat16>>(tensor1, tensor2);
+    Tensor<bfloat16> tensor1(dims);
+    tensor1.fillTensorWithRandomValues(-1.0f, 1.0f);
+    Tensor<bfloat16> tensor2(dims);
+    makeTensorsEqual<Tensor<bfloat16>>(tensor1, tensor2);
 
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
@@ -77,7 +77,7 @@ TEST(TestCpuFpReferenceValidationFp16, BasicTensorUsage)
     std::vector<int64_t> dims = {10, 10};
 
     Tensor<half> tensor1(dims);
-    tensor1.fillTensorWithRandomValues(-1.0_h, 1.0_h);
+    tensor1.fillTensorWithRandomValues(-1.0f, 1.0f);
     Tensor<half> tensor2(dims);
     makeTensorsEqual<Tensor<half>>(tensor1, tensor2);
 
@@ -100,13 +100,13 @@ TEST(TestCpuFpReferenceValidationFp64, BasicTensorUsage)
 // TensorNotComparable tests
 TEST(TestCpuFpReferenceValidationBfp16, TensorNotComparable)
 {
-    CpuFpReferenceValidation<hip_bfloat16> refValidation;
+    CpuFpReferenceValidation<bfloat16> refValidation;
     std::vector<int64_t> dims = {10, 10};
 
-    Tensor<hip_bfloat16> tensor1(dims);
-    Tensor<hip_bfloat16> tensor2(dims);
-    tensor1.fillTensorWithValue(1.0_bf);
-    tensor2.fillTensorWithValue(2.0_bf);
+    Tensor<bfloat16> tensor1(dims);
+    Tensor<bfloat16> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(2.0f);
 
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
@@ -118,8 +118,8 @@ TEST(TestCpuFpReferenceValidationFp16, TensorNotComparable)
 
     Tensor<half> tensor1(dims);
     Tensor<half> tensor2(dims);
-    tensor1.fillTensorWithValue(1.0_h);
-    tensor2.fillTensorWithValue(2.0_h);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(2.0f);
 
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
@@ -153,8 +153,8 @@ TEST(TestCpuFpReferenceValidationFp64, TensorNotComparable)
 // Tolerance tests
 TEST(TestCpuFpReferenceValidation, TensorToleranceComparison)
 {
-    CpuFpReferenceValidation<double> refValidationLowTolerance(1e-7, 1e-7);
-    CpuFpReferenceValidation<double> refValidationHighTolerance(1e-5, 1e-5);
+    CpuFpReferenceValidation<double> refValidationLowTolerance(1e-7f, 1e-7f);
+    CpuFpReferenceValidation<double> refValidationHighTolerance(1e-5f, 1e-5f);
     std::vector<int64_t> dims = {10, 10};
 
     Tensor<double> tensor1(dims);

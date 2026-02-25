@@ -23,13 +23,18 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <cstdio>
+#include <cstdlib>
+
 #include "log.hpp"
 #include "tensor_util.hpp"
 #include "get_handle.hpp"
 #include "../lib_env_var.hpp"
 
+#include <gtest/gtest_common.hpp>
 #include <miopen/config.h>
 #include <miopen/fusion_plan.hpp>
+#include <miopen/logger.hpp>
 #include "../random.hpp"
 
 #if MIOPEN_BACKEND_OPENCL
@@ -107,7 +112,18 @@ struct Tensor
         clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
         data = clCreateBuffer(ctx, CL_MEM_READ_WRITE, data_size, nullptr, nullptr);
 #elif MIOPEN_BACKEND_HIP
-        EXPECT_EQ(hipMalloc(&data, data_size), hipSuccess);
+        // ASSERT_* cannot be used in constructors (generates illegal
+        // return-void). Use hard abort on allocation failure instead.
+        auto err = hipMalloc(&data, data_size);
+        if(err != hipSuccess)
+        {
+            fprintf(stderr,
+                    "hipMalloc failed: %s at %s:%d\n",
+                    hipGetErrorString(err),
+                    __FILE__,
+                    __LINE__);
+            abort();
+        }
 #endif
     }
 
@@ -329,4 +345,91 @@ void TestLogCmdBNormFusion(std::function<void(const miopenFusionPlanDescriptor_t
         ASSERT_TRUE(isSubStr(str, sub_str)) << "str     : " << str << "str_sub : " << sub_str;
     else
         ASSERT_FALSE(isSubStr(str, sub_str)) << "str     : " << str << "str_sub : " << sub_str;
+}
+
+void TestLogBufferOn()
+{
+    auto filename =
+        fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
+    size_t line_i = 0;
+    std::string line;
+
+    fs::remove(filename);
+
+    ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
+                                                 "5"); // miopen::LoggingLevel::Info
+    // test log dump after error
+    miopen::ClearBufferLog();
+    MIOPEN_LOG_W("warn");
+    MIOPEN_LOG_I("info");
+    MIOPEN_LOG_I2("info2");
+    MIOPEN_LOG_T("trace");
+    MIOPEN_LOG_E("error");
+
+    ASSERT_TRUE(fs::exists(filename));
+    {
+        auto log_file = std::ifstream{filename};
+        while(std::getline(log_file, line))
+        {
+            switch(line_i)
+            {
+            case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
+            case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
+            case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
+            case 3:
+                ASSERT_FALSE(isSubStr(line, "trace"));
+                ASSERT_TRUE(isSubStr(line, "error"));
+                break;
+            }
+            line_i++;
+        }
+    }
+    fs::remove(filename);
+
+    // test log dump after throw
+    miopen::ClearBufferLog();
+    MIOPEN_LOG_W("warn");
+    MIOPEN_LOG_I("info");
+    MIOPEN_LOG_I2("info2");
+    MIOPEN_LOG_T("trace");
+    EXPECT_ANY_THROW({ MIOPEN_THROW("throw"); });
+
+    EXPECT_TRUE(fs::exists(filename));
+    {
+        auto log_file = std::ifstream{filename};
+        line_i        = 0;
+        while(std::getline(log_file, line))
+        {
+            switch(line_i)
+            {
+            case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
+            case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
+            case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
+            case 3: ASSERT_TRUE(isSubStr(line, "throw")); break;
+            }
+            line_i++;
+        }
+    }
+    fs::remove(filename);
+}
+
+void TestLogBufferOff()
+{
+    auto filename =
+        fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
+
+    fs::remove(filename);
+
+    ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
+                                                 "6"); // miopen::LoggingLevel::Info2
+
+    miopen::ClearBufferLog();
+    // log messages
+    MIOPEN_LOG_W("warn");
+    MIOPEN_LOG_I("info");
+    MIOPEN_LOG_I2("info2");
+    MIOPEN_LOG_T("trace");
+    // test log dump after error
+    MIOPEN_LOG_E("error");
+    ASSERT_FALSE(fs::exists(filename));
 }
