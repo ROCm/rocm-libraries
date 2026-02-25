@@ -35,16 +35,6 @@ def miopenCheckout()
     ])
 }
 
-def show_node_info() {
-    sh """
-        echo "NODE_NAME = \$NODE_NAME"
-        lsb_release -sd
-        uname -r
-        cat /sys/module/amdgpu/version
-        ls /opt/ -la
-    """
-}
-
 def check_host() {
     if ("${env.MIOPEN_SCCACHE}" != "null"){
         def SCCACHE_SERVER="${env.MIOPEN_SCCACHE.split(':')[0]}"
@@ -399,7 +389,6 @@ def runShell(String command){
 }
 
 def buildHipClangJob(Map conf=[:]){
-        show_node_info()
         /*
             The following is a workaround for git submodule updating for the fin module.  After Jenkins upgrade,
             many plugins started misbehaving, and submodules wouldn't get pulled.  This ensures that we always pull
