@@ -1672,38 +1672,37 @@ class Solution(collections.abc.Mapping):
     # - Needs PGR > 0, double buffer
     # - MIWaveTile must be even and larger than 2
     # - TLU{A,B} cases only supported if using LdsTR or if VPerm not needed (size{A,B} >= 4)
-    #
     # - Not supported for mixed precision cases currently
+    # - For non-CMS F32X kernels, SubIter is disabled after CMS check because
+    #   the default scheduler's sub-tiling conflicts with F32X pack code.
     TLUA = state["ProblemType"]["TLUA"]
     TLUB = state["ProblemType"]["TLUB"]
-    def doSubIterSetting():
+    def _canEnableSubIter():
       sizeDataTypeA = state["ProblemType"]["DataTypeA"].numBytes()
       sizeDataTypeB = state["ProblemType"]["DataTypeB"].numBytes()
       sizeDataType = state["ProblemType"]["DataType"].numBytes()
-      if (
-        state["EnableMatrixInstruction"] and not state["ExpandPointerSwap"] and
-        state["DepthU"] == state["MatrixInstK"] and state["PrefetchGlobalRead"] and not state["1LDSBuffer"]
+      return (
+        state["EnableMatrixInstruction"] and not state["ExpandPointerSwap"]
+        and state["DepthU"] == state["MatrixInstK"] and state["PrefetchGlobalRead"] and not state["1LDSBuffer"]
         and (state["MIWaveTile"][0] > 2  and state["MIWaveTile"][1] > 2)
         and (state["MIWaveTile"][0] % 2 == 0 and state["MIWaveTile"][1] % 2 == 0)
         and (sizeDataTypeA == sizeDataType) and (sizeDataTypeB == sizeDataType)
         and ((TLUA == False or state["enableLDSTrA"] or sizeDataTypeA >= 4) and (TLUB == False or state["enableLDSTrB"] or sizeDataTypeB >= 4) )
         and (not state["ProblemType"]["Sparse"] or state["TransposeLDSMetadata"])
-      ):
+      )
+
+    def _applySubIterSetting(enable):
+      if enable:
         state["ForceUnrollSubIter"] = True
         state["numSubTiles"] = 2
-        #state["PrefetchLocalRead"] = 0 if state["ClusterLocalRead"] == 0 else state["PrefetchLocalRead"]
-        state["ClusterLocalRead"] = 1
-        # disable TailloopInNll
-        state["TailloopInNll"] = False
       else:
         state["ForceUnrollSubIter"] = False
         state["numSubTiles"] = 1
 
-    # UseF32XEmulation case, need to finish SubIter setting before VectorWidth
-    # Here, DepthU is not finalized but we need to finish VectorWidth adjustment before DepthU
-    # Now, subIter is referred in DepthU function.
-    # We need to finalize SubIter here before calling DepthU function
-    doSubIterSetting()
+    _applySubIterSetting(_canEnableSubIter())
+    if state["ForceUnrollSubIter"]:
+      state["ClusterLocalRead"] = 1
+      state["TailloopInNll"] = False
 
     if state["VectorWidthA"] == -1:
       if state["EnableMatrixInstruction"]:
@@ -1931,6 +1930,12 @@ class Solution(collections.abc.Mapping):
 
     # additional setting for non CMS
     if state["UseCustomMainLoopSchedule"] == 0:
+      # Non-CMS, non-MFMA F32X (e.g. gfx1250 WMMA): disable SubIter because
+      # the default scheduler's sub-tiling conflicts with F32X pack code's
+      # destructive in-place VGPR conversion.
+      # MFMA-based XF32 (gfx950) and CMS kernels are exempt.
+      if state["UseF32XEmulation"] and not state["UseMFMAF32XEmulation"] and state["ForceUnrollSubIter"]:
+        _applySubIterSetting(False)
       if state["UseMFMAF32XEmulation"]:
         state["MfmaInitCVgprs"] = True
       # usePLRPack check
