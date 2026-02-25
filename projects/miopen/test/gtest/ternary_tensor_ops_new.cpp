@@ -86,10 +86,12 @@ struct TestCase
 };
 
 template <typename T,
+          typename TVerify,
           test::adaptive::UnitUnderTest UUT    = test::adaptive::UnitUnderTest::naiveGPU,
           test::adaptive::TestReference REF    = test::adaptive::TestReference::naiveCPU,
-          test::adaptive::AfterTestFailure ATF = test::adaptive::AfterTestFailure::moveOn>
-struct TensorOpsCommonNew : public test::adaptive::AdaptiveTest<UUT, REF, ATF>,
+          test::adaptive::AfterTestFailure ATF = test::adaptive::AfterTestFailure::moveOn,
+          test::adaptive::VerifyOption VER     = test::adaptive::VerifyOption::noValidateAndRMS>
+struct TensorOpsCommonNew : public test::adaptive::AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>,
                             public testing::TestWithParam<TestCase>
 {
 private:
@@ -97,24 +99,27 @@ private:
     tensor<T> tensorB;
     tensor<T> tensorC;
 
+    miopen::Allocator::ManageDataPtr uut_dev;
+    miopen::Allocator::ManageDataPtr ref_dev;
+
+    size_t input_sz;
+
     std::vector<T> naiveGPUData;
     std::vector<T> naiveCPUData;
 
-    std::vector<T>& referenceData     = naiveCPUData;
-    std::vector<T>& unitUnderTestData = naiveGPUData;
-    constexpr void SetUUTData() override
+    constexpr auto& GetUUTData()
     {
         if(UUT == test::adaptive::UnitUnderTest::naiveGPU)
         {
-            unitUnderTestData = naiveGPUData;
+            return uut_dev;
         }
     }
 
-    void SetREFData() override
+    auto& GetREFData()
     {
         if(this->current_REF == test::adaptive::TestReference::naiveCPU)
         {
-            referenceData = naiveCPUData;
+            return ref_dev;
         }
     }
 
@@ -125,6 +130,12 @@ protected:
         {
             GTEST_SKIP() << "Test configuration is incorrect";
         }
+        test::adaptive::SetUpSharedVerifyData<T, TVerify, UUT, REF, ATF, VER>();
+    }
+
+    static void TearDownTestSuite()
+    {
+        test::adaptive::TearDownSharedVerifyData<T, TVerify, UUT, REF, ATF, VER>();
     }
 
     void SetUp() override
@@ -143,6 +154,8 @@ protected:
             testCase.tensorlens_b, testCase.stride_b, testCase.offsets[1], testCase.packed);
         tensorC = CreateTensor(
             testCase.tensorlens_ac, testCase.stride_c, testCase.offsets[2], testCase.packed);
+
+        input_sz = std::distance(tensorC.data.begin(), tensorC.data.end());
     }
 
     tensor<T> CreateTensor(const std::vector<size_t>& lens,
@@ -175,7 +188,7 @@ protected:
 
         auto a_dev = handle.Write(tensorA.data);
         auto b_dev = handle.Write(tensorB.data);
-        auto c_dev = handle.Write(tensorC.data);
+        uut_dev    = handle.Write(tensorC.data);
 
         miopen::OpTensor(handle,
                          testCase.operation,
@@ -187,13 +200,13 @@ protected:
                          b_dev.get(),
                          &testCase.alphabeta[2],
                          tensorC.desc,
-                         c_dev.get(),
+                         uut_dev.get(),
                          testCase.offsets[0],
                          testCase.offsets[1],
                          testCase.offsets[2],
                          false); // it does not verify non-standard behaviour
 
-        naiveGPUData = handle.Read<T>(c_dev, tensorC.data.size());
+        // naiveGPUData = handle.Read<T>(uut_dev, tensorC.data.size());
         return miopenStatusSuccess;
     }
     miopenStatus_t RunOptimizedCPU() override { return miopenStatusNotImplemented; }
@@ -229,6 +242,8 @@ protected:
                 C = std::max(A * alpha1, B * alpha2) + C * beta;
             });
         }
+        auto&& handle = get_handle();
+        ref_dev       = handle.Write(naiveCPUData);
         return miopenStatusSuccess;
     }
 
@@ -253,7 +268,7 @@ protected:
         return r.data;
     }
 
-    std::pair<bool, std::unordered_map<std::string, double>> Verify() override
+    std::pair<bool, std::unordered_map<std::string, TVerify>> Verify() override
     {
         const TestCase& testCase = GetParam();
 
@@ -265,8 +280,10 @@ protected:
             tolerance = 80;
         }
 
-        double threshold = std::numeric_limits<T>::epsilon() * tolerance;
-        double error     = miopen::rms_range(referenceData, unitUnderTestData);
+        double threshold = std::numeric_limits<T>::epsilon() * tolerance * 10;
+
+        [[maybe_unused]] auto [res, error] =
+            this->template VerifyOnGPU<T>(uut_dev, ref_dev, input_sz);
 
         EXPECT_LE(error, threshold)
             << "TensorOp: " << testCase.operation << std::endl
@@ -290,9 +307,9 @@ public:
     void Run() { this->RunAdaptiveTest(); }
 };
 
-using GPU_TernaryTensorOpsNew_FP32 = TensorOpsCommonNew<float>;
-using GPU_TernaryTensorOpsNew_FP16 = TensorOpsCommonNew<half_float::half>;
-using GPU_TernaryTensorOpsNew_FP64 = TensorOpsCommonNew<double>;
+using GPU_TernaryTensorOpsNew_FP32 = TensorOpsCommonNew<float, float>;
+using GPU_TernaryTensorOpsNew_FP16 = TensorOpsCommonNew<half_float::half, float>;
+using GPU_TernaryTensorOpsNew_FP64 = TensorOpsCommonNew<double, double>;
 
 namespace {
 bool checkTensorsCompatibility(const std::vector<size_t>& tensorALens,

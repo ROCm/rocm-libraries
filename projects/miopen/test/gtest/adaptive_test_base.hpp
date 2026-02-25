@@ -28,9 +28,12 @@
 #include <array>
 #include <tuple>
 #include <unordered_map>
+#include <type_traits>
+#include <utility>
 
 #include "miopen/miopen.h"
 #include "miopen/errors.hpp"
+#include "get_handle.hpp"
 
 namespace test::adaptive {
 
@@ -70,6 +73,16 @@ enum class AfterTestFailure
     none    = 0, /*!< Do not do anything on test failure. */
     analyze = 1, /*!< Analyze and provide more information. */
     moveOn  = 2, /*!< Move on to the next, more trusted, reference. */
+};
+
+enum class VerifyOption
+{
+    noValidateAndRMS      = 0,
+    noValidateAndMAE      = 1,
+    noValidateAndMismatch = 2,
+    validateAndRMS        = 3,
+    validateAndMAE        = 4,
+    validateAndMismatch   = 5,
 };
 
 constexpr bool IsValidUUT(UnitUnderTest uut)
@@ -132,6 +145,14 @@ static std::string GetREFName(TestReference ref)
     }
 }
 
+struct ChecksResult
+{
+    bool all_zeros_ref              = true;
+    bool all_zeros_uut              = true;
+    bool all_finite_and_non_nan_ref = true;
+    bool all_finite_and_non_nan_uut = true;
+};
+
 /**
  * Number of runs that will be performed and analyzed when after test failure configuration is
  * AfterTestFailure::analyze
@@ -146,7 +167,12 @@ constexpr int number_of_runs_after_failure = 5;
  * (TestReference)    REF - desired implementation that will be used as reference
  * (AfterTestFailure) ATF - option that determine what to do (if anything) after test failure
  */
-template <UnitUnderTest UUT, TestReference REF, AfterTestFailure ATF>
+template <typename T,
+          typename TVerify,
+          UnitUnderTest UUT,
+          TestReference REF,
+          AfterTestFailure ATF,
+          VerifyOption VER>
 class AdaptiveTest
 {
 private:
@@ -279,7 +305,6 @@ private:
         {
             ret = RunNaiveCPU();
         }
-        SetREFData();
         return ret;
     }
 
@@ -321,8 +346,17 @@ private:
     };
 
     bool test_passed = true;
-    std::unordered_map<std::string, double> failure_errors;
+    std::unordered_map<std::string, TVerify> failure_errors;
     ErrorAnalysisInfo info;
+
+    const int verify_block_size = 256;
+
+public:
+    inline static ChecksResult* res_dev = nullptr;
+    inline static TVerify* rms_dev      = nullptr;
+    inline static TVerify* max_dev      = nullptr;
+    inline static TVerify* mae_dev      = nullptr;
+    inline static TVerify* mismatch_dev = nullptr;
 
 protected:
     TestReference current_REF = REF;
@@ -348,25 +382,199 @@ protected:
      * second [unordered_map] map should contain small name of the value(s) that failed and error
      * value(s)
      */
-    virtual std::pair<bool, std::unordered_map<std::string, double>> Verify() = 0;
+    virtual std::pair<bool, std::unordered_map<std::string, TVerify>> Verify() = 0;
+
+    template <typename UUT_Type, typename REF_Type = UUT_Type>
+    std::pair<ChecksResult, TVerify> VerifyOnGPU(miopen::Allocator::ManageDataPtr& uut_dev,
+                                                 miopen::Allocator::ManageDataPtr& ref_dev,
+                                                 size_t sz)
+    {
+        // This condition is based on the assumtion that verification will be performed in double
+        // only for FP32 and FP64 outputs
+        // static_assert((!std::is_same_v<T, float> && !std::is_same_v<T, double>) &&
+        //               std::is_same_v<TVerify, float>);
+        auto&& handle = get_handle();
+
+        size_t block_cnt = (sz / 2 + verify_block_size - 1) / verify_block_size;
+        block_cnt        = (block_cnt == 0) ? 1 : block_cnt;
+
+        *res_dev = ChecksResult{true, true, true, true};
+
+        TVerify error = static_cast<TVerify>(0);
+
+        std::vector<size_t> vld{verify_block_size, 1, 1};
+        std::vector<size_t> vgd{block_cnt * verify_block_size, 1, 1};
+
+        std::string fp_type_verify =
+            std::is_same_v<TVerify, float> ? "" : " -DMIOPEN_VERIFY_USE_DOUBLE_ACCUM=1";
+
+        std::string algo     = "Verify_GPU";
+        std::string net_conf = "";
+        std::string param    = "-DBLOCK_SZ=" + std::to_string(verify_block_size) + fp_type_verify;
+        std::string file     = "VerifyGPU.cpp";
+        std::string kernel_name = "VerifyGPUKernel";
+
+        if constexpr(VER == VerifyOption::noValidateAndMAE ||
+                     VER == VerifyOption::noValidateAndMismatch ||
+                     VER == VerifyOption::noValidateAndRMS)
+        {
+            param += " -DDO_VALIDATE=0";
+        }
+        else
+        {
+            param += " -DDO_VALIDATE=1";
+        }
+
+        if constexpr(std::is_same_v<UUT_Type, double>)
+        {
+            param += " -DMIOPEN_UUT_USE_FP64=1";
+        }
+        else if constexpr(std::is_same_v<UUT_Type, float>)
+        {
+            param += " -DMIOPEN_UUT_USE_FP32=1";
+        }
+        else if constexpr(std::is_same_v<UUT_Type, half_float::half>)
+        {
+            param += " -DMIOPEN_UUT_USE_FP16=1";
+        }
+        else if constexpr(std::is_same_v<UUT_Type, bfloat16>)
+        {
+            param += " -DMIOPEN_UUT_USE_BFP16=1";
+        }
+
+        if constexpr(std::is_same_v<REF_Type, double>)
+        {
+            param += " -DMIOPEN_REF_USE_FP64=1";
+        }
+        else if constexpr(std::is_same_v<REF_Type, float>)
+        {
+            param += " -DMIOPEN_REF_USE_FP32=1";
+        }
+        else if constexpr(std::is_same_v<REF_Type, half_float::half>)
+        {
+            param += " -DMIOPEN_REF_USE_FP16=1";
+        }
+        else if constexpr(std::is_same_v<REF_Type, bfloat16>)
+        {
+            param += " -DMIOPEN_REF_USE_BFP16=1";
+        }
+        // add support to other missing types
+
+        if constexpr(VER == VerifyOption::noValidateAndRMS || VER == VerifyOption::validateAndRMS)
+        {
+            algo += "_RMS";
+            net_conf = algo + "_" + std::to_string(vld[0]) + "_" +
+                       std::to_string(miopen_type<UUT_Type>{}) + "_" +
+                       std::to_string(miopen_type<REF_Type>{}) + "_" +
+                       std::to_string(miopen_type<TVerify>{});
+            param += " -DCALCULATE_RMS=1 -DCALCULATE_MAE=0 -DFIND_MISMATCH=0";
+
+            *rms_dev = static_cast<TVerify>(0.0);
+            *max_dev = static_cast<TVerify>(0.0);
+
+            auto&& kernels = handle.GetKernels(kernel_name, net_conf);
+
+            miopen::KernelInvoke kernel;
+
+            if(!kernels.empty())
+            {
+                kernel = kernels.front();
+            }
+            else
+            {
+                kernel = handle.AddKernel(algo, net_conf, file, kernel_name, vld, vgd, param);
+            }
+
+            // handle.EnableProfiling();
+            // handle.ResetKernelTime();
+
+            kernel(uut_dev.get(), ref_dev.get(), sz, res_dev, rms_dev, max_dev);
+
+            hipDeviceSynchronize();
+
+            // std::cout << "gpu sq diff: " << *rms_dev;
+
+            TVerify max = std::max({*max_dev, std::numeric_limits<TVerify>::min()});
+            // std::cout << " max: " << max;
+            // std::cout << " sz: " << sz << std::endl;
+            // std::cout << handle.GetKernelTime() << std::endl;
+            error = std::sqrt(*rms_dev) / (std::sqrt(sz) * max);
+        }
+        else if constexpr(VER == VerifyOption::noValidateAndMAE ||
+                          VER == VerifyOption::validateAndMAE)
+        {
+            algo += "_MAE";
+            net_conf = algo + "_" + std::to_string(vld[0]) + "_" + std::to_string(miopen_type<T>{});
+            param += " -DCALCULATE_RMS=0 -DCALCULATE_MAE=1 -DFIND_MISMATCH=0";
+
+            *mae_dev = 0.0;
+
+            auto&& kernels = handle.GetKernels(kernel_name, net_conf);
+
+            miopen::KernelInvoke kernel;
+
+            if(!kernels.empty())
+            {
+                kernel = kernels.front();
+            }
+            else
+            {
+                kernel = handle.AddKernel(algo, net_conf, file, kernel_name, vld, vgd, param);
+            }
+
+            kernel(uut_dev.get(), ref_dev.get(), sz, res_dev, mae_dev);
+
+            hipDeviceSynchronize();
+
+            error = *mae_dev;
+        }
+        else
+        {
+            algo += "_MISMATCH";
+            net_conf = algo + "_" + std::to_string(vld[0]) + "_" + std::to_string(miopen_type<T>{});
+            param += " -DCALCULATE_RMS=0 -DCALCULATE_MAE=0 -DFIND_MISMATCH=1";
+
+            *mismatch_dev = 0;
+
+            auto&& kernels = handle.GetKernels(kernel_name, net_conf);
+
+            miopen::KernelInvoke kernel;
+
+            if(!kernels.empty())
+            {
+                kernel = kernels.front();
+            }
+            else
+            {
+                kernel = handle.AddKernel(algo, net_conf, file, kernel_name, vld, vgd, param);
+            }
+
+            kernel(uut_dev.get(), ref_dev.get(), sz, res_dev, mismatch_dev);
+
+            hipDeviceSynchronize();
+
+            error = *mismatch_dev;
+        }
+
+        return std::make_pair(*res_dev, error);
+    }
 
     /**
      * Since there is an option to choose between different implementations that will be UUT/REF, we
      * need to use single pointer/reference to UUT/REF data, these methods are for that.
      *
-     * SetREFData is called after every execution of the reference implementation, it is not
+     * GetREFData is called after every execution of the reference implementation, it is not
      * constexpr as the reference can be changed throughout the test execution (when ATF ==
      * AfterTestFailure::moveOn)
      *
      * SetUUTData is called once at the start of the test, it is constexpr because the UUT is set at
      * the beginning and cannot be changed throughout the test texecution
      */
-    virtual void SetREFData()           = 0;
-    virtual void constexpr SetUUTData() = 0;
+    // virtual void GetREFDataDev()           = 0;
+    // virtual void constexpr GetUUTDataDev() = 0;
 
     void RunAdaptiveTest()
     {
-        SetUUTData();
         std::ignore = RunUUT();
         auto ret    = RunREF();
 
@@ -396,5 +604,55 @@ protected:
 
     virtual ~AdaptiveTest() {}
 };
+
+template <typename T,
+          typename TVerify,
+          UnitUnderTest UUT,
+          TestReference REF,
+          AfterTestFailure ATF,
+          VerifyOption VER>
+static void SetUpSharedVerifyData()
+{
+    hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::res_dev,
+                     sizeof(*AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::res_dev));
+    if constexpr(VER == VerifyOption::noValidateAndRMS || VER == VerifyOption::validateAndRMS)
+    {
+        hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::rms_dev, sizeof(TVerify));
+        hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::max_dev, sizeof(TVerify));
+    }
+    else if constexpr(VER == VerifyOption::noValidateAndMAE || VER == VerifyOption::validateAndMAE)
+    {
+        hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mae_dev, sizeof(TVerify));
+    }
+    else
+    {
+        hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mismatch_dev,
+                         sizeof(TVerify));
+    }
+}
+
+template <typename T,
+          typename TVerify,
+          UnitUnderTest UUT,
+          TestReference REF,
+          AfterTestFailure ATF,
+          VerifyOption VER>
+static void TearDownSharedVerifyData()
+{
+    hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::res_dev);
+    if constexpr(VER == VerifyOption::noValidateAndRMS || VER == VerifyOption::validateAndRMS)
+    {
+        hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::rms_dev);
+        hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::max_dev);
+    }
+    else if constexpr(VER == VerifyOption::noValidateAndMAE || VER == VerifyOption::validateAndMAE)
+    {
+        hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mae_dev);
+    }
+    else
+    {
+        hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mismatch_dev);
+    }
+}
 
 } // namespace test::adaptive
