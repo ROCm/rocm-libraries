@@ -14,6 +14,7 @@ add_executable(
     IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
     IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
     IntegrationGpuBatchnormForwardTraining.cpp
+    IntegrationGpuBatchnormFwdTrainingActiv.cpp
 )
 
 # Adds extra test source files to hip_kernel_plugin_integration_tests target
