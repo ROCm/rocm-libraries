@@ -30,6 +30,10 @@ void TensorDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "TensorDescriptor::finalize() failed: data type not set");
 
+    // Pass-by-value tensors are currently required to supply a value at descriptor
+    // creation time. In the future, pass-by-value tensors may also support setting
+    // values through variant packs.
+
     HipdnnBackendDescriptorImpl<TensorDescriptor>::finalize();
 }
 

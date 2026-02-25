@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "DataTypeConversion.hpp"
+#include "DescriptorAttributeUtils.hpp"
 
 namespace hipdnn_backend
 {
@@ -98,15 +99,10 @@ void setDataType(hipdnn_data_sdk::data_objects::DataType& target,
                  const void* arrayOfElements,
                  const char* errorPrefix)
 {
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_DATA_TYPE,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(errorPrefix) + ": attributeType mismatch");
+    checkSetArgs(HIPDNN_TYPE_DATA_TYPE, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": elementCount is not 1");
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  std::string(errorPrefix) + ": arrayOfElements is null");
     target = toSdkDataType(*static_cast<const hipdnnDataType_t*>(arrayOfElements));
 }
 
@@ -117,15 +113,10 @@ void getDataType(hipdnn_data_sdk::data_objects::DataType source,
                  void* arrayOfElements,
                  const char* errorPrefix)
 {
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_DATA_TYPE,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(errorPrefix) + ": attributeType mismatch");
+    checkGetArgs(HIPDNN_TYPE_DATA_TYPE, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(requestedElementCount >= 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": requestedElementCount < 1");
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  std::string(errorPrefix) + ": arrayOfElements is null");
     *static_cast<hipdnnDataType_t*>(arrayOfElements) = fromSdkDataType(source);
     if(elementCount != nullptr)
     {
