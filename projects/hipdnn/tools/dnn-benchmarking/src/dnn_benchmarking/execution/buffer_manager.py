@@ -29,12 +29,14 @@ def _generate_bfloat16_bytes(
 
     Args:
         dims: Tensor dimensions.
-        rng: Unused (kept for API consistency); torch uses its own RNG.
+        rng: Random state for reproducibility. If None, creates a new one.
 
     Returns:
         Raw bytes in bfloat16 format.
     """
-    data_f32 = np.random.uniform(0.0, 1.0, dims).astype(np.float32)
+    if rng is None:
+        rng = np.random.RandomState()
+    data_f32 = rng.uniform(0.0, 1.0, dims).astype(np.float32)
     t = torch.from_numpy(data_f32).bfloat16()
     # Get raw bfloat16 bytes via untyped_storage
     storage = t.untyped_storage()

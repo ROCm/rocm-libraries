@@ -9,7 +9,10 @@ enabling validation of GPU execution against known-correct implementations.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 @dataclass
@@ -22,7 +25,7 @@ class ReferenceOutput:
         metadata: Optional provider-specific metadata.
     """
 
-    data: "np.ndarray"  # type: ignore  # noqa: F821
+    data: "np.ndarray"
     tensor_uid: int
     metadata: Optional[Dict[str, Any]] = None
 
@@ -53,7 +56,7 @@ class ReferenceProvider(ABC):
     def compute_reference(
         self,
         graph_json: Dict[str, Any],
-        input_data: Dict[int, "np.ndarray"],  # type: ignore  # noqa: F821
+        input_data: Dict[int, "np.ndarray"],
     ) -> Dict[int, ReferenceOutput]:
         """Compute reference outputs for given graph and inputs.
 

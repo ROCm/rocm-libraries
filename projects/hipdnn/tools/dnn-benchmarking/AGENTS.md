@@ -19,7 +19,7 @@
 - Coverage: `LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest --cov=dnn_benchmarking tests/`
 
 ## Coding Style & Naming Conventions
-- Python project using `pyproject.toml`; target Python 3.8+.
+- Python project using `pyproject.toml`; target Python 3.9+.
 - Follow PEP 8 style; 4-space indentation.
 - Names: modules and functions use `snake_case`, classes use `PascalCase`.
 - Prefer small, focused modules under the existing package layout.

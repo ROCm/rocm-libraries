@@ -4,15 +4,18 @@ Benchmarking and validation tool for hipDNN graphs.
 
 ## Overview
 
+> **Caution**: This tool is in early development and subject to change.
+> Do not use it in build workflows or CI pipelines.
+
 This tool loads serialized hipDNN graphs, executes them via the MIOpen plugin, and captures performance metrics using PyTorch CUDA/ROCm events for kernel timing.
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.9+
 - numpy
+- PyTorch (any variant; ROCm or CUDA build required for GPU kernel timing)
 - hipdnn_frontend (installed hipDNN Python bindings)
 - AMD GPU with ROCm + MIOpen plugin
-- PyTorch with CUDA or ROCm for GPU kernel timing (optional but recommended)
 
 ## Installation
 

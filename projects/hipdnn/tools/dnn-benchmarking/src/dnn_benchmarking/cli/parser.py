@@ -17,7 +17,11 @@ def create_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="dnn-benchmark",
-        description="Benchmarking and validation tool for hipDNN graphs",
+        description=(
+            "Benchmarking and validation tool for hipDNN graphs\n\n"
+            "WARNING: This tool is in early development and subject to change.\n"
+            "Do not use it in build workflows or CI pipelines."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
