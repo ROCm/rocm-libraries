@@ -238,7 +238,7 @@ class TestLayoutAutoDetection:
             "_get_schedule_128x192x32_TF32": ["TN"],
             "_get_schedule_192x256x32_TF32": ["NN", "TN"],
             "_get_schedule_256x192x32_TF32": ["NN", "TN"],
-            "_get_schedule_256x256x32_TF32": ["TN"],
+            "_get_schedule_256x256x32_TF32": ["NT", "TN"],
             "_get_schedule_192x128x32_TF32": ["TN"],
             "_get_schedule_128x128x32_TF32": ["TN"],
             "_get_schedule_128x128x32_TF32_plr1": ["NN", "TN"],
