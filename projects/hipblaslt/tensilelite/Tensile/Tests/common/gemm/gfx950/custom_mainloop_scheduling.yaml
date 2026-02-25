@@ -1696,7 +1696,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - StaggerU: [0]
         - WorkGroupMapping: [8]
-        - WorkGroupMappingXCC: [8]
+        - WorkGroupMappingXCC: [32]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]
         - SourceSwap: [1]
