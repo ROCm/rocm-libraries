@@ -2,6 +2,7 @@
 
 # Find dependencies required by our library
 find_package(hip REQUIRED)
+find_package(libhipcxx REQUIRED)
 
 # Include the file that defines the hipthreads::hipthreads imported target
 include("${CMAKE_CURRENT_LIST_DIR}/hipthreadsTargets.cmake")
