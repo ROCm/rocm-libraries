@@ -112,7 +112,7 @@ struct CShuffleEpilogue
                            tf32_t,
                            std::conditional_t<std::is_same_v<BDataTypeBuf, pk_int4_t> ||
                                                   std::is_same_v<BDataTypeBuf, pk_fp4_t> ||
-                                                  sizeof(BDataType) < sizeof(ADataTypeBuf),
+                                                  sizeof(BDataTypeBuf) < sizeof(ADataTypeBuf),
                                               ADataTypeBuf,
                                               BDataTypeBuf>>;
 
