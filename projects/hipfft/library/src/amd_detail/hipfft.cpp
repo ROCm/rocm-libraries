@@ -533,77 +533,60 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         // TODO: what about in-place c2c?  Are the data layouts from enums actually just the same?
     }
 
-    // FIXME: need to delete these as well
-
-
     if(plan->singleProcMultiDevice)
     {
-        rocfft_field spaceField = nullptr;
-        rocfft_field frequencyField = nullptr;
-        
-        if(rocfft_field_create(&spaceField) != rocfft_status_success)
-            throw std::runtime_error("space field create failed");
-        for(const auto& brick : plan->inBricks)
-        {
-            // rm -> cm
-            auto cm_lower = brick.field_lower;
-            std::reverse(cm_lower.begin(), cm_lower.end());
-            auto cm_upper = brick.field_upper;
-            std::reverse(cm_upper.begin(), cm_upper.end());
-            auto cm_stride = brick.brick_stride;
-            std::reverse(cm_stride.begin(), cm_stride.end());
+        // Lambda for converting hipfft-bricks to rocfft-bricks and adding them to a rocfft
+        // description:
+        auto hipBricks2Desc = [](decltype(plan->inBricks) & hipBricks, rocfft_field& destField)
+            {
+                for(const auto& brick : hipBricks)
+                {
+                    // rm -> cm
+                    auto cm_lower = brick.field_lower;
+                    std::reverse(cm_lower.begin(), cm_lower.end());
+                    auto cm_upper = brick.field_upper;
+                    std::reverse(cm_upper.begin(), cm_upper.end());
+                    auto cm_stride = brick.brick_stride;
+                    std::reverse(cm_stride.begin(), cm_stride.end());
             
-            rocfft_brick rbrick = nullptr;
-            if(rocfft_brick_create(&rbrick,
-                                   cm_lower.data(),
-                                   cm_upper.data(),
-                                   cm_stride.data(),
-                                   cm_lower.size(),
-                                   brick.device)
-               != rocfft_status_success)
-                throw std::runtime_error("create input brick failed");
-            if(rocfft_field_add_brick(spaceField, rbrick) != rocfft_status_success)
-                throw std::runtime_error("add output brick failed");
-            rocfft_brick_destroy(rbrick);
-        }
+                    rocfft_brick rbrick = nullptr;
+                    if(rocfft_brick_create(&rbrick,
+                                           cm_lower.data(),
+                                           cm_upper.data(),
+                                           cm_stride.data(),
+                                           cm_lower.size(),
+                                           brick.device)
+                       != rocfft_status_success)
+                        throw std::runtime_error("create input brick failed");
+                    if(rocfft_field_add_brick(destField, rbrick) != rocfft_status_success)
+                        throw std::runtime_error("add output brick failed");
+                    rocfft_brick_destroy(rbrick);
+                }
+            };
 
+        rocfft_field spacetimeField = nullptr;
+        if(rocfft_field_create(&spacetimeField) != rocfft_status_success)
+            throw std::runtime_error("space-time field create failed");
+        hipBricks2Desc(plan->inBricks, spacetimeField);
+
+        rocfft_field frequencyField = nullptr;
         if(rocfft_field_create(&frequencyField) != rocfft_status_success)
-            throw std::runtime_error("frequency field create failed");
-        for(const auto& brick : plan->outBricks)
-        {
-            // rm -> cm
-            auto cm_lower = brick.field_lower;
-            std::reverse(cm_lower.begin(), cm_lower.end());
-            auto cm_upper = brick.field_upper;
-            std::reverse(cm_upper.begin(), cm_upper.end());
-            auto cm_stride = brick.brick_stride;
-            std::reverse(cm_stride.begin(), cm_stride.end());
-
-            rocfft_brick rbrick = nullptr;            
-            if(rocfft_brick_create(&rbrick,
-                                   cm_lower.data(),
-                                   cm_upper.data(),
-                                   cm_stride.data(),
-                                   cm_lower.size(),
-                                   brick.device)
-               != rocfft_status_success)
-                throw std::runtime_error("create input brick failed");
-            rocfft_brick_destroy(rbrick);
-        }
-    
+            throw std::runtime_error("space-time field create failed");
+        hipBricks2Desc(plan->outBricks, frequencyField);
+        
         for(auto rocfft_desc : {ip_forward_desc, op_forward_desc})
         {
-            rocfft_plan_description_add_infield(rocfft_desc, spaceField);
+            rocfft_plan_description_add_infield(rocfft_desc, spacetimeField);
             rocfft_plan_description_add_outfield(rocfft_desc, frequencyField);
         }
         for(auto rocfft_desc : {ip_inverse_desc, op_inverse_desc})
         {
-            rocfft_plan_description_add_infield(rocfft_desc, spaceField);
-            rocfft_plan_description_add_outfield(rocfft_desc, frequencyField);
+            rocfft_plan_description_add_infield(rocfft_desc, frequencyField);
+            rocfft_plan_description_add_outfield(rocfft_desc, spacetimeField);
         }
 
-        (void)rocfft_field_destroy(spaceField);
         (void)rocfft_field_destroy(frequencyField);
+        (void)rocfft_field_destroy(spacetimeField);
     }
 
     if(plan->scale_factor != 1.0)
@@ -633,7 +616,9 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     {
         for(const auto inplace : {true, false})
         {
+            
             const bool forward = iotype.is_forward(t);
+
             auto& plan_ptr  = inplace
                 ? (forward ? plan->ip_forward : plan->ip_inverse)
                 : (forward ? plan->op_forward : plan->op_inverse);

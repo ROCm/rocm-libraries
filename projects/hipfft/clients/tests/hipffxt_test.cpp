@@ -89,8 +89,6 @@ std::string directionname(const int direction)
     }
 }
 
-
-
 // Params are direction and real/complex
 class hipfftxtunit : public ::testing::TestWithParam<std::tuple<int, bool>>
 {};
@@ -105,7 +103,8 @@ TEST_P(hipfftxtunit, plancreation)
 
     const int Nx    = 32;
     const int Ny    = 32;
-    
+
+    // FIXME: direction isn't used?
     const int direction = std::get<0>(GetParam());
     const bool realcomplex = std::get<1>(GetParam());
     
@@ -114,7 +113,9 @@ TEST_P(hipfftxtunit, plancreation)
 
     if(verbose > 0)
     {
-        // FIXME: implement
+        std::cout << "hipfftxt plan creation test: " << directionname(direction)
+                  << (realcomplex ? " real/complex" : "complex/complex")
+                  << "\n";
     }
 
     auto hipfft_rt = HIPFFT_SUCCESS;
@@ -125,7 +126,6 @@ TEST_P(hipfftxtunit, plancreation)
 
     std::vector<int> gpus(ngpus);
     std::iota(gpus.begin(), gpus.end(), 0);
-
     
     hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
