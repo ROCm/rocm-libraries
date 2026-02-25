@@ -75,9 +75,7 @@ for layout in nhwgc ndhwgc; do
     for dtype in fp32 fp16 bf16; do
         profiler_config="backward_weight/profiler/${layout}_${dtype}.conf"
         test_config="backward_weight/tests/${layout}_${dtype}.conf"
-        total_lines=$(wc -l < $profiler_config)
-        lines_to_take=$((total_lines / 5)) # 20% of the lines
-        head -n $lines_to_take $profiler_config > $test_config
+        awk 'NR % 5 == 0' $profiler_config > $test_config # 20% of lines in the profiler configs
     done
 done
 
@@ -86,8 +84,6 @@ for layout in nhwgc ndhwgc; do
     for dtype in fp32 fp16 bf16; do
         profiler_config="backward_data/profiler/${layout}_${dtype}.conf"
         test_config="backward_data/tests/${layout}_${dtype}.conf"
-        total_lines=$(wc -l < $profiler_config)
-        lines_to_take=$((total_lines / 5)) # 20% of the lines
-        head -n $lines_to_take $profiler_config > $test_config
+        awk 'NR % 5 == 0' $profiler_config > $test_config # 20% of lines in the profiler configs
     done
 done
