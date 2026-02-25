@@ -271,8 +271,8 @@ class TestLayoutAutoDetection:
                 assert result["TransposeA"] == expected_a
                 assert result["TransposeB"] == expected_b
 
-    def test_cms_kernel_info_correctness_for_layouts_and_useLDSTr_and_TLDS(self):
-        """Confirm the correct detection of layouts, useLDSTr, and TLDS in the CMS kernel info."""
+    def test_cms_kernel_info_correctness_for_layouts_and_LDSTrInst_and_TransposeLDS(self):
+        """Confirm the correct detection of layouts, LDSTrInst, and TransposeLDS in the CMS kernel info."""
         @RegisterSchedule(
             tile_config=self.TILE,
             dtype_predicate=is16bit,
