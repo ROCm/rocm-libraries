@@ -7,6 +7,7 @@ import os
 subtree_to_project_map = {
     "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
     "dnn-providers/miopen-provider": "miopen-provider",
+    "projects/composablekernel": "miopen",
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
     "projects/hipblaslt": "blas",
@@ -50,8 +51,6 @@ project_map = {
             "-DTHEROCK_ENABLE_MIOPEN=ON",
             "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         ],
         "projects_to_test": ["miopen", "miopen_plugin"],
     },
@@ -87,8 +86,6 @@ additional_options = {
             "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
             "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         ],
         "projects_to_test": [
             "hipdnn",
@@ -103,8 +100,6 @@ additional_options = {
         "cmake_options": [
             "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         ],
         "projects_to_test": ["miopen_plugin"],
         "project_to_add": "miopen",

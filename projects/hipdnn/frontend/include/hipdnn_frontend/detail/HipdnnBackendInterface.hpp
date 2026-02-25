@@ -45,6 +45,7 @@ public:
         = 0;
     virtual const char* getErrorString(hipdnnStatus_t status) = 0;
     virtual void getLastErrorString(char* message, size_t maxSize) = 0;
+    virtual hipdnnStatus_t versionExt(const char** version) = 0;
     virtual hipdnnStatus_t backendCreateAndDeserializeGraphExt(
         hipdnnBackendDescriptor_t* descriptor, const uint8_t* serializedGraph, size_t graphByteSize)
         = 0;
