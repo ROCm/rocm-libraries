@@ -480,7 +480,7 @@ namespace rocRoller
                 co_yield Expression::generate(conditionResult, expr, m_context);
                 // -------------------------------------------------------------------------------
                 // TODO: remove this once we better handle data-flow across loops
-                if(op.loopName.find("LoopTail") != std::string::npos)
+                if(op.loopName == rocRoller::KLOOPTAIL)
                 {
                     co_yield Instruction::Wait(WaitCount::Zero(
                         m_context->targetArchitecture(),
@@ -493,7 +493,7 @@ namespace rocRoller
                     concatenate("Condition: Top (jump to " + botLabel->toString() + " if false)"));
                 // -------------------------------------------------------------------------------
                 // TODO: remove this once we better handle data-flow across loops
-                if(op.loopName.find("LoopTail") != std::string::npos)
+                if(op.loopName == rocRoller::KLOOPTAIL)
                 {
                     co_yield Instruction::Wait(
                         WaitCount::Zero(m_context->targetArchitecture(),
