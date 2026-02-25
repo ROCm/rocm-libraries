@@ -20,12 +20,12 @@ enum class Direction : int
 
 struct KernelConfig
 {
-    int variant;
-    size_t vectorsize;
-    size_t xlocalsize;
-    size_t ylocalsize;
-    size_t zlocalsize;
-    size_t nelements;
+    int variant = -1;
+    size_t vectorsize = 1;
+    size_t xlocalsize = 1;
+    size_t ylocalsize = 1;
+    size_t zlocalsize = 1;
+    size_t nelements = 1;
 };
 
 // Compute workgroup size configuration given a problem (NHWC) and a vectorsize
@@ -346,6 +346,8 @@ inline void DefaultConfigSpatialSingle(size_t n,
             }
             // clang-format on
         }
+        config.variant = 1;
+        config.vectorsize = 1;
     }
     else
     {

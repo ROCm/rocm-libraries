@@ -329,8 +329,37 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
     hip_kernel_plugin::batchnorm::KernelConfig config;
     // Define default configuration based on heuristics and
     // add all other valid configurations for the given problem
-    hip_kernel_plugin::batchnorm::
-        DefaultConfigSpatialSingle( // Will only select variants 0, 1, or 3!
+    if(hip_kernel_plugin::batchnorm::UseMultiple(
+           n,
+           h,
+           w,
+           useFp16Mix || useBfp16Mix,
+           isLayoutNHWC,
+           hip_kernel_plugin::batchnorm::Direction::FORWARD_TRAINING))
+    {
+        // Determine the minimum number of workgroups
+        const size_t min_workgroups
+            = std::max(size_t(1), size_t(0.6f * static_cast<float>(props.multiProcessorCount)));
+        hip_kernel_plugin::batchnorm::DefaultConfigSpatialMultiple(
+            n, c, h, w, isLayoutNHWC, useFp32, min_workgroups, stash_values_fwd, config);
+        if(config.variant == -1)
+        {
+            // If the default spatial multiple function failed to select a valid configuration,
+            // get a default spatial single configuration as fallback
+            hip_kernel_plugin::batchnorm::DefaultConfigSpatialSingle(
+                n,
+                h,
+                w,
+                useFp16Mix,
+                useBfp16Mix,
+                isLayoutNHWC,
+                hip_kernel_plugin::batchnorm::Direction::FORWARD_TRAINING,
+                config);
+        }
+    }
+    else
+    {
+        hip_kernel_plugin::batchnorm::DefaultConfigSpatialSingle(
             n,
             h,
             w,
@@ -339,14 +368,14 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
             isLayoutNHWC,
             hip_kernel_plugin::batchnorm::Direction::FORWARD_TRAINING,
             config);
+    }
 
     variant = config.variant;
     vectorsize = config.vectorsize;
-    // Activate these only for variant 2!
-    // xlocalsize = config.xlocalsize;
-    // ylocalsize = config.ylocalsize;
-    // zlocalsize = config.zlocalsize;
-    // nelements = config.nelements;
+    xlocalsize = config.xlocalsize;
+    ylocalsize = config.ylocalsize;
+    zlocalsize = config.zlocalsize;
+    nelements = config.nelements;
 
     size_t xlocalsize_final = xlocalsize, ylocalsize_final = ylocalsize,
            zlocalsize_final = zlocalsize;
@@ -521,16 +550,8 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
     options.emplace_back(std::string("-DHIP_PLUGIN_NRN_OP_ID=") + std::to_string(nrnOpId));
     options.emplace_back(std::string("--offload-arch=") + props.gcnArchName);
 
-    // Create and configure kernel - Should be implemented differently for variant 2!
+    // HipProgram for kernel launch
     auto hipProgram = HipProgram("BatchNormFwdTrainSpatial.cpp", options);
-    auto hipKernel = HipKernel(hipProgram, "BatchNormFwdTrainSpatial");
-
-    hipKernel.SetBlockSize(static_cast<unsigned int>(xlocalsize),
-                           static_cast<unsigned int>(ylocalsize),
-                           static_cast<unsigned int>(zlocalsize));
-    hipKernel.SetGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
-                          static_cast<unsigned int>(ygridsize / ylocalsize),
-                          static_cast<unsigned int>(zgridsize / zlocalsize));
 
     // Launch kernel with appropriate output buffer
     if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
@@ -540,6 +561,16 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
 
         if(variant != 2)
         {
+            // Create and configure kernel
+            auto hipKernel = HipKernel(hipProgram, "BatchNormFwdTrainSpatial");
+
+            hipKernel.SetBlockSize(static_cast<unsigned int>(xlocalsize),
+                                   static_cast<unsigned int>(ylocalsize),
+                                   static_cast<unsigned int>(zlocalsize));
+            hipKernel.SetGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
+                                  static_cast<unsigned int>(ygridsize / ylocalsize),
+                                  static_cast<unsigned int>(zgridsize / zlocalsize));
+
             if(_trainingParams.hasSaveMeanVariance() && _trainingParams.hasRunningStats())
             {
                 hipKernel.Launch(handle.getStream(),
@@ -603,7 +634,89 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
                                  beta);
             }
         }
-        // For variant 2, we still need to implement the launch code!
+        else
+        {
+            // Create and configure kernels
+            // For variant 2, we should launch three kernels
+            auto hipKernelMeanVariance
+                = HipKernel(hipProgram, "BatchNormFwdTrainSpatialMeanVariance");
+            auto hipKernelFinalMeanVariance
+                = HipKernel(hipProgram, "BatchNormFwdTrainSpatialFinalMeanVariance");
+            auto hipKernelNorm = HipKernel(hipProgram, "BatchNormFwdTrainSpatialNorm");
+
+            hipKernelMeanVariance.SetBlockSize(static_cast<unsigned int>(xlocalsize),
+                                               static_cast<unsigned int>(ylocalsize),
+                                               static_cast<unsigned int>(zlocalsize));
+            hipKernelMeanVariance.SetGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
+                                              static_cast<unsigned int>(ygridsize / ylocalsize),
+                                              static_cast<unsigned int>(zgridsize / zlocalsize));
+            hipKernelFinalMeanVariance.SetBlockSize(static_cast<unsigned int>(xlocalsize_final),
+                                                    static_cast<unsigned int>(ylocalsize_final),
+                                                    static_cast<unsigned int>(zlocalsize_final));
+            hipKernelFinalMeanVariance.SetGridSize(
+                static_cast<unsigned int>(xgridsize / xlocalsize_final),
+                static_cast<unsigned int>(1),
+                static_cast<unsigned int>(1));
+            hipKernelNorm.SetBlockSize(static_cast<unsigned int>(xlocalsize),
+                                       static_cast<unsigned int>(ylocalsize),
+                                       static_cast<unsigned int>(zlocalsize));
+            hipKernelNorm.SetGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
+                                      static_cast<unsigned int>(ygridsize / ylocalsize),
+                                      static_cast<unsigned int>(zgridsize / zlocalsize));
+
+            // Launch the kernels
+            // 1. BatchNormFwdTrainSpatialMeanVariance kernel
+            hipKernelMeanVariance.Launch(handle.getStream(), xBuffer.ptr, activationOutBuffer.ptr);
+            // 2. BatchNormFwdTrainSpatialFinalMeanVariance kernel
+            if(_trainingParams.hasSaveMeanVariance() && _trainingParams.hasRunningStats())
+            {
+                hipKernelFinalMeanVariance.Launch(handle.getStream(),
+                                                  activationOutBuffer.ptr,
+                                                  inhw,
+                                                  expAvgFactor,
+                                                  prevRunningMeanPtr,
+                                                  prevRunningVariancePtr,
+                                                  nextRunningMeanPtr,
+                                                  nextRunningVariancePtr,
+                                                  epsilon,
+                                                  resultSaveMeanPtr,
+                                                  resultSaveInvVariancePtr);
+            }
+            else if(_trainingParams.hasSaveMeanVariance())
+            {
+                hipKernelFinalMeanVariance.Launch(handle.getStream(),
+                                                  activationOutBuffer.ptr,
+                                                  inhw,
+                                                  epsilon,
+                                                  resultSaveMeanPtr,
+                                                  resultSaveInvVariancePtr);
+            }
+            else if(_trainingParams.hasRunningStats())
+            {
+                hipKernelFinalMeanVariance.Launch(handle.getStream(),
+                                                  activationOutBuffer.ptr,
+                                                  inhw,
+                                                  expAvgFactor,
+                                                  prevRunningMeanPtr,
+                                                  prevRunningVariancePtr,
+                                                  nextRunningMeanPtr,
+                                                  nextRunningVariancePtr,
+                                                  epsilon);
+            }
+            else
+            {
+                hipKernelFinalMeanVariance.Launch(
+                    handle.getStream(), activationOutBuffer.ptr, inhw, epsilon);
+            }
+            // 3. BatchNormFwdTrainSpatialNorm kernel
+            hipKernelNorm.Launch(handle.getStream(),
+                                 xBuffer.ptr,
+                                 activationOutBuffer.ptr,
+                                 scaleBuffer.ptr,
+                                 biasBuffer.ptr,
+                                 alpha,
+                                 beta);
+        }
     }
     else
     {
@@ -612,6 +725,16 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
 
         if(variant != 2)
         {
+            // Create and configure kernel
+            auto hipKernel = HipKernel(hipProgram, "BatchNormFwdTrainSpatial");
+
+            hipKernel.SetBlockSize(static_cast<unsigned int>(xlocalsize),
+                                   static_cast<unsigned int>(ylocalsize),
+                                   static_cast<unsigned int>(zlocalsize));
+            hipKernel.SetGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
+                                  static_cast<unsigned int>(ygridsize / ylocalsize),
+                                  static_cast<unsigned int>(zgridsize / zlocalsize));
+
             if(_trainingParams.hasSaveMeanVariance() && _trainingParams.hasRunningStats())
             {
                 hipKernel.Launch(handle.getStream(),
@@ -675,7 +798,89 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
                                  beta);
             }
         }
-        // For variant 2, we still need to implement the launch code!
+        else
+        {
+            // Create and configure kernels
+            // For variant 2, we should launch three kernels
+            auto hipKernelMeanVariance
+                = HipKernel(hipProgram, "BatchNormFwdTrainSpatialMeanVariance");
+            auto hipKernelFinalMeanVariance
+                = HipKernel(hipProgram, "BatchNormFwdTrainSpatialFinalMeanVariance");
+            auto hipKernelNorm = HipKernel(hipProgram, "BatchNormFwdTrainSpatialNorm");
+
+            // Set block and grid sizes for the kernels
+            hipKernelMeanVariance.SetBlockSize(static_cast<unsigned int>(xlocalsize),
+                                               static_cast<unsigned int>(ylocalsize),
+                                               static_cast<unsigned int>(zlocalsize));
+            hipKernelMeanVariance.SetGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
+                                              static_cast<unsigned int>(ygridsize / ylocalsize),
+                                              static_cast<unsigned int>(zgridsize / zlocalsize));
+            hipKernelFinalMeanVariance.SetBlockSize(static_cast<unsigned int>(xlocalsize_final),
+                                                    static_cast<unsigned int>(ylocalsize_final),
+                                                    static_cast<unsigned int>(zlocalsize_final));
+            hipKernelFinalMeanVariance.SetGridSize(
+                static_cast<unsigned int>(xgridsize / xlocalsize_final),
+                static_cast<unsigned int>(1),
+                static_cast<unsigned int>(1));
+            hipKernelNorm.SetBlockSize(static_cast<unsigned int>(xlocalsize),
+                                       static_cast<unsigned int>(ylocalsize),
+                                       static_cast<unsigned int>(zlocalsize));
+            hipKernelNorm.SetGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
+                                      static_cast<unsigned int>(ygridsize / ylocalsize),
+                                      static_cast<unsigned int>(zgridsize / zlocalsize));
+
+            // Launch the kernels
+            // 1. BatchNormFwdTrainSpatialMeanVariance kernel
+            hipKernelMeanVariance.Launch(handle.getStream(), xBuffer.ptr, yBuffer.ptr);
+            // 2. BatchNormFwdTrainSpatialFinalMeanVariance kernel
+            if(_trainingParams.hasSaveMeanVariance() && _trainingParams.hasRunningStats())
+            {
+                hipKernelFinalMeanVariance.Launch(handle.getStream(),
+                                                  yBuffer.ptr,
+                                                  inhw,
+                                                  expAvgFactor,
+                                                  prevRunningMeanPtr,
+                                                  prevRunningVariancePtr,
+                                                  nextRunningMeanPtr,
+                                                  nextRunningVariancePtr,
+                                                  epsilon,
+                                                  resultSaveMeanPtr,
+                                                  resultSaveInvVariancePtr);
+            }
+            else if(_trainingParams.hasSaveMeanVariance())
+            {
+                hipKernelFinalMeanVariance.Launch(handle.getStream(),
+                                                  yBuffer.ptr,
+                                                  inhw,
+                                                  epsilon,
+                                                  resultSaveMeanPtr,
+                                                  resultSaveInvVariancePtr);
+            }
+            else if(_trainingParams.hasRunningStats())
+            {
+                hipKernelFinalMeanVariance.Launch(handle.getStream(),
+                                                  yBuffer.ptr,
+                                                  inhw,
+                                                  expAvgFactor,
+                                                  prevRunningMeanPtr,
+                                                  prevRunningVariancePtr,
+                                                  nextRunningMeanPtr,
+                                                  nextRunningVariancePtr,
+                                                  epsilon);
+            }
+            else
+            {
+                hipKernelFinalMeanVariance.Launch(handle.getStream(), yBuffer.ptr, inhw, epsilon);
+            }
+            // 3. BatchNormFwdTrainSpatialNorm kernel
+            hipKernelNorm.Launch(handle.getStream(),
+                                 xBuffer.ptr,
+                                 yBuffer.ptr,
+                                 scaleBuffer.ptr,
+                                 biasBuffer.ptr,
+                                 alpha,
+                                 beta);
+        }
     }
 }
 
