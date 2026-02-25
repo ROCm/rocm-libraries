@@ -138,7 +138,7 @@ void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
         hipMemcpy(&ref.data()[0], reference.weight, weight_bytes_num, hipMemcpyDeviceToHost));
     HIP_CHECK_ERROR(
         hipMemcpy(&wei.data()[0], outputs.weight, weight_bytes_num, hipMemcpyDeviceToHost));
-    ck_tile::check_err(wei, ref, "Error: Incorrect results!");
+    ck_tile::check_err(wei, ref, "\tError: Incorrect results!");
 }
 
 template <auto SIGNATURE>
@@ -187,7 +187,7 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
     int best_split_k;
     bool is_supported;
     float avg_time;
-    bool valid = true;
+    bool all_instances_valid = true;
 
     using DataType =
         std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP32,
@@ -223,12 +223,6 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
             std::tie(is_supported, avg_time, op_name) = run_alg_func(args, inputs, outputs, s_conf);
             if(is_supported)
             {
-                best_avg_time = std::min(best_avg_time, avg_time);
-                best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
-                best_split_k  = best_avg_time < avg_time ? best_split_k : k_batch;
-                std::cout << "Perf: " << std::setw(10) << avg_time << " ms," << " " << op_name
-                          << ", SplitK " << k_batch << std::endl;
-
                 ckt::ValidationReport report;
                 auto&& [rtol, atol] =
                     get_rtol_atol<SIGNATURE>(num_accums, k_batch, max_accumulated_value);
@@ -240,14 +234,26 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
                         report.check(name, desc, outputs.*ptr, reference.get().*ptr, rtol, atol);
                     });
 
-                for(const auto& error : report.get_errors())
+                const bool valid = report.get_errors().empty();
+                if (valid)
                 {
-                    valid = false;
-                    std::cout << "Number of incorrect values: " << error.wrong_elements
-                              << " Is all zero:" << error.is_all_zero()
-                              << " max err: " << error.max_error << std::endl;
-                    // Check with cpu verification to get a values
-                    run_cpu_validation<SIGNATURE>(args, outputs, reference.get());
+                    best_avg_time = std::min(best_avg_time, avg_time);
+                    best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
+                    best_split_k  = best_avg_time < avg_time ? best_split_k : k_batch;
+                    std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms," << " " << op_name
+                            << ", SplitK " << k_batch << std::endl;
+                }
+                else {
+                    std::cout << "[Error] " << op_name << ", SplitK " << k_batch << std::endl;
+                    for(const auto& error : report.get_errors())
+                    {
+                        std::cout << "\tNumber of incorrect values: " << error.wrong_elements
+                                << " Is all zero:" << error.is_all_zero()
+                                << " max err: " << error.max_error << std::endl;
+                        // Check with cpu verification to get a values
+                        run_cpu_validation<SIGNATURE>(args, outputs, reference.get());
+                    }
+                    all_instances_valid = false;
                 }
             }
             else
@@ -278,7 +284,7 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
         std::cout << "Signature not supported" << std::endl;
         return std::make_tuple(false, best_avg_time, best_op_name, best_split_k);
     }
-    return std::make_tuple(valid, best_avg_time, best_op_name, best_split_k);
+    return std::make_tuple(all_instances_valid, best_avg_time, best_op_name, best_split_k);
 }
 
 } // namespace ck_tile::builder::profiling
