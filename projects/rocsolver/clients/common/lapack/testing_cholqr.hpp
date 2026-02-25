@@ -290,51 +290,41 @@ void cholqr_getError(const rocblas_handle handle,
         // Only compute numerical error if factorization succeeded
         if(hInfo[b][0] == 0)
         {
+            // -----------------------
             // Compute Q_gpu^H * Q_gpu using GEMM (should be identity for orthogonal Q)
             // QtQ = Q^H * Q, result is min_mn x min_mn
+            // -----------------------
             std::vector<T> QtQ(size_t(min_mn) * min_mn, T(0));
-            I const ldQtQ = min_mn;
+            std::vector<T> identity(size_t(min_mn) * min_mn, T(0));
 
-            // QtQ <- identity
-            cpu_laset('A', min_mn, min_mn, T(0), T(1), QtQ.data(), ldQtQ);
+            // form identity
+            cpu_laset('A', min_mn, min_mn, T(0), T(1), identity.data(), min_mn);
 
-            // Compute QtQ <-  Q' * Q - identity
-            rocblas_operation transQ = rocblas_operation_conjugate_transpose;
+            // Compute QtQ <-  Q' * Q
             cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, min_mn, min_mn,
-                     m, T(1), hARes[b], lda, hARes[b], lda, T(-1), QtQ.data(), ldQtQ);
+                     m, T(1), hARes[b], lda, hARes[b], lda, T(0), QtQ.data(), min_mn);
 
-            // -----------------------
             // Compute orth_err = norm( Q^H Q - I )
-            // -----------------------
-            S orth_err = snorm('F', min_mn, min_mn, QtQ.data(), ldQtQ);
+            auto orth_err = norm_error('F', min_mn, min_mn, min_mn, identity.data(), QtQ.data());
 
+            // -----------------------
             // Compute Q_gpu * R_gpu using GEMM (should equal original A)
             // QR = Q * R, result is m x n
             // Note: R may have garbage below diagonal from GPU, so extract only upper triangular
-
-            std::vector<T> R_gpu_clean(size_t(ldr) * n, T(0));
-
-            //  ------------------------------
-            //  Copy upper triangular part
-            //  R_gpu_clean = triu( hRRes[b] )
-            //  ------------------------------
-            cpu_lacpy('U', min_mn, min_mn, hRRes[b], ldr, R_gpu_clean.data(), ldr);
-
+            // -----------------------
             std::vector<T> QR(size_t(lda) * n, T(0));
-            I ldQR = lda;
 
-            // -------------------------
-            // compute  QR <-  Q * R - A
-            // -------------------------
-            cpu_lacpy('A', m, n, hA[b], lda, QR.data(), ldQR);
+            //  Copy upper triangular part
+            //  hR = triu( hRRes[b] )
+            cpu_lacpy('U', min_mn, min_mn, hRRes[b], ldr, hR[b], ldr);
 
+            // compute  QR <-  Q * R
             cpu_gemm(rocblas_operation_none, rocblas_operation_none, m, n, min_mn, T(1), hARes[b],
-                     lda, R_gpu_clean.data(), ldr, T(-1), QR.data(), ldQR);
+                     lda, hR[b], ldr, T(0), QR.data(), lda);
 
             // Compute recon_err = norm(A - QR)
             // Note: Must iterate column by column to respect leading dimension lda
-
-            auto recon_err = snorm('F', m, n, QR.data(), ldQR);
+            auto recon_err = norm_error('F', m, n, lda, hA[b], QR.data());
 
             err = std::max(orth_err, recon_err);
             *max_err = err > *max_err ? err : *max_err;
