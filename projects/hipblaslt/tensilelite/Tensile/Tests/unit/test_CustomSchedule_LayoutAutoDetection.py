@@ -41,6 +41,13 @@ def _get_layouts_for(func_name) -> set[str]:
             layouts.add(layout)
     return layouts
 
+def _get_cms_kernel_info_for(func_name):
+    """Get the CMS kernel info for a function from _SCHEDULE_METADATA."""
+    for info in _SCHEDULE_METADATA:
+        if info.name == func_name:
+            yield info
+    return None
+
 class TestLayoutAutoDetection:
     """Tests for automatic supported_layouts detection in RegisterSchedule."""
 
@@ -224,7 +231,6 @@ class TestLayoutAutoDetection:
         for func_name in registered_schedules:
             assert func_name in EXPECTED, f"{func_name} not found in 'EXPECTED' (Please update the 'EXPECTED' layouts in the test if needed)"
             
-
         for name, expected_layouts in EXPECTED.items():
             detected = _get_layouts_for(name)
             assert detected == expected_layouts, \
@@ -264,3 +270,55 @@ class TestLayoutAutoDetection:
                 assert REQUIRED_KEYS.issubset(result.keys())
                 assert result["TransposeA"] == expected_a
                 assert result["TransposeB"] == expected_b
+
+    def test_cms_kernel_info_correctness_for_layouts_and_useLDSTr_and_TLDS(self):
+        """Confirm the correct detection of layouts, useLDSTr, and TLDS in the CMS kernel info."""
+        @RegisterSchedule(
+            tile_config=self.TILE,
+            dtype_predicate=is16bit,
+            vector_widths=[8, 8, 8],
+            matrix_inst=[16, 16, 32, 1],
+            mfma_wave_group=[2, 2],
+        )
+        def _fake_cms(kernel, useLDSTr, TLDS):
+            if isTN(kernel) and TLDS == 1:
+                return True, None
+            if isNN(kernel) and useLDSTr and TLDS == 1:
+                return True, None
+            return False, None
+
+        kernel_infos = [(info.TransposeA, info.TransposeB, info.LDSTrInst, info.TransposeLDS) for info in _get_cms_kernel_info_for("_fake_cms")]
+
+        expected_kernel_infos_detection = {
+            # TransposeA, TransposeB, LDSTrInst, TransposeLDS
+            (True, False, True, 1): True, # TN  (TN and LDSTrInst and TransposeLDS == 1)
+            (True, False, False, 1): True, # TN  (TN and LDSTrInst and TransposeLDS == 1)
+            (True, False, True, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0)  
+            (True, False, False, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0) 
+
+            # TransposeA, TransposeB, LDSTrInst, TransposeLDS
+            (False, False, True, 1): True, # TN  (TN and LDSTrInst and TTransposeLDSLDS == 1)
+            (False, False, False, 1): False, # TN  (TN and LDSTrInst and TransposeLDS == 1)
+            (False, False, True, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0)  
+            (False, False, False, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0) 
+
+            # TransposeA, TransposeB, LDSTrInst, TransposeLDS
+            (False, True, True, 1): False, # NT  (NT and LDSTrInst and TransposeLDS == 1)
+            (False, True, False, 1): False, # NT  (NT and LDSTrInst and TransposeLDS == 1)
+            (False, True, True, 0): False, # NT  (NT and LDSTrInst and TransposeLDS == 0)  
+            (False, True, False, 0): False, # NT  (NT and LDSTrInst and TransposeLDS == 0) 
+
+            # TransposeA, TransposeB, LDSTrInst, TransposeLDS
+            (True, True, True, 1): False, # TT  (TT and LDSTrInst and TransposeLDS == 1)
+            (True, True, False, 1): False, # TT  (TT and LDSTrInst and TransposeLDS == 1)
+            (True, True, True, 0): False, # TT  (TT and LDSTrInst and TransposeLDS == 0)  
+            (True, True, False, 0): False, # TT  (TT and LDSTrInst and TransposeLDS == 0) 
+            
+        }   
+
+        for expected_kernel_info, expected_detection in expected_kernel_infos_detection.items():
+            if expected_detection:
+                assert expected_kernel_info in kernel_infos, f"Kernel support for {expected_kernel_info} (TransposeA, TransposeB, LDSTrInst, TransposeLDS) is not found in kernel_infos"
+            else:
+                assert expected_kernel_info not in kernel_infos, f"Kernel support for {expected_kernel_info} (TransposeA, TransposeB, LDSTrInst, TransposeLDS) is unexpectedly found in kernel_infos"
+            
