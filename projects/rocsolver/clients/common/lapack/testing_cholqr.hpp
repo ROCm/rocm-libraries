@@ -596,7 +596,7 @@ void testing_cholqr(Arguments& argus)
 
     // Use tolerance based on algorithm and problem size
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, 10 * m * n);
+        ROCSOLVER_TEST_CHECK(T, max_error, std::max(m, n));
 
     // output results for rocsolver-bench
     if(argus.timing)
