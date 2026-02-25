@@ -13,10 +13,16 @@ elseif(HIPSPARSELT_ENABLE_BLIS)
     # consolidate the vendoring strategy of BLAS/LAPACK, but remains for historical purposes
     find_package(BLIS REQUIRED)
 endif()
-# find_package(LAPACK) and conditionally fetch it if not found (there is an implicit
-# find_package(BLAS) when finding lapack)
+
+
+# hipblaslt-style: clients require a linkable LAPACK (and LAPACK implies BLAS).
+# Enable Fortran so CMake's FindLAPACK can do its usual compile/link checks.
 if(NOT HIPSPARSELT_ENABLE_THEROCK)
-    include(fetch_lapack)
+    if (NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
+        set(CMAKE_Fortran_COMPILER "gfortran")
+    endif()
+    enable_language(Fortran)
+    find_package(LAPACK REQUIRED)
 endif()
 
 add_library(hipsparselt-clients-common OBJECT)
