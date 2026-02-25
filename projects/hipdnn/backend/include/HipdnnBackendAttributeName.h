@@ -316,15 +316,6 @@ typedef enum
      * @{
      */
 
-    /** @brief Scaling factor alpha for forward convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_ALPHA = 1400,
-
-    /** @brief Scaling factor beta for forward convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_BETA = 1401,
-
-    /** @brief Convolution descriptor for forward convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_CONV_DESC = 1402,
-
     /** @brief Weight tensor for forward convolution */
     HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W = 1403,
 
@@ -338,7 +329,8 @@ typedef enum
 
     /**
      * @name Shared Convolution Descriptor Attributes (1500-1599)
-     * Attributes shared across convolution operation descriptors
+     * Attributes shared across convolution operation descriptors (forward,
+     * dgrad, wgrad). These are set directly on the operation descriptor.
      * @{
      */
 
@@ -359,9 +351,6 @@ typedef enum
 
     /** @brief Pre-padding values for each spatial dimension */
     HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS = 1505,
-
-    /** @brief Number of spatial dimensions */
-    HIPDNN_ATTR_CONVOLUTION_SPATIAL_DIMS = 1506,
 
     /** @} */
 

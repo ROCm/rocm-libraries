@@ -355,6 +355,8 @@ std::string ConvolutionFwdOperationDescriptor::toString() const
     str += ", stride=" + vecToString(_data.stride);
     str += ", dilation=" + vecToString(_data.dilation);
     str += ", conv_mode=" + std::to_string(static_cast<int>(_data.conv_mode));
+    str += ", compute_data_type=";
+    str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
 }

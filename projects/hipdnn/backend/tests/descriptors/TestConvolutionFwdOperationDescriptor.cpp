@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "DescriptorTestUtils.hpp"
-#include "TensorDescriptorTestUtils.hpp"
 #include "HipdnnException.hpp"
+#include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/ConvolutionFwdOperationDescriptor.hpp"
 #include "descriptors/IGraphOperation.hpp"
@@ -642,6 +642,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, ToStringContainsExpectedInfo)
     ASSERT_NE(str.find("x_uid=" + std::to_string(K_TENSOR_X_UID)), std::string::npos);
     ASSERT_NE(str.find("w_uid=" + std::to_string(K_TENSOR_W_UID)), std::string::npos);
     ASSERT_NE(str.find("y_uid=" + std::to_string(K_TENSOR_Y_UID)), std::string::npos);
+    ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
 
 // =============================================================================
