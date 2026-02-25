@@ -937,8 +937,8 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
         print("=== CMS ===")
         syncTable = [
             -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write for iteration == 0"),
-            17, SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1, comment="wait for previous set of global reads"),
-            17, SBarrier(comment=""),
+            18, SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1, comment="wait for previous set of global reads"),
+            18, SBarrier(comment=""),
             40, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
             40, SBarrier(comment=""),
         ]
@@ -948,16 +948,16 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
             'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
 
-            'LRA0': [[0, 0, 0, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 6, 7, 8]],
-            'LRB0': [[9, 9, 11, 11, 13, 13]],
+            'LRA0': [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]],
+            'LRB0': [[9, 10, 11, 12, 13, 14]],
 
-            'GRA': [[3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14]],
+            'GRA': [[6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 13, 14, 15, 16]],
             'GRB': [[27, 27, 28, 28, 29, 29]],
 
             'LRA1': [[19, 19, 21, 21, 23, 23, 25, 25, 31, 31, 33, 33, 35, 35, 37, 37]],
             'LRB1': [[41, 41, 43, 43, 45, 45]],
 
-            'LRSA': [[16, 16, 16, 16]],
+            'LRSA': [[17, 17, 17, 17]],
             'LRSB': [[22]],
             'LWSA': [[39, 39, 39]],
             'LWSB': [[]],
