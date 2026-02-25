@@ -4357,14 +4357,13 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         lwsb   = [                                                                            20]    
     
     elif isNT(kernel) and useLDSTr and TLDS==0  and kernel["VectorWidthA"] == 2 and kernel["VectorWidthB"] == 2:
-        print("=== AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA ===")
         disable_validation = True # swap instructions included in pack are not supported yet
 
         lra0   = [0,0,0,0,
                     1,1,1,1]
         lrb0   = [     3,3,4,4,
                                  6,6,6,6]
-        #                wait then read
+        #              wait then read
         syncs.add(     3, dscnt=4, comment="wait for the first 2x2 LRAs before packing")
         syncs.add(         4, dscnt=2, comment="wait for the rest of LRAs")
         pack_a0 = [    3,3,4,4, # swap instructions, must come after LR and before other packs
