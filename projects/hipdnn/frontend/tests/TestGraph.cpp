@@ -1767,7 +1767,10 @@ TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenGraphCreateFails)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     GraphTestUtils graph;
-    graph.set_name("GraphCreateFail").set_compute_data_type(DataType::FLOAT);
+    graph.set_name("GraphCreateFail")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_TENSOR_X_UID)

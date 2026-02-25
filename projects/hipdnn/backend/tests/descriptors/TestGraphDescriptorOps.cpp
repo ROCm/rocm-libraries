@@ -3,6 +3,7 @@
 
 #include "DescriptorTestUtils.hpp"
 #include "HipdnnException.hpp"
+#include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/ConvolutionFwdOperationDescriptor.hpp"
 #include "descriptors/DataTypeConversion.hpp"

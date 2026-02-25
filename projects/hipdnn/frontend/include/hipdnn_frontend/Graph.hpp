@@ -874,14 +874,20 @@ protected:
         }
 
         // Assemble the graph descriptor from operations
-        HIPDNN_CHECK_ERROR(detail::assembleGraphDescriptor(
-            operations,
-            handle,
-            toHipdnnDataType(graph_attributes.get_compute_data_type()),
-            toHipdnnDataType(graph_attributes.get_intermediate_data_type()),
-            toHipdnnDataType(graph_attributes.get_io_data_type()),
-            _preferredEngineId,
-            _graphDesc));
+        auto computeDt = toHipdnnDataType(graph_attributes.get_compute_data_type());
+        auto intermediateDt = toHipdnnDataType(graph_attributes.get_intermediate_data_type());
+        auto ioDt = toHipdnnDataType(graph_attributes.get_io_data_type());
+        if(!computeDt || !intermediateDt || !ioDt)
+        {
+            return {ErrorCode::INVALID_VALUE, "Unsupported data type in graph attributes"};
+        }
+        HIPDNN_CHECK_ERROR(detail::assembleGraphDescriptor(operations,
+                                                           handle,
+                                                           *computeDt,
+                                                           *intermediateDt,
+                                                           *ioDt,
+                                                           _preferredEngineId,
+                                                           _graphDesc));
 
         return {ErrorCode::OK, ""};
     }
