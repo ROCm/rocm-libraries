@@ -357,6 +357,221 @@ TEST_CASE("GEMM: compute_launch_parameters unit test", "[gemm]") {
   }
 }
 
+TEST_CASE("GEMM: count_unique_range unit test", "[gemm]") {
+  // Test 1: Single tile — range covers exactly one WG
+  {
+    origami::dim4_t grid{1, 4, 8, 1};  // k=1, m=4, n=8, b=1
+    auto u = origami::count_unique_range(grid, 8, 0, 1);
+    REQUIRE(u.m == 1);
+    REQUIRE(u.n == 1);
+    REQUIRE(u.k == 1);
+    REQUIRE(u.b == 1);
+  }
+
+  // Test 2: Full grid coverage — all tiles
+  {
+    origami::dim4_t grid{1, 4, 8, 1};
+    auto u = origami::count_unique_range(grid, 8, 0, 32);
+    REQUIRE(u.m == 4);
+    REQUIRE(u.n == 8);
+    REQUIRE(u.k == 1);
+    REQUIRE(u.b == 1);
+  }
+
+  // Test 3: Within one slab (wgm=4), partial M
+  {
+    origami::dim4_t grid{1, 8, 16, 1};  // k=1, m=8, n=16, b=1
+    auto u = origami::count_unique_range(grid, 4, 0, 3);
+    REQUIRE(u.m == 1);
+    REQUIRE(u.n == 3);
+    REQUIRE(u.k == 1);
+  }
+
+  // Test 4: Within one slab, spans multiple rows
+  {
+    origami::dim4_t grid{1, 8, 16, 1};
+    // wgm=4: slab has 8*4=32 tiles. IDs 0..7 = row0 cols 0-3, row1 cols 0-3
+    auto u = origami::count_unique_range(grid, 4, 0, 8);
+    REQUIRE(u.m == 2);
+    REQUIRE(u.n == 4);  // full slab width
+  }
+
+  // Test 5: Across two slabs
+  {
+    origami::dim4_t grid{1, 4, 8, 1};
+    // wgm=4: slab0 has 4*4=16 tiles (cols 0-3), slab1 has 16 tiles (cols 4-7)
+    auto u = origami::count_unique_range(grid, 4, 14, 4);
+    REQUIRE(u.m >= 1);
+    REQUIRE(u.n >= 2);  // spans across slab boundary
+  }
+
+  // Test 6: K-split dimension
+  {
+    origami::dim4_t grid{4, 2, 2, 1};  // k=4 splits, m=2, n=2, b=1
+    // First 4 IDs = same MN tile, different K splits
+    auto u = origami::count_unique_range(grid, 2, 0, 4);
+    REQUIRE(u.m == 1);
+    REQUIRE(u.n == 1);
+    REQUIRE(u.k == 4);
+  }
+
+  // Test 7: K-split spanning multiple MN tiles -> all K covered
+  {
+    origami::dim4_t grid{4, 2, 2, 1};
+    auto u = origami::count_unique_range(grid, 2, 0, 5);
+    REQUIRE(u.k == 4);  // crossed MN boundary, all K touched
+  }
+
+  // Test 8: Batch dimension
+  {
+    origami::dim4_t grid{1, 4, 4, 3};  // k=1, m=4, n=4, b=3
+    // 16 tiles per batch, 48 total. Range covering 2 batches:
+    auto u = origami::count_unique_range(grid, 4, 0, 32);
+    REQUIRE(u.b == 2);
+    REQUIRE(u.m == 4);  // multiple batches -> full M
+    REQUIRE(u.n == 4);  // multiple batches -> full N
+  }
+
+  // Test 9: wgm=1 (column-first, each slab is 1 column)
+  {
+    origami::dim4_t grid{1, 4, 8, 1};
+    auto u = origami::count_unique_range(grid, 1, 0, 4);
+    REQUIRE(u.m == 4);  // 4 rows in one column
+    REQUIRE(u.n == 1);  // single column slab
+  }
+
+}
+
+TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
+  // Test 1: Simple 2x4 grid, wgm=4 (single slab covers all N)
+  {
+    origami::dim4_t grid{1, 2, 4, 1};
+    origami::workgroup_mapping_t wgm{0, 0, 4};
+    // slab_width=4, tiles_per_slab=2*4=8. All 8 tiles in one slab.
+    // offset 0: m=0,n=0  offset 1: m=0,n=1  offset 2: m=0,n=2  offset 3: m=0,n=3
+    // offset 4: m=1,n=0  offset 5: m=1,n=1  offset 6: m=1,n=2  offset 7: m=1,n=3
+    auto t0 = origami::wgm_to_grid(grid, wgm, 0);
+    REQUIRE(t0.m == 0); REQUIRE(t0.n == 0); REQUIRE(t0.k == 0); REQUIRE(t0.b == 0);
+    auto t3 = origami::wgm_to_grid(grid, wgm, 3);
+    REQUIRE(t3.m == 0); REQUIRE(t3.n == 3);
+    auto t4 = origami::wgm_to_grid(grid, wgm, 4);
+    REQUIRE(t4.m == 1); REQUIRE(t4.n == 0);
+    auto t7 = origami::wgm_to_grid(grid, wgm, 7);
+    REQUIRE(t7.m == 1); REQUIRE(t7.n == 3);
+  }
+
+  // Test 2: Two slabs — 4x6 grid, wgm=3
+  {
+    origami::dim4_t grid{1, 4, 6, 1};
+    origami::workgroup_mapping_t wgm{0, 0, 3};
+    // slab0 (cols 0-2): 4*3=12 tiles, slab1 (cols 3-5): 12 tiles
+    auto t0  = origami::wgm_to_grid(grid, wgm, 0);
+    REQUIRE(t0.m == 0); REQUIRE(t0.n == 0);
+    auto t2  = origami::wgm_to_grid(grid, wgm, 2);
+    REQUIRE(t2.m == 0); REQUIRE(t2.n == 2);
+    auto t3  = origami::wgm_to_grid(grid, wgm, 3);
+    REQUIRE(t3.m == 1); REQUIRE(t3.n == 0);
+    auto t11 = origami::wgm_to_grid(grid, wgm, 11);
+    REQUIRE(t11.m == 3); REQUIRE(t11.n == 2);
+    // slab1 starts at id=12
+    auto t12 = origami::wgm_to_grid(grid, wgm, 12);
+    REQUIRE(t12.m == 0); REQUIRE(t12.n == 3);
+    auto t23 = origami::wgm_to_grid(grid, wgm, 23);
+    REQUIRE(t23.m == 3); REQUIRE(t23.n == 5);
+  }
+
+  // Test 3: K-splits — each MN tile has k splits
+  {
+    origami::dim4_t grid{4, 2, 3, 1};  // k=4, m=2, n=3, b=1
+    origami::workgroup_mapping_t wgm{0, 0, 3};
+    // First MN tile (m=0,n=0) has ids 0..3 (k=0..3)
+    auto t0 = origami::wgm_to_grid(grid, wgm, 0);
+    REQUIRE(t0.m == 0); REQUIRE(t0.n == 0); REQUIRE(t0.k == 0);
+    auto t3 = origami::wgm_to_grid(grid, wgm, 3);
+    REQUIRE(t3.m == 0); REQUIRE(t3.n == 0); REQUIRE(t3.k == 3);
+    // Second MN tile (m=0,n=1) starts at id=4
+    auto t4 = origami::wgm_to_grid(grid, wgm, 4);
+    REQUIRE(t4.m == 0); REQUIRE(t4.n == 1); REQUIRE(t4.k == 0);
+  }
+
+  // Test 4: Batch dimension
+  {
+    origami::dim4_t grid{1, 2, 2, 3};  // k=1, m=2, n=2, b=3
+    origami::workgroup_mapping_t wgm{0, 0, 2};
+    // 4 tiles per batch. batch 0: ids 0-3, batch 1: ids 4-7, batch 2: ids 8-11
+    auto t0 = origami::wgm_to_grid(grid, wgm, 0);
+    REQUIRE(t0.b == 0); REQUIRE(t0.m == 0); REQUIRE(t0.n == 0);
+    auto t4 = origami::wgm_to_grid(grid, wgm, 4);
+    REQUIRE(t4.b == 1); REQUIRE(t4.m == 0); REQUIRE(t4.n == 0);
+    auto t11 = origami::wgm_to_grid(grid, wgm, 11);
+    REQUIRE(t11.b == 2); REQUIRE(t11.m == 1); REQUIRE(t11.n == 1);
+  }
+
+  // Test 5: WGMXCC interleaving
+  {
+    origami::dim4_t grid{1, 4, 4, 1};  // 16 tiles total
+    origami::workgroup_mapping_t wgm_xcc{0, 8, 4};  // wgmxcc=8
+    origami::workgroup_mapping_t wgm_no{0, 0, 4};    // no xcc
+
+    // With WGMXCC, consecutive IDs should map to different XCD groups.
+    // ID 0 and ID 1 should land in different XCD regions.
+    auto t0_xcc = origami::wgm_to_grid(grid, wgm_xcc, 0);
+    auto t1_xcc = origami::wgm_to_grid(grid, wgm_xcc, 1);
+    auto t0_no  = origami::wgm_to_grid(grid, wgm_no, 0);
+
+    // Without WGMXCC, id 0 and 1 are adjacent; with WGMXCC they're spread apart
+    REQUIRE(t0_xcc.m == t0_no.m);
+    REQUIRE(t0_xcc.n == t0_no.n);
+    // id=1 with xcc should NOT be the same as id=1 without xcc (it gets remapped)
+    auto t1_no = origami::wgm_to_grid(grid, wgm_no, 1);
+    bool same = (t1_xcc.m == t1_no.m && t1_xcc.n == t1_no.n);
+    REQUIRE_FALSE(same);
+  }
+
+  // Test 6: wgm=1 — each slab is one column, M varies fastest
+  {
+    origami::dim4_t grid{1, 4, 3, 1};
+    origami::workgroup_mapping_t wgm{0, 0, 1};
+    // slab_width=1, tiles_per_slab=4. Col 0: ids 0-3, col 1: ids 4-7, col 2: ids 8-11
+    auto t0 = origami::wgm_to_grid(grid, wgm, 0);
+    REQUIRE(t0.m == 0); REQUIRE(t0.n == 0);
+    auto t3 = origami::wgm_to_grid(grid, wgm, 3);
+    REQUIRE(t3.m == 3); REQUIRE(t3.n == 0);
+    auto t4 = origami::wgm_to_grid(grid, wgm, 4);
+    REQUIRE(t4.m == 0); REQUIRE(t4.n == 1);
+  }
+
+  // Test 7: Remainder slab — grid.n not divisible by wgm
+  {
+    origami::dim4_t grid{1, 3, 5, 1};  // 5 cols, wgm=2 -> 2 full slabs + remainder of 1
+    origami::workgroup_mapping_t wgm{0, 0, 2};
+    // slab0: cols 0,1 (6 tiles), slab1: cols 2,3 (6 tiles), remainder: col 4 (3 tiles)
+    auto t12 = origami::wgm_to_grid(grid, wgm, 12);
+    REQUIRE(t12.m == 0); REQUIRE(t12.n == 4);
+    auto t14 = origami::wgm_to_grid(grid, wgm, 14);
+    REQUIRE(t14.m == 2); REQUIRE(t14.n == 4);
+  }
+
+  // Test 8: Brute-force 'bijection' test — every id maps to a unique (m,n,k,b) and back
+  {
+    origami::dim4_t grid{2, 3, 4, 2};
+    origami::workgroup_mapping_t wgm{0, 0, 2};
+    size_t total = grid.total();
+
+    std::set<std::tuple<size_t,size_t,size_t,size_t>> seen;
+    for (size_t id = 0; id < total; ++id) {
+      auto t = origami::wgm_to_grid(grid, wgm, id);
+      REQUIRE(t.m < grid.m);
+      REQUIRE(t.n < grid.n);
+      REQUIRE(t.k < grid.k);
+      REQUIRE(t.b < grid.b);
+      auto key = std::make_tuple(t.m, t.n, t.k, t.b);
+      REQUIRE(seen.count(key) == 0);
+      seen.insert(key);
+    }
+    REQUIRE(seen.size() == total);
+  }
+}
 
 TEST_CASE("GEMM: compute_mall_tiles unit test", "[gemm]") {
   // Test 1: Basic case — all CUs fit in one slab
@@ -882,6 +1097,102 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
       CHECK(u.m == 8);
       CHECK(u.n == 4);
       CHECK(u.b == 1);
+    }
+  }
+
+  SECTION("Zero/degenerate inputs return zeros") {
+    CHECK(origami::count_unique_tiles({1, 4, 4, 1}, {0, 8, 4}, 0, 8, 0, 0).m == 0);
+    CHECK(origami::count_unique_tiles({1, 4, 4, 1}, {0, 8, 4}, 256, 0, 0, 0).m == 0);
+    CHECK(origami::count_unique_tiles({1, 0, 4, 1}, {0, 8, 4}, 256, 8, 0, 0).m == 0);
+    CHECK(origami::count_unique_tiles({0, 4, 4, 1}, {0, 8, 4}, 256, 8, 0, 0).k == 0);
+  }
+
+  SECTION("Timestep beyond available tiles returns zeros") {
+    // 16 tiles total, 256 CUs -> 1 timestep. Timestep 1 should be empty.
+    origami::dim4_t grid{1, 4, 4, 1};
+    auto u = origami::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 1);
+    CHECK(u.m == 0);
+    CHECK(u.n == 0);
+    CHECK(u.k == 0);
+    CHECK(u.b == 0);
+  }
+
+  SECTION("Single tile grid — all XCDs see at most 1 tile") {
+    origami::dim4_t grid{1, 1, 1, 1};
+    auto u0 = origami::count_unique_tiles(grid, {0, 1, 1}, N_CU, num_xcd, 0, 0);
+    CHECK(u0.m == 1);
+    CHECK(u0.n == 1);
+    CHECK(u0.k == 1);
+    CHECK(u0.b == 1);
+    // XCD 1 should get nothing (only 1 tile, XCD 0 gets it)
+    auto u1 = origami::count_unique_tiles(grid, {0, 1, 1}, N_CU, num_xcd, 1, 0);
+    CHECK(u1.m == 0);
+  }
+
+  SECTION("Round-robin: large grid, all MN tiles covered per XCD") {
+    // 32x32 grid = 1024 tiles, 256 CUs, 8 XCDs -> 32 tiles/XCD.
+    // stride=8 across 1024 MN tiles -> each XCD sees many M and N values.
+    origami::dim4_t grid{1, 32, 32, 1};
+    auto u = origami::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 0);
+    CHECK(u.k == 1);
+    CHECK(u.m >= 1);
+    CHECK(u.m <= 32);
+    CHECK(u.n >= 1);
+    CHECK(u.n <= 32);
+    CHECK(u.b == 1);
+  }
+
+  SECTION("Round-robin: stride aligns with grid.k") {
+    // grid.k=8, stride=8 -> gcd=8, unique_k = 8/8 = 1.
+    // Each XCD sees a single K-split but many MN tiles.
+    origami::dim4_t grid{8, 4, 4, 1};
+    auto u = origami::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 0);
+    CHECK(u.k == 1);
+    CHECK(u.m >= 1);
+    CHECK(u.n >= 1);
+  }
+
+  SECTION("Round-robin: stride coprime with grid.k") {
+    // grid.k=3, stride=8 -> gcd(8,3)=1, unique_k = 3/1 = 3 (all K-splits).
+    origami::dim4_t grid{3, 4, 4, 1};
+    auto u = origami::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 0);
+    CHECK(u.k == 3);
+  }
+
+  SECTION("WGMXCC: last XCD gets correct tiles") {
+    // 256 tiles, 8 XCDs -> 32 per XCD. Last XCD starts at 7*32=224.
+    origami::dim4_t grid{1, 16, 16, 1};
+    auto u_first = origami::count_unique_tiles(grid, {0, 8, 4}, N_CU, num_xcd, 0, 0);
+    auto u_last  = origami::count_unique_tiles(grid, {0, 8, 4}, N_CU, num_xcd, 7, 0);
+    // Both should get same structure with symmetric grid
+    CHECK(u_first.k == u_last.k);
+    CHECK(u_first.b == u_last.b);
+    // M/N may differ since they're at different positions, but should be valid
+    CHECK(u_last.m >= 1);
+    CHECK(u_last.m <= 16);
+    CHECK(u_last.n >= 1);
+    CHECK(u_last.n <= 16);
+  }
+
+  SECTION("Unique counts never exceed grid dimensions") {
+    // Fuzz-like: various grid shapes should never produce out-of-range results
+    std::vector<origami::dim4_t> grids = {
+        {1, 3, 7, 1}, {4, 5, 5, 2}, {1, 1, 64, 1}, {1, 64, 1, 1},
+        {8, 4, 4, 4}, {1, 16, 16, 1}, {2, 8, 8, 3}
+    };
+    std::vector<origami::workgroup_mapping_t> wgms = {
+        {0, 8, 1}, {0, 8, 4}, {0, 8, 8}, {0, 1, 1}, {0, 0, 6}
+    };
+    for (auto& g : grids) {
+      for (auto& w : wgms) {
+        for (size_t xcd = 0; xcd < num_xcd; ++xcd) {
+          auto u = origami::count_unique_tiles(g, w, N_CU, num_xcd, xcd, 0);
+          CHECK(u.m <= g.m);
+          CHECK(u.n <= g.n);
+          CHECK(u.k <= g.k);
+          CHECK(u.b <= g.b);
+        }
+      }
     }
   }
 }

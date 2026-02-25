@@ -185,7 +185,7 @@ NB_MODULE(origami, m) {
                           const origami::config_t&>())
       .def_rw("grid_m", &origami::context_t::grid_m)
       .def_rw("grid_n", &origami::context_t::grid_n)
-      .def_rw("num_tiles", &origami::context_t::num_tiles)
+      .def_rw("num_output_tiles", &origami::context_t::num_output_tiles)
       .def_rw("reduction_strategy", &origami::context_t::reduction_strategy)
       .def_rw("splitting_factor", &origami::context_t::splitting_factor)
       .def_rw("num_wgs", &origami::context_t::num_wgs)

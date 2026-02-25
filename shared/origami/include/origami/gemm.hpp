@@ -18,34 +18,38 @@ namespace origami {
  * values computed from problem, config, and hardware.
  */
 struct context_t {
+  /// Element sizes
+  size_t a_bytes = 0;
+  size_t b_bytes = 0;
+  size_t d_bytes = 0;
+
   /// Grid dimensions.
   size_t grid_m    = 0;
   size_t grid_n    = 0;
-  size_t num_tiles = 0;
+  size_t num_output_tiles = 0;
 
   /// Launch parameters.
   reduction_t reduction_strategy = reduction_t::none;
-  size_t splitting_factor        = 1;
+  size_t splitting_factor        = 0;
   size_t num_wgs                 = 0;
-  size_t num_timesteps           = 1;
+  size_t num_timesteps           = 0;
 
   /// Hardware-derived values.
-  size_t active_cus          = 0;
-  double mem_bw_limited      = 0.0;
+  size_t active_cus           = 0;
+  double mem_bw_limited       = 0.0;
   double write_mem_bw_limited = 0.0;
 
   /// Tile-derived values.
+  size_t k_per_split       = 0;
+  size_t k_iters           = 0;
   size_t tile_elements     = 0;
   size_t output_tile_bytes = 0;
 
   /// Workgroup mapping parameters.
   workgroup_mapping_t wgm{0, 8, 1};
 
-  /// Cache tile dimensions.
-  size_t mall_tile_m = 0;
-  size_t mall_tile_n = 0;
-  size_t l2_tile_m   = 0;
-  size_t l2_tile_n   = 0;
+  /// Debug flag (cached from runtime_options to avoid repeated singleton lookups).
+  bool debug = false;
 
   /// Default constructor.
   context_t() = default;
@@ -58,6 +62,13 @@ struct context_t {
    * @param config Kernel configuration.
    */
   context_t(const problem_t& problem, const hardware_t& hardware, const config_t& config);
+
+  /**
+   * @brief Check if the context is valid.
+   *
+   * @return bool True if the context is valid, false otherwise.
+   */
+  bool is_valid() const;
 };
 
 /**
@@ -198,6 +209,20 @@ std::pair<size_t, size_t> compute_l2_tiles(const problem_t& problem,
  * @return dim4_t 4D tile coordinate.
  */
 dim4_t wgm_to_grid(const dim4_t& grid, const workgroup_mapping_t& wgm_mapping, size_t id);
+
+/**
+ * @brief Count unique tile coordinates touched by a contiguous range of workgroup IDs.
+ *
+ * Computes how many distinct rows (m), columns (n), K-splits (k), and batches (b)
+ * appear in the range [start, start+count) under raw dispatch order (no WGMXCC).
+ *
+ * @param grid Grid dimensions (k, m, n, b).
+ * @param wgm WGM slab width (absolute value).
+ * @param start First workgroup ID in the range.
+ * @param count Number of workgroups in the range.
+ * @return dim4_t Unique tile counts in each dimension.
+ */
+ dim4_t count_unique_range(const dim4_t& grid, size_t wgm, size_t start, size_t count);
 
 /**
  * @brief Count unique tiles for a specific XCD during a specific timestep.
