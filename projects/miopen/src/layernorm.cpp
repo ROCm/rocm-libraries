@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include "miopen/layernorm/problem_description.hpp"
 #include <miopen/find_solution.hpp>
 #include <miopen/float_equal.hpp>
 #include <miopen/kernel_cache.hpp>
@@ -33,6 +34,16 @@
 #include <miopen/tensor.hpp>
 
 namespace miopen {
+
+namespace layernorm {
+miopen::PerformanceDb GetDb(const miopen::ExecutionContext& context,
+                            const miopen::layernorm::ProblemDescriptionTag&)
+{
+    return {DbKinds::PerfDb,
+            context.GetPerfDbPath("layernorm"),
+            context.GetUserPerfDbPath("layernorm")};
+}
+} // namespace layernorm
 
 miopenStatus_t LayerNormForward(const Handle& handle,
                                 const TensorDescriptor& xDesc,
@@ -67,6 +78,9 @@ miopenStatus_t LayerNormForward(const Handle& handle,
         tmp.epsilon        = epsilon;
         tmp.normalized_dim = normalized_dim;
         tmp.mode           = mode;
+        tmp.stride         = problem.stride;
+        tmp.outer_size     = problem.outer_size;
+        tmp.inner_size     = problem.inner_size;
         return tmp;
     }();
 
@@ -144,10 +158,11 @@ miopenStatus_t LayerNormBackward(const Handle& handle,
                                                        normalized_dim};
 
     const auto invoke_params = [&]() {
-        auto tmp      = layernorm::BwdInvokeParams{};
-        tmp.type      = InvokeType::Run;
-        tmp.dyDesc    = &dyDesc;
-        tmp.workspace = workspace, tmp.workspace_size = workspaceSizeInBytes;
+        auto tmp           = layernorm::BwdInvokeParams{};
+        tmp.type           = InvokeType::Run;
+        tmp.dyDesc         = &dyDesc;
+        tmp.workspace      = workspace;
+        tmp.workspace_size = workspaceSizeInBytes;
         tmp.dy             = dy;
         tmp.x              = x;
         tmp.weight         = weight;
@@ -158,6 +173,9 @@ miopenStatus_t LayerNormBackward(const Handle& handle,
         tmp.db             = db;
         tmp.mode           = mode;
         tmp.normalized_dim = normalized_dim;
+        tmp.stride         = problem.stride;
+        tmp.outer_size     = problem.outer_size;
+        tmp.inner_size     = problem.inner_size;
         return tmp;
     }();
 
