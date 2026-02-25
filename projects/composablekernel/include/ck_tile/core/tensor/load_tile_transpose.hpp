@@ -423,6 +423,10 @@ CK_TILE_DEVICE void load_tile_transpose_with_offset(
     static_assert(std::is_same_v<decltype(make_static_tile_distribution(OutTileDstrEncode{})),
                                  remove_cvref_t<decltype(output_distr)>>);
 
+    // Check that the datatype of out_tensor matches that of the bottom tensor view.
+    static_assert(std::is_same_v<typename DistributedTensor_::DataType,
+                                 typename BottomTensorView_::DataType>);
+
     constexpr auto y_in_desc  = input_distr.get_ys_to_d_descriptor();
     constexpr auto y_out_desc = output_distr.get_ys_to_d_descriptor();
 
