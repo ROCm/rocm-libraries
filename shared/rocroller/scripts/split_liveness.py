@@ -5,6 +5,8 @@ Split a liveness file into separate files for each kind of register.
 The individual output files alternate between the liveness state and the
 instruction. This is much easier to view, especially with word wrapping
 disabled.
+
+It's recommended to view the output files with line wrapping OFF.
 """
 
 import argparse
@@ -65,6 +67,8 @@ if __name__ == "__main__":
         splits = split_lines(f)
 
     for k, v in splits.items():
-        with open(args.output_dir / new_name(args.fname, k), "w") as f:
+        new_file = args.output_dir / new_name(args.fname, k)
+        with open(new_file, "w") as f:
             for line in v:
                 f.write(line + '\n')
+        print(f"Wrote {new_file}")
