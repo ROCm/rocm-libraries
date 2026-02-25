@@ -48,6 +48,7 @@ The following libraries are automatically managed by CMake (see [Dependencies.cm
 - [FlatBuffers](https://github.com/google/flatbuffers) - Serialization library
 - [Google Test](https://github.com/google/googletest) - Unit testing framework
 - [spdlog](https://github.com/gabime/spdlog) - Logging library
+- [nlohmann_json](https://github.com/nlohmann/json) - JSON serialization (optional, see [Disabling JSON Support](#disabling-json-support))
 
 ## Quick Start Guide
 
@@ -126,6 +127,13 @@ ninja check
 # Build without plugins
 cmake -GNinja -DHIPDNN_BUILD_PLUGINS=OFF ..
 ```
+
+### Disabling JSON Support
+By default, hipDNN includes JSON serialization support via [nlohmann_json](https://github.com/nlohmann/json). To build without the nlohmann_json dependency:
+```bash
+cmake -GNinja -DHIPDNN_FRONTEND_SKIP_JSON_LIB=ON ..
+```
+This disables JSON-based graph serialization and deserialization. FlatBuffer-based serialization remains available.
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
 
