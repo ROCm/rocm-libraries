@@ -32,14 +32,14 @@ from Tensile.Components.CMSValidator import isValid
 from Tensile.Common import IsaVersion
 
 
-def _get_layouts_for(func_name):
+def _get_layouts_for(func_name) -> set[str]:
     """Collect unique layout strings for a function from _SCHEDULE_METADATA."""
     layouts = set()
     for info in _SCHEDULE_METADATA:
         if info.name == func_name:
             layout = ("T" if info.TransposeA else "N") + ("T" if info.TransposeB else "N")
             layouts.add(layout)
-    return sorted(layouts)
+    return layouts
 
 class TestLayoutAutoDetection:
     """Tests for automatic supported_layouts detection in RegisterSchedule."""
@@ -70,7 +70,7 @@ class TestLayoutAutoDetection:
                 return True, None
             return False, None
 
-        assert _get_layouts_for("_fake_tn_only") == ["TN"]
+        assert _get_layouts_for("_fake_tn_only") == {"TN"}
 
     def test_detect_tn_and_nn(self):
         """A function that handles TN and NN should detect both."""
@@ -88,7 +88,7 @@ class TestLayoutAutoDetection:
                 return True, None
             return False, None
 
-        assert _get_layouts_for("_fake_tn_nn") == ["NN", "TN"]
+        assert _get_layouts_for("_fake_tn_nn") == {"NN", "TN"}
 
     def test_detect_all_four_layouts(self):
         """A function that handles all four layouts should detect all four."""
@@ -110,11 +110,11 @@ class TestLayoutAutoDetection:
                 return True, None
             return False, None
 
-        assert _get_layouts_for("_fake_all_layouts") == ["NN", "NT", "TN", "TT"]
+        assert _get_layouts_for("_fake_all_layouts") == {"NN", "NT", "TN", "TT"}
 
-        assert get_available_layouts(dtype="16bit") == ["NN", "NT", "TN", "TT"]
+        assert get_available_layouts(dtype="16bit") == {"NN", "NT", "TN", "TT"}
 
-        assert get_available_layouts() == ["NN", "NT", "TN", "TT"]
+        assert get_available_layouts() == {"NN", "NT", "TN", "TT"}
 
     def test_detect_no_layouts(self):
         """A function that always returns False should detect no layouts."""
@@ -128,7 +128,7 @@ class TestLayoutAutoDetection:
         def _fake_no_layouts(kernel, useLDSTr, TLDS):
             return False, None
 
-        assert _get_layouts_for("_fake_no_layouts") == []
+        assert _get_layouts_for("_fake_no_layouts") == set()
 
     def test_mutation_isolation(self):
         """Kernel mutations in one probe must not leak into another probe."""
@@ -149,7 +149,7 @@ class TestLayoutAutoDetection:
                 return True, None
             return False, None
 
-        assert _get_layouts_for("_fake_mutating") == ["NN", "TN"]
+        assert _get_layouts_for("_fake_mutating") == {"NN", "TN"}
 
     def test_detect_layouts_logs_on_value_error(self, capsys):
         """When the inner function raises ValueError, the probe should log a warning and skip that combo."""
@@ -167,7 +167,7 @@ class TestLayoutAutoDetection:
                 return True, None
             return False, None
 
-        assert _get_layouts_for("_fake_raises_on_nt") == ["TN"]
+        assert _get_layouts_for("_fake_raises_on_nt") == {"TN"}
 
         captured = capsys.readouterr()
 
@@ -177,42 +177,53 @@ class TestLayoutAutoDetection:
     def test_consistency_with_existing_schedules(self):
         """Auto-detected layouts must match the previously hand-declared layouts for all existing schedules."""
         EXPECTED = {
-            "_get_schedule_256x96x64_16bit": ["NN", "TN"],
-            "_get_schedule_192x256x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_256x192x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_256x256x128_8bit": ["TN"],
-            "_get_schedule_256x256x64_16bit": ["NN", "NT", "TN", "TT"],
-            "_get_schedule_160x256x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_96x256x64_16bit": ["NT", "TN"],
-            "_get_schedule_256x160x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_256x240x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_256x208x64_16bit": ["NN", "TN"],
-            "_get_schedule_192x128x64_16bit": ["TN"],
-            "_get_schedule_224x128x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_224x256x64_16bit": ["NT", "TN"],
-            "_get_schedule_192x320x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_256x224x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_320x192x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_240x256x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_208x256x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_128x224x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_128x192x64_16bit": ["TN"],
-            "_get_schedule_128x192x32_TF32": ["TN"],
-            "_get_schedule_192x256x32_TF32": ["NN", "TN"],
-            "_get_schedule_256x192x32_TF32": ["NN", "TN"],
-            "_get_schedule_256x256x32_TF32": ["TN"],
-            "_get_schedule_192x128x32_TF32": ["TN"],
-            "_get_schedule_128x128x32_TF32": ["TN"],
-            "_get_schedule_128x128x32_TF32_plr1": ["TN"], #["NN", "TN"], # NN is disabled due to test fail. TODO: re-enable this
-            "_get_schedule_128x128x64_TF32": ["NN", "TN"],
-            "_get_schedule_128x256x32_TF32": ["TN"],
-            "_get_schedule_128x160x64_TF32": ["TN"],
-            "_get_schedule_256x128x32_TF32": ["TN"],
-            "_get_schedule_64x128x64_TF32": ["TN"],
-            "_get_schedule_128x64x64_TF32": ["TN"],
-            "_get_schedule_160x128x64_TF32": ["NN", "TN"],
-            "_get_schedule_128x256x64_16bit": ["NN"],
+            "_get_schedule_256x96x64_16bit": {"NN", "TN"},
+            "_get_schedule_192x256x64_16bit": {"NN", "NT", "TN"},
+            "_get_schedule_256x192x64_16bit": {"NN", "NT", "TN"},
+            "_get_schedule_256x256x128_8bit": {"TN"},
+            "_get_schedule_256x256x64_16bit": {"NN", "NT", "TN", "TT"},
+            "_get_schedule_160x256x64_16bit": {"NN", "NT", "TN"},
+            "_get_schedule_96x256x64_16bit": {"NT", "TN"},
+            "_get_schedule_256x160x64_16bit": {"NN", "NT", "TN"},
+            "_get_schedule_256x240x64_16bit": {"NN", "NT", "TN"},
+            "_get_schedule_256x208x64_16bit": {"NN", "TN"},
+            "_get_schedule_192x128x64_16bit": {"TN"},
+            "_get_schedule_224x128x64_16bit": {"NN", "NT", "TN"},
+            "_get_schedule_224x256x64_16bit": {"NT", "TN"},
+            "_get_schedule_192x320x64_16bit": {"NN", "NT", "TN"},
+            "_get_schedule_256x224x64_16bit": {"NN", "NT", "TN"},
+            "_get_schedule_320x192x64_16bit": {"NN", "NT", "TN"},
+            "_get_schedule_240x256x64_16bit": {"NN", "NT", "TN"},
+            "_get_schedule_208x256x64_16bit": {"NN", "NT", "TN"},
+            "_get_schedule_128x224x64_16bit": {"NN", "NT", "TN"},
+            "_get_schedule_128x192x64_16bit": {"TN"},
+            "_get_schedule_128x192x32_TF32": {"TN"},
+            "_get_schedule_192x256x32_TF32": {"NN", "TN"},
+            "_get_schedule_256x192x32_TF32": {"NN", "TN"},
+            "_get_schedule_256x256x32_TF32": {"TN"},
+            "_get_schedule_192x128x32_TF32": {"TN"},
+            "_get_schedule_128x128x32_TF32": {"TN"},
+            "_get_schedule_128x128x32_TF32_plr1": {"TN"}, #{"NN", "TN"}, # NN is disabled due to test fail. TODO: re-enable this
+            "_get_schedule_128x128x64_TF32": {"NN", "TN"},
+            "_get_schedule_128x256x32_TF32": {"TN"},
+            "_get_schedule_128x160x64_TF32": {"TN"},
+            "_get_schedule_256x128x32_TF32": {"TN"},
+            "_get_schedule_64x128x64_TF32": {"TN"},
+            "_get_schedule_128x64x64_TF32": {"TN"},
+            "_get_schedule_160x128x64_TF32": {"NN", "TN"},
+            "_get_schedule_128x256x64_16bit": {"NN"},
         }
+
+        registered_schedules = {info.name for info in _SCHEDULE_METADATA}
+
+        # Confirm we have all the expected schedules in the registry
+        for func_name in EXPECTED:
+            assert func_name in registered_schedules, f"{func_name} not found in _SCHEDULE_REGISTRY (Please update the expected layouts in the test if needed)"
+        
+        # Confirm we have all the registered schedules in the expected layouts
+        for func_name in registered_schedules:
+            assert func_name in EXPECTED, f"{func_name} not found in 'EXPECTED' (Please update the 'EXPECTED' layouts in the test if needed)"
+            
 
         for name, expected_layouts in EXPECTED.items():
             detected = _get_layouts_for(name)
@@ -225,7 +236,7 @@ class TestLayoutAutoDetection:
 
     def test_cms_api_query(self):
         """Test the CMS API query function."""
-        REQUIRED_KEYS = {"name", "dtype", "TransposeA", "TransposeB",
+        REQUIRED_KEYS = {"name", "dtype", "TransposeA", "TransposeB", "LDSTrInst", "TransposeLDS",
                          "MacroTile0", "MacroTile1", "DepthU"}
 
         results = query_cms_kernels()

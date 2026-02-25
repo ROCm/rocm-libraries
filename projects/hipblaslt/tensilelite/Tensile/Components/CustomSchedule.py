@@ -40,7 +40,7 @@ from Tensile.Common.Utilities import printWarning
 from Tensile.Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, Tuple
 from enum import Enum, auto
 import Tensile.Components.CMSValidator as cmsv
 from typing import Callable
@@ -561,7 +561,7 @@ def get_available_dtypes() -> list[str]:
     return sorted({info.dtype for info in _SCHEDULE_METADATA})
 
 
-def get_available_layouts(dtype: Optional[str] = None) -> list[str]:
+def get_available_layouts(dtype: Optional[str] = None) -> set[str]:
     """Return a sorted list of all layout strings available for the given data type.
 
     Args:
@@ -577,7 +577,7 @@ def get_available_layouts(dtype: Optional[str] = None) -> list[str]:
     for info in _SCHEDULE_METADATA:
         if dtype is None or info.dtype.lower() == dtype.lower():
             layouts.add(as_str(info.TransposeA) + as_str(info.TransposeB))
-    return sorted(layouts)
+    return layouts
 
 @CallableGuard
 def isNN(kernel):
