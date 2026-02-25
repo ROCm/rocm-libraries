@@ -1018,7 +1018,6 @@ class LocalReadMFMA(LocalRead):
                                     else:
                                         highBitsForHalf = False
                                         isHigh16Bits = False
-                                        #Case A
                                         if kernel["UnrollMajorLDS%s"%tc]:
                                             cvtTimes = int(blockWidth * writer.states.bpr // tP["bpeDS"]) // MIInputPerThUnroll
                                             for i in range(0, cvtTimes):
@@ -1050,7 +1049,6 @@ class LocalReadMFMA(LocalRead):
                                                                             sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
                                                     packCodeT.add(VCvtF32toF16(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+0+offset*2)), src=vgpr("CvtTemp+1"),\
                                                                             sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
-                                        #Case B
                                         elif (writer.states.lrvwTileA == 1 and tc == 'A') or (writer.states.lrvwTileB == 1 and tc == 'B'):
                                             sdwa = SDWAModifiers(dst_sel=SelectBit.WORD_0) if (rIdx % 2 == 0) else SDWAModifiers(dst_sel=SelectBit.WORD_1)
                                             destVgpr   = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, int(valufIdx*2)), numVgpr)
@@ -1069,7 +1067,6 @@ class LocalReadMFMA(LocalRead):
                                             else:
                                                 packCodeT.add(VCvtFP8toF32(dst=destVgpr, src=destVgpr, sdwa=SDWAModifiers(src0_sel=SelectBit.BYTE_0)))
                                                 packCodeT.add(VCvtF32toF16(dst=CvtDstVgpr, src=destVgpr, sdwa=sdwa, comment="Convert to FP16"))
-                                        #Case C
                                         elif (writer.states.lrvwTileA == 2 and tc == 'A') or (writer.states.lrvwTileB == 2 and tc == 'B'):
                                             if needPack or numSplitMetadata:
                                                 destVgpr = vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, rIdx%(MIInputPerThUnroll), vIdx*numVgpr), numVgpr)
@@ -1096,7 +1093,6 @@ class LocalReadMFMA(LocalRead):
                                                                                     src2=sgpr("PackKForV%u"%vectorIdx), \
                                                                                     comment="select K=%u%u for vector=%u"%(elementIdx*2,  elementIdx*2+1, vectorIdx)))
                                                                 vgprOffset += 1
-                                        #Case D
                                         elif (writer.states.lrvwTileA == 4 and tc == 'A') or (writer.states.lrvwTileB == 4 and tc == 'B'):
                                             if needPack or numSplitMetadata:
                                                 destVgpr = vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, rIdx%(MIInputPerThUnroll), 2 * vIdx * numVgpr), numVgpr)
@@ -1128,7 +1124,6 @@ class LocalReadMFMA(LocalRead):
                                                                                     src2=sgpr("PackKForV%u"%vectorIdx), \
                                                                                     comment="select K=%u%u for vector=%u"%(elementIdx*2,  elementIdx*2+1, vectorIdx)))
                                                                 vgprOffset += 1
-                                        #Case E
                                         elif (writer.states.lrvwTileA == 8 and tc == 'A') or (writer.states.lrvwTileB == 8 and tc == 'B'):
                                             if needPack or numSplitMetadata:
                                                 destVgpr = vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, rIdx%(MIInputPerThUnroll), 2*vIdx*numVgpr), numVgpr)
