@@ -2756,8 +2756,6 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
             34, SBarrier(comment="Barrier before GRA"),
             
             46, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for 3 LRB0s to complete"),
-            86, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0s to complete"),
-            86, SBarrier(comment="Barrier before GRB"),
             
             87, SWaitCnt(dscnt=0, vlcnt=17, vscnt=-1, comment="wait for previous GRA to complete"),
             87, SBarrier(comment="Barrier before LRA1"),
