@@ -320,19 +320,11 @@ struct UniversalGemmBasePolicy
     template <typename Problem>
     CK_TILE_DEVICE static constexpr auto MakeBLdsBlockDescriptor()
     {
-<<<<<<< HEAD
-        using BLayout   = remove_cvref_t<typename Problem::BLayout>;
-        using BDataType = if_select_v<typename Problem::BDataType,
-                                      pk_fp4_raw_t,
-                                      typename Problem::ADataType,
-                                      typename Problem::BDataType>;
-=======
         using BLayout                              = remove_cvref_t<typename Problem::BLayout>;
         constexpr bool IsBCastPolicyBeforeLDSWrite = IsBCastPolicyBeforeLDSWrite_v<Problem>;
         using BDataType                            = std::conditional_t<IsBCastPolicyBeforeLDSWrite,
                                                                         typename Problem::ADataType,
                                                                         typename Problem::BDataType>;
->>>>>>> develop
 
         constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
@@ -616,17 +608,10 @@ struct UniversalGemmBasePolicy
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
         using BLayout               = remove_cvref_t<std::tuple_element_t<number<0>{}, BsLayout>>;
 
-<<<<<<< HEAD
-        using BDataType = if_select_v<BInDataType,
-                                      pk_fp4_raw_t,
-                                      typename Problem::ADataType,
-                                      typename Problem::BDataType>;
-=======
         constexpr bool IsBCastPolicyBeforeLDSWrite = IsBCastPolicyBeforeLDSWrite_v<Problem>;
         using BDataType                            = std::conditional_t<IsBCastPolicyBeforeLDSWrite,
                                                                         typename Problem::ADataType,
                                                                         typename Problem::BDataType>;
->>>>>>> develop
 
         if constexpr(Problem::FixedVectorSize)
         {
@@ -884,17 +869,10 @@ struct UniversalGemmBasePolicy
     template <typename Problem>
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeB()
     {
-<<<<<<< HEAD
-        using BDataType                 = if_select_v<typename Problem::BDataType,
-                                                      pk_fp4_raw_t,
-                                                      typename Problem::ADataType,
-                                                      typename Problem::BDataType>;
-=======
         constexpr bool IsBCastPolicyBeforeLDSWrite = IsBCastPolicyBeforeLDSWrite_v<Problem>;
         using BDataType                            = std::conditional_t<IsBCastPolicyBeforeLDSWrite,
                                                                         typename Problem::ADataType,
                                                                         typename Problem::BDataType>;
->>>>>>> develop
         constexpr auto b_lds_block_desc = Derived::template MakeBLdsBlockDescriptor<Problem>();
         constexpr index_t smem_size_b   = integer_least_multiple(
             b_lds_block_desc.get_element_space_size() * sizeof(BDataType), 16);

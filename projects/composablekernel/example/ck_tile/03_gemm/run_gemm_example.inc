@@ -433,7 +433,7 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
 
         ADataTypeBuf* d_A = static_cast<ADataTypeBuf*>(a_m_k_dev_buf.GetDeviceBuffer());
         BDataTypeBuf* d_B = static_cast<BDataTypeBuf*>(b_k_n_dev_buf.GetDeviceBuffer());
-        CDataType* d_C = static_cast<CDataType*>(c_m_n_gpu_buf_ref.GetDeviceBuffer());
+        CDataType* d_C    = static_cast<CDataType*>(c_m_n_gpu_buf_ref.GetDeviceBuffer());
 
         ck_tile::reference_gemm_gpu<ADataTypeCompute,
                                     BDataTypeCompute,
