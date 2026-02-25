@@ -2748,7 +2748,7 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
     
     if isTN(kernel) and TLDS==1:
         syncTable = [
-            -1, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=5 newLW=0 newLR=5 for iteration == 0"),
+            -1, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=5 newLW=0 newLR=5 for iteration == 0"),
             14, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="wait for 5 LRA0s to complete"),
             25, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for next 4 LRA0s to complete"),
             
@@ -2759,11 +2759,10 @@ def _get_schedule_352x192x64_16bit(kernel, useLDSTr, TLDS):
             86, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0s to complete"),
             86, SBarrier(comment="Barrier before GRB"),
             
-            87, SWaitCnt(dscnt=-1, vlcnt=17, vscnt=-1, comment="wait for previous GRA to complete"),
+            87, SWaitCnt(dscnt=0, vlcnt=17, vscnt=-1, comment="wait for previous GRA to complete"),
             87, SBarrier(comment="Barrier before LRA1"),
             118, SWaitCnt(dscnt=-1, vlcnt=12, vscnt=-1, comment="wait for previous GRB to complete"),
             118, SBarrier(comment="Barrier before LRB1"),
-            131, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prev LRB1s to complete"),
         ]
         
         optSchedule = {
