@@ -120,7 +120,7 @@ struct Runner
         if constexpr(
             std::is_same_v<
                 InTypeA,
-                hipblaslt_f4x2> || std::is_same_v<InTypeA, hipblaslt_f6x16> || std::is_same_v<InTypeB, hipblaslt_bf6x16>)
+                hipblaslt_f4x2> || std::is_same_v<InTypeA, hipblaslt_f6x16> || std::is_same_v<InTypeA, hipblaslt_bf6x16>)
         {
             using type = InTypeA;
             a_factor   = type::packed_size;
@@ -157,10 +157,18 @@ struct Runner
 
         if(max_workspace_size > 0)
             CHECK_HIP_ERROR(hipMalloc(&d_workspace, max_workspace_size));
-        if constexpr(std::is_same_v<InTypeA,
-                                    hipblaslt_f6x16> || std::is_same_v<InTypeB, hipblaslt_f4x2>)
+        if constexpr(
+            std::is_same_v<
+                InTypeA,
+                hipblaslt_f4x2> || std::is_same_v<InTypeA, hipblaslt_f6x16> || std::is_same_v<InTypeA, hipblaslt_bf6x16>)
         {
             init(static_cast<InTypeA*>(a), m * k * batch_count);
+        }
+        if constexpr(
+            std::is_same_v<
+                InTypeB,
+                hipblaslt_f4x2> || std::is_same_v<InTypeB, hipblaslt_f6x16> || std::is_same_v<InTypeB, hipblaslt_bf6x16>)
+        {
             init(static_cast<InTypeB*>(b), n * k * batch_count);
         }
         for(int i = 0; i < m * n * batch_count; i++)
