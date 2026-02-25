@@ -904,9 +904,8 @@ class TestCustomScheduleTF32:
         "transA, transB, lds_tr_inst,  tr_lds,  plr,  vwa,       mi    , ncp", [
         (  True,  False,       False,       1,  1,   None, [16,16,32,1],   1),
         (  True,  False,       False,       1,  1,   None, [32,32,16,1],   1),
-        # disable TF32 NN 128x128x32 unit test until fail issue is resolved (TODO: re-enable it)
-        #(  False, False,       False,       1,  1,      2, [32,32,16,1],   2),
-        #(  False, False,        True,       1,  1,      2, [32,32,16,1],   2),
+        (  False, False,       False,       1,  1,      2, [32,32,16,1],   2),
+        (  False, False,        True,       1,  1,      2, [32,32,16,1],   2),
         # fmt: on
         ])
     def test_schedule_128x128x32(self, transA, transB, lds_tr_inst, tr_lds, plr, vwa, mi, ncp):
