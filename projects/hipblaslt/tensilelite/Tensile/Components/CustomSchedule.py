@@ -55,7 +55,6 @@ class ScheduleMatchStatus(Enum):
 # Global registry for schedule functions
 _SCHEDULE_REGISTRY = []
 
-# Global registry for schedule metadata (parallel to _SCHEDULE_REGISTRY)
 _SCHEDULE_METADATA: list["CMSKernelInfo"] = []
 
 # Map dtype predicate functions to human-readable names
@@ -92,7 +91,7 @@ class CMSKernelInfo:
     MatrixInstruction: list[int]
     MIWaveGroup: list[int]
     LDSTrInst: bool
-    TransposeLDS: bool
+    TransposeLDS: int
     TransposeA: bool
     TransposeB: bool
 
@@ -718,7 +717,7 @@ class RegisterSchedule:
             "MfmaInitCVgprs": False,
         }
 
-    def _detect_supported_layouts(self, func: Callable) -> list[str]:
+    def _detect_supported_layouts(self, func: Callable) -> list[Tuple[bool, bool, bool, int]]:
         """Probe the inner function to discover which layouts it actually handles."""
         def as_str(transpose: bool) -> str:
             return "T" if transpose else "N"
