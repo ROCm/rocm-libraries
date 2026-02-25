@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,9 @@
 #include "test_utils.hpp"
 
 #include <cstdint>
+
+// The 128-bit atomic store and atomic load are disabled for these targets.
+#if !defined(ROCPRIM_TARGET_UNKNOWN) && !defined(ROCPRIM_TARGET_SPIRV)
 
 template<typename GetPtr>
 ROCPRIM_INLINE ROCPRIM_DEVICE
@@ -158,6 +161,7 @@ TEST(RocprimAtomicTests, Global128Bits)
         {
             HIP_CHECK(hipMemset(d_ptr.get(), 0, sizeof(rocprim::uint128_t)));
             test_global<<<grid_size, block_size>>>(d_ptr.get(), d_error, d_input, size);
+            HIP_CHECK(hipGetLastError());
         });
 }
 
@@ -165,7 +169,10 @@ TEST(RocprimAtomicTests, Shared128Bits)
 {
     generic_atomic_test(
         [&](auto block_size, auto grid_size, auto* d_error, auto* d_input, auto size)
-        { test_shared<<<grid_size, block_size>>>(d_error, d_input, size); });
+        {
+            test_shared<<<grid_size, block_size>>>(d_error, d_input, size);
+            HIP_CHECK(hipGetLastError());
+        });
 }
 
 TEST(RocprimAtomicTests, Flat128Bits)
@@ -176,5 +183,7 @@ TEST(RocprimAtomicTests, Flat128Bits)
         {
             HIP_CHECK(hipMemset(d_ptr.get(), 0, sizeof(rocprim::uint128_t)));
             test_flat<<<grid_size, block_size>>>(d_ptr.get(), d_error, d_input, size);
+            HIP_CHECK(hipGetLastError());
         });
 }
+#endif

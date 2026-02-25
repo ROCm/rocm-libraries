@@ -5,9 +5,8 @@
 
 #include <algorithm>
 #include <array>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <numeric>
 #include <thread>
 #include <tuple>
@@ -16,17 +15,19 @@
 
 namespace hipdnn_test_sdk::detail
 {
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
 
-// Type trait to validate tensor types (arithmetic types + half + hip_bfloat16)
+// Type trait to validate tensor types (arithmetic types + half + bfloat16)
 template <typename T>
-constexpr bool IS_VALID_TENSOR_TYPE_V = std::
-    disjunction_v<std::is_arithmetic<T>, std::is_same<T, half>, std::is_same<T, hip_bfloat16>>;
+constexpr bool IS_VALID_TENSOR_TYPE_V
+    = std::disjunction_v<std::is_arithmetic<T>, std::is_same<T, half>, std::is_same<T, bfloat16>>;
 
 /**
  * @brief Safely convert between types while avoiding implicit precision loss warnings
  *
  * This function handles type conversions that may trigger compiler warnings about
- * implicit precision loss, particularly when converting from double to hip_bfloat16
+ * implicit precision loss, particularly when converting from double to bfloat16
  * or half. It makes the conversion path explicit to eliminate warnings.
  *
  * @tparam TargetType The type to convert to
@@ -37,10 +38,10 @@ constexpr bool IS_VALID_TENSOR_TYPE_V = std::
 template <typename TargetType, typename SourceType>
 inline TargetType safeConvert(const SourceType& value)
 {
-    if constexpr(std::is_same_v<TargetType, hip_bfloat16>)
+    if constexpr(std::is_same_v<TargetType, bfloat16>)
     {
-        // For hip_bfloat16, explicitly convert through float to avoid precision warnings
-        // hip_bfloat16 lacks direct constructor from double, only from float
+        // For bfloat16, explicitly convert through float to avoid precision warnings
+        // bfloat16 lacks direct constructor from double, only from float
         return static_cast<TargetType>(static_cast<float>(value));
     }
     else if constexpr(std::is_same_v<TargetType, half>)

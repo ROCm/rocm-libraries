@@ -6,15 +6,14 @@ include(CMakePackageConfigHelpers)
 # Version handling
 hipdnn_setup_version(hipdnn_data_sdk)
 
+# Set project with version
+project(hipdnn_data_sdk VERSION ${HIPDNN_DATA_SDK_VERSION} LANGUAGES CXX)
+
 set(HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/data_sdk")
 set(HIP_DNN_DATA_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
-hipdnn_add_dependency(spdlog VERSION ${HIPDNN_SPDLOG_VERSION})
 hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
-
-find_package(fmt ${HIPDNN_FMTLIB_VERSION} QUIET)
-find_package(hip REQUIRED)
 
 # For dependencies we are going to check if they weren't imported, and then install it along with
 # the SDK headers to allow it to work for local builds that want to install. If the dependecy is
@@ -85,12 +84,6 @@ if(TARGET FlatBuffers)
     )
 endif()
 
-# Process spdlog dependency
-_hipdnn_data_sdk_process_dependency(
-    spdlog_header_only spdlog::spdlog_header_only INCLUDE_DIR ${HIP_DNN_SPDLOG_INCLUDE_DIR}
-    INCLUDE_SUBDIR spdlog
-)
-
 # Process nlohmann_json dependency
 _hipdnn_data_sdk_process_dependency(
     nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
@@ -104,9 +97,6 @@ hipdnn_generate_version_header(hipdnn_data_sdk)
 # Add includes from dependency targets
 hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
 hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
-
-target_link_libraries(hipdnn_data_sdk INTERFACE hip::host)
-target_compile_definitions(hipdnn_data_sdk INTERFACE __HIP_PLATFORM_AMD__)
 
 target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>
@@ -159,10 +149,6 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
 
     add_dependencies(hipdnn_data_sdk generate_hipdnn_data_sdk_headers)
 endif()
-
-# __HIPCC__ is required to use hip/hip_fp16.h and hip/hip_bfloat16.h
-# This allows non-hipcc compilers to use these HIP type headers
-target_compile_definitions(hipdnn_data_sdk INTERFACE __HIPCC__)
 
 export(TARGETS hipdnn_data_sdk ${_hipdnn_data_sdk_local_export_targets}
        FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkTargets.cmake"

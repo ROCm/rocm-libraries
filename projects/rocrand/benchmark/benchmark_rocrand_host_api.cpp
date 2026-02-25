@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@
 #include <vector>
 
 #ifndef DEFAULT_RAND_N
-const size_t DEFAULT_RAND_N = 1024 * 1024 * 128;
+const size_t DEFAULT_RAND_N = 1024 * 1024 * 512;
 #endif
 
 typedef rocrand_rng_type rng_type_t;
@@ -212,7 +212,7 @@ int main(int argc, char* argv[])
     };
 
     const std::map<rng_type_t, std::vector<rocrand_ordering>> benchmarked_orderings{
-  // clang-format off
+        // clang-format off
         {          ROCRAND_RNG_PSEUDO_MTGP32,
             {ROCRAND_ORDERING_PSEUDO_DEFAULT, ROCRAND_ORDERING_PSEUDO_DYNAMIC}},
         {         ROCRAND_RNG_PSEUDO_MT19937, {ROCRAND_ORDERING_PSEUDO_DEFAULT}},
@@ -238,7 +238,7 @@ int main(int argc, char* argv[])
         {ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32,  {ROCRAND_ORDERING_QUASI_DEFAULT}},
         {          ROCRAND_RNG_QUASI_SOBOL64,  {ROCRAND_ORDERING_QUASI_DEFAULT}},
         {ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64,  {ROCRAND_ORDERING_QUASI_DEFAULT}},
-  // clang-format on
+        // clang-format on
     };
 
     const std::string benchmark_name_prefix = "device_generate";

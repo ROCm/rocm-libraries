@@ -19,7 +19,7 @@ types:
   scale_B: Separate
   scaleType_B: E8M0
   scaleBlockSize: 32
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
   scaleShuffleTileA:
     []
   scaleShuffleTileB:
@@ -66,7 +66,7 @@ types:
   scale_B: Separate
   scaleType_B: E8M0
   scaleBlockSize: 32
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
   scaleShuffleTileA:
     []
   scaleShuffleTileB:

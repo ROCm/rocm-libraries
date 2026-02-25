@@ -1596,7 +1596,7 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.a.numVgprLocalReadAddr > 0:
       module.add(self.lraSwapAddressesForDTLPad(kernel, tPA))
       module.add(self.lraAddressesInitFor3LDSBlk(kernel, tPA, False, True))
-      
+
     if self.states.b.numVgprLocalReadAddr > 0:
       module.add(self.lraSwapAddressesForDTLPad(kernel, tPB))
       module.add(self.lraAddressesInitFor3LDSBlk(kernel, tPB, False, True))
@@ -3169,7 +3169,6 @@ class KernelWriterAssembly(KernelWriter):
                 module.add(singleModule)
     # DTVA/B always go this way, including swizzled
     elif (not swapPerpPara):
-      #module.add(self.graFinalOffsetsSingleLoopGNLC(kernel, tP, tc))
       if kernel["UseGeneralizedNLCOne%s"%tc] and not self.states.inTailLoop:
         module.add(self.graFinalOffsetsSingleLoopGNLC(kernel, tP, tc))
       else:
@@ -3261,6 +3260,7 @@ class KernelWriterAssembly(KernelWriter):
     perpStride = abMatrixInfo.gNLCPerpStride
     permBlock = abMatrixInfo.gNLCPermBlock
     usePerpPerm = perpStride > 1
+    perpBlockSize = abMatrixInfo.gRDtlSwizzlePerpBlockSize
 
     tmpv = self.vgprPool.checkOutAligned(2,2)
     tmpv2 = self.vgprPool.checkOut(1)
@@ -3298,6 +3298,7 @@ class KernelWriterAssembly(KernelWriter):
       strideChar = 'L' if tc == 'A' else 'K'
       grov = "GlobalReadOffset%s+%u" % (tc, perp)
       # Compute division
+      # tmpv = vgprSerial // divsor
       if useMagicDiv:
         if ee > 0:
           module.add(VLShiftRightB32(dst=vgpr(tmpv2), shiftHex=ee, src=vgpr(grov), comment="division"))
@@ -3311,6 +3312,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VLShiftRightB32(dst=vgpr(tmpv), shiftHex=log2(divsor), src=vgpr(grov), comment="division"))
 
       # Compute remainder
+      # tmpv2 = vgprSerial % divsor
       if useMagicDiv:
         module.add(VMulLOU32(dst=vgpr(tmpv2), src0=sgpr(tmps2), src1=vgpr(tmpv)))
         module.add(VLShiftLeftB32(dst=vgpr(tmpv2), shiftHex=ee, src=vgpr(tmpv2), comment="remainder"))
@@ -3336,6 +3338,39 @@ class KernelWriterAssembly(KernelWriter):
         module.addComment0("Done computing strided(%u) perp indices"%perpStride)
         self.vgprPool.checkIn(reMap0)
         self.vgprPool.checkIn(reMap1)
+
+      applyRotation = perpBlockSize > 0
+      bS = abMatrixInfo.gRDtlSwizzleParaBlockSize
+      if applyRotation:
+        # ntc = numThreadsCoalecsed
+        # tmpv2 = serial % ntc
+        # tmpv = serial / ntc
+        tmpv3 = self.vgprPool.checkOut(1)
+        tmpv4 = self.vgprPool.checkOut(1)
+        # For TLU=0, apply an index rotation (with wrap-around) in the parallel dimension for a fix blocksize (=MI_K)
+        # in the summation dimension.
+        # ex: Given thread ID indices: [0,1,2,3,4,5,6,7, 8,9,10,..., 16,...., 24,..., 32,...., 40,....]
+        # where threads 0-7 loads row/col 1, threads 8-15 loads row/col 2, ...
+        # we rotate the indices as follows:
+        #    [0,1,2,3,4,5,6,7,  15,8,9,10,11,12,13,14, 22,23,16,17,18,19,20,21, ...]
+        #
+        # rotated index is computed by: new_idx = ((bS - off) + idx) % bS where off is the amount to rotate
+        #
+        module.addComment0("Apply index rotation in parallel dim")
+        # Computes {0,1,2,..bS-1, 0,1,2,..bS-1, ...}
+        module.add(VAndB32(dst=vgpr(tmpv3), src0=hex(bS - 1), src1=vgpr(tmpv2)))
+        module.add(VLShiftRightB32(dst=vgpr(tmpv4), shiftHex=log2(perpBlockSize), src=vgpr(tmpv)))
+        module.add(VAndB32(dst=vgpr(tmpv4), src0=hex(bS - 1), src1=vgpr(tmpv4)))
+        module.add(VSubU32(dst=vgpr(tmpv4), src0=bS, src1=vgpr(tmpv4)))
+        module.add(VAddU32(dst=vgpr(tmpv3), src0=vgpr(tmpv2), src1=vgpr(tmpv4)))
+        module.add(VAndB32(dst=vgpr(tmpv3), src0=hex(bS - 1), src1=vgpr(tmpv3)))
+        # Compute subgroup ids of each {0,...bS-1}
+        module.add(VLShiftRightB32(dst=vgpr(tmpv4), shiftHex=log2(bS), src=vgpr(tmpv2)))
+        with self.allocTmpSgpr(1) as tmpSgprInfo:
+          module.add(vectorStaticMultiplyAdd(vgpr(tmpv2), vgpr(tmpv4), bS, vgpr(tmpv3), tmpSgprInfo))
+
+        self.vgprPool.checkIn(tmpv3)
+        self.vgprPool.checkIn(tmpv4)
 
       stride = "Strides%s"%(tc)
       module.add(VLShiftLeftB32(dst=vgpr(grov), shiftHex=log2(kernel["GlobalReadVectorWidth%c"%tc]), src=vgpr(tmpv2)))
@@ -6047,7 +6082,7 @@ class KernelWriterAssembly(KernelWriter):
           toPGR1 = Label.getFormatting(self.labels.getName("toPGR1"))
           module.add(SCBranchSCC1(labelName=toPGR1, comment="PGR=2 but only 1 loop, toPGR1"))
         if kernel["PrefetchGlobalRead"] >= 3:
-          # early exit 1 (2<=loopCounter<=PGR-1) to second NGLL (no need GR Inc)  
+          # early exit 1 (2<=loopCounter<=PGR-1) to second NGLL (no need GR Inc)
           endCounter = kernel["PrefetchGlobalRead"]-1
           module.add(SCmpLeU32(
               src0=loopCounter, \
@@ -6057,7 +6092,7 @@ class KernelWriterAssembly(KernelWriter):
           jumpLabel = Label("NoGlobalLoadLoop_%d"%remainPgr, "")
           module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
                     comment="do not enter Loop%s"%loopChar ))
-          # early exit 2 (loopCounter==PGR) to first NGLL (need GR Inc)  
+          # early exit 2 (loopCounter==PGR) to first NGLL (need GR Inc)
           endCounter = kernel["PrefetchGlobalRead"]
           module.add(SCmpLeU32(
               src0=loopCounter, \
@@ -6764,7 +6799,6 @@ class KernelWriterAssembly(KernelWriter):
     numVgprValuPerBlock = kernel["MIWaveTile%c"%tc] * kernel["MIInputPerThread%c"%tc] * tP["bpe"] // self.states.bpr
     numIterPerCoalescedRead = self.states.numIterPerCoalescedReadA if tP["isA"] else self.states.numIterPerCoalescedReadB
     numReadsIterCoalesced   = self.states.numReadsIterCoalescedA   if tP["isA"] else self.states.numReadsIterCoalescedB
-    useDirect32XEmulation   = self.states.a.useDirect32XEmulation  if tP["isA"] else self.states.b.useDirect32XEmulation
 
     # calculate vgprBufferA_new ( or B) and offset for DirectToVgpr. Use u instead of m (number of local prefetch buffer does not matter)
     m_or_u = u if kernel["DirectToVgpr%c"%tc] else m
@@ -6783,7 +6817,7 @@ class KernelWriterAssembly(KernelWriter):
     iui_new_offset = iui%numReadsIterCoalesced*vgprPerInput
     ab_new = idxAB*vgprPerInput*numReadsIterCoalesced
     abStr = "Valu%c_X%u_I%u+%u+%u+%u" % (tc, vgprBuffer_new, iui_new, ab_new, vgprBuffer_new_offset, iui_new_offset)
-    if useDirect32XEmulation:
+    if statesAorB.useDirect32XEmulationThis or statesAorB.useDirect32XEmulationNext:
       lrvwTile = self.states.lrvwTileA if tP["isA"] else self.states.lrvwTileB
       component = Component.LocalRead.find(self)
       # tranpose case, we do ShiftK -> cnv -> MFMA
@@ -6796,9 +6830,9 @@ class KernelWriterAssembly(KernelWriter):
         idx += bk
         bk = None
       if shiftK:
-        abStr = component.getVgprStrForEmu(self, kernel, tc, vgprBuffer_new, iui_new, idx, lrvwTile)
+        abStr = component.getVgprStrForEmuMfma(self, kernel, tc, vgprBuffer_new, iui_new, idx, lrvwTile, u)
       else:
-        abStr = component.getVgprStrForEmu(self, kernel, tc, vgprBuffer_new, iui_new, idx, lrvwTile, dst=True)
+        abStr = component.getVgprStrForEmuMfma(self, kernel, tc, vgprBuffer_new, iui_new, idx, lrvwTile, u, dst=True)
       # need to add dummy for after string conversion
       abStr += "+0+0"
 
@@ -11773,20 +11807,20 @@ class KernelWriterAssembly(KernelWriter):
   def generateActivationModules(self, kernel, activation, activationLabelList, activationEnumStrList,
                                  activationSetPCStruct, tmpVgpr, actPCGwvwVgpr, actTempSgpr):
     module = Module("ActivationModules")
-    
+
     assert activationEnumStrList and activationSetPCStruct
-    
+
     for key, activationLabelModules in activationLabelList.items():
       gwvw = key
       actModules = Module(getActFuncModuleName(gwvw, \
         activationSetPCStruct.vgprActCopy, tmpVgpr.idx, actTempSgpr))
-      
+
       for index, activationLabelModule in enumerate(activationLabelModules):
         actModule = Module(activationLabelModule.getLabelName())
         actModule.add(activationLabelModule)
         activationTypeStr = activationEnumStrList[index]
         vgprIdx = activationSetPCStruct.vgprActCopy
-        
+
         if self.insertActivationAfterPacked(kernel, activationTypeStr):
           actModule.appendModule(self.getActivationDestDataType(kernel, activation, \
             activationTypeStr, gwvw, vgprIdx, vgprIdx, (tmpVgpr.idx + actPCGwvwVgpr), \
@@ -11795,12 +11829,12 @@ class KernelWriterAssembly(KernelWriter):
           actModule.appendModule(self.getActivationActivationComputeType(kernel, activation, \
             activationTypeStr, gwvw, vgprIdx, vgprIdx, (tmpVgpr.idx + actPCGwvwVgpr), \
             actTempSgpr))
-        
+
         actModule.add(SSetPCB64(src=sgpr(activationSetPCStruct.sgprOffsetBack,2)))
         actModules.add(actModule)
-      
+
       module.add(actModules)
-        
+
     return module
 
   ##############################################################################
@@ -11907,7 +11941,7 @@ class KernelWriterAssembly(KernelWriter):
       currentInstLength += 1
 
       betaModules.add(betaModule, pos=0)
-    
+
     return betaModules, currentInstLength
 
   ##############################################################################
@@ -11917,7 +11951,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def checkBetaBranchExceeds(self, kernel, betas, betaModules, writeLabels):
     module = Module("BetaBranchCheck")
-    
+
     # Check if branch exceeds
     if False in betas and True in betas:
       isBetaLongBranch = False
@@ -11928,7 +11962,7 @@ class KernelWriterAssembly(KernelWriter):
           isBetaLongBranch = True
         with self.allocTmpSgpr(3 if isBetaLongBranch else 1) as tmpSgprInfo:
           module.add(self.checkIsBetaZero(kernel, tmpSgprInfo, writeLabels[1]["Label"], isBetaLongBranch, posNeg=1))
-    
+
     return module
 
   ##############################################################################
@@ -12098,7 +12132,7 @@ class KernelWriterAssembly(KernelWriter):
     if (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel'):
       reductionStartLabel = Label(self.labels.getNameInc("Reduction_Start"), comment="Reduction start")
       reductionEndLabel = Label(self.labels.getNameInc("Reduction_End"), comment="Reduction end")
-      
+
     skBackup           = kernel["StreamK"]
     gsuBackup          = kernel["GlobalSplitU"]
     gsuAccumBackup     = kernel["_GlobalAccumulation"]
@@ -12689,7 +12723,7 @@ class KernelWriterAssembly(KernelWriter):
 
       # Check if branch exceeds and add beta zero check
       betaBranchCheckModule = self.checkBetaBranchExceeds(kernel, betas, betaModules, writeLabels)
-    
+
       # Append the beta modules to the main module
       module.appendModule(betaBranchCheckModule)
       module.appendModule(betaModules)
