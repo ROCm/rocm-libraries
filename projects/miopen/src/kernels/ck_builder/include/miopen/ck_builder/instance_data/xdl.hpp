@@ -127,6 +127,18 @@ constexpr XdlInstance DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle(
     // 49. Groups to merge
     std::size_t num_conv_groups_to_merge = 1)
 {
+    // TODO: ds_layouts and ds_data_types are not yet stored in the instance data but will be used
+    // in future work. They are present now so that the parameter list aligns with the original CK
+    // template this function is based on.
+    static_assert(NumDTensor == 0,
+                  "ds_layouts and ds_data_types are not yet stored in instance data");
+    (void)ds_layouts;
+    (void)ds_data_types;
+
+    // cshuffle_data_type is not stored because CK Builder derives it internally from the primary
+    // data type (see TileConvTensorTypes in conv_tile_tensor_type.hpp).
+    (void)cshuffle_data_type;
+
     // Our project auto-formatting makes this initializer hard to read
     // clang-format off
     return XdlInstance{

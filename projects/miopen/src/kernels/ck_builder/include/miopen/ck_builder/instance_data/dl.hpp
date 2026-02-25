@@ -148,6 +148,14 @@ constexpr DlInstance DeviceGroupedConvFwdDlMultipleD_NHWC_KYXC_NHWK(
     std::size_t c_thread_transfer_src_dst_vector_dim,
     std::size_t c_thread_transfer_dst_scalar_per_vector)
 {
+    // TODO: ds_layouts and ds_data_types are not yet stored in the instance data but will be used
+    // in future work. They are present now so that the parameter list aligns with the original CK
+    // template this function is based on.
+    static_assert(NumDTensor == 0,
+                  "ds_layouts and ds_data_types are not yet stored in instance data");
+    (void)ds_data_types;
+    (void)ds_layouts;
+
     // Our project auto-formatting makes this initializer hard to read
     // clang-format off
     return DlInstance{

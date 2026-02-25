@@ -185,8 +185,6 @@ add_library(ck_builder STATIC
     static_tests/grouped_conv_2d_fwd_wmma_f32.cpp
     static_tests/grouped_conv_2d_fwd_dl_f32.cpp
     static_tests/grouped_conv_fwd_xdl_test.cpp
-    static_tests/grouped_conv_fwd_xdl_bilinear_test.cpp
-    static_tests/grouped_conv_fwd_xdl_binary_test.cpp
 
     # Grouped conv2d fwd sources
     ${GROUPED_CONV2D_FWD_DL_SOURCES}
