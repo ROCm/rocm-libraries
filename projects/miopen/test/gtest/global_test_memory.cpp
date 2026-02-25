@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "global_test_memory.hpp"
 
 #include "get_handle.hpp"
@@ -7,7 +10,6 @@
 
 #include <cstddef>
 #include <cstring>
-#include <iostream>
 
 #include <hip/hip_runtime.h>
 

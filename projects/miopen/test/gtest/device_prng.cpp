@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "device_prng.hpp"
 
 #include <hip/hip_fp16.h>
