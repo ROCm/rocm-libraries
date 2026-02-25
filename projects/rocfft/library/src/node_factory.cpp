@@ -602,7 +602,7 @@ ComputeScheme NodeFactory::DecideRealScheme(const function_pool& pool, NodeMetaD
     // both input and output.  Subsequent strides + dist on the real
     // side must all be expressible as complex stride + dist; that
     // is, they must all be even.
-    if(realLength[0] % 2 == 0 && nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1
+    if(isEven(realLength[0]) && nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1
        && std::all_of(realStride.begin() + 1, realStride.end(), isEven) && isEven(realDist))
     {
         switch(nodeData.dimension)
@@ -922,7 +922,7 @@ ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaDat
 }
 
 bool NodeFactory::use_CS_2D_SINGLE(const function_pool& pool,
-                                   NodeMetaData&        nodeData,
+                                   const NodeMetaData&  nodeData,
                                    rocfft_array_type    inArrayType,
                                    rocfft_array_type    outArrayType)
 {
@@ -1123,6 +1123,18 @@ bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nod
 {
     const auto& realLength = nodeData.direction == -1 ? nodeData.length : nodeData.outputLength;
 
+    size_t curStride    = 0;
+    bool   isUnitStride = false;
+    nodeData.CheckUnitStride(true, isUnitStride, curStride);
+    nodeData.rootInStrideUnit = isUnitStride && (curStride == nodeData.iDist);
+    nodeData.CheckUnitStride(false, isUnitStride, curStride);
+    nodeData.rootOutStrideUnit = isUnitStride && (curStride == nodeData.oDist);
+
+    // First check if we can use 2D_SINGLE + 1D kernel, prefer that over partial-pass
+    if(Real3DEvenNode::use_real_2D_single_SBCC(nodeData, pool))
+        return false;
+
+    // Now check if we have the kernels for partial-pass
     if(!pool.has_function(PPFMKey(realLength[0],
                                   realLength[1],
                                   realLength[2],
@@ -1131,5 +1143,6 @@ bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nod
                                   CS_REAL_3D_PP)))
         return false;
 
+    // Fallback to REAL_3D_EVEN.
     return true;
 }

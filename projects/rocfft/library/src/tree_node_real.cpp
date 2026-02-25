@@ -58,7 +58,7 @@ static void set_complex_length(TreeNode&                   node,
 }
 
 // check if we have an SBCC kernel along the specified dimension
-static bool SBCC_dim_available(function_pool&             pool,
+static bool SBCC_dim_available(const function_pool&       pool,
                                const std::vector<size_t>& length,
                                size_t                     sbcc_dim,
                                rocfft_precision           precision)
@@ -979,6 +979,42 @@ void Real3DEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     }
 }
 
+// Check if we can use 2D_SINGLE kernel for the 3D real-even case.
+// The check is based on the input/output length and strides, precision
+// and kernel availability in the pool.
+bool Real3DEvenNode::use_real_2D_single_SBCC(const NodeMetaData&  nodeData,
+                                             const function_pool& pool)
+{
+    auto nodeDataCpy = nodeData;
+
+    const bool forward = nodeDataCpy.inArrayType == rocfft_array_type_real;
+
+    // but if we have 2D_SINGLE available, then we use it
+    // NB: use the check function in NodeFactory to make sure lds limit
+    // TODO- this part should be done in offline-tuning
+    if(forward)
+    {
+        auto lengthCpy     = nodeDataCpy.length;
+        nodeDataCpy.length = {lengthCpy[0] / 2, lengthCpy[1]};
+        if(NodeFactory::use_CS_2D_SINGLE(
+               pool, nodeDataCpy, nodeDataCpy.inArrayType, nodeDataCpy.outArrayType)
+           && SBCC_dim_available(pool, lengthCpy, 2, nodeDataCpy.precision)
+           && (nodeDataCpy.rootInStrideUnit && nodeDataCpy.rootOutStrideUnit))
+            return true;
+    }
+    else
+    {
+        nodeDataCpy.length = {nodeDataCpy.outputLength[1], nodeDataCpy.outputLength[0] / 2};
+        if(NodeFactory::use_CS_2D_SINGLE(
+               pool, nodeDataCpy, nodeDataCpy.inArrayType, nodeDataCpy.outArrayType)
+           && SBCC_dim_available(pool, nodeDataCpy.outputLength, 2, nodeDataCpy.precision)
+           && (nodeDataCpy.rootInStrideUnit && nodeDataCpy.rootOutStrideUnit))
+            return true;
+    }
+
+    return false;
+}
+
 void Real3DEvenNode::Build_solution()
 {
     const std::vector<size_t>* realLength    = nullptr;
@@ -991,34 +1027,22 @@ void Real3DEvenNode::Build_solution()
 
     const bool forward = inArrayType == rocfft_array_type_real;
 
-    const bool planInStrideUnit  = this->GetPlanRoot()->inStrideUnit;
-    const bool planOutStrideUnit = this->GetPlanRoot()->outStrideUnit;
-
     // but if we have 2D_SINGLE available, then we use it
     // NB: use the check function in NodeFactory to make sure lds limit
     // TODO- this part should be done in offline-tuning
     NodeMetaData nodeData(this);
-    if(forward)
+    nodeData.length            = length;
+    nodeData.outputLength      = outputLength;
+    nodeData.inArrayType       = inArrayType;
+    nodeData.outArrayType      = outArrayType;
+    nodeData.precision         = precision;
+    nodeData.rootInStrideUnit  = this->GetPlanRoot()->inStrideUnit;
+    nodeData.rootOutStrideUnit = this->GetPlanRoot()->outStrideUnit;
+
+    if(use_real_2D_single_SBCC(nodeData, pool))
     {
-        nodeData.length = {length[0] / 2, length[1]};
-        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData, inArrayType, outArrayType)
-           && SBCC_dim_available(pool, length, 2, precision)
-           && (planInStrideUnit && planOutStrideUnit))
-        {
-            solution = REAL_2D_SINGLE_SBCC;
-            return;
-        }
-    }
-    else
-    {
-        nodeData.length = {outputLength[1], outputLength[0] / 2};
-        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData, inArrayType, outArrayType)
-           && SBCC_dim_available(pool, outputLength, 2, precision)
-           && (planInStrideUnit && planOutStrideUnit))
-        {
-            solution = REAL_2D_SINGLE_SBCC;
-            return;
-        }
+        solution = REAL_2D_SINGLE_SBCC;
+        return;
     }
 
     // NB:

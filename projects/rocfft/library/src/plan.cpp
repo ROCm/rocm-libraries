@@ -3834,18 +3834,19 @@ bool BufferIsUnitStride(ExecPlan& execPlan, OperatingBuffer buf)
     if(execPlan.isUnitStride.find(buf) != execPlan.isUnitStride.end())
         return execPlan.isUnitStride.at(buf);
 
-    auto stride = (buf == OB_USER_IN) ? execPlan.rootPlan->inStride : execPlan.rootPlan->outStride;
-    auto length = (buf == OB_USER_IN) ? execPlan.iLength : execPlan.oLength;
-    auto dist   = (buf == OB_USER_IN) ? execPlan.rootPlan->iDist : execPlan.rootPlan->oDist;
-    size_t curStride = 1;
-    do
-    {
-        if(stride.front() != curStride)
-            return false;
-        curStride *= length.front();
-        stride.erase(stride.begin());
-        length.erase(length.begin());
-    } while(!stride.empty());
+    auto         isInput      = (buf == OB_USER_IN);
+    bool         isUnitStride = false;
+    size_t       curStride    = 0;
+    size_t       dist         = 0;
+    NodeMetaData rootPlanData(execPlan.rootPlan.get());
+    rootPlanData.inStride     = execPlan.rootPlan->inStride;
+    rootPlanData.outStride    = execPlan.rootPlan->outStride;
+    rootPlanData.length       = execPlan.iLength;
+    rootPlanData.outputLength = execPlan.oLength;
+    dist                      = isInput ? execPlan.rootPlan->iDist : execPlan.rootPlan->oDist;
+    rootPlanData.CheckUnitStride(isInput, isUnitStride, curStride);
+    if(!isUnitStride)
+        return false;
 
     // NB: users may input incorrect i/o-dist value for inplace transform
     //     however, when the batch-size is 1, we can simply make it permissive

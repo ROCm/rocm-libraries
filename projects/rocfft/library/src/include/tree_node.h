@@ -192,8 +192,32 @@ struct NodeMetaData
     rocfft_array_type       inArrayType       = rocfft_array_type_unset;
     rocfft_array_type       outArrayType      = rocfft_array_type_unset;
     hipDeviceProp_t         deviceProp        = {};
+    bool                    rootInStrideUnit  = false;
+    bool                    rootOutStrideUnit = false;
 
     explicit NodeMetaData(TreeNode* refNode);
+
+    // Check if the input or output buffer has unit stride.
+    // Return flag and current stride accordingly.
+    void CheckUnitStride(const bool& checkInput, bool& isUnitStride, size_t& curStride)
+    {
+        auto stride_ = checkInput ? inStride : outStride;
+        auto length_ = checkInput ? length : outputLength;
+
+        curStride = 1;
+        do
+        {
+            if(stride_.front() != curStride)
+            {
+                isUnitStride = false;
+                return;
+            }
+            curStride *= length_.front();
+            stride_.erase(stride_.begin());
+            length_.erase(length_.begin());
+        } while(!stride_.empty());
+        isUnitStride = true;
+    }
 };
 
 class rocfft_ostream;

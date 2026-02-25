@@ -131,6 +131,8 @@ class Real3DEvenNode : public InternalNode
         return true;
     }
 
+    static bool use_real_2D_single_SBCC(const NodeMetaData& nodeData, const function_pool& pool);
+
 protected:
     explicit Real3DEvenNode(TreeNode* p)
         : InternalNode(p)
