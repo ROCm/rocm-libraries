@@ -17,6 +17,7 @@ hipDNN is a graph-based deep learning library for AMD GPUs that leverages a flex
   - [Developer Guides](#developer-guides)
   - [Testing](#testing)
 - [Project Structure](#project-structure)
+- [API Documentation](#api-documentation)
 - [Contributing](#contributing)
 
 ---
@@ -36,6 +37,7 @@ The fastest way to get started with hipDNN is to follow the [quick start steps i
 - **[Environment Configuration](./docs/Environment.md)** - Runtime configuration and logging setup
 - **[Operation Support](./docs/OperationSupport.md)** - Currently supported operations and their status
 - **[Samples](./samples/README.md)** - Frontend usage examples
+- **[API Reference](#api-documentation)** - Doxygen-generated API documentation
 
 ### Developer Guides
 - **[Design Overview](./docs/Design.md)** - Architecture and design descriptions and diagrams
@@ -69,6 +71,42 @@ hipDNN is organized into several key components. For detailed architecture descr
 
 ### Docker Support
 See [Docker README](./dockerfiles/README.md) for containerized development environments.
+
+---
+
+## API Documentation
+
+hipDNN includes Doxygen-generated API documentation for the public C++ frontend.
+
+### Building the Documentation
+
+1. Install Doxygen:
+   ```bash
+   # Ubuntu/Debian
+   sudo apt-get install doxygen
+   ```
+   For Windows, download the installer from [doxygen.nl/download](https://www.doxygen.nl/download.html).
+
+2. Generate the documentation:
+   ```bash
+   cd <project-root>
+   doxygen Doxyfile
+   ```
+
+3. Open the generated documentation:
+   ```bash
+   # Linux
+   xdg-open build/docs/html/index.html
+
+   # Windows
+   start build\docs\html\index.html
+   ```
+
+The documentation covers the frontend API including:
+- Graph construction and execution
+- Tensor and operation attributes
+- Engine configuration and knobs
+- Error handling
 
 ---
 

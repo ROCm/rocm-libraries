@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -135,13 +135,7 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
         auto transformed_input
             = ::rocprim::make_transform_iterator(wrapped_input, wrapped_equal_op);
 
-        target_arch target_arch;
-        ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-        gpu target_gpu;
-        ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-        const target current_target(target_arch, target_gpu);
+        const target current_target(stream);
 
         const auto params = get_config<Selector>(Config{}, current_target);
 
@@ -151,9 +145,9 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
         const unsigned int grid_size        = (size + items_per_block - 1) / items_per_block;
         const unsigned int shared_mem_bytes = 0; /*no dynamic shared mem*/
 
-        auto kernel = [=](auto arch_config)
+        auto kernel = [=](auto target_config)
         {
-            adjacent_find_kernels::template block_reduce_kernel<decltype(arch_config)>(
+            adjacent_find_kernels::template block_reduce_kernel<decltype(target_config)>(
                 transformed_input,
                 reduce_output,
                 size,

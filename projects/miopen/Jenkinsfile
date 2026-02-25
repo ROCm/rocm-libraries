@@ -36,8 +36,62 @@ def get_branch_name(){
 
 utils = null
 
-def withWorkingDir(Closure body) {
+def show_node_info() {
+    sh """
+        echo "NODE_NAME = \$NODE_NAME"
+        lsb_release -sd
+        uname -r
+        cat /sys/module/amdgpu/version
+        ls /opt/ -la
+    """
+}
+
+def cloneUpdateRefRepo() {
+    def refRepoPath = "/var/jenkins/ref-repo/rocm-libraries"
+    def lockLabel = "git ref repo lock - ${env.NODE_NAME}"
+    def folderExists = sh(
+        script: "test -d ${refRepoPath}/refs",
+        returnStatus: true
+    ) == 0
+
+    if (!folderExists) {
+        echo "rocm-libraries repo does not exist at ${refRepoPath}, creating mirror clone..."
+        echo "locking on label: ${lockLabel}"
+        lock(lockLabel) {
+            def cloneCommand = """
+                set -ex
+                rm -rf ${refRepoPath} && mkdir -p ${refRepoPath}
+                git clone --mirror https://github.com/ROCm/rocm-libraries.git ${refRepoPath}
+            """
+            sh(script: cloneCommand, label: "clone ref repo")
+        }
+        echo "Completed git clone, lock released"
+    }
+    echo "rocm-libraries repo exists at ${refRepoPath}, performing git remote update..."
+    echo "locking on label: ${lockLabel}"
+    lock(lockLabel) {
+        def fetchCommand = """
+            set -ex
+            cd ${refRepoPath}
+            git remote prune origin
+            git remote update
+        """
+        sh(script: fetchCommand, label: "update ref repo")
+    }
+    echo "Completed git ref repo fetch, lock released"
+}
+
+def checkoutRepo()
+{
+    //update ref repo
+    cloneUpdateRefRepo()
+    // checkout project
     checkout scm
+}
+
+def withWorkingDir(Closure body) {
+    show_node_info()
+    checkoutRepo()
     dir("${env.WORKSPACE}/${env.MIOPEN_DIR}") {
         if (utils == null) {
             utils = load "vars/utils.groovy"

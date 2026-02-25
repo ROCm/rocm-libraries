@@ -14,7 +14,9 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/CpuDeviceExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/UnaryOperationFunctors.hpp>
 
 namespace hipdnn_test_sdk::detail
 {
@@ -73,7 +75,7 @@ public:
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
         if(_params.reluLowerClip.has_value() || _params.reluUpperClip.has_value()
-           || _params.reluLowerClipSlope.has_value())
+           || _params.reluLowerClipSlope.has_value() || _params.swishBeta.has_value())
         {
             executeParameterized(variantPack);
         }
@@ -138,7 +140,9 @@ private:
                                             : std::numeric_limits<float>::max()),
                 static_cast<OutputType>(_params.reluLowerClipSlope.has_value()
                                             ? _params.reluLowerClipSlope.value()
-                                            : 0.0f));
+                                            : 0.0f),
+                static_cast<OutputType>(_params.swishBeta.has_value() ? _params.swishBeta.value()
+                                                                      : 1.0f));
         }
         else if(hipdnn_data_sdk::utilities::isBinaryPointwiseMode(_params.mode))
         {
@@ -270,14 +274,9 @@ public:
                                nodeAttributes->elu_alpha(),
                                nodeAttributes->softplus_beta());
 
-        // Throw if these values get set so its clear to any future users they are not supported.
-        // Throwing here also makes it clear that we need to update PointwisePlan::execute
-        // to use the params once there are implementations that can use them.
-        // Cant throw in isApplicable and I want better error messaging than just returning false
-        if(params.swishBeta.has_value() || params.eluAlpha.has_value()
-           || params.softplusBeta.has_value())
+        if(params.eluAlpha.has_value() || params.softplusBeta.has_value())
         {
-            throw std::runtime_error("Swish, ELU, and Softplus parameters are not supported "
+            throw std::runtime_error("ELU and Softplus parameters are not supported "
                                      "in PointwisePlanBuilder for the Cpu Graph Executor yet");
         }
 
