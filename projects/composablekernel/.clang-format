@@ -33,6 +33,7 @@ BraceWrapping:
   IndentBraces:    false
 BreakBeforeBinaryOperators: None
 BreakBeforeBraces: Custom
+InsertBraces: true
 BreakBeforeTernaryOperators: true
 BreakConstructorInitializersBeforeComma: false
 ColumnLimit:     100
