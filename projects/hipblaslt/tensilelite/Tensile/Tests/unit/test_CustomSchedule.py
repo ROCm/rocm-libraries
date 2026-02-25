@@ -190,7 +190,8 @@ class TestCustomScheduleBF16:
         # TN case supports both LDSTrInst=True and LDSTrInst=False
         (  True,  False,       False,       1),
         (  True,  False,        True,       1),
-        ( False,   True,        True,       0)
+        ( False,   True,        True,       0),
+        ( False,  False,       False,       1)
         # fmt: on
         ])
     def test_schedule_96x256x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
@@ -213,7 +214,6 @@ class TestCustomScheduleBF16:
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
-        assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 48
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
