@@ -421,9 +421,8 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
     }
 
     std::cout << "Best configuration parameters:" << "\nname: " << best_op_name << " (instance "
-              << best_instance_index << ")"
-              << "\navg_time: " << best_avg_time << "\ntflops: " << best_tflops
-              << "\nGB/s: " << best_gb_per_sec << std::endl;
+              << best_instance_index << ")" << "\navg_time: " << best_avg_time
+              << "\ntflops: " << best_tflops << "\nGB/s: " << best_gb_per_sec << std::endl;
     if(instance_index != -1)
     {
         std::cout << "grouped_conv_fwd_instance (" << instance_index << "/" << num_kernel
