@@ -88,7 +88,7 @@ namespace TensileLite
                     {
                         if(m_printed == 0)
                         {
-                            std::cout << "CB2 Index:  Device | Reference" << std::endl;
+                            std::cout << "Index:  Device | Reference" << std::endl;
                         }
 
                         if constexpr(std::is_same<int8_t, T>())

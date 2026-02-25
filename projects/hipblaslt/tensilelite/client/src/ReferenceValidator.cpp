@@ -373,12 +373,16 @@ namespace TensileLite
             if(m_printAny)
                 printTensors(problem, reference, result);
 
-            auto k = problem.a().sizes().at(1);
-            if (problem.transA())
-                k = problem.a().sizes().at(0);
+            auto k = problem.transA() ? problem.a().sizes().at(0) : problem.a().sizes().at(1);
             bool isTF32 = (problem.f32XdlMathOp() == rocisa::DataType::XFloat32);
             bool isTF32x1 = (problem.computeType() == rocisa::DataType::BFloat16
                 && problem.computeInputType() == rocisa::DataType::Float);
+            double threshold = -1.0;
+            if (isTF32) {
+                threshold = 0.01 * sqrt(double(k));
+            } else if (isTF32x1) {
+                threshold = 0.1 * sqrt(double(k));
+            }
 
             for(size_t i = 0; i < problem.tensors().size(); i++)
             {
@@ -481,12 +485,6 @@ namespace TensileLite
                               << refPtr << ", gpu pointer " << resPtr
                               << ", size = " << result.maxElements[i] << std::endl;
                 
-                double threshold = -1.0;
-                if (isTF32) {
-                    threshold = 0.01 * sqrt(k);
-                } else if (isTF32x1) {
-                    threshold = 0.1 * sqrt(k);
-                }
                 rv &= checkResults(
                     tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride, threshold);
             }
