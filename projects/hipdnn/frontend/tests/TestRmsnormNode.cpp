@@ -16,6 +16,7 @@ TEST(TestRMSNormNode, RMSNormNodeProperties)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
     rmsnormAttributes.set_scale(std::make_shared<TensorAttributes>());
     rmsnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+    rmsnormAttributes.set_forward_phase(NormFwdPhase::INFERENCE);
 
     auto inputTensor = rmsnormAttributes.get_x();
     inputTensor->set_uid(1)
@@ -60,6 +61,8 @@ TEST(TestRMSNormNode, PreValidateNode)
     epsilonTensor->set_dim({1}).set_value(1e-5f);
     rmsnormAttributes.set_epsilon(epsilonTensor);
 
+    rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
+
     GraphAttributes graphAttributes;
     RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
@@ -78,6 +81,7 @@ TEST(TestRMSNormNode, PreValidateNodeMissingValues)
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     rmsnormAttributes.set_x(std::make_shared<TensorAttributes>());
+    rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
     auto rmsnormAttributesCopy = rmsnormAttributes;
     RMSNormNode nodeWithX(std::move(rmsnormAttributesCopy), graphAttributes);
 
@@ -138,6 +142,8 @@ TEST(TestRMSNormNode, PreValidateNodeWithBias)
     epsilonTensor->set_dim({1}).set_value(1e-5f);
     rmsnormAttributes.set_epsilon(epsilonTensor);
 
+    rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
+
     GraphAttributes graphAttributes;
     RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
@@ -167,6 +173,8 @@ TEST(TestRMSNormNode, PreValidateRejectsMismatchedBiasChannelDimensions)
     epsilonTensor->set_dim({1}).set_value(1e-5f);
     rmsnormAttributes.set_epsilon(epsilonTensor);
 
+    rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
+
     GraphAttributes graphAttributes;
     RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
@@ -182,6 +190,7 @@ TEST(TestRMSNormNode, InferPropertiesNode)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
     rmsnormAttributes.set_scale(std::make_shared<TensorAttributes>());
     rmsnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+    rmsnormAttributes.set_forward_phase(NormFwdPhase::INFERENCE);
 
     auto inputTensor = rmsnormAttributes.get_x();
     inputTensor->set_uid(1)
@@ -217,6 +226,7 @@ TEST(TestRMSNormNode, InferPropertiesNodeWithInvRms)
     rmsnormAttributes.set_scale(std::make_shared<TensorAttributes>());
     rmsnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
     rmsnormAttributes.set_inv_rms(std::make_shared<TensorAttributes>());
+    rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto inputTensor = rmsnormAttributes.get_x();
     inputTensor->set_uid(1)
@@ -259,6 +269,7 @@ TEST(TestRMSNormNode, InferPropertiesNodeWithBias)
     rmsnormAttributes.set_scale(std::make_shared<TensorAttributes>());
     rmsnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
     rmsnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    rmsnormAttributes.set_forward_phase(NormFwdPhase::INFERENCE);
 
     auto inputTensor = rmsnormAttributes.get_x();
     inputTensor->set_uid(1)
@@ -293,6 +304,7 @@ TEST(TestRMSNormNode, PackNode)
 {
     RMSNormAttributes rmsnormAttributes;
     rmsnormAttributes.set_name("RMSNorm");
+    rmsnormAttributes.set_forward_phase(NormFwdPhase::INFERENCE);
 
     auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_uid(1)
@@ -571,6 +583,8 @@ TEST(TestRMSNormNode, PreValidateAcceptsValid5DSpatialDimensions)
     epsilonTensor->set_dim({1}).set_value(1e-5f);
     rmsnormAttributes.set_epsilon(epsilonTensor);
 
+    rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
+
     GraphAttributes graphAttributes;
     RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
@@ -595,6 +609,8 @@ TEST(TestRMSNormNode, PreValidateAcceptsSingleElementSpatialDimensions)
     auto epsilonTensor = std::make_shared<TensorAttributes>();
     epsilonTensor->set_dim({1}).set_value(1e-5f);
     rmsnormAttributes.set_epsilon(epsilonTensor);
+
+    rmsnormAttributes.set_forward_phase(NormFwdPhase::INFERENCE);
 
     GraphAttributes graphAttributes;
     RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);

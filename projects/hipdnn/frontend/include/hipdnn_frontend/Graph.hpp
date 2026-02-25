@@ -1592,12 +1592,17 @@ public:
         }
 
         auto y = outputTensor(attributes.get_name() + "::Y");
-        auto invRmsOut = outputTensor(attributes.get_name() + "::INV_RMS");
+
+        std::shared_ptr<TensorAttributes> invRmsOut;
+        if(attributes.get_forward_phase() == NormFwdPhase::TRAINING)
+        {
+            invRmsOut = outputTensor(attributes.get_name() + "::INV_RMS");
+            attributes.set_inv_rms(invRmsOut);
+        }
 
         attributes.set_x(std::move(x));
         attributes.set_scale(std::move(scale));
         attributes.set_y(y);
-        attributes.set_inv_rms(invRmsOut);
 
         _sub_nodes.emplace_back(
             std::make_shared<RMSNormNode>(std::move(attributes), graph_attributes));

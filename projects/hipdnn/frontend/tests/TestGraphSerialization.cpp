@@ -1532,6 +1532,7 @@ TEST_P(TestGraphSerializationRoundTrip, RMSNormNode)
 
     RMSNormAttributes rmsnormAttrs;
     rmsnormAttrs.set_epsilon(epsilon);
+    rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto [y, invRms] = graph.rmsnorm(x, scale, rmsnormAttrs);
     y->set_output(true);
@@ -1562,6 +1563,7 @@ TEST_P(TestGraphSerializationRoundTrip, RMSNormNodeWithBias)
     RMSNormAttributes rmsnormAttrs;
     rmsnormAttrs.set_epsilon(epsilon);
     rmsnormAttrs.set_bias(bias);
+    rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto [y, invRms] = graph.rmsnorm(x, scale, rmsnormAttrs);
     y->set_output(true);

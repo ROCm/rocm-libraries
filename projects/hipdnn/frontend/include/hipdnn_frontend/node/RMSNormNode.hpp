@@ -82,9 +82,18 @@ public:
         HIPDNN_CHECK_ERROR(
             detail::validateChannelOnlyShapeIfSet(attributes.get_bias(), channels, "Bias tensor"));
 
-        // Validate optional inv_rms tensor (only if dimensions set)
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
-            attributes.get_inv_rms(), channels, "Inverse RMS tensor"));
+        // Validate forward_phase is set
+        HIPDNN_RETURN_IF_EQ(attributes.get_forward_phase(),
+                            NormFwdPhase::NOT_SET,
+                            ErrorCode::ATTRIBUTE_NOT_SET,
+                            "RMSNormNode forward_phase must be set to TRAINING or INFERENCE");
+
+        // Validate inv_rms tensor based on forward_phase
+        if(attributes.get_forward_phase() == NormFwdPhase::TRAINING)
+        {
+            HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
+                attributes.get_inv_rms(), channels, "Inverse RMS tensor"));
+        }
 
         return {ErrorCode::OK, ""};
     }
@@ -132,10 +141,13 @@ public:
             }
         };
 
-        auto invRms = attributes.get_inv_rms();
-        if(invRms)
+        if(attributes.get_forward_phase() == NormFwdPhase::TRAINING)
         {
-            inferCTensor(invRms);
+            auto invRms = attributes.get_inv_rms();
+            if(invRms)
+            {
+                inferCTensor(invRms);
+            }
         }
 
         auto bias = attributes.get_bias();

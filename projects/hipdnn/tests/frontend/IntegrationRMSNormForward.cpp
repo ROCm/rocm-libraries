@@ -26,6 +26,7 @@ namespace
 enum class FailurePoint
 {
     NONE, // No failure expected
+    VALIDATE, // Expect failure at validate
     CREATE_EXECUTION_PLAN, // Expect failure at create execution plan
     EXECUTE // Expect failure at execute
 };
@@ -38,6 +39,7 @@ struct IntegrationTestCase
     FailurePoint expectedFailure;
     bool useManualUids;
     bool hasBias;
+    NormFwdPhase forwardPhase;
 
     friend std::ostream& operator<<(std::ostream& os, const IntegrationTestCase& tc)
     {
@@ -49,6 +51,9 @@ struct IntegrationTestCase
         {
         case FailurePoint::NONE:
             os << "NONE";
+            break;
+        case FailurePoint::VALIDATE:
+            os << "VALIDATE";
             break;
         case FailurePoint::CREATE_EXECUTION_PLAN:
             os << "CREATE_EXECUTION_PLAN";
@@ -62,7 +67,8 @@ struct IntegrationTestCase
         }
 
         os << ", use_manual_uids: " << (tc.useManualUids ? "true" : "false")
-           << ", has_bias: " << (tc.hasBias ? "true" : "false") << "}";
+           << ", has_bias: " << (tc.hasBias ? "true" : "false")
+           << ", forward_phase: " << tc.forwardPhase << "}";
 
         return os;
     }
@@ -151,7 +157,8 @@ protected:
         const std::string& graphName,
         const SimpleRMSNorm2DTensorBundle<float, float>& tensorBundle,
         bool useManualUids,
-        bool hasBias)
+        bool hasBias,
+        NormFwdPhase forwardPhase)
     {
         auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
         graph->set_name(graphName)
@@ -186,6 +193,7 @@ protected:
         RMSNormAttributes attrs;
         attrs.set_name("rmsnorm");
         attrs.set_epsilon(tensors.epsilon);
+        attrs.set_forward_phase(forwardPhase);
 
         if(hasBias)
         {
@@ -205,10 +213,16 @@ protected:
         if(useManualUids)
         {
             tensors.y->set_uid(uid++);
-            tensors.invRms->set_uid(uid++);
+            if(tensors.invRms)
+            {
+                tensors.invRms->set_uid(uid++);
+            }
         }
         tensors.y->set_data_type(DataType::FLOAT);
-        tensors.invRms->set_data_type(DataType::FLOAT);
+        if(tensors.invRms)
+        {
+            tensors.invRms->set_data_type(DataType::FLOAT);
+        }
 
         return {graph, tensors};
     }
@@ -221,7 +235,12 @@ protected:
         variantPack[tensors.x->get_uid()] = tensorBundle.xTensor.memory().deviceData();
         variantPack[tensors.scale->get_uid()] = tensorBundle.scaleTensor.memory().deviceData();
         variantPack[tensors.y->get_uid()] = tensorBundle.yTensor.memory().deviceData();
-        variantPack[tensors.invRms->get_uid()] = tensorBundle.invRmsTensor.memory().deviceData();
+
+        if(tensors.invRms != nullptr)
+        {
+            variantPack[tensors.invRms->get_uid()]
+                = tensorBundle.invRmsTensor.memory().deviceData();
+        }
 
         if(tensors.bias != nullptr)
         {
@@ -238,6 +257,11 @@ protected:
                                  FailurePoint expectedFailure = FailurePoint::NONE)
     {
         auto result = graph->validate();
+        if(expectedFailure == FailurePoint::VALIDATE)
+        {
+            ASSERT_NE(result.code, ErrorCode::OK) << "validate should fail";
+            return;
+        }
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
         result = graph->build_operation_graph(handle);
@@ -261,7 +285,10 @@ protected:
         ASSERT_TRUE(tensors.scale->has_uid());
         ASSERT_TRUE(tensors.epsilon->has_uid());
         ASSERT_TRUE(tensors.y->has_uid());
-        ASSERT_TRUE(tensors.invRms->has_uid());
+        if(tensors.invRms)
+        {
+            ASSERT_TRUE(tensors.invRms->has_uid());
+        }
 
         auto variantPack = createVariantPack(tensors, tensorBundle);
 
@@ -288,8 +315,17 @@ protected:
         SimpleRMSNorm2DTensorBundle<float, float> tensorBundle(dims);
 
         // Create graph and tensors using the unified function
-        auto [graph, tensors] = createRMSNormTestGraphWithUids(
-            testCase.graphName, tensorBundle, testCase.useManualUids, testCase.hasBias);
+        auto [graph, tensors] = createRMSNormTestGraphWithUids(testCase.graphName,
+                                                               tensorBundle,
+                                                               testCase.useManualUids,
+                                                               testCase.hasBias,
+                                                               testCase.forwardPhase);
+
+        // Verify INFERENCE mode produces nullptr for invRms
+        if(testCase.forwardPhase == NormFwdPhase::INFERENCE)
+        {
+            ASSERT_EQ(tensors.invRms, nullptr) << "INFERENCE mode should not create invRms tensor";
+        }
 
         runGraphPipeline(graph, _handle, tensors, tensorBundle, testCase.expectedFailure);
     }
@@ -305,35 +341,61 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationRMSNormForwardFp32,
     ::testing::Values(
         IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
-                            "DefaultPluginWithManualUids",
+                            "TrainingWithManualUids",
                             "DefaultPluginRMSNormTest",
                             FailurePoint::NONE,
                             true,
-                            false},
+                            false,
+                            NormFwdPhase::TRAINING},
         IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
-                            "DefaultPluginWithAutoUids",
+                            "TrainingWithAutoUids",
                             "DefaultPluginRMSNormTestAutoUID",
                             FailurePoint::NONE,
                             false,
-                            false},
+                            false,
+                            NormFwdPhase::TRAINING},
         IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
-                            "DefaultPluginWithBias",
+                            "TrainingWithBias",
                             "DefaultPluginRMSNormTestWithBias",
                             FailurePoint::NONE,
                             true,
-                            true},
+                            true,
+                            NormFwdPhase::TRAINING},
+        IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
+                            "InferenceNoBias",
+                            "InferenceRMSNormTest",
+                            FailurePoint::NONE,
+                            true,
+                            false,
+                            NormFwdPhase::INFERENCE},
+        IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
+                            "InferenceWithBias",
+                            "InferenceRMSNormTestWithBias",
+                            FailurePoint::NONE,
+                            true,
+                            true,
+                            NormFwdPhase::INFERENCE},
+        IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
+                            "NotSetPhaseValidationFails",
+                            "NotSetPhaseRMSNormTest",
+                            FailurePoint::VALIDATE,
+                            true,
+                            false,
+                            NormFwdPhase::NOT_SET},
         IntegrationTestCase{hipdnn_tests::plugin_constants::testExecuteFailsPluginPath(),
                             "ExecuteFailsPlugin",
                             "ExecuteFailsPluginRMSNormTest",
                             FailurePoint::EXECUTE,
                             true,
-                            false},
+                            false,
+                            NormFwdPhase::TRAINING},
         IntegrationTestCase{hipdnn_tests::plugin_constants::testNoApplicableEnginesAPluginPath(),
                             "NoApplicableEnginesPlugin",
                             "NoEnginesPluginRMSNormTest",
                             FailurePoint::CREATE_EXECUTION_PLAN,
                             true,
-                            false}),
+                            false,
+                            NormFwdPhase::TRAINING}),
     // Provide a custom name for each test instance
     [](const ::testing::TestParamInfo<IntegrationTestCase>& info) {
         std::string name = info.param.description;

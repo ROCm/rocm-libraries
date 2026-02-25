@@ -32,6 +32,8 @@ public:
     std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs;
     std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs;
 
+    NormFwdPhase forward_phase = NormFwdPhase::NOT_SET; // NOLINT(readability-identifier-naming)
+
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_x() const
     {
@@ -124,6 +126,18 @@ public:
         return setOutput(OutputNames::INV_RMS, std::move(value));
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    NormFwdPhase get_forward_phase() const
+    {
+        return forward_phase;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    RMSNormAttributes& set_forward_phase(NormFwdPhase phase)
+    {
+        forward_phase = phase;
+        return *this;
+    }
+
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::RMSNormAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
@@ -137,7 +151,8 @@ public:
             get_epsilon()->get_uid(),
             get_y()->get_uid(),
             bias ? flatbuffers::Optional<int64_t>(bias->get_uid()) : flatbuffers::nullopt,
-            invRms ? flatbuffers::Optional<int64_t>(invRms->get_uid()) : flatbuffers::nullopt);
+            invRms ? flatbuffers::Optional<int64_t>(invRms->get_uid()) : flatbuffers::nullopt,
+            toSdkType(forward_phase));
     }
 
     static RMSNormAttributes fromFlatBuffer(
@@ -160,6 +175,8 @@ public:
         {
             attr.set_bias(tensorMap.at(fb->bias_tensor_uid().value()));
         }
+
+        attr.set_forward_phase(fromSdkType(fb->forward_phase()));
 
         return attr;
     }

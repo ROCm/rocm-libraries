@@ -1464,6 +1464,7 @@ TEST_F(TestGraph, RMSNormNodeCreation)
     RMSNormAttributes rmsnormAttrs;
     rmsnormAttrs.set_name("RMSNormNode");
     rmsnormAttrs.set_epsilon(epsilon);
+    rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto [y, invRms] = graph.rmsnorm(x, scale, rmsnormAttrs);
 
@@ -1498,6 +1499,7 @@ TEST_F(TestGraph, RMSNormNodeCreationWithBias)
     rmsnormAttrs.set_name("RMSNormWithBias");
     rmsnormAttrs.set_epsilon(epsilon);
     rmsnormAttrs.set_bias(bias);
+    rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto [y, invRms] = graph.rmsnorm(x, scale, rmsnormAttrs);
 
@@ -1537,6 +1539,7 @@ TEST_F(TestGraph, BuildAndSerializeRMSNormGraph)
     RMSNormAttributes rmsnormAttrs;
     rmsnormAttrs.set_name("RMSNormNode");
     rmsnormAttrs.set_epsilon(epsilon);
+    rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto [y, invRms] = graph.rmsnorm(x, scale, rmsnormAttrs);
 
@@ -1564,6 +1567,8 @@ TEST_F(TestGraph, BuildAndSerializeRMSNormGraph)
     EXPECT_EQ(deserializedRMSNormAttributes->scale_tensor_uid, scale->get_uid());
     EXPECT_EQ(deserializedRMSNormAttributes->epsilon_tensor_uid, epsilon->get_uid());
     EXPECT_EQ(deserializedRMSNormAttributes->y_tensor_uid, y->get_uid());
+    EXPECT_EQ(deserializedRMSNormAttributes->forward_phase,
+              hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
 }
 
 TEST_F(TestGraph, BuildAndSerializeConvolutionDgradGraph)
