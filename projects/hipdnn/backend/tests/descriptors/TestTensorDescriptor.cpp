@@ -985,7 +985,7 @@ TEST_F(TestTensorDescriptor, SetGetValueUint8)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(uint8_t), &setVal));
 
-    auto* stored = desc->getData().value.AsInt32Value();
+    auto* stored = desc->getData().value.AsFloat8Value();
     ASSERT_NE(stored, nullptr);
     ASSERT_EQ(stored->value(), 200);
 
@@ -1017,9 +1017,9 @@ TEST_F(TestTensorDescriptor, SetGetValueInt8)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(int8_t), &setVal));
 
-    auto* stored = desc->getData().value.AsInt32Value();
+    auto* stored = desc->getData().value.AsFloat8Value();
     ASSERT_NE(stored, nullptr);
-    ASSERT_EQ(stored->value(), -42);
+    ASSERT_EQ(stored->value(), static_cast<uint8_t>(static_cast<int8_t>(-42)));
 
     // Round-trip through getAttribute
     std::vector<int64_t> dims = {1, 3, 32, 32};

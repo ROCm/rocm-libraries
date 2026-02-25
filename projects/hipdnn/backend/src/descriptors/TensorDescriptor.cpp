@@ -269,12 +269,12 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
     }
     case DataType::UINT8:
     {
-        _data.value.Set(Int32Value(static_cast<int32_t>(bytes[0])));
+        _data.value.Set(Float8Value(bytes[0]));
         break;
     }
     case DataType::INT8:
     {
-        _data.value.Set(Int32Value(static_cast<int32_t>(static_cast<int8_t>(bytes[0]))));
+        _data.value.Set(Float8Value(bytes[0]));
         break;
     }
     case DataType::FP8_E4M3:
@@ -371,21 +371,13 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
         break;
     }
     case DataType::UINT8:
-    {
-        const auto* val = _data.value.AsInt32Value();
-        THROW_IF_TRUE(val == nullptr,
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "TensorDescriptor::getAttribute(): value type mismatch");
-        output[0] = static_cast<uint8_t>(val->value());
-        break;
-    }
     case DataType::INT8:
     {
-        const auto* val = _data.value.AsInt32Value();
+        const auto* val = _data.value.AsFloat8Value();
         THROW_IF_TRUE(val == nullptr,
                       HIPDNN_STATUS_BAD_PARAM,
                       "TensorDescriptor::getAttribute(): value type mismatch");
-        output[0] = static_cast<uint8_t>(static_cast<int8_t>(val->value()));
+        output[0] = val->value();
         break;
     }
     case DataType::FP8_E4M3:
@@ -424,6 +416,34 @@ std::string TensorDescriptor::toString() const
     str += ", dims=" + vecToString(_data.dims);
     str += ", strides=" + vecToString(_data.strides);
     str += ", virtual=" + std::string(_data.virtual_ ? "true" : "false");
+    using hipdnn_data_sdk::data_objects::TensorValue;
+    if(_data.value.type != TensorValue::NONE)
+    {
+        str += ", value=";
+        switch(_data.value.type)
+        {
+        case TensorValue::Float32Value:
+            str += std::to_string(_data.value.AsFloat32Value()->value());
+            break;
+        case TensorValue::Float64Value:
+            str += std::to_string(_data.value.AsFloat64Value()->value());
+            break;
+        case TensorValue::Float16Value:
+            str += std::to_string(_data.value.AsFloat16Value()->value());
+            break;
+        case TensorValue::BFloat16Value:
+            str += std::to_string(_data.value.AsBFloat16Value()->value());
+            break;
+        case TensorValue::Int32Value:
+            str += std::to_string(_data.value.AsInt32Value()->value());
+            break;
+        case TensorValue::Float8Value:
+            str += std::to_string(_data.value.AsFloat8Value()->value());
+            break;
+        default:
+            break;
+        }
+    }
     str += "}";
     return str;
 }
