@@ -132,6 +132,12 @@ NB_MODULE(origami, m) {
       .def_rw("a_mx_block_size", &origami::problem_t::a_mx_block_size)
       .def_rw("b_mx_block_size", &origami::problem_t::b_mx_block_size);
 
+  nanobind::class_<origami::staggerU_t>(m, "staggerU_t")
+      .def(nanobind::init<>())
+      .def_rw("staggerUMapping", &origami::staggerU_t::staggerUMapping)
+      .def_rw("staggerU", &origami::staggerU_t::staggerU)
+      .def_rw("staggerUStrideShift", &origami::staggerU_t::staggerUStrideShift);
+
   nanobind::class_<hardware_t>(m, "hardware_t")
       .def(nanobind::init<hardware_t::architecture_t,
                           size_t,  // N_CU
@@ -175,10 +181,14 @@ NB_MODULE(origami, m) {
         nanobind::arg("compute_clock_khz"),
         "Create hardware object for a specific architecture with specified parameters.");
 
-  m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
+  m.def("datatype_to_bits", 
+        &origami::datatype_to_bits, 
+        "Return the number of bits in a datatype");
+  
   m.def("string_to_datatype",
         &origami::string_to_datatype,
         "Convert a string representation of a datatype into data_type_t enum");
+
   m.def("datatype_to_string",
         &origami::datatype_to_string,
         "Convert data_type_t enum to string representation");
@@ -186,18 +196,34 @@ NB_MODULE(origami, m) {
   m.def("select_config",
         &origami::select_config,
         "Select best configuration based on problem and hardware");
+
   m.def("select_grid_size",
         &origami::streamk::select_grid_size,
         "Select best grid size for the given configuration");
+
   m.def("select_workgroup_mapping",
         &origami::select_workgroup_mapping,
         "Select best workgroup mapping");
-  m.def("rank_configs", &origami::rank_configs, "Rank configurations by performance");
+
+  m.def("select_staggerU",
+        &origami::select_staggerU,
+        "Select best staggerU parameters");
+
+  m.def("rank_configs",
+        &origami::rank_configs,
+        "Rank configurations by performance");
+
   m.def("select_config_mnk",
         &origami::select_config_mnk,
         "Select best configuration for M,N,K dimensions");
-  m.def("select_topk_configs", &origami::select_topk_configs, "Select topk configurations");
-  m.def("compute_perf_gflops", &origami::compute_perf_gflops, "Compute performance in GFLOPS");
+
+  m.def("select_topk_configs",
+        &origami::select_topk_configs,
+        "Select topk configurations");
+
+  m.def("compute_perf_gflops",
+        &origami::compute_perf_gflops,
+        "Compute performance in GFLOPS");
 
   // StreamK functions
   m.def("select_reduction",
