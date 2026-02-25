@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -38,6 +38,7 @@
 #include "../util_sync.hpp"
 #include "device_reduce.hpp"
 
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/device_segmented_reduce.hpp> // IWYU pragma: export
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 
@@ -70,15 +71,15 @@ inline hipError_t launch_segmented_arg_minmax(::rocprim::detail::target current_
                                               size_t                    shmem,
                                               hipStream_t               stream)
 {
-    auto kernel = [=](auto arch_config)
+    auto kernel = [=](auto target_config)
     {
         // each block processes one segment
-        ::rocprim::detail::segmented_reduce<decltype(arch_config)>(input,
-                                                                   output,
-                                                                   begin_offsets,
-                                                                   end_offsets,
-                                                                   reduce_op,
-                                                                   initial_value);
+        ::rocprim::detail::segmented_reduce<decltype(target_config)>(input,
+                                                                     output,
+                                                                     begin_offsets,
+                                                                     end_offsets,
+                                                                     reduce_op,
+                                                                     initial_value);
         // no synchronization is needed since thread 0 writes to output
 
         const unsigned int flat_id    = ::rocprim::detail::block_thread_id<0>();
@@ -137,20 +138,7 @@ inline hipError_t segmented_arg_minmax(void*          temporary_storage,
 
     using selector = ::rocprim::detail::segmented_reduce_config_selector<result_type>;
 
-    ::rocprim::detail::target_arch target_arch;
-    hipError_t result = ::rocprim::detail::host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    ::rocprim::detail::gpu target_gpu;
-    result = ::rocprim::detail::host_target_gpu(stream, target_gpu);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-
-    const ::rocprim::detail::target current_target(target_arch, target_gpu);
+    const ::rocprim::detail::target current_target(stream);
 
     const auto         params = ::rocprim::detail::get_config<selector>(Config{}, current_target);
     const unsigned int block_size = params.kernel_config.block_size;

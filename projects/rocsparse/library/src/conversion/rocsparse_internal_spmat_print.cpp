@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,16 +25,11 @@
 #include "rocsparse_internal_spmat_print.hpp"
 #include "rocsparse_convert_array.hpp"
 #include "rocsparse_enum_utils.hpp"
+#include "rocsparse_float16.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {
-    inline std::ostream& operator<<(std::ostream& out, const _Float16& x)
-    {
-        out << (float)x;
-        return out;
-    }
-
     template <typename T>
     static rocsparse_status internal_dnvec_print(std::ostream& out, int64_t nmemb, const void* h)
     {
