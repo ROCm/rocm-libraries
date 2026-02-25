@@ -455,10 +455,10 @@ if __name__ == "__main__":
 
     # FP32 doesn't work for bwd weigth currently
     bwd_weight_configs = [
-        #"nhwgc_fp32",
+        "nhwgc_fp32",
         "nhwgc_fp16",
         "nhwgc_bf16",
-        #"ndhwgc_fp32",
+        "ndhwgc_fp32",
         "ndhwgc_fp16",
         "ndhwgc_bf16",
     ]
