@@ -3,14 +3,15 @@
 
 #pragma once
 
-#include "xdl.hpp"
+#include <miopen/ck_builder/instance_data/xdl.hpp>
 
 namespace miopen {
 namespace conv {
 namespace ck_builder {
 namespace instance {
 namespace ckb = ck_tile::builder;
-struct XdlV3Algorithm
+
+struct XdlLargeTensorAlgorithm
 {
     using ConvSpecial = ckb::ConvSpecialization;
     using GemmSpecial = ckb::GemmSpecialization;
@@ -27,6 +28,8 @@ struct XdlV3Algorithm
         } tile_size;
     } thread_block;
 
+    static_assert(ckb::ThreadBlockDescriptor<ThreadBlock>);
+
     struct GridwiseGemm
     {
         std::size_t ak1;
@@ -38,7 +41,10 @@ struct XdlV3Algorithm
             std::size_t m_xdl_per_wave = 4;
             std::size_t n_xdl_per_wave = 1;
         } xdl_params;
+        static_assert(ckb::GridwiseXdlGemmDescriptor<XdlParams>);
     } gridwise_gemm;
+
+    static_assert(ckb::GridwiseFwdXdlGemmDescriptor<GridwiseGemm>);
 
     struct TransferABC
     {
@@ -87,21 +93,13 @@ struct XdlV3Algorithm
         } c;
     } transfer;
 
+    // TODO - Fix CK Builder schema to not require these defaults.
     ConvSpecial fwd_specialization;
     GemmSpecial gemm_specialization;
+
     std::size_t num_gemm_k_prefetch_stages;
     std::size_t num_conv_groups_to_merge;
-
-    // V3-specific: BlockGemmPipelineDescriptor
-    struct BlockGemmPipelineDescriptor
-    {
-        ckb::PipelineScheduler scheduler;
-        ckb::PipelineVersion pipeline_version;
-    } block_gemm_pipeline;
-
-    static_assert(ckb::BlockGemmPipelineDescriptor<BlockGemmPipelineDescriptor>);
-
-    bool direct_load;
+    PipeSched loop_scheduler;
 
     // Elementwise operations applied during convolution
     // - input_op: Applied to input tensor (A) before GEMM
@@ -113,22 +111,26 @@ struct XdlV3Algorithm
         ckb::ElementwiseOperation weight_op;
         ckb::ElementwiseOperation output_op;
     } elementwise_ops;
+
+    // Specialization field for large tensor support
+    static constexpr ckb::ConvAlgorithmSpecialization specialization =
+        ckb::ConvAlgorithmSpecialization::LARGE_TENSOR;
 };
 
-static_assert(ckb::factory::FwdXdlV3Algorithm<XdlV3Algorithm>);
+static_assert(ckb::factory::LargeTensorAlgorithm<XdlLargeTensorAlgorithm>);
 
-// V3 Instance struct
-struct XdlV3Instance
+// Struct to hold both signature and algorithm
+struct XdlLargeTensorInstance
 {
     XdlSignature signature;
-    XdlV3Algorithm algorithm;
+    XdlLargeTensorAlgorithm algorithm;
 };
 
-// Constexpr function to create XdlV3Instance from old
-// DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3 template parameters. Parameters are in the same
-// order as the template parameters, with V3-specific additions.
+// Constexpr function to create XdlLargeTensorInstance from old
+// DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor template parameters
+// Parameters are in the same order as the template parameters
 template <std::size_t NumDTensor>
-constexpr XdlV3Instance DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3(
+constexpr XdlLargeTensorInstance DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor(
     // 1. NDimSpatial
     std::size_t spatial_dim,
     // 2-5. Layouts
@@ -189,17 +191,13 @@ constexpr XdlV3Instance DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3(
     ckb::DataType input_compute_type,
     ckb::DataType weight_compute_type,
     // 48. Loop scheduler
-    ckb::PipelineScheduler loop_scheduler,
-    // 49. Pipeline version (V3-specific)
-    ckb::PipelineVersion pipeline_version,
-    // 50. Groups to merge
-    std::size_t num_conv_groups_to_merge = 1,
-    // 51. Direct load flag (V3-specific)
-    bool direct_load = false)
+    ckb::PipelineScheduler loop_scheduler = ckb::PipelineScheduler::DEFAULT,
+    // 49. Groups to merge
+    std::size_t num_conv_groups_to_merge = 1)
 {
     // Our project auto-formatting makes this initializer hard to read
     // clang-format off
-    return XdlV3Instance{
+    return XdlLargeTensorInstance{
         .signature = {
             .spatial_dim            = spatial_dim,
             .direction              = ckb::ConvDirection::FORWARD,
@@ -221,7 +219,7 @@ constexpr XdlV3Instance DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3(
                 .config = {
                     .layout       = output_layout,
                     .data_type    = output_data_type,
-                    .compute_type = output_data_type
+                    .compute_type = output_data_type // Output compute type same as data type
                 }
             },
             .data_type              = input_data_type,
@@ -257,7 +255,7 @@ constexpr XdlV3Instance DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3(
                         .src_vector_dim            = a_block_transfer_src_vector_dim,
                         .src_scalar_per_vector     = a_block_transfer_src_scalar_per_vector,
                         .lds_dst_scalar_per_vector = a_block_transfer_dst_scalar_per_vector_k1,
-                        .is_direct_load            = direct_load,
+                        .is_direct_load            = false,
                         .lds_padding               = a_block_lds_extra_m
                     },
                     .thread_cluster_arrange_order = {
@@ -277,7 +275,7 @@ constexpr XdlV3Instance DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3(
                         .src_vector_dim            = b_block_transfer_src_vector_dim,
                         .src_scalar_per_vector     = b_block_transfer_src_scalar_per_vector,
                         .lds_dst_scalar_per_vector = b_block_transfer_dst_scalar_per_vector_k1,
-                        .is_direct_load            = direct_load,
+                        .is_direct_load            = false,
                         .lds_padding               = b_block_lds_extra_n
                     },
                     .thread_cluster_arrange_order = {
@@ -305,11 +303,7 @@ constexpr XdlV3Instance DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3(
             .gemm_specialization        = gemm_specialization,
             .num_gemm_k_prefetch_stages = num_gemm_k_prefetch_stage,
             .num_conv_groups_to_merge   = num_conv_groups_to_merge,
-            .block_gemm_pipeline        = {
-                .scheduler        = loop_scheduler,
-                .pipeline_version = pipeline_version
-            },
-            .direct_load = direct_load,
+            .loop_scheduler             = loop_scheduler,
             .elementwise_ops = {
                 .input_op  = input_elementwise_op,
                 .weight_op = weight_elementwise_op,
@@ -319,6 +313,7 @@ constexpr XdlV3Instance DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3(
     };
     // clang-format on
 }
+
 } // namespace instance
 } // namespace ck_builder
 } // namespace conv
