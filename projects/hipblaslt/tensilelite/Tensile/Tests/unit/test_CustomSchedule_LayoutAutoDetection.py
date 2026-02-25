@@ -293,14 +293,14 @@ class TestLayoutAutoDetection:
             # TransposeA, TransposeB, LDSTrInst, TransposeLDS
             (True, False, True, 1): True, # TN  (TN and LDSTrInst and TransposeLDS == 1)
             (True, False, False, 1): True, # TN  (TN and LDSTrInst and TransposeLDS == 1)
-            (True, False, True, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0)  
-            (True, False, False, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0) 
+            (True, False, True, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0)
+            (True, False, False, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0)
 
             # TransposeA, TransposeB, LDSTrInst, TransposeLDS
             (False, False, True, 1): True, # TN  (TN and LDSTrInst and TTransposeLDSLDS == 1)
             (False, False, False, 1): False, # TN  (TN and LDSTrInst and TransposeLDS == 1)
-            (False, False, True, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0)  
-            (False, False, False, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0) 
+            (False, False, True, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0)
+            (False, False, False, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0)
 
             # TransposeA, TransposeB, LDSTrInst, TransposeLDS
             (False, True, True, 1): False, # NT  (NT and LDSTrInst and TransposeLDS == 1)
