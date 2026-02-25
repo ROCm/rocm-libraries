@@ -868,7 +868,7 @@ struct UniversalGemmBasePolicy
         using BDataType                            = std::conditional_t<IsBCastPolicyBeforeLDSWrite,
                                                                         typename Problem::ADataType,
                                                                         typename Problem::BDataType>;
-        constexpr auto BPackedSize      = numeric_traits<BDataType>::PackedSize;
+        constexpr auto BPackedSize                 = numeric_traits<BDataType>::PackedSize;
         constexpr auto b_lds_block_desc = Derived::template MakeBLdsBlockDescriptor<Problem>();
         constexpr index_t smem_size_b   = integer_least_multiple(
             b_lds_block_desc.get_element_space_size() * sizeof(BDataType) / BPackedSize, 16);
