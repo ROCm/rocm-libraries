@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <miopen/config.h> // WORKAROUND_BOOST_ISSUE_392
+#include <miopen/kernel.hpp>
 #include <miopen/rank.hpp>
 #include <miopen/sequences.hpp>
 
