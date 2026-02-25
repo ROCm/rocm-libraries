@@ -1,5 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file Types.hpp
+ * @brief Core type definitions and enumerations for the hipDNN Frontend API
+ *
+ * This file contains all the fundamental types used throughout the hipDNN Frontend,
+ * including data types, convolution modes, pointwise operation modes, and utility
+ * functions for type conversion between frontend and SDK types.
+ */
+
 #pragma once
 
 #include <HipdnnBackendHeuristicType.h>
@@ -23,104 +33,156 @@ using hipdnn_data_sdk::types::fp8_e4m3;
 using hipdnn_data_sdk::types::fp8_e5m2;
 using hipdnn_data_sdk::types::half;
 
+/**
+ * @enum ConvolutionMode
+ * @brief Specifies the convolution algorithm mode
+ *
+ * Determines how the convolution filter is applied to the input tensor.
+ */
 enum class ConvolutionMode
 {
-    NOT_SET = 0,
-    CROSS_CORRELATION = 1,
-    CONVOLUTION = 2
+    NOT_SET = 0, ///< Mode not specified
+    CROSS_CORRELATION = 1, ///< Cross-correlation mode (standard deep learning convolution)
+    CONVOLUTION = 2 ///< Mathematical convolution (filter is flipped)
 };
-typedef ConvolutionMode ConvolutionMode_t; // NOLINT(readability-identifier-naming)
+typedef ConvolutionMode ConvolutionMode_t; ///< @brief Type alias for ConvolutionMode
 
+/**
+ * @enum PointwiseMode
+ * @brief Specifies the type of element-wise (pointwise) operation
+ *
+ * Pointwise operations are applied element-by-element to tensors.
+ * They can be unary (1 input), binary (2 inputs), or ternary (3 inputs).
+ *
+ * @see isUnaryPointwiseMode(), isBinaryPointwiseMode(), isTernaryPointwiseMode()
+ */
 enum class PointwiseMode
 {
-    NOT_SET = 0,
-    ABS = 1,
-    ADD = 2,
-    ADD_SQUARE = 3,
-    BINARY_SELECT = 4,
-    CEIL = 5,
-    CMP_EQ = 6,
-    CMP_GE = 7,
-    CMP_GT = 8,
-    CMP_LE = 9,
-    CMP_LT = 10,
-    CMP_NEQ = 11,
-    DIV = 12,
-    ELU_BWD = 13,
-    ELU_FWD = 14,
-    ERF = 15,
-    EXP = 16,
-    FLOOR = 17,
-    GELU_APPROX_TANH_BWD = 18,
-    GELU_APPROX_TANH_FWD = 19,
-    GELU_BWD = 20,
-    GELU_FWD = 21,
-    GEN_INDEX = 22,
-    IDENTITY = 23,
-    LOG = 24,
-    LOGICAL_AND = 25,
-    LOGICAL_NOT = 26,
-    LOGICAL_OR = 27,
-    MAX = 28,
-    MIN = 29,
-    MUL = 30,
-    NEG = 31,
-    RECIPROCAL = 32,
-    RELU_BWD = 33,
-    RELU_FWD = 34,
-    RSQRT = 35,
-    SIGMOID_BWD = 36,
-    SIGMOID_FWD = 37,
-    SIN = 38,
-    SOFTPLUS_BWD = 39,
-    SOFTPLUS_FWD = 40,
-    SQRT = 41,
-    SUB = 42,
-    SWISH_BWD = 43,
-    SWISH_FWD = 44,
-    TAN = 45,
-    TANH_BWD = 46,
-    TANH_FWD = 47,
+    NOT_SET = 0, ///< Mode not specified
+    ABS = 1, ///< Absolute value: |x|
+    ADD = 2, ///< Addition: x + y
+    ADD_SQUARE = 3, ///< Add and square: (x + y)²
+    BINARY_SELECT = 4, ///< Ternary select based on condition
+    CEIL = 5, ///< Ceiling function
+    CMP_EQ = 6, ///< Compare equal: x == y
+    CMP_GE = 7, ///< Compare greater or equal: x >= y
+    CMP_GT = 8, ///< Compare greater than: x > y
+    CMP_LE = 9, ///< Compare less or equal: x <= y
+    CMP_LT = 10, ///< Compare less than: x < y
+    CMP_NEQ = 11, ///< Compare not equal: x != y
+    DIV = 12, ///< Division: x / y
+    ELU_BWD = 13, ///< ELU activation backward pass
+    ELU_FWD = 14, ///< ELU activation forward pass
+    ERF = 15, ///< Error function
+    EXP = 16, ///< Exponential: e^x
+    FLOOR = 17, ///< Floor function
+    GELU_APPROX_TANH_BWD = 18, ///< GELU (tanh approximation) backward
+    GELU_APPROX_TANH_FWD = 19, ///< GELU (tanh approximation) forward
+    GELU_BWD = 20, ///< GELU activation backward
+    GELU_FWD = 21, ///< GELU activation forward
+    GEN_INDEX = 22, ///< Generate index tensor
+    IDENTITY = 23, ///< Identity: y = x
+    LOG = 24, ///< Natural logarithm
+    LOGICAL_AND = 25, ///< Logical AND
+    LOGICAL_NOT = 26, ///< Logical NOT
+    LOGICAL_OR = 27, ///< Logical OR
+    MAX = 28, ///< Element-wise maximum
+    MIN = 29, ///< Element-wise minimum
+    MUL = 30, ///< Multiplication: x * y
+    NEG = 31, ///< Negation: -x
+    RECIPROCAL = 32, ///< Reciprocal: 1/x
+    RELU_BWD = 33, ///< ReLU backward pass
+    RELU_FWD = 34, ///< ReLU forward pass
+    RSQRT = 35, ///< Reciprocal square root: 1/sqrt(x)
+    SIGMOID_BWD = 36, ///< Sigmoid backward pass
+    SIGMOID_FWD = 37, ///< Sigmoid forward pass
+    SIN = 38, ///< Sine function
+    SOFTPLUS_BWD = 39, ///< Softplus backward pass
+    SOFTPLUS_FWD = 40, ///< Softplus forward pass
+    SQRT = 41, ///< Square root
+    SUB = 42, ///< Subtraction: x - y
+    SWISH_BWD = 43, ///< Swish activation backward
+    SWISH_FWD = 44, ///< Swish activation forward
+    TAN = 45, ///< Tangent function
+    TANH_BWD = 46, ///< Tanh backward pass
+    TANH_FWD = 47, ///< Tanh forward pass
 };
-typedef PointwiseMode PointwiseMode_t; // NOLINT(readability-identifier-naming)
+typedef PointwiseMode PointwiseMode_t; ///< @brief Type alias for PointwiseMode
 
+/**
+ * @enum DataType
+ * @brief Specifies the data type for tensor elements
+ *
+ * Defines the numeric precision and format for tensor data. Different operations
+ * may support different subsets of data types.
+ */
 enum class DataType
 {
-    NOT_SET = 0,
-    FLOAT = 1,
-    HALF = 2,
-    BFLOAT16 = 3,
-    DOUBLE = 4,
-    UINT8 = 5,
-    INT32 = 6,
-    INT8 = 7,
-    FP8_E4M3 = 8,
-    FP8_E5M2 = 9,
+    NOT_SET = 0, ///< Data type not specified
+    FLOAT = 1, ///< 32-bit floating point (fp32)
+    HALF = 2, ///< 16-bit floating point (fp16, IEEE 754)
+    BFLOAT16 = 3, ///< 16-bit brain floating point (bf16)
+    DOUBLE = 4, ///< 64-bit floating point (fp64)
+    UINT8 = 5, ///< 8-bit unsigned integer
+    INT32 = 6, ///< 32-bit signed integer
+    INT8 = 7, ///< 8-bit signed integer
+    FP8_E4M3 = 8, ///< 8-bit floating point (4 exponent, 3 mantissa bits)
+    FP8_E5M2 = 9, ///< 8-bit floating point (5 exponent, 2 mantissa bits)
 };
-typedef DataType DataType_t; // NOLINT(readability-identifier-naming)
+typedef DataType DataType_t; ///< @brief Type alias for DataType
 
+/**
+ * @enum HeuristicMode
+ * @brief Specifies the heuristic mode for engine selection
+ *
+ * Controls how the hipDNN backend selects execution plans and engines.
+ */
 enum class HeuristicMode
 {
-    FALLBACK,
+    FALLBACK, ///< Use fallback heuristics for engine selection
 };
-typedef HeuristicMode HeurMode_t; // NOLINT(readability-identifier-naming)
+typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
 
+/**
+ * @enum BuildPlanPolicy
+ * @brief Specifies how execution plans are selected during graph building
+ */
 enum class BuildPlanPolicy
 {
-    HEURISTICS_CHOICE, // Use heuristics to select the best plan
-    ALL // Build all available plans (currently unused)
+    HEURISTICS_CHOICE, ///< Use heuristics to select the best plan
+    ALL ///< Build all available plans (currently unused)
 };
-typedef BuildPlanPolicy BuildPlanPolicy_t; // NOLINT(readability-identifier-naming)
+typedef BuildPlanPolicy BuildPlanPolicy_t; ///< @brief Type alias for BuildPlanPolicy
 
+/**
+ * @enum KnobValueType
+ * @brief Specifies the data type of a knob value
+ *
+ * Knobs are configuration parameters for engine execution. This enum
+ * indicates what type of value a particular knob expects.
+ *
+ * @see Knob, KnobSetting
+ */
 enum class KnobValueType
 {
-    NOT_SET = 0,
-    INT64 = 1,
-    FLOAT64 = 2,
-    STRING = 3,
+    NOT_SET = 0, ///< Value type not specified
+    INT64 = 1, ///< 64-bit signed integer value
+    FLOAT64 = 2, ///< 64-bit floating point value
+    STRING = 3, ///< String value
 };
-typedef KnobValueType KnobValueType_t; // NOLINT(readability-identifier-naming)
+typedef KnobValueType KnobValueType_t; ///< @brief Type alias for KnobValueType
 
+/**
+ * @brief Get the DataType enum value corresponding to a C++ type
+ *
+ * @tparam T The C++ type (float, half, hip_bfloat16, double, etc.)
+ * @return The corresponding DataType enum value
+ *
+ * @code{.cpp}
+ * DataType dt = getDataTypeEnumFromType<float>();  // Returns DataType::FLOAT
+ * DataType dt2 = getDataTypeEnumFromType<half>();  // Returns DataType::HALF
+ * @endcode
+ */
 template <typename T>
 DataType getDataTypeEnumFromType()
 {
@@ -608,19 +670,31 @@ inline KnobValueType getKnobValueTypeFromVariant(const std::variant<Ts...>& valu
     return ret;
 }
 
-// Frontend functions delegate to SDK for single source of truth
-// Convert frontend PointwiseMode to SDK type and call SDK validation functions
-
+/**
+ * @brief Check if a pointwise mode is a unary operation (1 input)
+ * @param mode The pointwise mode to check
+ * @return true if the mode is unary, false otherwise
+ */
 inline bool isUnaryPointwiseMode(PointwiseMode mode)
 {
     return hipdnn_data_sdk::utilities::isUnaryPointwiseMode(toSdkType(mode));
 }
 
+/**
+ * @brief Check if a pointwise mode is a binary operation (2 inputs)
+ * @param mode The pointwise mode to check
+ * @return true if the mode is binary, false otherwise
+ */
 inline bool isBinaryPointwiseMode(PointwiseMode mode)
 {
     return hipdnn_data_sdk::utilities::isBinaryPointwiseMode(toSdkType(mode));
 }
 
+/**
+ * @brief Check if a pointwise mode is a ternary operation (3 inputs)
+ * @param mode The pointwise mode to check
+ * @return true if the mode is ternary, false otherwise
+ */
 inline bool isTernaryPointwiseMode(PointwiseMode mode)
 {
     return hipdnn_data_sdk::utilities::isTernaryPointwiseMode(toSdkType(mode));
