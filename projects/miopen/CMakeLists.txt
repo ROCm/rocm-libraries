@@ -1,28 +1,6 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright (c) 2017 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 cmake_minimum_required( VERSION 3.15 )
 
 #Add a name for the rocm-libraries location
@@ -132,9 +110,6 @@ if(MIOPEN_INCBIN)
     enable_language(ASM)
 endif()
 
-option(MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM "Workaround: Use boost::filesystem instead of std::filesystem" OFF)
-message(STATUS "MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM ${MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM}")
-
 # Strip symbols for release
 if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -s")
@@ -162,7 +137,7 @@ else()
     set(MIOPEN_DEFAULT_BACKEND "OpenCL")
 endif()
 
-if(NOT WIN32 AND NOT MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM)
+if(NOT WIN32)
     include(CheckCXXLinkerFlag)
     check_cxx_linker_flag(-lstdc++fs HAS_LIB_STD_FILESYSTEM)
 endif()
