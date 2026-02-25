@@ -143,6 +143,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/knob_value.fbs
             schemas/matmul_attributes.fbs
             schemas/pointwise_attributes.fbs
+            schemas/sdpa_attributes.fbs
             schemas/tensor_attributes.fbs
         SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
         PRIMARY_VERSION ${HIPDNN_FLATBUFFERS_VERSION}

@@ -75,6 +75,7 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/GraphDetail.hpp>
@@ -90,6 +91,7 @@
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
@@ -612,6 +614,18 @@ private:
                     }
                     _sub_nodes.emplace_back(
                         std::make_shared<MatmulNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
+                {
+                    auto attr = SdpaAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_SdpaAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<SdpaFpropNode>(std::move(attr), graph_attributes));
                     break;
                 }
                 default:
@@ -1674,6 +1688,44 @@ public:
             std::make_shared<MatmulNode>(std::move(attributes), graph_attributes));
 
         return c;
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 2> sdpa_fprop(std::shared_ptr<TensorAttributes> q,
+                                                                std::shared_ptr<TensorAttributes> k,
+                                                                std::shared_ptr<TensorAttributes> v,
+                                                                SdpaAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("SdpaFprop_" + std::to_string(_sub_nodes.size()));
+        }
+        if(q->get_name().empty())
+        {
+            q->set_name(attributes.get_name() + "::Q");
+        }
+        if(k->get_name().empty())
+        {
+            k->set_name(attributes.get_name() + "::K");
+        }
+        if(v->get_name().empty())
+        {
+            v->set_name(attributes.get_name() + "::V");
+        }
+
+        auto o = outputTensor(attributes.get_name() + "::O");
+        auto stats = outputTensor(attributes.get_name() + "::STATS");
+
+        attributes.set_q(std::move(q));
+        attributes.set_k(std::move(k));
+        attributes.set_v(std::move(v));
+        attributes.set_o(o);
+        attributes.set_stats(stats);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<SdpaFpropNode>(std::move(attributes), graph_attributes));
+
+        return {o, stats};
     }
 
     // NOLINTBEGIN(readability-identifier-naming)
