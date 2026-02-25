@@ -18,6 +18,19 @@ using namespace ::testing;
 namespace hipdnn_frontend
 {
 
+// Static assert checks to verify Move and Copy semantics
+// Ensure INode cannot be copied, only moved
+static_assert(!std::is_copy_constructible_v<INode>, "INode must not be copy constructible");
+static_assert(!std::is_copy_assignable_v<INode>, "INode must not be copy assignable");
+
+// Ensure Graph cannot be copied, only moved (inherits deleted copy from INode or explicitly deleted)
+static_assert(!std::is_copy_constructible_v<Graph>, "Graph must not be copy constructible");
+static_assert(!std::is_copy_assignable_v<Graph>, "Graph must not be copy assignable");
+
+// Optional: Explicitly verify that move semantics ARE available
+static_assert(std::is_move_constructible_v<Graph>, "Graph must be move constructible");
+static_assert(std::is_move_assignable_v<Graph>, "Graph must be move assignable");
+
 // Utility class to access private members of Graph for testing purposes
 class GraphTestUtils : public Graph
 {
@@ -5840,6 +5853,8 @@ TEST_F(TestGraph, MoveConstruction)
     EXPECT_EQ(movedGraph.get_compute_data_type(), DataType::FLOAT);
     EXPECT_EQ(movedGraph.get_intermediate_data_type(), DataType::HALF);
     EXPECT_EQ(movedGraph.get_io_data_type(), DataType::FLOAT);
+    EXPECT_EQ(originalGraph.get_name(), "");
+    EXPECT_TRUE(originalGraph.getTensorsByName().empty());
 }
 
 TEST_F(TestGraph, MoveAssignment)
