@@ -31,6 +31,45 @@ __forceinline__ __device__ unsigned int next_power_of_2(unsigned int n)
 
 } // namespace detail
 
+template <typename FloatAccum, unsigned int SizeLclData>
+__forceinline__ __device__ void lds_reduce2_welford(FloatAccum& mean,
+                                                    FloatAccum& variance,
+                                                    FloatAccum& count,
+                                                    FloatAccum scale,
+                                                    FloatAccum (&lcl_data_mean)[SizeLclData],
+                                                    FloatAccum (&lcl_data_variance)[SizeLclData],
+                                                    FloatAccum (&lcl_data_count)[SizeLclData],
+                                                    unsigned int lid)
+{
+    lcl_data_mean[lid]     = mean;
+    lcl_data_variance[lid] = variance;
+    lcl_data_count[lid]    = count;
+    __syncthreads();
+
+    for(unsigned int red = detail::next_power_of_2(SizeLclData) >> 1; red > 0; red >>= 1)
+    {
+        if(lid < red && lid + red < SizeLclData)
+        {
+            FloatAccum delta = lcl_data_mean[lid + red] - lcl_data_mean[lid];
+            FloatAccum n_a   = lcl_data_count[lid];
+            FloatAccum n_b   = lcl_data_count[lid + red];
+            FloatAccum n_new = n_a + n_b;
+            lcl_data_mean[lid] =
+                n_new > 0 ? (lcl_data_mean[lid] * n_a + lcl_data_mean[lid + red] * n_b) / n_new
+                          : 0.f;
+            lcl_data_variance[lid] = n_new > 0
+                                         ? lcl_data_variance[lid] + lcl_data_variance[lid + red] +
+                                               delta * delta * (n_a * n_b / n_new)
+                                         : 0.f;
+            lcl_data_count[lid]    = n_new;
+        }
+        __syncthreads();
+    }
+
+    mean     = lcl_data_mean[0];
+    variance = lcl_data_variance[0] * scale;
+}
+
 template <typename FloatAccum, unsigned int BlockSize>
 __forceinline__ __device__ void
 reduce2(FloatAccum& x, FloatAccum& y, FloatAccum scale, unsigned int lid)
@@ -208,6 +247,116 @@ __forceinline__ __device__ void gcn_reduce2(FloatAccum& x,
 
     x *= scale;
     y *= scale;
+}
+
+template <typename FloatAccum>
+__forceinline__ __device__ void dpp_interleaved_reduction_welford(volatile FloatAccum& temp_mean,
+                                                                  volatile FloatAccum& temp_var,
+                                                                  volatile FloatAccum& temp_count)
+{
+    FloatAccum delta;
+    FloatAccum count_mult;
+    FloatAccum n_rcp;
+
+    __asm__ volatile(
+        "s_nop 4\n"
+
+#define REDUCTION_STEP(dpp)                                                                        \
+    \ 
+            /* 1 */                                                                                \
+        "v_add_f32 %4 -%0 %0 " dpp                                                                 \
+        "\n" /* store the deltas of the means, that's a scratch register we'll need for the math.  \
+                Multiply src0 by -1 to get the proper sign of the delta. Note: the first delta     \
+                will be incorrect! Will be non-zero! */                                            \
+        /* 2 */ "v_mul_f32 %0 %0 %2\n" /* calculate mean times count */ /* 3 */ "v_mul_f32 %3 %2 " \
+        "%2 " dpp                                                                                  \
+        "\n" /* get n_a * n_b */ /* 4 */ "v_mul_f32 %4 %4 %4\n" /* square deltas, we need those    \
+                                                                   for the variance calculation;   \
+                                                                   this is put here in place of a  \
+                                                                   NOP due to dependency between 2 \
+                                                                   and 5*/                         \
+        /* 5 */ "v_add_f32 %0 %0 %0 " dpp                                                          \
+        "\n" /* merge mean times count */ /* 6 */ "v_add_f32 %2 %2 %2 " dpp                        \
+        "\n" /* sum up the new counts that correspond to the new mean times count values*/ /* 7 */ \
+        "v_rcp_f32 %5 %2\n"            /* prepare for division by n_a + n_b possibly also do       \
+                                          v_div_scale_f32?*/                                       \
+        /* 8 */ "v_mul_f32 %0 %0 %5\n" /* normalize mean; %5 is 1/(n_a + n_b), it's the updated    \
+                                          counts */                                                \
+        /* 9 */ "v_add_f32 %1 %1 %1 " dpp                                                          \
+        "\n" /* part of the variance calculation -- sum up the two partitions, add the deltas in   \
+                the next steps */                                                                  \
+        /*10 */ "v_mul_f32 %5 %3 %5\n" /*11 */ /* NOP is not necessary here, it's needed when the  \
+                                                  first instruction is non-DPP and the second one  \
+                                                  is, thus there should be no dependency between 9 \
+                                                  and 12 or data corruption risk between 10 and 12 \
+                                                */                                                 \
+        /*12 */ "v_fma_f32 %1 %4 %5 %1\n"      /* %4, %5 and %1 should already have been properly  \
+                                                  offset with the required number of lanes for the \
+                                                  reduciton */                                     \
+        /*13 */ "v_nop\n" /*14 */ "v_nop\n" /* NOPs necessary because the next instr needs %4 and  \
+                                               has DPP, dependency between 12 and 1 */
+
+        REDUCTION_STEP("row_shr:1 bound_ctrl:0") REDUCTION_STEP("row_shr:2 bound_ctrl:0")
+            REDUCTION_STEP("row_shr:4 bank_mask:0xe") REDUCTION_STEP("row_shr:8 bank_mask:0xc")
+                REDUCTION_STEP("row_bcast:15 row_mask:0xa")
+                    REDUCTION_STEP("row_bcast:31 row_mask:0xc")
+
+                        ""
+        : "=v"(temp_mean),
+          "=v"(temp_var),
+          "=v"(temp_count),
+          "=v"(count_mult),
+          "=v"(delta),
+          "=v"(n_rcp)
+        : "0"(temp_mean), "1"(temp_var), "2"(temp_count), "3"(count_mult), "4"(delta), "5"(n_rcp));
+}
+
+template <typename FloatAccum, unsigned int SizeLclData>
+__forceinline__ __device__ void gcn_reduce2_welford(FloatAccum& mean,
+                                                    FloatAccum& variance,
+                                                    FloatAccum& count,
+                                                    FloatAccum scale,
+                                                    FloatAccum (&lcl_data_mean)[SizeLclData],
+                                                    FloatAccum (&lcl_data_variance)[SizeLclData],
+                                                    FloatAccum (&lcl_data_count)[SizeLclData],
+                                                    unsigned int lid)
+{
+    const unsigned int ldsidx = lid >> 6;
+
+    dpp_interleaved_reduction_welford<FloatAccum>(mean, variance, count);
+
+    // Last thread
+    if((lid % 64) == 63)
+    {
+        lcl_data_mean[ldsidx]     = mean;
+        lcl_data_variance[ldsidx] = variance;
+        lcl_data_count[ldsidx]    = count;
+    }
+
+    __syncthreads();
+
+    mean     = lcl_data_mean[0];
+    variance = lcl_data_variance[0];
+    count    = lcl_data_count[0];
+
+    // This could be changed to clang loop unroll(full), because the size is small
+    // static_unroll_count<unsigned int, 1, SizeLclData, 1, 0>{[&](unsigned int i) {
+    //     x += lcl_data_x[i];
+    //     y += lcl_data_y[i];
+    // }};
+    for(unsigned int i = 1; i < SizeLclData; i++)
+    {
+        FloatAccum delta = lcl_data_mean[i] - mean;
+        FloatAccum n_a   = count;
+        FloatAccum n_b   = lcl_data_count[i];
+        FloatAccum n_new = n_a + n_b;
+        mean             = (mean * n_a + lcl_data_mean[i] * n_b) / (n_new);
+        variance         = variance + lcl_data_variance[i] + (delta * delta * (n_a * n_b)) / n_new;
+        count            = n_new;
+    }
+    // No scaling of the mean, that is already kept to scale as a requirement of Welford's variance
+    // calculation
+    variance *= scale;
 }
 
 } // namespace reduction
