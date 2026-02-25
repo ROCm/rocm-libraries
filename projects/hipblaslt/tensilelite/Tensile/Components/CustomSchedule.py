@@ -3154,7 +3154,7 @@ def _get_schedule_128x192x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 192, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(128, 192, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -3220,7 +3220,7 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(192, 256, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(192, 256, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -3365,7 +3365,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
         }
 
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
-    elif isNN(kernel) and TLDS==1:
+    elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
@@ -3550,7 +3550,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 192, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(256, 192, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -3647,7 +3647,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
 
-    elif isNN(kernel) and TLDS==1:
+    elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
         
@@ -3830,7 +3830,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 256, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(256, 256, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -3969,7 +3969,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(192, 128, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(192, 128, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -4057,7 +4057,7 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 128, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(128, 128, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -4216,7 +4216,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         syncs.add(                               9, dscnt=0, comment="wait for LRBs before the packing them",
                                                  barrier=True, barrier_comment="make sure all LRs are done before starting GR")
         pack_b0= [                               10,10,10,10, 10,10, 11,11,11,11,
-                                                 9,9,9,9,     10,10, 10,10,11,11]
+                                                 9,9,9,9,     10,10, 11,11,11,11]
         grinca = [0,0,1, 1,2,2, 2,2,2]
         grincb = [2,2,6, 7,7,7, 8,8,8]
         lrsa   = [10]
@@ -4225,25 +4225,23 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         num_code_paths = 2
         gra   = [                                9,9,   11,11]
         gra2  = [                                 10,10,11,11]
-        grb    = [                                              13,        14,14,16] # one index for two instructions
+        grb    = [                                              13,        14,14,17] # one index for two instructions
         grb2   = [                                              13,         15,15,17] # one index for two instructions
         num_gr = len(gra) + len(grb)
         syncs.add(                                             12, vlcnt=8, barrier=True, comment="wait for the previous GRAs")
 
         lra1   = [                                             12,12,12,12,
                                                                 13,13,13,13]
+        syncs.add(                                                         14, vlcnt=4+1, barrier=True, barrier_comment="make sure GRBs are done before starting LRBs"  )
         lrb1   = [                                                         14,15,16,16]
-        #                                                                  wait then read
-        syncs.add(                                                         14, dscnt=4, vlcnt=4+1, comment="wait for the first LRA before packing and also wait for GRBs",
-                                                                               barrier=True, barrier_comment="make sure GRBs are done before starting LRBs"  )
-        syncs.add(                                                                  17, dscnt=4, comment="wait for the rest of LRAs")
-        pack_a1 =[                                                            15,15,17,17, # swap instructions, must come after LR and before other packs
-                                                                                16,16,16,16, 20,20, 21,21,21,21,
+        syncs.add(                                                            15, dscnt=1, comment="wait for LRAs")
+        pack_a1 =[                                                            15,15,16,16, # swap instructions, must come after LR and before other packs
+                                                                                17,17,17,17, 20,20, 21,21,21,21,
                                                                                  18,18,18,18, 20,20, 21,21,21,21]
-        syncs.add(                                                               18, dscnt=3, comment="wait for the first LRB before the packing them")
-        syncs.add(                                                                19, dscnt=0, comment="wait for the 2nd and 3rd LRB")
-        pack_b1= [                                                               18,18,19,19, 20,20, 22,22,22,22,
-                                                                                  19,19,19,19, 20,20, 22,22,22,22]
+        syncs.add(                                                                19, dscnt=2, comment="wait for the first 2 LRBs before the packing them")
+        syncs.add(                                                                 20, dscnt=0, comment="wait for the rest of LRBs")
+        pack_b1= [                                                                19,19,19,19, 20,20, 22,22,22,22,
+                                                                                   20,20,20,20, 20,20, 22,22,22,22]
         lwsa   = [                                                                            20] # use delay before mfma4x4x4
         lwsb   = [                                                                            20]    
     else:
@@ -4433,7 +4431,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
 
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 256, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(128, 256, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -4843,7 +4841,7 @@ def _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS):
 
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 128, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(256, 128, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -4856,6 +4854,8 @@ def _get_schedule_256x128x32_TF32(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
 
     if isTN(kernel) and useLDSTr and TLDS==1:
+        kernel["UseMFMAF32XEmulation"] = False
+        kernel["UseDot2F32XEmulation"] = False
         kernel["UsePLRPack"] = True
         numPackInstr = 24 
         numPackIndices = numPackInstr // 2 # Assign 2 pack instructions per mfma index

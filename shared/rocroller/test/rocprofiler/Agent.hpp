@@ -20,11 +20,20 @@ namespace rocRoller
     {
         struct InstructionProfile
         {
-            uint64_t    totalLatency{0}; // Total latency in cycles
+            // Note: many of these latency numbers are architecture-dependent
+            // Refer to comments for `rocprofiler_thread_trace_decoder_inst_t` for details
+
+            // Total latency in cycles (includes stall)
+            uint64_t totalLatency{0};
+
+            // Total latency including gaps since previous instruction
+            uint64_t totalLatencyWithPrecedingNone{0};
+
             uint64_t    hitcount{0}; // Number of times instruction was executed
             std::string instruction; // Disassembled instruction text
 
             uint64_t    meanLatency() const;
+            uint64_t    meanLatencyWithPrecedingNone() const;
             std::string toString() const;
         };
 
@@ -35,20 +44,20 @@ namespace rocRoller
 
         /**
          * @brief Call a function that dispatches a single kernel and collects data
-         * 
+         *
          * When the agent is enabled, this function will repeatedly call the dispatch function
          * until instruction profiling data is successfully collected. The dispatch function
          * must only dispatch a single kernel per invocation.
-         * 
+         *
          * @param dispatch Function that dispatches a single kernel
-         * @return Vector of InstructionProfile from the dispatch. Returns empty vector if 
+         * @return Vector of InstructionProfile from the dispatch. Returns empty vector if
          *         agent is disabled.
          */
         std::vector<InstructionProfile> loopUntilDispatchData(std::function<void()> dispatch);
 
         /**
          * @brief Reset the internal state of the profiler agent
-         * 
+         *
          * For unexpected errors causing the agent to be in a bad state.
          */
         void reset();

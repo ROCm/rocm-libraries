@@ -33,6 +33,12 @@ namespace CLI
             return true;
         }
 
+        inline bool lexical_cast(const std::string& s, rocRoller::ScaleSkipPermlaneMode& v)
+        {
+            v = rocRoller::fromString<rocRoller::ScaleSkipPermlaneMode>(s);
+            return true;
+        }
+
         inline bool lexical_cast(const std::string& s, rocRoller::Client::GEMMClient::MNKTuple& v)
         {
             return rocRoller::Client::GEMMClient::CLI::ParseMNK(s, v);
