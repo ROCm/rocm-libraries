@@ -33,12 +33,16 @@
 
 #include <boost/program_options.hpp>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/registration.h>
 
 #include <cstddef>
 #include <string>
 #include <vector>
+#include <variant>
 #include <set>
+#include <mutex>
+#include <future>
 #include <unordered_map>
 
 #include "RunListener.hpp"
@@ -54,7 +58,7 @@ namespace TensileLite
             struct ProfileInfo {
                 uint64_t kernel_id;
                 double execution_time_us;
-                std::unordered_map<uint64_t, uint64_t> counters;
+                std::unordered_map<uint64_t, std::variant<double, std::vector<double>>> counters;
             };
 
             static std::shared_ptr<Profiler>
@@ -148,6 +152,14 @@ namespace TensileLite
 
         class RocProfiler {
         public:
+            struct CounterInfo {
+                uint64_t id;
+                size_t num;
+                std::vector<rocprofiler_counter_record_dimension_info_t> dimInfos;
+                std::vector<std::string> dimNames;
+                std::vector<size_t> strides;
+            };
+
             static RocProfiler& getInstance() {
                 static RocProfiler instance;
                 return instance;
@@ -176,7 +188,11 @@ namespace TensileLite
             void stop();
 
             // Enable rocprof
-            void enable() { m_do = true; }
+            void enable() {
+                m_do = true;
+                m_promise = std::promise<void>();
+                m_future = m_promise.get_future();
+            }
 
             // Disable rocprof
             void disable() { m_do = false; }
@@ -197,9 +213,12 @@ namespace TensileLite
             bool m_context_started = false;
             uint32_t m_locationId;
             std::mutex m_mutex;
+            std::promise<void> m_promise;
+            std::future<void> m_future;
             rocprofiler_context_id_t m_context;
             rocprofiler_agent_v0_t m_agent;
             rocprofiler_counter_config_id_t m_agentProfile;
+            std::unordered_map<uint64_t, CounterInfo> m_counterInfos;
             Profiler* m_profiler;
             std::unordered_map<std::string, rocprofiler_counter_id_t> m_counterName2Id;
 

@@ -89,6 +89,21 @@ namespace TensileLite
                 uint32_t locationId = ((bus & 0xFF) << 8) | ((dev & 0x1F) << 3) | (fnc & 0x07);
                 return locationId;
             }
+
+            std::string dimensionNameAbbrev(std::string dimName)
+            {
+                if (dimName == "DIMENSION_SHADER_ENGINE") {
+                    return "SE";
+                } else if (dimName == "DIMENSION_SHADER_ARRAY") {
+                    return "SA";
+                } else if (dimName == "DIMENSION_INSTANCE") {
+                    return "INST";
+                } else if (dimName.rfind("DIMENSION_", 0) == 0) {
+                    return dimName.substr(10);
+                } else {
+                    return dimName;
+                }
+            }
         }
 
         bool RocProfiler::initialize(int deviceIdx, const std::vector<std::string>& counter_names, Profiler* profiler) {
@@ -133,16 +148,33 @@ namespace TensileLite
                                  void* user_data) -> rocprofiler_status_t {
                 auto* rocprofiler = static_cast<RocProfiler*>(user_data);
                 std::vector<rocprofiler_counter_id_t> counter_ids;
-                rocprofiler_counter_info_v0_t info;
+                rocprofiler_counter_info_v1_t info;
                 rocprofiler_status_t status;
                 for (size_t i = 0; i < num_counters; i++) {
                     auto counter_id = counters[i];
-                    status = rocprofiler_query_counter_info(counter_id, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&info));
+                    status = rocprofiler_query_counter_info(counter_id, ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&info));
                     if (status == ROCPROFILER_STATUS_SUCCESS)
                     {
                         if (rocprofiler->m_profiler->m_counterNames.count(info.name)) {
                             counter_ids.push_back(counter_id);
                             rocprofiler->m_counterName2Id[info.name] = counter_id;
+                            auto* dims_p = *info.dimensions;
+                            RocProfiler::CounterInfo counterInfo{
+                                .id = counter_id.handle,
+                                .dimInfos = std::vector<rocprofiler_counter_record_dimension_info_t>(dims_p, dims_p + info.dimensions_count) };
+                            auto& strides = counterInfo.strides;
+                            strides.push_back(1);
+                            for (size_t j = 0; j < counterInfo.dimInfos.size() - 1; j++) {
+                                auto& dim = counterInfo.dimInfos[j];
+                                strides.push_back(dim.instance_size * strides.back());
+                            }
+                            counterInfo.num = counterInfo.dimInfos.back().instance_size * strides.back();
+                            auto& dimNames = counterInfo.dimNames;
+                            for (auto& dim : counterInfo.dimInfos) {
+                                std::string name = dim.name;
+                                dimNames.push_back(rocprof::dimensionNameAbbrev(name));
+                            }
+                            rocprofiler->m_counterInfos.emplace(counter_id.handle, std::move(counterInfo));
                         }
                     }
                 }
@@ -191,23 +223,50 @@ namespace TensileLite
         }
 
         std::string RocProfiler::fetch(int index) {
+            m_future.get(); // wait callback finished
             std::lock_guard<std::mutex> lock(m_mutex);
             auto it = m_profiler->m_solutionIdx2DispatchId.find(index);
             if (it == m_profiler->m_solutionIdx2DispatchId.end())
                 throw std::runtime_error("no counter data for solution " + std::to_string(index));
             auto dispatchId = it->second;
-            auto counters = m_profiler->m_dispatchId2ProfileInfo[dispatchId].counters;
+            auto& counters = m_profiler->m_dispatchId2ProfileInfo[dispatchId].counters;
             std::ostringstream ss;
-            int i = 0;
+            size_t i = 0;
             for (const auto& [name, counter_id] : m_counterName2Id) {
                 auto cit = counters.find(counter_id.handle);
                 if (cit == counters.end())
                     throw std::runtime_error("counter " + name + " value not found.");
+                if (i != 0) ss << ",";
                 auto value = cit->second;
-                if (i != 0) {
-                    ss << ",";
+                if (std::holds_alternative<double>(value)) {
+                    auto counterValue = std::get<double>(value);
+                    ss << name << ": " << counterValue;
+                } else {
+                    auto& counterValues = std::get<std::vector<double>>(value);
+                    auto& counterInfo = m_counterInfos[counter_id.handle];
+                    auto& strides = counterInfo.strides;
+                    for (size_t lindex = 0; lindex < counterInfo.num; lindex++) {
+                        if (lindex != 0) ss << ",";
+                        ss << name << "(";
+                        size_t pos = lindex, ndim = strides.size();
+                        for (size_t j = 0; j < ndim; j++) {
+                            size_t k = ndim - 1 - j;
+                            size_t stride = strides[k];
+                            size_t idx = pos / stride;
+                            ss << counterInfo.dimNames[k] << "=" << idx;
+                            if (k != 0) ss << ",";
+                            pos %= stride;
+                        }
+                        auto counterValue = counterValues[lindex];
+                        ss << "): ";
+                        if (std::trunc(counterValue) == counterValue) {
+                            ss << std::fixed << std::setprecision(0);
+                        } else {
+                            ss << std::defaultfloat;
+                        }
+                        ss << counterValue;
+                    }
                 }
-                ss << name << ": " << value;
                 i++;
             }
             return ss.str();
@@ -216,6 +275,7 @@ namespace TensileLite
         void RocProfiler::shutdown() {
             if (m_initialized) {
                 stop();
+                rocprofiler_destroy_counter_config(m_agentProfile);
                 m_initialized = false;
             }
         }
@@ -268,13 +328,36 @@ namespace TensileLite
             Profiler::ProfileInfo pinfo;
             pinfo.kernel_id = dispatch_data.dispatch_info.kernel_id;
             pinfo.execution_time_us = (dispatch_data.end_timestamp - dispatch_data.start_timestamp) / 1e3;
-            for (unsigned long i = 0; i < record_count; ++i) {
+            auto& counters = pinfo.counters;
+            for (size_t i = 0; i < record_count; ++i) {
                 const auto& record = record_data[i];
                 rocprofiler_counter_id_t counter_id = {.handle = 0};
                 rocprofiler_query_record_counter_id(record.id, &counter_id);
-                pinfo.counters[counter_id.handle] = record.counter_value;
+                std::ostringstream ss;
+                auto& counterInfo = rocprofiler->m_counterInfos[counter_id.handle];
+                if (counterInfo.num <= 1) {
+                    counters[counterInfo.id] = record.counter_value;
+                } else {
+                    size_t index = 0;
+                    for (size_t j = 0; j < counterInfo.dimInfos.size(); j++) {
+                        auto& dim = counterInfo.dimInfos[j];
+                        size_t pos = 0;
+                        rocprofiler_query_record_dimension_position(record.id, dim.id, &pos);
+                        index += pos * counterInfo.strides[j];
+                    }
+                    auto it = counters.find(counterInfo.id);
+                    if (it == counters.end()) {
+                        std::vector<double> counterValues(counterInfo.num);
+                        counterValues[index] = record.counter_value;
+                        counters.emplace(counterInfo.id, std::move(counterValues));
+                    } else {
+                        auto& counterValues = std::get<std::vector<double>>(it->second);
+                        counterValues[index] = record.counter_value;
+                    }
+                }
             }
             rocprofiler->m_profiler->m_dispatchId2ProfileInfo.emplace(dispatch_id, pinfo);
+            rocprofiler->m_promise.set_value(); // notify finished
         }
 
         namespace rocprof

@@ -73,8 +73,8 @@ namespace TensileLite
 
         void Profiler::preProfiler()
         {
-          if (!m_currentDone)
-              TensileLite::Client::RocProfiler::getInstance().enable();
+            if (!m_currentDone)
+                TensileLite::Client::RocProfiler::getInstance().enable();
         }
 
         void Profiler::postProfiler()
