@@ -311,6 +311,61 @@ typedef enum
     /** @} */
 
     /**
+     * @name Convolution Forward Operation Attributes (1400-1499)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Scaling factor alpha for forward convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_ALPHA = 1400,
+
+    /** @brief Scaling factor beta for forward convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_BETA = 1401,
+
+    /** @brief Convolution descriptor for forward convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_CONV_DESC = 1402,
+
+    /** @brief Weight tensor for forward convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W = 1403,
+
+    /** @brief Input tensor for forward convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X = 1404,
+
+    /** @brief Output tensor for forward convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y = 1405,
+
+    /** @} */
+
+    /**
+     * @name Shared Convolution Descriptor Attributes (1500-1599)
+     * Attributes shared across convolution operation descriptors
+     * @{
+     */
+
+    /** @brief Compute data type for convolution */
+    HIPDNN_ATTR_CONVOLUTION_COMP_TYPE = 1500,
+
+    /** @brief Convolution mode (e.g., cross-correlation) */
+    HIPDNN_ATTR_CONVOLUTION_CONV_MODE = 1501,
+
+    /** @brief Dilation values for each spatial dimension */
+    HIPDNN_ATTR_CONVOLUTION_DILATIONS = 1502,
+
+    /** @brief Filter stride values for each spatial dimension */
+    HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES = 1503,
+
+    /** @brief Post-padding values for each spatial dimension */
+    HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS = 1504,
+
+    /** @brief Pre-padding values for each spatial dimension */
+    HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS = 1505,
+
+    /** @brief Number of spatial dimensions */
+    HIPDNN_ATTR_CONVOLUTION_SPATIAL_DIMS = 1506,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{
