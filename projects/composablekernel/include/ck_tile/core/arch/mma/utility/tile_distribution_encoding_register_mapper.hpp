@@ -1,11 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <stdio.h>
-#include "ck_tile/core.hpp"
-#include "ck_tile/host.hpp"
+#pragma once
 
-namespace ck_tile {
+#include <stdio.h>
+#include "ck_tile/core/tensor/tensor_descriptor.hpp"
+#include "ck_tile/core/tensor/tile_distribution.hpp"
+
+namespace ck_tile::core::arch::mma {
 
 // Utility to calculate register mappings from a Tile Distribution Encoding.
 template <typename TileDistrEnc>
@@ -78,7 +80,10 @@ struct TileDistrEncRegMap
                 {
                     auto& lv = im[res[0]][res[1]][r];
                     if(lv.lane < 0)
-                        lv = {l, v};
+                    {
+                        lv.lane = l;
+                        lv.vec  = v;
+                    }
                 }
             }
         }
@@ -146,4 +151,4 @@ struct TileDistrEncRegMap
         print_inverse_mapping();
     }
 };
-} // namespace ck_tile
+} // namespace ck_tile::core::arch::mma

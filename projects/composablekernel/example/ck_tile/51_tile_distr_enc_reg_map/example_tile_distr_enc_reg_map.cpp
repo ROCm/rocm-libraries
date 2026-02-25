@@ -2,15 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 #include <stdio.h>
-#include "ck_tile/core/arch/mma/utility.hpp"
+#include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_register_mapper.hpp"
 
 using namespace ck_tile;
+using namespace ck_tile::core::arch::mma;
 
 int main()
 {
     // Define some tile distribution encodings and print register mappings.
 
-    printf("Example RDNA3 V_WMMA_F32_16X16X16_F16 A Matrix (M, K)\n L{RM} V{K}\n");
+    printf("Example RDNA3 V_WMMA_F32_16X16X16_F16 A Matrix (M, K)\nL{RM} V{K}\n");
     TileDistrEncRegMap<
         tile_distribution_encoding<sequence<2>, // R (= Repeat) Lanes 0-15 are duplicated at 16-31
                                    tuple<sequence<16>, sequence<16>>, // H (= Hidden dims = unmerged
