@@ -2058,9 +2058,9 @@ class Solution(collections.abc.Mapping):
             wlrA = max(state["LocalReadVectorWidthA"] // state["MIInputPerThread"], 1)
             wlrB = max(state["LocalReadVectorWidthB"] // state["MIInputPerThread"], 1)
             if wlrA > wlrB:
-              state["LocalReadVectorWidthA"] = wlrB // state["MIInputPerThread"]
+              state["LocalReadVectorWidthA"] = wlrB * state["MIInputPerThread"]
             if wlrA < wlrB:
-              state["LocalReadVectorWidthB"] = wlrA // state["MIInputPerThread"]
+              state["LocalReadVectorWidthB"] = wlrA * state["MIInputPerThread"]
 
           if state["ProblemType"]["Sparse"] == 1:
             state["LocalReadVectorWidthMetadata"] = state["LocalReadVectorWidthA"]
