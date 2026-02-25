@@ -30,6 +30,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <hip/hip_runtime_api.h>
 #include <hip/hip_version.h>
 #include <hip/hiprtc.h>
 #include <mutex>
