@@ -416,6 +416,13 @@ CK_TILE_DEVICE void load_tile_transpose_with_offset(
     constexpr auto input_distr  = TileDistribution_{};
     constexpr auto output_distr = typename DistributedTensor_::StaticTileDistribution{};
 
+    // Check that the tile distribution of out_tensor is the expected one for transposed loads.
+    using OutTileDstrEncode = typename OutputTileDistributionTraits<
+        typename TileDistribution_::DstrEncode,
+        typename BottomTensorView_::DataType>::TransposedDstrEncode;
+    static_assert(std::is_same_v<decltype(make_static_tile_distribution(OutTileDstrEncode{})),
+                                 remove_cvref_t<decltype(output_distr)>>);
+
     constexpr auto y_in_desc  = input_distr.get_ys_to_d_descriptor();
     constexpr auto y_out_desc = output_distr.get_ys_to_d_descriptor();
 
