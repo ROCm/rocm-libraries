@@ -6,8 +6,6 @@
 # ============================================================================
 FROM ubuntu:24.04 AS base
 
-ARG CCACHE_SECONDARY_STORAGE=""
-ARG CCACHE_DIR="/tmp"
 ARG CCACHE_COMMIT=8c107aada09df2a40930d7064bbec8120ee76c91
 
 ENV DEBIAN_FRONTEND=noninteractive
