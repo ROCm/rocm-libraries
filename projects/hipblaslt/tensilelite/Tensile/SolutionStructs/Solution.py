@@ -2023,7 +2023,7 @@ class Solution(collections.abc.Mapping):
               state[f"LocalReadVectorWidth{tc}"] = 32 if state[f"UnrollMajorLDS{tc}"] else 16
             else:
               autoLRVW = True
-              if state["TransposeLDS"] and (not state["DirectToLds"]):
+              if state["TransposeLDS"] and (not state[f"DirectToLds{tc}"]):
                 state[f"LocalReadVectorWidth{tc}"] = int(16 // state["ProblemType"][f"MacDataType{tc}"].numBytes())
               else:
                 if state["ProblemType"]["Sparse"] and state["MIInputPerThread"] * state["ProblemType"][f"MacDataType{tc}"].numBytes() > 16:
