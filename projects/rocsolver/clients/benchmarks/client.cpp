@@ -658,8 +658,9 @@ try
             "                           ")
 
         ("alg_select",
-         value<char>()->default_value('1'),
-            "1 = 1st algorithm, 2 = 2nd algorithm, 3 = 3rd algorithm, 4 = 4th algorithm.\n"
+         value<char>()->default_value('D'),
+            "D = default, 1 = 1st algorithm, 2 = 2nd algorithm,\n"
+            "                           3 = 3rd algorithm, 4 = 4th algorithm.\n"
             "                           Specifies which algorithm to use.\n"
             "                           ");
 

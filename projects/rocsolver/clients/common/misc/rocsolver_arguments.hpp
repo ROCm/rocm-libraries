@@ -337,7 +337,7 @@ public:
             return;
 
         char algo = std::toupper(val->second.as<char>());
-        if(algo != '1' && algo != '2' && algo != '3' && algo != '4')
+        if(algo != 'D' && algo != '1' && algo != '2' && algo != '3' && algo != '4')
             throw std::invalid_argument("Invalid value for " + name);
     }
 

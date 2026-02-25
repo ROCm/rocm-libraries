@@ -29881,7 +29881,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_batched_64(rocblas_handle hand
 
     The algorithm choices are:
     - rocsolver_alg_select1: Basic CholeskyQR1 algorithm
-    - rocsolver_alg_select2: CholeskyQR2 algorithm
+    - rocsolver_alg_select2: CholeskyQR2 algorithm (default)
     - rocsolver_alg_select3: Shifted CholeskyQR3 with computed shifts
     - rocsolver_alg_select4: Shifted CholeskyQR3 with user-provided shifts
 

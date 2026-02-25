@@ -197,10 +197,11 @@ typedef enum rocsolver_norm_type_
  ********************************************************************************/
 typedef enum rocsolver_alg_select_
 {
-    rocsolver_alg_select1 = 311,
-    rocsolver_alg_select2 = 312,
-    rocsolver_alg_select3 = 313,
-    rocsolver_alg_select4 = 314,
+    rocsolver_alg_select_default = 311,
+    rocsolver_alg_select1 = 312,
+    rocsolver_alg_select2 = 313,
+    rocsolver_alg_select3 = 314,
+    rocsolver_alg_select4 = 315,
 } rocsolver_alg_select;
 
 /*! \brief Used to specify a function with multiple supported algorithm modes.

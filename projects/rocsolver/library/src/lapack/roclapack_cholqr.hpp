@@ -414,8 +414,9 @@ rocblas_status rocsolver_cholqr_argCheck(rocblas_handle handle,
     // order is important for unit tests:
 
     // 1. invalid/non-supported values
-    if(algo != rocsolver_alg_select1 && algo != rocsolver_alg_select2
-       && algo != rocsolver_alg_select3 && algo != rocsolver_alg_select4)
+    if(algo != rocsolver_alg_select_default && algo != rocsolver_alg_select1
+       && algo != rocsolver_alg_select2 && algo != rocsolver_alg_select3
+       && algo != rocsolver_alg_select4)
         return rocblas_status_invalid_value;
 
     // 2. invalid size
@@ -817,7 +818,7 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
             handle, m, n, A, shiftA, lda, strideA, R, shiftR, ldr, strideR, batch_count, info,
             scalars, work1, work2, work3, work4, pivots, iinfo, workArr, optim_mem);
     }
-    else if(algo == rocsolver_alg_select2)
+    else if(algo == rocsolver_alg_select2 || algo == rocsolver_alg_select_default)
     {
         status = rocsolver_cholqr2_template<BATCHED, STRIDED, T>(
             handle, m, n, A, shiftA, lda, strideA, R, shiftR, ldr, strideR, batch_count, info,

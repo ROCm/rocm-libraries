@@ -269,6 +269,7 @@ constexpr auto rocsolver2char_alg_select(rocsolver_alg_select value)
 {
     switch(value)
     {
+    case rocsolver_alg_select_default: return 'D';
     case rocsolver_alg_select1: return '1';
     case rocsolver_alg_select2: return '2';
     case rocsolver_alg_select3: return '3';
@@ -503,6 +504,7 @@ constexpr rocsolver_alg_select char2rocsolver_alg_select(char value)
 {
     switch(std::toupper(value))
     {
+    case 'D': return rocsolver_alg_select_default;
     case '1': return rocsolver_alg_select1;
     case '2': return rocsolver_alg_select2;
     case '3': return rocsolver_alg_select3;
