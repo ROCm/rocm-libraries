@@ -122,6 +122,7 @@ static void gather_field_v(MPI_Comm                                  mpi_comm,
 
     // work out how much to receive from each rank and where
     std::vector<int> recvcounts(static_cast<size_t>(mpi_size));
+    size_t           send_count = 0;
     std::vector<int> displs(static_cast<size_t>(mpi_size));
     // loop over each rank's bricks
     size_t elem_total = 0;
@@ -136,13 +137,30 @@ static void gather_field_v(MPI_Comm                                  mpi_comm,
         recvcounts[current_rank] = rank_elems;
         displs[current_rank]     = elem_total;
         elem_total += rank_elems;
+        if(range.first->rank == mpi_rank)
+            send_count = rank_elems;
     }
 
     // gather brick(s) to rank 0 (to host memory)
     auto mpi_type = get_mpi_type(elem_size);
+    // make sure init/execution kernels are done before sending data
+    const auto hip_status = hipDeviceSynchronize();
+    // check that all buffers are at least as large as they need
+    // for what the process is expected to send
+    const bool local_buffer_is_too_small
+        = send_count > 0
+          && (local_bricks.empty() || send_count > local_bricks.begin()->second.size() / elem_size);
+    bool global_check = hip_status != hipSuccess || local_buffer_is_too_small;
+    MPI_Allreduce(MPI_IN_PLACE, &global_check, 1, MPI_CXX_BOOL, MPI_LOR, mpi_comm);
+    if(global_check)
+    {
+        throw std::runtime_error(
+            "Device synchronization failed on some process or its local buffer is too small for "
+            "the number of elements it's expected to send");
+    }
 
     MPI_Gatherv(local_bricks.empty() ? nullptr : local_bricks.begin()->second.data(),
-                local_bricks.empty() ? 0 : local_bricks.begin()->second.size() / elem_size,
+                send_count,
                 mpi_type,
                 recvbuf.data(),
                 recvcounts.data(),
