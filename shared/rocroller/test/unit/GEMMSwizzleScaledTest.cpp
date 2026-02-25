@@ -307,7 +307,7 @@ namespace GEMMTests
     {
     };
 
-    TEST_P(GEMMMXFP4TNSwizzleScaledUnrollTestSuite, GPU_GEMM_Scaled_MX_FP4_TN_Swizzle_64x4_Unroll)
+    TEST_P(GEMMMXFP4TNSwizzleScaledUnrollTestSuite, GPU_GEMM_Scaled_MX_FP4_TN_Swizzle_64x4_Unroll_d123)
     {
 
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
@@ -375,7 +375,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(GEMMMXFP4TNSwizzleScaledUnrollTestSuite, GPU_GEMM_Scaled_MX_FP4_TN_Swizzle_32x8_Unroll)
+    TEST_P(GEMMMXFP4TNSwizzleScaledUnrollTestSuite, GPU_GEMM_Scaled_MX_FP4_TN_Swizzle_32x8_Unroll_c123)
     {
 
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
@@ -458,7 +458,7 @@ namespace GEMMTests
     {
     };
 
-    TEST_P(GEMMSwizzleScaledF4TNTestSuite, GPU_GEMM_Scaled_Swizzle_F4_TN)
+    TEST_P(GEMMSwizzleScaledF4TNTestSuite, GPU_GEMM_Scaled_Swizzle_F4_TN_b123)
     {
         auto const& [arch, waveK, loadScaleA, loadScaleB, unrollK, loadPathAB, padA, padB]
             = GetParam();
@@ -595,7 +595,7 @@ namespace GEMMTests
     {
     };
 
-    TEST_P(GEMMSwizzleScaledStreamKTestSuite, GPU_GEMM_Scaled_StreamK_Prefetch_MX_F4_TN)
+    TEST_P(GEMMSwizzleScaledStreamKTestSuite, GPU_GEMM_Scaled_StreamK_Prefetch_MX_F4_TN_a123)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -647,6 +647,9 @@ namespace GEMMTests
         gemm.streamK = streamKMode;
 
         basicGEMM<FP4, FP4, float>(gemm);
+
+	Log::info("{}", TimerPool::summary());
+	exit(0);
     }
 
     INSTANTIATE_TEST_SUITE_P(GEMMSwizzleScaledTest,

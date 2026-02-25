@@ -10,32 +10,127 @@
 
 namespace rocRoller::KernelGraph::ControlGraph
 {
-    std::unordered_map<int, std::unordered_map<int, NodeOrdering>> const&
+    //std::unordered_map<int, std::unordered_map<int, NodeOrdering>> const&
+    //    ControlGraph::nodeOrderTable() const
+    //{
+    //    populateOrderCache();
+    //    return m_orderCache;
+    //}
+
+    std::unordered_map<int, std::unordered_map<int, NodeOrdering>>
         ControlGraph::nodeOrderTable() const
     {
         populateOrderCache();
-        return m_orderCache;
+        std::unordered_map<int, std::unordered_map<int, NodeOrdering>> table;
+        for(auto const& [node, rel] : m_orderCache)
+        {
+            for(int other : rel.after)
+            {
+                if(node < other)
+                    table[node][other] = NodeOrdering::LeftFirst;
+            }
+            for(int other : rel.inBody)
+            {
+                if(node < other)
+                    table[node][other] = NodeOrdering::RightInBodyOfLeft;
+                else
+                    table[other][node] = NodeOrdering::LeftInBodyOfRight;
+            }
+        }
+        return table;
     }
+
+    //std::string ControlGraph::nodeOrderTableString(std::set<int> const& nodes) const
+    //{
+    //    populateOrderCache();
+
+    //    if(nodes.empty())
+    //    {
+    //        return "Empty order cache.\n";
+    //    }
+
+    //    std::ostringstream msg;
+
+    //    int width = std::ceil(std::log10(static_cast<float>(*nodes.rbegin())));
+    //    width     = std::max(width, 3);
+
+    //    msg << std::setw(width) << " "
+    //        << "\\";
+    //    for(int n : nodes)
+    //        msg << " " << std::setw(width) << n;
+
+    //    for(int i : nodes)
+    //    {
+    //        msg << std::endl << std::setw(width) << i << "|";
+    //        for(int j : nodes)
+    //        {
+    //            if(i == j)
+    //            {
+    //                msg << " ";
+    //                auto oldFill = msg.fill('-');
+    //                msg << std::setw(width) << "-";
+    //                msg.fill(oldFill);
+    //            }
+    //            else
+    //            {
+    //                msg << " " << std::setw(width) << abbrev(lookupOrder(CacheOnly, i, j));
+    //            }
+    //        }
+
+    //        msg << " | " << std::setw(width) << i;
+    //    }
+
+    //    msg << std::endl
+    //        << std::setw(width) << " "
+    //        << "|";
+    //    for(int n : nodes)
+    //        msg << " " << std::setw(width) << n;
+
+    //    msg << std::endl;
+
+    //    return msg.str();
+    //}
+
+
+    std::string ControlGraph::nodeOrderTableString() const
+    {
+        populateOrderCache();
+        TIMER(t, "nodeOrderTable");
+        std::set<int> nodes;
+        for(auto const& [node, rel] : m_orderCache)
+        {
+            if(!rel.after.empty() || !rel.before.empty() || !rel.inBody.empty()
+               || !rel.containing.empty())
+            {
+                nodes.insert(node);
+            }
+            for(int n : rel.after)
+                nodes.insert(n);
+            for(int n : rel.before)
+                nodes.insert(n);
+            for(int n : rel.inBody)
+                nodes.insert(n);
+            for(int n : rel.containing)
+                nodes.insert(n);
+        }
+        return nodeOrderTableString(nodes);
+    }
+
 
     std::string ControlGraph::nodeOrderTableString(std::set<int> const& nodes) const
     {
         populateOrderCache();
-
         if(nodes.empty())
         {
             return "Empty order cache.\n";
         }
-
         std::ostringstream msg;
-
         int width = std::ceil(std::log10(static_cast<float>(*nodes.rbegin())));
         width     = std::max(width, 3);
-
         msg << std::setw(width) << " "
             << "\\";
         for(int n : nodes)
             msg << " " << std::setw(width) << n;
-
         for(int i : nodes)
         {
             msg << std::endl << std::setw(width) << i << "|";
@@ -53,40 +148,38 @@ namespace rocRoller::KernelGraph::ControlGraph
                     msg << " " << std::setw(width) << abbrev(lookupOrder(CacheOnly, i, j));
                 }
             }
-
             msg << " | " << std::setw(width) << i;
         }
-
         msg << std::endl
             << std::setw(width) << " "
             << "|";
         for(int n : nodes)
             msg << " " << std::setw(width) << n;
-
         msg << std::endl;
-
         return msg.str();
     }
 
-    std::string ControlGraph::nodeOrderTableString() const
-    {
-        populateOrderCache();
 
-        TIMER(t, "nodeOrderTable");
 
-        std::set<int> nodes;
+    //std::string ControlGraph::nodeOrderTableString() const
+    //{
+    //    populateOrderCache();
 
-        for(auto const& [node, nodeOrderPairs] : m_orderCache)
-        {
-            for(auto const pair : nodeOrderPairs)
-            {
-                nodes.insert(node);
-                nodes.insert(pair.first);
-            }
-        }
+    //    TIMER(t, "nodeOrderTable");
 
-        return nodeOrderTableString(nodes);
-    }
+    //    std::set<int> nodes;
+
+    //    for(auto const& [node, nodeOrderPairs] : m_orderCache)
+    //    {
+    //        for(auto const pair : nodeOrderPairs)
+    //        {
+    //            nodes.insert(node);
+    //            nodes.insert(pair.first);
+    //        }
+    //    }
+
+    //    return nodeOrderTableString(nodes);
+    //}
 
     void ControlGraph::clearCache(Graph::GraphModification modification)
     {
@@ -138,140 +231,323 @@ namespace rocRoller::KernelGraph::ControlGraph
         }
     }
 
+    void ControlGraph::finalizeOrderCache() const
+    {
+        for(auto& [node, rel] : m_orderCache)
+        {
+            std::sort(rel.after.begin(), rel.after.end());
+            std::sort(rel.before.begin(), rel.before.end());
+            std::sort(rel.inBody.begin(), rel.inBody.end());
+            std::sort(rel.containing.begin(), rel.containing.end());
+        }
+    }
+
     void ControlGraph::populateOrderCache() const
     {
         TIMER(t, "populateOrderCache");
-
         if(m_cacheStatus == CacheStatus::Valid)
             return;
-
-        auto r = roots().to<std::set>();
-        populateOrderCache(r);
+        m_orderCache.clear();
+        auto rootNodes = roots().to<std::vector>();
+        populateOrderCacheImpl(rootNodes);
+        finalizeOrderCache();
         m_cacheStatus = CacheStatus::Valid;
-
-        //
-        // m_descendentCache is only used to help build m_orderCache,
-        // and it must be cleared after finish building m_orderCache
-        // to ensure no stale data being used when building m_orderCache
-        // next time.
-        //
         m_descendentCache.clear();
     }
-
     template <CForwardRangeOf<int> Range>
-    std::set<int> ControlGraph::populateOrderCache(Range const& startingNodes) const
+    std::vector<int> ControlGraph::populateOrderCacheImpl(Range const& startingNodes) const
     {
-        std::set<int> rv;
-
-        auto it = startingNodes.begin();
-        if(it == startingNodes.end())
-            return rv;
-
-        rv = populateOrderCache(*it);
-
-        for(it++; it != startingNodes.end(); it++)
+        std::vector<int> rv;
+        for(auto it = startingNodes.begin(); it != startingNodes.end(); ++it)
         {
-            auto nodes = populateOrderCache(*it);
-            rv.insert(nodes.begin(), nodes.end());
+            auto nodes = populateOrderCacheImpl(*it);
+            rv.insert(rv.end(), nodes.begin(), nodes.end());
         }
-
         return rv;
     }
-
-    std::set<int> ControlGraph::populateOrderCache(int startingNode) const
+    std::vector<int> ControlGraph::populateOrderCacheImpl(int startingNode) const
     {
         auto ccEntry = m_descendentCache.find(startingNode);
         if(ccEntry != m_descendentCache.end())
             return ccEntry->second;
+        using GD = Graph::Direction;
+        // Collect all children bucketed by edge type in a single pass
+        // Edge variant indices: Sequence(0), Initialize(1), ForLoopIncrement(2), Body(3), Else(4)
+        std::array<std::vector<int>, 5> directChildren;
+        for(auto edge : getNeighbours<GD::Downstream>(startingNode))
+        {
+            auto edgeTypeIndex = getEdge(edge).index();
+            for(auto child : getNeighbours<GD::Downstream>(edge))
+                directChildren[edgeTypeIndex].push_back(child);
+        }
 
-        auto addDescendents = [this](Generator<int> nodes) {
-            auto theNodes = nodes.to<std::set>();
-
-            auto descendents = populateOrderCache(theNodes);
-            theNodes.insert(descendents.begin(), descendents.end());
-
-            return theNodes;
+        auto addDescendents = [this](std::vector<int> const& children) -> std::vector<int> {
+            auto descendents = populateOrderCacheImpl(children);
+            std::vector<int> result;
+            result.reserve(children.size() + descendents.size());
+            result.insert(result.end(), children.begin(), children.end());
+            result.insert(result.end(), descendents.begin(), descendents.end());
+            std::sort(result.begin(), result.end());
+            result.erase(std::unique(result.begin(), result.end()), result.end());
+            return result;
         };
 
-        auto initNodes     = addDescendents(getOutputNodeIndices<Initialize>(startingNode));
-        auto bodyNodes     = addDescendents(getOutputNodeIndices<Body>(startingNode));
-        auto elseNodes     = addDescendents(getOutputNodeIndices<Else>(startingNode));
-        auto incNodes      = addDescendents(getOutputNodeIndices<ForLoopIncrement>(startingNode));
-        auto sequenceNodes = addDescendents(getOutputNodeIndices<Sequence>(startingNode));
 
+        // Index: Initialize(1), Body(3), Else(4), ForLoopIncrement(2), Sequence(0)
+        auto initNodes = addDescendents(directChildren[1]);
+        auto bodyNodes = addDescendents(directChildren[3]);
+        auto elseNodes = addDescendents(directChildren[4]);
+        auto incNodes  = addDescendents(directChildren[2]);
+        auto seqNodes  = addDescendents(directChildren[0]);
         // {init, body, else, inc} nodes are in the body of the current node
         writeOrderCache({startingNode}, initNodes, NodeOrdering::RightInBodyOfLeft);
         writeOrderCache({startingNode}, bodyNodes, NodeOrdering::RightInBodyOfLeft);
         writeOrderCache({startingNode}, elseNodes, NodeOrdering::RightInBodyOfLeft);
         writeOrderCache({startingNode}, incNodes, NodeOrdering::RightInBodyOfLeft);
-
         // Sequence connected nodes are after the current node
-        writeOrderCache({startingNode}, sequenceNodes, NodeOrdering::LeftFirst);
-
+        writeOrderCache({startingNode}, seqNodes, NodeOrdering::LeftFirst);
         // {body, else, inc, sequence} are after init nodes
         writeOrderCache(initNodes, bodyNodes, NodeOrdering::LeftFirst);
         writeOrderCache(initNodes, elseNodes, NodeOrdering::LeftFirst);
         writeOrderCache(initNodes, incNodes, NodeOrdering::LeftFirst);
-        writeOrderCache(initNodes, sequenceNodes, NodeOrdering::LeftFirst);
-
+        writeOrderCache(initNodes, seqNodes, NodeOrdering::LeftFirst);
         // {else, inc, sequence} are after body nodes
         writeOrderCache(bodyNodes, elseNodes, NodeOrdering::LeftFirst);
         writeOrderCache(bodyNodes, incNodes, NodeOrdering::LeftFirst);
-        writeOrderCache(bodyNodes, sequenceNodes, NodeOrdering::LeftFirst);
-
+        writeOrderCache(bodyNodes, seqNodes, NodeOrdering::LeftFirst);
         // {inc, sequence} are after else nodes
         writeOrderCache(elseNodes, incNodes, NodeOrdering::LeftFirst);
-        writeOrderCache(elseNodes, sequenceNodes, NodeOrdering::LeftFirst);
+        writeOrderCache(elseNodes, seqNodes, NodeOrdering::LeftFirst);
+        // sequence are after inc nodes
+        writeOrderCache(incNodes, seqNodes, NodeOrdering::LeftFirst);
+        std::vector<int> allNodes;
+        allNodes.reserve(initNodes.size() + bodyNodes.size() + elseNodes.size() + incNodes.size()
+                         + seqNodes.size());
 
-        // sequence are after inc nodes.
-        writeOrderCache(incNodes, sequenceNodes, NodeOrdering::LeftFirst);
 
-        auto allNodes = std::move(sequenceNodes);
-        allNodes.insert(bodyNodes.begin(), bodyNodes.end());
-        allNodes.insert(elseNodes.begin(), elseNodes.end());
-        allNodes.insert(incNodes.begin(), incNodes.end());
-        allNodes.insert(initNodes.begin(), initNodes.end());
-
+        allNodes.insert(allNodes.end(), initNodes.begin(), initNodes.end());
+        allNodes.insert(allNodes.end(), bodyNodes.begin(), bodyNodes.end());
+        allNodes.insert(allNodes.end(), elseNodes.begin(), elseNodes.end());
+        allNodes.insert(allNodes.end(), incNodes.begin(), incNodes.end());
+        allNodes.insert(allNodes.end(), seqNodes.begin(), seqNodes.end());
+        std::sort(allNodes.begin(), allNodes.end());
+        allNodes.erase(std::unique(allNodes.begin(), allNodes.end()), allNodes.end());
         m_descendentCache[startingNode] = allNodes;
 
         return allNodes;
     }
+
+
+
+
+    //void ControlGraph::populateOrderCache() const
+    //{
+    //    TIMER(t, "populateOrderCache");
+
+    //    if(m_cacheStatus == CacheStatus::Valid)
+    //        return;
+
+    //    auto r = roots().to<std::set>();
+    //    populateOrderCache(r);
+    //    m_cacheStatus = CacheStatus::Valid;
+
+    //    //
+    //    // m_descendentCache is only used to help build m_orderCache,
+    //    // and it must be cleared after finish building m_orderCache
+    //    // to ensure no stale data being used when building m_orderCache
+    //    // next time.
+    //    //
+    //    m_descendentCache.clear();
+    //}
+
+    //template <CForwardRangeOf<int> Range>
+    //std::set<int> ControlGraph::populateOrderCache(Range const& startingNodes) const
+    //{
+    //    std::set<int> rv;
+
+    //    auto it = startingNodes.begin();
+    //    if(it == startingNodes.end())
+    //        return rv;
+
+    //    rv = populateOrderCache(*it);
+
+    //    for(it++; it != startingNodes.end(); it++)
+    //    {
+    //        auto nodes = populateOrderCache(*it);
+    //        rv.insert(nodes.begin(), nodes.end());
+    //    }
+
+    //    return rv;
+    //}
+
+    //std::set<int> ControlGraph::populateOrderCache(int startingNode) const
+    //{
+    //    auto ccEntry = m_descendentCache.find(startingNode);
+    //    if(ccEntry != m_descendentCache.end())
+    //        return ccEntry->second;
+
+    //    auto addDescendents = [this](Generator<int> nodes) {
+    //        auto theNodes = nodes.to<std::set>();
+
+    //        auto descendents = populateOrderCache(theNodes);
+    //        theNodes.insert(descendents.begin(), descendents.end());
+
+    //        return theNodes;
+    //    };
+
+    //    auto initNodes     = addDescendents(getOutputNodeIndices<Initialize>(startingNode));
+    //    auto bodyNodes     = addDescendents(getOutputNodeIndices<Body>(startingNode));
+    //    auto elseNodes     = addDescendents(getOutputNodeIndices<Else>(startingNode));
+    //    auto incNodes      = addDescendents(getOutputNodeIndices<ForLoopIncrement>(startingNode));
+    //    auto sequenceNodes = addDescendents(getOutputNodeIndices<Sequence>(startingNode));
+
+    //    // {init, body, else, inc} nodes are in the body of the current node
+    //    writeOrderCache({startingNode}, initNodes, NodeOrdering::RightInBodyOfLeft);
+    //    writeOrderCache({startingNode}, bodyNodes, NodeOrdering::RightInBodyOfLeft);
+    //    writeOrderCache({startingNode}, elseNodes, NodeOrdering::RightInBodyOfLeft);
+    //    writeOrderCache({startingNode}, incNodes, NodeOrdering::RightInBodyOfLeft);
+
+    //    // Sequence connected nodes are after the current node
+    //    writeOrderCache({startingNode}, sequenceNodes, NodeOrdering::LeftFirst);
+
+    //    // {body, else, inc, sequence} are after init nodes
+    //    writeOrderCache(initNodes, bodyNodes, NodeOrdering::LeftFirst);
+    //    writeOrderCache(initNodes, elseNodes, NodeOrdering::LeftFirst);
+    //    writeOrderCache(initNodes, incNodes, NodeOrdering::LeftFirst);
+    //    writeOrderCache(initNodes, sequenceNodes, NodeOrdering::LeftFirst);
+
+    //    // {else, inc, sequence} are after body nodes
+    //    writeOrderCache(bodyNodes, elseNodes, NodeOrdering::LeftFirst);
+    //    writeOrderCache(bodyNodes, incNodes, NodeOrdering::LeftFirst);
+    //    writeOrderCache(bodyNodes, sequenceNodes, NodeOrdering::LeftFirst);
+
+    //    // {inc, sequence} are after else nodes
+    //    writeOrderCache(elseNodes, incNodes, NodeOrdering::LeftFirst);
+    //    writeOrderCache(elseNodes, sequenceNodes, NodeOrdering::LeftFirst);
+
+    //    // sequence are after inc nodes.
+    //    writeOrderCache(incNodes, sequenceNodes, NodeOrdering::LeftFirst);
+
+    //    auto allNodes = std::move(sequenceNodes);
+    //    allNodes.insert(bodyNodes.begin(), bodyNodes.end());
+    //    allNodes.insert(elseNodes.begin(), elseNodes.end());
+    //    allNodes.insert(incNodes.begin(), incNodes.end());
+    //    allNodes.insert(initNodes.begin(), initNodes.end());
+
+    //    m_descendentCache[startingNode] = allNodes;
+
+    //    return allNodes;
+    //}
+
+
+    //template <CForwardRangeOf<int> ARange, CForwardRangeOf<int> BRange>
+    //void ControlGraph::writeOrderCache(ARange const& nodesA,
+    //                                   BRange const& nodesB,
+    //                                   NodeOrdering  order) const
+    //{
+    //    for(int nodeA : nodesA)
+    //        for(int nodeB : nodesB)
+    //            writeOrderCache(nodeA, nodeB, order);
+    //}
+
 
     template <CForwardRangeOf<int> ARange, CForwardRangeOf<int> BRange>
     void ControlGraph::writeOrderCache(ARange const& nodesA,
                                        BRange const& nodesB,
                                        NodeOrdering  order) const
     {
-        for(int nodeA : nodesA)
-            for(int nodeB : nodesB)
-                writeOrderCache(nodeA, nodeB, order);
+        if(nodesA.size() == 0 || nodesB.size() == 0)
+            return;
+        auto oppositeOrder = opposite(order);
+        auto selectVec = [](PerNodeOrder& rel, NodeOrdering ord) -> std::vector<int>& {
+            switch(ord)
+            {
+            case NodeOrdering::LeftFirst:
+                return rel.after;
+            case NodeOrdering::RightFirst:
+                return rel.before;
+            case NodeOrdering::RightInBodyOfLeft:
+                return rel.inBody;
+            case NodeOrdering::LeftInBodyOfRight:
+                return rel.containing;
+            default:
+                __builtin_unreachable();
+            }
+        };
+        for(int a : nodesA)
+        {
+            auto& vec = selectVec(m_orderCache[a], order);
+            vec.insert(vec.end(), nodesB.begin(), nodesB.end());
+        }
+        for(int b : nodesB)
+        {
+            auto& vec = selectVec(m_orderCache[b], oppositeOrder);
+            vec.insert(vec.end(), nodesA.begin(), nodesA.end());
+        }
     }
 
     void ControlGraph::writeOrderCache(int nodeA, int nodeB, NodeOrdering order) const
     {
-        if(nodeA > nodeB)
+        switch(order)
         {
-            writeOrderCache(nodeB, nodeA, opposite(order));
-        }
-        else
-        {
-            auto [iter, _ignore] = m_orderCache.try_emplace(nodeA);
-
-            if(iter->second.contains(nodeB))
-            {
-                AssertFatal(iter->second.at(nodeB) == order,
-                            "Different kinds of orderings!",
-                            ShowValue(nodeA),
-                            ShowValue(nodeB),
-                            ShowValue(iter->second.at(nodeB)),
-                            ShowValue(order));
-            }
-            else
-            {
-                iter->second.emplace(nodeB, order);
-            }
+        case NodeOrdering::LeftFirst:
+            m_orderCache[nodeA].after.push_back(nodeB);
+            m_orderCache[nodeB].before.push_back(nodeA);
+            break;
+        case NodeOrdering::RightFirst:
+            m_orderCache[nodeA].before.push_back(nodeB);
+            m_orderCache[nodeB].after.push_back(nodeA);
+            break;
+        case NodeOrdering::RightInBodyOfLeft:
+            m_orderCache[nodeA].inBody.push_back(nodeB);
+            m_orderCache[nodeB].containing.push_back(nodeA);
+            break;
+        case NodeOrdering::LeftInBodyOfRight:
+            m_orderCache[nodeA].containing.push_back(nodeB);
+            m_orderCache[nodeB].inBody.push_back(nodeA);
+            break;
+        default:
+            break;
         }
     }
+
+
+
+    //template <CForwardRangeOf<int> ARange, CForwardRangeOf<int> BRange>
+    //void ControlGraph::writeOrderCache(ARange const& nodesA,
+    //                                   BRange const& nodesB,
+    //                                   NodeOrdering  order) const
+    //{
+    //    for(int nodeA : nodesA)
+    //        for(int nodeB : nodesB)
+    //            writeOrderCache(nodeA, nodeB, order);
+    //}
+
+    //void ControlGraph::writeOrderCache(int nodeA, int nodeB, NodeOrdering order) const
+    //{
+    //    if(nodeA > nodeB)
+    //    {
+    //        writeOrderCache(nodeB, nodeA, opposite(order));
+    //    }
+    //    else
+    //    {
+    //        auto [iter, _ignore] = m_orderCache.try_emplace(nodeA);
+
+    //        if(iter->second.contains(nodeB))
+    //        {
+    //            AssertFatal(iter->second.at(nodeB) == order,
+    //                        "Different kinds of orderings!",
+    //                        ShowValue(nodeA),
+    //                        ShowValue(nodeB),
+    //                        ShowValue(iter->second.at(nodeB)),
+    //                        ShowValue(order));
+    //        }
+    //        else
+    //        {
+    //            iter->second.emplace(nodeB, order);
+    //        }
+    //    }
+    //}
 
     NodeOrdering ControlGraph::lookupOrder(IgnoreCachePolicy const, int nodeA, int nodeB) const
     {

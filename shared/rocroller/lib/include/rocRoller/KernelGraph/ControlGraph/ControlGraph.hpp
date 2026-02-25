@@ -83,6 +83,23 @@ namespace rocRoller
          */
         NodeOrdering opposite(NodeOrdering order);
 
+
+	struct PerNodeOrder
+	{
+	    std::vector<int> after;
+	    std::vector<int> before;
+	    std::vector<int> inBody;
+	    std::vector<int> containing;
+	    void clear()
+	    {
+		after.clear();
+		before.clear();
+		inBody.clear();
+		containing.clear();
+	    }
+	};
+
+
         /**
          * Control flow graph.
          *
@@ -172,8 +189,11 @@ namespace rocRoller
              * Also, if a reference to the returned value is maintained through any changes
              * to the graph, the returned map will be cleared.
              */
-            std::unordered_map<int, std::unordered_map<int, NodeOrdering>> const&
-                nodeOrderTable() const;
+            //std::unordered_map<int, std::unordered_map<int, NodeOrdering>> const&
+            //    nodeOrderTable() const;
+	    std::unordered_map<int, std::unordered_map<int, NodeOrdering>>
+		nodeOrderTable() const;
+
 
             template <typename T>
             requires(std::constructible_from<Operation, T>)
@@ -233,9 +253,30 @@ namespace rocRoller
             }
 
         private:
-            virtual void clearCache(Graph::GraphModification modification) override;
+
+	    virtual void clearCache(Graph::GraphModification modification) override;
+	    void         populateOrderCache() const;
+	    void         finalizeOrderCache() const;
+	    template <CForwardRangeOf<int> Range>
+		std::vector<int> populateOrderCacheImpl(Range const& startingNodes) const;
+	    std::vector<int> populateOrderCacheImpl(int startingNode) const;
+	    NodeOrdering lookupOrder(CacheOnlyPolicy const, int nodeA, int nodeB) const;
+	    NodeOrdering lookupOrder(IgnoreCachePolicy const, int nodeA, int nodeB) const;
+	    void writeOrderCache(int nodeA, int nodeB, NodeOrdering order) const;
+	    template <CForwardRangeOf<int> ARange = std::initializer_list<int>,
+		     CForwardRangeOf<int> BRange = std::initializer_list<int>>
+			 void writeOrderCache(ARange const& nodesA,
+				 BRange const& nodesB,
+				 NodeOrdering  order) const;
+	    mutable std::unordered_map<int, PerNodeOrder> m_orderCache;
+	    mutable std::unordered_map<int, std::vector<int>> m_descendentCache;
+	    mutable CacheStatus m_cacheStatus = CacheStatus::Invalid;
+	    mutable bool m_changesRestricted = false;
+
+
+            //virtual void clearCache(Graph::GraphModification modification) override;
             void         checkOrderCache() const;
-            void         populateOrderCache() const;
+            //void         populateOrderCache() const;
 
             /**
              * Populates m_orderCache for startingNodes relative to their descendents, and the
@@ -251,27 +292,27 @@ namespace rocRoller
              */
             std::set<int> populateOrderCache(int startingNode) const;
 
-            NodeOrdering lookupOrder(CacheOnlyPolicy const, int nodeA, int nodeB) const;
-            NodeOrdering lookupOrder(IgnoreCachePolicy const, int nodeA, int nodeB) const;
+            //NodeOrdering lookupOrder(CacheOnlyPolicy const, int nodeA, int nodeB) const;
+            //NodeOrdering lookupOrder(IgnoreCachePolicy const, int nodeA, int nodeB) const;
 
-            void writeOrderCache(int nodeA, int nodeB, NodeOrdering order) const;
+            //void writeOrderCache(int nodeA, int nodeB, NodeOrdering order) const;
 
-            template <CForwardRangeOf<int> ARange = std::initializer_list<int>,
-                      CForwardRangeOf<int> BRange = std::initializer_list<int>>
-            void writeOrderCache(ARange const& nodesA,
-                                 BRange const& nodesB,
-                                 NodeOrdering  order) const;
+            //template <CForwardRangeOf<int> ARange = std::initializer_list<int>,
+            //          CForwardRangeOf<int> BRange = std::initializer_list<int>>
+            //void writeOrderCache(ARange const& nodesA,
+            //                     BRange const& nodesB,
+            //                     NodeOrdering  order) const;
 
-            mutable std::unordered_map<int, std::unordered_map<int, NodeOrdering>> m_orderCache;
+            //mutable std::unordered_map<int, std::unordered_map<int, NodeOrdering>> m_orderCache;
             /**
              * If an entry is present, the value will be the IDs of every descendent from the key,
              * following every kind of edge.
              */
-            mutable std::unordered_map<int, std::set<int>> m_descendentCache;
+            //mutable std::unordered_map<int, std::set<int>> m_descendentCache;
 
-            mutable CacheStatus m_cacheStatus = CacheStatus::Invalid;
+            //mutable CacheStatus m_cacheStatus = CacheStatus::Invalid;
 
-            mutable bool m_changesRestricted = false;
+            //mutable bool m_changesRestricted = false;
         };
 
         std::string name(ControlGraph::Element const& el);
