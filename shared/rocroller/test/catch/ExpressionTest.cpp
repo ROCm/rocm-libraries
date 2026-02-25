@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <cmath>
 #include <memory>
@@ -269,38 +246,38 @@ namespace ExpressionTest
         expected += R"(
              // BitFieldExtract<0,16>(rb: VGPR Value: Halfx2 x 1: v1)
              // Allocated : 2 VGPRs (Value: Half): v3, v2
-              v_bfe_u32 v11, v7, 0, 16
-              v_bfe_u32 v10, v7, 16, 16
+              v_bfe_u32 v10, v7, 0, 16
+              v_bfe_u32 v11, v7, 16, 16
 
              // BitFieldExtract<0,16>(rb: VGPR Value: BFloat16x2 x 1: v1)
              // Allocated : 2 VGPRs (Value: BFloat16): v3, v2
-             v_bfe_u32 v11, v7, 0, 16
-             v_bfe_u32 v10, v7, 16, 16
+             v_bfe_u32 v10, v7, 0, 16
+             v_bfe_u32 v11, v7, 16, 16
 
              // BitFieldExtract<0,8>(rb: VGPR Value: FP8x4 x 1: v1)
              // Allocated : 4 VGPRs (Value: FP8): v5, v4, v3, v2
-             v_bfe_u32 v13, v7, 0, 8
-             v_bfe_u32 v12, v7, 8, 8
-             v_bfe_u32 v11, v7, 16, 8
-             v_bfe_u32 v10, v7, 24, 8
+             v_bfe_u32 v10, v7, 0, 8
+             v_bfe_u32 v11, v7, 8, 8
+             v_bfe_u32 v12, v7, 16, 8
+             v_bfe_u32 v13, v7, 24, 8
 
              // BitFieldExtract<0,8>(rb: VGPR Value: BF8x4 x 1: v1)
              // Allocated : 4 VGPRs (Value: BF8): v5, v4, v3, v2
-             v_bfe_u32 v13, v7, 0, 8
-             v_bfe_u32 v12, v7, 8, 8
-             v_bfe_u32 v11, v7, 16, 8
-             v_bfe_u32 v10, v7, 24, 8
+             v_bfe_u32 v10, v7, 0, 8
+             v_bfe_u32 v11, v7, 8, 8
+             v_bfe_u32 v12, v7, 16, 8
+             v_bfe_u32 v13, v7, 24, 8
 
              // BitFieldExtract<0,4>(rb: VGPR Value: FP4x8 x 1: v1)
              // Allocated : 8 VGPRs (Value: FP4): v9, v8, v7, v6, v5, v4, v3, v2
-             v_bfe_u32 v17, v7, 0, 4
-             v_bfe_u32 v16, v7, 4, 4
-             v_bfe_u32 v15, v7, 8, 4
-             v_bfe_u32 v14, v7, 12, 4
-             v_bfe_u32 v13, v7, 16, 4
-             v_bfe_u32 v12, v7, 20, 4
-             v_bfe_u32 v11, v7, 24, 4
-             v_bfe_u32 v10, v7, 28, 4
+             v_bfe_u32 v10, v7, 0, 4
+             v_bfe_u32 v11, v7, 4, 4
+             v_bfe_u32 v12, v7, 8, 4
+             v_bfe_u32 v13, v7, 12, 4
+             v_bfe_u32 v14, v7, 16, 4
+             v_bfe_u32 v15, v7, 20, 4
+             v_bfe_u32 v16, v7, 24, 4
+             v_bfe_u32 v17, v7, 28, 4
         )";
 
         {
@@ -3233,9 +3210,9 @@ namespace ExpressionTest
             // 4294965263 = 11111111111111111111100000001111
             std::string expected = R"(
                 v_and_b32 v2, 130048, v0
-                v_and_b32 v3, 4294965263, v1
-                v_lshrrev_b32 v4, 6, v2
-                v_or_b32 v2, v4, v3
+                v_lshrrev_b32 v3, 6, v2
+                v_and_b32 v2, 4294965263, v1
+                v_or_b32 v4, v3, v2
             )";
 
             CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));

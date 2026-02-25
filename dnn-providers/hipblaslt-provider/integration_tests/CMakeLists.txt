@@ -9,6 +9,9 @@ add_executable(
     hipblaslt_plugin_integration_tests
     main.cpp
     IntegrationGpuMatmul.cpp
+    IntegrationGpuMatmulActiv.cpp
+    IntegrationGpuMatmulBias.cpp
+    IntegrationGpuMatmulBiasActiv.cpp
 )
 
 target_compile_options(hipblaslt_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -24,9 +27,6 @@ target_compile_definitions(
 target_link_libraries(
     hipblaslt_plugin_integration_tests PUBLIC GTest::gtest hip::host hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
 )
-
-# Enable spdlog support for fmt-style logging
-hipdnn_enable_spdlog(hipblaslt_plugin_integration_tests)
 
 # Ensure that the hipblaslt_plugin is built before the hipblaslt_plugin_integration_tests, as the
 # integration tests depend on the hipBLASLt Provider Plugin
