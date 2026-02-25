@@ -28,40 +28,53 @@
 
 namespace {
 
-auto GetTestCases()
+struct TestCase
+{
+    int batch_size;
+    int seq_len;
+    int vector_len;
+    int hidden_size;
+
+    friend std::ostream& operator<<(std::ostream& os, const TestCase& tc)
+    {
+        return os << "batch-size:" << tc.batch_size << " seq-len:" << tc.seq_len
+                  << " vector-len:" << tc.vector_len << " hidden-size:" << tc.hidden_size;
+    }
+};
+
+std::vector<TestCase> GetTestCases()
 {
     return std::vector{
         // clang-format off
-        //            batch-size seq-len vector-len hidden-size
-        std::make_tuple( 16,       25,      512,       512 ),
-        std::make_tuple( 32,       25,      512,       512 ),
-        std::make_tuple( 64,       25,      512,       512 ),
-        std::make_tuple(128,       25,      512,       512 ),
-        std::make_tuple( 16,       25,     1024,      1024 ),
-        std::make_tuple( 32,       25,     1024,      1024 ),
-        std::make_tuple( 64,       25,     1024,      1024 ),
-        std::make_tuple(128,       25,     1024,      1024 ),
-        std::make_tuple( 16,       25,     2048,      2048 ),
-        std::make_tuple( 32,       25,     2048,      2048 ),
-        std::make_tuple( 64,       25,     2048,      2048 ),
-        std::make_tuple(128,       25,     2048,      2048 ),
-        std::make_tuple( 16,       25,     4096,      4096 ),
-        std::make_tuple( 32,       25,     4096,      4096 ),
-        std::make_tuple( 64,       25,     4096,      4096 ),
-        std::make_tuple(128,       25,     4096,      4096 ),
-        std::make_tuple(  8,       50,     1536,      1536 ),
-        std::make_tuple( 16,       50,     1536,      1536 ),
-        std::make_tuple( 32,       50,     1536,      1536 ),
-        std::make_tuple( 16,      150,      256,       256 ),
-        std::make_tuple( 32,      150,      256,       256 ),
-        std::make_tuple( 64,      150,      256,       256 )
+        //     batch-size seq-len vector-len hidden-size
+        TestCase( 16,       25,      512,       512 ),
+        TestCase( 32,       25,      512,       512 ),
+        TestCase( 64,       25,      512,       512 ),
+        TestCase(128,       25,      512,       512 ),
+        TestCase( 16,       25,     1024,      1024 ),
+        TestCase( 32,       25,     1024,      1024 ),
+        TestCase( 64,       25,     1024,      1024 ),
+        TestCase(128,       25,     1024,      1024 ),
+        TestCase( 16,       25,     2048,      2048 ),
+        TestCase( 32,       25,     2048,      2048 ),
+        TestCase( 64,       25,     2048,      2048 ),
+        TestCase(128,       25,     2048,      2048 ),
+        TestCase( 16,       25,     4096,      4096 ),
+        TestCase( 32,       25,     4096,      4096 ),
+        TestCase( 64,       25,     4096,      4096 ),
+        TestCase(128,       25,     4096,      4096 ),
+        TestCase(  8,       50,     1536,      1536 ),
+        TestCase( 16,       50,     1536,      1536 ),
+        TestCase( 32,       50,     1536,      1536 ),
+        TestCase( 16,      150,      256,       256 ),
+        TestCase( 32,      150,      256,       256 ),
+        TestCase( 64,      150,      256,       256 )
         // clang-format on
     };
 }
 
 } // namespace
 
-using TestCase = decltype(GetTestCases())::value_type;
 struct GPU_DeepBench_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<TestCase>
 {
 };

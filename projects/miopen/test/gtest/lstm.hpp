@@ -1569,8 +1569,8 @@ struct Verifier
     }
 
     template <class F, class V, class... Ts>
-    auto verify_impl(F&& f, V&& v, Ts&&... xs) -> decltype(std::make_pair(v.cpu(xs...),
-                                                                          v.gpu(xs...)))
+    auto verify_impl(F&& f, V&& v, Ts&&... xs)
+        -> decltype(std::make_pair(v.cpu(xs...), v.gpu(xs...)))
     {
         decltype(v.cpu(xs...)) cpu;
         decltype(v.gpu(xs...)) gpu;
@@ -1642,7 +1642,7 @@ struct Verifier
             },
             v,
             xs...);
-       }
+    }
 };
 
 template <typename T>

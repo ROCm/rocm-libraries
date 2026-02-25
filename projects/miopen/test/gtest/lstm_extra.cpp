@@ -28,48 +28,68 @@
 
 namespace {
 
-auto GetTestCases()
+struct TestCase
+{
+    int dir_mode;
+    int no_hx;
+    int no_dhy;
+    int no_cx;
+    int no_dcy;
+    int no_hy;
+    int no_dhx;
+    int no_cy;
+    int no_dcx;
+
+    friend std::ostream& operator<<(std::ostream& os, const TestCase& tc)
+    {
+        return os << "dir-mode:" << tc.dir_mode << " no-hx:" << tc.no_hx << " no-dhy:" << tc.no_dhy
+                  << " no-cx:" << tc.no_cx << " no-dcy:" << tc.no_dcy << " no-hy:" << tc.no_hy
+                  << " no-dhx:" << tc.no_dhx << " no-cy:" << tc.no_cy << " no-dcx:" << tc.no_dcx
+                  << " no_dcx:" << tc.no_dcx;
+    }
+};
+
+std::vector<TestCase> GetTestCases()
 {
     return std::vector{
         // clang-format off
-        //          dir-mode no-hx no-dhy no-cx no-dcy no-hy no-dhx no-cy no-dcx
-        std::make_tuple(0,     1,    0,     0,    0,     0,    0,     0,    0),
-        std::make_tuple(0,     0,    1,     0,    0,     0,    0,     0,    0),
-        std::make_tuple(0,     1,    1,     0,    0,     0,    0,     0,    0),
-        std::make_tuple(0,     0,    0,     1,    0,     0,    0,     0,    0),
-        std::make_tuple(0,     1,    0,     1,    0,     0,    0,     0,    0),
-        std::make_tuple(0,     0,    0,     0,    1,     0,    0,     0,    0),
-        std::make_tuple(0,     0,    0,     1,    1,     0,    0,     0,    0),
-        std::make_tuple(1,     1,    0,     0,    0,     0,    0,     0,    0),
-        std::make_tuple(1,     0,    1,     0,    0,     0,    0,     0,    0),
-        std::make_tuple(1,     1,    1,     0,    0,     0,    0,     0,    0),
-        std::make_tuple(1,     0,    0,     1,    0,     0,    0,     0,    0),
-        std::make_tuple(1,     1,    0,     1,    0,     0,    0,     0,    0),
-        std::make_tuple(1,     0,    0,     0,    1,     0,    0,     0,    0),
-        std::make_tuple(1,     0,    0,     1,    1,     0,    0,     0,    0),
-        std::make_tuple(0,     0,    0,     0,    0,     1,    0,     0,    0),
-        std::make_tuple(0,     0,    0,     0,    0,     0,    1,     0,    0),
-        std::make_tuple(0,     0,    0,     0,    0,     1,    1,     0,    0),
-        std::make_tuple(0,     0,    0,     0,    0,     0,    0,     1,    0),
-        std::make_tuple(0,     0,    0,     0,    0,     1,    0,     1,    0),
-        std::make_tuple(0,     0,    0,     0,    0,     0,    0,     0,    1),
-        std::make_tuple(0,     0,    0,     0,    0,     0,    0,     1,    1),
-        std::make_tuple(1,     0,    0,     0,    0,     1,    0,     0,    0),
-        std::make_tuple(1,     0,    0,     0,    0,     0,    1,     0,    0),
-        std::make_tuple(1,     0,    0,     0,    0,     1,    1,     0,    1),
-        std::make_tuple(1,     0,    0,     0,    0,     0,    0,     1,    0),
-        std::make_tuple(1,     0,    0,     0,    0,     1,    0,     1,    0),
-        std::make_tuple(1,     0,    0,     0,    0,     0,    0,     0,    1),
-        std::make_tuple(1,     0,    0,     0,    0,     0,    0,     1,    1),
-        std::make_tuple(0,     1,    1,     1,    1,     1,    1,     1,    1),
-        std::make_tuple(1,     1,    1,     1,    1,     1,    1,     1,    1)
+        //   dir-mode no-hx no-dhy no-cx no-dcy no-hy no-dhx no-cy no-dcx
+        TestCase(0,     1,    0,     0,    0,     0,    0,     0,    0),
+        TestCase(0,     0,    1,     0,    0,     0,    0,     0,    0),
+        TestCase(0,     1,    1,     0,    0,     0,    0,     0,    0),
+        TestCase(0,     0,    0,     1,    0,     0,    0,     0,    0),
+        TestCase(0,     1,    0,     1,    0,     0,    0,     0,    0),
+        TestCase(0,     0,    0,     0,    1,     0,    0,     0,    0),
+        TestCase(0,     0,    0,     1,    1,     0,    0,     0,    0),
+        TestCase(1,     1,    0,     0,    0,     0,    0,     0,    0),
+        TestCase(1,     0,    1,     0,    0,     0,    0,     0,    0),
+        TestCase(1,     1,    1,     0,    0,     0,    0,     0,    0),
+        TestCase(1,     0,    0,     1,    0,     0,    0,     0,    0),
+        TestCase(1,     1,    0,     1,    0,     0,    0,     0,    0),
+        TestCase(1,     0,    0,     0,    1,     0,    0,     0,    0),
+        TestCase(1,     0,    0,     1,    1,     0,    0,     0,    0),
+        TestCase(0,     0,    0,     0,    0,     1,    0,     0,    0),
+        TestCase(0,     0,    0,     0,    0,     0,    1,     0,    0),
+        TestCase(0,     0,    0,     0,    0,     1,    1,     0,    0),
+        TestCase(0,     0,    0,     0,    0,     0,    0,     1,    0),
+        TestCase(0,     0,    0,     0,    0,     1,    0,     1,    0),
+        TestCase(0,     0,    0,     0,    0,     0,    0,     0,    1),
+        TestCase(0,     0,    0,     0,    0,     0,    0,     1,    1),
+        TestCase(1,     0,    0,     0,    0,     1,    0,     0,    0),
+        TestCase(1,     0,    0,     0,    0,     0,    1,     0,    0),
+        TestCase(1,     0,    0,     0,    0,     1,    1,     0,    1),
+        TestCase(1,     0,    0,     0,    0,     0,    0,     1,    0),
+        TestCase(1,     0,    0,     0,    0,     1,    0,     1,    0),
+        TestCase(1,     0,    0,     0,    0,     0,    0,     0,    1),
+        TestCase(1,     0,    0,     0,    0,     0,    0,     1,    1),
+        TestCase(0,     1,    1,     1,    1,     1,    1,     1,    1),
+        TestCase(1,     1,    1,     1,    1,     1,    1,     1,    1)
         // clang-format on
     };
 }
 
 } // namespace
 
-using TestCase = decltype(GetTestCases())::value_type;
 struct GPU_LSTM_extra_FP32 : LSTM_test<float>, testing::TestWithParam<TestCase>
 {
 };
