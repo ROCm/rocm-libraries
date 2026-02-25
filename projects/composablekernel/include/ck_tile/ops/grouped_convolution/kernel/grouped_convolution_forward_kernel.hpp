@@ -762,7 +762,7 @@ struct GroupedConvolutionForwardKernel
                      std::is_same_v<InLayout, ctc::NDHWGC>)
         {
             // Check access per C
-            if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0 && ConvSpecialization == ConvolutionSpecialization::Default)
+            if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0 && GroupedConvTraitsType_::NumGroupsToMerge == 1)
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
@@ -809,7 +809,7 @@ struct GroupedConvolutionForwardKernel
                      std::is_same_v<OutLayout, ctc::NHWGK> ||
                      std::is_same_v<OutLayout, ctc::NDHWGK>)
         {
-            if(ConvK % GroupedConvTraitsType_::VectorSizeC != 0 && ConvSpecialization != ConvolutionSpecialization::Default && GroupedConvTraitsType_::NumGroupsToMerge == 1)
+            if(ConvK % GroupedConvTraitsType_::VectorSizeC != 0 && GroupedConvTraitsType_::NumGroupsToMerge == 1)
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
