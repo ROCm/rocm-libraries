@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,7 @@ struct adjacent_find_impl_kernels
         ordered_tile_id.reset();
     }
 
-    template<typename ArchConfig>
+    template<typename TargetConfig>
     static ROCPRIM_DEVICE
     void block_reduce_kernel(TransformedInputIterator transformed_input,
                              ReduceIndexIterator      reduce_output,
@@ -59,20 +59,20 @@ struct adjacent_find_impl_kernels
                              BinaryPred               op,
                              OrderedTileIdType        ordered_tile_id)
     {
-        static constexpr adjacent_find_config_params params     = ArchConfig::params;
+        static constexpr adjacent_find_config_params params     = TargetConfig::params;
         static constexpr unsigned int                block_size = params.kernel_config.block_size;
         static constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
         static constexpr unsigned int items_per_tile   = block_size * items_per_thread;
 
         using transformed_input_type =
             typename std::iterator_traits<TransformedInputIterator>::value_type;
-        using block_reduce_type
-            = ::rocprim::block_reduce<transformed_input_type,
-                                      block_size,
-                                      block_reduce_algorithm::raking_reduce,
-                                      1,
-                                      1,
-                                      ArchConfig::wavefront>; // TODO?: params.block_reduce_method>;
+        using block_reduce_type = ::rocprim::block_reduce<
+            transformed_input_type,
+            block_size,
+            block_reduce_algorithm::raking_reduce,
+            1,
+            1,
+            TargetConfig::wavefront>; // TODO?: params.block_reduce_method>;
 
         ROCPRIM_SHARED_MEMORY union
         {
