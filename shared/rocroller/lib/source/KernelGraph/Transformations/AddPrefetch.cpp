@@ -907,15 +907,11 @@ namespace rocRoller
                         graph.control.addElement(
                             Sequence(), {previousBoundaryStart}, {firstLoadTopSetCoord});
                     }
-                    else if(u == 0)
-                    {
-                        graph.control.addElement(
-                            Body(), {previousBoundaryStart}, {firstLoadTopSetCoord});
-                    }
                     else
                     {
+                        auto edge = (u == 0) ? ControlEdge{Body()} : ControlEdge{Sequence()};
                         graph.control.addElement(
-                            Sequence(), {previousBoundaryStart}, {firstLoadTopSetCoord});
+                            edge, {previousBoundaryStart}, {firstLoadTopSetCoord});
                     }
 
                     for(size_t i = 1; i < directLoads.size(); ++i)
@@ -936,15 +932,11 @@ namespace rocRoller
                     graph.control.addElement(
                         Sequence(), {previousBoundaryStart}, {globalLoads[0].globalChain});
                 }
-                else if(u == 0)
-                {
-                    graph.control.addElement(
-                        Body(), {previousBoundaryStart}, {globalLoads[0].globalChain});
-                }
                 else
                 {
+                    auto edge = (u == 0) ? ControlEdge{Body()} : ControlEdge{Sequence()};
                     graph.control.addElement(
-                        Sequence(), {previousBoundaryStart}, {globalLoads[0].globalChain});
+                        edge, {previousBoundaryStart}, {globalLoads[0].globalChain});
                 }
 
                 logger->debug("  prefetch: in-loop: global load {} user {}",
