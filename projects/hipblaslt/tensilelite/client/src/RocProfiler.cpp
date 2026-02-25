@@ -240,7 +240,13 @@ namespace TensileLite
                 auto value = cit->second;
                 if (std::holds_alternative<double>(value)) {
                     auto counterValue = std::get<double>(value);
-                    ss << name << ": " << counterValue;
+                    ss << name << ": ";
+                    if (std::trunc(counterValue) == counterValue) {
+                        ss << std::fixed << std::setprecision(0);
+                    } else {
+                        ss << std::defaultfloat;
+                    }
+                    ss << counterValue;
                 } else {
                     auto& counterValues = std::get<std::vector<double>>(value);
                     auto& counterInfo = m_counterInfos[counter_id.handle];
