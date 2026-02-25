@@ -1698,8 +1698,7 @@ namespace TensileLite
 
         void DataInitialization::initializeCPUInputs(ContractionProblemGemm const& problem)
         {
-            bool useMXGenerator = (problem.a().dataType() == rocisa::DataType::Float4 && problem.mxBlockA() > 0)
-                                  || (problem.b().dataType() == rocisa::DataType::Float4 && problem.mxBlockB() > 0);
+            bool useMXGenerator = isMXFP4Problem(problem);
             if(useMXGenerator)
                 initializeMXDataForFP4(problem);
 
@@ -1772,14 +1771,8 @@ namespace TensileLite
 
         void DataInitialization::initializeMXDataForFP4(ContractionProblemGemm const& problem)
         {
-            // Compute preSwizzle parameters from the current solution's matrix instruction.
-            // PreSwizzle rearranges the scale tensor into the memory layout expected by the
-            // GPU kernel.  The format is:
-            //   preSwizzle: {swizzleTileMN, 256/swizzleTileMN, MiK/mxBlock}
-            //   preTile:    {256/swizzleTileMN, swizzleTileMN}
-            // swizzleTileMN is the wave-level MN span for scale access: 2 SIMDs * 16 lanes = 32.
-            // This is fixed for all current FP4 MX kernels (gfx950) regardless of MiM.
-            // subTileK is derived from MiK (matrixInstruction[2]) and the scale block size.
+            // Compute preSwizzle parameters from the solution's matrix instruction to rearrange
+            // the scale tensor into the GPU kernel's expected memory layout
             std::vector<size_t> preSwizzleA, preTileA, preSwizzleB, preTileB;
 
             if(m_currentSolution != nullptr)
@@ -1807,7 +1800,7 @@ namespace TensileLite
                 }
             }
 
-            if(problem.mxBlockA() > 0 && problem.a().dataType() == rocisa::DataType::Float4)
+            if(isMXFP4Tensor(problem.a(), problem.mxBlockA()))
             {
                 auto const& tensorA = problem.a();
                 auto        rows    = tensorA.sizes()[0];
@@ -1836,7 +1829,7 @@ namespace TensileLite
                                 1.0f);
             }
 
-            if(problem.mxBlockB() > 0 && problem.b().dataType() == rocisa::DataType::Float4)
+            if(isMXFP4Tensor(problem.b(), problem.mxBlockB()))
             {
                 auto const& tensorB = problem.b();
                 auto        rows    = tensorB.sizes()[0];

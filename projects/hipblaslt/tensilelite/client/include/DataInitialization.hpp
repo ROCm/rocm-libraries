@@ -47,6 +47,17 @@ namespace TensileLite
 {
     namespace Client
     {
+        static inline bool isMXFP4Tensor(const TensorDescriptor& tensor, size_t mxBlock)
+        {
+            return tensor.dataType() == rocisa::DataType::Float4 && mxBlock > 0;
+        }
+
+        static inline bool isMXFP4Problem(const ContractionProblemGemm& problem)
+        {
+            return isMXFP4Tensor(problem.a(), problem.mxBlockA())
+                || isMXFP4Tensor(problem.b(), problem.mxBlockB());
+        }
+
         // Problem-indept. from 0~7, and 16, and 23~26 (fixed values for every problem)
         // And problem-dept. from 8~15 (values depend on problem)
         // RandomNegPosLimited: integer -128~128. fp -1.0~1.0
@@ -836,19 +847,14 @@ namespace TensileLite
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
-                // Re-initialize MX FP4 scale data with preSwizzle now that the solution
-                // is known.  The earlier prepareGPUInputs() call (before preSolution) had
-                // to generate scale data without preSwizzle because m_currentSolution was
-                // null at that point.  Push the corrected, pre-shuffled data to the GPU
-                // working buffers so the kernel sees the expected memory layout.
+                // Re-initialize MX FP4 scale data with preSwizzle now that the solution is known
+                // (earlier prepareGPUInputs() skipped it since m_currentSolution was null).
+                // Push corrected, pre-shuffled data to GPU buffers for the expected memory layout.
+
                 if(m_currentSolution != nullptr && m_currentGemmProblem != nullptr
                    && !m_gpuPtrs.empty())
                 {
-                    bool isMXFP4
-                        = (m_currentGemmProblem->a().dataType() == rocisa::DataType::Float4
-                           && m_currentGemmProblem->mxBlockA() > 0)
-                          || (m_currentGemmProblem->b().dataType() == rocisa::DataType::Float4
-                              && m_currentGemmProblem->mxBlockB() > 0);
+                    bool isMXFP4 = isMXFP4Problem(*m_currentGemmProblem);
                     if(isMXFP4)
                     {
                         initializeMXDataForFP4(*m_currentGemmProblem);

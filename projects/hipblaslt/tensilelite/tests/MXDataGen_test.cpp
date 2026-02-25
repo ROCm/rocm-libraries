@@ -64,7 +64,7 @@ TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
     std::vector<size_t> emptySwizzle;
     std::vector<size_t> emptyTile;
 
-    generateMXInput((hipDataType)HIP_R_4F_E2M1_EXT,
+    generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     dataBuffer.data(),
                     scaleBuffer.data(),
                     rows,
@@ -109,17 +109,15 @@ INSTANTIATE_TEST_SUITE_P(
 // ============================================================================
 // PreSwizzle scale tests
 //
-// These tests verify that generateMXInput with preSwizzle parameters produces
-// scale data that is a permutation of the unswizzled scale data.  The FP4 MX
-// kernels on gfx950 expect scale data in a specific shuffled layout:
+// Verify generateMXInput with preSwizzle produces scale data that is a
+// permutation of the unswizzled layout. gfx950 FP4 MX kernels expect:
 //   preSwizzle = {swizzleTileMN=32, tileK=8, subTileK=MiK/mxBlock}
 //   preTile    = {tileK=8, swizzleTileMN=32}
-// where swizzleTileMN=32 is fixed (2 SIMDs * 16 lanes per wave) and
-// subTileK=4 for MiK=128, mxBlock=32.
+// swizzleTileMN=32 is fixed (2 SIMDs * 16 lanes); subTileK=4 for MiK=128, mxBlock=32.
 //
-// Constraints on test sizes for preSwizzle {32,8,4} + preTile {8,32}:
-//   scaleRows = rows / mxBlock  must be divisible by tileK (8)  → rows % 256 == 0
-//   scaleCols = cols             must be divisible by swizzleTileMN (32) → cols % 32 == 0
+// Test size constraints for preSwizzle {32,8,4} + preTile {8,32}:
+//   rows % 256 == 0  (scaleRows = rows/mxBlock must be divisible by tileK=8)
+//   cols % 32  == 0  (scaleCols must be divisible by swizzleTileMN=32)
 // ============================================================================
 
 // Params: {rows, cols, mxBlock, isTranspose, isMatrixA}
@@ -129,19 +127,13 @@ class MXPreSwizzleTest
 };
 
 /**
- * @brief Verify that generateMXInput with preSwizzle parameters produces scale data
- * that is a permutation of the scale data generated without preSwizzle.
- *
- * Pre-shuffled scale data must contain the same bytes as the unshuffled version
- * (just reordered) so that numerical values are preserved.  A non-trivial shuffle
- * must also have occurred — i.e. the buffers must differ.
+ * @brief Verify generateMXInput with preSwizzle produces scale data that is a
+ * non-trivial permutation of the unswizzled output (same bytes, different order).
  */
 TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
 {
     auto [rows, cols, mxBlock, isTranspose, isMatrixA] = GetParam();
 
-    // preSwizzle parameters for gfx950 FP4 MX kernels:
-    //   swizzleTileMN=32 (2 SIMDs*16 lanes), tileK=256/32=8, subTileK=MiK/mxBlock=128/32=4
     const std::vector<size_t> preSwizzle = {32, 8, 4};
     const std::vector<size_t> preTile    = {8, 32};
 
@@ -155,7 +147,7 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
     std::vector<uint8_t> scaleShuf(numScales, 0);
 
     // Generate without preSwizzle (natural scale order)
-    generateMXInput((hipDataType)HIP_R_4F_E2M1_EXT,
+    generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     dataNoShuf.data(),
                     scaleNoShuf.data(),
                     rows, cols, rows,
@@ -164,8 +156,8 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
                     mxBlock, 1, isMatrixA,
                     "Bounded", -1.0f, 1.0f);
 
-    // Generate with preSwizzle (shuffled scale order expected by the GPU kernel)
-    generateMXInput((hipDataType)HIP_R_4F_E2M1_EXT,
+    // Generate with preSwizzle
+    generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     dataShuf.data(),
                     scaleShuf.data(),
                     rows, cols, rows,
