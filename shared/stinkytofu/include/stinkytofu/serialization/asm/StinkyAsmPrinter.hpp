@@ -373,6 +373,10 @@ namespace stinkytofu
 
     inline std::ostream& operator<<(std::ostream& os, const MFMAModifiers& mfmaMod)
     {
+        if(!mfmaMod.scaleStr.empty())
+        {
+            os << mfmaMod.scaleStr;
+        }
         if(!mfmaMod.inputPermute.empty())
         {
             os << " " << mfmaMod.inputPermute;

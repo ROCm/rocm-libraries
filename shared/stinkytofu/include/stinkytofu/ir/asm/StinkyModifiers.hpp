@@ -461,12 +461,14 @@ namespace stinkytofu
 
     struct LabelData : public Modifier
     {
-        LabelData(const Modifier::Type& type, const std::string& label)
+        LabelData(const Modifier::Type& type, const std::string& label, uint16_t alignment = 1)
             : Modifier(type)
             , label(label)
+            , alignment(alignment)
         {
         }
         std::string label;
+        uint16_t    alignment;
     };
 
     struct SWaitTensorCntData : public Modifier
@@ -677,6 +679,7 @@ namespace stinkytofu
     struct MFMAModifiers : public Modifier
     {
         MFMAModifiers(const std::string& inputPermute = "",
+                      const std::string& scaleStr     = "",
                       const std::string& negStr       = "",
                       bool               reuseA       = false,
                       bool               reuseB       = false,
@@ -684,6 +687,7 @@ namespace stinkytofu
                       bool               neg_hi       = false)
             : Modifier(Type::MFMA_DATA)
             , inputPermute(inputPermute)
+            , scaleStr(scaleStr)
             , negStr(negStr)
             , reuseA(reuseA)
             , reuseB(reuseB)
@@ -698,6 +702,7 @@ namespace stinkytofu
 
         // Constructor for MXMFMA instructions
         MFMAModifiers(const std::string& inputPermute,
+                      const std::string& scaleStr,
                       const std::string& negStr,
                       bool               reuseA,
                       bool               reuseB,
@@ -708,6 +713,7 @@ namespace stinkytofu
                       bool               neg_hi = false)
             : Modifier(Type::MFMA_DATA)
             , inputPermute(inputPermute)
+            , scaleStr(scaleStr)
             , negStr(negStr)
             , reuseA(reuseA)
             , reuseB(reuseB)
@@ -721,6 +727,7 @@ namespace stinkytofu
         }
 
         std::string inputPermute;
+        std::string scaleStr;
         std::string negStr;
         bool        reuseA;
         bool        reuseB;

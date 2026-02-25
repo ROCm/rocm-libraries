@@ -104,6 +104,9 @@ target_include_directories(stinkytofu
         # Make the generated files' directories available to the library
         # This allows source files to #include the generated .inc files
         "${TABLEGEN_OUTPUT_DIR}"
+        # Generated GfxXXX.hpp and ArchHelper_includes.inc (from hardware/CMakeLists.txt)
+        # PRIVATE: do not expose to consumers of stinkytofu
+        "${HW_ARCH_HEADERS_DIR}"
 )
 
 # Make stinkytofu depend on the generated ISA definition files from tablegen

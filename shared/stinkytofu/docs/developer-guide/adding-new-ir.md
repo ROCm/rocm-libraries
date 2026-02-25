@@ -121,10 +121,10 @@ Add to `shared/stinkytofu/tools/tablegen/LogicalInstructionDefs.inc`:
 
 #### 6a. Instruction Costs
 
-Costs are defined in the **architecture .def file**, not in the .cpp.
+Costs are defined in the **architecture .def file** and **arch.cmake**, not in the .cpp.
 
-- **Default cost**: Each arch sets a default (e.g. Gfx1250 uses 1,1; Gfx942/Gfx950 use 4,4) in its .cpp. Instructions without `.cost` in the .def use that default.
-- **Override**: In `hardware/src/gfx/GfxXXX/GfxXXXInstructions.def`, add `.cost = {cycle, latency}` to the instruction's `DEF_T(...)`. Tablegen emits only non-default costs into `GfxXXX_costs.inc`; the .cpp includes that file and applies them.
+- **Default cost**: Each arch sets a default in `arch.cmake` (ARCH_DEFAULT_CYCLE, ARCH_DEFAULT_LATENCY). E.g. Gfx1250 uses 1,1; Gfx942/Gfx950 use 4,4. Instructions without `.cost` in the .def use that default.
+- **Override**: In `hardware/src/gfx/GfxXXX/GfxXXXInstructions.def`, add `.cost = {cycle, latency}` to the instruction's `DEF_T(...)`. Tablegen emits only non-default costs into `GfxXXX_costs.inc`; the generated block applies them.
 
 Example in `Gfx1250Instructions.def`:
 
@@ -193,7 +193,7 @@ Instruction **definitions** and **costs** live in `.def` files; tablegen generat
 
 ### Gfx1250, Gfx942, Gfx950
 
-Same pattern for all three: edit `hardware/src/gfx/GfxXXX/GfxXXXInstructions.def` (and optionally `GfxXXXFormats.def` in same folder), then rebuild. The corresponding `GfxXXX.cpp` only includes the generated .inc and holds the Rocisa map.
+Same pattern for all three: edit `hardware/src/gfx/GfxXXX/GfxXXXInstructions.def` (and optionally `GfxXXXFormats.def` in same folder), then rebuild. The corresponding `GfxXXX.cpp` only holds the Rocisa maps (LogicalToArch, RocisaToArch, Conversion). Instruction definitions and costs come from the .def files and generated .inc files.
 
 ### See also
 

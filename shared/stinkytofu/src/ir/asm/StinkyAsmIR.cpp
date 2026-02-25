@@ -26,10 +26,10 @@
 
 #include <iostream> // TODO: don't use iostream.
 
-#include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
-#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu
 {
@@ -69,13 +69,13 @@ namespace stinkytofu
     //----------------------------------------------------------------------
     // AsmIRBuilder implementation
     //----------------------------------------------------------------------
-    StinkyInstruction* AsmIRBuilder::createLabel(const std::string& label)
+    StinkyInstruction* AsmIRBuilder::createLabel(const std::string& label, uint16_t alignment)
     {
         static const HwInstDesc labelMCID{
             GFX::LABEL, GFX::LABEL, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
         StinkyInstruction* labelInst = create(&labelMCID);
-        labelInst->addModifier<LabelData>(LabelData{Modifier::Type::LABEL_NAME, label});
+        labelInst->addModifier<LabelData>(LabelData{Modifier::Type::LABEL_NAME, label, alignment});
         return labelInst;
     }
 

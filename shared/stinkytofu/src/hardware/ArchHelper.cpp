@@ -32,19 +32,8 @@ namespace
 #include "hardware/gfxIsa.inc"
 }
 
-/* Architecture-specific headers (GfxXXX.hpp defines GfxXXXArchInfo) */
-
-#ifdef STINKYTOFU_ARCH_GFX942
-#include "Gfx942.hpp"
-#endif
-
-#ifdef STINKYTOFU_ARCH_GFX950
-#include "Gfx950.hpp"
-#endif
-
-#ifdef STINKYTOFU_ARCH_GFX1250
-#include "Gfx1250.hpp"
-#endif
+/* Architecture-specific headers (GfxXXX.hpp defines GfxXXXArchInfo) - auto-generated in build dir */
+#include "arch_headers/ArchHelper_includes.inc"
 
 namespace stinkytofu
 {

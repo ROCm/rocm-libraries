@@ -2,359 +2,185 @@
 
 This guide walks through all the steps required to add support for a new GPU architecture to the StinkyTofu framework.
 
-> **Note:** This guide uses **Gfx942** (CDNA3/MI300) as a concrete example to show how an actual architecture is implemented. When adding your own architecture, follow the same pattern using Gfx942, Gfx950, or Gfx1250 as your template.
+> **Note:** This guide uses **Gfx942** (CDNA3/MI300) as a concrete example. When adding your own architecture, follow the same pattern using Gfx942, Gfx950, or Gfx1250 as your template.
 
 ## Overview
 
 Adding a new architecture involves:
-1. Updating the architecture list in CMake (step 1 and step 2)
-2. Creating architecture definitions (step 3)
-    - Add new architecture in *gfxisa* library used by table generation
-    - This includes defining the instruction set, instruction costs, and Rocisa mappings (string to string)
-3. Implementing architecture 'ArchInfo' class (step 4)
-    - This class wraps the generated architecture information and provides helper functions
-4. Implementing Rocisa-related header (step 5)
-    - Provides helper functions for Rocisa-dependent mapping
+1. Updating the architecture list (Step 1 and 2)
+2. Creating the architecture folder with `arch.cmake`, `.def` files, and `.cpp` (Step 3)
+3. Updating generated-file lists: Config.h.in, tablegen CMakeLists, RocisaArchInfo (Step 4)
+4. Implementing Rocisa-related header (Step 5)
 
-**NOTE: Use existing architectures as templates:**
+**Instruction definitions and costs** are in `.def` files; tablegen generates `*_init.inc`, `*_costs.inc`. The `defineGfxXXXInsts` and cost application are **auto-generated** from `GfxArchDefines_block.inc.in` and `arch.cmake`. You only provide the maps in `GfxXXX.cpp`.
 
-| Architecture | File | Type | Defaults | Notes |
-|--------------|------|------|----------|-------|
-| **Gfx942** | `hardware/src/gfx/Gfx942/Gfx942.cpp` | CDNA3/MI300 | cycle=4, latency=4 | ~986 lines, has MFMA |
-| **Gfx950** | `hardware/src/gfx/Gfx950/Gfx950.cpp` | CDNA5 | cycle=4, latency=4 | Has WMMA |
-| **Gfx1250** | `hardware/src/gfx/Gfx1250/Gfx1250.cpp` | RDNA4 | cycle=1, latency=1 | Simpler ISA |
-
-**This guide uses Gfx942 as the example** - all code snippets are from actual files you can reference.
+| Architecture | Type | arch.cmake defaults | Notes |
+|--------------|------|--------------------|-------|
+| **Gfx942** | CDNA3/MI300 | cycle=4, latency=4, VGPR=256, SGPR=102, AGPR=256 | Has MFMA |
+| **Gfx950** | CDNA5 | cycle=4, latency=4, VGPR=256, SGPR=102, AGPR=256 | Has WMMA |
+| **Gfx1250** | RDNA4 | cycle=1, latency=1, VGPR=256, SGPR=102, AGPR=0 | Simpler ISA |
 
 ## Step-by-Step Guide
 
 ### Step 1: Update Architecture List
 
-Add the new architecture to `cmake/StinkytofuArchList.cmake`.
-
-**Example (how Gfx942 is listed):**
+Add the new architecture to `cmake/StinkytofuArchList.cmake`:
 
 ```cmake
 set(STINKYTOFU_ALL_ARCHS
-    Gfx942    # <-- CDNA3/MI300 (existing example)
-    Gfx950    # <-- Your new architecture would be added here
+    Gfx942
+    Gfx950
     Gfx1250
+    GfxYourArch    # <-- Add here
 )
 ```
 
-### Step 2: Update Configuration Template
+### Step 2: Update Config.h.in
 
-Add a `#cmakedefine` entry in `include/Config.h.in`.
-
-**Example (how Gfx942 is configured):**
+Add a `#cmakedefine` entry in `include/stinkytofu/Config.h.in`:
 
 ```cpp
-// Architecture support definitions
-#cmakedefine STINKYTOFU_ARCH_GFX942    // <-- CDNA3/MI300 (existing example)
-#cmakedefine STINKYTOFU_ARCH_GFX950    // <-- Your new architecture would be added here
+#cmakedefine STINKYTOFU_ARCH_GFX942
+#cmakedefine STINKYTOFU_ARCH_GFX950
 #cmakedefine STINKYTOFU_ARCH_GFX1250
+#cmakedefine STINKYTOFU_ARCH_GFXYOURARCH    // <-- Add here
 ```
 
-### Step 3: Create Arch Definitions with Instruction Costs
+### Step 3: Create Architecture Definitions
 
-**Best approach:** Copy an existing architecture file and modify it.
+**Best approach:** Copy an existing architecture folder and modify it.
 
-**Example:** Copy a similar architecture as your starting point:
 ```bash
-# For CDNA-like architecture, copy Gfx942 or Gfx950
-cp hardware/src/gfx/Gfx942/Gfx942.cpp hardware/src/gfx/GfxYourArch/GfxYourArch.cpp
-
-# For RDNA-like architecture, copy Gfx1250
-cp -r hardware/src/gfx/Gfx1250 hardware/src/gfx/GfxYourArch && mv hardware/src/gfx/GfxYourArch/Gfx1250.cpp hardware/src/gfx/GfxYourArch/GfxYourArch.cpp
+# For CDNA-like architecture
+cp -r hardware/src/gfx/Gfx942 hardware/src/gfx/GfxYourArch
+cd hardware/src/gfx/GfxYourArch
+mv Gfx942.cpp GfxYourArch.cpp
+mv Gfx942Formats.def GfxYourArchFormats.def
+mv Gfx942Instructions.def GfxYourArchInstructions.def
 ```
 
-Here's the actual structure from **Gfx942** (CDNA3/MI300):
+#### 3a. Create `arch.cmake`
+
+This file defines architecture metadata. **All values are required.** ARCH_MAX_AGPR may be 0 for RDNA.
+
+```cmake
+# GfxYourArch arch properties
+set(ARCH_MAJOR X)
+set(ARCH_MINOR Y)
+set(ARCH_STEPPING Z)
+set(ARCH_WAVEFRONT 64)        # 64 for CDNA, 32 for RDNA
+set(ARCH_DEFAULT_CYCLE 4)     # 4 for CDNA, 1 for RDNA
+set(ARCH_DEFAULT_LATENCY 4)   # 4 for CDNA, 1 for RDNA
+set(ARCH_MAX_VGPR 256)        # Must be > 0
+set(ARCH_MAX_SGPR 102)        # Must be > 0
+set(ARCH_MAX_AGPR 256)        # May be 0 for RDNA
+```
+
+#### 3b. Create `GfxYourArchInstructions.def` and `GfxYourArchFormats.def`
+
+- **Instructions**: Add `DEF_T(ClassName, "mnemonic", .format = X, .flags = {...}, .cost = {cycle, latency})` for each instruction. Tablegen generates `*_init.inc` and `*_costs.inc`.
+- **Formats**: Copy from a similar arch and adjust. See [Instruction DEF_T System](../design/instruction-def-t-system.md).
+
+#### 3c. Create `GfxYourArch.cpp`
+
+The `.cpp` file **only** contains the three map functions. No instruction definitions, no cost tables--those are generated.
 
 ```cpp
-#include <iostream>
-#include <string>
-
 #include "gfx/InstDefDSL.hpp"
 
 namespace stinkytofu
 {
-    namespace
+    void setGfxYourArchLogicalToArchMap(GpuArch& registry)
     {
-        // Instruction cost structure (same for all architectures)
-        struct InstructionCost
-        {
-            const char* opcode;
-            uint16_t    cycle;
-            uint16_t    latency;
+        std::unordered_map<std::string, std::string> logicalToHwInstMap = {
+            {"SBranch", "s_branch"},
+            // ... add Logical IR name -> assembly mnemonic mappings
         };
+        registry.setLogicalToArchMap(std::move(logicalToHwInstMap));
+    }
 
-        // Architecture-specific instruction costs
-        // Only instructions that differ from defaults are listed here
-        constexpr InstructionCost GFX942_COSTS[] = {
-            // Buffer loads
-            {"buffer_load_dword", 12, 108},
-            {"buffer_load_dwordx2", 12, 128},
-            {"buffer_load_dwordx3", 12, 120},
-            {"buffer_load_dwordx4", 12, 124},
-            // ... ~200 more instructions ...
-
-            // MFMA instructions (must enumerate ALL variants)
-            {"v_mfma_f32_16x16x16_f16", 4, 16},
-            {"v_mfma_f32_16x16x1_4b_f32", 4, 32},
-            {"v_mfma_f32_16x16x2_bf16", 4, 16},
-            {"v_mfma_f32_16x16x4_f32", 4, 32},
-            // ... all MFMA variants ...
+    void setGfxYourArchRocisaToArchMap(GpuArch& registry)
+    {
+        std::unordered_map<std::string, std::string> rocisaToArchMap = {
+            // ... Rocisa type name -> mnemonic
         };
-
-        // Architecture default costs
-        constexpr uint16_t GFX942_DEFAULT_CYCLE = 4;
-        constexpr uint16_t GFX942_DEFAULT_LATENCY = 4;
+        registry.setRocisaToArchMap(std::move(rocisaToArchMap));
     }
 
-    void defineGfx942Insts(GpuArch& registry)
+    void setGfxYourArchConversionMap(GpuArch& registry)
     {
-        // Architecture properties
-        registry.setWaveFrontSize(64);
-        registry.setRegisterLimits({256, 102, 256});  // VGPR, SGPR, AGPR
-
-        // STEP 1: Set default costs (REQUIRED!)
-        registry.setDefaultCosts(GFX942_DEFAULT_CYCLE, GFX942_DEFAULT_LATENCY);
-
-        // STEP 2: Define all instructions
-        // (See full file for complete instruction definitions)
-        genScalarALU(registry);
-        genVectorALU(registry);
-        genBufferInsts(registry);
-        genDSInsts(registry);
-        genMFMAInsts(registry);
-        // ... etc.
-
-        // STEP 3: Register instruction-specific costs (exceptions from defaults)
-        for(const auto& cost : GFX942_COSTS)
-        {
-            registry.setInstructionCost(cost.opcode, cost.cycle, cost.latency);
-        }
-
-        // STEP 4: Apply costs with strict validation
-        if(!registry.applyInstructionCosts())
-        {
-            std::cerr << "FATAL: Failed to apply instruction costs for Gfx942\n";
-            return;
-        }
+        std::unordered_map<std::string, std::string> rocisaConversionMap = {
+            // ... Rocisa conversion mappings
+        };
+        registry.setRocisaConversionMap(std::move(rocisaConversionMap));
     }
-
-    void setGfx942LogicalToArchMap(GpuArch& registry)
-    {
-        // Logical-to-architecture instruction name mappings
-        // (See full file for complete mappings)
-    }
-
-    void setGfx942ConversionMap(GpuArch& registry)
-    {
-        // Rocisa conversion mappings
-        // (See full file for complete conversions)
-    }
-
-} // namespace stinkytofu
-```
-
-**To adapt Gfx942 for your architecture:**
-1. Replace all occurrences of `942` with your architecture number
-2. Update default costs based on your architecture family:
-   - CDNA (MI200/MI300): cycle=4, latency=4
-   - RDNA: cycle=1, latency=1
-3. Update `GFX942_COSTS[]` table with your architecture's instruction timings
-4. Modify instruction definitions if your ISA differs
-5. Update register limits (`setRegisterLimits`) and wave front size (`setWaveFrontSize`)
-
-**Important Notes for Instruction Costs:**
-
-1. **Default Costs:** Choose appropriate defaults for your architecture
-   - CDNA (Gfx942/Gfx950): cycle=4, latency=4
-   - RDNA (Gfx1250): cycle=1, latency=1
-
-2. **Exception Table:** Only include instructions that differ from defaults
-   - This keeps the table small and maintainable
-   - Most instructions will use the default values
-
-3. **Enumerate All MFMA/WMMA Variants:**
-   - Each MFMA/WMMA variant must be listed explicitly
-   - Cannot use formula-based calculation (removed for compile-time validation)
-   - See existing architectures for complete lists
-
-4. **Compile-Time Validation:**
-   - Build fails if `setDefaultCosts()` is not called
-   - Build fails if any instruction ends up with 0 cycle or latency
-   - Prevents silent errors from typos or missing costs
-
-**Tips for Instruction Definitions:**
-
-- Add instructions in `GfxXXXInstructions.def` with `DEF_T(ClassName, "mnemonic", .format = X, .flags = {...})`; tablegen generates `DEF_T("mnemonic", IF_X)` in _init.inc
-- **Copy from existing architectures:**
-  - `hardware/src/gfx/Gfx942/Gfx942.cpp` - ~986 lines, CDNA3 with MFMA
-  - `hardware/src/gfx/Gfx950/Gfx950.cpp` - CDNA5 with WMMA
-  - `hardware/src/gfx/Gfx1250/Gfx1250.cpp` - RDNA4, simpler instruction set
-- Use `grep "v_mfma\|v_wmma" instruction_costs_groundtruth.txt` to see all matrix variants
-
-**Where to find instruction costs:**
-- Reference existing Gfx942/Gfx950/Gfx1250 cost tables
-- Use hardware documentation for your architecture
-- Start with defaults, then add exceptions as needed
-
-### Step 4: Create ArchInfo Class
-
-#### 1. Create `src/hardware/Gfx942.hpp`
-
-**Template:** Copy from an existing ArchInfo file.
-
-**Example (actual Gfx942 structure):**
-
-```cpp
-#include "stinkytofu/hardware/ArchHelper.hpp"
-
-namespace
-{
-
-#define GET_ISAINFO_UOP_MAPPINGS
-#include "hardware/Gfx942Isa.inc"
-
 }
-
-using namespace stinkytofu;
-
-struct Gfx942ArchInfo : public ArchHelper::ArchInfo
-{
-    Gfx942ArchInfo()
-        : ArchInfo(9, 4, 2)   // <-- Architecture version (major=9, minor=4, stepping=2)
-    {
-    }
-
-    IsaOpcode getIsaOpcode(UnifiedOpcode unifiedOpcode) const override
-    {
-        return getGfx942Opcode(unifiedOpcode);
-    }
-
-    const HwInstDesc* getMCIDTable() const override
-    {
-#define GET_ISAINFO_HWINSTDESC_TABLE
-#include "hardware/Gfx942Isa.inc"
-        return MCIDTable;
-    }
-
-    const std::unordered_map<std::string, uint16_t>& getMnemonicToIsaOpcodeMap() const override
-    {
-#define GET_ISAINFO_MNEMONIC_TO_OPCODE_MAPPINGS
-#include "hardware/Gfx942Isa.inc"
-        return MnemonicToIsaOpcodeMap;
-    }
-};
 ```
 
-**To adapt:** Replace `942` and `9, 4, 2` with your architecture's identifiers.
+**What is auto-generated (no manual code):**
+- `defineGfxYourArchInsts()` -- from `GfxArchDefines_block.inc.in`, configured per arch
+- Instruction definitions -- from `GfxYourArchInstructions.def` via tablegen
+- Cost tables -- from `.cost` in DEF_T, tablegen emits `*_costs.inc`
+- Wavefront size, register limits, default costs -- from `arch.cmake`
 
-#### 2. Update `src/hardware/ArchHelper.cpp`
+### Step 4: Update Tablegen and Generated Headers
 
-**Example (how Gfx942 is included):**
+#### 4a. Update `tools/tablegen/CMakeLists.txt`
 
-```cpp
-/* Architecture-specific headers (GfxXXX.hpp defines GfxXXXArchInfo) */
+Add your arch to the `INSTRUCTION_GEN_FILES` and `INSTRUCTION_DEF_FILES` lists:
 
-#ifdef STINKYTOFU_ARCH_GFX942
-#include "Gfx942.hpp"    // <-- CDNA3/MI300 (existing example)
-#endif
-
-#ifdef STINKYTOFU_ARCH_GFX950
-#include "Gfx950.hpp"
-#endif
-
-#ifdef STINKYTOFU_ARCH_GFX1250
-#include "Gfx1250.hpp"
-#endif
+```cmake
+foreach(arch Gfx1250 Gfx942 Gfx950 GfxYourArch)   # Add GfxYourArch
+    ...
+endforeach()
+set(INSTRUCTION_DEF_FILES
+    ...
+    "${INSTRUCTION_DEF_BASE_DIR}/GfxYourArch/GfxYourArchFormats.def"
+    "${INSTRUCTION_DEF_BASE_DIR}/GfxYourArch/GfxYourArchInstructions.def"
+)
 ```
 
-### Step 5: Create Rocisa-related header
+#### 4b. GfxXXX.hpp and ArchHelper
 
-#### 1. Create `src/conversion/rocisa/Gfx942RocisaArchInfo.hpp`
+`GfxXXX.hpp` is **auto-generated** from `hardware/GfxArch.hpp.in` by CMake. No manual file needed. `ArchHelper_includes.inc` is also generated from the arch list. As long as your arch is in `StinkytofuArchList.cmake`, it will be included.
 
-**Template:** Copy from an existing RocisaArchInfo file.
+### Step 5: Create Rocisa-related Header
 
-**Example (actual Gfx942 structure):**
+#### 5a. Create `src/conversion/rocisa/GfxYourArchRocisaArchInfo.hpp`
 
-```cpp
-namespace
-{
-    using namespace stinkytofu;
+Copy from `Gfx942RocisaArchInfo.hpp` and replace `942` with your arch number.
 
-    const std::unordered_map<std::type_index, uint16_t>* Gfx942RocisaToHwInstMap()
-    {
-#define GET_ROCISA_HW_MAPPING_TABLE
-#include "stinkytofu/ir/rocisa/RocisaGfx942Mappings.inc"
-        return &rocisaToHwInstMap;
-    }
+#### 5b. Update `src/conversion/rocisa/RocisaArchInfo.hpp`
 
-    const std::unordered_map<std::type_index, stinkytofu::ConvertRocisaToHwInstFunc>*
-        Gfx942RocisaToHwInstLoweringMap()
-    {
-#define GET_ROCISA_TO_HW_CONVERSION_TABLE
-#include "stinkytofu/ir/rocisa/RocisaGfx942Mappings.inc"
-        return &convertRocisaToHwInstFunc;
-    }
-};
-```
-
-**To adapt:** Replace `942` with your architecture number.
-
-#### 2. Update `src/conversion/rocisa/RocisaArchInfo.hpp`
-
-**Example (how Gfx942 is included):**
+Add:
 
 ```cpp
-/* Begin architecture-specific ArchInfo headers */
-
-// GFX942
-#ifdef STINKYTOFU_ARCH_GFX942
-#include "Gfx942RocisaArchInfo.hpp"    // <-- CDNA3/MI300 (existing example)
+#ifdef STINKYTOFU_ARCH_GFXYOURARCH
+#include "GfxYourArchRocisaArchInfo.hpp"
 #endif
-
-// GFX950 (your new architecture would be added here)
-#ifdef STINKYTOFU_ARCH_GFX950
-#include "Gfx950RocisaArchInfo.hpp"
-#endif
-
-/* End of architecture-specific ArchInfo headers */
 ```
 
 ---
 
 ## Summary Checklist
 
-When adding a new architecture, follow the Gfx942 pattern:
-
-- [ ] Update `cmake/StinkytofuArchList.cmake` - add your architecture to the list
-- [ ] Update `include/Config.h.in` - add `#cmakedefine STINKYTOFU_ARCH_GFXYOURARCH`
-- [ ] Create `hardware/src/gfx/GfxYourArch/GfxYourArch.cpp` (copy from Gfx942/Gfx950/Gfx1250 folder)
-  - [ ] Define instruction cost table `GFXYOURARCH_COSTS[]`
-  - [ ] Set default costs `GFXYOURARCH_DEFAULT_CYCLE/LATENCY`
-  - [ ] Define instructions (`defineGfxYourArchInsts`)
-  - [ ] Apply costs with validation (`applyInstructionCosts()`)
-  - [ ] Set logical-to-arch mappings (`setGfxYourArchLogicalToArchMap`)
-  - [ ] Set Rocisa conversion mappings (`setGfxYourArchConversionMap`)
-- [ ] Add to `hardware/CMakeLists.txt` in `GFX_SOURCES`
-- [ ] Create `src/hardware/GfxYourArch.hpp` (copy from similar arch)
-- [ ] Update `src/hardware/ArchHelper.cpp` to include new header (as `#include "hardware/GfxYourArch.hpp"`)
-- [ ] Create `src/conversion/rocisa/GfxYourArchRocisaArchInfo.hpp` (copy from similar arch)
-- [ ] Update `src/conversion/rocisa/RocisaArchInfo.hpp` to include new header
+- [ ] Add to `cmake/StinkytofuArchList.cmake`
+- [ ] Add `#cmakedefine STINKYTOFU_ARCH_GFXYOURARCH` in `include/stinkytofu/Config.h.in`
+- [ ] Create `hardware/src/gfx/GfxYourArch/`:
+  - [ ] `arch.cmake` -- ARCH_MAJOR, ARCH_MINOR, ARCH_STEPPING, ARCH_WAVEFRONT, ARCH_DEFAULT_CYCLE, ARCH_DEFAULT_LATENCY, ARCH_MAX_VGPR, ARCH_MAX_SGPR, ARCH_MAX_AGPR
+  - [ ] `GfxYourArchFormats.def`
+  - [ ] `GfxYourArchInstructions.def` -- DEF_T for all instructions
+  - [ ] `GfxYourArch.cpp` -- only `setGfxYourArchLogicalToArchMap`, `setGfxYourArchRocisaToArchMap`, `setGfxYourArchConversionMap`
+- [ ] Update `tools/tablegen/CMakeLists.txt` -- add arch to INSTRUCTION_GEN_FILES and INSTRUCTION_DEF_FILES
+- [ ] Create `src/conversion/rocisa/GfxYourArchRocisaArchInfo.hpp`
+- [ ] Update `src/conversion/rocisa/RocisaArchInfo.hpp` -- add #include for new arch
 - [ ] Rebuild and test:
   ```bash
-  cd build
-  cmake ..
-  make -j
-  make test
+  cd build && cmake .. && cmake --build . -j && ctest -j
   ```
 
-**Pro tip:** Use search-and-replace on the copied files:
+**Pro tip:** Use search-and-replace on copied files:
 ```bash
-# Example: Copy Gfx942 and replace 942 -> YourArch
 sed -i 's/942/YourArch/g' hardware/src/gfx/GfxYourArch/GfxYourArch.cpp
-sed -i 's/9, 4, 2/X, Y, Z/g' src/hardware/GfxYourArch.hpp
+sed -i 's/9, 4, 2/X, Y, Z/g' hardware/src/gfx/GfxYourArch/arch.cmake
 ```

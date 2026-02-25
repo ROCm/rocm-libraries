@@ -911,7 +911,7 @@ namespace stinkytofu
         }
 
         /// Creates a LABEL instruction. TODO: remove when basic-block labels are supported.
-        StinkyInstruction* createLabel(const std::string& label);
+        StinkyInstruction* createLabel(const std::string& label, uint16_t alignment = 1);
 
         AsmIRBuilder(BasicBlock& bb, const GfxArchID& arch)
             : IRBuilder(bb)

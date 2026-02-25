@@ -24,6 +24,15 @@
 //==============================================================================
 // GFX1250 (RDNA4) INSTRUCTION FORMAT DEFINITIONS
 //
+// Architecture metadata (must appear before DEF_FORMAT)
+//------------------------------------------------------------------------------
+DEF_ARCH(Gfx1250,
+    .major = 12, .minor = 5, .stepping = 0,
+    .wavefront = 32,
+    .maxVGPR = 256, .maxSGPR = 102, .maxAGPR = 0,
+    .defaultCycle = 1, .defaultLatency = 1)
+
+//------------------------------------------------------------------------------
 // This file defines default properties for each instruction encoding format.
 // Instructions using a format inherit its defaults and can optionally override them.
 //

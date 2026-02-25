@@ -519,6 +519,10 @@ namespace stinkytofu
             const LabelData* labelData = inst.getModifier<LabelData>();
             if(labelData)
             {
+                if(labelData->alignment > 1)
+                {
+                    os << ".align " << labelData->alignment << "\n";
+                }
                 os << labelData->label << ":";
             }
 

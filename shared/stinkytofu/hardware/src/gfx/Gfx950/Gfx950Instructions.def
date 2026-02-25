@@ -27,17 +27,20 @@
 
 DEF_T(BufferAtomicAddF32Inst, "buffer_atomic_add_f32",
     .format = MUBUF,
-    .flags = {MUBUFAtomic}
+    .flags = {MUBUFAtomic},
+    .logical = "BufferAtomicAddF32"
 )
 
 DEF_T(BufferAtomicCmpswapInst, "buffer_atomic_cmpswap",
     .format = MUBUF,
-    .flags = {MUBUFAtomic}
+    .flags = {MUBUFAtomic},
+    .logical = "BufferAtomicCmpswapB32"
 )
 
 DEF_T(BufferAtomicCmpswapX2Inst, "buffer_atomic_cmpswap_x2",
     .format = MUBUF,
-    .flags = {MUBUFAtomic}
+    .flags = {MUBUFAtomic},
+    .logical = "BufferAtomicCmpswapB64"
 )
 
 DEF_T(BufferLoadB128Inst, "buffer_load_b128",
@@ -67,7 +70,8 @@ DEF_T(BufferLoadB8Inst, "buffer_load_b8",
 
 DEF_T(BufferLoadB96Inst, "buffer_load_b96",
     .format = MUBUF,
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadB96"
 )
 
 DEF_T(BufferLoadD16B16Inst, "buffer_load_d16_b16",
@@ -82,12 +86,14 @@ DEF_T(BufferLoadD16HiB16Inst, "buffer_load_d16_hi_b16",
 
 DEF_T(BufferLoadShortD16HiInst, "buffer_load_short_d16_hi",
     .format = MUBUF,
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadD16HIB16"
 )
 
 DEF_T(BufferLoadShortD16Inst, "buffer_load_short_d16",
     .format = MUBUF,
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadD16B16"
 )
 
 DEF_T(BufferLoadD16HiU8Inst, "buffer_load_d16_hi_u8",
@@ -103,13 +109,15 @@ DEF_T(BufferLoadD16U8Inst, "buffer_load_d16_u8",
 DEF_T(BufferLoadDwordInst, "buffer_load_dword",
     .format = MUBUF,
     .cost = {12, 108},
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadB32"
 )
 
 DEF_T(BufferLoadDwordx2Inst, "buffer_load_dwordx2",
     .format = MUBUF,
     .cost = {12, 120},
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadB64"
 )
 
 DEF_T(BufferLoadDwordx3Inst, "buffer_load_dwordx3",
@@ -121,55 +129,64 @@ DEF_T(BufferLoadDwordx3Inst, "buffer_load_dwordx3",
 DEF_T(BufferLoadDwordx4Inst, "buffer_load_dwordx4",
     .format = MUBUF,
     .cost = {12, 116},
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadB128"
 )
 
 DEF_T(BufferLoadSbyteInst, "buffer_load_sbyte",
     .format = MUBUF,
     .cost = {12, 104},
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadI8"
 )
 
 DEF_T(BufferLoadSbyteD16Inst, "buffer_load_sbyte_d16",
     .format = MUBUF,
     .cost = {12, 108},
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadD16I8"
 )
 
 DEF_T(BufferLoadSbyteD16HiInst, "buffer_load_sbyte_d16_hi",
     .format = MUBUF,
     .cost = {12, 104},
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadD16HII8"
 )
 
 DEF_T(BufferLoadSshortInst, "buffer_load_sshort",
     .format = MUBUF,
     .cost = {12, 104},
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadI16"
 )
 
 DEF_T(BufferLoadUbyteInst, "buffer_load_ubyte",
     .format = MUBUF,
     .cost = {12, 108},
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadU8"
 )
 
 DEF_T(BufferLoadUbyteD16Inst, "buffer_load_ubyte_d16",
     .format = MUBUF,
     .cost = {12, 108},
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadD16U8"
 )
 
 DEF_T(BufferLoadUbyteD16HiInst, "buffer_load_ubyte_d16_hi",
     .format = MUBUF,
     .cost = {12, 104},
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadD16HIU8"
 )
 
 DEF_T(BufferLoadUshortInst, "buffer_load_ushort",
     .format = MUBUF,
     .cost = {12, 108},
-    .flags = {MUBUFLoad}
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadU16"
 )
 
 DEF_T(BufferStoreB128Inst, "buffer_store_b128",
@@ -199,7 +216,8 @@ DEF_T(BufferStoreB8Inst, "buffer_store_b8",
 
 DEF_T(BufferStoreB96Inst, "buffer_store_b96",
     .format = MUBUF,
-    .flags = {MUBUFStore}
+    .flags = {MUBUFStore},
+    .logical = "BufferStoreB96"
 )
 
 DEF_T(BufferStoreD16HiB16Inst, "buffer_store_d16_hi_b16",
@@ -215,38 +233,46 @@ DEF_T(BufferStoreD16HiB8Inst, "buffer_store_d16_hi_b8",
 // Legacy naming (aliases; Rocisa LogicalToArch map uses these)
 DEF_T(BufferStoreByteInst, "buffer_store_byte",
     .format = MUBUF,
-    .flags = {MUBUFStore}
+    .flags = {MUBUFStore},
+    .logical = "BufferStoreB8"
 )
 DEF_T(BufferStoreByteD16HiInst, "buffer_store_byte_d16_hi",
     .format = MUBUF,
-    .flags = {MUBUFStore}
+    .flags = {MUBUFStore},
+    .logical = "BufferStoreD16HIU8"
 )
 DEF_T(BufferStoreShortInst, "buffer_store_short",
     .format = MUBUF,
-    .flags = {MUBUFStore}
+    .flags = {MUBUFStore},
+    .logical = "BufferStoreB16"
 )
 DEF_T(BufferStoreShortD16HiInst, "buffer_store_short_d16_hi",
     .format = MUBUF,
-    .flags = {MUBUFStore}
+    .flags = {MUBUFStore},
+    .logical = "BufferStoreD16HIB16"
 )
 DEF_T(BufferStoreDwordInst, "buffer_store_dword",
     .format = MUBUF,
-    .flags = {MUBUFStore}
+    .flags = {MUBUFStore},
+    .logical = "BufferStoreB32"
 )
 DEF_T(BufferStoreDwordx2Inst, "buffer_store_dwordx2",
     .format = MUBUF,
-    .flags = {MUBUFStore}
+    .flags = {MUBUFStore},
+    .logical = "BufferStoreB64"
 )
 DEF_T(BufferStoreDwordx4Inst, "buffer_store_dwordx4",
     .format = MUBUF,
-    .flags = {MUBUFStore}
+    .flags = {MUBUFStore},
+    .logical = "BufferStoreB128"
 )
 
 // Control Flow
 
 DEF_T(SBarrierInst, "s_barrier",
     .format = SOPP,
-    .flags = {Barrier}
+    .flags = {Barrier},
+    .logical = "SBarrier"
 )
 
 DEF_T(SBarrierSignalInst, "s_barrier_signal",
@@ -261,42 +287,50 @@ DEF_T(SBarrierWaitInst, "s_barrier_wait",
 
 DEF_T(SBranchInst, "s_branch",
     .format = SOPP,
-    .flags = {Branch}
+    .flags = {Branch},
+    .logical = "SBranch"
 )
 
 DEF_T(SCbranchExecnzInst, "s_cbranch_execnz",
     .format = SOPP,
-    .flags = {Branch, ConditionalBranch}
+    .flags = {Branch, ConditionalBranch},
+    .logical = "SCBranchExecNZ"
 )
 
 DEF_T(SCbranchExeczInst, "s_cbranch_execz",
     .format = SOPP,
-    .flags = {Branch, ConditionalBranch}
+    .flags = {Branch, ConditionalBranch},
+    .logical = "SCBranchExecZ"
 )
 
 DEF_T(SCbranchScc0Inst, "s_cbranch_scc0",
     .format = SOPP,
-    .flags = {Branch, ConditionalBranch}
+    .flags = {Branch, ConditionalBranch},
+    .logical = "SCBranchSCC0"
 )
 
 DEF_T(SCbranchScc1Inst, "s_cbranch_scc1",
     .format = SOPP,
-    .flags = {Branch, ConditionalBranch}
+    .flags = {Branch, ConditionalBranch},
+    .logical = "SCBranchSCC1"
 )
 
 DEF_T(SCbranchVccnzInst, "s_cbranch_vccnz",
     .format = SOPP,
-    .flags = {Branch, ConditionalBranch}
+    .flags = {Branch, ConditionalBranch},
+    .logical = "SCBranchVCCNZ"
 )
 
 DEF_T(SCbranchVcczInst, "s_cbranch_vccz",
     .format = SOPP,
-    .flags = {Branch, ConditionalBranch}
+    .flags = {Branch, ConditionalBranch},
+    .logical = "SCBranchVCCZ"
 )
 
 DEF_T(SWaitAluInst, "s_wait_alu",
     .format = SOPP,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SWaitAlu"
 )
 
 DEF_T(SWaitAsynccntInst, "s_wait_asynccnt",
@@ -336,7 +370,8 @@ DEF_T(SWaitStorecntDscntInst, "s_wait_storecnt_dscnt",
 
 DEF_T(SWaitcntInst, "s_waitcnt",
     .format = SOPP,
-    .flags = {WaitCnt}
+    .flags = {WaitCnt},
+    .logical = "SWaitCnt"
 )
 
 DEF_T(SWaitTensorcntInst, "s_wait_tensorcnt",
@@ -368,7 +403,8 @@ DEF_T(FlatAtomicAndInst, "flat_atomic_and",
 
 DEF_T(FlatAtomicCmpswapInst, "flat_atomic_cmpswap",
     .format = FLAT,
-    .flags = {FLATAtomic}
+    .flags = {FLATAtomic},
+    .logical = "FlatAtomicCmpswapB32"
 )
 
 DEF_T(FlatAtomicDecInst, "flat_atomic_dec",
@@ -458,17 +494,20 @@ DEF_T(FlatLoadB64Inst, "flat_load_b64",
 
 DEF_T(FlatLoadB96Inst, "flat_load_b96",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadB96"
 )
 
 DEF_T(FlatLoadDwordInst, "flat_load_dword",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadB32"
 )
 
 DEF_T(FlatLoadDwordx2Inst, "flat_load_dwordx2",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadB64"
 )
 
 DEF_T(FlatLoadDwordx3Inst, "flat_load_dwordx3",
@@ -478,57 +517,68 @@ DEF_T(FlatLoadDwordx3Inst, "flat_load_dwordx3",
 
 DEF_T(FlatLoadDwordx4Inst, "flat_load_dwordx4",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadB128"
 )
 
 DEF_T(FlatLoadSbyteInst, "flat_load_sbyte",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadI8"
 )
 
 DEF_T(FlatLoadSbyteD16Inst, "flat_load_sbyte_d16",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadD16I8"
 )
 
 DEF_T(FlatLoadSbyteD16HiInst, "flat_load_sbyte_d16_hi",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadD16HII8"
 )
 
 DEF_T(FlatLoadShortD16Inst, "flat_load_short_d16",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadD16B16"
 )
 
 DEF_T(FlatLoadShortD16HiInst, "flat_load_short_d16_hi",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadD16HIB16"
 )
 
 DEF_T(FlatLoadSshortInst, "flat_load_sshort",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadI16"
 )
 
 DEF_T(FlatLoadUbyteInst, "flat_load_ubyte",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadU8"
 )
 
 DEF_T(FlatLoadUbyteD16Inst, "flat_load_ubyte_d16",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadD16U8"
 )
 
 DEF_T(FlatLoadUbyteD16HiInst, "flat_load_ubyte_d16_hi",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadD16HIU8"
 )
 
 DEF_T(FlatLoadUshortInst, "flat_load_ushort",
     .format = FLAT,
-    .flags = {FLATLoad}
+    .flags = {FLATLoad},
+    .logical = "FlatLoadU16"
 )
 
 DEF_T(FlatStoreB128Inst, "flat_store_b128",
@@ -548,27 +598,32 @@ DEF_T(FlatStoreB64Inst, "flat_store_b64",
 
 DEF_T(FlatStoreB96Inst, "flat_store_b96",
     .format = FLAT,
-    .flags = {FLATStore}
+    .flags = {FLATStore},
+    .logical = "FlatStoreB96"
 )
 
 DEF_T(FlatStoreByteInst, "flat_store_byte",
     .format = FLAT,
-    .flags = {FLATStore}
+    .flags = {FLATStore},
+    .logical = "FlatStoreB8"
 )
 
 DEF_T(FlatStoreByteD16HiInst, "flat_store_byte_d16_hi",
     .format = FLAT,
-    .flags = {FLATStore}
+    .flags = {FLATStore},
+    .logical = "FlatStoreD16HIB8"
 )
 
 DEF_T(FlatStoreDwordInst, "flat_store_dword",
     .format = FLAT,
-    .flags = {FLATStore}
+    .flags = {FLATStore},
+    .logical = "FlatStoreB32"
 )
 
 DEF_T(FlatStoreDwordx2Inst, "flat_store_dwordx2",
     .format = FLAT,
-    .flags = {FLATStore}
+    .flags = {FLATStore},
+    .logical = "FlatStoreB64"
 )
 
 DEF_T(FlatStoreDwordx3Inst, "flat_store_dwordx3",
@@ -578,17 +633,20 @@ DEF_T(FlatStoreDwordx3Inst, "flat_store_dwordx3",
 
 DEF_T(FlatStoreDwordx4Inst, "flat_store_dwordx4",
     .format = FLAT,
-    .flags = {FLATStore}
+    .flags = {FLATStore},
+    .logical = "FlatStoreB128"
 )
 
 DEF_T(FlatStoreShortInst, "flat_store_short",
     .format = FLAT,
-    .flags = {FLATStore}
+    .flags = {FLATStore},
+    .logical = "FlatStoreB16"
 )
 
 DEF_T(FlatStoreShortD16HiInst, "flat_store_short_d16_hi",
     .format = FLAT,
-    .flags = {FLATStore}
+    .flags = {FLATStore},
+    .logical = "FlatStoreD16HIB16"
 )
 
 // Global Memory
@@ -673,36 +731,42 @@ DEF_T(DsLoadU8Inst, "ds_load_u8",
 DEF_T(DsRead2B32Inst, "ds_read2_b32",
     .format = DS,
     .cost = {4, 52},
-    .flags = {DSRead}
+    .flags = {DSRead},
+    .logical = "DSLoad2B32"
 )
 
 DEF_T(DsRead2B64Inst, "ds_read2_b64",
     .format = DS,
     .cost = {4, 64},
-    .flags = {DSRead}
+    .flags = {DSRead},
+    .logical = "DSLoad2B64"
 )
 
 DEF_T(DsReadB128Inst, "ds_read_b128",
     .format = DS,
     .cost = {4, 56},
-    .flags = {DSRead}
+    .flags = {DSRead},
+    .logical = "DSLoadB128"
 )
 
 DEF_T(DsReadB32Inst, "ds_read_b32",
     .format = DS,
     .cost = {4, 48},
-    .flags = {DSRead}
+    .flags = {DSRead},
+    .logical = "DSLoadB32"
 )
 
 DEF_T(DsReadB64Inst, "ds_read_b64",
     .format = DS,
     .cost = {4, 48},
-    .flags = {DSRead}
+    .flags = {DSRead},
+    .logical = "DSLoadB64"
 )
 
 DEF_T(DsReadB64TrB16Inst, "ds_read_b64_tr_b16",
     .format = DS,
-    .flags = {DSRead}
+    .flags = {DSRead},
+    .logical = "DSLoadB64TrB16"
 )
 
 DEF_T(DsReadB64TrB4Inst, "ds_read_b64_tr_b4",
@@ -717,7 +781,8 @@ DEF_T(DsReadB64TrB8Inst, "ds_read_b64_tr_b8",
 
 DEF_T(DsReadB96Inst, "ds_read_b96",
     .format = DS,
-    .flags = {DSRead}
+    .flags = {DSRead},
+    .logical = "DSLoadB96"
 )
 
 DEF_T(DsReadB96TrB6Inst, "ds_read_b96_tr_b6",
@@ -728,41 +793,48 @@ DEF_T(DsReadB96TrB6Inst, "ds_read_b96_tr_b6",
 DEF_T(DsReadI16Inst, "ds_read_i16",
     .format = DS,
     .cost = {4, 52},
-    .flags = {DSRead}
+    .flags = {DSRead},
+    .logical = "DSLoadI16"
 )
 
 DEF_T(DsReadI8Inst, "ds_read_i8",
     .format = DS,
-    .flags = {DSRead}
+    .flags = {DSRead},
+    .logical = "DSLoadI8"
 )
 
 DEF_T(DsReadU16Inst, "ds_read_u16",
     .format = DS,
     .cost = {4, 48},
-    .flags = {DSRead}
+    .flags = {DSRead},
+    .logical = {"DSLoadB16", "DSLoadU16"}
 )
 
 DEF_T(DsReadU16D16HiInst, "ds_read_u16_d16_hi",
     .format = DS,
     .cost = {4, 48},
-    .flags = {DSRead}
+    .flags = {DSRead},
+    .logical = "DSLoadD16HIU16"
 )
 
 DEF_T(DsReadU8Inst, "ds_read_u8",
     .format = DS,
     .cost = {4, 52},
-    .flags = {DSRead}
+    .flags = {DSRead},
+    .logical = "DSLoadU8"
 )
 
 DEF_T(DsReadU8D16HiInst, "ds_read_u8_d16_hi",
     .format = DS,
     .cost = {4, 48},
-    .flags = {DSRead}
+    .flags = {DSRead},
+    .logical = "DSLoadD16HIU8"
 )
 
 DEF_T(DsBpermuteB32Inst, "ds_bpermute_b32",
     .format = DS,
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = "DSBPermuteB32"
 )
 
 DEF_T(DsStoreB128Inst, "ds_store_b128",
@@ -808,61 +880,71 @@ DEF_T(DsStoreB96Inst, "ds_store_b96",
 DEF_T(DsWrite2B32Inst, "ds_write2_b32",
     .format = DS,
     .cost = {12, 64},
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = "DSStore2B32"
 )
 
 DEF_T(DsWrite2B64Inst, "ds_write2_b64",
     .format = DS,
     .cost = {20, 72},
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = "DSStore2B64"
 )
 
 DEF_T(DsWriteB128Inst, "ds_write_b128",
     .format = DS,
     .cost = {20, 72},
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = "DSStoreB128"
 )
 
 DEF_T(DsWriteB16Inst, "ds_write_b16",
     .format = DS,
     .cost = {8, 56},
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = {"DSStoreB16", "DSStoreU16"}
 )
 
 DEF_T(DsWriteB16D16HiInst, "ds_write_b16_d16_hi",
     .format = DS,
     .cost = {8, 56},
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = "DSStoreD16HIB16"
 )
 
 DEF_T(DsWriteB32Inst, "ds_write_b32",
     .format = DS,
     .cost = {8, 56},
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = "DSStoreB32"
 )
 
 DEF_T(DsWriteB64Inst, "ds_write_b64",
     .format = DS,
     .cost = {12, 64},
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = "DSStoreB64"
 )
 
 DEF_T(DsWriteB8Inst, "ds_write_b8",
     .format = DS,
     .cost = {8, 56},
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = "DSStoreB8"
 )
 
 DEF_T(DsWriteB8D16HiInst, "ds_write_b8_d16_hi",
     .format = DS,
     .cost = {8, 56},
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = "DSStoreB8HID16"
 )
 
 DEF_T(DsWriteB96Inst, "ds_write_b96",
     .format = DS,
     .cost = {16, 68},
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = "DSStoreB96"
 )
 
 // Matrix Instructions
@@ -1154,52 +1236,62 @@ DEF_T(OrSaveexecB32Inst, "or_saveexec_b32",
 
 DEF_T(SAndSaveexecB64Inst, "s_and_saveexec_b64",
     .format = SOP2,
-    .flags = {Branch}
+    .flags = {Branch},
+    .logical = "SAndSaveExecB64"
 )
 
 DEF_T(SDcacheWbInst, "s_dcache_wb",
     .format = SOP2,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SDcacheWb"
 )
 
 DEF_T(SDelayAluInst, "s_delay_alu",
     .format = SOP2,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SDelayAlu"
 )
 
 DEF_T(SEndpgmInst, "s_endpgm",
     .format = SOPP,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SEndpgm"
 )
 
 DEF_T(SFf1I32B32Inst, "s_ff1_i32_b32",
     .format = SOP2,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SFf1B32"
 )
 
 DEF_T(SGetpcB64Inst, "s_getpc_b64",
     .format = SOP2,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SGetPCB64"
 )
 
 DEF_T(SGetregB32Inst, "s_getreg_b32",
     .format = SOP2,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SGetRegB32"
 )
 
 DEF_T(SNopInst, "s_nop",
     .format = SOPP,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SNop"
 )
 
 DEF_T(SOrSaveexecB64Inst, "s_or_saveexec_b64",
     .format = SOP2,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SOrSaveExecB64"
 )
 
 DEF_T(SSetMaskInst, "s_set_mask",
     .format = SOP2,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SSetMask"
 )
 
 DEF_T(SSetVgprMsbInst, "s_set_vgpr_msb",
@@ -1209,12 +1301,14 @@ DEF_T(SSetVgprMsbInst, "s_set_vgpr_msb",
 
 DEF_T(SSetpcB64Inst, "s_setpc_b64",
     .format = SOP2,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SSetPCB64"
 )
 
 DEF_T(SSetprioInst, "s_setprio",
     .format = SOP2,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SSetPrior"
 )
 
 DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32",
@@ -1224,67 +1318,80 @@ DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32",
 
 DEF_T(SSetregImm32B32Inst, "s_setreg_imm32_b32",
     .format = SOP2,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SSetRegIMM32B32"
 )
 
 DEF_T(SSetregB32Inst, "s_setreg_b32",
     .format = SOP2,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SSetRegB32"
 )
 
 DEF_T(SSleepInst, "s_sleep",
     .format = SOP2,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SSleep"
 )
 
 DEF_T(SSwappcB64Inst, "s_swappc_b64",
     .format = SOP2,
-    .flags = {HasSideEffect}
+    .flags = {HasSideEffect},
+    .logical = "SSwapPCB64"
 )
 
 DEF_T(SAtomicDecInst, "s_atomic_dec",
     .format = SOP2,
-    .flags = {MUBUFAtomic}
+    .flags = {MUBUFAtomic},
+    .logical = "SAtomicDec"
 )
 
 DEF_T(SAbsI32Inst, "s_abs_i32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SAbsI32"
 )
 
 DEF_T(SAddI32Inst, "s_add_i32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SAddI32"
 )
 
 DEF_T(SAddU32Inst, "s_add_u32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SAddU32"
 )
 
 DEF_T(SAddcU32Inst, "s_addc_u32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SAddCU32"
 )
 
 DEF_T(SAndB32Inst, "s_and_b32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SAndB32"
 )
 
 DEF_T(SAndB64Inst, "s_and_b64",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SAndB64"
 )
 
 DEF_T(SAndSaveexecB32Inst, "s_and_saveexec_b32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SAndSaveExecB32"
 )
 
 DEF_T(SAndn2B32Inst, "s_andn2_b32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SAndN2B32"
 )
 
 DEF_T(SAndn2B64Inst, "s_andn2_b64",
@@ -1294,7 +1401,8 @@ DEF_T(SAndn2B64Inst, "s_andn2_b64",
 
 DEF_T(SAshrI32Inst, "s_ashr_i32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SAShiftRightI32"
 )
 
 DEF_T(SAshrI64Inst, "s_ashr_i64",
@@ -1304,22 +1412,26 @@ DEF_T(SAshrI64Inst, "s_ashr_i64",
 
 DEF_T(SBfmB32Inst, "s_bfm_b32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SBfmB32"
 )
 
 DEF_T(SCmovB32Inst, "s_cmov_b32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCMovB32"
 )
 
 DEF_T(SCmovB64Inst, "s_cmov_b64",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCMovB64"
 )
 
 DEF_T(SCselectB32Inst, "s_cselect_b32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCSelectB32"
 )
 
 DEF_T(SCselectB64Inst, "s_cselect_b64",
@@ -1329,142 +1441,170 @@ DEF_T(SCselectB64Inst, "s_cselect_b64",
 
 DEF_T(SLshl1AddU32Inst, "s_lshl1_add_u32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SLShiftLeft1AddU32"
 )
 
 DEF_T(SLshl2AddU32Inst, "s_lshl2_add_u32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SLShiftLeft2AddU32"
 )
 
 DEF_T(SLshl3AddU32Inst, "s_lshl3_add_u32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SLShiftLeft3AddU32"
 )
 
 DEF_T(SLshl4AddU32Inst, "s_lshl4_add_u32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SLShiftLeft4AddU32"
 )
 
 DEF_T(SLshlB32Inst, "s_lshl_b32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SLShiftLeftB32"
 )
 
 DEF_T(SLshlB64Inst, "s_lshl_b64",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SLShiftLeftB64"
 )
 
 DEF_T(SLshrB32Inst, "s_lshr_b32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SLShiftRightB32"
 )
 
 DEF_T(SLshrB64Inst, "s_lshr_b64",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SLShiftRightB64"
 )
 
 DEF_T(SMaxI32Inst, "s_max_i32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SMaxI32"
 )
 
 DEF_T(SMaxU32Inst, "s_max_u32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SMaxU32"
 )
 
 DEF_T(SMinI32Inst, "s_min_i32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SMinI32"
 )
 
 DEF_T(SMinU32Inst, "s_min_u32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SMinU32"
 )
 
 DEF_T(SMovB32Inst, "s_mov_b32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SMovB32"
 )
 
 DEF_T(SMovB64Inst, "s_mov_b64",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SMovB64"
 )
 
 DEF_T(SMovkI32Inst, "s_movk_i32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SMovkI32"
 )
 
 DEF_T(SMulHiI32Inst, "s_mul_hi_i32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SMulHII32"
 )
 
 DEF_T(SMulHiU32Inst, "s_mul_hi_u32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SMulHIU32"
 )
 
 DEF_T(SMulI32Inst, "s_mul_i32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SMulI32"
 )
 
 DEF_T(SMulLoU32Inst, "s_mul_lo_u32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SMulLOU32"
 )
 
 DEF_T(SOrB32Inst, "s_or_b32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SOrB32"
 )
 
 DEF_T(SOrB64Inst, "s_or_b64",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SOrB64"
 )
 
 DEF_T(SOrSaveexecB32Inst, "s_or_saveexec_b32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SOrSaveExecB32"
 )
 
 DEF_T(SSextI32I16Inst, "s_sext_i32_i16",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SSExtI16toI32"
 )
 
 DEF_T(SSubI32Inst, "s_sub_i32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SSubI32"
 )
 
 DEF_T(SSubU32Inst, "s_sub_u32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SSubU32"
 )
 
 DEF_T(SSubU64Inst, "s_sub_u64",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SSubU64"
 )
 
 DEF_T(SSubbU32Inst, "s_subb_u32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SSubBU32"
 )
 
 DEF_T(SXorB32Inst, "s_xor_b32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SXorB32"
 )
 
 DEF_T(SXorB64Inst, "s_xor_b64",
@@ -1499,27 +1639,32 @@ DEF_T(SLoadB64Inst, "s_load_b64",
 
 DEF_T(SLoadDwordInst, "s_load_dword",
     .format = SMRD,
-    .flags = {SMemLoad}
+    .flags = {SMemLoad},
+    .logical = "SLoadB32"
 )
 
 DEF_T(SLoadDwordx16Inst, "s_load_dwordx16",
     .format = SMRD,
-    .flags = {SMemLoad}
+    .flags = {SMemLoad},
+    .logical = "SLoadB512"
 )
 
 DEF_T(SLoadDwordx2Inst, "s_load_dwordx2",
     .format = SMRD,
-    .flags = {SMemLoad}
+    .flags = {SMemLoad},
+    .logical = "SLoadB64"
 )
 
 DEF_T(SLoadDwordx4Inst, "s_load_dwordx4",
     .format = SMRD,
-    .flags = {SMemLoad}
+    .flags = {SMemLoad},
+    .logical = "SLoadB128"
 )
 
 DEF_T(SLoadDwordx8Inst, "s_load_dwordx8",
     .format = SMRD,
-    .flags = {SMemLoad}
+    .flags = {SMemLoad},
+    .logical = "SLoadB256"
 )
 
 DEF_T(SStoreB128Inst, "s_store_b128",
@@ -1539,94 +1684,112 @@ DEF_T(SStoreB64Inst, "s_store_b64",
 
 DEF_T(SStoreDwordInst, "s_store_dword",
     .format = SMRD,
-    .flags = {SMemStore}
+    .flags = {SMemStore},
+    .logical = "SStoreB32"
 )
 
 DEF_T(SStoreDwordx2Inst, "s_store_dwordx2",
     .format = SMRD,
-    .flags = {SMemStore}
+    .flags = {SMemStore},
+    .logical = "SStoreB64"
 )
 
 DEF_T(SStoreDwordx4Inst, "s_store_dwordx4",
     .format = SMRD,
-    .flags = {SMemStore}
+    .flags = {SMemStore},
+    .logical = "SStoreB128"
 )
 
 // Scalar Compare
 
 DEF_T(SBitcmp1B32Inst, "s_bitcmp1_b32",
     .format = SOP2,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SBitcmp1B32"
 )
 
 DEF_T(SCmpEqI32Inst, "s_cmp_eq_i32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpEQI32"
 )
 
 DEF_T(SCmpEqU32Inst, "s_cmp_eq_u32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpEQU32"
 )
 
 DEF_T(SCmpEqU64Inst, "s_cmp_eq_u64",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpEQU64"
 )
 
 DEF_T(SCmpGeI32Inst, "s_cmp_ge_i32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpGeI32"
 )
 
 DEF_T(SCmpGeU32Inst, "s_cmp_ge_u32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpGeU32"
 )
 
 DEF_T(SCmpGtI32Inst, "s_cmp_gt_i32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpGtI32"
 )
 
 DEF_T(SCmpGtU32Inst, "s_cmp_gt_u32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpGtU32"
 )
 
 DEF_T(SCmpLeI32Inst, "s_cmp_le_i32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpLeI32"
 )
 
 DEF_T(SCmpLeU32Inst, "s_cmp_le_u32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpLeU32"
 )
 
 DEF_T(SCmpLgI32Inst, "s_cmp_lg_i32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpLgI32"
 )
 
 DEF_T(SCmpLgU32Inst, "s_cmp_lg_u32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpLgU32"
 )
 
 DEF_T(SCmpLgU64Inst, "s_cmp_lg_u64",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpLgU64"
 )
 
 DEF_T(SCmpLtI32Inst, "s_cmp_lt_i32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpLtI32"
 )
 
 DEF_T(SCmpLtU32Inst, "s_cmp_lt_u32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpLtU32"
 )
 
 DEF_T(SCmpkEqI32Inst, "s_cmpk_eq_i32",
@@ -1636,7 +1799,8 @@ DEF_T(SCmpkEqI32Inst, "s_cmpk_eq_i32",
 
 DEF_T(SCmpkEqU32Inst, "s_cmpk_eq_u32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpKEQU32"
 )
 
 DEF_T(SCmpkGeI32Inst, "s_cmpk_ge_i32",
@@ -1646,7 +1810,8 @@ DEF_T(SCmpkGeI32Inst, "s_cmpk_ge_i32",
 
 DEF_T(SCmpkGeU32Inst, "s_cmpk_ge_u32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpKGeU32"
 )
 
 DEF_T(SCmpkGtI32Inst, "s_cmpk_gt_i32",
@@ -1656,7 +1821,8 @@ DEF_T(SCmpkGtI32Inst, "s_cmpk_gt_i32",
 
 DEF_T(SCmpkGtU32Inst, "s_cmpk_gt_u32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpKGtU32"
 )
 
 DEF_T(SCmpkLeI32Inst, "s_cmpk_le_i32",
@@ -1676,7 +1842,8 @@ DEF_T(SCmpkLgI32Inst, "s_cmpk_lg_i32",
 
 DEF_T(SCmpkLgU32Inst, "s_cmpk_lg_u32",
     .format = SOPC,
-    .flags = {SALU}
+    .flags = {SALU},
+    .logical = "SCmpKLGU32"
 )
 
 DEF_T(SCmpkLtI32Inst, "s_cmpk_lt_i32",
@@ -1693,42 +1860,50 @@ DEF_T(SCmpkLtU32Inst, "s_cmpk_lt_u32",
 
 DEF_T(VAdd3U32Inst, "v_add3_u32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VAdd3U32"
 )
 
 DEF_T(VAddCoCiU32Inst, "v_add_co_ci_u32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VAddCCOU32"
 )
 
 DEF_T(VAddCoU32Inst, "v_add_co_u32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VAddCOU32"
 )
 
 DEF_T(VAddF16Inst, "v_add_f16",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VAddF16"
 )
 
 DEF_T(VAddF32Inst, "v_add_f32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VAddF32"
 )
 
 DEF_T(VAddF64Inst, "v_add_f64",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VAddF64"
 )
 
 DEF_T(VAddI32Inst, "v_add_i32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VAddI32"
 )
 
 DEF_T(VAddU32Inst, "v_add_u32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VAddU32"
 )
 
 DEF_T(VAddNcI32Inst, "v_add_nc_i32",
@@ -1748,122 +1923,146 @@ DEF_T(VAddcCoU32Inst, "v_addc_co_u32",
 
 DEF_T(VAndB32Inst, "v_and_b32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VAndB32"
 )
 
 DEF_T(VDot2F32F16Inst, "v_dot2_f32_f16",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VDot2F32F16"
 )
 
 DEF_T(VDot2cF32F16Inst, "v_dot2c_f32_f16",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VDot2CF32F16"
 )
 
 DEF_T(VFmaF16Inst, "v_fma_f16",
     .format = VOP3,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VFmaF16"
 )
 
 DEF_T(VFmaF32Inst, "v_fma_f32",
     .format = VOP3,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VFmaF32"
 )
 
 DEF_T(VFmaF64Inst, "v_fma_f64",
     .format = VOP3,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VFmaF64"
 )
 
 DEF_T(VMaxF16Inst, "v_max_f16",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMaxF16"
 )
 
 DEF_T(VMaxF32Inst, "v_max_f32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMaxF32"
 )
 
 DEF_T(VMaxF64Inst, "v_max_f64",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMaxF64"
 )
 
 DEF_T(VMaxI32Inst, "v_max_i32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMaxI32"
 )
 
 DEF_T(VMinF16Inst, "v_min_f16",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMinF16"
 )
 
 DEF_T(VMinF32Inst, "v_min_f32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMinF32"
 )
 
 DEF_T(VMinF64Inst, "v_min_f64",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMinF64"
 )
 
 DEF_T(VMinI32Inst, "v_min_i32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMinI32"
 )
 
 DEF_T(VMulF16Inst, "v_mul_f16",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMulF16"
 )
 
 DEF_T(VMulF32Inst, "v_mul_f32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMulF32"
 )
 
 DEF_T(VMulF64Inst, "v_mul_f64",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMulF64"
 )
 
 DEF_T(VMulHiI32Inst, "v_mul_hi_i32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMulHII32"
 )
 
 DEF_T(VMulHiU32Inst, "v_mul_hi_u32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMulHIU32"
 )
 
 DEF_T(VMulI32I24Inst, "v_mul_i32_i24",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMulI32I24"
 )
 
 DEF_T(VMulLoU32Inst, "v_mul_lo_u32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMulLOU32"
 )
 
 DEF_T(VMulU32U24Inst, "v_mul_u32_u24",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMulU32U24"
 )
 
 DEF_T(VOrB32Inst, "v_or_b32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VOrB32"
 )
 
 DEF_T(VPkAddF16Inst, "v_pk_add_f16",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VAddPKF16"
 )
 
 DEF_T(VPkAddF32Inst, "v_pk_add_f32",
@@ -1883,7 +2082,8 @@ DEF_T(VPkAddU16Inst, "v_pk_add_u16",
 
 DEF_T(VPkMaxF16Inst, "v_pk_max_f16",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMaxPKF16"
 )
 
 DEF_T(VPkMaxI16Inst, "v_pk_max_i16",
@@ -1913,12 +2113,14 @@ DEF_T(VPkMinU16Inst, "v_pk_min_u16",
 
 DEF_T(VPkMulF16Inst, "v_pk_mul_f16",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMulPKF16"
 )
 
 DEF_T(VPkMulF32Inst, "v_pk_mul_f32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VMulPKF32S"
 )
 
 DEF_T(VPkMulLoU16Inst, "v_pk_mul_lo_u16",
@@ -1928,7 +2130,8 @@ DEF_T(VPkMulLoU16Inst, "v_pk_mul_lo_u16",
 
 DEF_T(VXorB32Inst, "v_xor_b32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VXorB32"
 )
 
 DEF_T(VNopInst, "v_nop",
@@ -1938,102 +2141,122 @@ DEF_T(VNopInst, "v_nop",
 
 DEF_T(VAccvgprReadB32Inst, "v_accvgpr_read_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VAccvgprReadB32"
 )
 
 DEF_T(VAccvgprWriteB32Inst, "v_accvgpr_write_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = {"VAccvgprWriteB32", "VAccvgprWrite"}
 )
 
 DEF_T(VAddLshlU32Inst, "v_add_lshl_u32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VAddLShiftLeftU32"
 )
 
 DEF_T(VAndOrB32Inst, "v_and_or_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VAndOrB32"
 )
 
 DEF_T(VAshrrevI32Inst, "v_ashrrev_i32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VAShiftRightI32"
 )
 
 DEF_T(VBfeI32Inst, "v_bfe_i32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VBfeI32"
 )
 
 DEF_T(VBfeU32Inst, "v_bfe_u32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VBfeU32"
 )
 
 DEF_T(VBfiB32Inst, "v_bfi_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VBfiB32"
 )
 
 DEF_T(VCndmaskB32Inst, "v_cndmask_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCndMaskB32"
 )
 
 DEF_T(VFmaMixF32Inst, "v_fma_mix_f32",
     .format = VOP3,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VFmaMixF32"
 )
 
 DEF_T(VFmacF32Inst, "v_fmac_f32",
     .format = VOP3,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VMacF32"
 )
 
 DEF_T(VLshlAddU32Inst, "v_lshl_add_u32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VLShiftLeftAddU32"
 )
 
 DEF_T(VLshlOrB32Inst, "v_lshl_or_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VLShiftLeftOrB32"
 )
 
 DEF_T(VLshlrevB16Inst, "v_lshlrev_b16",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VLShiftLeftB16"
 )
 
 DEF_T(VLshlrevB32Inst, "v_lshlrev_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VLShiftLeftB32"
 )
 
 DEF_T(VLshlrevB64Inst, "v_lshlrev_b64",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VLShiftLeftB64"
 )
 
 DEF_T(VLshrrevB32Inst, "v_lshrrev_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VLShiftRightB32"
 )
 
 DEF_T(VLshrrevB64Inst, "v_lshrrev_b64",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VLShiftRightB64"
 )
 
 DEF_T(VMadI32I24Inst, "v_mad_i32_i24",
     .format = VOP3,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VMadI32I24"
 )
 
 DEF_T(VMadMixF32Inst, "v_mad_mix_f32",
     .format = VOP3,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VMadMixF32"
 )
 
 DEF_T(VMadMixhiF16Inst, "v_mad_mixhi_f16",
@@ -2048,42 +2271,50 @@ DEF_T(VMadMixloF16Inst, "v_mad_mixlo_f16",
 
 DEF_T(VMadU32U24Inst, "v_mad_u32_u24",
     .format = VOP3,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VMadU32U24"
 )
 
 DEF_T(VMed3F32Inst, "v_med3_f32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VMed3F32"
 )
 
 DEF_T(VMed3I32Inst, "v_med3_i32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VMed3I32"
 )
 
 DEF_T(VMovB32Inst, "v_mov_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VMovB32"
 )
 
 DEF_T(VMovB64Inst, "v_mov_b64",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VMovB64"
 )
 
 DEF_T(VNotB32Inst, "v_not_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VNotB32"
 )
 
 DEF_T(VPackB32F16Inst, "v_pack_b32_f16",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VPackF16toB32"
 )
 
 DEF_T(VPermB32Inst, "v_perm_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VPermB32"
 )
 
 DEF_T(VPkAshrrevI16Inst, "v_pk_ashrrev_i16",
@@ -2093,7 +2324,8 @@ DEF_T(VPkAshrrevI16Inst, "v_pk_ashrrev_i16",
 
 DEF_T(VPkFmaF16Inst, "v_pk_fma_f16",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VFmaPKF16"
 )
 
 DEF_T(VPkFmaF32Inst, "v_pk_fma_f32",
@@ -2138,22 +2370,26 @@ DEF_T(VPkSubU16Inst, "v_pk_sub_u16",
 
 DEF_T(VPrngB32Inst, "v_prng_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VPrngB32"
 )
 
 DEF_T(VReadfirstlaneB32Inst, "v_readfirstlane_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VReadfirstlaneB32"
 )
 
 DEF_T(VRndneF32Inst, "v_rndne_f32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VRndneF32"
 )
 
 DEF_T(VSubCoU32Inst, "v_sub_co_u32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VSubCoU32"
 )
 
 DEF_T(VSubF16Inst, "v_sub_f16",
@@ -2163,12 +2399,14 @@ DEF_T(VSubF16Inst, "v_sub_f16",
 
 DEF_T(VSubF32Inst, "v_sub_f32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VSubF32"
 )
 
 DEF_T(VSubI32Inst, "v_sub_i32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VSubI32"
 )
 
 DEF_T(VSubNcU32Inst, "v_sub_nc_u32",
@@ -2178,22 +2416,26 @@ DEF_T(VSubNcU32Inst, "v_sub_nc_u32",
 
 DEF_T(VSubU32Inst, "v_sub_u32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VSubU32"
 )
 
 DEF_T(VSwapB32Inst, "v_swap_b32",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VSwapB32"
 )
 
 DEF_T(VDot2F32Bf16Inst, "v_dot2_f32_bf16",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VDot2F32BF16"
 )
 
 DEF_T(VDot2cF32Bf16Inst, "v_dot2c_f32_bf16",
     .format = VOP2,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VDot2CF32BF16"
 )
 
 // Vector Compare
@@ -2205,7 +2447,8 @@ DEF_T(VCmpClassF16Inst, "v_cmp_class_f16",
 
 DEF_T(VCmpClassF32Inst, "v_cmp_class_f32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpClassF32"
 )
 
 DEF_T(VCmpClassF64Inst, "v_cmp_class_f64",
@@ -2220,12 +2463,14 @@ DEF_T(VCmpEqF16Inst, "v_cmp_eq_f16",
 
 DEF_T(VCmpEqF32Inst, "v_cmp_eq_f32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpEQF32"
 )
 
 DEF_T(VCmpEqF64Inst, "v_cmp_eq_f64",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpEQF64"
 )
 
 DEF_T(VCmpEqI16Inst, "v_cmp_eq_i16",
@@ -2235,7 +2480,8 @@ DEF_T(VCmpEqI16Inst, "v_cmp_eq_i16",
 
 DEF_T(VCmpEqI32Inst, "v_cmp_eq_i32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpEQI32"
 )
 
 DEF_T(VCmpEqI64Inst, "v_cmp_eq_i64",
@@ -2250,7 +2496,8 @@ DEF_T(VCmpEqU16Inst, "v_cmp_eq_u16",
 
 DEF_T(VCmpEqU32Inst, "v_cmp_eq_u32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpEQU32"
 )
 
 DEF_T(VCmpEqU64Inst, "v_cmp_eq_u64",
@@ -2305,17 +2552,20 @@ DEF_T(VCmpFU64Inst, "v_cmp_f_u64",
 
 DEF_T(VCmpGeF16Inst, "v_cmp_ge_f16",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpGEF16"
 )
 
 DEF_T(VCmpGeF32Inst, "v_cmp_ge_f32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpGEF32"
 )
 
 DEF_T(VCmpGeF64Inst, "v_cmp_ge_f64",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpGEF64"
 )
 
 DEF_T(VCmpGeI16Inst, "v_cmp_ge_i16",
@@ -2325,7 +2575,8 @@ DEF_T(VCmpGeI16Inst, "v_cmp_ge_i16",
 
 DEF_T(VCmpGeI32Inst, "v_cmp_ge_i32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpGEI32"
 )
 
 DEF_T(VCmpGeI64Inst, "v_cmp_ge_i64",
@@ -2340,7 +2591,8 @@ DEF_T(VCmpGeU16Inst, "v_cmp_ge_u16",
 
 DEF_T(VCmpGeU32Inst, "v_cmp_ge_u32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpGEU32"
 )
 
 DEF_T(VCmpGeU64Inst, "v_cmp_ge_u64",
@@ -2350,17 +2602,20 @@ DEF_T(VCmpGeU64Inst, "v_cmp_ge_u64",
 
 DEF_T(VCmpGtF16Inst, "v_cmp_gt_f16",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpGTF16"
 )
 
 DEF_T(VCmpGtF32Inst, "v_cmp_gt_f32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpGTF32"
 )
 
 DEF_T(VCmpGtF64Inst, "v_cmp_gt_f64",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpGTF64"
 )
 
 DEF_T(VCmpGtI16Inst, "v_cmp_gt_i16",
@@ -2370,7 +2625,8 @@ DEF_T(VCmpGtI16Inst, "v_cmp_gt_i16",
 
 DEF_T(VCmpGtI32Inst, "v_cmp_gt_i32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpGTI32"
 )
 
 DEF_T(VCmpGtI64Inst, "v_cmp_gt_i64",
@@ -2385,7 +2641,8 @@ DEF_T(VCmpGtU16Inst, "v_cmp_gt_u16",
 
 DEF_T(VCmpGtU32Inst, "v_cmp_gt_u32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpGtU32"
 )
 
 DEF_T(VCmpGtU64Inst, "v_cmp_gt_u64",
@@ -2415,7 +2672,8 @@ DEF_T(VCmpLeI16Inst, "v_cmp_le_i16",
 
 DEF_T(VCmpLeI32Inst, "v_cmp_le_i32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpLeI32"
 )
 
 DEF_T(VCmpLeI64Inst, "v_cmp_le_i64",
@@ -2430,7 +2688,8 @@ DEF_T(VCmpLeU16Inst, "v_cmp_le_u16",
 
 DEF_T(VCmpLeU32Inst, "v_cmp_le_u32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpLeU32"
 )
 
 DEF_T(VCmpLeU64Inst, "v_cmp_le_u64",
@@ -2505,7 +2764,8 @@ DEF_T(VCmpLtI16Inst, "v_cmp_lt_i16",
 
 DEF_T(VCmpLtI32Inst, "v_cmp_lt_i32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpLtI32"
 )
 
 DEF_T(VCmpLtI64Inst, "v_cmp_lt_i64",
@@ -2520,7 +2780,8 @@ DEF_T(VCmpLtU16Inst, "v_cmp_lt_u16",
 
 DEF_T(VCmpLtU32Inst, "v_cmp_lt_u32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpLtU32"
 )
 
 DEF_T(VCmpLtU64Inst, "v_cmp_lt_u64",
@@ -2535,7 +2796,8 @@ DEF_T(VCmpNeI16Inst, "v_cmp_ne_i16",
 
 DEF_T(VCmpNeI32Inst, "v_cmp_ne_i32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpNeI32"
 )
 
 DEF_T(VCmpNeI64Inst, "v_cmp_ne_i64",
@@ -2550,12 +2812,14 @@ DEF_T(VCmpNeU16Inst, "v_cmp_ne_u16",
 
 DEF_T(VCmpNeU32Inst, "v_cmp_ne_u32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpNeU32"
 )
 
 DEF_T(VCmpNeU64Inst, "v_cmp_ne_u64",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpNeU64"
 )
 
 DEF_T(VCmpNeqF16Inst, "v_cmp_neq_f16",
@@ -2715,7 +2979,8 @@ DEF_T(VCmpUF16Inst, "v_cmp_u_f16",
 
 DEF_T(VCmpUF32Inst, "v_cmp_u_f32",
     .format = VOPC,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCmpUF32"
 )
 
 DEF_T(VCmpUF64Inst, "v_cmp_u_f64",
@@ -2730,7 +2995,8 @@ DEF_T(VCmpxClassF16Inst, "v_cmpx_class_f16",
 
 DEF_T(VCmpxClassF32Inst, "v_cmpx_class_f32",
     .format = VOPC,
-    .flags = {VCmpX}
+    .flags = {VCmpX},
+    .logical = "VCmpXClassF32"
 )
 
 DEF_T(VCmpxClassF64Inst, "v_cmpx_class_f64",
@@ -2775,7 +3041,8 @@ DEF_T(VCmpxEqU16Inst, "v_cmpx_eq_u16",
 
 DEF_T(VCmpxEqU32Inst, "v_cmpx_eq_u32",
     .format = VOPC,
-    .flags = {VCmpX}
+    .flags = {VCmpX},
+    .logical = "VCmpXEqU32"
 )
 
 DEF_T(VCmpxEqU64Inst, "v_cmpx_eq_u64",
@@ -2865,7 +3132,8 @@ DEF_T(VCmpxGeU16Inst, "v_cmpx_ge_u16",
 
 DEF_T(VCmpxGeU32Inst, "v_cmpx_ge_u32",
     .format = VOPC,
-    .flags = {VCmpX}
+    .flags = {VCmpX},
+    .logical = "VCmpXGeU32"
 )
 
 DEF_T(VCmpxGeU64Inst, "v_cmpx_ge_u64",
@@ -2910,7 +3178,8 @@ DEF_T(VCmpxGtU16Inst, "v_cmpx_gt_u16",
 
 DEF_T(VCmpxGtU32Inst, "v_cmpx_gt_u32",
     .format = VOPC,
-    .flags = {VCmpX}
+    .flags = {VCmpX},
+    .logical = "VCmpXGtU32"
 )
 
 DEF_T(VCmpxGtU64Inst, "v_cmpx_gt_u64",
@@ -2940,7 +3209,8 @@ DEF_T(VCmpxLeI16Inst, "v_cmpx_le_i16",
 
 DEF_T(VCmpxLeI32Inst, "v_cmpx_le_i32",
     .format = VOPC,
-    .flags = {VCmpX}
+    .flags = {VCmpX},
+    .logical = "VCmpXLeI32"
 )
 
 DEF_T(VCmpxLeI64Inst, "v_cmpx_le_i64",
@@ -2955,7 +3225,8 @@ DEF_T(VCmpxLeU16Inst, "v_cmpx_le_u16",
 
 DEF_T(VCmpxLeU32Inst, "v_cmpx_le_u32",
     .format = VOPC,
-    .flags = {VCmpX}
+    .flags = {VCmpX},
+    .logical = "VCmpXLeU32"
 )
 
 DEF_T(VCmpxLeU64Inst, "v_cmpx_le_u64",
@@ -3015,7 +3286,8 @@ DEF_T(VCmpxLtF16Inst, "v_cmpx_lt_f16",
 
 DEF_T(VCmpxLtF32Inst, "v_cmpx_lt_f32",
     .format = VOPC,
-    .flags = {VCmpX}
+    .flags = {VCmpX},
+    .logical = "VCmpXLtF32"
 )
 
 DEF_T(VCmpxLtF64Inst, "v_cmpx_lt_f64",
@@ -3030,7 +3302,8 @@ DEF_T(VCmpxLtI16Inst, "v_cmpx_lt_i16",
 
 DEF_T(VCmpxLtI32Inst, "v_cmpx_lt_i32",
     .format = VOPC,
-    .flags = {VCmpX}
+    .flags = {VCmpX},
+    .logical = "VCmpXLtI32"
 )
 
 DEF_T(VCmpxLtI64Inst, "v_cmpx_lt_i64",
@@ -3045,12 +3318,14 @@ DEF_T(VCmpxLtU16Inst, "v_cmpx_lt_u16",
 
 DEF_T(VCmpxLtU32Inst, "v_cmpx_lt_u32",
     .format = VOPC,
-    .flags = {VCmpX}
+    .flags = {VCmpX},
+    .logical = "VCmpXLtU32"
 )
 
 DEF_T(VCmpxLtU64Inst, "v_cmpx_lt_u64",
     .format = VOPC,
-    .flags = {VCmpX}
+    .flags = {VCmpX},
+    .logical = "VCmpXLtU64"
 )
 
 DEF_T(VCmpxNeI16Inst, "v_cmpx_ne_i16",
@@ -3070,12 +3345,14 @@ DEF_T(VCmpxNeI64Inst, "v_cmpx_ne_i64",
 
 DEF_T(VCmpxNeU16Inst, "v_cmpx_ne_u16",
     .format = VOPC,
-    .flags = {VCmpX}
+    .flags = {VCmpX},
+    .logical = "VCmpXNeU16"
 )
 
 DEF_T(VCmpxNeU32Inst, "v_cmpx_ne_u32",
     .format = VOPC,
-    .flags = {VCmpX}
+    .flags = {VCmpX},
+    .logical = "VCmpXNeU32"
 )
 
 DEF_T(VCmpxNeU64Inst, "v_cmpx_ne_u64",
@@ -3252,52 +3529,62 @@ DEF_T(VCmpxUF64Inst, "v_cmpx_u_f64",
 
 DEF_T(VCvtF16F32Inst, "v_cvt_f16_f32",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtF32toF16"
 )
 
 DEF_T(VCvtF32Bf16Inst, "v_cvt_f32_bf16",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "PVCvtBF16toFP32"
 )
 
 DEF_T(VCvtF32Bf8Inst, "v_cvt_f32_bf8",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtBF8toF32"
 )
 
 DEF_T(VCvtF32F16Inst, "v_cvt_f32_f16",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtF16toF32"
 )
 
 DEF_T(VCvtF32Fp8Inst, "v_cvt_f32_fp8",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtFP8toF32"
 )
 
 DEF_T(VCvtF32I32Inst, "v_cvt_f32_i32",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtI32toF32"
 )
 
 DEF_T(VCvtF32U32Inst, "v_cvt_f32_u32",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtU32toF32"
 )
 
 DEF_T(VCvtI32F32Inst, "v_cvt_i32_f32",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtF32toI32"
 )
 
 DEF_T(VCvtPkBf16F32Inst, "v_cvt_pk_bf16_f32",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtPkF32toBF16"
 )
 
 DEF_T(VCvtPkBf8F32Inst, "v_cvt_pk_bf8_f32",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtPkF32toBF8"
 )
 
 DEF_T(VCvtPkF16F32Inst, "v_cvt_pk_f16_f32",
@@ -3312,7 +3599,8 @@ DEF_T(VCvtPkF32Bf16Inst, "v_cvt_pk_f32_bf16",
 
 DEF_T(VCvtPkF32Bf8Inst, "v_cvt_pk_f32_bf8",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtPkBF8toF32"
 )
 
 DEF_T(VCvtPkF32F16Inst, "v_cvt_pk_f32_f16",
@@ -3322,62 +3610,74 @@ DEF_T(VCvtPkF32F16Inst, "v_cvt_pk_f32_f16",
 
 DEF_T(VCvtPkF32Fp8Inst, "v_cvt_pk_f32_fp8",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtPkFP8toF32"
 )
 
 DEF_T(VCvtPkFp8F32Inst, "v_cvt_pk_fp8_f32",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtPkF32toFP8"
 )
 
 DEF_T(VCvtSrBf8F32Inst, "v_cvt_sr_bf8_f32",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtSRF32toBF8"
 )
 
 DEF_T(VCvtSrFp8F32Inst, "v_cvt_sr_fp8_f32",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtSRF32toFP8"
 )
 
 DEF_T(VCvtU32F32Inst, "v_cvt_u32_f32",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtF32toU32"
 )
 
 DEF_T(VCvtScalef32F16Fp8Inst, "v_cvt_scalef32_f16_fp8",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtScaleFP8toF16"
 )
 
 DEF_T(VCvtScalef32PkBf8F16Inst, "v_cvt_scalef32_pk_bf8_f16",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtScalePkF16toBF8"
 )
 
 DEF_T(VCvtScalef32PkF16Bf8Inst, "v_cvt_scalef32_pk_f16_bf8",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtScalePkBF8toF16"
 )
 
 DEF_T(VCvtScalef32PkF16Fp8Inst, "v_cvt_scalef32_pk_f16_fp8",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtScalePkFP8toF16"
 )
 
 DEF_T(VCvtScalef32PkFp8F16Inst, "v_cvt_scalef32_pk_fp8_f16",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtScalePkF16toFP8"
 )
 
 DEF_T(VCvtScalef32SrBf8F16Inst, "v_cvt_scalef32_sr_bf8_f16",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtScaleSRF16toBF8"
 )
 
 DEF_T(VCvtScalef32SrFp8F16Inst, "v_cvt_scalef32_sr_fp8_f16",
     .format = VOP1,
-    .flags = {VALU}
+    .flags = {VALU},
+    .logical = "VCvtScaleSRF16toFP8"
 )
 
 // Vector Transcendental
@@ -3394,12 +3694,14 @@ DEF_T(VCosF32Inst, "v_cos_f32",
 
 DEF_T(VExpF16Inst, "v_exp_f16",
     .format = VOP1,
-    .flags = {VALU, Transcendental}
+    .flags = {VALU, Transcendental},
+    .logical = "VExpF16"
 )
 
 DEF_T(VExpF32Inst, "v_exp_f32",
     .format = VOP1,
-    .flags = {VALU, Transcendental}
+    .flags = {VALU, Transcendental},
+    .logical = "VExpF32"
 )
 
 DEF_T(VExpLegacyF32Inst, "v_exp_legacy_f32",
@@ -3424,12 +3726,14 @@ DEF_T(VLogLegacyF32Inst, "v_log_legacy_f32",
 
 DEF_T(VRcpF16Inst, "v_rcp_f16",
     .format = VOP1,
-    .flags = {VALU, Transcendental}
+    .flags = {VALU, Transcendental},
+    .logical = "VRcpF16"
 )
 
 DEF_T(VRcpF32Inst, "v_rcp_f32",
     .format = VOP1,
-    .flags = {VALU, Transcendental}
+    .flags = {VALU, Transcendental},
+    .logical = "VRcpF32"
 )
 
 DEF_T(VRcpF64Inst, "v_rcp_f64",
@@ -3439,17 +3743,20 @@ DEF_T(VRcpF64Inst, "v_rcp_f64",
 
 DEF_T(VRcpIflagF32Inst, "v_rcp_iflag_f32",
     .format = VOP1,
-    .flags = {VALU, Transcendental}
+    .flags = {VALU, Transcendental},
+    .logical = "VRcpIFlagF32"
 )
 
 DEF_T(VRsqF16Inst, "v_rsq_f16",
     .format = VOP1,
-    .flags = {VALU, Transcendental}
+    .flags = {VALU, Transcendental},
+    .logical = "VRsqF16"
 )
 
 DEF_T(VRsqF32Inst, "v_rsq_f32",
     .format = VOP1,
-    .flags = {VALU, Transcendental}
+    .flags = {VALU, Transcendental},
+    .logical = "VRsqF32"
 )
 
 DEF_T(VRsqF64Inst, "v_rsq_f64",
@@ -3459,7 +3766,8 @@ DEF_T(VRsqF64Inst, "v_rsq_f64",
 
 DEF_T(VRsqIflagF32Inst, "v_rsq_iflag_f32",
     .format = VOP1,
-    .flags = {VALU, Transcendental}
+    .flags = {VALU, Transcendental},
+    .logical = "VRsqIFlagF32"
 )
 
 DEF_T(VSinF16Inst, "v_sin_f16",
