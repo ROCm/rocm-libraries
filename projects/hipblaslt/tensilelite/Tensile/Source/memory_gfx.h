@@ -105,13 +105,6 @@ struct alignas(16) BufferResource
     INLINEDEVICE
     BufferResource(void const* base_addr, uint32_t num_records = (0xFFFFFFFF - 1))
     {
-        // Reference:
-        //   For CDNA: see section 9.1.8 in the AMD resources
-        //   https://developer.amd.com/wp-content/resources/CDNA1_Shader_ISA_14December2020.pdf
-        //   For RDNA: see section 8.1.8 in the AMD resources
-        //   https://developer.amd.com/wp-content/resources/RDNA2_Shader_ISA_November2020.pdf
-        //   The d32[3] field represents the 0x[127] ~ [96]
-
         // 64-bit base address
         desc_.d64[0] = const_cast<void*>(base_addr);
         // 32-bit number of records in bytes which is used to guard against out-of-range access
