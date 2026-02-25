@@ -162,9 +162,9 @@ struct rocfft_plan_description_t
     // Multi-process communicator info:
     rocfft_comm_type comm_type = rocfft_comm_none;
 #ifdef ROCFFT_MPI_ENABLE
-    // this is the communicator that was directly provided by the user
-    // - we don't own it so it doesn't need to be wrapped or freed
-    MPI_Comm user_mpi_comm = MPI_COMM_NULL;
+    // Wrapper to a unique mpi communicator, duplicated from the user-provided
+    // one (when one is given) and set with our own error policy handling
+    MPI_Comm_wrapper_t mpi_comm;
 #endif
 
     LoadOps  loadOps;
@@ -181,6 +181,14 @@ struct rocfft_plan_description_t
                        rocfft_result_placement    placement,
                        const std::vector<size_t>& lengths,
                        const std::vector<size_t>& outputLengths);
+
+    // Get the local communication rank
+    int get_local_comm_rank() const;
+    // Get number of ranks in the local communicator
+    int get_local_comm_size() const;
+    // returns the current rocfft_location_t (process rank + current device ID)
+    // seen by this object
+    rocfft_location_t get_current_location() const;
 
     // Count the number of pointers required for either input or output
     // - planar data requires two pointers, real + complex require one.
@@ -210,9 +218,6 @@ struct rocfft_plan_description_t
 
 struct rocfft_plan_t
 {
-#ifdef ROCFFT_MPI_ENABLE
-    MPI_Comm_wrapper_t mpi_comm;
-#endif
     size_t rank = 0;
     // input lengths
     std::vector<size_t> lengths;
@@ -282,11 +287,6 @@ struct rocfft_plan_t
     // throw exception if input/output fields are not valid (e.g. they
     // don't cover the whole index space, or bricks overlap)
     void ValidateFields() const;
-
-    // Get the local communication rank
-    int get_local_comm_rank() const;
-    // Get number of ranks in the local communicator
-    int get_local_comm_size() const;
 
     // During plan creation, InternalTempBuffer remembers how much
     // space will be needed but doesn't allocate.  Allocate the buffers
