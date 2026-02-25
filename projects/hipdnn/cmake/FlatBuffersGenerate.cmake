@@ -79,7 +79,7 @@ function(_hipdnn_generate_secondary_version _version _flatc_flags)
                 ${_flatc_flags}
                 -o ${_output_dir}
                 ${CMAKE_CURRENT_SOURCE_DIR}/${_schema}
-            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${_schema}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${_schema} ${_flatc_binary}
             COMMENT "flatc ${_version}: generating ${_schema_name}_generated.h"
         )
     endforeach()
