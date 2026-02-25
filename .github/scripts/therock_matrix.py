@@ -110,6 +110,7 @@ additional_options = {
     "hipblaslt-provider": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPBLASLT_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
         ],
         "projects_to_test": ["hipblaslt_plugin"],
         "project_to_add": "blas",

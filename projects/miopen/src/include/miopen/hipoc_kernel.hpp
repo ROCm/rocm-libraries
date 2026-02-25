@@ -225,9 +225,16 @@ struct MIOPEN_INTERNALS_EXPORT HIPOCKernel
         auto status   = hipModuleGetFunction(&fun, program.GetModule(), kernel_module.c_str());
         if(hipSuccess != status)
         {
-            MIOPEN_THROW_HIP_STATUS(status,
-                                    "Failed to get function: " + kernel_module + " from " +
-                                        program.GetCodeObjectPathname());
+            if(program.IsCodeObjectInFile())
+            {
+                MIOPEN_THROW_HIP_STATUS(status,
+                                        "Failed to get function: " + kernel_module + " from " +
+                                            program.GetCodeObjectPathname());
+            }
+            else
+            {
+                MIOPEN_THROW_HIP_STATUS(status, "Failed to get function: " + kernel_module);
+            }
         }
     }
 

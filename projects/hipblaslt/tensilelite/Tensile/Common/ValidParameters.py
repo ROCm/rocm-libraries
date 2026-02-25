@@ -934,6 +934,11 @@ validParameters = { # we need to make sure this matches develop
     #  0: disable
     #  1: enable (force to 0 if not applicable)
     "ScheduleGROverBarrier": [-1,0,1],
+    # This is to improve scheduling for packing code (so far, X32F emulation code only)
+    #  0: Do prefetch for local read only
+    #  1: Do prefetch for pack code
+    # CMS (UseCustomMainLoopSchedule) case, this is internally set and setting it from yaml will not change CMS config
+    "UsePLRPack": [0,1]
 }
 
 newMIValidParameters = {

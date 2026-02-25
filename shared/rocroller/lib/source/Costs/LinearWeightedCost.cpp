@@ -335,28 +335,22 @@ namespace rocRoller
                              + status.waitLengths.at(GPUWaitQueueType::DSQueue);
             float ldsQueueSat = std::max(kmQueueLen - m_weights.lgkmQueueLen, 0);
 
-            float newSGPRs
-                = status.allocatedRegisters.at(static_cast<size_t>(Register::Type::Scalar));
-            float newVGPRs
-                = status.allocatedRegisters.at(static_cast<size_t>(Register::Type::Vector));
-            float highWaterMarkSGPRs = status.highWaterMarkRegistersDelta.at(
-                static_cast<size_t>(Register::Type::Scalar));
-            float highWaterMarkVGPRs = status.highWaterMarkRegistersDelta.at(
-                static_cast<size_t>(Register::Type::Vector));
+            float newSGPRs = status.allocatedRegisters.at(Register::Type::Scalar);
+            float newVGPRs = status.allocatedRegisters.at(Register::Type::Vector);
+            float highWaterMarkSGPRs
+                = status.highWaterMarkRegistersDelta.at(Register::Type::Scalar);
+            float highWaterMarkVGPRs
+                = status.highWaterMarkRegistersDelta.at(Register::Type::Vector);
 
             float notMFMA = inst.getOpCode().find("mfma") == std::string::npos ? 1.0f : 0.0f;
 
-            float fractionOfSGPRs
-                = status.allocatedRegisters.at(static_cast<size_t>(Register::Type::Scalar));
-            float remainingSGPRs
-                = status.remainingRegisters.at(static_cast<size_t>(Register::Type::Scalar));
+            float fractionOfSGPRs = status.allocatedRegisters.at(Register::Type::Scalar);
+            float remainingSGPRs  = status.remainingRegisters.at(Register::Type::Scalar);
             if(remainingSGPRs > 0)
                 fractionOfSGPRs /= remainingSGPRs;
 
-            float fractionOfVGPRs
-                = status.allocatedRegisters.at(static_cast<size_t>(Register::Type::Vector));
-            float remainingVGPRs
-                = status.remainingRegisters.at(static_cast<size_t>(Register::Type::Vector));
+            float fractionOfVGPRs = status.allocatedRegisters.at(Register::Type::Vector);
+            float remainingVGPRs  = status.remainingRegisters.at(Register::Type::Vector);
             if(remainingVGPRs > 0)
                 fractionOfVGPRs /= remainingVGPRs;
 
