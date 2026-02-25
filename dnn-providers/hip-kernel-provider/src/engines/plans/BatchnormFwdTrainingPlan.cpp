@@ -71,6 +71,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     , _y(tensorMap.at(attributes.y_tensor_uid()))
     , _scale(tensorMap.at(attributes.scale_tensor_uid()))
     , _bias(tensorMap.at(attributes.bias_tensor_uid()))
+    , _optActivation(hip_kernel_utils::parseActivation(pointwiseAttributes))
     , _activationOut(tensorMap.at(pointwiseAttributes.out_0_tensor_uid()))
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
