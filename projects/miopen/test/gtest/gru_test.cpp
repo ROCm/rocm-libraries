@@ -1,49 +1,1743 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <miopen/miopen.h>
-#include <miopen/errors.hpp>
 #include <miopen/rnn.hpp>
-#include <miopen/tensor.hpp>
+#include <miopen/miopen.h>
 #include "tensor_holder.hpp"
-#include <half/half.hpp>
-
-#include <vector>
-#include <sstream>
 
 #include "compare_helper.hpp"
-#include "get_handle.hpp"
-#include "../driver/gru_verify_gemm.hpp"
+#include "../dropout_util.hpp"
 #include "../rnn_util.hpp"
 #include "../workspace.hpp"
 
+#include <math.h>
+
+#define MIO_GRU_TEST_DEBUG 1
 
 namespace
 {
+/**********************************************
+ * CPU verification functions
+ *
+ **********************************************/
+template <typename T>
+void GRUFwdCPUVerify(const miopen::Handle& handle,
+                     bool use_dropout,
+                     miopen::DropoutDescriptor& dropoutDesc,
+                     std::vector<T>& in,
+                     std::vector<T>& wei, // [ input_state_weight_trans
+                                          // hidden_state_weight0_trans input1_trans
+                                          // hidden1_trans ... output_weight;
+                                          // bidirectional reversed weights ]
+                     std::vector<T>& hy,  // current/final hidden state
+                     std::vector<T>& hx,  // initial hidden state
+                     std::vector<T>& out,
+                     const std::vector<int>& in_n, // input batch size
+                     int in_h,                     // input data length
+                     int seqLength,                // Number of iterations to unroll over
+                     bool bidirection,             // whether using bidirectional net
+                     bool biased,                  // whether using bias
+                     int hy_d,  // 1 by numlayer (number of stacks of hidden layers) for
+                                // unidirection, 2 by numlayer for bidirection
+                     int hy_n,  // equal to input batch size in_n[0]
+                     int hy_h,  // hidden state number
+                     int out_h, // 1 by hy_h related function for unidirection, 2 by hy_h
+                                // related function for bidirection
+                     int inputMode,
+                     std::vector<T>& rsvspace,
+                     bool hx_is_null = false)
+{
+    int batch_n = sumvc(in_n);
+
+    int numlayer = bidirection ? hy_d / 2 : hy_d;
+    int bi       = bidirection ? 2 : 1;
+
+    int in_stride  = in_h;
+    int out_stride = out_h;
+    int wei_stride = bi * 3 * hy_h;
+    int hy_stride  = bi * 4 * hy_h;
+    int h_stride   = bi * hy_h;
+    int uni_stride = hy_h;
+    int bi_stride  = hy_h * bi;
+
+    if(inputMode == 1)
+    {
+        if(in_h != hy_h)
+        {
+            std::cout
+                << "Verification cannot be completed: The input tensor size must equal to the "
+                << "hidden state size of the network in SKIP_INPUT mode!" << std::endl;
+            return;
+        }
+        in_h = 0;
+    }
+
+    int wei_shift_bias = (in_h + hy_h + (bi * hy_h + hy_h) * (numlayer - 1)) * wei_stride;
+
+    // initial dropoput
+    std::vector<rocrand_state_xorwow> dropout_states_host;
+    std::vector<unsigned char> dropout_reservespace_host;
+    std::vector<T> dropout_hid_state;
+    miopenTensorDescriptor_t dropout_inputTensor{}, dropout_outputTensor{};
+    if(use_dropout)
+    {
+        size_t states_size  = dropoutDesc.stateSizeInBytes / sizeof(rocrand_state_xorwow);
+        dropout_states_host = std::vector<rocrand_state_xorwow>(states_size);
+        InitKernelStateEmulator(dropout_states_host, dropoutDesc);
+
+        std::array<int, 2> drop_in_len  = {{batch_n, hy_h * bi}};
+        std::array<int, 2> drop_in_str  = {{hy_stride, 1}};
+        std::array<int, 2> drop_out_str = {{hy_h * bi, 1}};
+        miopenCreateTensorDescriptor(&dropout_inputTensor);
+        miopenCreateTensorDescriptor(&dropout_outputTensor);
+        miopenSetTensorDescriptor(
+            dropout_inputTensor, miopenFloat, 2, drop_in_len.data(), drop_in_str.data());
+        miopenSetTensorDescriptor(
+            dropout_outputTensor, miopenFloat, 2, drop_in_len.data(), drop_out_str.data());
+
+        size_t reserveSpaceSizeInBytes = 0;
+        miopenDropoutGetReserveSpaceSize(dropout_inputTensor, &reserveSpaceSizeInBytes);
+        size_t reserve_size       = reserveSpaceSizeInBytes / sizeof(unsigned char);
+        dropout_reservespace_host = std::vector<unsigned char>(reserve_size * (numlayer - 1),
+                                                               static_cast<unsigned char>(1));
+
+        dropout_hid_state = std::vector<T>((numlayer - 1) * batch_n * hy_h * bi, static_cast<T>(0));
+    }
+
+    // forward emulator
+    for(int li = 0; li < numlayer; li++)
+    {
+        int hid_shift           = li * batch_n * hy_stride;
+        int hx_shift            = li * in_n.at(0) * h_stride;
+        int wei_shift_bias_temp = wei_shift_bias + li * 2 * wei_stride;
+
+        // from input
+        if(li == 0)
+        {
+            if(inputMode == 1)
+            {
+                for(int bs = 0; bs < batch_n; bs++)
+                {
+                    for(int h = 0; h < hy_h; h++)
+                    {
+                        for(int gi = 0; gi < 3; gi++)
+                        {
+                            rsvspace[hid_shift + bs * hy_stride + gi * hy_h + h] +=
+                                in[bs * in_stride + h];
+                            if(bidirection)
+                            {
+                                rsvspace[hid_shift + bs * hy_stride + (gi + 3) * hy_h + h] +=
+                                    in[bs * in_stride + h];
+                            }
+                        }
+                    }
+                }
+
+                // from bias
+                if(biased)
+                {
+                    for(int bs = 0; bs < batch_n; bs++)
+                    {
+                        for(int h = 0; h < wei_stride; h++)
+                        {
+                            rsvspace[hid_shift + bs * hy_stride + h] += wei[wei_shift_bias + h];
+                        }
+                    }
+                }
+            }
+            else
+            {
+                gemm_cpu(in.data(),
+                         in_h,
+                         batch_n,
+                         in_stride,
+                         false,
+                         wei.data(), // wei_state.data(),
+                         in_h,
+                         hy_h * bi * 3,
+                         in_stride,
+                         true,
+                         &rsvspace[hid_shift],
+                         hy_h * bi * 3,
+                         batch_n,
+                         hy_stride,
+                         1,
+                         1);
+
+                // from bias
+                if(biased)
+                {
+                    for(int bs = 0; bs < batch_n; bs++)
+                    {
+                        for(int h = 0; h < wei_stride; h++)
+                        {
+                            rsvspace[hid_shift + bs * hy_stride + h] += wei[wei_shift_bias + h];
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            int wei_shift = (in_h + hy_h) * wei_stride + (li - 1) * (bi * hy_h + hy_h) * wei_stride;
+            int prelayer_shift = (li - 1) * batch_n * hy_stride + bi * 3 * hy_h;
+            if(use_dropout)
+            {
+                auto dropout_states_tmp = dropout_states_host;
+                size_t drop_out_offset  = (static_cast<size_t>(li) - 1) * batch_n * hy_h * bi;
+
+                DropoutForwardVerify<T>(handle,
+                                        dropoutDesc,
+                                        miopen::deref(dropout_inputTensor),
+                                        rsvspace,
+                                        miopen::deref(dropout_outputTensor),
+                                        dropout_hid_state,
+                                        dropout_reservespace_host,
+                                        dropout_states_tmp,
+                                        prelayer_shift,
+                                        drop_out_offset,
+                                        drop_out_offset);
+
+                prelayer_shift = drop_out_offset;
+            }
+
+            gemm_cpu(use_dropout ? &dropout_hid_state[prelayer_shift] : &rsvspace[prelayer_shift],
+                     hy_h * bi,
+                     batch_n,
+                     use_dropout ? hy_h * bi : hy_stride,
+                     false,
+                     &wei[wei_shift], //&wei_state[wei_shift],
+                     hy_h * bi,
+                     hy_h * bi * 3,
+                     bi_stride,
+                     true,
+                     &rsvspace[hid_shift],
+                     hy_h * bi * 3,
+                     batch_n,
+                     hy_stride,
+                     1,
+                     1);
+
+            // from bias
+            if(biased)
+            {
+                for(int bs = 0; bs < batch_n; bs++)
+                {
+                    for(int h = 0; h < wei_stride; h++)
+                    {
+                        rsvspace[hid_shift + bs * hy_stride + h] += wei[wei_shift_bias_temp + h];
+                    }
+                }
+            }
+        }
+
+        // from hidden state
+        int bacc   = 0;
+        int baccbi = batch_n;
+        for(int ti = 0; ti < seqLength; ti++)
+        {
+            baccbi -= in_n.at(seqLength - 1 - ti);
+            int wei_shift = in_h * wei_stride + li * (bi * hy_h + hy_h) * wei_stride;
+            int pretime_shift;
+
+            if(ti == 0)
+            {
+                if(!hx_is_null)
+                {
+                    gemm_cpu(&hx[hx_shift],
+                             hy_h,
+                             in_n.at(ti),
+                             uni_stride,
+                             false,
+                             &wei[wei_shift],
+                             hy_h,
+                             hy_h * 2,
+                             uni_stride,
+                             true,
+                             &rsvspace[hid_shift + bacc * hy_stride],
+                             hy_h * 2,
+                             in_n.at(ti),
+                             hy_stride,
+                             1,
+                             1);
+
+                    if(biased)
+                    {
+                        for(int bs = 0; bs < in_n.at(ti); bs++)
+                        {
+                            for(int h = 0; h < hy_h; h++)
+                            {
+                                for(int gi = 0; gi < 2; gi++)
+                                {
+                                    rsvspace[hid_shift + (bacc + bs) * hy_stride + gi * hy_h + h] +=
+                                        wei[wei_shift_bias_temp + wei_stride + gi * hy_h + h];
+                                }
+                            }
+                        }
+                    }
+
+                    gemm_cpu(&hx[hx_shift],
+                             hy_h,
+                             in_n.at(ti),
+                             uni_stride,
+                             false,
+                             &wei[wei_shift + 2 * hy_h * uni_stride],
+                             hy_h,
+                             hy_h,
+                             uni_stride,
+                             true,
+                             &rsvspace[hid_shift + bacc * hy_stride + bi * 3 * hy_h],
+                             hy_h,
+                             in_n.at(ti),
+                             hy_stride,
+                             1,
+                             1);
+
+                    if(biased)
+                    {
+                        for(int bs = 0; bs < in_n.at(ti); bs++)
+                        {
+                            for(int h = 0; h < hy_h; h++)
+                            {
+                                rsvspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h] +=
+                                    wei[wei_shift_bias_temp + wei_stride + 2 * hy_h + h];
+                            }
+                        }
+                    }
+
+                    if(bidirection)
+                    {
+                        gemm_cpu(&hx[hx_shift + hy_n * hy_h],
+                                 hy_h,
+                                 in_n.at(seqLength - 1 - ti),
+                                 uni_stride,
+                                 false,
+                                 &wei[wei_shift + 3 * hy_h * uni_stride],
+                                 hy_h,
+                                 hy_h * 2,
+                                 uni_stride,
+                                 true,
+                                 &rsvspace[hid_shift + baccbi * hy_stride + 3 * hy_h],
+                                 hy_h * 2,
+                                 in_n.at(seqLength - 1 - ti),
+                                 hy_stride,
+                                 1,
+                                 1);
+
+                        if(biased)
+                        {
+                            for(int bs = 0; bs < in_n.at(seqLength - 1 - ti); bs++)
+                            {
+                                for(int h = 0; h < hy_h; h++)
+                                {
+                                    for(int gi = 0; gi < 2; gi++)
+                                    {
+                                        rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                                 (3 + gi) * hy_h + h] +=
+                                            wei[wei_shift_bias_temp + wei_stride + (3 + gi) * hy_h +
+                                                h];
+                                    }
+                                }
+                            }
+                        }
+
+                        gemm_cpu(&hx[hx_shift + hy_n * hy_h],
+                                 hy_h,
+                                 in_n.at(seqLength - 1 - ti),
+                                 uni_stride,
+                                 false,
+                                 &wei[wei_shift + 5 * hy_h * uni_stride],
+                                 hy_h,
+                                 hy_h,
+                                 uni_stride,
+                                 true,
+                                 &rsvspace[hid_shift + baccbi * hy_stride + bi * 3 * hy_h + hy_h],
+                                 hy_h,
+                                 in_n.at(seqLength - 1 - ti),
+                                 hy_stride,
+                                 1,
+                                 1);
+
+                        if(biased)
+                        {
+                            for(int bs = 0; bs < in_n.at(seqLength - 1 - ti); bs++)
+                            {
+                                for(int h = 0; h < hy_h; h++)
+                                {
+                                    rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h +
+                                             hy_h + h] +=
+                                        wei[wei_shift_bias_temp + wei_stride + 5 * hy_h + h];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                gemm_cpu(&hy[hx_shift],
+                         hy_h,
+                         in_n.at(ti),
+                         uni_stride,
+                         false,
+                         &wei[wei_shift],
+                         hy_h,
+                         hy_h * 2,
+                         uni_stride,
+                         true,
+                         &rsvspace[hid_shift + bacc * hy_stride],
+                         hy_h * 2,
+                         in_n.at(ti),
+                         hy_stride,
+                         1,
+                         1);
+
+                if(biased)
+                {
+                    for(int bs = 0; bs < in_n.at(ti); bs++)
+                    {
+                        for(int h = 0; h < hy_h; h++)
+                        {
+                            for(int gi = 0; gi < 2; gi++)
+                            {
+                                rsvspace[hid_shift + (bacc + bs) * hy_stride + gi * hy_h + h] +=
+                                    wei[wei_shift_bias_temp + wei_stride + gi * hy_h + h];
+                            }
+                        }
+                    }
+                }
+
+                gemm_cpu(&hy[hx_shift],
+                         hy_h,
+                         in_n.at(ti),
+                         uni_stride,
+                         false,
+                         &wei[wei_shift + 2 * hy_h * uni_stride],
+                         hy_h,
+                         hy_h,
+                         uni_stride,
+                         true,
+                         &rsvspace[hid_shift + bacc * hy_stride + bi * 3 * hy_h],
+                         hy_h,
+                         in_n.at(ti),
+                         hy_stride,
+                         1,
+                         1);
+
+                if(biased)
+                {
+                    for(int bs = 0; bs < in_n.at(ti); bs++)
+                    {
+                        for(int h = 0; h < hy_h; h++)
+                        {
+                            rsvspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h] +=
+                                wei[wei_shift_bias_temp + wei_stride + 2 * hy_h + h];
+                        }
+                    }
+                }
+
+                if(bidirection)
+                {
+
+                    if(!hx_is_null && in_n.at(seqLength - 1 - ti) > in_n.at(seqLength - ti))
+                    {
+                        gemm_cpu(
+                            &hx[hx_shift + hy_n * hy_h + in_n.at(seqLength - ti) * hy_h],
+                            hy_h,
+                            (in_n.at(seqLength - 1 - ti) - in_n.at(seqLength - ti)),
+                            uni_stride,
+                            false,
+                            &wei[wei_shift + 3 * hy_h * uni_stride],
+                            hy_h,
+                            hy_h * 2,
+                            uni_stride,
+                            true,
+                            &rsvspace[hid_shift + (baccbi + in_n.at(seqLength - ti)) * hy_stride +
+                                      3 * hy_h],
+                            hy_h * 2,
+                            (in_n.at(seqLength - 1 - ti) - in_n.at(seqLength - ti)),
+                            hy_stride,
+                            1,
+                            1);
+
+                        if(biased)
+                        {
+                            for(int bs = in_n.at(seqLength - ti); bs < in_n.at(seqLength - 1 - ti);
+                                bs++)
+                            {
+                                for(int h = 0; h < hy_h; h++)
+                                {
+                                    for(int gi = 0; gi < 2; gi++)
+                                    {
+                                        rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                                 (3 + gi) * hy_h + h] +=
+                                            wei[wei_shift_bias_temp + wei_stride + (3 + gi) * hy_h +
+                                                h];
+                                    }
+                                }
+                            }
+                        }
+
+                        gemm_cpu(
+                            &hx[hx_shift + hy_n * hy_h + in_n.at(seqLength - ti) * hy_h],
+                            hy_h,
+                            (in_n.at(seqLength - 1 - ti) - in_n.at(seqLength - ti)),
+                            uni_stride,
+                            false,
+                            &wei[wei_shift + 5 * hy_h * uni_stride],
+                            hy_h,
+                            hy_h,
+                            uni_stride,
+                            true,
+                            &rsvspace[hid_shift + (baccbi + in_n.at(seqLength - ti)) * hy_stride +
+                                      bi * 3 * hy_h + hy_h],
+                            hy_h,
+                            (in_n.at(seqLength - 1 - ti) - in_n.at(seqLength - ti)),
+                            hy_stride,
+                            1,
+                            1);
+
+                        if(biased)
+                        {
+                            for(int bs = in_n.at(seqLength - ti); bs < in_n.at(seqLength - 1 - ti);
+                                bs++)
+                            {
+                                for(int h = 0; h < hy_h; h++)
+                                {
+                                    rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h +
+                                             hy_h + h] +=
+                                        wei[wei_shift_bias_temp + wei_stride + 5 * hy_h + h];
+                                }
+                            }
+                        }
+                    }
+
+                    gemm_cpu(&hy[hx_shift + hy_n * hy_h],
+                             hy_h,
+                             in_n.at(seqLength - ti),
+                             uni_stride,
+                             false,
+                             &wei[wei_shift + 3 * hy_h * uni_stride],
+                             hy_h,
+                             hy_h * 2,
+                             uni_stride,
+                             true,
+                             &rsvspace[hid_shift + baccbi * hy_stride + 3 * hy_h],
+                             hy_h * 2,
+                             in_n.at(seqLength - ti),
+                             hy_stride,
+                             1,
+                             1);
+
+                    if(biased)
+                    {
+                        for(int bs = 0; bs < in_n.at(seqLength - ti); bs++)
+                        {
+                            for(int h = 0; h < hy_h; h++)
+                            {
+                                for(int gi = 0; gi < 2; gi++)
+                                {
+                                    rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                             (3 + gi) * hy_h + h] +=
+                                        wei[wei_shift_bias_temp + wei_stride + (3 + gi) * hy_h + h];
+                                }
+                            }
+                        }
+                    }
+
+                    gemm_cpu(&hy[hx_shift + hy_n * hy_h],
+                             hy_h,
+                             in_n.at(seqLength - ti),
+                             uni_stride,
+                             false,
+                             &wei[wei_shift + 5 * hy_h * uni_stride],
+                             hy_h,
+                             hy_h,
+                             uni_stride,
+                             true,
+                             &rsvspace[hid_shift + baccbi * hy_stride + bi * 3 * hy_h + hy_h],
+                             hy_h,
+                             in_n.at(seqLength - ti),
+                             hy_stride,
+                             1,
+                             1);
+
+                    if(biased)
+                    {
+                        for(int bs = 0; bs < in_n.at(seqLength - ti); bs++)
+                        {
+                            for(int h = 0; h < hy_h; h++)
+                            {
+                                rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h +
+                                         hy_h + h] +=
+                                    wei[wei_shift_bias_temp + wei_stride + 5 * hy_h + h];
+                            }
+                        }
+                    }
+                }
+            }
+
+            for(int bs = 0; bs < in_n.at(ti); bs++)
+            {
+                for(int h = 0; h < hy_h; h++)
+                {
+                    rsvspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h +
+                             numlayer * batch_n * hy_stride] =
+                        rsvspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h];
+
+                    rsvspace[hid_shift + (bacc + bs) * hy_stride + 2 * hy_h + h] +=
+                        activfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + hy_h + h], 2) *
+                        rsvspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h];
+                    rsvspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h] = 0;
+
+                    if(ti == 0)
+                    {
+                        if(!hx_is_null)
+                        {
+                            rsvspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h] +=
+                                ((1 -
+                                  activfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + h], 2)) *
+                                     activfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride +
+                                                        2 * hy_h + h],
+                                               1) +
+                                 activfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + h], 2) *
+                                     hx[hx_shift + bs * uni_stride + h]);
+                        }
+                        else
+                        {
+                            rsvspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h] +=
+                                ((1 -
+                                  activfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + h], 2)) *
+                                 activfunc(
+                                     rsvspace[hid_shift + (bacc + bs) * hy_stride + 2 * hy_h + h],
+                                     1));
+                        }
+                    }
+                    else
+                    {
+
+                        pretime_shift = li * batch_n * hy_stride +
+                                        (bacc - in_n.at(ti - 1)) * hy_stride + bi * 3 * hy_h;
+
+                        rsvspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h] +=
+                            ((1 - activfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + h], 2)) *
+                                 activfunc(
+                                     rsvspace[hid_shift + (bacc + bs) * hy_stride + 2 * hy_h + h],
+                                     1) +
+                             activfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + h], 2) *
+                                 rsvspace[pretime_shift + bs * hy_stride + h]);
+                    }
+
+                    rsvspace[hid_shift + (bacc + bs) * hy_stride + h +
+                             numlayer * batch_n * hy_stride] =
+                        activfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + h], 2);
+                    rsvspace[hid_shift + (bacc + bs) * hy_stride + hy_h + h +
+                             numlayer * batch_n * hy_stride] =
+                        activfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + hy_h + h], 2);
+                    rsvspace[hid_shift + (bacc + bs) * hy_stride + 2 * hy_h + h +
+                             numlayer * batch_n * hy_stride] =
+                        activfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + 2 * hy_h + h], 1);
+
+                    // Update final state
+                    hy[hx_shift + bs * uni_stride + h] =
+                        rsvspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h];
+                }
+            }
+
+            if(bidirection)
+            {
+                pretime_shift = li * batch_n * hy_stride +
+                                (baccbi + in_n.at(seqLength - 1 - ti)) * hy_stride + bi * 3 * hy_h +
+                                hy_h;
+
+                for(int bs = 0; bs < in_n.at(seqLength - 1 - ti); bs++)
+                {
+                    for(int h = 0; h < hy_h; h++)
+                    {
+                        rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h + hy_h + h +
+                                 numlayer * batch_n * hy_stride] =
+                            rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h + hy_h +
+                                     h];
+
+                        rsvspace[hid_shift + (baccbi + bs) * hy_stride + 5 * hy_h + h] +=
+                            activfunc(
+                                rsvspace[hid_shift + (baccbi + bs) * hy_stride + 4 * hy_h + h], 2) *
+                            rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h + hy_h +
+                                     h];
+                        rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h + hy_h + h] =
+                            0;
+
+                        if(ti == 0)
+                        {
+                            if(!hx_is_null)
+                            {
+                                rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h +
+                                         hy_h + h] +=
+                                    ((1 - activfunc(rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                                             3 * hy_h + h],
+                                                    2)) *
+                                         activfunc(rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                                            5 * hy_h + h],
+                                                   1) +
+                                     activfunc(rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                                        3 * hy_h + h],
+                                               2) *
+                                         hx[hx_shift + bs * uni_stride + hy_n * hy_h + h]);
+                            }
+                            else
+                            {
+                                rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h +
+                                         hy_h + h] +=
+                                    ((1 - activfunc(rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                                             3 * hy_h + h],
+                                                    2)) *
+                                     activfunc(rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                                        5 * hy_h + h],
+                                               1));
+                            }
+                        }
+                        else
+                        {
+                            if(!hx_is_null && in_n.at(seqLength - 1 - ti) > in_n.at(seqLength - ti))
+                            {
+                                if(bs >= in_n.at(seqLength - ti))
+                                {
+                                    rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h +
+                                             hy_h + h] +=
+                                        (activfunc(rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                                            3 * hy_h + h],
+                                                   2) *
+                                         hx[hx_shift + bs * uni_stride + hy_n * hy_h + h]);
+                                }
+                            }
+
+                            rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h + hy_h +
+                                     h] +=
+                                ((1 - activfunc(rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                                         3 * hy_h + h],
+                                                2)) *
+                                 activfunc(
+                                     rsvspace[hid_shift + (baccbi + bs) * hy_stride + 5 * hy_h + h],
+                                     1));
+
+                            if(bs < in_n.at(seqLength - ti))
+                            {
+                                rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h +
+                                         hy_h + h] +=
+                                    (activfunc(rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                                        3 * hy_h + h],
+                                               2) *
+                                     rsvspace[pretime_shift + bs * hy_stride + h]);
+                            }
+                        }
+
+                        rsvspace[hid_shift + (baccbi + bs) * hy_stride + 3 * hy_h + h +
+                                 numlayer * batch_n * hy_stride] =
+                            activfunc(
+                                rsvspace[hid_shift + (baccbi + bs) * hy_stride + 3 * hy_h + h], 2);
+                        rsvspace[hid_shift + (baccbi + bs) * hy_stride + 4 * hy_h + h +
+                                 numlayer * batch_n * hy_stride] =
+                            activfunc(
+                                rsvspace[hid_shift + (baccbi + bs) * hy_stride + 4 * hy_h + h], 2);
+                        rsvspace[hid_shift + (baccbi + bs) * hy_stride + 5 * hy_h + h +
+                                 numlayer * batch_n * hy_stride] =
+                            activfunc(
+                                rsvspace[hid_shift + (baccbi + bs) * hy_stride + 5 * hy_h + h], 1);
+
+                        // Update final hidden state
+                        hy[hx_shift + bs * uni_stride + hy_n * hy_h + h] =
+                            rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h + hy_h +
+                                     h];
+                    }
+                }
+            }
+
+            bacc += in_n.at(ti);
+        }
+    }
+
+    // output
+    int prelayer_shift = (numlayer - 1) * batch_n * hy_stride + bi * 3 * hy_h;
+    for(int bs = 0; bs < batch_n; bs++)
+    {
+        for(int h = 0; h < out_h; h++)
+        {
+            out[bs * out_stride + h] = rsvspace[prelayer_shift + bs * hy_stride + h];
+        }
+    }
+
+    if(use_dropout)
+    {
+        for(int i = 0; i < (numlayer - 1) * batch_n * hy_h * bi; i++)
+        {
+            rsvspace.at(numlayer * batch_n * hy_stride * 2 + i) = dropout_hid_state.at(i);
+        }
+        auto p_drop_rsv = reinterpret_cast<unsigned char*>(&rsvspace.at(
+            numlayer * batch_n * hy_stride * 2 + (numlayer - 1) * batch_n * hy_h * bi));
+        for(int i = 0; i < (numlayer - 1) * batch_n * hy_h * bi; i++)
+        {
+            *(p_drop_rsv + i) = dropout_reservespace_host.at(i);
+        }
+    }
+}
+
+template <typename T>
+void GRUBwdDataCPUVerify(bool use_dropout,
+                         miopen::DropoutDescriptor& dropoutDesc,
+                         std::vector<T>& din,
+                         std::vector<T>& wei, // [ input_state_weight_trans
+                                              // hidden_state_weight0_trans input1_trans
+                                              // hidden1_trans ... output_weight;
+                                              // bidirectional reversed weights ]
+                         std::vector<T>& dhy, // current/final hidden state
+                         std::vector<T>& dhx,
+                         std::vector<T>& hx, // initial hidden state
+                         std::vector<T>& out,
+                         std::vector<T>& dout,
+                         const std::vector<int>& in_n, // input batch size
+                         int in_h,                     // input data length
+                         int seqLength,                // Number of iterations to unroll over
+                         bool bidirection,             // whether using bidirectional net
+                         bool,                         // whether using bias
+                         int hy_d,  // 1 by numlayer (number of stacks of hidden layers)
+                                    // for unidirection, 2 by numlayer for bidirection
+                         int hy_n,  // equal to input batch size in_n[0]
+                         int hy_h,  // hidden state number
+                         int out_h, // 1 by hy_h related function for unidirection, 2 by
+                                    // hy_h related function for bidirection
+                         int inputMode,
+                         std::vector<T>& rsvspace,
+                         std::vector<T>& wkspace,
+                         bool hx_is_null  = false,
+                         bool dhy_is_null = false)
+{
+    int batch_n = sumvc(in_n);
+    (void)out;
+
+    int numlayer = bidirection ? hy_d / 2 : hy_d;
+    int bi       = bidirection ? 2 : 1;
+
+    int in_stride  = in_h;
+    int out_stride = out_h;
+    int wei_stride = bi * 3 * hy_h;
+    int hy_stride  = bi * 4 * hy_h;
+    int h_stride   = bi * hy_h;
+    int uni_stride = hy_h;
+    int bi_stride  = hy_h * bi;
+
+    // initial hidden states
+    auto ihs = hy_d * hy_n * hy_h;
+    std::vector<T> dcx(ihs);
+
+    if(inputMode == 1)
+    {
+        if(in_h != hy_h)
+        {
+            std::cout
+                << "Verification cannot be completed: The input tensor size must equal to the "
+                << "hidden state size of the network in SKIP_INPUT mode!" << std::endl;
+            return;
+        }
+        in_h = 0;
+    }
+
+    // initial dropoput
+    miopenTensorDescriptor_t dropout_inputTensor{};
+    std::vector<unsigned char> dropout_reservespace_host;
+    if(use_dropout)
+    {
+        std::array<int, 2> drop_in_len = {{batch_n, hy_h * bi}};
+        std::array<int, 2> drop_in_str = {{hy_stride, 1}};
+        miopenCreateTensorDescriptor(&dropout_inputTensor);
+        miopenSetTensorDescriptor(
+            dropout_inputTensor, miopenFloat, 2, drop_in_len.data(), drop_in_str.data());
+
+        size_t reserveSpaceSizeInBytes = 0;
+        miopenDropoutGetReserveSpaceSize(dropout_inputTensor, &reserveSpaceSizeInBytes);
+        size_t reserve_size       = reserveSpaceSizeInBytes / sizeof(unsigned char);
+        dropout_reservespace_host = std::vector<unsigned char>(reserve_size * (numlayer - 1),
+                                                               static_cast<unsigned char>(0));
+
+        auto p_drop_rsv = reinterpret_cast<unsigned char*>(&rsvspace.at(
+            numlayer * batch_n * hy_stride * 2 + (numlayer - 1) * batch_n * hy_h * bi));
+        for(int i = 0; i < (numlayer - 1) * batch_n * hy_h * bi; i++)
+        {
+            dropout_reservespace_host.at(i) = *(p_drop_rsv + i);
+        }
+    }
+
+    // bwd data emulator
+    for(int li = numlayer - 1; li >= 0; li--)
+    {
+        int wei_shift     = (in_h + hy_h) * wei_stride + li * (bi * hy_h + hy_h) * wei_stride;
+        int hid_shift     = li * batch_n * hy_stride;
+        int hx_shift      = li * in_n.at(0) * h_stride;
+        int weitime_shift = in_h * wei_stride + li * (bi * hy_h + hy_h) * wei_stride;
+
+        if(li == numlayer - 1)
+        {
+            for(int bs = 0; bs < batch_n; bs++)
+            {
+                for(int h = 0; h < out_h; h++)
+                {
+                    wkspace[hid_shift + bi * 3 * hy_h + bs * hy_stride + h] +=
+                        dout[bs * out_stride + h];
+                }
+            }
+        }
+        else
+        {
+            int prelayer_shift = (li + 1) * batch_n * hy_stride;
+
+            gemm_cpu(&wkspace[prelayer_shift],
+                     hy_h * bi * 3,
+                     batch_n,
+                     hy_stride,
+                     false,
+                     &wei[wei_shift],
+                     hy_h * bi,
+                     hy_h * bi * 3,
+                     bi_stride,
+                     false,
+                     &wkspace[hid_shift + bi * 3 * hy_h],
+                     hy_h * bi,
+                     batch_n,
+                     hy_stride,
+                     1,
+                     1);
+
+            if(use_dropout)
+            {
+                DropoutBackwardVerify<T>(dropoutDesc,
+                                         miopen::deref(dropout_inputTensor),
+                                         wkspace,
+                                         miopen::deref(dropout_inputTensor),
+                                         wkspace,
+                                         dropout_reservespace_host,
+                                         hid_shift + bi * 3 * hy_h,
+                                         hid_shift + bi * 3 * hy_h,
+                                         li * batch_n * hy_h * bi);
+            }
+        }
+
+        // from hidden state
+        int bacc   = batch_n;
+        int baccbi = 0;
+        for(int ti = seqLength - 1; ti >= 0; ti--)
+        {
+            bacc -= in_n.at(ti);
+
+            if(ti == seqLength - 1)
+            {
+                if(!dhy_is_null)
+                {
+                    for(int bs = 0; bs < in_n.at(ti); bs++)
+                    {
+                        for(int h = 0; h < hy_h; h++)
+                        {
+                            wkspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h] +=
+                                dhy[hx_shift + bs * uni_stride + h];
+                        }
+                    }
+
+                    if(bidirection)
+                    {
+                        for(int bs = 0; bs < in_n.at(seqLength - 1 - ti); bs++)
+                        {
+                            for(int h = 0; h < hy_h; h++)
+                            {
+                                wkspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h +
+                                        hy_h + h] +=
+                                    dhy[hx_shift + bs * uni_stride + hy_n * hy_h + h];
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                if(!dhy_is_null && in_n.at(ti) > in_n.at(ti + 1))
+                {
+                    for(int bs = in_n.at(ti + 1); bs < in_n.at(ti); bs++)
+                    {
+                        for(int h = 0; h < hy_h; h++)
+                        {
+                            wkspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h] +=
+                                dhy[hx_shift + bs * uni_stride + h];
+                        }
+                    }
+                }
+
+                int pretime_shift = li * batch_n * hy_stride + (bacc + in_n.at(ti)) * hy_stride;
+
+                gemm_cpu(&wkspace[pretime_shift],
+                         hy_h * 2,
+                         in_n.at(ti + 1),
+                         hy_stride,
+                         false,
+                         &wei[weitime_shift],
+                         hy_h,
+                         hy_h * 2,
+                         uni_stride,
+                         false,
+                         &wkspace[hid_shift + bacc * hy_stride + bi * 3 * hy_h],
+                         hy_h,
+                         in_n.at(ti + 1),
+                         hy_stride,
+                         1,
+                         1);
+
+                for(int bs = 0; bs < in_n.at(ti + 1); bs++)
+                {
+                    for(int h = 0; h < hy_h; h++)
+                    {
+                        wkspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h] +=
+                            wkspace[pretime_shift + bs * hy_stride + bi * 3 * hy_h + h] *
+                            activfunc(rsvspace[pretime_shift + bs * hy_stride + h], 2);
+
+                        wkspace[hid_shift + (bacc + bs) * hy_stride + 2 * hy_h + h] =
+                            wkspace[pretime_shift + bs * hy_stride + 2 * hy_h + h] *
+                            activfunc(rsvspace[pretime_shift + bs * hy_stride + hy_h + h], 2);
+                    }
+                }
+
+                gemm_cpu(&wkspace[hid_shift + bacc * hy_stride + 2 * hy_h],
+                         hy_h,
+                         in_n.at(ti + 1),
+                         hy_stride,
+                         false,
+                         &wei[weitime_shift + 2 * hy_h * uni_stride],
+                         hy_h,
+                         hy_h,
+                         uni_stride,
+                         false,
+                         &wkspace[hid_shift + bacc * hy_stride + bi * 3 * hy_h],
+                         hy_h,
+                         in_n.at(ti + 1),
+                         hy_stride,
+                         1,
+                         1);
+
+                for(int bs = 0; bs < in_n.at(ti + 1); bs++)
+                {
+                    auto subidx = hid_shift + (bacc + bs) * hy_stride + 2 * hy_h;
+                    std::fill(wkspace.begin() + subidx, wkspace.begin() + subidx + hy_h, 0);
+                }
+
+                if(bidirection)
+                {
+                    pretime_shift = li * batch_n * hy_stride +
+                                    (baccbi - in_n.at(seqLength - 2 - ti)) * hy_stride + hy_h * 3;
+
+                    gemm_cpu(&wkspace[pretime_shift],
+                             hy_h * 2,
+                             in_n.at(seqLength - 1 - ti),
+                             hy_stride,
+                             false,
+                             &wei[weitime_shift + hy_h * 3 * uni_stride],
+                             hy_h,
+                             hy_h * 2,
+                             uni_stride,
+                             false,
+                             &wkspace[hid_shift + baccbi * hy_stride + bi * 3 * hy_h + hy_h],
+                             hy_h,
+                             in_n.at(seqLength - 1 - ti),
+                             hy_stride,
+                             1,
+                             1);
+
+                    for(int bs = 0; bs < in_n.at(seqLength - 1 - ti); bs++)
+                    {
+                        for(int h = 0; h < hy_h; h++)
+                        {
+                            wkspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h + hy_h +
+                                    h] +=
+                                wkspace[pretime_shift + bs * hy_stride + 3 * hy_h + hy_h + h] *
+                                activfunc(rsvspace[pretime_shift + bs * hy_stride + h], 2);
+
+                            wkspace[hid_shift + (baccbi + bs) * hy_stride + 5 * hy_h + h] =
+                                wkspace[pretime_shift + bs * hy_stride + 2 * hy_h + h] *
+                                activfunc(rsvspace[pretime_shift + bs * hy_stride + hy_h + h], 2);
+                        }
+                    }
+
+                    gemm_cpu(&wkspace[hid_shift + baccbi * hy_stride + 5 * hy_h],
+                             hy_h,
+                             in_n.at(seqLength - 1 - ti),
+                             hy_stride,
+                             false,
+                             &wei[weitime_shift + 5 * hy_h * uni_stride],
+                             hy_h,
+                             hy_h,
+                             uni_stride,
+                             false,
+                             &wkspace[hid_shift + baccbi * hy_stride + bi * 3 * hy_h + hy_h],
+                             hy_h,
+                             in_n.at(seqLength - 1 - ti),
+                             hy_stride,
+                             1,
+                             1);
+
+                    for(int bs = 0; bs < in_n.at(seqLength - 1 - ti); bs++)
+                    {
+                        auto subidx = hid_shift + (baccbi + bs) * hy_stride + 5 * hy_h;
+                        std::fill(wkspace.begin() + subidx, wkspace.begin() + (subidx + hy_h), 0);
+                    }
+                }
+            }
+
+            for(int bs = 0; bs < in_n.at(ti); bs++)
+            {
+                for(int h = 0; h < hy_h; h++)
+                {
+                    wkspace[hid_shift + (bacc + bs) * hy_stride + 2 * hy_h + h] +=
+                        wkspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h] *
+                        (1 - activfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + h], 2)) *
+                        dervactivfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + 2 * hy_h + h],
+                                      1);
+
+                    wkspace[hid_shift + (bacc + bs) * hy_stride + hy_h + h] =
+                        (rsvspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h +
+                                  numlayer * batch_n * hy_stride] *
+                         wkspace[hid_shift + (bacc + bs) * hy_stride + 2 * hy_h + h] *
+                         dervactivfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + hy_h + h],
+                                       2));
+
+                    if(ti == 0)
+                    {
+                        if(!hx_is_null)
+                        {
+                            wkspace[hid_shift + (bacc + bs) * hy_stride + h] +=
+                                (wkspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h] *
+                                 hx[hx_shift + bs * uni_stride + h] *
+                                 dervactivfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + h],
+                                               2));
+                        }
+                        wkspace[hid_shift + (bacc + bs) * hy_stride + h] -=
+                            (wkspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h] *
+                             activfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + 2 * hy_h + h],
+                                       1) *
+                             dervactivfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + h], 2));
+                    }
+                    else
+                    {
+                        wkspace[hid_shift + (bacc + bs) * hy_stride + h] +=
+                            wkspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h] *
+                            (rsvspace[hid_shift + (bacc - in_n.at(ti - 1) + bs) * hy_stride +
+                                      bi * 3 * hy_h + h] -
+                             activfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + 2 * hy_h + h],
+                                       1)) *
+                            dervactivfunc(rsvspace[hid_shift + (bacc + bs) * hy_stride + h], 2);
+                    }
+
+                    rsvspace[hid_shift + (bacc + bs) * hy_stride + bi * 3 * hy_h + h +
+                             numlayer * batch_n * hy_stride] =
+                        wkspace[hid_shift + (bacc + bs) * hy_stride + 2 * hy_h + h] *
+                        rsvspace[hid_shift + (bacc + bs) * hy_stride + hy_h + h +
+                                 numlayer * batch_n * hy_stride];
+                }
+            }
+
+            if(bidirection)
+            {
+                for(int bs = 0; bs < in_n.at(seqLength - 1 - ti); bs++)
+                {
+                    for(int h = 0; h < hy_h; h++)
+                    {
+                        wkspace[hid_shift + (baccbi + bs) * hy_stride + 5 * hy_h + h] +=
+                            wkspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h + hy_h +
+                                    h] *
+                            (1 - activfunc(
+                                     rsvspace[hid_shift + (baccbi + bs) * hy_stride + 3 * hy_h + h],
+                                     2)) *
+                            dervactivfunc(
+                                rsvspace[hid_shift + (baccbi + bs) * hy_stride + 5 * hy_h + h], 1);
+
+                        wkspace[hid_shift + (baccbi + bs) * hy_stride + 4 * hy_h + h] =
+                            rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h + hy_h +
+                                     h + numlayer * batch_n * hy_stride];
+
+                        wkspace[hid_shift + (baccbi + bs) * hy_stride + 4 * hy_h + h] *=
+                            (wkspace[hid_shift + (baccbi + bs) * hy_stride + 5 * hy_h + h] *
+                             dervactivfunc(
+                                 rsvspace[hid_shift + (baccbi + bs) * hy_stride + 4 * hy_h + h],
+                                 2));
+
+                        if(ti == 0)
+                        {
+                            if(!hx_is_null)
+                            {
+                                wkspace[hid_shift + (baccbi + bs) * hy_stride + 3 * hy_h + h] +=
+                                    (wkspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h +
+                                             hy_h + h] *
+                                     hx[hx_shift + bs * uni_stride + hy_n * hy_h + h] *
+                                     dervactivfunc(rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                                            3 * hy_h + h],
+                                                   2));
+                            }
+                            wkspace[hid_shift + (baccbi + bs) * hy_stride + 3 * hy_h + h] -=
+                                (wkspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h +
+                                         hy_h + h] *
+                                 activfunc(
+                                     rsvspace[hid_shift + (baccbi + bs) * hy_stride + 5 * hy_h + h],
+                                     1) *
+                                 dervactivfunc(
+                                     rsvspace[hid_shift + (baccbi + bs) * hy_stride + 3 * hy_h + h],
+                                     2));
+                        }
+                        else
+                        {
+                            if(!hx_is_null &&
+                               in_n.at(seqLength - 1 - ti) > in_n.at(seqLength - ti) &&
+                               bs >= in_n.at(seqLength - ti))
+                            {
+                                wkspace[hid_shift + (baccbi + bs) * hy_stride + 3 * hy_h + h] +=
+                                    (wkspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h +
+                                             hy_h + h] *
+                                     hx[hx_shift + bs * uni_stride + hy_n * hy_h + h] *
+                                     dervactivfunc(rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                                            3 * hy_h + h],
+                                                   2));
+                            }
+
+                            if(bs < in_n.at(seqLength - ti))
+                            {
+                                wkspace[hid_shift + (baccbi + bs) * hy_stride + 3 * hy_h + h] +=
+                                    (wkspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h +
+                                             hy_h + h] *
+                                     rsvspace[hid_shift +
+                                              (baccbi + in_n.at(seqLength - 1 - ti) + bs) *
+                                                  hy_stride +
+                                              bi * 3 * hy_h + hy_h + h] *
+                                     dervactivfunc(rsvspace[hid_shift + (baccbi + bs) * hy_stride +
+                                                            3 * hy_h + h],
+                                                   2));
+                            }
+                            wkspace[hid_shift + (baccbi + bs) * hy_stride + 3 * hy_h + h] -=
+                                (wkspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h +
+                                         hy_h + h] *
+                                 activfunc(
+                                     rsvspace[hid_shift + (baccbi + bs) * hy_stride + 5 * hy_h + h],
+                                     1) *
+                                 dervactivfunc(
+                                     rsvspace[hid_shift + (baccbi + bs) * hy_stride + 3 * hy_h + h],
+                                     2));
+                        }
+
+                        rsvspace[hid_shift + (baccbi + bs) * hy_stride + bi * 3 * hy_h + hy_h + h +
+                                 numlayer * batch_n * hy_stride] =
+                            wkspace[hid_shift + (baccbi + bs) * hy_stride + 5 * hy_h + h] *
+                            rsvspace[hid_shift + (baccbi + bs) * hy_stride + 4 * hy_h + h +
+                                     numlayer * batch_n * hy_stride];
+                    }
+                }
+            }
+
+            baccbi += in_n.at(seqLength - 1 - ti);
+        }
+
+        // dhx
+        int pretime_shift = li * batch_n * hy_stride;
+
+        gemm_cpu(&wkspace[pretime_shift],
+                 hy_h * 2,
+                 in_n.at(0),
+                 hy_stride,
+                 false,
+                 &wei[weitime_shift],
+                 hy_h,
+                 hy_h * 2,
+                 uni_stride,
+                 false,
+                 &dhx[hx_shift],
+                 hy_h,
+                 in_n.at(0),
+                 uni_stride,
+                 1,
+                 1);
+
+        for(int bs = 0; bs < in_n.at(0); bs++)
+        {
+            for(int h = 0; h < hy_h; h++)
+            {
+                dhx[hx_shift + bs * uni_stride + h] +=
+                    wkspace[pretime_shift + bs * hy_stride + bi * 3 * hy_h + h] *
+                    activfunc(rsvspace[pretime_shift + bs * hy_stride + h], 2);
+
+                dcx[hx_shift + bs * uni_stride + h] =
+                    wkspace[pretime_shift + bs * hy_stride + 2 * hy_h + h] *
+                    activfunc(rsvspace[pretime_shift + bs * hy_stride + hy_h + h], 2);
+            }
+        }
+
+        gemm_cpu(&dcx[hx_shift],
+                 hy_h,
+                 in_n.at(0),
+                 uni_stride,
+                 false,
+                 &wei[weitime_shift + 2 * hy_h * uni_stride],
+                 hy_h,
+                 hy_h,
+                 uni_stride,
+                 false,
+                 &dhx[hx_shift],
+                 hy_h,
+                 in_n.at(0),
+                 uni_stride,
+                 1,
+                 1);
+
+        if(bidirection)
+        {
+            int ti = seqLength - 1, cur_bat = 0, pre_bat = batch_n;
+
+            while(ti >= 0)
+            {
+                pre_bat -= in_n.at(ti);
+                if(in_n.at(ti) > cur_bat)
+                {
+                    pretime_shift = li * batch_n * hy_stride + (pre_bat + cur_bat) * hy_stride;
+
+                    gemm_cpu(&wkspace[pretime_shift + 3 * hy_h],
+                             hy_h * 2,
+                             (in_n.at(ti) - cur_bat),
+                             hy_stride,
+                             false,
+                             &wei[weitime_shift + 3 * hy_h * uni_stride],
+                             hy_h,
+                             hy_h * 2,
+                             uni_stride,
+                             false,
+                             &dhx[hx_shift + hy_n * hy_h + cur_bat * hy_h],
+                             hy_h,
+                             (in_n.at(ti) - cur_bat),
+                             uni_stride,
+                             1,
+                             1);
+
+                    for(int bs = cur_bat; bs < in_n.at(ti); bs++)
+                    {
+                        for(int h = 0; h < hy_h; h++)
+                        {
+                            dhx[hx_shift + bs * uni_stride + hy_n * hy_h + h] +=
+                                wkspace[pretime_shift + (bs - cur_bat) * hy_stride + bi * 3 * hy_h +
+                                        hy_h + h] *
+                                activfunc(rsvspace[pretime_shift + (bs - cur_bat) * hy_stride +
+                                                   3 * hy_h + h],
+                                          2);
+
+                            dcx[hx_shift + bs * uni_stride + hy_n * hy_h + h] =
+                                wkspace[pretime_shift + (bs - cur_bat) * hy_stride + 5 * hy_h + h] *
+                                activfunc(rsvspace[pretime_shift + (bs - cur_bat) * hy_stride +
+                                                   4 * hy_h + h],
+                                          2);
+                        }
+                    }
+
+                    gemm_cpu(&dcx[hx_shift + hy_n * hy_h + cur_bat * hy_h],
+                             hy_h,
+                             (in_n.at(ti) - cur_bat),
+                             uni_stride,
+                             false,
+                             &wei[weitime_shift + 5 * hy_h * uni_stride],
+                             hy_h,
+                             hy_h,
+                             uni_stride,
+                             false,
+                             &dhx[hx_shift + hy_n * hy_h + cur_bat * hy_h],
+                             hy_h,
+                             (in_n.at(ti) - cur_bat),
+                             uni_stride,
+                             1,
+                             1);
+                }
+                cur_bat = in_n.at(ti--);
+            }
+        }
+    }
+
+    // dinput
+    if(inputMode == 1)
+    {
+        for(int bs = 0; bs < batch_n; bs++)
+        {
+            for(int h = 0; h < hy_h; h++)
+            {
+                for(int gi = 0; gi < 3; gi++)
+                {
+                    din[bs * in_stride + h] += wkspace[bs * hy_stride + gi * hy_h + h];
+                    if(bidirection)
+                    {
+                        din[bs * in_stride + h] += wkspace[bs * hy_stride + (gi + 3) * hy_h + h];
+                    }
+                }
+            }
+        }
+    }
+    else
+    {
+        gemm_cpu(wkspace.data(),
+                 hy_h * bi * 3,
+                 batch_n,
+                 hy_stride,
+                 false,
+                 wei.data(),
+                 in_h,
+                 hy_h * bi * 3,
+                 in_stride,
+                 false,
+                 din.data(),
+                 in_h,
+                 batch_n,
+                 in_stride,
+                 1,
+                 1);
+    }
+}
+
+template <typename T>
+void GRUBwdWeightCPUVerify(bool use_dropout,
+                           std::vector<T>& in,
+                           std::vector<T>& dwei,         // [ input_state_weight_trans
+                                                         // hidden_state_weight0_trans
+                                                         // input1_trans hidden1_trans ...
+                                                         // output_weight; bidirectional
+                                                         // reversed weights ]
+                           std::vector<T>& hx,           // initial hidden state
+                           const std::vector<int>& in_n, // input batch size
+                           int in_h,                     // input data length
+                           int seqLength,                // Number of iterations to unroll over
+                           bool bidirection,             // whether using bidirectional net
+                           bool biased,                  // whether using bias
+                           int hy_d, // 1 by numlayer (number of stacks of hidden
+                                     // layers) for unidirection, 2 by numlayer for
+                                     // bidirection
+                           int hy_n, // equal to input batch size in_n[0]
+                           int hy_h, // hidden state number
+                                     // by hy_h related function for bidirection
+                           int inputMode,
+                           std::vector<T>& rsvspace,
+                           std::vector<T>& wkspace,
+                           bool hx_is_null = false)
+{
+    int batch_n  = sumvc(in_n);
+    int numlayer = bidirection ? hy_d / 2 : hy_d;
+    int bi       = bidirection ? 2 : 1;
+
+    int in_stride  = in_h;
+    int wei_stride = bi * 3 * hy_h;
+    int hy_stride  = bi * 4 * hy_h;
+    int h_stride   = bi * hy_h;
+    int uni_stride = hy_h;
+    int bi_stride  = hy_h * bi;
+
+    if(inputMode == 1)
+    {
+        if(in_h != hy_h)
+        {
+            std::cout
+                << "Verification cannot be completed: The input tensor size must equal to the "
+                << "hidden state size of the network in SKIP_INPUT mode!" << std::endl;
+            return;
+        }
+        in_h = 0;
+    }
+
+    int wei_shift_bias = (in_h + hy_h + (bi * hy_h + hy_h) * (numlayer - 1)) * wei_stride;
+
+    // bwd weights emulator
+    for(int li = 0; li < numlayer; li++)
+    {
+        // between layers
+        if(li == 0)
+        {
+            if(inputMode == 0)
+            {
+                gemm_cpu(wkspace.data(),
+                         hy_h * bi * 3,
+                         batch_n,
+                         hy_stride,
+                         true,
+                         in.data(),
+                         in_h,
+                         batch_n,
+                         in_stride,
+                         false,
+                         dwei.data(),
+                         in_h,
+                         hy_h * bi * 3,
+                         in_stride,
+                         1,
+                         1);
+            }
+
+            if(biased)
+            {
+                for(int h = 0; h < wei_stride; h++)
+                {
+                    for(int w = 0; w < batch_n; w++)
+                    {
+                        dwei[wei_shift_bias + h] += wkspace[w * hy_stride + h];
+                    }
+                }
+            }
+        }
+        else
+        {
+            int prelayer_shift =
+                use_dropout ? 2 * numlayer * batch_n * hy_stride + (li - 1) * batch_n * hy_h * bi
+                            : (li - 1) * batch_n * hy_stride + bi * hy_h * 3;
+            int hid_shift = li * batch_n * hy_stride;
+            int wei_shift = (in_h + hy_h) * wei_stride + (li - 1) * (bi * hy_h + hy_h) * wei_stride;
+
+            gemm_cpu(&wkspace[hid_shift],
+                     hy_h * bi * 3,
+                     batch_n,
+                     hy_stride,
+                     true,
+                     &rsvspace[prelayer_shift],
+                     hy_h * bi,
+                     batch_n,
+                     use_dropout ? hy_h * bi : hy_stride,
+                     false,
+                     &dwei[wei_shift],
+                     hy_h * bi,
+                     hy_h * bi * 3,
+                     bi_stride,
+                     1,
+                     1);
+
+            if(biased)
+            {
+                wei_shift = wei_shift_bias + li * 2 * wei_stride;
+
+                for(int h = 0; h < wei_stride; h++)
+                {
+                    for(int w = 0; w < batch_n; w++)
+                    {
+                        dwei[wei_shift + h] += wkspace[hid_shift + w * hy_stride + h];
+                    }
+                }
+            }
+        }
+
+        // between time
+        int bacc = 0;
+        for(int ti = 0; ti < seqLength; ti++)
+        {
+            int hid_shift = li * batch_n * hy_stride + bacc * hy_stride;
+            int hx_shift  = li * in_n.at(0) * h_stride;
+            int wei_shift = in_h * wei_stride + li * (bi * hy_h + hy_h) * wei_stride;
+            int pretime_shift;
+
+            for(int bs = 0; bs < in_n.at(ti); bs++)
+            {
+                for(int h = 0; h < hy_h; h++)
+                {
+                    wkspace[hid_shift + bs * hy_stride + 2 * hy_h + h] *=
+                        activfunc(rsvspace[hid_shift + bs * hy_stride + hy_h + h], 2);
+                }
+            }
+
+            // between time
+            if(ti == 0)
+            {
+                if(!hx_is_null)
+                {
+                    gemm_cpu(&wkspace[hid_shift],
+                             hy_h * 3,
+                             in_n.at(ti),
+                             hy_stride,
+                             true,
+                             &hx[hx_shift],
+                             hy_h,
+                             in_n.at(ti),
+                             uni_stride,
+                             false,
+                             &dwei[wei_shift],
+                             hy_h,
+                             hy_h * 3,
+                             uni_stride,
+                             1,
+                             1);
+
+                    if(biased)
+                    {
+                        int bias_shift = wei_shift_bias + li * 2 * wei_stride + wei_stride;
+
+                        for(int h = 0; h < hy_h * 3; h++)
+                        {
+                            for(int w = 0; w < in_n.at(ti); w++)
+                            {
+                                dwei[bias_shift + h] += wkspace[hid_shift + w * hy_stride + h];
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                pretime_shift =
+                    li * batch_n * hy_stride + (bacc - in_n.at(ti - 1)) * hy_stride + bi * 3 * hy_h;
+
+                gemm_cpu(&wkspace[hid_shift],
+                         hy_h * 3,
+                         in_n.at(ti),
+                         hy_stride,
+                         true,
+                         &rsvspace[pretime_shift],
+                         hy_h,
+                         in_n.at(ti),
+                         hy_stride,
+                         false,
+                         &dwei[wei_shift],
+                         hy_h,
+                         hy_h * 3,
+                         uni_stride,
+                         1,
+                         1);
+
+                if(biased)
+                {
+                    int bias_shift = wei_shift_bias + li * 2 * wei_stride + wei_stride;
+
+                    for(int h = 0; h < hy_h * 3; h++)
+                    {
+                        for(int w = 0; w < in_n.at(ti); w++)
+                        {
+                            dwei[bias_shift + h] += wkspace[hid_shift + w * hy_stride + h];
+                        }
+                    }
+                }
+            }
+
+            if(bidirection)
+            {
+                for(int bs = 0; bs < in_n.at(ti); bs++)
+                {
+                    for(int h = 0; h < hy_h; h++)
+                    {
+                        wkspace[hid_shift + bs * hy_stride + 5 * hy_h + h] *=
+                            activfunc(rsvspace[hid_shift + bs * hy_stride + 4 * hy_h + h], 2);
+                    }
+                }
+
+                if(ti == seqLength - 1)
+                {
+                    if(!hx_is_null)
+                    {
+                        gemm_cpu(&wkspace[hid_shift + 3 * hy_h],
+                                 hy_h * 3,
+                                 in_n.at(ti),
+                                 hy_stride,
+                                 true,
+                                 &hx[hx_shift + hy_n * hy_h],
+                                 hy_h,
+                                 in_n.at(ti),
+                                 uni_stride,
+                                 false,
+                                 &dwei[wei_shift + 3 * hy_h * uni_stride],
+                                 hy_h,
+                                 hy_h * 3,
+                                 uni_stride,
+                                 1,
+                                 1);
+
+                        if(biased)
+                        {
+                            int bias_shift = wei_shift_bias + li * 2 * wei_stride + wei_stride;
+
+                            for(int h = 0; h < hy_h * 3; h++)
+                            {
+                                for(int w = 0; w < in_n.at(ti); w++)
+                                {
+                                    dwei[bias_shift + 3 * hy_h + h] +=
+                                        wkspace[hid_shift + 3 * hy_h + w * hy_stride + h];
+                                }
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    if(!hx_is_null && in_n.at(ti) > in_n.at(ti + 1))
+                    {
+                        gemm_cpu(&wkspace[hid_shift + 3 * hy_h + in_n.at(ti + 1) * hy_stride],
+                                 hy_h * 3,
+                                 (in_n.at(ti) - in_n.at(ti + 1)),
+                                 hy_stride,
+                                 true,
+                                 &hx[hx_shift + hy_n * hy_h + in_n.at(ti + 1) * hy_h],
+                                 hy_h,
+                                 (in_n.at(ti) - in_n.at(ti + 1)),
+                                 uni_stride,
+                                 false,
+                                 &dwei[wei_shift + 3 * hy_h * uni_stride],
+                                 hy_h,
+                                 hy_h * 3,
+                                 uni_stride,
+                                 1,
+                                 1);
+
+                        if(biased)
+                        {
+                            int bias_shift = wei_shift_bias + li * 2 * wei_stride + wei_stride;
+
+                            for(int h = 0; h < hy_h * 3; h++)
+                            {
+                                for(int w = in_n.at(ti + 1); w < in_n.at(ti); w++)
+                                {
+                                    dwei[bias_shift + 3 * hy_h + h] +=
+                                        wkspace[hid_shift + 3 * hy_h + w * hy_stride + h];
+                                }
+                            }
+                        }
+                    }
+
+                    pretime_shift =
+                        li * batch_n * hy_stride + (bacc + in_n.at(ti)) * hy_stride + bi * 3 * hy_h;
+
+                    gemm_cpu(&wkspace[hid_shift + 3 * hy_h],
+                             hy_h * 3,
+                             in_n.at(ti + 1),
+                             hy_stride,
+                             true,
+                             &rsvspace[pretime_shift + hy_h],
+                             hy_h,
+                             in_n.at(ti + 1),
+                             hy_stride,
+                             false,
+                             &dwei[wei_shift + 3 * hy_h * uni_stride],
+                             hy_h,
+                             hy_h * 3,
+                             uni_stride,
+                             1,
+                             1);
+
+                    if(biased)
+                    {
+                        int bias_shift = wei_shift_bias + li * 2 * wei_stride + wei_stride;
+
+                        for(int h = 0; h < hy_h * 3; h++)
+                        {
+                            for(int w = 0; w < in_n.at(ti + 1); w++)
+                            {
+                                dwei[bias_shift + 3 * hy_h + h] +=
+                                    wkspace[hid_shift + 3 * hy_h + w * hy_stride + h];
+                            }
+                        }
+                    }
+                }
+            }
+
+            bacc += in_n.at(ti);
+        }
+    }
+}
+
+//////=========END CPU VERIFICATION FUNCTIONS=============
+
 inline std::vector<int> GenBatchSeq(const int batchSize, const int seqLength)
 {
 
@@ -167,7 +1861,9 @@ struct verify_forward_infer_gru
         auto t_start1 = std::chrono::high_resolution_clock::now();
 #endif
 
-        RunGRUForwardGEMMCPUVerify(&handle,
+        GRUFwdCPUVerify(handle,
+                        false,
+                        miopen::deref(miopen::deref(rnnDesc).dropoutDesc),
                         input,
                         weights,     // [ input_state_weight_trans
                                      // hidden_state_weight0_trans input1_trans
@@ -189,8 +1885,6 @@ struct verify_forward_infer_gru
                                          // related function for bidirection
                         inputMode,
                         reserveSpace,
-                        false,
-                        &(miopen::deref(miopen::deref(rnnDesc).dropoutDesc)),
                         nohx);
 
 #if(MIO_GRU_TEST_DEBUG == 2)
@@ -448,7 +2142,10 @@ struct verify_forward_train_gru
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start1 = std::chrono::high_resolution_clock::now();
 #endif
-        RunGRUForwardGEMMCPUVerify(&handle,
+
+        GRUFwdCPUVerify(handle,
+                        use_dropout,
+                        miopen::deref(miopen::deref(rnnDesc).dropoutDesc),
                         input,
                         weights,     // [ input_state_weight_trans
                                      // hidden_state_weight0_trans input1_trans
@@ -470,8 +2167,6 @@ struct verify_forward_train_gru
                                          // related function for bidirection
                         inputMode,
                         reserveSpace,
-                        use_dropout,
-                        &(miopen::deref(miopen::deref(rnnDesc).dropoutDesc)),
                         nohx);
 
 #if(MIO_GRU_TEST_DEBUG == 2)
@@ -584,15 +2279,15 @@ struct verify_forward_train_gru
                                  rspace.ptr(),
                                  rspace.size());
 
-#if(MIO_GRU_TEST_DEBUG == 2)
         auto outdata = handle.Read<T>(output_dev, output.size());
+#if(MIO_GRU_TEST_DEBUG == 2)
         for(int i = 0; i < outdata.size(); i++)
         {
             std::cout << "GPU outdata[" << i << "]: " << outdata[i] << "\n";
         }
 #endif
 
-        auto retSet = std::make_tuple(handle.Read<T>(output_dev, output.size()),
+        auto retSet = std::make_tuple(outdata,
                                       (nohy ? initHidden : handle.Read<T>(hy_dev, hy.size())),
                                       rspace.Read<std::vector<T>>());
 
@@ -756,34 +2451,34 @@ struct verify_backward_data_gru
         auto t_start1 = std::chrono::high_resolution_clock::now();
 #endif
 
-        RunGRUBackwardDataGEMMCPUVerify(dx,              // DX (output)
-                                        weights,         // [ input_state_weight_trans
-                                                        //   hidden_state_weight0_trans input1_trans
-                                                        //   hidden1_trans ... output_weight;
-                                                        //   bidirectional reversed weights ]
-                                        dhy,             // current/final hidden state
-                                        dhx,             // DHX (output)
-                                        initHidden,      // HX initial hidden state
-                                        // yin,             // Y
-                                        dy,              // DY
-                                        batch_seq,       // input batch size
-                                        inputVecLen,     // input data length
-                                        seqLength,       // Number of iterations to unroll over
-                                        dirMode,         // whether using bidirectional net
-                                        biasMode,        // whether using bias
-                                        bi * nLayers,    // 1 by numlayer (number of stacks of hidden layers)
-                                                        // for unidirection, 2 by numlayer for bidirection
-                                        batch_seq.at(0), // equal to input batch size in_n[0]
-                                        hiddenSize,      // hidden state number
-                                        bi_stride,       // 1 by hy_h related function for unidirection, 2 by
-                                        // hy_h related function for bidirection
-                                        inputMode,
-                                        reserveSpace,
-                                        workSpace,
-                                        use_dropout,
-                                        &(miopen::deref(miopen::deref(rnnDesc).dropoutDesc)),
-                                        nohx,
-                                        nodhy);
+        GRUBwdDataCPUVerify(use_dropout,
+                            miopen::deref(miopen::deref(rnnDesc).dropoutDesc),
+                            dx,              // DX (output)
+                            weights,         // [ input_state_weight_trans
+                                             //   hidden_state_weight0_trans input1_trans
+                                             //   hidden1_trans ... output_weight;
+                                             //   bidirectional reversed weights ]
+                            dhy,             // current/final hidden state
+                            dhx,             // DHX (output)
+                            initHidden,      // HX initial hidden state
+                            yin,             // Y
+                            dy,              // DY
+                            batch_seq,       // input batch size
+                            inputVecLen,     // input data length
+                            seqLength,       // Number of iterations to unroll over
+                            dirMode,         // whether using bidirectional net
+                            biasMode,        // whether using bias
+                            bi * nLayers,    // 1 by numlayer (number of stacks of hidden layers)
+                                             // for unidirection, 2 by numlayer for bidirection
+                            batch_seq.at(0), // equal to input batch size in_n[0]
+                            hiddenSize,      // hidden state number
+                            bi_stride,       // 1 by hy_h related function for unidirection, 2 by
+                            // hy_h related function for bidirection
+                            inputMode,
+                            reserveSpace,
+                            workSpace,
+                            nohx,
+                            nodhy);
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
@@ -797,13 +2492,11 @@ struct verify_backward_data_gru
                   << std::endl;
 #endif
 
-        auto retSet = std::make_tuple(dx, (nodhx ? initHidden : dhx), reserveSpace, workSpace);
-
 #if(MIO_GRU_TEST_DEBUG > 0)
         std::cout << "Done with GRU backward data CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
-        return retSet;
+        return std::make_tuple(dx, (nodhx ? initHidden : dhx), reserveSpace, workSpace);
     }
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>> gpu()
@@ -892,11 +2585,6 @@ struct verify_backward_data_gru
                               rspace.ptr(),
                               rspace.size());
 
-        auto retSet = std::make_tuple(handle.Read<T>(dx_dev, dx.size()),
-                                      (nodhx ? initHidden : handle.Read<T>(dhx_dev, dhx.size())),
-                                      rspace.Read<std::vector<T>>(),
-                                      wspace.Read<std::vector<T>>());
-
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
@@ -911,7 +2599,10 @@ struct verify_backward_data_gru
 #if(MIO_GRU_TEST_DEBUG > 0)
         std::cout << "Done with GRU backward data GPU" << std::endl;
 #endif
-        return retSet;
+        return std::make_tuple(handle.Read<T>(dx_dev, dx.size()),
+                                      (nodhx ? initHidden : handle.Read<T>(dhx_dev, dhx.size())),
+                                      rspace.Read<std::vector<T>>(),
+                                      wspace.Read<std::vector<T>>());
     }
 
     void fail() const
@@ -1026,30 +2717,29 @@ struct verify_backward_weights_gru
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start1 = std::chrono::high_resolution_clock::now();
 #endif
-        RunGRUBackwardWeightGEMMCPUVerify(input,
-                                          dweights,        // (output) [ input_state_weight_trans
-                                                          // hidden_state_weight0_trans
-                                                          // input1_trans hidden1_trans ...
-                                                          // output_weight; bidirectional
-                                                          // reversed weights ]
-                                          initHidden,      // initial hidden state
-                                          dy,
-                                          batch_seq,       // input batch size
-                                          inputVecLen,     // input data length
-                                          seqLength,       // Number of iterations to unroll over
-                                          dirMode,         // whether using bidirectional net
-                                          biasMode,        // whether using bias
-                                          bi * nLayers,    // 1 by numlayer (number of stacks of hidden
-                                                          // layers) for unidirection, 2 by numlayer for
-                                                          // bidirection
-                                          batch_seq.at(0), // equal to input batch size in_n[0]
-                                          hiddenSize,      // hidden state number
-                                          bi * hiddenSize,
-                                          inputMode,
-                                          reserveSpace,
-                                          workSpace,
-                                          use_dropout,
-                                          nohx);
+
+        GRUBwdWeightCPUVerify(use_dropout,
+                              input,
+                              dweights,        // (output) [ input_state_weight_trans
+                                               // hidden_state_weight0_trans
+                                               // input1_trans hidden1_trans ...
+                                               // output_weight; bidirectional
+                                               // reversed weights ]
+                              initHidden,      // initial hidden state
+                              batch_seq,       // input batch size
+                              inputVecLen,     // input data length
+                              seqLength,       // Number of iterations to unroll over
+                              dirMode,         // whether using bidirectional net
+                              biasMode,        // whether using bias
+                              bi * nLayers,    // 1 by numlayer (number of stacks of hidden
+                                               // layers) for unidirection, 2 by numlayer for
+                                               // bidirection
+                              batch_seq.at(0), // equal to input batch size in_n[0]
+                              hiddenSize,      // hidden state number
+                              inputMode,
+                              reserveSpace,
+                              workSpace,
+                              nohx);
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
@@ -1173,93 +2863,10 @@ struct verify_backward_weights_gru
     }
 };
 //~~~~~~~~~~~~ END BACKWARD WEIGHTS ~~~~~~~~~~~~~~~~~~~~~~~~
-} // anonymous namespace
 
-using GruTestCase = std::tuple<int, int, int, int, int, int, int, int, bool, bool, bool, bool, bool, bool>;
-
-auto GenCases(bool full_tests = false, bool gen_dropout=false)
+struct TestCase
 {
-    std::vector<int> modes(2, 0);
-    modes[1] = 1;
-
-    if(gen_dropout)
-    {
-            return ::testing::Combine(::testing::ValuesIn({23}),
-                                  ::testing::ValuesIn({13}),
-                                  ::testing::ValuesIn({67}),
-                                  ::testing::ValuesIn({3}),
-#if(MIO_GRU_TEST_DEBUG == 3)
-                                  ::testing::ValuesIn({0}),
-                                  ::testing::ValuesIn({1}),
-                                  ::testing::ValuesIn({0}),
-#else
-                                  ::testing::ValuesIn({0}),
-                                  ::testing::ValuesIn({0}),
-                                  ::testing::ValuesIn(modes),
-#endif
-                                  ::testing::ValuesIn({17}),
-                                  ::testing::ValuesIn({true}),
-                                  ::testing::ValuesIn({true}),
-                                  ::testing::ValuesIn({true}),
-                                  ::testing::ValuesIn({true}),
-                                  ::testing::ValuesIn({true}),
-                                  ::testing::ValuesIn({true, false}));
-    }
-
-    if(full_tests)
-    {
-        return ::testing::Combine(::testing::ValuesIn(get_gru_seq_len()),
-                                  ::testing::ValuesIn(get_gru_vector_len()),
-                                  ::testing::ValuesIn(get_gru_hidden_size()),
-                                  ::testing::ValuesIn(get_gru_num_layers()),
-                                  ::testing::ValuesIn(modes),
-                                  ::testing::ValuesIn(modes),
-                                  ::testing::ValuesIn(modes),
-                                  ::testing::ValuesIn(get_gru_batchSize()),
-                                  ::testing::ValuesIn({false}),
-                                  ::testing::ValuesIn({true}),
-                                  ::testing::ValuesIn({true}),
-                                  ::testing::ValuesIn({true}),
-                                  ::testing::ValuesIn({true}),
-                                  ::testing::ValuesIn({true}));
-    }
-    return ::testing::Combine(::testing::ValuesIn({2}),
-                                  ::testing::ValuesIn(get_gru_vector_len()),
-                                  ::testing::ValuesIn(get_gru_hidden_size()),
-                                  ::testing::ValuesIn(get_gru_num_layers()),
-#if(MIO_GRU_TEST_DEBUG == 3)
-                                  ::testing::ValuesIn({0}),
-                                  ::testing::ValuesIn({1}),
-                                  ::testing::ValuesIn({0}),
-#else
-                                  ::testing::ValuesIn({0}),
-                                  ::testing::ValuesIn({0}),
-                                  ::testing::ValuesIn({0}),
-#endif
-                                  ::testing::ValuesIn({17}),
-                                  ::testing::ValuesIn({false}),
-                                  ::testing::ValuesIn({true}),
-                                  ::testing::ValuesIn({true}),
-                                  ::testing::ValuesIn({true}),
-                                  ::testing::ValuesIn({true}),
-                                  ::testing::ValuesIn({true}));
-}
-
-template<typename T>
-struct GruTolerance
-{
-    static double value() { return 500000.f; }
-};
-
-template<>
-struct GruTolerance<half_float::half>
-{
-    static double value() { return 100000.f; };
-};
-
-template <class T>
-class gru_test : public testing::TestWithParam<GruTestCase>
-{
+    int batchSize{};
     int seqLength{};
     int inVecLen{};
     int hiddenSize{};
@@ -1267,18 +2874,209 @@ class gru_test : public testing::TestWithParam<GruTestCase>
     int inputMode{};
     int biasMode{};
     int dirMode{};
-    int batchSize{};
-    bool useDropout{false};
-    const double tolerance = GruTolerance<T>::value(); // Will be multiplied by std::numeric_limits<T>::epsilon()
-
-    // Null pointer input
+    bool useDropout    = false;
     bool nohx          = false;
     bool nodhy         = false;
     bool nohy          = false;
     bool nodhx         = false;
     bool flatBatchFill = false;
+    std::vector<int> batchSeq{};
+};
 
-    std::vector<int> batchSeq;
+std::vector<TestCase> dropout_full_cases = {
+    TestCase{17, 23, 13, 67, 3, 0, 0, 0, true, false, false, false, false, false, {0}},
+    TestCase{17, 23, 13, 67, 3, 0, 0, 1, true, false, false, false, false, false, {0}},
+    TestCase{17, 23, 13, 67, 3, 0, 0, 0, true, false, false, false, false, true, {0}},
+    TestCase{17, 23, 13, 67, 3, 0, 0, 1, true, false, false, false, false, true, {0}}
+};
+
+std::vector<TestCase> deepbench_cases = {
+    TestCase{32, 1500, 216, 216, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{32, 750, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{32, 375, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{32, 10, 2816, 2816, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{32, 1500, 248, 248, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{32, 12, 2048, 2048, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{32, 1500, 156, 156, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{32, 500, 156, 156, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{32, 12, 1536, 1536, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{32, 1500, 256, 256, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{32, 500, 256, 256, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{32, 10, 2560, 2560, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{32, 1, 512, 512, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{32, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0} },
+    TestCase{64, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0} }
+};
+
+std::vector<TestCase> extra_cases = {
+    TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, true, false, false, false, false, {32, 32, 32}},
+    TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, false, true, false, false, false, {32, 32, 32}},
+    TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, true, true, false, false, false, {32, 32, 32}},
+    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, true, false, false, false, false, {32, 32, 32}},
+    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, false, true, false, false, false, {32, 32, 32}},
+    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, true, true, false, false, false, {32, 32, 32}},
+    TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, false, false, false, true, false, {32, 32, 32}},
+    TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, false, false, true, true, false, {32, 32, 32}},
+    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, false, false, true, false, false, {32, 32, 32}},
+    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, false, false, false, true, false, {32, 32, 32}},
+    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, false, false, true, true, false, {32, 32, 32}},
+    TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, true, true, true, true, false, {32, 32, 32}},
+    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, true, true, true, true, false, {32, 32, 32}}
+};
+
+static std::vector<TestCase> base_cases = {
+    TestCase{1, 1, 13, 67, 1, 0, 0, 0, false, false, false, false, false, false, {0}},
+    TestCase{1, 1, 13, 67, 1, 0, 0, 1, false, false, false, false, false, false, {1}}, 
+    TestCase{1, 1, 13, 67, 1, 0, 1, 0, false, false, false, false, false, false, {1}},
+    TestCase{1, 1, 13, 67, 1, 0, 1, 1, false, false, false, false, false, false, {1}}, 
+    TestCase{1, 1, 13, 67, 1, 1, 0, 0, false, false, false, false, false, false, {1}},
+    TestCase{1, 1, 13, 67, 1, 1, 0, 1, false, false, false, false, false, false, {1}},
+    TestCase{1, 1, 13, 67, 1, 1, 1, 0, false, false, false, false, false, false, {1}},
+    TestCase{1, 1, 13, 67, 1, 1, 1, 1, false, false, false, false, false, false, {1}},
+    TestCase{1, 1, 13, 67, 3, 0, 0, 0, false, false, false, false, false, false, {1}},
+    TestCase{1, 1, 13, 67, 3, 0, 0, 1, false, false, false, false, false, false, {1}},
+    TestCase{1, 1, 13, 67, 3, 0, 1, 0, false, false, false, false, false, false, {1}},
+    TestCase{1, 1, 13, 67, 3, 0, 1, 1, false, false, false, false, false, false, {1}},
+    TestCase{1, 1, 13, 67, 3, 1, 0, 0, false, false, false, false, false, false, {1}},
+    TestCase{1, 1, 13, 67, 3, 1, 0, 1, false, false, false, false, false, false, {1}},
+    TestCase{1, 1, 13, 67, 3, 1, 1, 0, false, false, false, false, false, false, {1}},
+    TestCase{1, 1, 13, 67, 3, 1, 1, 1, false, false, false, false, false, false, {1}},
+    TestCase{1, 23, 13, 67, 1, 0, 0, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 1, 0, 0, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 1, 0, 1, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 1, 0, 1, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 1, 1, 0, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 1, 1, 0, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 1, 1, 1, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 1, 1, 1, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 3, 0, 0, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 3, 0, 0, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 3, 0, 1, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 3, 0, 1, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 3, 1, 0, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 3, 1, 0, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 3, 1, 1, 0, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{1, 23, 13, 67, 3, 1, 1, 1, false, false, false, false, false, false, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,}},
+    TestCase{17, 1, 13, 67, 1, 0, 0, 0, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 1, 0, 0, 1, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 1, 0, 1, 0, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 1, 0, 1, 1, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 1, 1, 0, 0, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 1, 1, 0, 1, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 1, 1, 1, 0, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 1, 1, 1, 1, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 3, 0, 0, 0, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 3, 0, 0, 1, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 3, 0, 1, 0, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 3, 0, 1, 1, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 3, 1, 0, 0, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 3, 1, 0, 1, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 3, 1, 1, 0, false, false, false, false, false, false, {17}},
+    TestCase{17, 1, 13, 67, 3, 1, 1, 1, false, false, false, false, false, false, {17}},
+    TestCase{17, 23, 13, 67, 1, 0, 0, 0, false, false, false, false, false, false, {17, 15, 14, 14, 12, 10, 9, 9, 9, 7, 5, 5, 3, 3, 2, 2, 1, 1, 1, 1, 1, 1, 1}},
+    TestCase{17, 23, 13, 67, 1, 0, 0, 1, false, false, false, false, false, false, {17, 15, 13, 12, 10, 9, 8, 6, 6, 6, 4, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
+    TestCase{17, 23, 13, 67, 1, 0, 1, 0, false, false, false, false, false, false, {17, 17, 17, 16, 16, 16, 15, 14, 14, 12, 11, 11, 11, 11, 11, 10, 9, 8, 6, 4, 3, 2, 1}},
+    TestCase{17, 23, 13, 67, 1, 0, 1, 1, false, false, false, false, false, false, {17, 15, 13, 12, 11, 11, 10, 8, 7, 5, 5, 4, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
+    TestCase{17, 23, 13, 67, 1, 1, 0, 0, false, false, false, false, false, false, {17, 15, 15, 13, 12, 11, 10, 8, 6, 6, 4, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
+    TestCase{17, 23, 13, 67, 1, 1, 0, 1, false, false, false, false, false, false, {17, 15, 14, 14, 14, 13, 13, 13, 11, 9, 9, 7, 6, 4, 4, 4, 4, 4, 4, 4, 4, 2, 1}},
+    TestCase{17, 23, 13, 67, 1, 1, 1, 0, false, false, false, false, false, false, {17, 17, 17, 15, 14, 12, 12, 12, 10, 8, 6, 4, 4, 4, 4, 3, 1, 1, 1, 1, 1, 1, 1}},
+    TestCase{17, 23, 13, 67, 1, 1, 1, 1, false, false, false, false, false, false, {17, 15, 13, 11, 11, 10, 10, 10, 8, 7, 6, 4, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
+    TestCase{17, 23, 13, 67, 3, 0, 0, 0, false, false, false, false, false, false, {17, 15, 13, 13, 11, 10, 8, 7, 5, 4, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
+    TestCase{17, 23, 13, 67, 3, 0, 0, 1, false, false, false, false, false, false, {17, 16, 15, 14, 12, 11, 9, 8, 6, 6, 6, 4, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
+    TestCase{17, 23, 13, 67, 3, 0, 1, 0, false, false, false, false, false, false, {17, 15, 15, 15, 15, 15, 14, 13, 11, 10, 9, 7, 5, 3, 2, 2, 1, 1, 1, 1, 1, 1, 1}},
+    TestCase{17, 23, 13, 67, 3, 0, 1, 1, false, false, false, false, false, false, {17, 17, 15, 15, 13, 12, 10, 9, 8, 6, 5, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
+    TestCase{17, 23, 13, 67, 3, 1, 0, 0, false, false, false, false, false, false, {17, 17, 16, 16, 16, 15, 15, 13, 13, 11, 11, 10, 10, 10, 8, 7, 7, 7, 5, 4, 3, 3, 3}},
+    TestCase{17, 23, 13, 67, 3, 1, 0, 1, false, false, false, false, false, false, {17, 17, 16, 16, 15, 13, 12, 12, 10, 10, 9, 8, 7, 7, 7, 5, 4, 4, 4, 4, 3, 2, 1}},
+    TestCase{17, 23, 13, 67, 3, 1, 1, 0, false, false, false, false, false, false, {17, 16, 14, 14, 14, 13, 13, 13, 12, 11, 10, 9, 9, 7, 7, 5, 4, 4, 2, 1, 1, 1, 1}},
+    TestCase{17, 23, 13, 67, 3, 1, 1, 1, false, false, false, false, false, false, {17, 17, 17, 16, 16, 15, 13, 11, 11, 11, 9, 7, 7, 7, 6, 6, 5, 3, 3, 2, 1, 1, 1}}
+};
+
+auto GenCases(bool gen_dropout)
+{
+    std::vector<int> modes(2, 0);
+    modes[1] = 1;
+    std::vector<int> defaultBS(1);
+
+    std::vector<TestCase> cases{};
+
+    TestCase single{};
+    single.batchSize = 17;
+    single.seqLength = 2;
+    single.inVecLen = 13;
+    single.hiddenSize = 67;
+    single.numLayers = 1;
+    single.inputMode = 0;
+    single.biasMode = 0;
+    single.dirMode = 1;
+    single.useDropout    = gen_dropout;
+    single.nohx          = false;
+    single.nodhy         = false;
+    single.nohy          = false;
+    single.nodhx         = false;
+    single.flatBatchFill = false;
+    single.batchSeq      = defaultBS;
+
+#if MIO_GRU_TEST_DEBUG == 3
+    cases.push_back(single);
+    return cases;
+#else // MIO_GRU_TEST_DEBUG == 3
+    for(int i =0; i < modes.size(); ++i)
+    {
+        for(int j = 0; j < modes.size(); ++j)
+        {
+            for(int k = 0; k < modes.size(); ++k)
+            {
+                TestCase copy = single;
+                copy.inputMode = modes[i];
+                copy.biasMode = modes[j];
+                copy.dirMode = modes[k];
+                cases.push_back(copy);
+            }
+        }
+    }
+    return cases;
+#endif // MIO_GRU_TEST_DEBUG == 3
+}
+
+auto const& GetFullBaseTests()
+{
+    return base_cases;
+}
+
+auto const& GetDropoutTests()
+{
+    return dropout_full_cases;
+}
+
+auto const& GetDropoutSmokeTests()
+{
+    static auto cases = GenCases(true);
+    return cases;
+}
+
+auto const& GetDeepbenchTests()
+{
+    return deepbench_cases;
+}
+
+auto const& GetExtraTests()
+{
+    return extra_cases;
+}
+
+auto const& GetSmokeTests()
+{
+    static auto cases = GenCases(false);
+    return cases;
+}
+
+template <class T>
+class gru_test : public testing::TestWithParam<TestCase>
+{
+    const double tolerance = 80; // Will be multiplied by std::numeric_limits<T>::epsilon()
+    TestCase param;
+    int batch_n{};
+    size_t statesSizeInBytes{0U};
 
 public:
     void fill_buffers(std::vector<T>& input, std::vector<T>& hx, std::vector<T>& weights)
@@ -1298,18 +3096,18 @@ public:
             return [=]() -> T { return prng::gen_descreet_uniform_sign<T>(scale, range); };
         };
 
-        const double data_max_v = sqrt(1. / hiddenSize);
+        const double data_max_v = sqrt(1. / param.hiddenSize);
         int data_range          = 100;
         const double data_scale = data_max_v / data_range;
         fill_array_via_gen(input, pos_gen(data_scale, data_range), 0);
 
-        if(!nohx)
+        if(!param.nohx)
         {
             fill_array_via_gen(hx, pos_gen(data_scale, data_range), 1);
         }
 
         // filter
-        const double weights_max_v = sqrt(1. / hiddenSize);
+        const double weights_max_v = sqrt(1. / param.hiddenSize);
         int weights_range          = 64;
         const double weights_scale = weights_max_v / weights_range;
 
@@ -1330,11 +3128,11 @@ public:
             return [=]() { return prng::gen_descreet_uniform_sign<T>(scale, range); };
         };
 
-        const double bwd_data_max_v = sqrt(1. / hiddenSize) / 8;
+        const double bwd_data_max_v = sqrt(1. / param.hiddenSize) / 8;
         int bwd_data_range          = 100;
         const double bwd_data_scale = bwd_data_max_v / bwd_data_range;
 
-        if(!nodhy)
+        if(!param.nodhy)
         {
             fill_array_via_gen(dhy, sign_gen(bwd_data_scale, bwd_data_range), 3);
         }
@@ -1346,59 +3144,47 @@ public:
 
     void SetUp() override
     {
-        // prng::reset_seed();
-        auto param = GetParam();
-        seqLength = std::get<0>(param);
-        inVecLen = std::get<1>(param);
-        hiddenSize = std::get<2>(param);
-        numLayers = std::get<3>(param);
-        inputMode = std::get<4>(param);
-        biasMode = std::get<5>(param);
-        dirMode = std::get<6>(param);
-        batchSize = std::get<7>(param);
-        useDropout = std::get<8>(param);
-        nohx = std::get<9>(param);
-        nodhy = std::get<10>(param);
-        nohy = std::get<11>(param);
-        nodhx = std::get<12>(param);
-        flatBatchFill = std::get<13>(param);
+        prng::reset_seed();
+        param = GetParam();
     }
 
     void Run()
     {
-        if(batchSeq.empty() || 0 == batchSeq[0])
+        if(param.batchSeq.empty() || 0 == param.batchSeq[0])
         {
-            if(flatBatchFill)
+            std::cout << "Empty batch sequence. Filling uniformly with batch size: " << param.batchSize
+                      << std::endl;
+            if(param.flatBatchFill)
             {
-                batchSeq.clear();
-                batchSeq.resize(seqLength, batchSize);
+                param.batchSeq.clear();
+                param.batchSeq.resize(param.seqLength, param.batchSize);
             }
             else
             {
-                batchSeq = GenBatchSeq(batchSize, seqLength);
+                param.batchSeq = GenBatchSeq(param.batchSize, param.seqLength);
             }
+        }
+
+        if(param.batchSeq.size() != param.seqLength)
+        {
+            std::cerr << "FAILED: Batch sequence vector length, does not match sequence length."
+                      << std::endl;
+            GTEST_SKIP();
         }
 
         auto&& handle = get_handle();
 
-        int batch_n = std::accumulate(batchSeq.begin(), batchSeq.end(), 0);
-
+        batch_n = std::accumulate(param.batchSeq.begin(), param.batchSeq.end(), 0);
+        
         miopenRNNDescriptor_t rnnDesc;
         miopenCreateRNNDescriptor(&rnnDesc);
         miopenRNNAlgo_t algoMode = miopenRNNdefault;
 
         miopenDropoutDescriptor_t DropoutDesc;
         miopenCreateDropoutDescriptor(&DropoutDesc);
-        size_t statesSizeInBytes = 0;
 
-        if(useDropout)
+        if(param.useDropout)
         {
-// Workaround for issue #2335.
-// OpenCL error creating buffer: 0 Invalid Buffer Size
-#if MIOPEN_BACKEND_OPENCL
-            GTEST_SUCCESS() << "Skip test for Issue #2335: " << std::endl;
-            return;
-#endif
             miopenHandle_t mio_handle;
             miopenCreateWithStream(&mio_handle, handle.GetStream());
 
@@ -1406,16 +3192,8 @@ public:
             unsigned long long dropout_seed = 0ULL;
             miopenDropoutGetStatesSize(mio_handle, &statesSizeInBytes);
 
-#if MIOPEN_BACKEND_OPENCL
-            cl_context ctx;
-            clGetCommandQueueInfo(
-                handle.GetStream(), CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-            cl_mem dropout_state_buf =
-                clCreateBuffer(ctx, CL_MEM_READ_WRITE, statesSizeInBytes, nullptr, nullptr);
-#elif MIOPEN_BACKEND_HIP
             void* dropout_state_buf;
             hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
-#endif
 
             miopenSetDropoutDescriptor(DropoutDesc,
                                        mio_handle,
@@ -1428,41 +3206,41 @@ public:
                                        MIOPEN_RNG_PSEUDO_XORWOW);
 
             miopenSetRNNDescriptor_V2(rnnDesc,
-                                      hiddenSize,
-                                      numLayers,
+                                      param.hiddenSize,
+                                      param.numLayers,
                                       DropoutDesc,
-                                      miopenRNNInputMode_t(inputMode),
-                                      miopenRNNDirectionMode_t(dirMode),
+                                      miopenRNNInputMode_t(param.inputMode),
+                                      miopenRNNDirectionMode_t(param.dirMode),
                                       miopenGRU,
-                                      miopenRNNBiasMode_t(biasMode),
+                                      miopenRNNBiasMode_t(param.biasMode),
                                       miopenRNNAlgo_t(algoMode),
                                       miopen_type<T>{});
         }
         else
         {
             miopenSetRNNDescriptor(rnnDesc,
-                                   hiddenSize,
-                                   numLayers,
-                                   miopenRNNInputMode_t(inputMode),
-                                   miopenRNNDirectionMode_t(dirMode),
+                                   param.hiddenSize,
+                                   param.numLayers,
+                                   miopenRNNInputMode_t(param.inputMode),
+                                   miopenRNNDirectionMode_t(param.dirMode),
                                    miopenGRU,
-                                   miopenRNNBiasMode_t(biasMode),
+                                   miopenRNNBiasMode_t(param.biasMode),
                                    miopenRNNAlgo_t(algoMode),
                                    miopen_type<T>{}); // defined in superclass testdriver
         }
 
         // Create input tensor
         // If we are in skip mode, take the real input size to be the vector length.
-        auto inVecReal    = (inputMode != 0) ? hiddenSize : inVecLen;
+        auto inVecReal    = (param.inputMode != 0) ? param.hiddenSize : param.inVecLen;
         std::size_t in_sz = static_cast<std::size_t>(inVecReal) * batch_n;
-        std::size_t hx_sz = ((dirMode != 0) ? 2ULL : 1ULL) * hiddenSize * batchSize * numLayers;
+        std::size_t hx_sz = ((param.dirMode != 0) ? 2ULL : 1ULL) * param.hiddenSize * param.batchSize * param.numLayers;
 
-        std::vector<T> input(in_sz), hx(hx_sz), dhyin(hx_sz);
+        std::vector<T> input(in_sz), hx(hx_sz), dhyin(hx_sz);        
 
         size_t wei_bytes = [&]() {
             size_t filter_bytes;
             std::vector<int> inlens(2, 0);
-            inlens.at(0)        = batchSeq.at(0);
+            inlens.at(0)        = param.batchSeq.at(0);
             inlens.at(1)        = inVecReal;
             auto firstInputDesc = miopen::TensorDescriptor(miopen::deref(rnnDesc).dataType, inlens);
             miopenGetRNNParamsSize(
@@ -1476,32 +3254,32 @@ public:
         std::vector<miopen::TensorDescriptor> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
-            inputCPPDescs, inputDescs, batchSeq, inVecReal, miopen::deref(rnnDesc).dataType);
+            inputCPPDescs, inputDescs, param.batchSeq, inVecReal, miopen::deref(rnnDesc).dataType);
 
         std::vector<miopen::TensorDescriptor> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
-                              batchSeq,
-                              hiddenSize * ((dirMode != 0) ? 2 : 1),
+                              param.batchSeq,
+                              param.hiddenSize * ((param.dirMode != 0) ? 2 : 1),
                               miopen::deref(rnnDesc).dataType);
 
         size_t out_sz;
-        miopenGetRNNInputTensorSize(&handle, rnnDesc, seqLength, outputDescs.data(), &out_sz);
+        miopenGetRNNInputTensorSize(&handle, rnnDesc, param.seqLength, outputDescs.data(), &out_sz);
         size_t reserveSpaceSize;
         miopenGetRNNTrainingReserveSize(
-            &handle, rnnDesc, seqLength, inputDescs.data(), &reserveSpaceSize);
+            &handle, rnnDesc, param.seqLength, inputDescs.data(), &reserveSpaceSize);
         size_t workspace_size;
-        miopenGetRNNWorkspaceSize(&handle, rnnDesc, seqLength, inputDescs.data(), &workspace_size);
+        miopenGetRNNWorkspaceSize(&handle, rnnDesc, param.seqLength, inputDescs.data(), &workspace_size);
 
         size_t total_mem = statesSizeInBytes + reserveSpaceSize + workspace_size + 2 * out_sz +
-                           (in_sz + wei_sz + (nohx ? 0 : hx_sz) + (nohy ? 0 : hx_sz) +
-                            (nodhx ? 0 : hx_sz) + (nodhy ? 0 : hx_sz)) *
+                           (in_sz + wei_sz + (param.nohx ? 0 : hx_sz) + (param.nohy ? 0 : hx_sz) +
+                            (param.nodhx ? 0 : hx_sz) + (param.nodhy ? 0 : hx_sz)) *
                                sizeof(T);
         size_t device_mem = handle.GetGlobalMemorySize();
         if(total_mem >= device_mem)
         {
-            ADD_FAILURE() << "Config requires " << total_mem
+            GTEST_SKIP() << "Config requires " << total_mem
                       << " Bytes to write all necessary tensors to GPU. GPU has " << device_mem
                       << " Bytes of memory." << std::endl;
         }
@@ -1512,19 +3290,19 @@ public:
                                                                      input,
                                                                      hx,
                                                                      weights,
-                                                                     batchSeq,
-                                                                     hiddenSize,
+                                                                     param.batchSeq,
+                                                                     param.hiddenSize,
                                                                      batch_n,
-                                                                     seqLength,
-                                                                     numLayers,
-                                                                     biasMode,
-                                                                     dirMode,
-                                                                     inputMode,
+                                                                     param.seqLength,
+                                                                     param.numLayers,
+                                                                     param.biasMode,
+                                                                     param.dirMode,
+                                                                     param.inputMode,
                                                                      inVecReal,
                                                                      hx_sz,
-                                                                     nohx,
-                                                                     nohy,
-                                                                     useDropout}, tolerance);
+                                                                     param.nohx,
+                                                                     param.nohy,
+                                                                     param.useDropout}, tolerance);
 
         /// RETURNS std::make_tuple(output, hiddenState, reserveSpace);
         auto yin = std::get<0>(fwdTrainOutputPair.second);
@@ -1537,8 +3315,8 @@ public:
 
         auto bwdDataOutputPair = test_helpers::CompareResults(verify_backward_data_gru<T>{
             rnnDesc,   yin,        dyin,    dhyin,     hx,        weights,  reserveSpaceFwdTrain,
-            batchSeq,  hiddenSize, batch_n, seqLength, numLayers, biasMode, dirMode,
-            inputMode, inVecReal,  hx_sz,   nohx,      nodhy,     nodhx,    useDropout}, tolerance);
+            param.batchSeq,  param.hiddenSize, batch_n, param.seqLength, param.numLayers, param.biasMode, param.dirMode,
+            param.inputMode, inVecReal,  hx_sz,   param.nohx,      param.nodhy,     param.nodhx,    param.useDropout}, tolerance);
 
         // RETURNS:  std::make_tuple(dx, dhx, reserveSpace, workSpace);
         auto reserveSpaceBwdData = std::get<2>(bwdDataOutputPair.second);
@@ -1550,38 +3328,38 @@ public:
                                               hx,
                                               reserveSpaceBwdData,
                                               workSpaceBwdData,
-                                              batchSeq,
-                                              hiddenSize,
+                                              param.batchSeq,
+                                              param.hiddenSize,
                                               static_cast<int>(wei_sz),
                                               batch_n,
-                                              seqLength,
-                                              numLayers,
-                                              biasMode,
-                                              dirMode,
-                                              inputMode,
+                                              param.seqLength,
+                                              param.numLayers,
+                                              param.biasMode,
+                                              param.dirMode,
+                                              param.inputMode,
                                               inVecReal,
                                               hx_sz,
-                                              nohx,
-                                              useDropout}, tolerance);
+                                              param.nohx,
+                                              param.useDropout}, tolerance);
 
-        if(!useDropout)
+        if(!param.useDropout)
         {
             test_helpers::CompareResults(verify_forward_infer_gru<T>{rnnDesc,
                                                input,
                                                hx,
                                                weights,
-                                               batchSeq,
-                                               hiddenSize,
+                                               param.batchSeq,
+                                               param.hiddenSize,
                                                batch_n,
-                                               seqLength,
-                                               numLayers,
-                                               biasMode,
-                                               dirMode,
-                                               inputMode,
+                                               param.seqLength,
+                                               param.numLayers,
+                                               param.biasMode,
+                                               param.dirMode,
+                                               param.inputMode,
                                                inVecReal,
                                                hx_sz,
-                                               nohx,
-                                               nohy}, tolerance);
+                                               param.nohx,
+                                               param.nohy}, tolerance);
         }
         // DLOWELL: Subtracting delta weights may produce NAN and infinities. Further investigation
         // is needed.
@@ -1598,21 +3376,105 @@ public:
     }
 };
 
-using GPU_GRU_FP32 = gru_test<float>;
+struct TestNameGenerator
+{
+    std::string operator()(const ::testing::TestParamInfo<TestCase>& param_info)
+    {
+        std::stringstream ss{};
+        auto print_bool = [](bool value)
+        {
+            return value ? "true" : "false";
+        };
 
-TEST_P(GPU_GRU_FP32, TestFloat32) { Run(); }
+        auto print_batch_seq = [](std::vector<int> const& vec) {
+            std::stringstream vec_ss{};
+            for(auto el : vec)
+            {
+                vec_ss << std::to_string(el) << "_";
+            }
+            return vec_ss.str();
+        };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_FP32, GenCases(true));
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_FP32, GenCases());
-INSTANTIATE_TEST_SUITE_P(SmokeDropout, GPU_GRU_FP32, GenCases(false, true));
+        ss << "batchSize_" << param_info.param.batchSize << "_seqLength_" <<  param_info.param.seqLength <<
+              "_inVecLen_" << param_info.param.inVecLen <<
+              "_hiddenSize_" << param_info.param.hiddenSize <<
+              "_numLayers_" << param_info.param.numLayers <<
+              "_inputMode_" << param_info.param.inputMode <<
+              "_biasMode_" << param_info.param.biasMode <<
+              "_dirMode_" << param_info.param.dirMode <<
+              "_useDropout_" << print_bool(param_info.param.useDropout) <<
+              "_nohx_" << print_bool(param_info.param.nohx) <<
+              "_nodhy_" << print_bool(param_info.param.nodhy) <<
+              "_nohy_" << print_bool(param_info.param.nohy) <<
+              "_nodhx_" << print_bool(param_info.param.nodhx) <<
+              "_flatBatchFill_" << print_bool(param_info.param.flatBatchFill) <<
+              "_batch_seq_" << print_batch_seq(param_info.param.batchSeq);
+        return ss.str();
+    }
+};
 
+template<typename T>
+struct gru_dropout_test : public gru_test<T>
+{
+// intentionally empty
+};
 
-#if !(MIOPEN_BACKEND_OPENCL == 1)
-using GPU_GRU_FP16 = gru_test<half_float::half>;
+template<typename T>
+struct gru_deepbench_test : public gru_test<T>
+{
+// intentionally empty
+};
 
-TEST_P(GPU_GRU_FP16, TestFloat16) { Run(); }
+template<typename T>
+struct gru_extra_test : public gru_test<T>
+{
+// intentionally empty
+};
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_FP16, GenCases(true));
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_FP16, GenCases());
-INSTANTIATE_TEST_SUITE_P(SmokeDropout, GPU_GRU_FP16, GenCases(false, true));
-#endif // !(MIOPEN_BACKEND_OPENCL == 1)
+} // anonymous namespace
+
+using GPU_GRU_Base_FP32 = gru_test<float>;
+using GPU_GRU_Base_FP16 = gru_test<half_float::half>;
+
+using GPU_GRU_Dropout_FP32 = gru_dropout_test<float>;
+using GPU_GRU_Dropout_FP16 = gru_dropout_test<half_float::half>;
+
+using GPU_GRU_Deepbench_FP32 = gru_deepbench_test<float>;
+using GPU_GRU_Deepbench_FP16 = gru_deepbench_test<half_float::half>;
+
+using GPU_GRU_Extra_FP32 = gru_extra_test<float>;
+using GPU_GRU_Extra_FP16 = gru_extra_test<half_float::half>;
+
+TEST_P(GPU_GRU_Base_FP32, TestFloat32) { Run(); }
+TEST_P(GPU_GRU_Base_FP16, TestFloat16) { Run(); }
+
+// Base tests
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Base_FP32, ::testing::ValuesIn(GetFullBaseTests()), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Base_FP32, ::testing::ValuesIn(GetSmokeTests()), TestNameGenerator{});
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Base_FP16, ::testing::ValuesIn(GetFullBaseTests()), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Base_FP16, ::testing::ValuesIn(GetSmokeTests()), TestNameGenerator{});
+
+// Dropout tests
+TEST_P(GPU_GRU_Dropout_FP32, TestFloat32) { Run(); }
+TEST_P(GPU_GRU_Dropout_FP16, TestFloat16) { Run(); }
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Dropout_FP32, ::testing::ValuesIn(GetDropoutTests()), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Dropout_FP32, ::testing::ValuesIn(GetDropoutSmokeTests()), TestNameGenerator{});
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Dropout_FP16, ::testing::ValuesIn(GetDropoutTests()), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Dropout_FP16, ::testing::ValuesIn(GetDropoutSmokeTests()), TestNameGenerator{});
+
+// Deepbench tests
+TEST_P(GPU_GRU_Deepbench_FP32, TestFloat32) { Run(); }
+TEST_P(GPU_GRU_Deepbench_FP16, TestFloat16) { Run(); }
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Deepbench_FP32, ::testing::ValuesIn(GetDeepbenchTests()), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Deepbench_FP16, ::testing::ValuesIn(GetDeepbenchTests()), TestNameGenerator{});
+
+// Extra tests
+TEST_P(GPU_GRU_Extra_FP32, TestFloat32) { Run(); }
+TEST_P(GPU_GRU_Extra_FP16, TestFloat16) { Run(); }
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Extra_FP32, ::testing::ValuesIn(GetExtraTests()), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Extra_FP16, ::testing::ValuesIn(GetExtraTests()), TestNameGenerator{});
