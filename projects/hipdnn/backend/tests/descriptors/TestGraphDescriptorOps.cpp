@@ -5,6 +5,7 @@
 #include "HipdnnException.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/ConvolutionFwdOperationDescriptor.hpp"
+#include "descriptors/DataTypeConversion.hpp"
 #include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
@@ -121,7 +122,7 @@ public:
         std::unique_ptr<HipdnnBackendDescriptor> convOp;
     };
 
-    static ConvOpBundle createDefaultConvOp(DataType computeType = DataType::FLOAT)
+    static ConvOpBundle createDefaultConvOp(hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
     {
         ConvOpBundle bundle;
         bundle.xDesc = createFinalizedTensor(K_TENSOR_X_UID);
@@ -395,7 +396,7 @@ TEST_F(TestGraphDescriptorOps, TensorDeduplication)
 
 TEST_F(TestGraphDescriptorOps, ComputeDataTypePreserved)
 {
-    auto conv = createDefaultConvOp(DataType::HALF);
+    auto conv = createDefaultConvOp(HIPDNN_DATA_HALF);
 
     auto desc = getDescriptor();
     setHandle();
@@ -474,7 +475,7 @@ TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
     convDesc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_DILATIONS, HIPDNN_TYPE_INT64, 2, dilation.data());
 
-    auto computeType = DataType::FLOAT;
+    auto computeType = HIPDNN_DATA_FLOAT;
     convDesc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     auto convMode = static_cast<int64_t>(ConvMode::CROSS_CORRELATION);
@@ -1024,8 +1025,8 @@ struct ConvEquivalenceParams
     std::vector<int64_t> postPadding;
     std::vector<int64_t> stride;
     std::vector<int64_t> dilation;
-    DataType tensorDataType;
-    DataType computeDataType;
+    hipdnnDataType_t tensorDataType;
+    hipdnnDataType_t computeDataType;
 };
 
 inline std::ostream& operator<<(std::ostream& os, const ConvEquivalenceParams& p)
@@ -1087,8 +1088,8 @@ public:
                                                      const std::vector<int64_t>& postPadding,
                                                      const std::vector<int64_t>& stride,
                                                      const std::vector<int64_t>& dilation,
-                                                     DataType tensorDataType,
-                                                     DataType computeDataType)
+                                                     hipdnnDataType_t tensorDataType,
+                                                     hipdnnDataType_t computeDataType)
     {
         // Create tensor descriptors
         auto xDesc = createFinalizedTensor(xUid, xDims, xStrides, tensorDataType);
@@ -1151,23 +1152,26 @@ public:
     void verifyEquivalence(const ConvEquivalenceParams& p)
     {
         // Build via FlatBuffer path
+        auto sdkTensorDt = hipdnn_backend::toSdkDataType(p.tensorDataType);
+        auto sdkComputeDt = hipdnn_backend::toSdkDataType(p.computeDataType);
+
         TensorAttributesT xTensor;
         xTensor.uid = p.xUid;
         xTensor.dims = p.xDims;
         xTensor.strides = p.xStrides;
-        xTensor.data_type = p.tensorDataType;
+        xTensor.data_type = sdkTensorDt;
 
         TensorAttributesT wTensor;
         wTensor.uid = p.wUid;
         wTensor.dims = p.wDims;
         wTensor.strides = p.wStrides;
-        wTensor.data_type = p.tensorDataType;
+        wTensor.data_type = sdkTensorDt;
 
         TensorAttributesT yTensor;
         yTensor.uid = p.yUid;
         yTensor.dims = p.yDims;
         yTensor.strides = p.yStrides;
-        yTensor.data_type = p.tensorDataType;
+        yTensor.data_type = sdkTensorDt;
 
         ConvolutionFwdAttributesT convAttrs;
         convAttrs.x_tensor_uid = p.xUid;
@@ -1179,7 +1183,7 @@ public:
         convAttrs.dilation = p.dilation;
 
         auto flatbufferBuffer
-            = buildGraphViaFlatBuffer(xTensor, wTensor, yTensor, convAttrs, p.computeDataType);
+            = buildGraphViaFlatBuffer(xTensor, wTensor, yTensor, convAttrs, sdkComputeDt);
         auto flatbufferGraphT = GetGraph(flatbufferBuffer.data())->UnPack();
 
         // Build via descriptor path
@@ -1276,8 +1280,8 @@ INSTANTIATE_TEST_SUITE_P(ConvOps,
                                                                  toVec(K_CONV_PADDING),
                                                                  toVec(K_CONV_STRIDE),
                                                                  toVec(K_CONV_DILATION),
-                                                                 DataType::FLOAT,
-                                                                 DataType::FLOAT},
+                                                                 HIPDNN_DATA_FLOAT,
+                                                                 HIPDNN_DATA_FLOAT},
                                            ConvEquivalenceParams{"HalfPrecision",
                                                                  10,
                                                                  20,
@@ -1292,8 +1296,8 @@ INSTANTIATE_TEST_SUITE_P(ConvOps,
                                                                  {1, 1},
                                                                  {1, 1},
                                                                  {1, 1},
-                                                                 DataType::HALF,
-                                                                 DataType::HALF},
+                                                                 HIPDNN_DATA_HALF,
+                                                                 HIPDNN_DATA_HALF},
                                            ConvEquivalenceParams{"NonUnitStrideAndDilation",
                                                                  100,
                                                                  200,
@@ -1308,8 +1312,8 @@ INSTANTIATE_TEST_SUITE_P(ConvOps,
                                                                  {2, 2},
                                                                  {2, 2},
                                                                  {2, 2},
-                                                                 DataType::FLOAT,
-                                                                 DataType::FLOAT}),
+                                                                 HIPDNN_DATA_FLOAT,
+                                                                 HIPDNN_DATA_FLOAT}),
                          convEquivalenceParamName);
 
 // =============================================================================
@@ -1328,17 +1332,17 @@ TEST_F(TestGraphDescriptorOps, GraphLevelDataTypesPreserved)
         HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
 
     // Set graph-level data types before finalize
-    auto computeDt = DataType::HALF;
+    auto computeDt = HIPDNN_DATA_HALF;
     desc->setAttribute(
         HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeDt);
 
-    auto intermediateDt = DataType::BFLOAT16;
+    auto intermediateDt = HIPDNN_DATA_BFLOAT16;
     desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_INTERMEDIATE_DATA_TYPE_EXT,
                        HIPDNN_TYPE_DATA_TYPE,
                        1,
                        &intermediateDt);
 
-    auto ioDt = DataType::FLOAT;
+    auto ioDt = HIPDNN_DATA_FLOAT;
     desc->setAttribute(
         HIPDNN_ATTR_OPERATIONGRAPH_IO_DATA_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &ioDt);
 

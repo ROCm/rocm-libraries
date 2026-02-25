@@ -3,6 +3,7 @@
 
 #include "GraphDescriptor.hpp"
 #include "BackendEnumStringUtils.hpp"
+#include "DataTypeConversion.hpp"
 #include "FlatbufferUtilities.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
@@ -78,30 +79,21 @@ void GraphDescriptor::setDataType(hipdnnBackendAttributeName_t attributeName,
                                   int64_t elementCount,
                                   const void* arrayOfElements)
 {
-    THROW_IF_NE(attributeType,
-                HIPDNN_TYPE_DATA_TYPE,
-                HIPDNN_STATUS_BAD_PARAM,
-                "GraphDescriptor::setDataType: Invalid attribute type.");
-    THROW_IF_NE(elementCount,
-                1,
-                HIPDNN_STATUS_BAD_PARAM,
-                "GraphDescriptor::setDataType: Invalid element count.");
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "GraphDescriptor::setDataType: Null pointer.");
-
-    auto dataType = *static_cast<const hipdnn_data_sdk::data_objects::DataType*>(arrayOfElements);
+    const char* errorPrefix = "GraphDescriptor::setDataType";
 
     switch(attributeName)
     {
     case HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT:
-        _computeDataType = dataType;
+        hipdnn_backend::setDataType(
+            _computeDataType, attributeType, elementCount, arrayOfElements, errorPrefix);
         break;
     case HIPDNN_ATTR_OPERATIONGRAPH_INTERMEDIATE_DATA_TYPE_EXT:
-        _intermediateDataType = dataType;
+        hipdnn_backend::setDataType(
+            _intermediateDataType, attributeType, elementCount, arrayOfElements, errorPrefix);
         break;
     case HIPDNN_ATTR_OPERATIONGRAPH_IO_DATA_TYPE_EXT:
-        _ioDataType = dataType;
+        hipdnn_backend::setDataType(
+            _ioDataType, attributeType, elementCount, arrayOfElements, errorPrefix);
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
@@ -178,8 +170,10 @@ void GraphDescriptor::setOperations(hipdnnBackendAttributeType_t attributeType,
 
     auto descriptors = static_cast<HipdnnBackendDescriptor* const*>(arrayOfElements);
 
-    // Clear existing operations so setAttribute replaces rather than appends
-    _operations.clear();
+    // Validate all descriptors into a temporary vector before modifying state,
+    // so that a validation failure doesn't leave _operations in a partial state.
+    std::vector<std::shared_ptr<IGraphOperation>> newOperations;
+    newOperations.reserve(static_cast<size_t>(elementCount));
 
     for(int64_t i = 0; i < elementCount; ++i)
     {
@@ -195,8 +189,10 @@ void GraphDescriptor::setOperations(hipdnnBackendAttributeType_t attributeType,
                       HIPDNN_STATUS_NOT_SUPPORTED,
                       "GraphDescriptor::setOperations: Descriptor does not implement "
                       "IGraphOperation");
-        _operations.push_back(graphOp);
+        newOperations.push_back(graphOp);
     }
+
+    _operations = std::move(newOperations);
 }
 
 void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
@@ -263,6 +259,16 @@ hipdnnPluginConstData_t GraphDescriptor::getSerializedGraph() const
         builder.Finish(hipdnn_data_sdk::data_objects::Graph::Pack(builder, _graph.get()));
 
         _graphSerializedBuffer = builder.Release();
+
+        flatbuffers::Verifier verifier(_graphSerializedBuffer.data(),
+                                       _graphSerializedBuffer.size());
+        if(!hipdnn_data_sdk::data_objects::VerifyGraphBuffer(verifier))
+        {
+            _graphSerializedBuffer = flatbuffers::DetachedBuffer();
+            throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                                  "GraphDescriptor::getSerializedGraph: serialized graph "
+                                  "failed verification");
+        }
     }
 
     return {_graphSerializedBuffer.data(), _graphSerializedBuffer.size()};

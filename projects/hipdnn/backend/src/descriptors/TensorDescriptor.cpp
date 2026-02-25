@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 #include "TensorDescriptor.hpp"
+#include "DataTypeConversion.hpp"
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include <cstring>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
@@ -54,13 +57,12 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         getName(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_TENSOR_DATA_TYPE:
-        getScalar(_data.data_type,
-                  HIPDNN_TYPE_DATA_TYPE,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "TensorDescriptor::getAttribute()");
+        getDataType(_data.data_type,
+                    attributeType,
+                    requestedElementCount,
+                    elementCount,
+                    arrayOfElements,
+                    "TensorDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_DIMENSIONS:
         getInt64Vector(_data.dims,
@@ -119,12 +121,11 @@ void TensorDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
         setName(attributeType, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_TENSOR_DATA_TYPE:
-        setScalar(_data.data_type,
-                  HIPDNN_TYPE_DATA_TYPE,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "TensorDescriptor::setAttribute()");
+        setDataType(_data.data_type,
+                    attributeType,
+                    elementCount,
+                    arrayOfElements,
+                    "TensorDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_DIMENSIONS:
         setInt64Vector(_data.dims,
@@ -198,9 +199,10 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
                                       int64_t elementCount,
                                       const void* arrayOfElements)
 {
-    THROW_IF_FALSE(elementCount == 1,
+    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
                    HIPDNN_STATUS_BAD_PARAM,
-                   "TensorDescriptor::setAttribute(): elementCount is not 1");
+                   "TensorDescriptor::setAttribute(): attributeType must be HIPDNN_TYPE_CHAR "
+                   "for TENSOR_VALUE");
     THROW_IF_NULL(arrayOfElements,
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                   "TensorDescriptor::setAttribute(): arrayOfElements is null");
@@ -208,37 +210,74 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
                   HIPDNN_STATUS_BAD_PARAM,
                   "TensorDescriptor::setAttribute(): data type must be set before tensor value");
 
+    auto expectedSize = getDataTypeByteSize(_data.data_type);
+    THROW_IF_FALSE(elementCount == expectedSize,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "TensorDescriptor::setAttribute(): elementCount (" + std::to_string(elementCount)
+                       + ") does not match data type byte size (" + std::to_string(expectedSize)
+                       + ")");
+
     using namespace hipdnn_data_sdk::data_objects;
 
-    switch(attributeType)
+    auto bytes = static_cast<const uint8_t*>(arrayOfElements);
+
+    switch(_data.data_type)
     {
-    case HIPDNN_TYPE_FLOAT:
+    case DataType::FLOAT:
     {
-        auto val = *static_cast<const float*>(arrayOfElements);
-        switch(_data.data_type)
-        {
-        case DataType::HALF:
-            _data.value.Set(Float16Value(val));
-            break;
-        case DataType::BFLOAT16:
-            _data.value.Set(BFloat16Value(val));
-            break;
-        default:
-            _data.value.Set(Float32Value(val));
-            break;
-        }
+        float val;
+        std::memcpy(&val, bytes, sizeof(float));
+        _data.value.Set(Float32Value(val));
         break;
     }
-    case HIPDNN_TYPE_DOUBLE:
-        _data.value.Set(Float64Value(*static_cast<const double*>(arrayOfElements)));
+    case DataType::DOUBLE:
+    {
+        double val;
+        std::memcpy(&val, bytes, sizeof(double));
+        _data.value.Set(Float64Value(val));
         break;
-    case HIPDNN_TYPE_INT32:
-        _data.value.Set(Int32Value(*static_cast<const int32_t*>(arrayOfElements)));
+    }
+    case DataType::HALF:
+    {
+        hipdnn_data_sdk::types::half val;
+        std::memcpy(&val, bytes, sizeof(val));
+        _data.value.Set(Float16Value(static_cast<float>(val)));
         break;
+    }
+    case DataType::BFLOAT16:
+    {
+        hipdnn_data_sdk::types::bfloat16 val;
+        std::memcpy(&val, bytes, sizeof(val));
+        _data.value.Set(BFloat16Value(static_cast<float>(val)));
+        break;
+    }
+    case DataType::INT32:
+    {
+        int32_t val;
+        std::memcpy(&val, bytes, sizeof(int32_t));
+        _data.value.Set(Int32Value(val));
+        break;
+    }
+    case DataType::UINT8:
+    {
+        _data.value.Set(Int32Value(static_cast<int32_t>(bytes[0])));
+        break;
+    }
+    case DataType::INT8:
+    {
+        _data.value.Set(Int32Value(static_cast<int32_t>(static_cast<int8_t>(bytes[0]))));
+        break;
+    }
+    case DataType::FP8_E4M3:
+    case DataType::FP8_E5M2:
+    {
+        _data.value.Set(Float8Value(bytes[0]));
+        break;
+    }
     default:
         throw HipdnnException(
             HIPDNN_STATUS_BAD_PARAM,
-            "TensorDescriptor::setAttribute(): unsupported attributeType for TENSOR_VALUE");
+            "TensorDescriptor::setAttribute(): unsupported data type for TENSOR_VALUE");
     }
 }
 
@@ -247,9 +286,10 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
                                       int64_t* elementCount,
                                       void* arrayOfElements) const
 {
-    THROW_IF_FALSE(requestedElementCount >= 1,
+    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
                    HIPDNN_STATUS_BAD_PARAM,
-                   "TensorDescriptor::getAttribute(): requestedElementCount < 1");
+                   "TensorDescriptor::getAttribute(): attributeType must be HIPDNN_TYPE_CHAR "
+                   "for TENSOR_VALUE");
     THROW_IF_NULL(arrayOfElements,
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                   "TensorDescriptor::getAttribute(): arrayOfElements is null");
@@ -260,57 +300,104 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
                   HIPDNN_STATUS_BAD_PARAM,
                   "TensorDescriptor::getAttribute(): tensor value is not set");
 
-    switch(attributeType)
+    auto byteSize = getDataTypeByteSize(_data.data_type);
+    THROW_IF_FALSE(requestedElementCount >= byteSize,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "TensorDescriptor::getAttribute(): requestedElementCount ("
+                       + std::to_string(requestedElementCount)
+                       + ") is less than data type byte size (" + std::to_string(byteSize) + ")");
+
+    auto output = static_cast<uint8_t*>(arrayOfElements);
+
+    switch(_data.data_type)
     {
-    case HIPDNN_TYPE_FLOAT:
+    case DataType::FLOAT:
     {
         const auto* val = _data.value.AsFloat32Value();
-        if(val == nullptr)
-        {
-            // Try Float16 or BFloat16 (both store as float internally)
-            const auto* f16 = _data.value.AsFloat16Value();
-            const auto* bf16 = _data.value.AsBFloat16Value();
-            THROW_IF_TRUE(f16 == nullptr && bf16 == nullptr,
-                          HIPDNN_STATUS_BAD_PARAM,
-                          "TensorDescriptor::getAttribute(): value type mismatch for "
-                          "HIPDNN_TYPE_FLOAT");
-            *static_cast<float*>(arrayOfElements) = f16 != nullptr ? f16->value() : bf16->value();
-        }
-        else
-        {
-            *static_cast<float*>(arrayOfElements) = val->value();
-        }
+        THROW_IF_TRUE(val == nullptr,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "TensorDescriptor::getAttribute(): value type mismatch");
+        auto nativeVal = val->value();
+        std::memcpy(output, &nativeVal, sizeof(float));
         break;
     }
-    case HIPDNN_TYPE_DOUBLE:
+    case DataType::DOUBLE:
     {
         const auto* val = _data.value.AsFloat64Value();
         THROW_IF_TRUE(val == nullptr,
                       HIPDNN_STATUS_BAD_PARAM,
-                      "TensorDescriptor::getAttribute(): value type mismatch for "
-                      "HIPDNN_TYPE_DOUBLE");
-        *static_cast<double*>(arrayOfElements) = val->value();
+                      "TensorDescriptor::getAttribute(): value type mismatch");
+        auto nativeVal = val->value();
+        std::memcpy(output, &nativeVal, sizeof(double));
         break;
     }
-    case HIPDNN_TYPE_INT32:
+    case DataType::HALF:
+    {
+        const auto* val = _data.value.AsFloat16Value();
+        THROW_IF_TRUE(val == nullptr,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "TensorDescriptor::getAttribute(): value type mismatch");
+        auto nativeVal = hipdnn_data_sdk::types::half(val->value());
+        std::memcpy(output, &nativeVal, sizeof(nativeVal));
+        break;
+    }
+    case DataType::BFLOAT16:
+    {
+        const auto* val = _data.value.AsBFloat16Value();
+        THROW_IF_TRUE(val == nullptr,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "TensorDescriptor::getAttribute(): value type mismatch");
+        auto nativeVal = hipdnn_data_sdk::types::bfloat16(val->value());
+        std::memcpy(output, &nativeVal, sizeof(nativeVal));
+        break;
+    }
+    case DataType::INT32:
     {
         const auto* val = _data.value.AsInt32Value();
         THROW_IF_TRUE(val == nullptr,
                       HIPDNN_STATUS_BAD_PARAM,
-                      "TensorDescriptor::getAttribute(): value type mismatch for "
-                      "HIPDNN_TYPE_INT32");
-        *static_cast<int32_t*>(arrayOfElements) = val->value();
+                      "TensorDescriptor::getAttribute(): value type mismatch");
+        auto nativeVal = val->value();
+        std::memcpy(output, &nativeVal, sizeof(int32_t));
+        break;
+    }
+    case DataType::UINT8:
+    {
+        const auto* val = _data.value.AsInt32Value();
+        THROW_IF_TRUE(val == nullptr,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "TensorDescriptor::getAttribute(): value type mismatch");
+        output[0] = static_cast<uint8_t>(val->value());
+        break;
+    }
+    case DataType::INT8:
+    {
+        const auto* val = _data.value.AsInt32Value();
+        THROW_IF_TRUE(val == nullptr,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "TensorDescriptor::getAttribute(): value type mismatch");
+        output[0] = static_cast<uint8_t>(static_cast<int8_t>(val->value()));
+        break;
+    }
+    case DataType::FP8_E4M3:
+    case DataType::FP8_E5M2:
+    {
+        const auto* val = _data.value.AsFloat8Value();
+        THROW_IF_TRUE(val == nullptr,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "TensorDescriptor::getAttribute(): value type mismatch");
+        output[0] = val->value();
         break;
     }
     default:
         throw HipdnnException(
             HIPDNN_STATUS_BAD_PARAM,
-            "TensorDescriptor::getAttribute(): unsupported attributeType for TENSOR_VALUE");
+            "TensorDescriptor::getAttribute(): unsupported data type for TENSOR_VALUE");
     }
 
     if(elementCount != nullptr)
     {
-        *elementCount = 1;
+        *elementCount = byteSize;
     }
 }
 

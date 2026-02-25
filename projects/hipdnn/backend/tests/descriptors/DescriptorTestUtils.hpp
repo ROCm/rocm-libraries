@@ -33,8 +33,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor> createFinalizedTensor(
     int64_t uid,
     std::vector<int64_t> dims = hipdnn_tests::toVec(hipdnn_tests::constants::K_TENSOR_X_DIMS),
     std::vector<int64_t> strides = hipdnn_tests::toVec(hipdnn_tests::constants::K_TENSOR_X_STRIDES),
-    hipdnn_data_sdk::data_objects::DataType dataType
-    = hipdnn_data_sdk::data_objects::DataType::FLOAT)
+    hipdnnDataType_t dataType = HIPDNN_DATA_FLOAT)
 {
     auto wrapper = createDescriptor<TensorDescriptor>();
     auto desc = wrapper->asDescriptor<TensorDescriptor>();
@@ -54,12 +53,13 @@ inline std::unique_ptr<HipdnnBackendDescriptor> createFinalizedTensor(
     return wrapper;
 }
 
+// Creates a finalized ConvolutionFwdOperationDescriptor using shared test constants
+// from ConvFpropConstants.hpp (padding, stride, dilation) with CROSS_CORRELATION mode.
 inline std::unique_ptr<HipdnnBackendDescriptor>
     createFinalizedConvOp(HipdnnBackendDescriptor* xDesc,
                           HipdnnBackendDescriptor* wDesc,
                           HipdnnBackendDescriptor* yDesc,
-                          hipdnn_data_sdk::data_objects::DataType computeType
-                          = hipdnn_data_sdk::data_objects::DataType::FLOAT)
+                          hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
 {
     auto wrapper = createDescriptor<ConvolutionFwdOperationDescriptor>();
     auto desc = wrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();

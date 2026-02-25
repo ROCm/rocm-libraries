@@ -62,6 +62,44 @@ inline Error setDescriptorAttrScalar(hipdnnBackendDescriptor_t desc,
     return {};
 }
 
+// Overload for std::monostate — this is unreachable when guarded by
+// get_pass_by_value(), but required for std::visit to compile.
+inline Error setDescriptorAttrTensorValue(hipdnnBackendDescriptor_t /*desc*/,
+                                          std::monostate /*value*/,
+                                          const std::string& errorContext)
+{
+    return {ErrorCode::HIPDNN_BACKEND_ERROR,
+            "Tensor value variant is empty when setting " + errorContext};
+}
+
+// Passes raw bytes to the backend's TENSOR_VALUE_EXT attribute.
+// The backend dispatches on the tensor's data_type to interpret the bytes.
+template <typename T>
+inline Error setDescriptorAttrTensorValue(hipdnnBackendDescriptor_t desc,
+                                          const T& value,
+                                          const std::string& errorContext)
+{
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        hipdnnBackend()->backendSetAttribute(desc,
+                                             HIPDNN_ATTR_TENSOR_VALUE_EXT,
+                                             HIPDNN_TYPE_CHAR,
+                                             static_cast<int64_t>(sizeof(T)),
+                                             &value),
+        "Failed to set " + errorContext);
+    return {};
+}
+
+// Sets a data type attribute on a backend descriptor, converting from the
+// frontend DataType enum to hipdnnDataType_t.
+inline Error setDescriptorAttrDataType(hipdnnBackendDescriptor_t desc,
+                                       hipdnnBackendAttributeName_t attrName,
+                                       DataType type,
+                                       const std::string& errorContext)
+{
+    auto hipdnnType = toHipdnnDataType(type);
+    return setDescriptorAttrScalar(desc, attrName, HIPDNN_TYPE_DATA_TYPE, hipdnnType, errorContext);
+}
+
 // Sets a tensor reference attribute on an operation descriptor by looking up
 // the tensor UID in the tensorDescs map.
 inline Error setDescriptorAttrTensorRef(
@@ -134,12 +172,8 @@ inline std::pair<Error, int64_t>
         }
     }
 
-    auto sdkDataType = hipdnn_frontend::toSdkType(tensor->get_data_type());
-    err = setDescriptorAttrScalar(desc.get(),
-                                  HIPDNN_ATTR_TENSOR_DATA_TYPE,
-                                  HIPDNN_TYPE_DATA_TYPE,
-                                  sdkDataType,
-                                  "tensor data type");
+    err = setDescriptorAttrDataType(
+        desc.get(), HIPDNN_ATTR_TENSOR_DATA_TYPE, tensor->get_data_type(), "tensor data type");
     if(err.is_bad())
     {
         return {std::move(err), uid};
@@ -180,34 +214,7 @@ inline std::pair<Error, int64_t>
     {
         err = std::visit(
             [&](auto&& arg) -> Error {
-                using T = std::decay_t<decltype(arg)>;
-                if constexpr(std::is_same_v<T, std::monostate>)
-                {
-                    return {};
-                }
-                else
-                {
-                    hipdnnBackendAttributeType_t attrType;
-                    if constexpr(std::is_same_v<T, float>)
-                    {
-                        attrType = HIPDNN_TYPE_FLOAT;
-                    }
-                    else if constexpr(std::is_same_v<T, double>)
-                    {
-                        attrType = HIPDNN_TYPE_DOUBLE;
-                    }
-                    else if constexpr(std::is_same_v<T, int32_t>)
-                    {
-                        attrType = HIPDNN_TYPE_INT32;
-                    }
-                    else
-                    {
-                        // half, bfloat16, uint8_t — pass as float
-                        attrType = HIPDNN_TYPE_FLOAT;
-                    }
-                    return setDescriptorAttrScalar(
-                        desc.get(), HIPDNN_ATTR_TENSOR_VALUE_EXT, attrType, arg, "tensor value");
-                }
+                return setDescriptorAttrTensorValue(desc.get(), arg, "tensor value");
             },
             tensor->get_value_variant());
         if(err.is_bad())

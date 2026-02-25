@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "ConvolutionFwdOperationDescriptor.hpp"
+#include "DataTypeConversion.hpp"
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
@@ -96,12 +97,11 @@ void ConvolutionFwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_
         setConvMode(attributeType, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_CONVOLUTION_COMP_TYPE:
-        setScalar(_computeDataType,
-                  HIPDNN_TYPE_DATA_TYPE,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "ConvolutionFwdOperationDescriptor::setAttribute()");
+        setDataType(_computeDataType,
+                    attributeType,
+                    elementCount,
+                    arrayOfElements,
+                    "ConvolutionFwdOperationDescriptor::setAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -239,13 +239,12 @@ void ConvolutionFwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
         getConvMode(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_CONVOLUTION_COMP_TYPE:
-        getScalar(_computeDataType,
-                  HIPDNN_TYPE_DATA_TYPE,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "ConvolutionFwdOperationDescriptor::getAttribute()");
+        getDataType(_computeDataType,
+                    attributeType,
+                    requestedElementCount,
+                    elementCount,
+                    arrayOfElements,
+                    "ConvolutionFwdOperationDescriptor::getAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

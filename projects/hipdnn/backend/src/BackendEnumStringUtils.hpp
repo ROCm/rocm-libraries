@@ -8,6 +8,7 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnBackendPluginUnloadingMode.h"
+#include "HipdnnDataType.h"
 #include "HipdnnStatus.h"
 
 namespace hipdnn_backend
@@ -47,6 +48,33 @@ inline const char* hipdnnGetStatusString(hipdnnStatus_t status)
         return "HIPDNN_STATUS_EXECUTION_FAILED";
     default:
         return "HIPDNN_STATUS_UNKNOWN";
+    }
+}
+
+inline const char* hipdnnGetDataTypeString(hipdnnDataType_t type)
+{
+    switch(type)
+    {
+    case HIPDNN_DATA_FLOAT:
+        return "HIPDNN_DATA_FLOAT";
+    case HIPDNN_DATA_DOUBLE:
+        return "HIPDNN_DATA_DOUBLE";
+    case HIPDNN_DATA_HALF:
+        return "HIPDNN_DATA_HALF";
+    case HIPDNN_DATA_INT8:
+        return "HIPDNN_DATA_INT8";
+    case HIPDNN_DATA_INT32:
+        return "HIPDNN_DATA_INT32";
+    case HIPDNN_DATA_UINT8:
+        return "HIPDNN_DATA_UINT8";
+    case HIPDNN_DATA_BFLOAT16:
+        return "HIPDNN_DATA_BFLOAT16";
+    case HIPDNN_DATA_FP8_E4M3:
+        return "HIPDNN_DATA_FP8_E4M3";
+    case HIPDNN_DATA_FP8_E5M2:
+        return "HIPDNN_DATA_FP8_E5M2";
+    default:
+        return "HIPDNN_DATA_UNKNOWN";
     }
 }
 

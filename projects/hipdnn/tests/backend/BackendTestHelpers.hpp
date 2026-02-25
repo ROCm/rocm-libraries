@@ -6,7 +6,6 @@
 #include "hipdnn_backend.h"
 #include <cstring>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 #include <vector>
 
@@ -24,10 +23,8 @@ inline void setAllTensorAttributes(hipdnnBackendDescriptor_t desc,
                                    const std::vector<int64_t>& dims,
                                    const std::vector<int64_t>& strides,
                                    bool isVirtual = false,
-                                   hipdnn_data_sdk::data_objects::DataType dataType
-                                   = hipdnn_data_sdk::data_objects::DataType::FLOAT)
+                                   hipdnnDataType_t dataType = HIPDNN_DATA_FLOAT)
 {
-
     ASSERT_EQ(
         hipdnnBackendSetAttribute(desc, HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uid),
         HIPDNN_STATUS_SUCCESS);
@@ -61,14 +58,13 @@ inline void setAllTensorAttributes(hipdnnBackendDescriptor_t desc,
 /// Uses EXPECT macros (non-void return). Wrap calls in ASSERT_NO_FATAL_FAILURE
 /// if early abort on failure is desired.
 /// Caller is responsible for calling hipdnnBackendDestroyDescriptor on the result.
-inline hipdnnBackendDescriptor_t
-    createAndFinalizeTensorDesc(int64_t uid,
-                                const char* name,
-                                const std::vector<int64_t>& dims,
-                                const std::vector<int64_t>& strides,
-                                bool isVirtual = false,
-                                hipdnn_data_sdk::data_objects::DataType dataType
-                                = hipdnn_data_sdk::data_objects::DataType::FLOAT)
+inline hipdnnBackendDescriptor_t createAndFinalizeTensorDesc(int64_t uid,
+                                                             const char* name,
+                                                             const std::vector<int64_t>& dims,
+                                                             const std::vector<int64_t>& strides,
+                                                             bool isVirtual = false,
+                                                             hipdnnDataType_t dataType
+                                                             = HIPDNN_DATA_FLOAT)
 {
     hipdnnBackendDescriptor_t desc = nullptr;
     EXPECT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, &desc),

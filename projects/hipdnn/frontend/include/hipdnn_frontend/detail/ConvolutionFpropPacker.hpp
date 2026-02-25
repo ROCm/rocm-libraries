@@ -68,12 +68,10 @@ inline Error createConvFpropOperation(
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
         opDesc.get(), HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, convMode, "conv mode"));
 
-    auto computeDataType = hipdnn_frontend::toSdkType(attributes.compute_data_type);
-    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                               HIPDNN_ATTR_CONVOLUTION_COMP_TYPE,
-                                               HIPDNN_TYPE_DATA_TYPE,
-                                               computeDataType,
-                                               "conv compute data type"));
+    HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
+                                                 HIPDNN_ATTR_CONVOLUTION_COMP_TYPE,
+                                                 attributes.compute_data_type,
+                                                 "conv compute data type"));
 
     // Finalize operation descriptor
     HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "convolution operation descriptor"));

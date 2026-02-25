@@ -73,7 +73,7 @@ public:
     {
         setTensors();
         setConvParams();
-        auto computeType = DataType::FLOAT;
+        auto computeType = HIPDNN_DATA_FLOAT;
         getDescriptor()->setAttribute(
             HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
         auto convMode = static_cast<int64_t>(ConvMode::CROSS_CORRELATION);
@@ -251,7 +251,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, FinalizeFailsWithoutConvMode)
 {
     setTensors();
     setConvParams();
-    auto computeType = DataType::FLOAT;
+    auto computeType = HIPDNN_DATA_FLOAT;
     getDescriptor()->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -415,7 +415,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, SetConvModeWrongElementCount)
 TEST_F(TestConvolutionFwdOperationDescriptor, SetComputeDataType)
 {
     auto desc = getDescriptor();
-    auto computeType = DataType::FLOAT;
+    auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
@@ -426,7 +426,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, SetComputeDataType)
 TEST_F(TestConvolutionFwdOperationDescriptor, SetComputeDataTypeWrongElementCount)
 {
     auto desc = getDescriptor();
-    auto computeType = DataType::FLOAT;
+    auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
@@ -552,16 +552,16 @@ TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeComputeType)
 {
     auto desc = getDescriptor();
     setRequiredAttributes();
-    auto computeType = DataType::HALF;
+    auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    DataType retrieved = DataType::UNSET;
+    hipdnnDataType_t retrieved = HIPDNN_DATA_FLOAT;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
 
-    ASSERT_EQ(retrieved, DataType::HALF);
+    ASSERT_EQ(retrieved, HIPDNN_DATA_HALF);
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -664,7 +664,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, BuildNodeProducesCorrectNodeT)
     setRequiredAttributes();
 
     auto desc = getDescriptor();
-    auto computeType = DataType::FLOAT;
+    auto computeType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
@@ -688,7 +688,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, BuildNodeWithHalfComputeType)
     setRequiredAttributes();
 
     auto desc = getDescriptor();
-    auto computeType = DataType::HALF;
+    auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 

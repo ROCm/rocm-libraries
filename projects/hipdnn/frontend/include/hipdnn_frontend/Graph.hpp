@@ -774,9 +774,9 @@ protected:
         HIPDNN_CHECK_ERROR(detail::assembleGraphDescriptor(
             operations,
             handle,
-            toSdkType(graph_attributes.get_compute_data_type()),
-            toSdkType(graph_attributes.get_intermediate_data_type()),
-            toSdkType(graph_attributes.get_io_data_type()),
+            toHipdnnDataType(graph_attributes.get_compute_data_type()),
+            toHipdnnDataType(graph_attributes.get_intermediate_data_type()),
+            toHipdnnDataType(graph_attributes.get_io_data_type()),
             _preferredEngineId,
             _graphDesc));
 
