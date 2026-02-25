@@ -278,7 +278,6 @@ struct BlockFmhaPipelineQRKSVS
         const auto num_sink_loop = integer_divide_ceil(sink_seq_end, kN0);
         const auto num_total_loop =
             integer_divide_ceil(seqlen_k_end - seqlen_k_start, kN0) + num_sink_loop;
-        static_assert(scale_s != 0);
 
         // check early exit if no work to do
         if constexpr(FmhaMask::IsMasking || kPadSeqLenK)
