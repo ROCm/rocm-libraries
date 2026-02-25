@@ -274,12 +274,12 @@ rocblas_status rocsolver_gecon_template(rocblas_handle handle,
                 // Solve L*y = x (unit lower triangular), then U*x = y (non-unit upper triangular)
                 rocsolver_trsm_lower<false, false, T, I>(
                     handle, rocblas_side_left, rocblas_operation_none, rocblas_diagonal_unit, n,
-                    (I)1, (U)hA[batch], 0, inca, lda, strideA, (U)x, 0, (I)1, n, strideA, (I)1,
+                    (I)1, (T*)hA[batch], 0, inca, lda, strideA, (T*)x, 0, (I)1, n, strideA, (I)1,
                     optim_mem, work_trsm_1, work_trsm_2, work_trsm_3, work_trsm_4);
 
                 rocsolver_trsm_upper<false, false, T, I>(
                     handle, rocblas_side_left, rocblas_operation_none, rocblas_diagonal_non_unit, n,
-                    (I)1, (U)hA[batch], 0, inca, lda, strideA, (U)x, 0, (I)1, n, strideA, (I)1,
+                    (I)1, (T*)hA[batch], 0, inca, lda, strideA, (T*)x, 0, (I)1, n, strideA, (I)1,
                     optim_mem, work_trsm_1, work_trsm_2, work_trsm_3, work_trsm_4);
             }
             else
@@ -287,12 +287,12 @@ rocblas_status rocsolver_gecon_template(rocblas_handle handle,
                 // Solve U^H*y = x, then L^H*x = y (conjugate transpose for complex, transpose for real)
                 rocsolver_trsm_upper<false, false, T, I>(
                     handle, rocblas_side_left, opr, rocblas_diagonal_non_unit, n, (I)1,
-                    (U)hA[batch], 0, inca, lda, strideA, (U)x, 0, (I)1, n, strideA, (I)1, optim_mem,
-                    work_trsm_1, work_trsm_2, work_trsm_3, work_trsm_4);
+                    (T*)hA[batch], 0, inca, lda, strideA, (T*)x, 0, (I)1, n, strideA, (I)1,
+                    optim_mem, work_trsm_1, work_trsm_2, work_trsm_3, work_trsm_4);
 
                 rocsolver_trsm_lower<false, false, T, I>(
-                    handle, rocblas_side_left, opr, rocblas_diagonal_unit, n, (I)1, (U)hA[batch], 0,
-                    inca, lda, strideA, (U)x, 0, (I)1, n, strideA, (I)1, optim_mem, work_trsm_1,
+                    handle, rocblas_side_left, opr, rocblas_diagonal_unit, n, (I)1, (T*)hA[batch],
+                    0, inca, lda, strideA, (T*)x, 0, (I)1, n, strideA, (I)1, optim_mem, work_trsm_1,
                     work_trsm_2, work_trsm_3, work_trsm_4);
             }
         } while(h_kase != 0);
