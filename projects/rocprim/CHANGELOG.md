@@ -2,7 +2,7 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM x.y.z for ROCm 8.0
+## rocPRIM 4.3.0 for ROCm 7.12
 
 ### Optimizations
 
@@ -15,11 +15,22 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Changed
 
 * Changed various APIs with undefined behaviors to abort with a trap instead of printing a runtime error with `ROCPRIM_PRINT_ERROR_ONCE` 
+* Benchmarking now requires [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) to be installed.
+  * rocPRIM now uses the new single-header library 'primbench' for benchmarks, rather than Google Benchmark. primbench requires AMD SMI.
+  * See `shared/primbench/README.md` for primbench its documentation.
+
+### Removed
+
+* Removed the CMake option `BENCHMARK_USE_AMDSMI`, as benchmarking now requires AMD SMI to be installed.
 
 ### Removed
 
 * Removed unused `equality`, `inequality`, `sum`, `max`, `min` from thread_operator.hpp.
 * Removed duplicate `inequality_operator` from binary_op_warpper.hpp
+
+### Known issues
+
+* benchmark_warp_sort may hang on Navi GPUs on Windows when running logical warp sizes > hardware warp size.
 
 ## rocPRIM 4.2.0 for ROCm 7.2
 
