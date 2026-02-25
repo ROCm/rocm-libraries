@@ -7417,7 +7417,13 @@ class KernelWriterAssembly(KernelWriter):
       abStr  = "G2L%s+%u+%u" % (tc, ab_new, vgprBuffer_new_offset)
 
     if bk != None:
-      abStr += "+%u"%(bk)
+      if kernel["UseDirect32XEmulation"] and (int(bk) % 8) < 4:
+        # T0 set is allocated with half the VGPRs (ri // 2).  Map bk to the
+        # correct T0 offset: groups of 8 elements share 4 T0 slots each.
+        adjustedBk = (int(bk) // 8) * 4 + (int(bk) % 4)
+        abStr += "+%u"%(adjustedBk)
+      else:
+        abStr += "+%u"%(bk)
     return abStr
 
   ##############################################################################
@@ -7814,7 +7820,12 @@ class KernelWriterAssembly(KernelWriter):
           elif is_wmma_v2 and vgprPerInUnrollA > 2:
             vgprPerSet0Group = 4
           else:
-            vgprPerSet0Group = 2 if not kernel["ProblemType"]["DataType"].is6bitFloat() else 3
+            if is_wmma_v3 and kernel["UseF32XEmulation"]:
+              vgprPerSet0Group = 1
+            elif kernel["ProblemType"]["DataType"].is6bitFloat():
+              vgprPerSet0Group = 3
+            else:
+              vgprPerSet0Group = 2
 
           if not tPA["isSwizzled"] and tPA["bpe"] == 0.75 and kernel["enableLDSTrA"]:
             for a in range(0, kernel["MIWaveTileA"]):
@@ -7832,6 +7843,9 @@ class KernelWriterAssembly(KernelWriter):
                   multiplyBy = numMIInUnroll // blocksPerTGroupSMFMAA
                 elif kernel["ProblemType"]["Sparse"] and not self.states.asmCaps["HasSWMMAC_gfx1250"]:
                   multiplyBy = numMIInUnroll // blocksPerTGroupSMFMAA
+                elif is_wmma_v3 and kernel["UseF32XEmulation"]:
+                  vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPA["bpe"] * 8)
+                  multiplyBy = vgprLayout[-1] // vgprLayout[2]
                 elif is_wmma_v3:
                   vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPA["bpe"] * 8)
                   multiplyBy = vgprLayout[-1]
@@ -7840,6 +7854,14 @@ class KernelWriterAssembly(KernelWriter):
 
                 shiftK.add(vectorStaticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
+              elif is_wmma_v3 and kernel["UseF32XEmulation"]:
+                vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPA["bpe"] * 8)
+                miVectorWidth = vgprLayout[-1]
+                # Absolute K offset for interleaved layout:
+                # groups within each half are contiguous, halves are miVectorWidth apart.
+                elemPerHalf = miVectorWidth // vgprLayout[2]
+                kOffsetA = (group // elemPerHalf) * miVectorWidth + (group % elemPerHalf)
+                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), kOffsetA, "K index for group %d" % group))
               elif blocksPerTGroupSMFMAA == 2 and (group * vgprPerSet0Group) == (elementsPerBlockSMFMAA * numRegistersIn):
                 if kernel["ProblemType"]["Sparse"]:
                   kIncA = blockOffsetSMFMAA + (numMIInUnroll//numSet0GroupA) * (max(group - 1, 0) if not self.states.asmCaps["HasSWMMAC_gfx1250"] else 1)
@@ -7890,7 +7912,12 @@ class KernelWriterAssembly(KernelWriter):
           else:
             shiftK.add(vectorStaticRemainder(dummy, kReg_first, "Serial", kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
             shiftK.add(vectorStaticDivide(kReg_first, kReg_first, dividerFortidInK, tmpVgpr))
-            vgprPerSet0Group = 2 if not kernel["ProblemType"]["DataType"].is6bitFloat() else 3
+            if is_wmma_v3 and kernel["UseF32XEmulation"]:
+              vgprPerSet0Group = 1
+            elif kernel["ProblemType"]["DataType"].is6bitFloat():
+              vgprPerSet0Group = 3
+            else:
+              vgprPerSet0Group = 2
 
           if tPB["bpe"] == 0.75 and kernel["enableLDSTrB"]:
             for b in range(0, kernel["MIWaveTileB"]):
@@ -7908,6 +7935,9 @@ class KernelWriterAssembly(KernelWriter):
                   multiplyBy = numMIInUnroll // blocksPerTGroupSMFMAB
                 elif kernel["ProblemType"]["Sparse"] and not self.states.asmCaps["HasSWMMAC_gfx1250"]:
                   multiplyBy = numMIInUnroll // blocksPerTGroupSMFMAB
+                elif is_wmma_v3 and kernel["UseF32XEmulation"]:
+                  vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPB["bpe"] * 8)
+                  multiplyBy = vgprLayout[-1] // vgprLayout[2]
                 elif is_wmma_v3:
                   vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPB["bpe"] * 8)
                   multiplyBy = vgprLayout[-1]
@@ -7915,6 +7945,12 @@ class KernelWriterAssembly(KernelWriter):
                   multiplyBy = numMIInUnroll//2
                 shiftK.add(vectorStaticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
+              elif is_wmma_v3 and kernel["UseF32XEmulation"]:
+                vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPB["bpe"] * 8)
+                miVectorWidth = vgprLayout[-1]
+                elemPerHalf = miVectorWidth // vgprLayout[2]
+                kOffsetB = (group // elemPerHalf) * miVectorWidth + (group % elemPerHalf)
+                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), kOffsetB, "K index for group %d" % group))
               elif blocksPerTGroupSMFMAB == 2 and (group * vgprPerSet0Group) == (elementsPerBlockSMFMAB * numRegistersIn):
                 if kernel["ProblemType"]["Sparse"]:
                   kIncB = blockOffsetSMFMAB + (numMIInUnroll//numSet0GroupB) * (max(group - 1, 0) if not self.states.asmCaps["HasSWMMAC_gfx1250"] else 1)
@@ -7933,10 +7969,11 @@ class KernelWriterAssembly(KernelWriter):
 
                   if group and curElemIdx % miVectorWidth == 0:
                     kIncB += miVectorWidth
-                elif group == 2 and vgprPerInUnrollB == 8 and not is_wmma_v3:
-                   kIncB = 56 if kernel["MatrixInstK"] == 128 else 24
-                   if kernel["UseF32XEmulation"]:
-                     kIncB = 14 if kernel["MatrixInstK"] == 32 else 6
+                elif self.states.asmCaps["HasMFMA_f8f6f4"]:
+                  if group == 2 and vgprPerInUnrollB == 8 and not is_wmma_v3:
+                     kIncB = 56 if kernel["MatrixInstK"] == 128 else 24
+                     if kernel["UseF32XEmulation"]:
+                       kIncB = 14 if kernel["MatrixInstK"] == 32 else 6
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K"))
               # replace 0 for differnet thread
               if kernel["LocalSplitU"] > 1:
@@ -7951,7 +7988,10 @@ class KernelWriterAssembly(KernelWriter):
                     shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment="set 0 if K_idx >= sizeL"))
 
           # replace elements with 0 for same thread, this conducting shift and mask between numElementsPerRead
-          if numMIInUnroll > 1 and kernel["AssertSummationElementMultiple"] < 32 and tPA["bpe"] != 0.75 and tPB["bpe"] != 0.75:
+          # Skip when numRegistersIn >= 1 on wmma_v3 with XF32 emulation: each element fills a full register,
+          # so Phase 1 per-element masking (vgprPerSet0Group=1) already handles all cases.
+          if numMIInUnroll > 1 and kernel["AssertSummationElementMultiple"] < 32 and tPA["bpe"] != 0.75 and tPB["bpe"] != 0.75 \
+              and not (is_wmma_v3 and kernel["UseF32XEmulation"]):
             alignment = vgprPerInUnroll if is_wmma_v2 else (2 if vgprPerInUnroll > 1 else 1)
             abReg   = self.vgprPool.checkOutAligned(vgprPerInUnroll, alignment, "abReg")
             if (vgprPerInUnroll < 4 and is_mfma) or is_wmma_v2:
@@ -8835,7 +8875,7 @@ class KernelWriterAssembly(KernelWriter):
                         src1=incUpper, \
                         comment="limit -= inc)" ))
       imod.add(SCmpEQU32(src0=sgpr("ShadowLimit%s+1"%tc), src1=0, comment="are we within 2^32?"))
-      if 1: # self.states.staggerUCode:
+      if self.states.staggerUCode:
         # staggerU case, need to restore BufferLimit when ShadowLimit goes to negative value
         imod.add(SCSelectB32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("ShadowLimit%s+0"%tc), src1="BufferLimit", comment="Move shadow to real if we are within 2^32"))
       else:

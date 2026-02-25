@@ -4598,10 +4598,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
       moduleMacroDTLLWVgpr, vgprLW = self.tailLoopAllocDTLLWVgpr(kernel)
       module.add(moduleMacroDTLLWVgpr)
 
-      module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, -1))
+      is_wmma_v3 = self.states.asmCaps.get("HasWMMA_V3", False)
+      if not is_wmma_v3:
+        module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, -1))
       if self.states.actualSummationLoops==1 and self.states.staggerUCode:
         module.addComment1("remove stagger offsets for tail loop")
+        if is_wmma_v3:
+          skipRemoveStaggerLabel = Label("SkipRemoveStagger", "")
+          module.add(SCmpEQU32(src0=sgpr("OrigLoopCounter"), src1=0, comment="skip if main loop was not executed"))
+          module.add(SCBranchSCC1(labelName=skipRemoveStaggerLabel.getLabelName(), comment="skip removeStagger"))
         module.add(self.removeStaggerAB(kernel, tensorParametersA, tensorParametersB))
+        if is_wmma_v3:
+          module.add(skipRemoveStaggerLabel)
+      if is_wmma_v3:
+        module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, -1))
 
       tensorParameters1st = tensorParametersA
       tensorParameters2nd = tensorParametersB
