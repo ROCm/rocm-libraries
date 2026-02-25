@@ -36,6 +36,8 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
     EXPECT_STREQ(
         hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR),
         "HIPDNN_BACKEND_OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR");
+    EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_TENSOR_DESCRIPTOR),
+                 "HIPDNN_BACKEND_TENSOR_DESCRIPTOR");
 
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
@@ -160,6 +162,21 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT),
                  "HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT");
+
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_UNIQUE_ID),
+                 "HIPDNN_ATTR_TENSOR_UNIQUE_ID");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_NAME_EXT),
+                 "HIPDNN_ATTR_TENSOR_NAME_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_DATA_TYPE),
+                 "HIPDNN_ATTR_TENSOR_DATA_TYPE");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_DIMENSIONS),
+                 "HIPDNN_ATTR_TENSOR_DIMENSIONS");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_STRIDES),
+                 "HIPDNN_ATTR_TENSOR_STRIDES");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_IS_VIRTUAL),
+                 "HIPDNN_ATTR_TENSOR_IS_VIRTUAL");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_VALUE_EXT),
+                 "HIPDNN_ATTR_TENSOR_VALUE_EXT");
 }
 
 TEST(TestBackendEnumStringUtils, GetStatusString)
