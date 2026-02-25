@@ -15,12 +15,12 @@ target_sources(hipblaslt
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/hipblaslt/hipblaslt-export.h>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt-ext.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt-ext-op.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_float8.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_float4.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_e8.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_e5m3.h>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt-ext.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt-ext-op.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt-types.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/hipblaslt/hipblaslt-version.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt.h>
