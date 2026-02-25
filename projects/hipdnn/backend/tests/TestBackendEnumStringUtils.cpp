@@ -263,6 +263,21 @@ TEST(TestBackendEnumStringUtils, GetPluginLoadingModeString)
                  "HIPDNN_PLUGIN_LOADING_UNKNOWN");
 }
 
+TEST(TestBackendEnumStringUtils, GetDataTypeString)
+{
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_FLOAT), "HIPDNN_DATA_FLOAT");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_DOUBLE), "HIPDNN_DATA_DOUBLE");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_HALF), "HIPDNN_DATA_HALF");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_INT8), "HIPDNN_DATA_INT8");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_INT32), "HIPDNN_DATA_INT32");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_UINT8), "HIPDNN_DATA_UINT8");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_BFLOAT16), "HIPDNN_DATA_BFLOAT16");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_FP8_E4M3), "HIPDNN_DATA_FP8_E4M3");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_FP8_E5M2), "HIPDNN_DATA_FP8_E5M2");
+
+    EXPECT_STREQ(hipdnnGetDataTypeString(static_cast<hipdnnDataType_t>(-1)), "HIPDNN_DATA_UNKNOWN");
+}
+
 TEST(TestBackendEnumStringUtils, GetPluginUnloadingModeString)
 {
     EXPECT_STREQ(hipdnnGetPluginUnloadingModeString(HIPDNN_PLUGIN_UNLOAD_LAZY),

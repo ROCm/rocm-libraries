@@ -31,7 +31,7 @@ hipdnn_data_sdk::data_objects::DataType toSdkDataType(hipdnnDataType_t type)
     case HIPDNN_DATA_FP8_E5M2:
         return DataType::FP8_E5M2;
     default:
-        return DataType::UNSET;
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnDataType_t value");
     }
 }
 
@@ -88,7 +88,7 @@ int64_t getDataTypeByteSize(hipdnn_data_sdk::data_objects::DataType type)
     case DataType::FP8_E5M2:
         return 1;
     default:
-        return -1;
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported DataType for byte size");
     }
 }
 

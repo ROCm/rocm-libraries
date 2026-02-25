@@ -22,6 +22,7 @@
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
 
 #include <bitset>
+#include <optional>
 #include <ostream>
 #include <set>
 #include <string>
@@ -310,7 +311,7 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
     }
 }
 
-inline hipdnnDataType_t toHipdnnDataType(const DataType& type)
+inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
 {
     switch(type)
     {
@@ -333,7 +334,7 @@ inline hipdnnDataType_t toHipdnnDataType(const DataType& type)
     case DataType::FP8_E5M2:
         return HIPDNN_DATA_FP8_E5M2;
     default:
-        return HIPDNN_DATA_FLOAT;
+        return std::nullopt;
     }
 }
 

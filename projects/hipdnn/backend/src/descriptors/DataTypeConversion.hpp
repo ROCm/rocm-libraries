@@ -15,7 +15,7 @@ namespace hipdnn_backend
 hipdnn_data_sdk::data_objects::DataType toSdkDataType(hipdnnDataType_t type);
 hipdnnDataType_t fromSdkDataType(hipdnn_data_sdk::data_objects::DataType type);
 
-// Returns the byte size for a given data type, or -1 if unsupported.
+// Returns the byte size for a given data type. Throws for unsupported types.
 int64_t getDataTypeByteSize(hipdnn_data_sdk::data_objects::DataType type);
 
 // Validates attributeType/elementCount/null and sets a DataType from a

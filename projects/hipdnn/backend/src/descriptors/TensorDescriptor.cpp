@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "TensorDescriptor.hpp"
+#include "BackendEnumStringUtils.hpp"
 #include "DataTypeConversion.hpp"
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
@@ -168,6 +169,10 @@ void TensorDescriptor::setName(hipdnnBackendAttributeType_t attributeType,
     THROW_IF_NULL(arrayOfElements,
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                   "TensorDescriptor::setAttribute(): arrayOfElements is null");
+    THROW_IF_LT(elementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                "TensorDescriptor::setAttribute(): elementCount is negative");
 
     _data.name
         = std::string(static_cast<const char*>(arrayOfElements), static_cast<size_t>(elementCount));
@@ -184,6 +189,10 @@ void TensorDescriptor::getName(hipdnnBackendAttributeType_t attributeType,
     THROW_IF_NULL(arrayOfElements,
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                   "TensorDescriptor::getAttribute(): arrayOfElements is null");
+    THROW_IF_LT(requestedElementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                "TensorDescriptor::getAttribute(): requestedElementCount is negative");
 
     auto maxSize = static_cast<size_t>(requestedElementCount);
     hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
@@ -411,7 +420,7 @@ std::string TensorDescriptor::toString() const
     using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "TensorDescriptor: {uid=" + std::to_string(_data.uid);
     str += ", name=" + _data.name;
-    str += ", dataType=" + std::to_string(static_cast<int>(_data.data_type));
+    str += std::string(", dataType=") + hipdnnGetDataTypeString(fromSdkDataType(_data.data_type));
     str += ", dims=" + vecToString(_data.dims);
     str += ", strides=" + vecToString(_data.strides);
     str += ", virtual=" + std::string(_data.virtual_ ? "true" : "false");
