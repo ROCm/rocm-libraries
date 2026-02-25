@@ -29,9 +29,8 @@
 namespace ck {
 namespace profiler {
 
-namespace bwd_weight 
-{
-    template <ck::index_t NDimSpatial,
+namespace bwd_weight {
+template <ck::index_t NDimSpatial,
           typename InLayout,
           typename WeiLayout,
           typename OutLayout,
@@ -43,42 +42,42 @@ namespace bwd_weight
           typename OutElementOp,
           typename ComputeTypeA,
           typename ComputeTypeB>
-    void print_instances()
+void print_instances()
+{
+    using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<NDimSpatial,
+                                                                              InLayout,
+                                                                              WeiLayout,
+                                                                              OutLayout,
+                                                                              InDataType,
+                                                                              WeiDataType,
+                                                                              OutDataType,
+                                                                              InElementOp,
+                                                                              WeiElementOp,
+                                                                              OutElementOp,
+                                                                              ComputeTypeA,
+                                                                              ComputeTypeB>;
+
+    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+
+    for(const auto& op_ptr : op_ptrs)
     {
-        using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<NDimSpatial,
-                                                                                InLayout,
-                                                                                WeiLayout,
-                                                                                OutLayout,
-                                                                                InDataType,
-                                                                                WeiDataType,
-                                                                                OutDataType,
-                                                                                InElementOp,
-                                                                                WeiElementOp,
-                                                                                OutElementOp,
-                                                                                ComputeTypeA,
-                                                                                ComputeTypeB>;
-
-        const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-            DeviceOp>::GetInstances();
-
-        for(const auto& op_ptr : op_ptrs)
-        {
 #ifdef CK_EXPERIMENTAL_BUILDER
-            const auto& instance_str = op_ptr->GetInstanceString();
-            if (!instance_str.empty())
-            {
-                std::cout << instance_str << std::endl;
-            }
-            else
-            {
-                std::cout << op_ptr->GetTypeString() << std::endl;
-            }
-#else
-            std::cout << op_ptr->GetTypeString() << std::endl;
-#endif
+        const auto& instance_str = op_ptr->GetInstanceString();
+        if(!instance_str.empty())
+        {
+            std::cout << instance_str << std::endl;
         }
+        else
+        {
+            std::cout << op_ptr->GetTypeString() << std::endl;
+        }
+#else
+        std::cout << op_ptr->GetTypeString() << std::endl;
+#endif
     }
 }
+} // namespace bwd_weight
 
 template <ck::index_t NDimSpatial,
           typename InLayout,

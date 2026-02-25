@@ -165,21 +165,22 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
                     });
 
                 const bool valid = report.get_errors().empty();
-                if (valid)
+                if(valid)
                 {
                     best_avg_time = std::min(best_avg_time, avg_time);
                     best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
                     best_split_k  = best_avg_time < avg_time ? best_split_k : k_batch;
-                    std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms," << " " << op_name
-                            << ", SplitK " << k_batch << std::endl;
+                    std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms," << " "
+                              << op_name << ", SplitK " << k_batch << std::endl;
                 }
-                else {
+                else
+                {
                     std::cout << "[Error] " << op_name << ", SplitK " << k_batch << std::endl;
                     for(const auto& error : report.get_errors())
                     {
                         std::cout << "\tNumber of incorrect values: " << error.wrong_elements
-                                << " Is all zero:" << error.is_all_zero()
-                                << " max err: " << error.max_error << std::endl;
+                                  << " Is all zero:" << error.is_all_zero()
+                                  << " max err: " << error.max_error << std::endl;
                         // Check with cpu verification to get a values
                         run_cpu_validation<SIGNATURE>(args, outputs, reference.get());
                     }

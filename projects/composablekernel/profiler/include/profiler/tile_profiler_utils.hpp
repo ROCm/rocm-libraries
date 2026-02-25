@@ -77,4 +77,4 @@ auto parse_conv_args(int arg_idx, char* const argv[])
     return args;
 }
 
-}
+} // namespace ck_tile::builder::profiling

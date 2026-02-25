@@ -115,9 +115,18 @@ struct GroupedConvBwdWeightKernelArgs
 
         k_batch = args.k_batch;
 
-        LogInfo("GemmM: ", GemmM, ", GemmN: ", GemmN, ", GemmK: ", GemmK,
-                ", GemmBatch: ", GemmBatch,
-                ", NumGroupsPerBatch: ", NumGroupsPerBatch, ", k_batch: ", k_batch);
+        LogInfo("GemmM: ",
+                GemmM,
+                ", GemmN: ",
+                GemmN,
+                ", GemmK: ",
+                GemmK,
+                ", GemmBatch: ",
+                GemmBatch,
+                ", NumGroupsPerBatch: ",
+                NumGroupsPerBatch,
+                ", k_batch: ",
+                k_batch);
     }
 
     template <
@@ -197,9 +206,18 @@ struct GroupedConvBwdWeightKernelArgs
 
         k_batch = args.k_batch;
 
-        LogInfo("GemmM: ", GemmM, ", GemmN: ", GemmN, ", GemmK: ", GemmK,
-                ", GemmBatch: ", GemmBatch,
-                ", NumGroupsPerBatch: ", NumGroupsPerBatch, ", k_batch: ", k_batch);
+        LogInfo("GemmM: ",
+                GemmM,
+                ", GemmN: ",
+                GemmN,
+                ", GemmK: ",
+                GemmK,
+                ", GemmBatch: ",
+                GemmBatch,
+                ", NumGroupsPerBatch: ",
+                NumGroupsPerBatch,
+                ", k_batch: ",
+                k_batch);
     }
 
     template <
@@ -286,9 +304,18 @@ struct GroupedConvBwdWeightKernelArgs
 
         k_batch = args.k_batch;
 
-        LogInfo("GemmM: ", GemmM, ", GemmN: ", GemmN, ", GemmK: ", GemmK,
-                ", GemmBatch: ", GemmBatch,
-                ", NumGroupsPerBatch: ", NumGroupsPerBatch, ", k_batch: ", k_batch);
+        LogInfo("GemmM: ",
+                GemmM,
+                ", GemmN: ",
+                GemmN,
+                ", GemmK: ",
+                GemmK,
+                ", GemmBatch: ",
+                GemmBatch,
+                ", NumGroupsPerBatch: ",
+                NumGroupsPerBatch,
+                ", k_batch: ",
+                k_batch);
     }
 
     using ABCGridDescs = remove_cvref_t<
@@ -471,9 +498,12 @@ struct GroupedConvolutionBackwardWeightKernel
     CK_TILE_HOST static constexpr GroupedConvBwdWeightKernelArgsSpecialized
     MakeKernelArgs(const GroupedConvBwdWeightHostArgs& hostArgs)
     {
-        LogInfo("MPerBlock: ", number<TilePartitioner::MPerBlock>{},
-                ", NPerBlock: ", number<TilePartitioner::NPerBlock>{},
-                ", KPerBlock: ", number<TilePartitioner::KPerBlock>{});
+        LogInfo("MPerBlock: ",
+                number<TilePartitioner::MPerBlock>{},
+                ", NPerBlock: ",
+                number<TilePartitioner::NPerBlock>{},
+                ", KPerBlock: ",
+                number<TilePartitioner::KPerBlock>{});
 
         auto kernel_args = GroupedConvBwdWeightKernelArgsSpecialized(hostArgs);
 
@@ -523,7 +553,8 @@ struct GroupedConvolutionBackwardWeightKernel
             // accuracy issues. Hence, we limit the maximum split-K value to 128 in such cases.
             if(kargs.k_batch > 128)
             {
-                LogInfo("For epilogue output data type that is not float/double, we must have k_batch <= 128.");
+                LogInfo("For epilogue output data type that is not float/double, we must have "
+                        "k_batch <= 128.");
                 return false;
             }
         }
@@ -533,16 +564,24 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             if(kargs.k_batch != 1)
             {
-                LogInfo("Conditions not met for K_batch > 1: VectorSizeC must be a multiple of 2 for fp16/bf16 when K_batch > 1.", 
-                    "Now k_batch is ", kargs.k_batch, ", VectorSizeC is ", GroupedConvTraitsType_::VectorSizeC);
+                LogInfo("Conditions not met for K_batch > 1: VectorSizeC must be a multiple of 2 "
+                        "for fp16/bf16 when K_batch > 1.",
+                        "Now k_batch is ",
+                        kargs.k_batch,
+                        ", VectorSizeC is ",
+                        GroupedConvTraitsType_::VectorSizeC);
                 return false;
             }
         }
 
         if(kargs.GemmK < TilePartitioner::BlockGemmShape::WarpTile::at(number<2>{}) * kargs.k_batch)
         {
-            LogInfo("KBatch is too large, part of GPU wouldn't be utilized! GemmK: ", kargs.GemmK, ", BlockGemmShape K: ",
-                TilePartitioner::BlockGemmShape::WarpTile::at(number<2>{}), ", k_batch: ", kargs.k_batch);
+            LogInfo("KBatch is too large, part of GPU wouldn't be utilized! GemmK: ",
+                    kargs.GemmK,
+                    ", BlockGemmShape K: ",
+                    TilePartitioner::BlockGemmShape::WarpTile::at(number<2>{}),
+                    ", k_batch: ",
+                    kargs.k_batch);
             return false;
         }
 
@@ -562,8 +601,17 @@ struct GroupedConvolutionBackwardWeightKernel
 
                 if(!(SpatialDim == 1 && ConvStride == 1 && LeftPad == 0 && RightPad == 0))
                 {
-                    LogInfo("For Filter1x1Stride1Pad0 specialization, all spatial dimensions must be 1, stride must be 1, and padding must be 0. Now for dimension ", i,
-                        ": SpatialDim is ", SpatialDim, ", ConvStride is ", ConvStride, ", LeftPad is ", LeftPad, ", RightPad is ", RightPad);
+                    LogInfo("For Filter1x1Stride1Pad0 specialization, all spatial dimensions must "
+                            "be 1, stride must be 1, and padding must be 0. Now for dimension ",
+                            i,
+                            ": SpatialDim is ",
+                            SpatialDim,
+                            ", ConvStride is ",
+                            ConvStride,
+                            ", LeftPad is ",
+                            LeftPad,
+                            ", RightPad is ",
+                            RightPad);
                     return false;
                 }
             }
@@ -579,8 +627,15 @@ struct GroupedConvolutionBackwardWeightKernel
 
                 if(!(SpatialDim == 1 && LeftPad == 0 && RightPad == 0))
                 {
-                    LogInfo("For Filter1x1Pad0 specialization, all spatial dimensions must be 1 and padding must be 0. Now for dimension ", i,
-                        ": SpatialDim is ", SpatialDim, ", LeftPad is ", LeftPad, ", RightPad is ", RightPad);
+                    LogInfo("For Filter1x1Pad0 specialization, all spatial dimensions must be 1 "
+                            "and padding must be 0. Now for dimension ",
+                            i,
+                            ": SpatialDim is ",
+                            SpatialDim,
+                            ", LeftPad is ",
+                            LeftPad,
+                            ", RightPad is ",
+                            RightPad);
                     return false;
                 }
             }
@@ -598,8 +653,11 @@ struct GroupedConvolutionBackwardWeightKernel
 
                 if(filter_spatial_dim != I3)
                 {
-                    LogInfo("For Filter3x3 specialization, all spatial dimensions of the filter must be 3. Now for dimension ", 
-                                i, ", filter_spatial_dim is ", filter_spatial_dim);
+                    LogInfo("For Filter3x3 specialization, all spatial dimensions of the filter "
+                            "must be 3. Now for dimension ",
+                            i,
+                            ", filter_spatial_dim is ",
+                            filter_spatial_dim);
                     return false;
                 }
             }
@@ -620,7 +678,10 @@ struct GroupedConvolutionBackwardWeightKernel
             // Check access per C
             if(ConvC % GroupedConvTraitsType_::VectorSizeB != 0)
             {
-                LogInfo("Conv C is not a multiple of vector load size for input! ConvC: ", ConvC, ", VectorSizeB: ", GroupedConvTraitsType_::VectorSizeB);
+                LogInfo("Conv C is not a multiple of vector load size for input! ConvC: ",
+                        ConvC,
+                        ", VectorSizeB: ",
+                        GroupedConvTraitsType_::VectorSizeB);
                 return false;
             }
         }
@@ -636,7 +697,10 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             if(ConvC % GroupedConvTraitsType_::VectorSizeC != 0)
             {
-                LogInfo("Conv C is not a multiple of vector load size for weight! ConvC: ", ConvC, ", VectorSizeC: ", GroupedConvTraitsType_::VectorSizeC);
+                LogInfo("Conv C is not a multiple of vector load size for weight! ConvC: ",
+                        ConvC,
+                        ", VectorSizeC: ",
+                        GroupedConvTraitsType_::VectorSizeC);
                 return false;
             }
         }
@@ -652,7 +716,10 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             if(ConvK % GroupedConvTraitsType_::VectorSizeA != 0)
             {
-                LogInfo("Conv K is not a multiple of vector load size for output! ConvK: ", ConvK, ", VectorSizeA: ", GroupedConvTraitsType_::VectorSizeA);
+                LogInfo("Conv K is not a multiple of vector load size for output! ConvK: ",
+                        ConvK,
+                        ", VectorSizeA: ",
+                        GroupedConvTraitsType_::VectorSizeA);
                 return false;
             }
         }
@@ -667,7 +734,10 @@ struct GroupedConvolutionBackwardWeightKernel
             const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
             if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0)
             {
-                LogInfo("Number of groups must be divisible by NumGroupsToMerge! ConvG: ", ConvG, ", NumGroupsToMerge: ", GroupedConvTraitsType_::NumGroupsToMerge);
+                LogInfo("Number of groups must be divisible by NumGroupsToMerge! ConvG: ",
+                        ConvG,
+                        ", NumGroupsToMerge: ",
+                        GroupedConvTraitsType_::NumGroupsToMerge);
                 return false;
             }
         }

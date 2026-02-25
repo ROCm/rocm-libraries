@@ -53,13 +53,13 @@ static void print_helper_msg()
 }
 
 void print_available_instances(auto num_dim_spatial_tmp,
-                       auto in_layout,
-                       auto wei_layout,
-                       auto out_layout,
-                       auto in_type,
-                       auto wei_type,
-                       auto out_type,
-                       auto compute_type) 
+                               auto in_layout,
+                               auto wei_layout,
+                               auto out_layout,
+                               auto in_type,
+                               auto wei_type,
+                               auto out_type,
+                               auto compute_type)
 {
     constexpr ck::index_t NDimSpatial = num_dim_spatial_tmp.value;
 
@@ -72,20 +72,20 @@ void print_available_instances(auto num_dim_spatial_tmp,
     using OutDataType = decltype(out_type);
 
     using ComputeType = decltype(compute_type);
-    
+
     using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 
     ck::profiler::bwd_data::print_instances<NDimSpatial,
-                                    InLayout,
-                                    WeiLayout,
-                                    OutLayout,
-                                    InDataType,
-                                    WeiDataType,
-                                    OutDataType,
-                                    PassThrough,
-                                    PassThrough,
-                                    PassThrough,
-                                    ComputeType>();
+                                            InLayout,
+                                            WeiLayout,
+                                            OutLayout,
+                                            InDataType,
+                                            WeiDataType,
+                                            OutDataType,
+                                            PassThrough,
+                                            PassThrough,
+                                            PassThrough,
+                                            ComputeType>();
 }
 
 void print_bwd_data_instances(auto data_type, auto layout, auto num_dim_spatial)
@@ -107,76 +107,92 @@ void print_bwd_data_instances(auto data_type, auto layout, auto num_dim_spatial)
         {
             if(data_type == ConvDataType::F32_F32_F32)
             {
-                return print_available_instances(I2, GNHWC{}, GKYXC{}, GNHWK{}, F32{}, F32{}, F32{}, F32{});
+                return print_available_instances(
+                    I2, GNHWC{}, GKYXC{}, GNHWK{}, F32{}, F32{}, F32{}, F32{});
             }
             else if(data_type == ConvDataType::F16_F16_F16)
             {
-                return print_available_instances(I2, GNHWC{}, GKYXC{}, GNHWK{}, F16{}, F16{}, F16{}, F16{});
+                return print_available_instances(
+                    I2, GNHWC{}, GKYXC{}, GNHWK{}, F16{}, F16{}, F16{}, F16{});
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
-                return print_available_instances(I2, GNHWC{}, GKYXC{}, GNHWK{}, BF16{}, BF16{}, BF16{}, BF16{});
+                return print_available_instances(
+                    I2, GNHWC{}, GKYXC{}, GNHWK{}, BF16{}, BF16{}, BF16{}, BF16{});
             }
             else if(data_type == ConvDataType::F32_F32_F32_TF32)
             {
-                return print_available_instances(I2, GNHWC{}, GKYXC{}, GNHWK{}, F32{}, F32{}, F32{}, TF32{});
+                return print_available_instances(
+                    I2, GNHWC{}, GKYXC{}, GNHWK{}, F32{}, F32{}, F32{}, TF32{});
             }
         }
         else if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
         {
             if(data_type == ConvDataType::F32_F32_F32)
             {
-                return print_available_instances(I2, NHWGC{}, GKYXC{}, NHWGK{}, F32{}, F32{}, F32{}, F32{});
+                return print_available_instances(
+                    I2, NHWGC{}, GKYXC{}, NHWGK{}, F32{}, F32{}, F32{}, F32{});
             }
             else if(data_type == ConvDataType::F16_F16_F16)
             {
-                return print_available_instances(I2, NHWGC{}, GKYXC{}, NHWGK{}, F16{}, F16{}, F16{}, F16{});
+                return print_available_instances(
+                    I2, NHWGC{}, GKYXC{}, NHWGK{}, F16{}, F16{}, F16{}, F16{});
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
-                return print_available_instances(I2, NHWGC{}, GKYXC{}, NHWGK{}, BF16{}, BF16{}, BF16{}, BF16{});
+                return print_available_instances(
+                    I2, NHWGC{}, GKYXC{}, NHWGK{}, BF16{}, BF16{}, BF16{}, BF16{});
             }
             else if(data_type == ConvDataType::F32_F32_F32_TF32)
             {
-                return print_available_instances(I2, NHWGC{}, GKYXC{}, NHWGK{}, F32{}, F32{}, F32{}, TF32{});
+                return print_available_instances(
+                    I2, NHWGC{}, GKYXC{}, NHWGK{}, F32{}, F32{}, F32{}, TF32{});
             }
         }
         else if(layout == ConvLayout::NGCHW_GKYXC_NGKHW)
         {
             if(data_type == ConvDataType::F32_F32_F32)
             {
-                return print_available_instances(I2, NGCHW{}, GKYXC{}, NGKHW{}, F32{}, F32{}, F32{}, F32{});
+                return print_available_instances(
+                    I2, NGCHW{}, GKYXC{}, NGKHW{}, F32{}, F32{}, F32{}, F32{});
             }
             else if(data_type == ConvDataType::F16_F16_F16)
             {
-                return print_available_instances(I2, NGCHW{}, GKYXC{}, NGKHW{}, F16{}, F16{}, F16{}, F16{});
+                return print_available_instances(
+                    I2, NGCHW{}, GKYXC{}, NGKHW{}, F16{}, F16{}, F16{}, F16{});
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
-                return print_available_instances(I2, NGCHW{}, GKYXC{}, NGKHW{}, BF16{}, BF16{}, BF16{}, BF16{});
+                return print_available_instances(
+                    I2, NGCHW{}, GKYXC{}, NGKHW{}, BF16{}, BF16{}, BF16{}, BF16{});
             }
             else if(data_type == ConvDataType::F32_F32_F32_TF32)
             {
-                return print_available_instances(I2, NGCHW{}, GKYXC{}, NGKHW{}, F32{}, F32{}, F32{}, TF32{});
+                return print_available_instances(
+                    I2, NGCHW{}, GKYXC{}, NGKHW{}, F32{}, F32{}, F32{}, TF32{});
             }
         }
         else if(layout == ConvLayout::NGCHW_GKCYX_NGKHW)
         {
             if(data_type == ConvDataType::F32_F32_F32)
             {
-                return print_available_instances(I2, NGCHW{}, GKCYX{}, NGKHW{}, F32{}, F32{}, F32{}, F32{});
+                return print_available_instances(
+                    I2, NGCHW{}, GKCYX{}, NGKHW{}, F32{}, F32{}, F32{}, F32{});
             }
             else if(data_type == ConvDataType::F16_F16_F16)
             {
-                return print_available_instances(I2, NGCHW{}, GKCYX{}, NGKHW{}, F16{}, F16{}, F16{}, F16{});
+                return print_available_instances(
+                    I2, NGCHW{}, GKCYX{}, NGKHW{}, F16{}, F16{}, F16{}, F16{});
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
-                return print_available_instances(I2, NGCHW{}, GKCYX{}, NGKHW{}, BF16{}, BF16{}, BF16{}, BF16{});
+                return print_available_instances(
+                    I2, NGCHW{}, GKCYX{}, NGKHW{}, BF16{}, BF16{}, BF16{}, BF16{});
             }
             else if(data_type == ConvDataType::F32_F32_F32_TF32)
             {
-                return print_available_instances(I2, NGCHW{}, GKCYX{}, NGKHW{}, F32{}, F32{}, F32{}, TF32{});
+                return print_available_instances(
+                    I2, NGCHW{}, GKCYX{}, NGKHW{}, F32{}, F32{}, F32{}, TF32{});
             }
         }
     }
@@ -186,76 +202,92 @@ void print_bwd_data_instances(auto data_type, auto layout, auto num_dim_spatial)
         {
             if(data_type == ConvDataType::F32_F32_F32)
             {
-                return print_available_instances(I3, GNDHWC{}, GKZYXC{}, GNDHWK{}, F32{}, F32{}, F32{}, F32{});
+                return print_available_instances(
+                    I3, GNDHWC{}, GKZYXC{}, GNDHWK{}, F32{}, F32{}, F32{}, F32{});
             }
             else if(data_type == ConvDataType::F16_F16_F16)
             {
-                return print_available_instances(I3, GNDHWC{}, GKZYXC{}, GNDHWK{}, F16{}, F16{}, F16{}, F16{});
+                return print_available_instances(
+                    I3, GNDHWC{}, GKZYXC{}, GNDHWK{}, F16{}, F16{}, F16{}, F16{});
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
-                return print_available_instances(I3, GNDHWC{}, GKZYXC{}, GNDHWK{}, BF16{}, BF16{}, BF16{}, BF16{});
+                return print_available_instances(
+                    I3, GNDHWC{}, GKZYXC{}, GNDHWK{}, BF16{}, BF16{}, BF16{}, BF16{});
             }
             else if(data_type == ConvDataType::F32_F32_F32_TF32)
             {
-                return print_available_instances(I3, GNDHWC{}, GKZYXC{}, GNDHWK{}, F32{}, F32{}, F32{}, TF32{});
+                return print_available_instances(
+                    I3, GNDHWC{}, GKZYXC{}, GNDHWK{}, F32{}, F32{}, F32{}, TF32{});
             }
         }
         else if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
         {
             if(data_type == ConvDataType::F32_F32_F32)
             {
-                return print_available_instances(I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F32{}, F32{}, F32{}, F32{});
+                return print_available_instances(
+                    I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F32{}, F32{}, F32{}, F32{});
             }
             else if(data_type == ConvDataType::F16_F16_F16)
             {
-                return print_available_instances(I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F16{}, F16{}, F16{}, F16{});
+                return print_available_instances(
+                    I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F16{}, F16{}, F16{}, F16{});
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
-                return print_available_instances(I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, BF16{}, BF16{}, BF16{}, BF16{});
+                return print_available_instances(
+                    I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, BF16{}, BF16{}, BF16{}, BF16{});
             }
             else if(data_type == ConvDataType::F32_F32_F32_TF32)
             {
-                return print_available_instances(I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F32{}, F32{}, F32{}, TF32{});
+                return print_available_instances(
+                    I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F32{}, F32{}, F32{}, TF32{});
             }
         }
         else if(layout == ConvLayout::NGCHW_GKYXC_NGKHW)
         {
             if(data_type == ConvDataType::F32_F32_F32)
             {
-                return print_available_instances(I3, NGCDHW{}, GKZYXC{}, NGKDHW{}, F32{}, F32{}, F32{}, F32{});
+                return print_available_instances(
+                    I3, NGCDHW{}, GKZYXC{}, NGKDHW{}, F32{}, F32{}, F32{}, F32{});
             }
             else if(data_type == ConvDataType::F16_F16_F16)
             {
-                return print_available_instances(I3, NGCDHW{}, GKZYXC{}, NGKDHW{}, F16{}, F16{}, F16{}, F16{});
+                return print_available_instances(
+                    I3, NGCDHW{}, GKZYXC{}, NGKDHW{}, F16{}, F16{}, F16{}, F16{});
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
-                return print_available_instances(I3, NGCDHW{}, GKZYXC{}, NGKDHW{}, BF16{}, BF16{}, BF16{}, BF16{});
+                return print_available_instances(
+                    I3, NGCDHW{}, GKZYXC{}, NGKDHW{}, BF16{}, BF16{}, BF16{}, BF16{});
             }
             else if(data_type == ConvDataType::F32_F32_F32_TF32)
             {
-                return print_available_instances(I3, NGCDHW{}, GKZYXC{}, NGKDHW{}, F32{}, F32{}, F32{}, TF32{});
+                return print_available_instances(
+                    I3, NGCDHW{}, GKZYXC{}, NGKDHW{}, F32{}, F32{}, F32{}, TF32{});
             }
         }
         else if(layout == ConvLayout::NGCHW_GKYXC_NGKHW)
         {
             if(data_type == ConvDataType::F32_F32_F32)
             {
-                return print_available_instances(I3, NGCDHW{}, GKCZYX{}, NGKDHW{}, F32{}, F32{}, F32{}, F32{});
+                return print_available_instances(
+                    I3, NGCDHW{}, GKCZYX{}, NGKDHW{}, F32{}, F32{}, F32{}, F32{});
             }
             else if(data_type == ConvDataType::F16_F16_F16)
             {
-                return print_available_instances(I3, NGCDHW{}, GKCZYX{}, NGKDHW{}, F16{}, F16{}, F16{}, F16{});
+                return print_available_instances(
+                    I3, NGCDHW{}, GKCZYX{}, NGKDHW{}, F16{}, F16{}, F16{}, F16{});
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
-                return print_available_instances(I3, NGCDHW{}, GKCZYX{}, NGKDHW{}, BF16{}, BF16{}, BF16{}, BF16{});
+                return print_available_instances(
+                    I3, NGCDHW{}, GKCZYX{}, NGKDHW{}, BF16{}, BF16{}, BF16{}, BF16{});
             }
             else if(data_type == ConvDataType::F32_F32_F32_TF32)
             {
-                return print_available_instances(I3, NGCDHW{}, GKCZYX{}, NGKDHW{}, F32{}, F32{}, F32{}, TF32{});
+                return print_available_instances(
+                    I3, NGCDHW{}, GKCZYX{}, NGKDHW{}, F32{}, F32{}, F32{}, TF32{});
             }
         }
     }
@@ -267,11 +299,11 @@ void print_bwd_data_instances(auto data_type, auto layout, auto num_dim_spatial)
 
 int profile_grouped_conv_bwd_data(int argc, char* argv[])
 {
-    if (argc == 6 && std::string(argv[5]) == "--instances")
+    if(argc == 6 && std::string(argv[5]) == "--instances")
     {
-        const auto data_type               = static_cast<ConvDataType>(std::stoi(argv[2]));
-        const auto layout                  = static_cast<ConvLayout>(std::stoi(argv[3]));
-        const ck::index_t num_dim_spatial  = static_cast<ck::index_t>(std::stoi(argv[4]));
+        const auto data_type              = static_cast<ConvDataType>(std::stoi(argv[2]));
+        const auto layout                 = static_cast<ConvLayout>(std::stoi(argv[3]));
+        const ck::index_t num_dim_spatial = static_cast<ck::index_t>(std::stoi(argv[4]));
 
         print_bwd_data_instances(data_type, layout, num_dim_spatial);
         return 0;
