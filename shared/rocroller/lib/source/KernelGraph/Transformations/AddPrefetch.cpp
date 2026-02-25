@@ -314,6 +314,33 @@ namespace rocRoller
 
                 return !isLoadInLDSPathViaVGPR;
             }
+
+            std::vector<int> FindTopSetCoordOfLoadLDSTileOpsInCurrentSegment(
+                KernelGraph const& graph, int currentSegmentStart, int currentSegmentEnd)
+            {
+                auto isLoadLDSTile = graph.control.isElemType<LoadLDSTile>();
+
+                auto edgePredicate = [&](int edgeTag) {
+                    for(auto neighbour : graph.control.getNeighbours(edgeTag, GD::Downstream))
+                    {
+                        if(currentSegmentEnd == neighbour)
+                            return false;
+                    }
+                    return true;
+                };
+
+                auto topSetCoordOfLoadLDSTileOps
+                    = graph.control
+                          .depthFirstVisit(currentSegmentStart, edgePredicate, GD::Downstream)
+                          .filter(isLoadLDSTile)
+                          .map([&graph](int tag) { return getTopSetCoordinate(graph, tag); })
+                          .to<std::vector>();
+                AssertFatal(
+                    not topSetCoordOfLoadLDSTileOps.empty(),
+                    " AddPrefetch: Expected at least one LoadLDSTile in the current segment");
+
+                return topSetCoordOfLoadLDSTileOps;
+            }
         }
 
         namespace CF = rocRoller::KernelGraph::ControlGraph;
@@ -1049,6 +1076,22 @@ namespace rocRoller
                 {
                     for(auto tag : m_prefetchUnrollBodyEnds[forLoop][u])
                         graph.control.addElement(Sequence(), {tag}, {segmentBoundaries[u + 1]});
+                }
+
+                // When mixing memory operations and not prefetching LoadLDSTile ops,
+                // ensure that all LoadLDSTile operations in the current are scheduled
+                // before any prefetch load-store chains.
+                if(m_params->prefetchMixMemOps && m_params->prefetchLDSFactor == 0)
+                {
+                    const auto currentSegmentStart = segmentBoundaries[u];
+                    const auto currentSegmentEnd   = segmentBoundaries[u + 1];
+                    for(const auto topSetCoordOfLoadLDSTile :
+                        FindTopSetCoordOfLoadLDSTileOpsInCurrentSegment(
+                            graph, currentSegmentStart, currentSegmentEnd))
+                    {
+                        graph.control.addElement(
+                            Sequence(), {topSetCoordOfLoadLDSTile}, {globalLoads[0].globalChain});
+                    }
                 }
             }
 
