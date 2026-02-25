@@ -576,13 +576,16 @@ namespace TensileLite
                 idx++;
             }
         }
-        if(problem.batchMode() == 1)
-        {
-            std::cout<<"Resetting the autoGsuVal, autoWGM, autoWGMXCC\n";
+        // Resetting GSU and WGM for General Batched GEMM until Code Generator supports GSU and StreamK in General Batched GEMM
+        // This will avoid CI failures and execute this project in phased approach.       
+        //if(problem.batchMode() == 1)
+        //{
+            std::cout<<"autoGSUVal: "<<autoGsuVal<<", autoWGM: "<<autoWGM<<", autoWGMXCC: "<<autoWGMXCC<<"autoWGMXCCCHUNK: "<<autoWGMXCCCHUNK<<"\n";
+        /*    std::cout<<"Resetting the autoGsuVal, autoWGM, autoWGMXCC\n";
             gsu = autoGsuVal = 1;
             autoWGM = 1;
             autoWGMXCC = 8;
-        }
+        }*/
         bool singleWSD = false;
         if(sizeMapping.globalAccumulation == 1
            && (problemType.computeType != problemType.dType
@@ -592,8 +595,9 @@ namespace TensileLite
         // in General Batched GEMM
         if(gsu > 1 && sizeMapping.streamK == 0
            && ((singleWSD || sizeMapping.globalAccumulation == 2)
-               || (sizeMapping.globalAccumulation == 3)) && (problem.batchMode() != 1))
+               || (sizeMapping.globalAccumulation == 3)))// && (problem.batchMode() != 1))
         {
+            //std::cout << "Appending ws_d as kernel argument GSU > 1: "<<std::hex<<inputs.ws<<"\n";
             args.template append<void const*>("ws_d", (uint8_t*)inputs.ws + workspaceOffsetInByte);
             if(sizeMapping.globalAccumulation == 3)
             {
@@ -601,14 +605,16 @@ namespace TensileLite
             }
             else
             {
+                //std::cout << "Appending ws_c as kernel argument GGSU > 1: "<<std::hex<<inputs.ws<<"\n";
                 args.template append<void const*>("ws_c",
                                                   (uint8_t*)inputs.ws + workspaceOffsetInByte);
             }
         }
         else if(problemType.stridedBatched)
         {
-            if(sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel)
+            if(sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel && problem.batchMode() != 1)
             {
+                //std::cout << "Appending ws_d and ws_c as kernel argument "<<std::hex<<inputs.ws<<","<<std::hex<<inputs.ws<<"\n";
                 args.template append<void const*>("ws_d",
                                                   (uint8_t*)inputs.ws + workspaceOffsetInByte);
                 args.template append<void const*>("ws_c",
@@ -646,7 +652,9 @@ namespace TensileLite
         if(problemType.sparse)
             args.template append<unsigned char const*>("metadata", inputs.metadata);
 
-        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0)
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
+        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0 && problem.batchMode() != 1)
         {
             // Assert hardware is not null
             // For now grouped gemm is not supported and passes nullptr
@@ -669,13 +677,15 @@ namespace TensileLite
         bool skWSStride = sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel;
         // Additional check for General Batched GEMM until GSU and StreamK are supported
         // in General Batched GEMM
-        if((gsuWSStride || skWSStride) && problem.batchMode() != 1)
+        if((gsuWSStride))// || skWSStride))// && problem.batchMode() != 1)
         {
+            //std::cout << "Inside gsuStride block\n";
             size_t wsStride = startStrideCD ? d.sizes()[0] : 1;
             for(size_t i = startStrideCD; i < d.dimensions(); i++)
             {
                 args.template append<uint32_t>(concatenate_if<T_Debug>("strideW_D", i), wsStride);
                 wsStride *= d.sizes()[i];
+                //std::cout << "strideW_D " << i << ": " << wsStride << "\n";
             }
 
             wsStride = startStrideCD ? d.sizes()[0] : 1;
@@ -683,6 +693,7 @@ namespace TensileLite
             {
                 args.template append<uint32_t>(concatenate_if<T_Debug>("strideW_C", i), wsStride);
                 wsStride *= d.sizes()[i];
+                //std::cout << "strideW_C " << i << ": " << wsStride << "\n";
             }
         }
         else
@@ -1200,6 +1211,7 @@ namespace TensileLite
         // if original GSU is not -1
         if(sizeMapping.globalSplitU != -1)
         {
+            std::cout<<"Returning the sizeMapping.globalsplitU value as autoGSU: "<<sizeMapping.globalSplitU<<"\n";
             return sizeMapping.globalSplitU;
         }
 
@@ -1282,7 +1294,7 @@ namespace TensileLite
                                          size_t   autoStaggerUStrideShift,
                                          uint32_t autoGsuVal) const
     {
-        //std::cout << "Argtype in KernelArgs : " << argType << std::endl;
+        //std::cout << "AutoGSU value inside KernArgs : " << autoGsuVal << std::endl;
         if constexpr(!Legacy)
         {
             gemmCount = gemmCount & 0x3FFFFFFF;
@@ -1356,6 +1368,7 @@ namespace TensileLite
             gsuwgmrr = param.gsuwgmrr() > 0 ? param.gsuwgmrr()
                                             : sizeMapping.globalSplitUWorkGroupMappingRoundRobin;
         }
+        //std::cout << "GSU value inside KernArgs : " << gsu << std::endl;
 
         internalArg0
             = internalArg0 | ((uint32_t)gsuc << 15) | ((uint32_t)gsuwgmrr << 14) | (mask14 & gsu);
@@ -1449,8 +1462,8 @@ namespace TensileLite
         uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
         //Resetting gsu to 1 for General Batched GEMM until it is supported on the kernel side
-        if(problem.batchMode() == 1)
-            gsu = autoGsuVal = 1;
+        //if(problem.batchMode() == 1)
+        //    gsu = autoGsuVal = 1;
         if(gsu > 0)
             rv.numWorkGroups.y *= gsu;
 
@@ -1505,9 +1518,9 @@ namespace TensileLite
             {
                 // Setting the autoWGM=1, autoWGMXCC=8 and autoGsuVal=1 for General Batched GEMM until 
                 // Kernel Code Generator is enabled to handle the GSU and StreamK vairants for General Batched GEMM
-                autoWGM    = 1;
-                autoWGMXCC = 8;
-                autoGsuVal = 1;
+                //autoWGM    = 1;
+                //autoWGMXCC = 8;
+                //autoGsuVal = 1;
                 //std::cout << "Reset autoWGM: " << autoWGM << ", autoWGMXCC: " << autoWGMXCC
                 //      << ", autoGSU: " << autoGsuVal << std::endl;                
                 kernelArgs<T_Debug, false>(1,
@@ -2139,6 +2152,10 @@ namespace TensileLite
         {
             args.template append<uint32_t>("factorDim", (uint32_t)problem.getParams().factorDim());
         }
+        // Adding the batchmode kernel argument for post GSU kernel to determine 
+        // how to index the batch dimension in Strided Batch versus General Batched.
+        uint32_t batch_mode = problem.batchMode();
+        args.template append<uint32_t>("batchMode", batch_mode);
     }
 
     template <bool T_Debug>
@@ -2187,7 +2204,7 @@ namespace TensileLite
                   ? 1
                   : (problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal);
 
-        if(sizeMapping.streamK > 0)
+        if(sizeMapping.streamK > 0 && problem.batchMode() != 1)
         {
             // If using post kernel with stream-k then it is doing parallel reduciton
             // Calculate the splitting factor
@@ -2805,8 +2822,8 @@ namespace TensileLite
         auto autoGsuVal = calculateAutoGSU(problem, &hardware);
         auto gsu        = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
         //Resetting GSU to 1 for General Batched GEMM until we support this on Kernel side
-        if(problem.batchMode() == 1)
-            gsu = autoGsuVal = 1;
+        //if(problem.batchMode() == 1)
+        //    gsu = autoGsuVal = 1;
         if(gsu > 1 && sizeMapping.globalAccumulation != 2 && sizeMapping.globalAccumulation != 3)
         {
             if(debug)

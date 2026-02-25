@@ -12190,11 +12190,7 @@ class KernelWriterAssembly(KernelWriter):
       indices = list(range(0, kernel["ProblemType"]["NumIndicesC"]))
       numDim = len(indices)
       #addrSrcSgpr = "Address" # use "Address" only for the first iteration
-      addrSrcSgpr = "Srd" # Since SrdC/D are initialized with AddressC/D for non-General Batched GEMM case.
-      generalBatchedGemmLoadC = Label(label="GeneralBatchedGemmLoadC", comment="Computing the Batch Matrix's base address for General Batched GEMM")
-      generalBatchedGemmLoadC_End = Label(label="GeneralBatchedGemmLoadC_End", comment="End of label GeneralBatchedGemmLoadC")
-      generalBatchedGemmLoadD = Label(label="GeneralBatchedGemmLoadD", comment="Computing the Batch Matrix's base address for General Batched GEMM")
-      generalBatchedGemmLoadD_End = Label(label="GeneralBatchedGemmLoadD_End", comment="End of label GeneralBatchedGemmLoadD")        
+      addrSrcSgpr = "Srd" # Since SrdC/D are initialized with AddressC/D for non-General Batched GEMM case.      
       for i in range(1, numDim):
         if i == kernel["ProblemType"]["Index0"]:
           # Used if the output is transposed?
@@ -12217,9 +12213,15 @@ class KernelWriterAssembly(KernelWriter):
         assert len(srdTcList) == len(sgprBpeList)
         if addToSrd:
           for mat, sgprBpe, us in zip(srdTcList, sgprBpeList, useSize):
+            generalBatchedGemmLoad = Label(label="GeneralBatchedGemmLoad"+mat, comment="Computing the Batch Matrix's base address for General Batched GEMM")
+            generalBatchedGemmLoad_End = Label(label="GeneralBatchedGemmLoad"+mat+"_End", comment="End of label GeneralBatchedGemmLoad"+mat)
+            multipleBufferChecks = Label(label="MultipleBufferChecks"+mat, comment="Checks for MultipleBuffer/MultiBufferSingleKernel cases")
+            stridedBatchedGemmLoad = Label(label="StridedBatchedGemmLoad"+mat, comment="Computing the Batch Matrix's base address for Strided Batched GEMM")            
             bpe = self.states.bpeCinternal if mat =="Bias" else (self.states.bpeE if mat == "E" else self.states.bpeCexternal)
             bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()) if kernel["_GlobalAccumulation"] == 'MultipleBuffer' and mat =="C" else bpe
             bpe = sgpr(sgprBpe) if sgprBpe else log2(bpe)  # sgprBpe cannot be 0
+            if(kernel["GlobalSplitU"] != 0):
+              module.add(SAndB32(dst=sgpr(tmpS2), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
             # These are constant across all workitems, just add to the SRD:
             if us:
               if i == 0:
@@ -12232,12 +12234,17 @@ class KernelWriterAssembly(KernelWriter):
                 for x in range(2, i - 1):
                   strideC = "Size%s"%(INDEX_CHARS[x])
                   module.add(SMulI32(dst=sgpr(tmpS0), src0=sgpr(tmpS0), src1=sgpr(strideC)))
-                if(i == 2):
+                if(i == 2 and (mat == "C" or mat == "D")):
+                  if(kernel["GlobalSplitU"] != 0):
+                    module.add(SCmpEQU32(src0=sgpr(tmpS2), src1=1, comment="GSU == 1 ?"))
+                    module.add(SCBranchSCC0(labelName=multipleBufferChecks.getLabelName()))
                   module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-                  if(mat == "C"):
-                    module.add(SCBranchSCC1(labelName=generalBatchedGemmLoadC.getLabelName()))
-                  else:
-                    module.add(SCBranchSCC1(labelName=generalBatchedGemmLoadD.getLabelName()))                  
+                  module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))   
+                  if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
+                    module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))               
+                    module.add(multipleBufferChecks)                    
+                    module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+                    module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))                 
                 module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(tmpS0), comment="Scale%s %s by Stride"%(mat, coord)))
               else:
                 strideC = "Size%s"%(INDEX_CHARS[i-1])
@@ -12245,16 +12252,27 @@ class KernelWriterAssembly(KernelWriter):
             else:
               strideC = "Stride%s%s"%(mat, self.states.indexChars[i])
               if(i == 2 and (mat == "C" or mat == "D")):
+                if(kernel["GlobalSplitU"] != 0):
+                  module.add(SCmpEQU32(src0=sgpr(tmpS2), src1=1, comment="GSU == 1 ?"))
+                  if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
+                    module.add(SCBranchSCC0(labelName=multipleBufferChecks.getLabelName()))
+                  else:
+                    module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
                 module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-                if(mat == "C"):
-                  module.add(SCBranchSCC1(labelName=generalBatchedGemmLoadC.getLabelName()))
-                else:
-                  module.add(SCBranchSCC1(labelName=generalBatchedGemmLoadD.getLabelName()))                 
+                module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName())) 
+                                
+                if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
+                  module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))
+                  module.add(multipleBufferChecks)
+                  module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))   
+                  module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))                                
+                module.add(stridedBatchedGemmLoad)
               module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(strideC), comment="Scale%s %s by Stride"%(mat, coord)))
             module.add(SLShiftLeftB64(dst=sgpr(tmpS0,2), src=sgpr(tmpS0,2), shiftHex=bpe, comment="scale by bpe"))
             module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("%s%s+0"%(addrSrcSgpr, mat)), src1=sgpr(tmpS0), comment="add lo to SRD"))
             module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("%s%s+1"%(addrSrcSgpr, mat)), src1=sgpr(tmpS1), comment="add hi to SRD"))
             if(i == 2 and (mat == "C" or mat == "D")):
+<<<<<<< HEAD
               if(mat == "C"):
                 module.add(SBranch(labelName=generalBatchedGemmLoadC_End.getLabelName()))
                 module.add(generalBatchedGemmLoadC)
@@ -12264,16 +12282,18 @@ class KernelWriterAssembly(KernelWriter):
               #module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr("Srd%s+0"%mat), src1=sgpr("Address%s+0"%mat), comment="Deduce the offset within a batch matrix"))
               #module.add(SSubBU32(dst=sgpr(tmpS3), src0=sgpr("Srd%s+1"%mat), src1=sgpr("Address%s+1"%mat), comment="Deduce the offset within a batch matrix"))
               module.add(SMulI32(dst=sgpr(tmpS2), src0=8, src1=coord, comment="Compute stride in bytes into Pointer Array"))
+=======
+              module.add(SBranch(labelName=generalBatchedGemmLoad_End.getLabelName()))
+              module.add(generalBatchedGemmLoad)
+              module.add(SMulI32(dst=sgpr(tmpS2), src0="BpeAddress", src1=coord, comment="Compute stride in bytes into Pointer Array"))
+>>>>>>> 58d23746ce (Adding GSU support for General Batched GEMM)
               module.add(SAddU32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=sgpr("Address%s+0"%mat), comment="Offsetting to the location [Lower half of address]"))
               module.add(SAddCU32(dst=sgpr(wgMT1), src0=sgpr("Address%s+1"%mat), src1=0, comment="Offsetting to the location [Higher half of address]"))
               module.add(SMemLoadInstruction(instType=InstType.INST_B64, dst=sgpr(tmpS0, 2), base=sgpr(tmpS2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
               module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
               module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("Srd%s+0"%mat), src1=sgpr(tmpS0), comment="Offsetting within the Batch Matrix [Lower half of address]"))
               module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("Srd%s+1"%mat), src1=sgpr(tmpS1), comment="Offsetting within the Batch Matrix [Higher half of address]")) 
-              if(mat == "C"):
-                module.add(generalBatchedGemmLoadC_End)
-              else:
-                module.add(generalBatchedGemmLoadD_End)
+              module.add(generalBatchedGemmLoad_End)
           module.addSpaceLine()
 
           addrSrcSgpr = "Srd" # update src Sgpr for the second or later iterations
@@ -12385,8 +12405,8 @@ class KernelWriterAssembly(KernelWriter):
   def globalWriteWorkGroupInit(self, kernel):
     module = Module("globalWriteWorkGroupInit")
     if kernel["BufferStore"]:
-      module.add(self.allocPostLoopSrd("D"))
-      module.add(self.allocPostLoopSrd("C"))
+      module.add(self.allocPostLoopSrd("D", kernel))
+      module.add(self.allocPostLoopSrd("C", kernel))
       sgprBpeList = ["GSULog2BpeC", "GSULog2BpeD"] if kernel["GlobalSplitU"] != 0 else []
 
       # Set BPE based on reduction algorithm
@@ -12572,6 +12592,7 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
+<<<<<<< HEAD
   def shiftSrd(self, tc) -> Module:
     module = Module("shiftSrd")
     if self.states.version[:2] == (12, 5):
@@ -12587,15 +12608,29 @@ class KernelWriterAssembly(KernelWriter):
   def allocPostLoopSrd(self, ch: str):
     checkForGeneralBatchedGemm = Label(label="checkForGeneralBatchedGemm"+ch, comment="Handling General Batched GEMM SRD initialization")
     checkForGeneralBatchedGemm_End = Label(label="checkForGeneralBatchedGemm"+ch+"_End", comment="End of handling General Batched GEMM SRD initialization")    
+=======
+  def allocPostLoopSrd(self, ch: str, kernel):   
+>>>>>>> 58d23746ce (Adding GSU support for General Batched GEMM)
     module = Module("allocPostLoopSrd")
-    # Buffer-load uses one base read pointer stored in the SRD - set it here:
+    GeneralBatchedGemmSrdInitiation = Label(label="GeneralBatchedGemmSrdInitiation"+ch, comment="Handling General Batched GEMM SRD initialization")
+    GeneralBatchedGemmSrdInitiation_End = Label(label="GeneralBatchedGemmSrdInitiation"+ch+"_End", comment="End of handling General Batched GEMM SRD initialization")
+    ArgTypeCheckLabel = Label(label="ArgTypeCheck"+ch, comment="Check if ArgType is for General Batched GEMM for "+ch)
+    if(((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) and kernel["GlobalSplitU"] != 0):
+      with self.allocTmpSgpr(1) as tmpSgprGSU:
+        module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+        module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
+        module.add(SCBranchSCC1(labelName=ArgTypeCheckLabel.getLabelName(), comment="Handling General Batched GEMM SRD initialization"))
+        if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and ch == "D")):
+          module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" )) 
+          module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName(), comment="End of handling General Batched GEMM SRD initialization"))
+        module.add(ArgTypeCheckLabel)
     module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-    module.add(SCBranchSCC1(labelName=checkForGeneralBatchedGemm.getLabelName()))
+    module.add(SCBranchSCC1(labelName=GeneralBatchedGemmSrdInitiation.getLabelName()))
     module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" ))
-    module.add(SBranch(labelName=checkForGeneralBatchedGemm_End.getLabelName()))
-    module.add(checkForGeneralBatchedGemm)
+    module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName()))
+    module.add(GeneralBatchedGemmSrdInitiation)
     module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=0, comment="init SRD to 0" ))
-    module.add(checkForGeneralBatchedGemm_End)
+    module.add(GeneralBatchedGemmSrdInitiation_End)
     module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src="BufferOOB"))
     module.add(SMovB32(dst=sgpr("Srd%s+3"%ch), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
     module.add(self.shiftSrd(ch))

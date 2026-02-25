@@ -204,7 +204,10 @@ class KernelWriterConversion(KernelWriterBase):
     if self.state["ProblemType"]["GroupedGemm"]:
       kStr += "  uint32_t* wiTablePtr, void* deviceUserArgsPtr, argument_%s* argsPtr, uint32_t gemm_count)" % ( self.kernelName ) + self.endLine
     else:
-      kStr += "  argument_%s arg)" % ( self.kernelName ) + self.endLine
+      # Additional argument batch_mode is added to distinguish between Strided Batch and General Batched GEMM
+      # batch_mode will dictate how the GLOBAL_C and GLOBAL_D macros are defined and used in the kernel body
+      # since the index calculation for Strided Batch and General Batch GEMM are different.
+      kStr += "  argument_%s arg, uint32_t batch_mode)" % ( self.kernelName ) + self.endLine
 
     return kStr
 
@@ -395,11 +398,25 @@ class KernelWriterConversion(KernelWriterBase):
     ########################################
     # D index
     kStr += self.endLine
-    kStr += "  %s idxD = GLOBAL_D( (%s)" % (self.uint64Str, self.uint64Str)
+    kStr += "%s idxD, idxC;" % self.uint64Str
+    if not self.state["ProblemType"]["GroupedGemm"]:
+      kStr += "  if(batch_mode == 0)" + self.endLine
+      kStr += "  {" + self.endLine
+    kStr += "  idxD = GLOBAL_D( (%s)" % self.uint64Str
     for i in range(problemType["NumIndicesC"]):
       kStr += ', ' if i else ''
       kStr += '0'  if i in nonTileFreeIndices else ('id%d' % i)
     kStr += ");%s" % (self.endLine)
+    if not self.state["ProblemType"]["GroupedGemm"]:
+      kStr += "  }" + self.endLine
+      kStr += "  else" + self.endLine
+      kStr += "  {" + self.endLine
+      kStr += "  idxD = GLOBAL_D( (%s)" % self.uint64Str
+      for i in range(problemType["NumIndicesC"]-1):
+        kStr += ', ' if i else ''
+        kStr += '0'  if i in nonTileFreeIndices else ('id%d' % i)
+      kStr += ", 0);%s" % (self.endLine)
+      kStr += "}" + self.endLine
 
     # W index
     kStr += "  %s idxW = GLOBAL_W( (%s)" % (self.uint64Str, self.uint64Str)
@@ -409,11 +426,24 @@ class KernelWriterConversion(KernelWriterBase):
     kStr += ");%s" % (self.endLine)
 
     # C index
-    kStr += "  %s idxC = GLOBAL_C( (%s)" % (self.uint64Str, self.uint64Str)
+    if not self.state["ProblemType"]["GroupedGemm"]:
+      kStr += "  if(batch_mode == 0)" + self.endLine
+      kStr += "  {" + self.endLine    
+    kStr += "     idxC = GLOBAL_C( (%s)" % self.uint64Str
     for i in range(problemType["NumIndicesC"]):
       kStr += ', ' if i else ''
       kStr += '0'  if i in nonTileFreeIndices else ('id%d' % i)
     kStr += ");%s" % (self.endLine)
+    if not self.state["ProblemType"]["GroupedGemm"]:
+      kStr += "  }" + self.endLine
+      kStr += "  else" + self.endLine
+      kStr += "  {" + self.endLine
+      kStr += "     idxC = GLOBAL_C( (%s)" % self.uint64Str
+      for i in range(problemType["NumIndicesC"]-1):
+        kStr += ', ' if i else ''
+        kStr += '0'  if i in nonTileFreeIndices else ('id%d' % i)
+      kStr += ", 0);%s" % (self.endLine)
+      kStr += "  }" + self.endLine
 
     if self.state["ProblemType"]["UseBias"] and \
        (not self.state["ProblemType"]["Gradient"] or \
@@ -671,8 +701,19 @@ class KernelWriterConversion(KernelWriterBase):
 
     #Beta
     kStr += "  if(arg.beta != (%s)0){%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
+    if not self.state["ProblemType"]["GroupedGemm"]:
+      kStr += "  if(batch_mode == 0)" + self.endLine
+      kStr += "  {" + self.endLine
     for vIdx in range(self.num_dword_load):
       kStr += "    %s[%d] += arg.beta * (%s)arg.C[idxC+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
+    if not self.state["ProblemType"]["GroupedGemm"]:
+      kStr += "  }" + self.endLine
+      kStr += "  else" + self.endLine
+      kStr += "  {" + self.endLine
+      kStr += "    %s *ptr = *(reinterpret_cast<%s **>(arg.C + id2));" % (intermediateDataType, intermediateDataType) + self.endLine
+      for vIdx in range(self.num_dword_load):
+        kStr += "    %s[%d] += arg.beta * (%s)ptr[idxC+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
+      kStr += "  }" + self.endLine
     kStr += "  }" + self.endLine
     kStr += self.endLine
 
@@ -761,8 +802,15 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  %s[%d] = (%s)%s[%d];%s" % (resultStr, vIdx, destTypeStr, accumStr, vIdx, self.endLine)
 
     # kStr += "  *(%s *)(arg.D+idxD) = *(%s *)%s;%s" % (storeTypeStr, storeTypeStr, resultStr, self.endLine)
-    kStr += "  buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, arg.D, idxD * sizeof(%s), 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, destTypeStr, self.endLine)
-
+    if not self.state["ProblemType"]["GroupedGemm"]:
+      kStr += "  if(batch_mode == 0) {" + self.endLine
+      kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, arg.D, idxD * sizeof(%s), 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, destTypeStr, self.endLine)
+      kStr += "  } else {" + self.endLine
+      kStr += "    %s *ptr = *(reinterpret_cast<%s **>(arg.D + id2));" % (storeTypeStr, storeTypeStr) + self.endLine
+      kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, ptr, idxD * sizeof(%s), 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, destTypeStr, self.endLine)
+      kStr += "  }" + self.endLine
+    else:
+      kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, arg.D, idxD * sizeof(%s), 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, destTypeStr, self.endLine)      
     ########################################
     # end
     kStr += "}%s" % self.endLine
