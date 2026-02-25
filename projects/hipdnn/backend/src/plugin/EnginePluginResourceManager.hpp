@@ -5,7 +5,9 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -31,6 +33,15 @@ class EngineDetailsWrapper;
 class EngineExecutionContextWrapper;
 class EnginePlugin;
 class EnginePluginManager;
+
+struct EngineInfo
+{
+    std::string engineName;
+    std::string pluginName;
+    int64_t engineId;
+    std::string version;
+    std::string type;
+};
 
 class EnginePluginResourceManager
 {
@@ -84,6 +95,9 @@ public:
                                const hipdnnPluginConstData_t* engineConfig,
                                const GraphDescriptor* graphDesc);
 
+    virtual size_t getEngineCount() const;
+    virtual std::vector<EngineInfo> getEngineInfos() const;
+
     virtual void
         getLoadedPluginFiles(size_t* numPlugins, char** pluginPaths, size_t* maxStringLen) const;
 
@@ -115,6 +129,7 @@ private:
     std::shared_ptr<EnginePluginManager> _pm;
     std::unordered_map<hipdnnEnginePluginHandle_t, const EnginePlugin*> _handleToPlugin;
     std::unordered_map<int64_t, hipdnnEnginePluginHandle_t> _engineIdToHandle;
+    mutable std::optional<std::vector<EngineInfo>> _cachedEngineInfos;
 
     friend class EngineDetailsWrapper;
     friend class EngineExecutionContextWrapper;

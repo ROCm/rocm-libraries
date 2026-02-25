@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -127,9 +127,10 @@ template<typename ItemT,
          unsigned int BlockSizeX,
          int          RUNS_PER_THREAD,
          int          DECODED_ITEMS_PER_THREAD,
-         typename DecodedOffsetT = uint32_t,
-         unsigned int BlockSizeY = 1,
-         unsigned int BlockSizeZ = 1>
+         typename DecodedOffsetT                = uint32_t,
+         unsigned int            BlockSizeY     = 1,
+         unsigned int            BlockSizeZ     = 1,
+         arch::wavefront::target TargetWaveSize = arch::wavefront::get_target()>
 class block_run_length_decode
 {
 private:
@@ -144,7 +145,8 @@ private:
                                                 BlockSizeX,
                                                 rocprim::block_scan_algorithm::using_warp_scan,
                                                 BlockSizeY,
-                                                BlockSizeZ>;
+                                                BlockSizeZ,
+                                                TargetWaveSize>;
 
     /// Type used to index into the block's runs
     using RunOffsetT = uint32_t;

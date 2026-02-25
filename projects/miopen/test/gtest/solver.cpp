@@ -219,6 +219,7 @@ protected:
                                              miopen::conv::Direction::Forward};
         auto ctx = miopen::ExecutionContext{};
         ctx.SetStream(&get_handle());
+        ctx.disable_search_enforce = true;
         context_filler(ctx);
 
         const auto sol = FindSolution(ctx, problem, db_path);
