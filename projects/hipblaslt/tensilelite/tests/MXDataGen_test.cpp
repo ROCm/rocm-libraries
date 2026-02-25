@@ -146,7 +146,7 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
     std::vector<uint8_t> dataShuf(numPacked, 0);
     std::vector<uint8_t> scaleShuf(numScales, 0);
 
-    // Generate without preSwizzle (natural scale order)
+    // Generate without preSwizzle
     generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     dataNoShuf.data(),
                     scaleNoShuf.data(),
@@ -166,7 +166,7 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
                     mxBlock, 1, isMatrixA,
                     "Bounded", -1.0f, 1.0f);
 
-    // The scale buffers must be different (a non-trivial shuffle occurred)
+    // The scale buffers must be different
     EXPECT_NE(scaleNoShuf, scaleShuf)
         << "Scale data was not shuffled for " << rows << "x" << cols
         << " (transpose=" << isTranspose << ", isMatrixA=" << isMatrixA << ")";
