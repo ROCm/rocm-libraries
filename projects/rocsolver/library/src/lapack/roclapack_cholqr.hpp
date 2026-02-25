@@ -297,7 +297,7 @@ static __global__ void add_shift_kernel(const I m,
         auto const B = load_ptr_batch(BB, bid, shiftB, strideB);
 
         // note: ignore null and negative shifts
-        S const sigma = (sigma_array == nullptr) ? 0 : max(sigma_array[bid], 0);
+        S const sigma = (sigma_array == nullptr) ? S(0) : std::max(sigma_array[bid], S(0));
 
         if(sigma != 0)
         {
@@ -392,7 +392,7 @@ static void set_triangular(rocblas_handle handle,
     I const nby = std::min(max_blocks, ceil(n, ny));
     I const nbz = std::min(max_blocks, batch_count);
 
-    ROCSOLVER_LAUNCH_KERNEL((laset_kernel<T>), dim3(nbx, nby, nbx), dim3(nx, ny, 1), 0, stream, uplo,
+    ROCSOLVER_LAUNCH_KERNEL((laset_kernel<T>), dim3(nbx, nby, nbz), dim3(nx, ny, 1), 0, stream, uplo,
                             mm, nn, alpha, alpha, A, shiftA + offset, lda, strideA, batch_count);
 }
 
@@ -567,11 +567,6 @@ static rocblas_status rocsolver_cholqr1_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
-
     const T zero = T(0);
     const T one = T(1);
     const S Szero = S(0);
@@ -613,7 +608,6 @@ static rocblas_status rocsolver_cholqr1_template(rocblas_handle handle,
                                       R, shiftR, ldr, strideR, A, shiftA, lda, strideA, batch_count,
                                       optim_mem, work1, work2, work3, work4, workArr));
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 
@@ -657,11 +651,6 @@ static rocblas_status rocsolver_cholqr2_template(rocblas_handle handle,
     const T zero = T(0);
     const T one = T(1);
 
-    // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
-
     // (1) [Q,R1] = cholqr1( A )
     ROCBLAS_CHECK(rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
         handle, m, n, A, shiftA, lda, strideA, R1, 0, n, n * n, batch_count, info, scalars, work1,
@@ -682,7 +671,6 @@ static rocblas_status rocsolver_cholqr2_template(rocblas_handle handle,
                                       0, R1, 0, n, n * n, R, shiftR, ldr, strideR, batch_count,
                                       workArr));
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 
@@ -741,11 +729,6 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
     const T zero = T(0);
     const T one = T(1);
 
-    // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
-
     // (1)  R1 * R1' = A'*A + sigma * identity
     // Note: paper suggests
     // T const sigma = 11 * (m * n * ueps + (n + 1) * (n * ueps)) * gnorm
@@ -756,7 +739,7 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
     // perform CholeskQR1 with shift
     ROCBLAS_CHECK(rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
         handle, m, n, A, shiftA, lda, strideA, R1, 0, n, n * n, batch_count, info, scalars, work1,
-        work2, work3, work4, pivots, iinfo, workArr, optim_mem));
+        work2, work3, work4, pivots, iinfo, workArr, optim_mem, sigma_array));
 
     // (2)   CholQR2(Q)
     // Note: matrix Q is stored in matrix A
@@ -774,7 +757,6 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
                                       0, R1, 0, n, n * n, R, shiftR, ldr, strideR, batch_count,
                                       workArr));
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 
@@ -807,11 +789,16 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
 
 {
     // quick return
-    if(m == 0 || n == 0)
+    if(batch_count == 0)
         return rocblas_status_success;
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
+
+    // everything must be executed with scalars on the host
+    rocblas_pointer_mode old_mode;
+    rocblas_get_pointer_mode(handle, &old_mode);
+    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
 
     I blocksReset = (batch_count - 1) / BS1 + 1;
     dim3 gridReset(blocksReset, 1, 1);
@@ -824,26 +811,30 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
     if(m == 0 || n == 0)
         return rocblas_status_success;
 
+    rocblas_status status = rocblas_status_success;
     if(algo == rocsolver_alg_select1)
     {
-        return rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
+        status = rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
             handle, m, n, A, shiftA, lda, strideA, R, shiftR, ldr, strideR, batch_count, info,
             scalars, work1, work2, work3, work4, pivots, iinfo, workArr, optim_mem);
     }
     else if(algo == rocsolver_alg_select2)
     {
-        return rocsolver_cholqr2_template<BATCHED, STRIDED, T>(
+        status = rocsolver_cholqr2_template<BATCHED, STRIDED, T>(
             handle, m, n, A, shiftA, lda, strideA, R, shiftR, ldr, strideR, batch_count, info,
             scalars, work1, work2, work3, work4, pivots, iinfo, R1, workArr, optim_mem);
     }
     else
     {
         bool const compute_sigma = (algo == rocsolver_alg_select3);
-        return rocsolver_cholqr3_template<BATCHED, STRIDED, T>(
+        status = rocsolver_cholqr3_template<BATCHED, STRIDED, T>(
             handle, m, n, A, shiftA, lda, strideA, R, shiftR, ldr, strideR, compute_sigma, sigma,
             info, batch_count, scalars, work1, work2, work3, work4, pivots, iinfo, R1, workArr,
             optim_mem);
     }
+
+    rocblas_set_pointer_mode(handle, old_mode);
+    return status;
 }
 
 ROCSOLVER_END_NAMESPACE
