@@ -73,7 +73,7 @@ public:
         return capacity() < s;
     }
 
-    inline size_t get_available_host_memory()
+    size_t get_available_host_memory()
     {
 #ifdef __linux__
         struct sysinfo info;
@@ -87,7 +87,7 @@ public:
             hipblaslt_cerr << "Error getting available host memory" << std::endl;
             return 0;
         }
-#elif _WIN32
+#elif defined(_WIN32)
         MEMORYSTATUSEX memStatus = {};
         memStatus.dwLength = sizeof(memStatus);
         if(GlobalMemoryStatusEx(&memStatus))
@@ -103,8 +103,10 @@ public:
             hipblaslt_cerr << "Error getting available host memory" << std::endl;
             return 0;
         }
-#endif
+#else
+        hipblaslt_cerr << "Error getting available host memory: unsupported platform" << std::endl;
         return 0;
+#endif
     }
 
 protected:
