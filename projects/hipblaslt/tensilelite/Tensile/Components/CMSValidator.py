@@ -2147,6 +2147,16 @@ STRUCTURAL_CHECKS: dict[ValidatorPass, Callable] = {
 }
 
 
+def format_kernel_string(kernel: 'Solution') -> str:
+    """Format a human-readable description of the kernel's tile dimensions and transpose modes."""
+    mt0 = kernel.get("MacroTile0", "?")
+    mt1 = kernel.get("MacroTile1", "?")
+    du = kernel.get("DepthU", "?")
+    transA = "T" if kernel.get("TransA") else "N"
+    transB = "T" if kernel.get("TransB") else "N"
+    return f"MT0xMT1xDepthU = {mt0}x{mt1}x{du} {transA}{transB}"
+
+
 def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     """
     Return True if all the validation rules pass, False otherwise.
@@ -2161,12 +2171,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     kernel = context["kernel"]
 
     # Log disabled passes once, before iterating over code paths.
-    mt0 = kernel.get("MacroTile0", "?")
-    mt1 = kernel.get("MacroTile1", "?")
-    du = kernel.get("DepthU", "?")
-    transA = "T" if kernel.get("TransA") else "N"
-    transB = "T" if kernel.get("TransB") else "N"
-    kernel_desc = f"MT0xMT1xDepthU = {mt0}x{mt1}x{du} {transA}{transB}"
+    kernel_desc = format_kernel_string(kernel)
 
     disabled_structural = {}
     for pass_id in STRUCTURAL_CHECKS:
