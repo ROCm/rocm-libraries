@@ -1,13 +1,13 @@
 name: CI - Build and Test
 
 on:
-  # Run on push to main and gpu_thread branches
+  # Run on push to main and develop branches
   push:
-    branches: [ "main", "gpu_thread" ]
+    branches: [ "main", "develop" ]
   
-  # Run on pull requests to main and gpu_thread
+  # Run on pull requests to main and develop
   pull_request:
-    branches: [ "main", "gpu_thread" ]
+    branches: [ "main", "develop" ]
   
   # Run nightly at 5 AM UTC
   schedule:
