@@ -45,8 +45,7 @@ target_include_directories(
 )
 
 target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-hipdnn_add_dependency(fmt VERSION ${HIPDNN_FMTLIB_VERSION})
-target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk fmt::fmt)
+target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk)
 target_link_libraries(hipdnn_backend_private PRIVATE ${CMAKE_DL_LIBS})
 target_compile_definitions(hipdnn_backend_private PRIVATE HIPDNN_BACKEND_COMPILATION)
 
