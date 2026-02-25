@@ -238,7 +238,7 @@ class ScheduleInfo:
         self.snopCode = snopCode
         self._disabledPasses: dict[cmsv.ValidatorPass, str] = {}
 
-    def disablePass(self, pass_id: cmsv.ValidatorPass, reason: str) -> None:
+    def disableValidationPass(self, pass_id: cmsv.ValidatorPass, reason: str) -> None:
         """Disable a specific validator pass for this schedule.
 
         Args:
@@ -251,7 +251,12 @@ class ScheduleInfo:
             raise ValueError("Reason for disabling pass must be a non-empty string")
         self._disabledPasses[pass_id] = reason
 
-    def reasonForDisablingPass(self, pass_id: cmsv.ValidatorPass) -> Optional[str]:
+    def disableValidation(self, reason: str) -> None:
+        """Disable all validator passes for this schedule."""
+        for pass_id in cmsv.ValidatorPass:
+            self.disableValidationPass(pass_id, reason)
+
+    def reasonForDisablingValidationPass(self, pass_id: cmsv.ValidatorPass) -> Optional[str]:
         """Return the reason this pass was disabled, or None if it is enabled.
 
         Raises TypeError if pass_id is not a ValidatorPass enum member.
@@ -4153,7 +4158,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     if disable_validation:
-        opt1.disableValidation()
+        opt1.disableValidation("4x4MFMA with wider loads is not yet supported by validator")
     return True, opt1
 
 @RegisterSchedule(
@@ -4472,7 +4477,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     kernel["UseMFMAF32XEmulation"] = True
     opt1 = ScheduleInfo(num_code_paths, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     if disable_validation:
-        opt1.disableValidation()
+        opt1.disableValidation("swap instructions included in pack are not supported yet")
     return True, opt1
 
 @RegisterSchedule(
@@ -4614,7 +4619,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     kernel["UsePLRPack"] = True
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     if disable_validation:
-        opt1.disableValidation()
+        opt1.disableValidation("NN transpose with wider loads is not yet supported by validator")
     return True, opt1
 
 

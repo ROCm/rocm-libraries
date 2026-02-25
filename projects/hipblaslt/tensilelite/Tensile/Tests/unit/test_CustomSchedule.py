@@ -1118,55 +1118,72 @@ class TestCustomScheduleValidation:
         si = ScheduleInfo(1, 0, invalid_schedule, None, None, None, None)
         for p in ValidatorPass:
             if p != ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS:
-                si.disablePass(p, reason="Not relevant to this test")
+                si.disableValidationPass(p, reason="Not relevant to this test")
         status, message = isValid(si, {"kernel": kernel})
         # The ascending-order error is gone; the schedule passes the remaining enabled check.
         assert "Non-descending-order" not in message
         assert status == True
 
-    def test_disable_pass_reason_required(self):
-        """disablePass requires a non-empty reason string and a valid ValidatorPass enum member."""
+    def test_disable_validation_pass_reason_required(self):
+        """disableValidationPass requires a non-empty reason string and a valid ValidatorPass enum member."""
         si = ScheduleInfo(1, None, {}, None, None, None, None)
 
         with pytest.raises(ValueError):
-            si.disablePass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="")
+            si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="")
 
         with pytest.raises(ValueError):
-            si.disablePass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="   ")
+            si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="   ")
 
         with pytest.raises(TypeError):
-            si.disablePass("not_an_enum", reason="some reason")
+            si.disableValidationPass("not_an_enum", reason="some reason")
 
         with pytest.raises(TypeError):
-            si.disablePass(42, reason="some reason")
+            si.disableValidationPass(42, reason="some reason")
 
-    def test_disable_multiple_passes(self):
-        """Multiple passes can be disabled independently."""
+    def test_disable_multiple_validation_passes(self):
+        """Multiple validation passes can be disabled independently."""
         invalid_schedule = {"P": [[3, 2, 1]]}
         si = ScheduleInfo(1, None, invalid_schedule, None, None, None, None)
-        si.disablePass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="Reason A")
-        si.disablePass(ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS, reason="Reason B")
+        si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="Reason A")
+        si.disableValidationPass(ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS, reason="Reason B")
 
-        assert si.reasonForDisablingPass(ValidatorPass.VERIFY_ASCENDING_ORDER) == "Reason A"
-        assert si.reasonForDisablingPass(ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS) == "Reason B"
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER) == "Reason A"
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS) == "Reason B"
         # Passes not disabled return None.
-        assert si.reasonForDisablingPass(ValidatorPass.VERIFY_SCC_OVERLAP) is None
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_SCC_OVERLAP) is None
 
-    def test_reason_for_disabling_pass(self):
-        """reasonForDisablingPass returns the reason for disabled passes, None for enabled ones,
+    def test_reason_for_disabling_validation_pass(self):
+        """reasonForDisablingValidationPass returns the reason for disabled passes, None for enabled ones,
         and raises TypeError for non-enum arguments."""
         si = ScheduleInfo(1, None, {}, None, None, None, None)
 
         # Nothing disabled yet.
-        assert si.reasonForDisablingPass(ValidatorPass.VERIFY_ASCENDING_ORDER) is None
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER) is None
 
-        si.disablePass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="test reason")
-        assert si.reasonForDisablingPass(ValidatorPass.VERIFY_ASCENDING_ORDER) == "test reason"
+        si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="test reason")
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER) == "test reason"
 
         # Non-enum argument raises TypeError.
         with pytest.raises(TypeError):
-            si.reasonForDisablingPass("not_an_enum")
+            si.reasonForDisablingValidationPass("not_an_enum")
 
         with pytest.raises(TypeError):
-            si.reasonForDisablingPass(42)
+            si.reasonForDisablingValidationPass(42)
+
+    def test_disable_validation_all_passes(self):
+        """disableValidation disables all passes with the given reason."""
+        si = ScheduleInfo(1, None, {}, None, None, None, None)
+        si.disableValidation("entire schedule unsupported")
+
+        for p in ValidatorPass:
+            assert si.reasonForDisablingValidationPass(p) == "entire schedule unsupported"
+
+    def test_disable_validation_isvalid_early_return(self):
+        """isValid returns (True, '') with a single warning when all passes are disabled."""
+        kernel = create_base_kernel()
+        si = ScheduleInfo(1, 0, {}, None, None, None, None)
+        si.disableValidation("not supported yet")
+        status, message = isValid(si, {"kernel": kernel})
+        assert status == True
+        assert message == ""
 

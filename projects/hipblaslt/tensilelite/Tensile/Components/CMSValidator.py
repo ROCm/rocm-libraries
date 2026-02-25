@@ -2173,15 +2173,23 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     # Log disabled passes once, before iterating over code paths.
     kernel_desc = format_kernel_string(kernel)
 
+    # Check if ALL passes are disabled — single warning + early return
+    all_disabled_reasons = {p: scheduleInfo.reasonForDisablingValidationPass(p) for p in ValidatorPass}
+    if all(all_disabled_reasons.values()):
+        reasons = set(all_disabled_reasons.values())
+        reason_str = "; ".join(reasons)
+        printWarning(f"All validation passes disabled on {kernel_desc}: {reason_str}")
+        return True, ""
+
     disabled_structural = {}
     for pass_id in STRUCTURAL_CHECKS:
-        if reason := scheduleInfo.reasonForDisablingPass(pass_id):
+        if reason := scheduleInfo.reasonForDisablingValidationPass(pass_id):
             disabled_structural[pass_id] = reason
             printWarning(f"Skipping {pass_id.name} on {kernel_desc}: {reason}")
 
     disabled_timeline = {}
     for pass_id in TIMELINE_PASSES:
-        if reason := scheduleInfo.reasonForDisablingPass(pass_id):
+        if reason := scheduleInfo.reasonForDisablingValidationPass(pass_id):
             disabled_timeline[pass_id] = reason
             printWarning(f"Skipping {pass_id.name} on {kernel_desc}: {reason}")
 
