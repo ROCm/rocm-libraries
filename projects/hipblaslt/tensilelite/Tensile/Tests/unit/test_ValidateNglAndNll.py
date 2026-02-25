@@ -22,12 +22,14 @@
 
 from rocisa.instruction import SWaitCnt, SBarrier
 
-from Tensile.Components.CMSValidator import verify_grs_finish_before_lrs, verify_lrs_finished_before_vmfma
+from Tensile.Components.CMSValidator import (
+    add_local_read_constraints, add_gr_finish_before_lr_constraints,
+)
 from cms_validation_base import CMSValidationTestBase
 
+
 class TestValidateNgl(CMSValidationTestBase):
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_grs_finish_before_lrs(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_gr_finish_before_lr_constraints]
 
     def make_simple_schedule_and_sync(self) -> tuple[dict[str, list[list[int]]], list[SWaitCnt | SBarrier]]:
         """
@@ -82,8 +84,7 @@ class TestValidateNgl(CMSValidationTestBase):
         self.validate(optSchedule, syncCode, 1, shift_value, shift_value, 0, None)
 
 class TestValidateNll(CMSValidationTestBase):
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_lrs_finished_before_vmfma(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints]
 
     def test_lr0_swait_depends_on_lr1(self):
         """
