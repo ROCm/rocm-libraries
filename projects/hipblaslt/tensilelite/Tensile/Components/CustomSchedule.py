@@ -2321,6 +2321,44 @@ def _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS):
             SBarrier(comment=""),
         ]
         nglshift = nllshift = 15
+    elif isNN(kernel) and useLDSTr and TLDS == 1:
+        optSchedule = {
+            'SYNC': [[  -1,6,
+                        23,23,
+                        55,55,
+                        94,
+                    ]],
+            'GRIncA': [[0,1,2,3,4,5,6,7,8]],
+            'GRIncB': [[9,10,11,12,13,14,15,16,17]],
+            'LRA0': [[0,1,2,3,4,5,6,7,8,9,10,11,12,13]],
+            'GRA': [[23,23,27,27,32,32,37,37,42,42,46,46,51,51],
+                    [25,25,29,29,34,34,39,39,44,44,48,48,53,53]],
+            'LRB0': [[23,27,32,37,42,46,51,54],
+                     [25,29,34,39,44,48,53,54]],
+            
+            'LWSA': [[87],[86]],
+            'LWSB': [[90],[89]],
+            'LRA1': [[57,57,61,61,65,65,75,75,81,81,87,90,96,96],
+                     [55,55,59,59,63,63,69,69,79,79,86,89,94,94]],                     
+            'GRB': [[56,56, 60,60, 70,70, 80,80, 90,92, 100,100, 106,106, 109,109],
+                    [58,58, 62,62, 72,72, 82,82, 91,93, 101,101, 107,107, 110,110]],                    
+            'LRB1': [[91,92,97,100,102,103,106,109]],
+            'LRSA': [[54]],
+            'LRSB': [[54]],
+            'LCC': [[109,110]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for 8-5 local reads // oldleft=8, completed=3"),
+            SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for 11-6 local reads // oldleft=5, new=6, completed=5"),
+            SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1,  comment="wait for prior global reads and local reads // oldleft=6, new=8, completed=14"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=7, vscnt=-1,  comment="wait for prior global reads and local reads // oldleft=0, new=8, completed=8"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for 14-5 local reads // oldleft=0, new=14, completed=9"),
+        ]
+
+        nglshift = nllshift = 15    
     else:
         return False, None
 

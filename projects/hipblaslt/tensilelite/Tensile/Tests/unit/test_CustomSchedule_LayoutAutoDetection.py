@@ -227,7 +227,7 @@ class TestLayoutAutoDetection:
             "_get_schedule_256x208x64_16bit": ["NN", "TN"],
             "_get_schedule_192x128x64_16bit": ["TN"],
             "_get_schedule_224x128x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_224x256x64_16bit": ["NT", "TN"],
+            "_get_schedule_224x256x64_16bit": ["NN", "NT", "TN"],
             "_get_schedule_192x320x64_16bit": ["NN", "NT", "TN"],
             "_get_schedule_256x224x64_16bit": ["NN", "NT", "TN"],
             "_get_schedule_320x192x64_16bit": ["NN", "NT", "TN"],
