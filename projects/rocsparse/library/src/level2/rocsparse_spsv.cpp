@@ -232,6 +232,7 @@ namespace rocsparse
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         case rocsparse_format_coo_aos:
         {
             // LCOV_EXCL_START

@@ -3192,7 +3192,7 @@ def _get_schedule_128x192x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 192, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(128, 192, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -3258,7 +3258,7 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(192, 256, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(192, 256, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -3403,7 +3403,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
         }
 
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
-    elif isNN(kernel) and TLDS==1:
+    elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
@@ -3588,7 +3588,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 192, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(256, 192, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -3685,7 +3685,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
 
-    elif isNN(kernel) and TLDS==1:
+    elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
         
@@ -3868,7 +3868,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 256, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(256, 256, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -4007,7 +4007,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(192, 128, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(192, 128, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -4095,7 +4095,7 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 128, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(128, 128, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -4238,7 +4238,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         lwsa   = [                                                                          20] # use delay before mfma4x4x4
         lwsb   = [                                                                          20]
         
-    elif isNN(kernel) and TLDS==1  and kernel["VectorWidthA"] == 2:
+    elif isNN(kernel) and TLDS==1  and kernel["VectorWidthA"] == 2 and False: # force disable this kernel due to test fail (TODO: re-enable it)
         disable_validation = True # swap instructions included in pack are not supported yet
 
         lra0   = [0,0,0,0,
@@ -4471,7 +4471,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
 
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 256, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(128, 256, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -4881,7 +4881,7 @@ def _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS):
 
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 128, 32, 2, 0, 1, False, 0, 0),
+    tile_config=TileConfig(256, 128, 32, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -4894,6 +4894,8 @@ def _get_schedule_256x128x32_TF32(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
 
     if isTN(kernel) and useLDSTr and TLDS==1:
+        kernel["UseMFMAF32XEmulation"] = False
+        kernel["UseDot2F32XEmulation"] = False
         kernel["UsePLRPack"] = True
         numPackInstr = 24 
         numPackIndices = numPackInstr // 2 # Assign 2 pack instructions per mfma index
