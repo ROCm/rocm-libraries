@@ -156,8 +156,11 @@ namespace rocRoller
             connections.push_back(DC<SubDimension>(sdimX, 0));
             connections.push_back(DC<SubDimension>(sdimY, 1));
 
-            auto numTilesX = tileCeilDivide(numPTTilesX * literal(sizePTTileX), tile.sizes[0]);
-            auto numTilesY = tileCeilDivide(numPTTilesY * literal(sizePTTileY), tile.sizes[1]);
+            // TODO: Audit scale-pretile and pretile-b paths to make
+            // this intuitive.  Consider renaming the numPTTilesX/Y
+            // variables.
+            auto numTilesX = tileCeilDivide(numPTTilesX, tile.sizes[0]);
+            auto numTilesY = tileCeilDivide(numPTTilesY, tile.sizes[1]);
 
             auto nX = graph.coordinates.addElement(tile.tileNumber(0, numTilesX));
             auto nY = graph.coordinates.addElement(tile.tileNumber(1, numTilesY));

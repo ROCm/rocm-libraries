@@ -264,11 +264,45 @@ namespace rocRoller
 
                 if(subTile)
                 {
+                    // A is MxK and TransposeType::T (row-major),
+                    // therefore: M is slow, K is fast.
+                    //
+                    // Let K' = K/32.
+                    //
+                    // Let AScale be MxK'.  Let T_M and T_K be the
+                    // pre-tile sizes.
+                    //
+                    // Then pre-tiled AScale is; slow-to-fast:
+                    //
+                    //   tileM * ((K / T_K) * T_M * T_K) + tileK * (T_M * T_K) + m * T_K + k
+                    //
+                    // Therefore: strides = {(K' / T_K) * T_M * T_K, T_M * T_K, T_K, 1};
+                    //
+                    // B is KxN and TransposeType::N (col-major),
+                    // therefore: K is fast, N is slow.
+                    //
+                    // Let BScale be K'xN.  Let T_K and T_N be the
+                    // pre-tile sizes.
+                    //
+                    // Then pre-tiled BScale is; slow-to-fast:
+                    //
+                    //   tileN * ((K // T_N) * T_N * T_K) + tileK * (T_N * T_K) + n * T_K + k
+                    //
+                    // Therefore: strides = {T_N * T_K, (K' / T_N) * T_N * T_K, 1, T_K};
+                    //
+                    // Then pre-tiled B is; slow-to-fast:
+                    //
+                    //   tileN * ((K // T_N) * T_N * T_K) + tileK * (T_N * T_K) + n * T_K + k
+                    //
+                    // Therefore: strides = {T_N * T_K, (K / T_N) * T_N * T_K, 1, T_K};
+
+                    auto const strideDataType = DataType::UInt32;
+
                     auto sizes   = subTile->tileDimensions();
-                    auto strides = std::vector<size_t>{1, sizes[0]};
+                    auto strides = std::vector<uint32_t>{1, static_cast<uint32_t>(sizes[0])};
                     if(subTile->isTranspose())
                     {
-                        strides = {sizes[1], 1};
+                        strides = {static_cast<uint32_t>(sizes[1]), 1};
                     }
 
                     dims.push_back(m_graph.coordinates.addElement(
@@ -279,6 +313,73 @@ namespace rocRoller
                         SubDimension(dims.size(),
                                      Expression::literal(sizes[1]),
                                      Expression::literal(strides[1]))));
+
+                    // TODO: Audit pretile-scale and pretile-B paths
+                    // to make this intuitive.  Ideally the unit tests
+                    // and client would not have to muck around with
+                    // strides.
+
+                    // Update pre-existing dims
+                    // AssertFatal(dims.size() == 4);
+
+                    // auto sdim0 = m_graph.coordinates.get<SubDimension>(dims[0]).value();
+                    // auto sdim1 = m_graph.coordinates.get<SubDimension>(dims[1]).value();
+
+                    // if(subTile->isTranspose())
+                    // {
+                    //     auto T_M = Expression::literal(sizes[0], strideDataType);
+                    //     auto T_K = Expression::literal(sizes[1], strideDataType);
+                    //     sdim0.size   = sdim0.size / T_M;
+                    //     sdim1.size   = sdim1.size / T_K;
+                    //     sdim0.stride = (sdim1.size / T_K) * T_M * T_K;
+                    //     sdim1.stride = T_M * T_K;
+                    // }
+                    // else
+                    // {
+                    //     auto T_K = Expression::literal(sizes[0], strideDataType);
+                    //     auto T_N = Expression::literal(sizes[1], strideDataType);
+                    //     sdim0.size   = sdim0.size / T_K;
+                    //     sdim1.size   = sdim1.size / T_N;
+                    //     sdim0.stride = T_N * T_K;
+                    //     sdim1.stride = (sdim0.size / T_N) * T_N * T_K;
+                    // }
+
+                    // auto isDynamicStride = [&](size_t i) {
+                    //     auto rv = not(literalStrides.size() > i && literalStrides[i] > 0);
+                    //     Log::debug("isDynamicStride({}): {} {}",
+                    //                i,
+                    //                rv,
+                    //                literalStrides.size() > i ? ShowValue(literalStrides[i])
+                    //                                          : "N/A");
+                    //     //return rv;
+                    //     return false;
+                    // };
+
+                    //
+                    // TODO: The tensors for scaling data are created
+                    // with literal strides.  We don't want to update
+                    // them (currently).  This should be cleaned up.
+                    //
+                    // Ideally we want:
+                    //
+                    //   m_graph.coordinates.setElement(dims[0], sdim0);
+                    //   m_graph.coordinates.setElement(dims[1], sdim1);
+                    //
+                    // instead of guarding these updates with `isDynamicStride`.
+                    //
+                    // if(isDynamicStride(0))
+                    //     m_graph.coordinates.setElement(dims[0], sdim0);
+                    // if(isDynamicStride(1))
+                    //     m_graph.coordinates.setElement(dims[1], sdim1);
+
+                    // for(int i = 0; i < 4; ++i)
+                    // {
+                    //     auto sdim = m_graph.coordinates.get<SubDimension>(dims[i]).value();
+                    //     Log::debug("SubDimension {}: size={}, stride={}",
+                    //                i,
+                    //                toString(sdim.size),
+                    //                toString(sdim.stride));
+                    // }
                 }
 
                 auto tiled = m_graph.coordinates.addElement(MacroTile(tload.getTag(), dims.size()));

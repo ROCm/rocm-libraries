@@ -824,6 +824,9 @@ def test_gemm_options(tmp_path):
     assert float(mean) == mean_C
     assert float(std_dev) == std_dev_C
 
+    post = run_and_load_example_problem_yaml([gemm, "--pretileB", "44", "55"])
+    assert post["pretileB"] == [44, 55]
+
 
 def test_gemm_generate_from_example(tmp_path):
     """GEMM 'generate' from the output of 'example'."""
