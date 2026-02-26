@@ -62,15 +62,15 @@ public:
     static constexpr bool use_graphs = Params::use_graphs;
 };
 
-using HipcubDeviceScanTestsParams
-    = ::testing::Types<DeviceScanParams<int, long>,
-                       DeviceScanParams<unsigned long long, unsigned long long, hipcub::Min>,
-                       DeviceScanParams<unsigned long>,
-                       DeviceScanParams<short, float, hipcub::Max>,
-                       DeviceScanParams<int, double>,
-                       DeviceScanParams<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max>,
-                       DeviceScanParams<test_utils::half, test_utils::half, hipcub::Max>,
-                       DeviceScanParams<int, long, hipcub::Sum, int, true>>;
+using HipcubDeviceScanTestsParams = ::testing::Types<
+    DeviceScanParams<int, long>,
+    DeviceScanParams<unsigned long long, unsigned long long, test_utils::minimum>,
+    DeviceScanParams<unsigned long>,
+    DeviceScanParams<short, float, test_utils::maximum>,
+    DeviceScanParams<int, double>,
+    DeviceScanParams<test_utils::bfloat16, test_utils::bfloat16, test_utils::maximum>,
+    DeviceScanParams<test_utils::half, test_utils::half, test_utils::maximum>,
+    DeviceScanParams<int, long, hipcub::Sum, int, true>>;
 
 // use float for accumulation of bfloat16 and half inputs if operator is plus
 template<typename input_type, typename input_op_type>

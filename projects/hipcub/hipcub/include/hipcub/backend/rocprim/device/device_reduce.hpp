@@ -46,6 +46,8 @@
 #include <hip/hip_bfloat16.h> // hip_bfloat16
 #include <hip/hip_fp16.h> // __half
 
+#include _HIPCUB_LIBCXX_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(functional)
 #include _HIPCUB_STD_INCLUDE(limits)
 
 #include <iterator>
@@ -271,7 +273,11 @@ public:
                       d_in,
                       d_out,
                       num_items,
-                      ::hipcub::Min(),
+#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
+                      _HIPCUB_LIBCXX::minimum<>{},
+#else
+                      [] (auto a, auto b) { return a > b ? b : a;},
+#endif
                       detail::get_max_value<T>(),
                       stream);
     }
@@ -388,7 +394,11 @@ public:
                       d_in,
                       d_out,
                       num_items,
-                      ::hipcub::Max(),
+#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
+                      _HIPCUB_LIBCXX::maximum<>{},
+#else
+                      [] (auto a, auto b) { return a > b ? a : b;},
+#endif
                       detail::get_lowest_value<T>(),
                       stream);
     }

@@ -263,10 +263,10 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
 
             // Calculate expected results on host using the same accumulator type than on device
             using Min    = typename MinSelector<T, U>::type; // For custom_type_test tests
-            using AccumT = hipcub::detail::accumulator_t<hipcub::Min, T, U>;
+            using AccumT = hipcub::detail::accumulator_t<test_utils::minimum, T, U>;
             Min    min_op;
             AccumT tmp_result = test_utils::numeric_limits<
-                AccumT>::max(); // hipcub::Min uses as initial type the input type
+                AccumT>::max(); // test_utils::minimum uses as initial type the input type
             for(unsigned int i = 0; i < input.size(); i++)
             {
                 tmp_result = min_op(tmp_result, input[i]);
@@ -377,7 +377,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMaximum)
 
             // Calculate expected results on host using the same accumulator type than on device
             using Max    = typename MaxSelector<T, U>::type; // For custom_type_test tests
-            using AccumT = hipcub::detail::accumulator_t<hipcub::Max, T, U>;
+            using AccumT = hipcub::detail::accumulator_t<test_utils::maximum, T, U>;
             Max    max_op;
             AccumT tmp_result = test_utils::numeric_limits<AccumT>::min();
             for(unsigned int i = 0; i < input.size(); i++)

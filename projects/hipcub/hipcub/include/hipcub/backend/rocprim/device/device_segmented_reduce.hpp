@@ -42,6 +42,8 @@
 #include <rocprim/device/device_segmented_reduce.hpp> // IWYU pragma: export
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 
+#include _HIPCUB_LIBCXX_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(functional)
 #include _HIPCUB_STD_INCLUDE(limits)
 
 #include <chrono>
@@ -312,7 +314,11 @@ struct DeviceSegmentedReduce
                       num_segments,
                       d_begin_offsets,
                       d_end_offsets,
-                      ::hipcub::Min(),
+#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
+                      _HIPCUB_LIBCXX::minimum<>{},
+#else
+                      [] (auto a, auto b) { return a > b ? b : a;},
+#endif
                       _HIPCUB_STD::numeric_limits<input_type>::max(),
                       stream);
     }
@@ -424,7 +430,11 @@ struct DeviceSegmentedReduce
                       num_segments,
                       d_begin_offsets,
                       d_end_offsets,
-                      ::hipcub::Max(),
+#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
+                      _HIPCUB_LIBCXX::maximum<>{},
+#else
+                      [] (auto a, auto b) { return a > b ? a : b;},
+#endif
                       _HIPCUB_STD::numeric_limits<input_type>::lowest(),
                       stream);
     }
