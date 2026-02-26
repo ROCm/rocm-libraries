@@ -45,7 +45,7 @@ void Driver::AddHipGraphFlag(InputFlags& inflags)
 #if MIOPEN_BACKEND_HIP
     inflags.AddInputFlag(
         "use_hip_graph",
-        'Q',
+        'J',
         "0",
         "Use HIP stream capture/graph replay for steady-state iterations (HIP only). "
         "0: disabled (default), 1: enabled.",
