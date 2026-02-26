@@ -59,10 +59,6 @@ project_map = {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
         "projects_to_test": ["hipfft", "rocfft"],
     },
-    "rocwmma": {
-        "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
-        "projects_to_test": ["rocwmma"],
-    },
 }
 
 # For certain math components, they are optional during building and testing.
@@ -110,8 +106,14 @@ additional_options = {
     "hipblaslt-provider": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPBLASLT_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
         ],
         "projects_to_test": ["hipblaslt_plugin"],
+        "project_to_add": "blas",
+    },
+    "rocwmma": {
+        "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
+        "projects_to_test": ["rocwmma"],
         "project_to_add": "blas",
     },
 }

@@ -135,4 +135,12 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR,
 
+    /**
+     * @brief Tensor descriptor
+     *
+     * Represents a tensor with dimensions, strides, data type,
+     * and optional pass-by-value data.
+     */
+    HIPDNN_BACKEND_TENSOR_DESCRIPTOR,
+
 } hipdnnBackendDescriptorType_t;

@@ -62,6 +62,8 @@ TEST(TestFillTensorFromFile, Valid)
     }
 }
 
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 TEST(TestLoadGraphAndTensors, Valid)
 {
     SKIP_IF_NO_DEVICES();
@@ -159,4 +161,7 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
         }
     }
 }
+
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 }
