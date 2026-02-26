@@ -258,57 +258,42 @@ __forceinline__ __device__ void dpp_interleaved_reduction_welford(volatile Float
     FloatAccum count_mult;
     FloatAccum n_rcp;
 
+    // Disabling clang-format within this function, otherwise
+    // the indentation gets very messy
+
+    // clang-format off
+    #define REDUCTION_STEP(dpp) \
+            /* 1 */ "v_add_f32 %4 -%0 %0 " dpp "\n" /* store the deltas of the means, that's a scratch register we'll need for the math. Multiply src0 by -1 to get the proper sign of the delta. Note: the first delta will be incorrect! Will be non-zero! */ \
+            /* 2 */ "v_mul_f32 %0 %0 %2\n" /* calculate mean times count */ \
+            /* 3 */ "v_mul_f32 %3 %2 %2 " dpp "\n" /* get n_a * n_b */ \
+            /* 4 */ "v_mul_f32 %4 %4 %4\n" /* square deltas, we need those for the variance calculation; this is put here in place of a NOP due to dependency between 2 and 5*/ \
+            /* 5 */ "v_add_f32 %0 %0 %0 " dpp "\n" /* merge mean times count */ \
+            /* 6 */ "v_add_f32 %2 %2 %2 " dpp "\n" /* sum up the new counts that correspond to the new mean times count values*/ \
+            /* 7 */ "v_rcp_f32 %5 %2\n" /* prepare for division by n_a + n_b possibly also do v_div_scale_f32?*/ \
+            /* 8 */ "v_cmp_eq_f32 vcc %2 0\n"/* Idea: move 0 if %2 is zero for specific lanes -- for the mean, the variance and the count */\
+            /* 9 */ "v_cndmask_b32_e64 %5 %5 %2 vcc\n" \
+            /*10 */ "v_mul_f32 %0 %0 %5\n"/* normalize mean; %5 is 1/(n_a + n_b), it's the updated counts */ \
+            /*11 */ "v_add_f32 %1 %1 %1 " dpp "\n" /* part of the variance calculation -- sum up the two partitions, add the deltas in the next steps */ \
+            /*12 */ "v_mul_f32 %5 %3 %5\n"\
+            /*13 */ /* NOP is not necessary here, it's needed when the first instruction is non-DPP and the second one is, thus there should be no dependency between 11 and 14 or data corruption risk between 12 and 14 */ \
+            /*14 */ "v_fma_f32 %1 %4 %5 %1\n" /* %4, %5 and %1 should already have been properly offset with the required number of lanes for the reduciton */ \
+            /*15 */ "v_nop\n"\
+            /*16 */ "v_nop\n"/* NOPs necessary because the next instr needs %4 and has DPP, dependency between 14 and 1 */\
+            
     __asm__ volatile(
         "s_nop 4\n"
+        REDUCTION_STEP("row_shr:1 bound_ctrl:0")
+        REDUCTION_STEP("row_shr:2 bound_ctrl:0")
+        REDUCTION_STEP("row_shr:4 bank_mask:0xe")
+        REDUCTION_STEP("row_shr:8 bank_mask:0xc")
+        REDUCTION_STEP("row_bcast:15 row_mask:0xa")
+        REDUCTION_STEP("row_bcast:31 row_mask:0xc")
 
-#define REDUCTION_STEP(dpp)                                                                        \
-    \ 
-            /* 1 */                                                                                \
-        "v_add_f32 %4 -%0 %0 " dpp                                                                 \
-        "\n" /* store the deltas of the means, that's a scratch register we'll need for the math.  \
-                Multiply src0 by -1 to get the proper sign of the delta. Note: the first delta     \
-                will be incorrect! Will be non-zero! */                                            \
-        /* 2 */ "v_mul_f32 %0 %0 %2\n" /* calculate mean times count */ /* 3 */ "v_mul_f32 %3 %2 " \
-        "%2 " dpp                                                                                  \
-        "\n" /* get n_a * n_b */ /* 4 */ "v_mul_f32 %4 %4 %4\n" /* square deltas, we need those    \
-                                                                   for the variance calculation;   \
-                                                                   this is put here in place of a  \
-                                                                   NOP due to dependency between 2 \
-                                                                   and 5*/                         \
-        /* 5 */ "v_add_f32 %0 %0 %0 " dpp                                                          \
-        "\n" /* merge mean times count */ /* 6 */ "v_add_f32 %2 %2 %2 " dpp                        \
-        "\n" /* sum up the new counts that correspond to the new mean times count values*/ /* 7 */ \
-        "v_rcp_f32 %5 %2\n"            /* prepare for division by n_a + n_b possibly also do       \
-                                          v_div_scale_f32?*/                                       \
-        /* 8 */ "v_mul_f32 %0 %0 %5\n" /* normalize mean; %5 is 1/(n_a + n_b), it's the updated    \
-                                          counts */                                                \
-        /* 9 */ "v_add_f32 %1 %1 %1 " dpp                                                          \
-        "\n" /* part of the variance calculation -- sum up the two partitions, add the deltas in   \
-                the next steps */                                                                  \
-        /*10 */ "v_mul_f32 %5 %3 %5\n" /*11 */ /* NOP is not necessary here, it's needed when the  \
-                                                  first instruction is non-DPP and the second one  \
-                                                  is, thus there should be no dependency between 9 \
-                                                  and 12 or data corruption risk between 10 and 12 \
-                                                */                                                 \
-        /*12 */ "v_fma_f32 %1 %4 %5 %1\n"      /* %4, %5 and %1 should already have been properly  \
-                                                  offset with the required number of lanes for the \
-                                                  reduciton */                                     \
-        /*13 */ "v_nop\n" /*14 */ "v_nop\n" /* NOPs necessary because the next instr needs %4 and  \
-                                               has DPP, dependency between 12 and 1 */
 
-        REDUCTION_STEP("row_shr:1 bound_ctrl:0") REDUCTION_STEP("row_shr:2 bound_ctrl:0")
-            REDUCTION_STEP("row_shr:4 bank_mask:0xe") REDUCTION_STEP("row_shr:8 bank_mask:0xc")
-                REDUCTION_STEP("row_bcast:15 row_mask:0xa")
-                    REDUCTION_STEP("row_bcast:31 row_mask:0xc")
-
-                        ""
-        : "=v"(temp_mean),
-          "=v"(temp_var),
-          "=v"(temp_count),
-          "=v"(count_mult),
-          "=v"(delta),
-          "=v"(n_rcp)
-        : "0"(temp_mean), "1"(temp_var), "2"(temp_count), "3"(count_mult), "4"(delta), "5"(n_rcp));
+        ""
+            : "=v"(temp_mean), "=v"(temp_var), "=v" (temp_count), "=v" (count_mult), "=v" (delta), "=v" (n_rcp)
+            : "0"(temp_mean), "1"(temp_var), "2" (temp_count), "3" (count_mult), "4" (delta), "5" (n_rcp));
+    // clang-format on
 }
 
 template <typename FloatAccum, unsigned int SizeLclData>
