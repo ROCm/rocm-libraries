@@ -228,6 +228,7 @@ if(MIOPEN_TEST_WITH_MIOPENDRIVER)
     add_dependencies(check MIOpenDriver)
 endif()
 
+
 set(MIOPEN_GTEST_SUFFIX)
 set(MIOPEN_TEST_FLOAT_ARG)
 set(MIOPEN_TEST_FLOAT FALSE)
