@@ -83,14 +83,6 @@ void rocsparse_clients::configurable_event_listener::OnTestCaseStart(
 
 void rocsparse_clients::configurable_event_listener::OnTestStart(const testing::TestInfo& test_info)
 {
-#if 0
-    if(redirectOutput)
-    {
-        // Clear and redirect streams before each test
-        this->m_redirector.clear();
-        this->m_redirector.redirect();
-    }
-#endif
     if(showTestNames)
     {
         if(!showSkipped)
