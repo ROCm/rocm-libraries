@@ -70,6 +70,19 @@ enum class MyEnum
 };
 ```
 
+## Graph Operation Methods
+
+Operation methods in `Graph.hpp` (e.g., `conv_fprop`, `matmul`, `pointwise`, `batchnorm`) follow a minimal pattern: a `@brief` description and a `@see` reference to the corresponding attributes class.
+
+```cpp
+/** @brief Convolution forward pass
+ *
+ * @see ConvFpropAttributes
+ */
+```
+
+When adding a new operation to `Graph.hpp`, add a Doxygen comment following this pattern before the method declaration.
+
 ## Doxygen Comment Style
 
 - Use `/** ... */` for multi-line Doxygen comments

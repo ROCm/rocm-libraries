@@ -1438,6 +1438,10 @@ public:
         return *this;
     }
 
+    /** @brief Batch normalization forward pass for training
+     *
+     * @see BatchnormAttributes
+     */
     std::array<std::shared_ptr<TensorAttributes>, 5>
         batchnorm(std::shared_ptr<TensorAttributes> x,
                   std::shared_ptr<TensorAttributes> scale,
@@ -1480,6 +1484,10 @@ public:
         return {y, meanOut, invVarianceOut, nextRunningMean, nextRunningVariance};
     }
 
+    /** @brief Batch normalization backward pass
+     *
+     * @see BatchnormBackwardAttributes
+     */
     std::array<std::shared_ptr<TensorAttributes>, 3>
         batchnorm_backward(std::shared_ptr<TensorAttributes> dy, // NOLINT
                            std::shared_ptr<TensorAttributes> x,
@@ -1508,6 +1516,10 @@ public:
         return {dx, dscale, dbias};
     }
 
+    /** @brief Batch normalization inference
+     *
+     * @see BatchnormInferenceAttributes
+     */
     std::shared_ptr<TensorAttributes>
         batchnorm_inference(std::shared_ptr<TensorAttributes> x, // NOLINT
                             std::shared_ptr<TensorAttributes> mean,
@@ -1536,6 +1548,10 @@ public:
         return y;
     }
 
+    /** @brief Batch normalization inference with variance and epsilon tensors
+     *
+     * @see BatchnormInferenceAttributesVarianceExt
+     */
     std::shared_ptr<TensorAttributes>
         batchnorm_inference_variance_ext(std::shared_ptr<TensorAttributes> x, // NOLINT
                                          std::shared_ptr<TensorAttributes> mean,
@@ -1567,6 +1583,10 @@ public:
         return y;
     }
 
+    /** @brief Unary element-wise operation
+     *
+     * @see PointwiseAttributes
+     */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 PointwiseAttributes attributes)
 
@@ -1590,6 +1610,10 @@ public:
         return out0;
     }
 
+    /** @brief Binary element-wise operation
+     *
+     * @see PointwiseAttributes
+     */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 std::shared_ptr<TensorAttributes> in1,
                                                 PointwiseAttributes attributes)
@@ -1619,6 +1643,10 @@ public:
         return out0;
     }
 
+    /** @brief Ternary element-wise operation
+     *
+     * @see PointwiseAttributes
+     */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 std::shared_ptr<TensorAttributes> in1,
                                                 std::shared_ptr<TensorAttributes> in2,
@@ -1654,6 +1682,10 @@ public:
         return out0;
     }
 
+    /** @brief Matrix multiplication
+     *
+     * @see MatmulAttributes
+     */
     std::shared_ptr<TensorAttributes> matmul(std::shared_ptr<TensorAttributes> a,
                                              std::shared_ptr<TensorAttributes> b,
                                              MatmulAttributes attributes)
@@ -1683,6 +1715,10 @@ public:
         return c;
     }
 
+    /** @brief Convolution forward pass
+     *
+     * @see ConvFpropAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_fprop(std::shared_ptr<TensorAttributes> x,
                                                  std::shared_ptr<TensorAttributes> w,
@@ -1714,6 +1750,10 @@ public:
         return y;
     }
 
+    /** @brief Convolution data gradient (backward data)
+     *
+     * @see ConvDgradAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_dgrad(std::shared_ptr<TensorAttributes> dy,
                                                  std::shared_ptr<TensorAttributes> w,
@@ -1745,6 +1785,10 @@ public:
         return dx;
     }
 
+    /** @brief Convolution weight gradient (backward weights)
+     *
+     * @see ConvWgradAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_wgrad(std::shared_ptr<TensorAttributes> dy,
                                                  std::shared_ptr<TensorAttributes> x,
