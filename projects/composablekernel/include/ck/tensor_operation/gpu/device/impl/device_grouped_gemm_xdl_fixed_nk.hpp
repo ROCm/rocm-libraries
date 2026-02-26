@@ -313,20 +313,7 @@ struct DeviceGroupedGemm_Xdl_Fixed_NK : public DeviceGroupedGemmFixedNK<ALayout,
     using Block2ETileMap = BlockToCTileMap_KBatch_M00_N0_M01Adapt_MLoops<MPerBlock, NPerBlock>;
     using GroupedGemmBlock2ETileMap = OffsettedBlockToCTileMapMLoops<Block2ETileMap>;
 
-    // TODO: replace with GroupedGemmKernelArgument
-    struct GemmBiasTransKernelArg
-    {
-        // pointers
-        const void* a_ptr_;
-        const void* b_ptr_;
-        std::array<const void*, NumDTensor> ds_ptr_;
-        void* e_ptr_;
-
-        index_t M_, N_, K_;
-        index_t StrideA_, StrideB_;
-        std::array<index_t, NumDTensor> StrideDs_;
-        index_t StrideE_;
-    };
+    using KernelArgument = GroupedGemmKernelArgument<NumDTensor>;
 
     // Argument
     struct Argument : public BaseArgument
@@ -344,8 +331,8 @@ struct DeviceGroupedGemm_Xdl_Fixed_NK : public DeviceGroupedGemmFixedNK<ALayout,
 
             const index_t AverM = math::integer_divide_ceil(sum_of_m, group_count_);
 
-            const index_t StrideE = gemm_desc_kernel_arg_[0].StrideE_;
-            const index_t N       = gemm_desc_kernel_arg_[0].N_;
+            const index_t StrideE = gemm_desc_kernel_arg_[0].StrideE;
+            const index_t N       = gemm_desc_kernel_arg_[0].N;
 
             const auto e_grid_desc_m_n =
                 GridwiseGemm64::template MakeEGridDescriptor_M_N<ELayout, GemmSpec>(
@@ -486,7 +473,7 @@ struct DeviceGroupedGemm_Xdl_Fixed_NK : public DeviceGroupedGemmFixedNK<ALayout,
                     }
                 }
 
-                gemm_desc_kernel_arg_.push_back(GemmBiasTransKernelArg{
+                gemm_desc_kernel_arg_.push_back(KernelArgument{
                     nullptr,
                     nullptr,
                     p_ds_grid,
@@ -505,7 +492,7 @@ struct DeviceGroupedGemm_Xdl_Fixed_NK : public DeviceGroupedGemmFixedNK<ALayout,
 
             const auto e_grid_desc_sum_m_n =
                 GridwiseGemm64::template MakeEGridDescriptor_M_N<ELayout, GemmSpec>(
-                    sum_of_m, gemm_desc_kernel_arg_[0].N_, gemm_desc_kernel_arg_[0].StrideE_);
+                    sum_of_m, gemm_desc_kernel_arg_[0].N, gemm_desc_kernel_arg_[0].StrideE);
 
             const auto local_b2c_tile_map = Block2ETileMap{e_grid_desc_sum_m_n, 1};
 
@@ -519,7 +506,7 @@ struct DeviceGroupedGemm_Xdl_Fixed_NK : public DeviceGroupedGemmFixedNK<ALayout,
         BElementwiseOperation b_element_op_;
         CDEElementwiseOperation c_element_op_;
 
-        std::vector<GemmBiasTransKernelArg> gemm_desc_kernel_arg_;
+        std::vector<KernelArgument> gemm_desc_kernel_arg_;
         std::vector<Tuple<index_t, index_t>> a_mtx_mraw_kraw_;
         std::vector<Tuple<index_t, index_t>> b_mtx_nraw_kraw_;
 
@@ -546,7 +533,7 @@ struct DeviceGroupedGemm_Xdl_Fixed_NK : public DeviceGroupedGemmFixedNK<ALayout,
             for(std::size_t i = 0; i < arg.gemm_desc_kernel_arg_.size(); i++)
             {
                 const auto KPad =
-                    GridwiseGemm::CalculateKPadded(arg.gemm_desc_kernel_arg_[i].K_, arg.k_batch_);
+                    GridwiseGemm::CalculateKPadded(arg.gemm_desc_kernel_arg_[i].K, arg.k_batch_);
 
                 if(GridwiseGemm::CalculateHasMainKBlockLoop(KPad) != has_main_k_block_loop)
                 {

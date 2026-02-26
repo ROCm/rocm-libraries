@@ -273,20 +273,7 @@ struct DeviceGroupedGemm_Xdl_Multi_ABD_Fixed_NK
     using Block2ETileMap = BlockToCTileMap_KBatch_M00_N0_M01Adapt_MLoops<MPerBlock, NPerBlock>;
     using GroupedGemmBlock2ETileMap = OffsettedBlockToCTileMapMLoops<Block2ETileMap>;
 
-    struct GemmBiasTransKernelArg
-    {
-        // pointers
-        std::array<const void*, NumATensor> as_ptr_;
-        std::array<const void*, NumBTensor> bs_ptr_;
-        std::array<const void*, NumDTensor> ds_ptr_;
-        void* e_ptr_;
-
-        index_t M_, N_, K_;
-        std::array<index_t, NumATensor> StrideAs_;
-        std::array<index_t, NumBTensor> StrideBs_;
-        std::array<index_t, NumDTensor> StrideDs_;
-        index_t StrideE_;
-    };
+    using KernelArgument = GroupedGemmMultiABDKernelArgument<NumATensor, NumBTensor, NumDTensor>;
 
     // Argument
     struct Argument : public BaseArgument
@@ -395,7 +382,7 @@ struct DeviceGroupedGemm_Xdl_Multi_ABD_Fixed_NK
                     throw std::runtime_error("wrong! block_2_etile_map validation failed");
                 }
 
-                gemm_desc_kernel_arg_.push_back(GemmBiasTransKernelArg{
+                gemm_desc_kernel_arg_.push_back(KernelArgument{
                     p_as_grid,
                     p_bs_grid,
                     p_ds_grid,
@@ -414,7 +401,7 @@ struct DeviceGroupedGemm_Xdl_Multi_ABD_Fixed_NK
 
             const auto e_grid_desc_sum_m_n =
                 GridwiseGemm64::template MakeEGridDescriptor_M_N<ELayout, GemmSpec>(
-                    sum_of_m, gemm_desc_kernel_arg_[0].N_, gemm_desc_kernel_arg_[0].StrideE_);
+                    sum_of_m, gemm_desc_kernel_arg_[0].N, gemm_desc_kernel_arg_[0].StrideE);
 
             const auto local_b2c_tile_map = Block2ETileMap{e_grid_desc_sum_m_n, 1};
 
@@ -428,7 +415,7 @@ struct DeviceGroupedGemm_Xdl_Multi_ABD_Fixed_NK
         BElementwiseOperation b_element_op_;
         CDEElementwiseOperation c_element_op_;
 
-        std::vector<GemmBiasTransKernelArg> gemm_desc_kernel_arg_;
+        std::vector<KernelArgument> gemm_desc_kernel_arg_;
         std::vector<Tuple<index_t, index_t>> a_mtx_mraw_kraw_;
         std::vector<Tuple<index_t, index_t>> b_mtx_nraw_kraw_;
 
@@ -454,7 +441,7 @@ struct DeviceGroupedGemm_Xdl_Multi_ABD_Fixed_NK
 
             for(std::size_t i = 0; i < arg.gemm_desc_kernel_arg_.size(); i++)
             {
-                if(GridwiseGemm::CalculateHasMainKBlockLoop(arg.gemm_desc_kernel_arg_[i].K_) !=
+                if(GridwiseGemm::CalculateHasMainKBlockLoop(arg.gemm_desc_kernel_arg_[i].K) !=
                    has_main_k_block_loop)
                 {
                     throw std::runtime_error("wrong! not all gemm has_main_k_block_loop");
@@ -587,7 +574,7 @@ struct DeviceGroupedGemm_Xdl_Multi_ABD_Fixed_NK
         {
             if(get_warp_size() == 64)
             {
-                if(GridwiseGemm64::CalculateHasMainKBlockLoop(arg.gemm_desc_kernel_arg_[i].K_) !=
+                if(GridwiseGemm64::CalculateHasMainKBlockLoop(arg.gemm_desc_kernel_arg_[i].K) !=
                    true)
                 {
                     supported = false;
@@ -595,7 +582,7 @@ struct DeviceGroupedGemm_Xdl_Multi_ABD_Fixed_NK
             }
             else
             {
-                if(GridwiseGemm32::CalculateHasMainKBlockLoop(arg.gemm_desc_kernel_arg_[i].K_) !=
+                if(GridwiseGemm32::CalculateHasMainKBlockLoop(arg.gemm_desc_kernel_arg_[i].K) !=
                    true)
                 {
                     supported = false;
