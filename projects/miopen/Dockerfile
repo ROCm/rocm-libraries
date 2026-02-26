@@ -299,7 +299,7 @@ RUN set -x && \
     mkdir build && cd build && \
     #Get the number of threads and RAM available
     num_threads=$(nproc) && \
-    ram_gb=$(free -g | awk '/^Mem:/{print $2}') && \
+    ram_gb=$(free -g | awk '/^Mem:/{print $7}') && \
     # CK's ram req per thread is ~4 GB,
     # so limit the number of threads accordingly
     if [ "$num_threads" -le 0 ]; then \
