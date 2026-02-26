@@ -80,7 +80,6 @@ void preloadCustomKernels(SolutionCache& cache)
     mxfp4Kernel.scaleTypeB.blockColSize   = 32;
     mxfp4Kernel.scaleTypeB.preSwizzleTile = {32, 8, 4};
     mxfp4Kernel.scaleTypeB.preTile        = {8, 32};
-    mxfp4Kernel.swizzleA                  = true;
 
     SolutionIndexParameters params;
    
@@ -91,6 +90,8 @@ void preloadCustomKernels(SolutionCache& cache)
             params.streamK = streamK;
             params.tailLoops = true;
             params.workgroupMapping = workgroupMapping;
+
+            mxfp4Kernel.swizzleA = true;
 
             // 32xN kernels
             params.workgroupTile    = {32, 128, 256};
@@ -428,6 +429,18 @@ void preloadCustomKernels(SolutionCache& cache)
                     mxfp4Kernel,
                     params.workgroupTile,
                     getCoPath() / "rr_custom_kernels.co"));
+
+            // No B pre-shuffle
+            mxfp4Kernel.swizzleA    = false;
+            params.workgroupTile    = {256, 256, 256};
+            cache.addKernel(
+                mxfp4Kernel,
+                params,
+                createCustomGemmKernel(
+                    "_ZN5aiter44f4gemm_bf16_per1x32Fp4_noBpreShuffle_256x256E",
+                    mxfp4Kernel,
+                    params.workgroupTile,
+                    getCoPath() / "rr_custom_kernels.co"));
         }
     }
 }
@@ -533,6 +546,12 @@ rocblaslt_status runCustomKernel(std::shared_ptr<GemmKernel>        gemm,
     {
         std::cerr << "runCustomKernel failed: Module not loadable" << std::endl;
         return rocblaslt_status_internal_error;
+    }
+
+    if (prob.beta && *static_cast<const float*>(prob.beta) != 0)
+    {
+        std::cerr << "Kernel only supports when beta is 0" << std::endl;;
+        return rocblaslt_status_invalid_value;
     }
 
     F4GemmKernelArgs args(prob);
