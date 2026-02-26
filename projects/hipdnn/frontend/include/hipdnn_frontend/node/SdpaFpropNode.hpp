@@ -62,7 +62,16 @@ public:
                             ErrorCode::INVALID_VALUE,
                             "SdpaFpropNode: Value tensor V must be rank-4, got rank="
                                 + std::to_string(vDims.size()));
-
+HIPDNN_RETURN_IF_NE(qDims[0],
+                              kDims[0],
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFpropNode: batch size mismatch between Q and K: "
+                                  + std::to_string(qDims[0]) + " vs " + std::to_string(kDims[0]));
+          HIPDNN_RETURN_IF_NE(qDims[0],
+                              vDims[0],
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFpropNode: batch size mismatch between Q and V: "
+                                  + std::to_string(qDims[0]) + " vs " + std::to_string(vDims[0]));
         // Rule 2: head_dim: Q[-1] == K[-1]; V[-1] is independent (may differ)
         const auto headDimQ = qDims[3];
         const auto headDimK = kDims[3];
