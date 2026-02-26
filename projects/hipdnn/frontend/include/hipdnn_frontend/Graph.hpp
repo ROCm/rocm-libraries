@@ -62,6 +62,8 @@
 
 #pragma once
 
+#include <array>
+
 #include <HipdnnBackendFlatbufferData.h>
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
@@ -73,7 +75,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_frontend/attributes/LayernormFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
@@ -617,10 +619,10 @@ private:
                         std::make_shared<MatmulNode>(std::move(attr), graph_attributes));
                     break;
                 }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::LayernormFpropAttributes:
+                case hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes:
                 {
-                    auto attr = LayernormFpropAttributes::fromFlatBuffer(
-                        fbNode->attributes_as_LayernormFpropAttributes(), tensorMap);
+                    auto attr = LayernormAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_LayernormAttributes(), tensorMap);
                     if(fbNode->name() != nullptr)
                     {
                         attr.set_name(fbNode->name()->str());
@@ -1582,47 +1584,59 @@ public:
     }
 
     // NOLINTBEGIN(readability-identifier-naming)
-    std::shared_ptr<TensorAttributes> layernorm_fprop(std::shared_ptr<TensorAttributes> x,
-                                                      std::shared_ptr<TensorAttributes> scale,
-                                                      std::shared_ptr<TensorAttributes> bias,
-                                                      LayernormFpropAttributes attributes)
+    std::array<std::shared_ptr<TensorAttributes>, 3>
+        layernorm(std::shared_ptr<TensorAttributes> x,
+                  std::shared_ptr<TensorAttributes> scale,
+                  std::shared_ptr<TensorAttributes> bias,
+                  std::shared_ptr<TensorAttributes> epsilon,
+                  LayernormAttributes attributes)
     // NOLINTEND(readability-identifier-naming)
     {
         if(attributes.get_name().empty())
         {
-            attributes.set_name("LayernormFprop_" + std::to_string(_sub_nodes.size()));
+            attributes.set_name("Layernorm_" + std::to_string(_sub_nodes.size()));
         }
 
         if(x->get_name().empty())
         {
             x->set_name(attributes.get_name() + "::X");
         }
-        if(scale && scale->get_name().empty())
+        if(scale->get_name().empty())
         {
             scale->set_name(attributes.get_name() + "::SCALE");
         }
-        if(bias && bias->get_name().empty())
+        if(bias->get_name().empty())
         {
             bias->set_name(attributes.get_name() + "::BIAS");
+        }
+        if(epsilon->get_name().empty())
+        {
+            epsilon->set_name(attributes.get_name() + "::EPSILON");
         }
 
         auto y = outputTensor(attributes.get_name() + "::Y");
 
+        std::shared_ptr<TensorAttributes> mean = nullptr;
+        std::shared_ptr<TensorAttributes> invVariance = nullptr;
+
+        if(attributes.get_forward_phase() != hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE)
+        {
+            mean = outputTensor(attributes.get_name() + "::MEAN");
+            invVariance = outputTensor(attributes.get_name() + "::INV_VARIANCE");
+            attributes.set_mean(mean);
+            attributes.set_inv_variance(invVariance);
+        }
+
         attributes.set_x(std::move(x));
-        if(scale)
-        {
-            attributes.set_scale(std::move(scale));
-        }
-        if(bias)
-        {
-            attributes.set_bias(std::move(bias));
-        }
+        attributes.set_scale(std::move(scale));
+        attributes.set_bias(std::move(bias));
+        attributes.set_epsilon(std::move(epsilon));
         attributes.set_y(y);
 
         _sub_nodes.emplace_back(
             std::make_shared<LayernormFpropNode>(std::move(attributes), graph_attributes));
 
-        return y;
+        return {y, mean, invVariance};
     }
 
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,

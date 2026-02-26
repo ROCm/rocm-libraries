@@ -1495,9 +1495,11 @@ inline flatbuffers::FlatBufferBuilder
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-    std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
-        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+    // For LayerNorm, scale and bias match the normalized dimensions (all dims except batch).
+    // E.g., for input [N, C, H, W], normalized dims are [C, H, W].
+    std::vector<int64_t> normalizedDims(dims.begin() + 1, dims.end());
+    std::vector<int64_t> normalizedStrides
+        = hipdnn_data_sdk::utilities::generateStrides(normalizedDims);
 
     // Required tensors
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
@@ -1511,16 +1513,16 @@ inline flatbuffers::FlatBufferBuilder
         3,
         "scale",
         hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        &derivedStrides,
-        &derivedDims));
+        &normalizedStrides,
+        &normalizedDims));
 
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         4,
         "bias",
         hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        &derivedStrides,
-        &derivedDims));
+        &normalizedStrides,
+        &normalizedDims));
 
     // Epsilon (pass-by-value)
     std::vector<int64_t> passByValueDims = {1};
@@ -1537,20 +1539,20 @@ inline flatbuffers::FlatBufferBuilder
         builder.CreateStruct(epsilonVal).Union()));
 
     auto layernormAttributes
-        = hipdnn_data_sdk::data_objects::CreateLayernormFpropAttributes(builder,
-                                                                        1, // x tensor uid
-                                                                        3, // scale tensor uid
-                                                                        4, // bias tensor uid
-                                                                        5, // epsilon tensor uid
-                                                                        2 // y tensor uid
+        = hipdnn_data_sdk::data_objects::CreateLayernormAttributes(builder,
+                                                                   1, // x tensor uid
+                                                                   3, // scale tensor uid
+                                                                   4, // bias tensor uid
+                                                                   5, // epsilon tensor uid
+                                                                   2 // y tensor uid
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
     auto node = hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
-        "layernorm_fprop",
+        "layernorm",
         hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::NodeAttributes::LayernormFpropAttributes,
+        hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes,
         layernormAttributes.Union());
     nodes.push_back(node);
 

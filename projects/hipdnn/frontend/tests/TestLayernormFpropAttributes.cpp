@@ -2,13 +2,13 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_frontend/attributes/LayernormFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 
 using namespace hipdnn_frontend::graph;
 
-TEST(TestLayernormFpropAttributes, DefaultValues)
+TEST(TestLayernormAttributes, DefaultValues)
 {
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
 
     EXPECT_EQ(attrs.get_x(), nullptr);
     EXPECT_EQ(attrs.get_scale(), nullptr);
@@ -16,84 +16,78 @@ TEST(TestLayernormFpropAttributes, DefaultValues)
     EXPECT_EQ(attrs.get_epsilon(), nullptr);
     EXPECT_EQ(attrs.get_y(), nullptr);
     EXPECT_EQ(attrs.get_mean(), nullptr);
-    EXPECT_EQ(attrs.get_rstd(), nullptr);
+    EXPECT_EQ(attrs.get_inv_variance(), nullptr);
+    EXPECT_EQ(attrs.get_forward_phase(), hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET);
 }
 
-TEST(TestLayernormFpropAttributes, SetRequiredTensors)
+TEST(TestLayernormAttributes, SetRequiredTensors)
 {
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
 
     auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1);
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2);
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3);
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(2);
+    epsilon->set_uid(4);
     auto y = std::make_shared<TensorAttributes>();
-    y->set_uid(3);
+    y->set_uid(5);
 
     attrs.set_x(x);
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
     attrs.set_epsilon(epsilon);
     attrs.set_y(y);
 
     EXPECT_EQ(attrs.get_x(), x);
+    EXPECT_EQ(attrs.get_scale(), scale);
+    EXPECT_EQ(attrs.get_bias(), bias);
     EXPECT_EQ(attrs.get_epsilon(), epsilon);
     EXPECT_EQ(attrs.get_y(), y);
-    EXPECT_EQ(attrs.get_scale(), nullptr);
-    EXPECT_EQ(attrs.get_bias(), nullptr);
     EXPECT_EQ(attrs.get_mean(), nullptr);
-    EXPECT_EQ(attrs.get_rstd(), nullptr);
+    EXPECT_EQ(attrs.get_inv_variance(), nullptr);
 }
 
-TEST(TestLayernormFpropAttributes, SetOptionalScale)
+TEST(TestLayernormAttributes, SetOptionalMean)
 {
-    LayernormFpropAttributes attrs;
-
-    auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(10);
-    attrs.set_scale(scale);
-
-    EXPECT_EQ(attrs.get_scale(), scale);
-    EXPECT_EQ(attrs.get_bias(), nullptr);
-}
-
-TEST(TestLayernormFpropAttributes, SetOptionalBias)
-{
-    LayernormFpropAttributes attrs;
-
-    auto bias = std::make_shared<TensorAttributes>();
-    bias->set_uid(20);
-    attrs.set_bias(bias);
-
-    EXPECT_EQ(attrs.get_bias(), bias);
-    EXPECT_EQ(attrs.get_scale(), nullptr);
-}
-
-TEST(TestLayernormFpropAttributes, SetOptionalMean)
-{
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
 
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(30);
     attrs.set_mean(mean);
 
     EXPECT_EQ(attrs.get_mean(), mean);
-    EXPECT_EQ(attrs.get_rstd(), nullptr);
+    EXPECT_EQ(attrs.get_inv_variance(), nullptr);
 }
 
-TEST(TestLayernormFpropAttributes, SetOptionalRstd)
+TEST(TestLayernormAttributes, SetOptionalInvVariance)
 {
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
 
-    auto rstd = std::make_shared<TensorAttributes>();
-    rstd->set_uid(40);
-    attrs.set_rstd(rstd);
+    auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_uid(40);
+    attrs.set_inv_variance(invVariance);
 
-    EXPECT_EQ(attrs.get_rstd(), rstd);
+    EXPECT_EQ(attrs.get_inv_variance(), invVariance);
     EXPECT_EQ(attrs.get_mean(), nullptr);
 }
 
-TEST(TestLayernormFpropAttributes, PackAttributes)
+TEST(TestLayernormAttributes, SetForwardPhase)
 {
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
+
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    EXPECT_EQ(attrs.get_forward_phase(), hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    EXPECT_EQ(attrs.get_forward_phase(), hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+}
+
+TEST(TestLayernormAttributes, PackAttributes)
+{
+    LayernormAttributes attrs;
 
     auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1);
@@ -107,8 +101,8 @@ TEST(TestLayernormFpropAttributes, PackAttributes)
     y->set_uid(5);
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(6);
-    auto rstd = std::make_shared<TensorAttributes>();
-    rstd->set_uid(7);
+    auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_uid(7);
 
     attrs.set_x(x);
     attrs.set_scale(scale);
@@ -116,40 +110,46 @@ TEST(TestLayernormFpropAttributes, PackAttributes)
     attrs.set_epsilon(epsilon);
     attrs.set_y(y);
     attrs.set_mean(mean);
-    attrs.set_rstd(rstd);
+    attrs.set_inv_variance(invVariance);
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
 
     flatbuffers::FlatBufferBuilder builder;
     auto packed = attrs.pack_attributes(builder);
     builder.Finish(packed);
 
     auto buf = builder.GetBufferPointer();
-    auto fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::LayernormFpropAttributes>(buf);
+    auto fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::LayernormAttributes>(buf);
 
     EXPECT_EQ(fb->x_tensor_uid(), 1);
-    ASSERT_TRUE(fb->scale_tensor_uid().has_value());
-    EXPECT_EQ(*fb->scale_tensor_uid(), 2);
-    ASSERT_TRUE(fb->bias_tensor_uid().has_value());
-    EXPECT_EQ(*fb->bias_tensor_uid(), 3);
+    EXPECT_EQ(fb->scale_tensor_uid(), 2);
+    EXPECT_EQ(fb->bias_tensor_uid(), 3);
     EXPECT_EQ(fb->epsilon_tensor_uid(), 4);
     EXPECT_EQ(fb->y_tensor_uid(), 5);
     ASSERT_TRUE(fb->mean_tensor_uid().has_value());
     EXPECT_EQ(*fb->mean_tensor_uid(), 6);
-    ASSERT_TRUE(fb->rstd_tensor_uid().has_value());
-    EXPECT_EQ(*fb->rstd_tensor_uid(), 7);
+    ASSERT_TRUE(fb->inv_variance_tensor_uid().has_value());
+    EXPECT_EQ(*fb->inv_variance_tensor_uid(), 7);
+    EXPECT_EQ(fb->forward_phase(), hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
 }
 
-TEST(TestLayernormFpropAttributes, PackAttributesNoOptionals)
+TEST(TestLayernormAttributes, PackAttributesNoOptionals)
 {
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
 
     auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1);
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2);
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3);
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(2);
+    epsilon->set_uid(4);
     auto y = std::make_shared<TensorAttributes>();
-    y->set_uid(3);
+    y->set_uid(5);
 
     attrs.set_x(x);
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
     attrs.set_epsilon(epsilon);
     attrs.set_y(y);
 
@@ -158,34 +158,35 @@ TEST(TestLayernormFpropAttributes, PackAttributesNoOptionals)
     builder.Finish(packed);
 
     auto buf = builder.GetBufferPointer();
-    auto fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::LayernormFpropAttributes>(buf);
+    auto fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::LayernormAttributes>(buf);
 
     EXPECT_EQ(fb->x_tensor_uid(), 1);
-    EXPECT_EQ(fb->epsilon_tensor_uid(), 2);
-    EXPECT_EQ(fb->y_tensor_uid(), 3);
-    EXPECT_FALSE(fb->scale_tensor_uid().has_value());
-    EXPECT_FALSE(fb->bias_tensor_uid().has_value());
+    EXPECT_EQ(fb->scale_tensor_uid(), 2);
+    EXPECT_EQ(fb->bias_tensor_uid(), 3);
+    EXPECT_EQ(fb->epsilon_tensor_uid(), 4);
+    EXPECT_EQ(fb->y_tensor_uid(), 5);
     EXPECT_FALSE(fb->mean_tensor_uid().has_value());
-    EXPECT_FALSE(fb->rstd_tensor_uid().has_value());
+    EXPECT_FALSE(fb->inv_variance_tensor_uid().has_value());
 }
 
-TEST(TestLayernormFpropAttributes, FromFlatBuffer)
+TEST(TestLayernormAttributes, FromFlatBuffer)
 {
     // Build a FlatBuffer with all fields
     flatbuffers::FlatBufferBuilder builder;
-    auto packed = hipdnn_data_sdk::data_objects::CreateLayernormFpropAttributes(
+    auto packed = hipdnn_data_sdk::data_objects::CreateLayernormAttributes(
         builder,
         10,
-        flatbuffers::Optional<int64_t>(20),
-        flatbuffers::Optional<int64_t>(30),
+        20,
+        30,
         40,
         50,
         flatbuffers::Optional<int64_t>(60),
-        flatbuffers::Optional<int64_t>(70));
+        flatbuffers::Optional<int64_t>(70),
+        hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
     builder.Finish(packed);
 
     auto buf = builder.GetBufferPointer();
-    auto fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::LayernormFpropAttributes>(buf);
+    auto fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::LayernormAttributes>(buf);
 
     // Build a tensorMap with all referenced UIDs
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
@@ -196,7 +197,7 @@ TEST(TestLayernormFpropAttributes, FromFlatBuffer)
         tensorMap[static_cast<int64_t>(uid)] = t;
     }
 
-    auto attrs = LayernormFpropAttributes::fromFlatBuffer(fb, tensorMap);
+    auto attrs = LayernormAttributes::fromFlatBuffer(fb, tensorMap);
 
     ASSERT_NE(attrs.get_x(), nullptr);
     EXPECT_EQ(attrs.get_x()->get_uid(), 10);
@@ -210,39 +211,41 @@ TEST(TestLayernormFpropAttributes, FromFlatBuffer)
     EXPECT_EQ(attrs.get_y()->get_uid(), 50);
     ASSERT_NE(attrs.get_mean(), nullptr);
     EXPECT_EQ(attrs.get_mean()->get_uid(), 60);
-    ASSERT_NE(attrs.get_rstd(), nullptr);
-    EXPECT_EQ(attrs.get_rstd()->get_uid(), 70);
+    ASSERT_NE(attrs.get_inv_variance(), nullptr);
+    EXPECT_EQ(attrs.get_inv_variance()->get_uid(), 70);
+    EXPECT_EQ(attrs.get_forward_phase(), hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
 }
 
-TEST(TestLayernormFpropAttributes, FromFlatBufferNoOptionals)
+TEST(TestLayernormAttributes, FromFlatBufferNoOptionals)
 {
     // Build a FlatBuffer without optional fields
     flatbuffers::FlatBufferBuilder builder;
-    auto packed
-        = hipdnn_data_sdk::data_objects::CreateLayernormFpropAttributes(builder, 1, {}, {}, 2, 3);
+    auto packed = hipdnn_data_sdk::data_objects::CreateLayernormAttributes(builder, 1, 2, 3, 4, 5);
     builder.Finish(packed);
 
     auto buf = builder.GetBufferPointer();
-    auto fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::LayernormFpropAttributes>(buf);
+    auto fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::LayernormAttributes>(buf);
 
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
-    for(auto uid : {1, 2, 3})
+    for(auto uid : {1, 2, 3, 4, 5})
     {
         auto t = std::make_shared<TensorAttributes>();
         t->set_uid(static_cast<int64_t>(uid));
         tensorMap[static_cast<int64_t>(uid)] = t;
     }
 
-    auto attrs = LayernormFpropAttributes::fromFlatBuffer(fb, tensorMap);
+    auto attrs = LayernormAttributes::fromFlatBuffer(fb, tensorMap);
 
     ASSERT_NE(attrs.get_x(), nullptr);
     EXPECT_EQ(attrs.get_x()->get_uid(), 1);
+    ASSERT_NE(attrs.get_scale(), nullptr);
+    EXPECT_EQ(attrs.get_scale()->get_uid(), 2);
+    ASSERT_NE(attrs.get_bias(), nullptr);
+    EXPECT_EQ(attrs.get_bias()->get_uid(), 3);
     ASSERT_NE(attrs.get_epsilon(), nullptr);
-    EXPECT_EQ(attrs.get_epsilon()->get_uid(), 2);
+    EXPECT_EQ(attrs.get_epsilon()->get_uid(), 4);
     ASSERT_NE(attrs.get_y(), nullptr);
-    EXPECT_EQ(attrs.get_y()->get_uid(), 3);
-    EXPECT_EQ(attrs.get_scale(), nullptr);
-    EXPECT_EQ(attrs.get_bias(), nullptr);
+    EXPECT_EQ(attrs.get_y()->get_uid(), 5);
     EXPECT_EQ(attrs.get_mean(), nullptr);
-    EXPECT_EQ(attrs.get_rstd(), nullptr);
+    EXPECT_EQ(attrs.get_inv_variance(), nullptr);
 }

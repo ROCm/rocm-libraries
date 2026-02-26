@@ -7,7 +7,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_frontend/attributes/LayernormFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
@@ -15,9 +15,9 @@ namespace hipdnn_frontend::graph
 class LayernormFpropNode : public BaseNode<LayernormFpropNode>
 {
 public:
-    LayernormFpropAttributes attributes;
+    LayernormAttributes attributes;
 
-    LayernormFpropNode(LayernormFpropAttributes&& layernormAttrs, const GraphAttributes& graphAttrs)
+    LayernormFpropNode(LayernormAttributes&& layernormAttrs, const GraphAttributes& graphAttrs)
         : BaseNode(graphAttrs)
         , attributes(std::move(layernormAttrs))
     {
@@ -30,20 +30,26 @@ public:
         // ====================================================================
         // Algorithm Overview:
         // LayerNorm computes statistics over the feature dimensions (last normalized_shape dims):
-        //   For input shape [N, ..., D₁, D₂, ..., Dₖ] where last k dims are normalized:
-        //   mean = (1/m) * Σ x[..., i] over normalized dims, where m = D₁*D₂*...*Dₖ
-        //   var  = (1/m) * Σ (x[..., i] - mean)² over normalized dims
+        //   For input shape [N, ..., D1, D2, ..., Dk] where last k dims are normalized:
+        //   mean = (1/m) * sum x[..., i] over normalized dims, where m = D1*D2*...*Dk
+        //   var  = (1/m) * sum (x[..., i] - mean)^2 over normalized dims
         //
-        // Normalizes: xhat = (x - mean) / sqrt(var + ε)
+        // Normalizes: xhat = (x - mean) / sqrt(var + epsilon)
         // Transforms: y = scale * xhat + bias (scale and bias have shape of normalized dims)
         //
         // Outputs:
         // - Y: normalized output (same shape as X)
         // - Mean: computed mean per sample (optional, shape: batch dims only)
-        // - Rstd: reciprocal standard deviation (optional, shape: batch dims only)
+        // - InvVariance: inverse standard deviation (optional, shape: batch dims only)
         // ====================================================================
 
-        // SECTION 1: Validate Required Tensor Pointers
+        // SECTION 1: Validate Forward Phase
+        HIPDNN_RETURN_IF_FALSE(attributes.get_forward_phase()
+                                   != hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET,
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "Forward phase not set of layernorm node.");
+
+        // SECTION 2: Validate Required Tensor Pointers
         HIPDNN_RETURN_IF_FALSE(attributes.get_x(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "LayernormFpropNode missing x for pre-validation");
@@ -56,6 +62,14 @@ public:
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "LayernormFpropNode missing epsilon for pre-validation");
 
+        HIPDNN_RETURN_IF_FALSE(attributes.get_scale(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "LayernormFpropNode missing scale for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_bias(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "LayernormFpropNode missing bias for pre-validation");
+
         // Get tensor references
         auto x = attributes.get_x();
         auto y = attributes.get_y();
@@ -63,38 +77,26 @@ public:
         auto bias = attributes.get_bias();
         auto epsilon = attributes.get_epsilon();
 
-        // SECTION 2: Validate Required Parameter Dimensions
+        // SECTION 3: Validate Required Parameter Dimensions
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 1, "Input tensor (x)"));
 
-        // Epsilon (ε) provides numerical stability: xhat = (x - mean) / sqrt(var + ε)
+        // Epsilon provides numerical stability: xhat = (x - mean) / sqrt(var + epsilon)
         HIPDNN_CHECK_ERROR(detail::validateScalarParameter(epsilon, "Epsilon"));
 
-        // SECTION 3: Validate Output Tensor Shape Consistency
+        // SECTION 4: Validate Output Tensor Shape Consistency
         // LayerNorm preserves tensor shape - output has same shape as input
         HIPDNN_CHECK_ERROR(
             detail::validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
 
-        // SECTION 4: Validate Optional Scale and Bias Tensors
+        // SECTION 5: Validate Scale and Bias Tensors
         // Scale and bias are per-feature parameters matching the normalized dimensions.
         // For input shape [N, C, H, W] normalized over last 3 dims, scale/bias shape is [C, H, W]
-        // We validate that if scale or bias are set, they match the normalized portion shape.
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 1, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 1, "Bias tensor"));
 
-        // Scale and bias, if provided, should have dimensions set
-        if(scale)
-        {
-            HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 1, "Scale tensor"));
-        }
-        if(bias)
-        {
-            HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 1, "Bias tensor"));
-        }
-
-        // If both scale and bias are provided, they should have matching shapes
-        if(scale && bias)
-        {
-            HIPDNN_CHECK_ERROR(
-                detail::validateTensorShapesMatchIfSet(scale, bias, "Scale tensor", "Bias tensor"));
-        }
+        // Scale and bias should have matching shapes
+        HIPDNN_CHECK_ERROR(
+            detail::validateTensorShapesMatchIfSet(scale, bias, "Scale tensor", "Bias tensor"));
 
         return {ErrorCode::OK, ""};
     }
@@ -132,35 +134,118 @@ public:
             }
             else
             {
-                auto yStrides = hipdnn_data_sdk::utilities::generateStrides(y->get_dim());
-                y->set_stride(yStrides);
+                y->set_stride(hipdnn_data_sdk::utilities::generateStrides(y->get_dim()));
             }
         }
 
-        // Infer mean and rstd shapes if they are outputs
-        // Mean and rstd have shape of the batch dimensions (everything except normalized dims)
+        // Infer epsilon dims and strides: all-ones matching X's rank
+        auto epsilon = attributes.get_epsilon();
+        if(epsilon && !x->get_dim().empty())
+        {
+            if(epsilon->get_dim().size() < x->get_dim().size())
+            {
+                std::vector<int64_t> epsilonDim(x->get_dim().size(), 1);
+                epsilon->set_dim(epsilonDim);
+            }
+            if(epsilon->get_stride().empty())
+            {
+                std::vector<int64_t> epsilonStride(epsilon->get_dim().size(), 1);
+                epsilon->set_stride(epsilonStride);
+            }
+        }
+
+        // Infer scale and bias dims and strides from X's normalized dimensions
+        // For input [N, C, H, W], scale/bias dim = [1, C, H, W] (batch dim set to 1)
+        // This matches cudnn-frontend convention for porting compatibility
+        auto scale = attributes.get_scale();
+        auto bias = attributes.get_bias();
+
+        if(scale && !x->get_dim().empty())
+        {
+            if(scale->get_dim().empty())
+            {
+                auto scaleBiasDim = x->get_dim();
+                scaleBiasDim[0] = 1;
+                scale->set_dim(scaleBiasDim);
+            }
+            if(scale->get_stride().empty())
+            {
+                const auto& scaleDim = scale->get_dim();
+                if(!x->get_stride().empty() && x->get_stride().size() == scaleDim.size())
+                {
+                    auto strideOrder
+                        = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
+                    scale->set_stride(
+                        hipdnn_data_sdk::utilities::generateStrides(scaleDim, strideOrder));
+                }
+                else
+                {
+                    scale->set_stride(hipdnn_data_sdk::utilities::generateStrides(scaleDim));
+                }
+            }
+        }
+
+        if(bias && !x->get_dim().empty())
+        {
+            if(bias->get_dim().empty())
+            {
+                auto scaleBiasDim = x->get_dim();
+                scaleBiasDim[0] = 1;
+                bias->set_dim(scaleBiasDim);
+            }
+            if(bias->get_stride().empty())
+            {
+                const auto& biasDim = bias->get_dim();
+                if(!x->get_stride().empty() && x->get_stride().size() == biasDim.size())
+                {
+                    auto strideOrder
+                        = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
+                    bias->set_stride(
+                        hipdnn_data_sdk::utilities::generateStrides(biasDim, strideOrder));
+                }
+                else
+                {
+                    bias->set_stride(hipdnn_data_sdk::utilities::generateStrides(biasDim));
+                }
+            }
+        }
+
+        // Infer mean and inv_variance shapes (training phase outputs)
+        // Mean and inv_variance have shape of the batch dimensions (everything except normalized dims)
         auto mean = attributes.get_mean();
-        auto rstd = attributes.get_rstd();
+        auto invVariance = attributes.get_inv_variance();
 
         auto inferStatsTensor = [&](std::shared_ptr<TensorAttributes>& tensorToInfer) {
-            if(tensorToInfer && tensorToInfer->get_dim().empty())
+            if(tensorToInfer && tensorToInfer->get_dim().empty() && scale
+               && !scale->get_dim().empty())
             {
-                // For LayerNorm, mean and rstd are typically computed per-sample
-                // across the normalized dimensions. The output shape is the batch shape.
-                // For simplicity, we'll set it to match the first dimension(s) before
-                // the normalized dimensions. This is a simplified inference - actual
-                // implementation may need normalized_shape attribute to be more precise.
-
-                // Common case: normalize over last dimension(s)
-                // Mean/rstd shape is input shape with last dims reduced to 1
-                // For now, we'll use a scalar output as a safe default
-                std::vector<int64_t> statsDims = {1};
-                tensorToInfer->set_dim(statsDims);
+                // Stats dims mirror X's shape, but where scale has dim 1 (batch dims),
+                // the stats dim retains X's value; where scale has dim > 1 (normalized
+                // dims), the stats dim becomes 1. This matches cudnn-frontend convention.
+                const auto& xDim = x->get_dim();
+                const auto& scaleDim = scale->get_dim();
+                if(scaleDim.size() == xDim.size())
+                {
+                    std::vector<int64_t> statsDims(xDim.size());
+                    for(size_t i = 0; i < xDim.size(); i++)
+                    {
+                        statsDims[i] = (scaleDim[i] == 1) ? xDim[i] : 1;
+                    }
+                    tensorToInfer->set_dim(statsDims);
+                }
+                else
+                {
+                    // Fallback: batch dim from X, rest set to 1
+                    std::vector<int64_t> statsDims(xDim.size(), 1);
+                    statsDims[0] = xDim[0];
+                    tensorToInfer->set_dim(statsDims);
+                }
             }
 
             if(tensorToInfer && tensorToInfer->get_stride().empty())
             {
-                if(!x->get_stride().empty())
+                if(!x->get_stride().empty()
+                   && x->get_stride().size() == tensorToInfer->get_dim().size())
                 {
                     auto strideOrder
                         = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
@@ -169,9 +254,8 @@ public:
                 }
                 else
                 {
-                    auto statStrides
-                        = hipdnn_data_sdk::utilities::generateStrides(tensorToInfer->get_dim());
-                    tensorToInfer->set_stride(statStrides);
+                    tensorToInfer->set_stride(
+                        hipdnn_data_sdk::utilities::generateStrides(tensorToInfer->get_dim()));
                 }
             }
         };
@@ -181,9 +265,9 @@ public:
             inferStatsTensor(mean);
         }
 
-        if(rstd)
+        if(invVariance)
         {
-            inferStatsTensor(rstd);
+            inferStatsTensor(invVariance);
         }
 
         return {};
@@ -196,7 +280,7 @@ public:
             builder,
             attributes.get_name().c_str(),
             toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::LayernormFpropAttributes,
+            hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes,
             attributes.pack_attributes(builder).Union());
     }
 };

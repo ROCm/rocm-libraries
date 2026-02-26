@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_frontend/attributes/LayernormFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/LayernormFpropNode.hpp>
 
@@ -26,15 +26,23 @@ std::shared_ptr<TensorAttributes> makeTensor(const std::vector<int64_t>& dims,
     return t;
 }
 
-LayernormFpropAttributes makeMinimalAttrs(const std::shared_ptr<TensorAttributes>& x)
+LayernormAttributes makeMinimalAttrs(const std::shared_ptr<TensorAttributes>& x)
 {
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
     attrs.set_x(x);
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
     epsilon->set_value(1e-5f);
     attrs.set_epsilon(epsilon);
     attrs.set_y(std::make_shared<TensorAttributes>());
+
+    // Scale and bias are required
+    auto scale = makeTensor({x->get_dim().back()});
+    auto bias = makeTensor({x->get_dim().back()});
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
+
     return attrs;
 }
 } // namespace
@@ -75,36 +83,6 @@ TEST(TestLayernormFpropNode, PreValidateSucceeds4D)
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
-TEST(TestLayernormFpropNode, PreValidateSucceedsWithScale)
-{
-    auto x = makeTensor({32, 512});
-    auto attrs = makeMinimalAttrs(x);
-
-    // Scale matches the feature dimension
-    auto scale = makeTensor({512});
-    attrs.set_scale(scale);
-
-    GraphAttributes graphAttrs;
-    LayernormFpropNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
-    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
-}
-
-TEST(TestLayernormFpropNode, PreValidateSucceedsWithBias)
-{
-    auto x = makeTensor({32, 512});
-    auto attrs = makeMinimalAttrs(x);
-
-    // Bias matches the feature dimension
-    auto bias = makeTensor({512});
-    attrs.set_bias(bias);
-
-    GraphAttributes graphAttrs;
-    LayernormFpropNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
-    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
-}
-
 TEST(TestLayernormFpropNode, PreValidateSucceedsWithScaleAndBias)
 {
     auto x = makeTensor({32, 512});
@@ -121,13 +99,37 @@ TEST(TestLayernormFpropNode, PreValidateSucceedsWithScaleAndBias)
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
-TEST(TestLayernormFpropNode, PreValidateFailsMissingX)
+TEST(TestLayernormFpropNode, PreValidateFailsForwardPhaseNotSet)
 {
-    LayernormFpropAttributes attrs;
+    auto x = makeTensor({32, 512});
+    LayernormAttributes attrs;
+    attrs.set_x(x);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
     attrs.set_epsilon(epsilon);
     attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(makeTensor({512}));
+    attrs.set_bias(makeTensor({512}));
+    // forward_phase intentionally NOT set
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestLayernormFpropNode, PreValidateFailsMissingX)
+{
+    LayernormAttributes attrs;
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
+    attrs.set_epsilon(epsilon);
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(makeTensor({512}));
+    attrs.set_bias(makeTensor({512}));
 
     GraphAttributes graphAttrs;
     LayernormFpropNode node(std::move(attrs), graphAttrs);
@@ -137,12 +139,16 @@ TEST(TestLayernormFpropNode, PreValidateFailsMissingX)
 
 TEST(TestLayernormFpropNode, PreValidateFailsMissingY)
 {
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
     auto x = makeTensor({32, 512});
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
     attrs.set_x(x);
     attrs.set_epsilon(epsilon);
+    attrs.set_scale(makeTensor({512}));
+    attrs.set_bias(makeTensor({512}));
 
     GraphAttributes graphAttrs;
     LayernormFpropNode node(std::move(attrs), graphAttrs);
@@ -152,10 +158,51 @@ TEST(TestLayernormFpropNode, PreValidateFailsMissingY)
 
 TEST(TestLayernormFpropNode, PreValidateFailsMissingEpsilon)
 {
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
     auto x = makeTensor({32, 512});
     attrs.set_x(x);
     attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(makeTensor({512}));
+    attrs.set_bias(makeTensor({512}));
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestLayernormFpropNode, PreValidateFailsMissingScale)
+{
+    LayernormAttributes attrs;
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    auto x = makeTensor({32, 512});
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
+    attrs.set_x(x);
+    attrs.set_epsilon(epsilon);
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_bias(makeTensor({512}));
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestLayernormFpropNode, PreValidateFailsMissingBias)
+{
+    LayernormAttributes attrs;
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    auto x = makeTensor({32, 512});
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
+    attrs.set_x(x);
+    attrs.set_epsilon(epsilon);
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(makeTensor({512}));
 
     GraphAttributes graphAttrs;
     LayernormFpropNode node(std::move(attrs), graphAttrs);
@@ -215,6 +262,67 @@ TEST(TestLayernormFpropNode, InferPropertiesSetsOutputStrides)
     EXPECT_EQ(strides[0], 512);
 }
 
+TEST(TestLayernormFpropNode, InferPropertiesInfersScaleDimsFromX)
+{
+    // If scale dims are empty, they should be inferred from X's normalized dims
+    auto x = makeTensor({32, 512}, {512, 1});
+
+    LayernormAttributes attrs;
+    attrs.set_x(x);
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
+    attrs.set_epsilon(epsilon);
+    attrs.set_y(std::make_shared<TensorAttributes>());
+
+    auto scale = std::make_shared<TensorAttributes>(); // No dims set
+    auto bias = std::make_shared<TensorAttributes>(); // No dims set
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    // Scale should have dims = [1, 512] (same rank as X, batch dim = 1)
+    EXPECT_EQ(scale->get_dim(), (std::vector<int64_t>{1, 512}));
+    EXPECT_FALSE(scale->get_stride().empty());
+
+    // Bias should also have dims = [1, 512]
+    EXPECT_EQ(bias->get_dim(), (std::vector<int64_t>{1, 512}));
+    EXPECT_FALSE(bias->get_stride().empty());
+}
+
+TEST(TestLayernormFpropNode, InferPropertiesInfersScaleDimsFromX4D)
+{
+    // For 4D input [N, C, H, W], normalized dims should be [C, H, W]
+    auto x = makeTensor({2, 64, 28, 28}, {50176, 784, 28, 1});
+
+    LayernormAttributes attrs;
+    attrs.set_x(x);
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
+    attrs.set_epsilon(epsilon);
+    attrs.set_y(std::make_shared<TensorAttributes>());
+
+    auto scale = std::make_shared<TensorAttributes>();
+    auto bias = std::make_shared<TensorAttributes>();
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    // Scale should have dims = [1, 64, 28, 28] (same rank as X, batch dim = 1)
+    EXPECT_EQ(scale->get_dim(), (std::vector<int64_t>{1, 64, 28, 28}));
+    EXPECT_FALSE(scale->get_stride().empty());
+    EXPECT_EQ(bias->get_dim(), (std::vector<int64_t>{1, 64, 28, 28}));
+}
+
 TEST(TestLayernormFpropNode, InferPropertiesSetsMeanShape)
 {
     auto x = makeTensor({32, 512});
@@ -233,21 +341,20 @@ TEST(TestLayernormFpropNode, InferPropertiesSetsMeanShape)
     EXPECT_FALSE(dims.empty());
 }
 
-TEST(TestLayernormFpropNode, InferPropertiesSetsRstdShape)
+TEST(TestLayernormFpropNode, InferPropertiesSetsInvVarianceShape)
 {
     auto x = makeTensor({32, 512});
     auto attrs = makeMinimalAttrs(x);
 
-    auto rstd = std::make_shared<TensorAttributes>();
-    attrs.set_rstd(rstd);
+    auto invVariance = std::make_shared<TensorAttributes>();
+    attrs.set_inv_variance(invVariance);
 
     GraphAttributes graphAttrs;
     LayernormFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 
-    // Rstd should be inferred (simplified to scalar)
-    auto dims = rstd->get_dim();
+    auto dims = invVariance->get_dim();
     EXPECT_FALSE(dims.empty());
 }
 
@@ -256,11 +363,14 @@ TEST(TestLayernormFpropNode, InferPropertiesPreservesExplicitOutputShape)
     // If Y dims are already set, they should not be overwritten
     auto x = makeTensor({32, 512});
 
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
     attrs.set_x(x);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
     attrs.set_epsilon(epsilon);
+    attrs.set_scale(makeTensor({512}));
+    attrs.set_bias(makeTensor({512}));
 
     auto y = std::make_shared<TensorAttributes>();
     y->set_dim({32, 512});
@@ -296,7 +406,7 @@ TEST(TestLayernormFpropNode, PackNode)
 
     EXPECT_EQ(fbNode->name()->str(), "TestLayerNorm");
     EXPECT_EQ(fbNode->attributes_type(),
-              hipdnn_data_sdk::data_objects::NodeAttributes::LayernormFpropAttributes);
+              hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes);
 }
 
 // ============================================================================
@@ -305,7 +415,8 @@ TEST(TestLayernormFpropNode, PackNode)
 
 TEST(TestLayernormFpropNode, PreValidateFailsXWithNoDimensions)
 {
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
     attrs.set_x(std::make_shared<TensorAttributes>()); // No dimensions set
 
     auto epsilon = std::make_shared<TensorAttributes>();
@@ -313,6 +424,8 @@ TEST(TestLayernormFpropNode, PreValidateFailsXWithNoDimensions)
     epsilon->set_value(1e-5f);
     attrs.set_epsilon(epsilon);
     attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(makeTensor({512}));
+    attrs.set_bias(makeTensor({512}));
 
     GraphAttributes graphAttrs;
     LayernormFpropNode node(std::move(attrs), graphAttrs);
@@ -323,14 +436,18 @@ TEST(TestLayernormFpropNode, PreValidateFailsXWithNoDimensions)
 TEST(TestLayernormFpropNode, PreValidateFailsEpsilonNotScalar)
 {
     auto x = makeTensor({32, 512});
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
     attrs.set_x(x);
     attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(makeTensor({512}));
+    attrs.set_bias(makeTensor({512}));
 
-    // Epsilon with more than one element
+    // Epsilon with more than one element.
+    // set_value must be called before set_dim because set_value resets dim to {1}.
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_dim({2});
     epsilon->set_value(1e-5f);
+    epsilon->set_dim({2});
     attrs.set_epsilon(epsilon);
 
     GraphAttributes graphAttrs;
@@ -342,9 +459,12 @@ TEST(TestLayernormFpropNode, PreValidateFailsEpsilonNotScalar)
 TEST(TestLayernormFpropNode, PreValidateFailsEpsilonNotPassByValue)
 {
     auto x = makeTensor({32, 512});
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
     attrs.set_x(x);
     attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(makeTensor({512}));
+    attrs.set_bias(makeTensor({512}));
 
     // Epsilon with correct dim but not pass-by-value (no set_value call)
     auto epsilon = std::make_shared<TensorAttributes>();
@@ -360,9 +480,12 @@ TEST(TestLayernormFpropNode, PreValidateFailsEpsilonNotPassByValue)
 TEST(TestLayernormFpropNode, PreValidateFailsEpsilonWithNoDimensions)
 {
     auto x = makeTensor({32, 512});
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
     attrs.set_x(x);
     attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(makeTensor({512}));
+    attrs.set_bias(makeTensor({512}));
 
     // Epsilon set but no dimensions
     attrs.set_epsilon(std::make_shared<TensorAttributes>());
@@ -376,8 +499,11 @@ TEST(TestLayernormFpropNode, PreValidateFailsEpsilonWithNoDimensions)
 TEST(TestLayernormFpropNode, PreValidateFailsXYShapeMismatch)
 {
     auto x = makeTensor({32, 512});
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
     attrs.set_x(x);
+    attrs.set_scale(makeTensor({512}));
+    attrs.set_bias(makeTensor({512}));
 
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
@@ -424,13 +550,15 @@ TEST(TestLayernormFpropNode, PreValidateFailsBiasWithNoDimensions)
 
 TEST(TestLayernormFpropNode, InferPropertiesFailsMissingX)
 {
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
     attrs.set_y(std::make_shared<TensorAttributes>());
 
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
     epsilon->set_value(1e-5f);
     attrs.set_epsilon(epsilon);
+    attrs.set_scale(makeTensor({512}));
+    attrs.set_bias(makeTensor({512}));
 
     GraphAttributes graphAttrs;
     LayernormFpropNode node(std::move(attrs), graphAttrs);
@@ -441,13 +569,15 @@ TEST(TestLayernormFpropNode, InferPropertiesFailsMissingX)
 TEST(TestLayernormFpropNode, InferPropertiesFailsMissingY)
 {
     auto x = makeTensor({32, 512});
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
     attrs.set_x(x);
 
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
     epsilon->set_value(1e-5f);
     attrs.set_epsilon(epsilon);
+    attrs.set_scale(makeTensor({512}));
+    attrs.set_bias(makeTensor({512}));
 
     GraphAttributes graphAttrs;
     LayernormFpropNode node(std::move(attrs), graphAttrs);
@@ -485,26 +615,30 @@ TEST(TestLayernormFpropNode, InferPropertiesMeanStrideFromXStrideOrder)
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 
-    EXPECT_EQ(mean->get_dim(), (std::vector<int64_t>{1}));
+    // Stats shape: batch dims from X, normalized dims set to 1
+    // For X=[32,512] with scale=[512], stats=[32, 1]
+    EXPECT_EQ(mean->get_dim(), (std::vector<int64_t>{32, 1}));
     EXPECT_FALSE(mean->get_stride().empty());
 }
 
-TEST(TestLayernormFpropNode, InferPropertiesRstdStrideFromXStrideOrder)
+TEST(TestLayernormFpropNode, InferPropertiesInvVarianceStrideFromXStrideOrder)
 {
-    // When x has strides, rstd stride should be inferred from x's stride order
+    // When x has strides, inv_variance stride should be inferred from x's stride order
     auto x = makeTensor({32, 512}, {512, 1});
     auto attrs = makeMinimalAttrs(x);
 
-    auto rstd = std::make_shared<TensorAttributes>();
-    attrs.set_rstd(rstd);
+    auto invVariance = std::make_shared<TensorAttributes>();
+    attrs.set_inv_variance(invVariance);
 
     GraphAttributes graphAttrs;
     LayernormFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 
-    EXPECT_EQ(rstd->get_dim(), (std::vector<int64_t>{1}));
-    EXPECT_FALSE(rstd->get_stride().empty());
+    // Stats shape: batch dims from X, normalized dims set to 1
+    // For X=[32,512] with scale=[512], stats=[32, 1]
+    EXPECT_EQ(invVariance->get_dim(), (std::vector<int64_t>{32, 1}));
+    EXPECT_FALSE(invVariance->get_stride().empty());
 }
 
 TEST(TestLayernormFpropNode, InferPropertiesPreservesExplicitMeanDims)
@@ -548,16 +682,16 @@ TEST(TestLayernormFpropNode, InferPropertiesPreservesExplicitStatStrides)
     EXPECT_EQ(mean->get_stride(), (std::vector<int64_t>{1}));
 }
 
-TEST(TestLayernormFpropNode, InferPropertiesSetsBothMeanAndRstd)
+TEST(TestLayernormFpropNode, InferPropertiesSetsBothMeanAndInvVariance)
 {
-    // Both mean and rstd should be inferred when set
+    // Both mean and inv_variance should be inferred when set
     auto x = makeTensor({32, 512}, {512, 1});
     auto attrs = makeMinimalAttrs(x);
 
     auto mean = std::make_shared<TensorAttributes>();
-    auto rstd = std::make_shared<TensorAttributes>();
+    auto invVariance = std::make_shared<TensorAttributes>();
     attrs.set_mean(mean);
-    attrs.set_rstd(rstd);
+    attrs.set_inv_variance(invVariance);
 
     GraphAttributes graphAttrs;
     LayernormFpropNode node(std::move(attrs), graphAttrs);
@@ -566,8 +700,8 @@ TEST(TestLayernormFpropNode, InferPropertiesSetsBothMeanAndRstd)
 
     EXPECT_FALSE(mean->get_dim().empty());
     EXPECT_FALSE(mean->get_stride().empty());
-    EXPECT_FALSE(rstd->get_dim().empty());
-    EXPECT_FALSE(rstd->get_stride().empty());
+    EXPECT_FALSE(invVariance->get_dim().empty());
+    EXPECT_FALSE(invVariance->get_stride().empty());
 }
 
 // ============================================================================
@@ -594,17 +728,17 @@ TEST(TestLayernormFpropNode, GatherHipdnnTensors)
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(6).set_name("Mean");
 
-    auto rstd = std::make_shared<TensorAttributes>();
-    rstd->set_uid(7).set_name("Rstd");
+    auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_uid(7).set_name("InvVariance");
 
-    LayernormFpropAttributes attrs;
+    LayernormAttributes attrs;
     attrs.set_x(x);
     attrs.set_y(y);
     attrs.set_scale(scale);
     attrs.set_bias(bias);
     attrs.set_epsilon(epsilon);
     attrs.set_mean(mean);
-    attrs.set_rstd(rstd);
+    attrs.set_inv_variance(invVariance);
 
     GraphAttributes graphAttrs;
     LayernormFpropNode node(std::move(attrs), graphAttrs);
@@ -618,11 +752,11 @@ TEST(TestLayernormFpropNode, GatherHipdnnTensors)
     EXPECT_TRUE(allTensors.find(bias) != allTensors.end());
     EXPECT_TRUE(allTensors.find(epsilon) != allTensors.end());
     EXPECT_TRUE(allTensors.find(mean) != allTensors.end());
-    EXPECT_TRUE(allTensors.find(rstd) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(invVariance) != allTensors.end());
     EXPECT_EQ(allTensors.size(), 7u);
 }
 
-TEST(TestLayernormFpropNode, GatherHipdnnTensorsMinimal)
+TEST(TestLayernormFpropNode, GatherHipdnnTensorsRequired)
 {
     auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1);
@@ -630,12 +764,20 @@ TEST(TestLayernormFpropNode, GatherHipdnnTensorsMinimal)
     auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2);
 
-    auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(3).set_value(1e-5f);
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(3);
 
-    LayernormFpropAttributes attrs;
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(4);
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(5).set_value(1e-5f);
+
+    LayernormAttributes attrs;
     attrs.set_x(x);
     attrs.set_y(y);
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
     attrs.set_epsilon(epsilon);
 
     GraphAttributes graphAttrs;
@@ -646,6 +788,8 @@ TEST(TestLayernormFpropNode, GatherHipdnnTensorsMinimal)
 
     EXPECT_TRUE(allTensors.find(x) != allTensors.end());
     EXPECT_TRUE(allTensors.find(y) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(scale) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(bias) != allTensors.end());
     EXPECT_TRUE(allTensors.find(epsilon) != allTensors.end());
-    EXPECT_EQ(allTensors.size(), 3u);
+    EXPECT_EQ(allTensors.size(), 5u);
 }
