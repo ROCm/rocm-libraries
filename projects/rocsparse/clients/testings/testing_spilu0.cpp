@@ -505,7 +505,6 @@ void host_bsrilu0(rocsparse_direction       dir,
 template <typename I, typename J, typename T>
 void testing_spilu0_set_input_bad_arg(const Arguments& arg)
 {
-    std::cout << __FUNCTION__ << std::endl;
     rocsparse_error*             p_error = nullptr;
     rocsparse_local_handle       local_handle;
     rocsparse_spilu0_descr       spilu0_descr       = (rocsparse_spilu0_descr)0x4;
@@ -569,7 +568,6 @@ void testing_spilu0_set_input_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename T>
 void testing_spilu0_buffer_size_bad_arg(const Arguments& arg)
 {
-    std::cout << __FUNCTION__ << std::endl;
     rocsparse_local_handle local_handle;
 
     rocsparse_handle       handle       = local_handle;
@@ -595,7 +593,6 @@ void testing_spilu0_buffer_size_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename T>
 void testing_spilu0_get_output_bad_arg(const Arguments& arg)
 {
-    std::cout << __FUNCTION__ << std::endl;
     rocsparse_local_handle  local_handle;
     rocsparse_handle        handle             = local_handle;
     rocsparse_spilu0_descr  spilu0_descr       = (rocsparse_spilu0_descr)0x4;
@@ -1019,15 +1016,6 @@ void testing_spilu0(const Arguments& arg)
     const T                         h_boost_value[1]              = {arg.get_boostval<T>()};
     const floating_data_t<T> h_boost_tolerance[1] = {static_cast<floating_data_t<T>>(arg.boosttol)};
 
-#if 1
-    std::cout << "boost_enable " << boost_enable << std::endl;
-#if 0
-  if (boost_enable)
-    {
-      return;
-    }
-#endif
-#endif
     rocsparse_clients::spilu0_descr spilu0_descr(handle, batch_count);
 
     CHECK_ROCSPARSE_ERROR(rocsparse_spilu0_set_input(

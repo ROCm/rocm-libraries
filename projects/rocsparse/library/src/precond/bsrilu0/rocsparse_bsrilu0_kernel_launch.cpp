@@ -69,17 +69,6 @@ rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle          hand
                                        sizeof(int32_t) * A->rows * A->batch_count,
                                        handle->stream));
 
-    auto numeric_exact = bsrilu0_info->get_singularity_numeric_exact();
-    if(numeric_exact->get_batch_count() != A->batch_count)
-    {
-        std::cout << "ffffffffff " << std::endl;
-        exit(1);
-    }
-    if(A->batch_count > 1)
-    {
-        std::cout << "HHHHHHHHHHHHHHHHHHH " << numeric_exact->get_batch_count() << " "
-                  << A->batch_count << std::endl;
-    }
     //
     //
     //

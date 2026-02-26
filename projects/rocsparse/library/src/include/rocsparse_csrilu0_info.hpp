@@ -48,7 +48,6 @@ public:
                                           rocsparse_indextype indextype,
                                           hipStream_t         stream)
     {
-        std::cout << "CREATE EXACT BATCH_COUNT " << batch_count << std::endl;
         THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_exact.create_singular_pivot_async(
             batch_count, indextype, stream));
     }
@@ -62,7 +61,6 @@ public:
                                          rocsparse_indextype indextype,
                                          hipStream_t         stream)
     {
-        std::cout << "CREATE NEAR BATCH_COUNT " << batch_count << std::endl;
         THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_near.create_singular_pivot_async(
             batch_count, indextype, stream));
     }
