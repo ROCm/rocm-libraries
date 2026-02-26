@@ -84,6 +84,7 @@ class hipsolver_dispatcher
             {"geev_64", testing_geev<API_COMPAT, false, false, T, T, int64_t, size_t>},
             {"gels", testing_gels<API_NORMAL, false, false, false, T>},
             {"geqrf", testing_geqrf<API_NORMAL, false, false, T, int, int>},
+            {"geqrf_batched", testing_geqrf<API_NORMAL, true, false, T, int, int>},
             {"geqrf_64", testing_geqrf<API_COMPAT, false, false, T, int64_t, size_t>},
             {"gesv", testing_gesv<API_NORMAL, false, false, false, T>},
             {"gesvd", testing_gesvd<API_NORMAL, false, false, false, T>},
