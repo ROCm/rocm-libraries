@@ -1,13 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-namespace hipdnn_data_sdk.data_objects;
+include "norm_common.fbs";
 
-enum NormFwdPhase : byte {
-    NOT_SET = 0,
-    INFERENCE = 1,
-    TRAINING = 2,
-}
+namespace hipdnn_data_sdk.data_objects;
 
 table LayernormAttributes {
     x_tensor_uid:              long;
