@@ -323,6 +323,105 @@ TEST(TestLayernormFpropNode, InferPropertiesInfersScaleDimsFromX4D)
     EXPECT_EQ(bias->get_dim(), (std::vector<int64_t>{1, 64, 28, 28}));
 }
 
+TEST(TestLayernormFpropNode, InferPropertiesPreservesNhwcStrideOrder)
+{
+    // NHWC layout: strides = {H*W*C, 1, W*C, C} = {50176, 1, 1792, 64}
+    // Stride order: C is innermost (0), then W (1), H (2), N outermost (3)
+    auto x = makeTensor({2, 64, 28, 28}, {50176, 1, 1792, 64});
+
+    LayernormAttributes attrs;
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    attrs.set_x(x);
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
+    attrs.set_epsilon(epsilon);
+    attrs.set_y(std::make_shared<TensorAttributes>());
+
+    auto scale = std::make_shared<TensorAttributes>();
+    auto bias = std::make_shared<TensorAttributes>();
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    auto invVariance = std::make_shared<TensorAttributes>();
+    attrs.set_mean(mean);
+    attrs.set_inv_variance(invVariance);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    // Y should preserve NHWC strides from X
+    EXPECT_EQ(node.attributes.get_y()->get_stride(), (std::vector<int64_t>{50176, 1, 1792, 64}));
+
+    // Scale/bias dims: [1, 64, 28, 28], strides should preserve NHWC order
+    EXPECT_EQ(scale->get_dim(), (std::vector<int64_t>{1, 64, 28, 28}));
+    EXPECT_EQ(scale->get_stride(), (std::vector<int64_t>{50176, 1, 1792, 64}));
+    EXPECT_EQ(bias->get_dim(), (std::vector<int64_t>{1, 64, 28, 28}));
+    EXPECT_EQ(bias->get_stride(), (std::vector<int64_t>{50176, 1, 1792, 64}));
+
+    // Stats dims: [2, 1, 1, 1] (batch from X, normalized dims set to 1)
+    EXPECT_EQ(mean->get_dim(), (std::vector<int64_t>{2, 1, 1, 1}));
+    EXPECT_EQ(invVariance->get_dim(), (std::vector<int64_t>{2, 1, 1, 1}));
+}
+
+TEST(TestLayernormFpropNode, InferPropertiesNhwcScaleStridesMatchX)
+{
+    // Verify stride order is preserved for scale when X is NHWC
+    // For scale dim [1, 64, 28, 28] with NHWC order, the stride values should
+    // reflect channels-last layout even though batch dim is 1
+    auto x = makeTensor({4, 32, 16, 16}, {8192, 1, 512, 32}); // NHWC
+
+    LayernormAttributes attrs;
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_x(x);
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
+    attrs.set_epsilon(epsilon);
+    attrs.set_y(std::make_shared<TensorAttributes>());
+
+    auto scale = std::make_shared<TensorAttributes>();
+    auto bias = std::make_shared<TensorAttributes>();
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    // Scale dims: [1, 32, 16, 16]
+    EXPECT_EQ(scale->get_dim(), (std::vector<int64_t>{1, 32, 16, 16}));
+    // Scale strides should preserve NHWC: {H*W*C, 1, W*C, C} = {8192, 1, 512, 32}
+    EXPECT_EQ(scale->get_stride(), (std::vector<int64_t>{8192, 1, 512, 32}));
+    EXPECT_EQ(bias->get_dim(), (std::vector<int64_t>{1, 32, 16, 16}));
+    EXPECT_EQ(bias->get_stride(), (std::vector<int64_t>{8192, 1, 512, 32}));
+}
+
+TEST(TestLayernormFpropNode, InferPropertiesStatsSkippedInInferenceMode)
+{
+    // Stats should NOT be inferred during inference phase, even if tensors are provided
+    auto x = makeTensor({32, 512}, {512, 1});
+    auto attrs = makeMinimalAttrs(x); // Sets INFERENCE mode
+
+    auto mean = std::make_shared<TensorAttributes>();
+    auto invVariance = std::make_shared<TensorAttributes>();
+    attrs.set_mean(mean);
+    attrs.set_inv_variance(invVariance);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    // Stats dims should remain empty — inference mode skips stats inference
+    EXPECT_TRUE(mean->get_dim().empty());
+    EXPECT_TRUE(invVariance->get_dim().empty());
+}
+
 TEST(TestLayernormFpropNode, InferPropertiesSetsMeanShape)
 {
     auto x = makeTensor({32, 512});
