@@ -1,6 +1,5 @@
 [flake8]
 filename = *.py,
-    **/scripts/benchmark_tensile,
     **/scripts/fix-format,
     **/scripts/rrperf
     **/scripts/show_matrix,
