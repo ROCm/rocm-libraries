@@ -22,11 +22,9 @@ do
 done
 setup_rocm_compilers_hash_file() {
     mkdir -p "$COMPILERS_HASH_DIR"
-    HIPCC_MD5="$(md5sum "${ROCM_PATH}/bin/hipcc")"
     pushd "${ROCM_PATH}/lib/llvm/amdgcn/bitcode"
         DEVICELIBS_BITCODES_MD5="$(find . -type f -exec md5sum {} \; | sort | md5sum)"
     popd
-    HIPCC_HASH_VALUE="${HIPCC_MD5%% *}"
     DEVICELIBS_BITCODES_HASH_VALUE="${DEVICELIBS_BITCODES_MD5%% *}"
     # MD5 checksums of clang and clang-offload-bundler cannot be used since they will keep changing
     # if the ROCM_PATH changes, ie; for every mainline build.
@@ -41,7 +39,6 @@ setup_rocm_compilers_hash_file() {
     # and the hash value of the bitcode files too (TODO: Need to confirm if the bitcode hash is even requried)
     printf '%s: %s\n' 'clang version' "${CLANG_VERSION}" | sed 's/ (.*)//' | tee -a "$SCCACHE_EXTRAFILES"
     printf '%s: %s\n' 'clang-offload-bundler version' "${CLANG_OFFLOAD_BUNDLER_VERSION}" | sed 's/ (.*)//' | tee -a "$SCCACHE_EXTRAFILES"
-    # printf '%s: %s\n' 'hipcc md5sum' "${HIPCC_HASH_VALUE}" | tee -a "$SCCACHE_EXTRAFILES"
     # printf '%s: %s\n' 'devicelibs bitcode md5sum' "${DEVICELIBS_BITCODES_HASH_VALUE}" | tee -a "$SCCACHE_EXTRAFILES"
     echo "sccache-wrapper: compilers hash file set up at ${SCCACHE_EXTRAFILES}"
     cat "$SCCACHE_EXTRAFILES"
