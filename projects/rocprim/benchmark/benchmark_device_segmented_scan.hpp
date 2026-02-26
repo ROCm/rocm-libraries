@@ -39,22 +39,21 @@
 #include <string>
 #include <vector>
 
-constexpr const char* get_reduce_method_name(rocprim::block_reduce_algorithm alg)
+constexpr inline const char* get_block_scan_algorithm_name(rocprim::block_scan_algorithm alg)
 {
     switch(alg)
     {
-        case rocprim::block_reduce_algorithm::raking_reduce: return "raking_reduce";
-        case rocprim::block_reduce_algorithm::raking_reduce_commutative_only:
-            return "raking_reduce_commutative_only";
-        case rocprim::block_reduce_algorithm::using_warp_reduce:
-            return "using_warp_reduce";
+        case rocprim::block_scan_algorithm::using_warp_scan:
+            return "block_scan_algorithm::using_warp_scan";
+        case rocprim::block_scan_algorithm::reduce_then_scan:
+            return "block_scan_algorithm::reduce_then_scan";
             // Not using `default: ...` because it kills effectiveness of -Wswitch
     }
-    return "unknown_algorithm";
+    return "default_algorithm";
 }
 
 template<typename Config>
-auto config_name()
+constexpr auto config_name()
 {
     if constexpr(std::is_same_v<Config, rocprim::default_config>)
     {
@@ -66,11 +65,12 @@ auto config_name()
         return primbench::json{}
             .add("bs", config.kernel_config.block_size)
             .add("ipt", config.kernel_config.items_per_thread)
-            .add("method", get_reduce_method_name(config.block_reduce_method));
+            .add("method", get_block_scan_algorithm_name(config.block_scan_method));
     }
 }
 
-template<typename T,
+template<bool Exclusive,
+         typename T,
          typename BinaryFunction = rocprim::plus<T>,
          typename Config         = rocprim::default_config>
 struct device_segmented_scan_benchmark : public primbench::benchmark_interface
@@ -88,7 +88,7 @@ struct device_segmented_scan_benchmark : public primbench::benchmark_interface
     {
         auto j = primbench::json{}
                      .add("lvl", "device")
-                     .add("algo", "device_segmented_reduce")
+                     .add("algo", "device_segmented_scan")
                      .add("key_type", primbench::name<T>())
                      .add("cfg", config_name<Config>());
 
@@ -140,7 +140,7 @@ struct device_segmented_scan_benchmark : public primbench::benchmark_interface
 
         common::device_ptr<value_type> d_aggregates_output(segments_count);
 
-        rocprim::plus<value_type> reduce_op;
+        rocprim::plus<value_type> scan_op;
         value_type                init(0);
 
         size_t temporary_storage_bytes = 0;

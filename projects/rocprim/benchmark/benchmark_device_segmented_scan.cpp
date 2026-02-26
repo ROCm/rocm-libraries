@@ -30,15 +30,19 @@
 
 #include <stdint.h>
 
-#define CREATE_BENCHMARK(T, SEGMENTS) \
-    executor.queue<device_segmented_scan_benchmark<T>>(SEGMENTS);
+#define CREATE_BENCHMARK(T, EXCL, SEGMENTS) \
+    executor.queue<device_segmented_scan_benchmark<EXCL, T>>(SEGMENTS);
 
-#define BENCHMARK_TYPE(type)     \
-    CREATE_BENCHMARK(type, 1)    \
-    CREATE_BENCHMARK(type, 10)   \
-    CREATE_BENCHMARK(type, 100)  \
-    CREATE_BENCHMARK(type, 1000) \
-    CREATE_BENCHMARK(type, 10000)
+#define CREATE_BENCHMARK_EXCL_INCL(T, SEGMENTS) \
+    CREATE_BENCHMARK(T, true, SEGMENTS)         \
+    CREATE_BENCHMARK(T, false, SEGMENTS)
+
+#define BENCHMARK_TYPE(type)               \
+    CREATE_BENCHMARK_EXCL_INCL(type, 1)    \
+    CREATE_BENCHMARK_EXCL_INCL(type, 10)   \
+    CREATE_BENCHMARK_EXCL_INCL(type, 100)  \
+    CREATE_BENCHMARK_EXCL_INCL(type, 1000) \
+    CREATE_BENCHMARK_EXCL_INCL(type, 10000)
 
 int main(int argc, char* argv[])
 {
