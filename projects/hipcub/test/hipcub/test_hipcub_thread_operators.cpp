@@ -37,6 +37,8 @@
 #include <type_traits>
 #include <vector>
 
+#include _HIPCUB_STD_INCLUDE(functional)
+
 template<class InputType, class OutputType = InputType>
 struct ThreadOperatorsParams
 {
@@ -133,8 +135,8 @@ TYPED_TEST(HipcubThreadOperatorsTests, InequalityWrapper)
     using output_type = typename TestFixture::output_type;
 
     using Equality = typename EqualitySelector<test_utils::equal, input_type, output_type>::type;
-    Equality                            wrapped_op{};
-    hipcub::InequalityWrapper<Equality> op{wrapped_op};
+    Equality wrapped_op{};
+    auto     op = _HIPCUB_STD::not_fn(wrapped_op);
 
     equality_op_test<input_type, output_type>(op, false);
 }
