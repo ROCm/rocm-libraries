@@ -96,11 +96,7 @@ struct GPU_LSTM_extra_FP32 : LSTM_test<float>, testing::TestWithParam<TestCase>
 
 TEST_P(GPU_LSTM_extra_FP32, FloatTest)
 {
-    int device_count{0};
-    if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
-    {
-        GTEST_SKIP() << "No HIP devices available for testing";
-    }
+    auto [dirMode, nohx, nodhy, nocx, nodcy, nohy, nodhx, nocy, nodcx] = GetParam();
 
     this->batchSize  = 32;
     this->seqLength  = 3;
@@ -110,18 +106,15 @@ TEST_P(GPU_LSTM_extra_FP32, FloatTest)
     this->numLayers  = 1;
     this->inputMode  = 0;
     this->biasMode   = 0;
-
-    auto [dirMode, nohx, nodhy, nocx, nodcy, nohy, nodhx, nocy, nodcx] = GetParam();
-
-    this->dirMode = dirMode;
-    this->nohx    = bool(nohx);
-    this->nodhy   = bool(nodhy);
-    this->nocx    = bool(nocx);
-    this->nodcy   = bool(nodcy);
-    this->nohy    = bool(nohy);
-    this->nodhx   = bool(nodhx);
-    this->nocy    = bool(nocy);
-    this->nodcx   = bool(nodcx);
+    this->dirMode    = dirMode;
+    this->nohx       = bool(nohx);
+    this->nodhy      = bool(nodhy);
+    this->nocx       = bool(nocx);
+    this->nodcy      = bool(nodcy);
+    this->nohy       = bool(nohy);
+    this->nodhx      = bool(nodhx);
+    this->nocy       = bool(nocy);
+    this->nodcx      = bool(nodcx);
 
     RunTest();
 };

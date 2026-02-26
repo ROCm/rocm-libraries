@@ -1,28 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright (c) 2017 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
 cmake_policy(SET CMP0057 NEW)
 
@@ -109,6 +86,7 @@ set( MIOpen_Source
     ctc_api.cpp
     db.cpp
     db_record.cpp
+    demangle.cpp
     driver_arguments.cpp
     dropout.cpp
     dropout_api.cpp
@@ -303,6 +281,7 @@ set( MIOpen_Source
     solver/kthvalue/forward_kthvalue.cpp
     solver/layernorm/backward_layernorm.cpp
     solver/layernorm/backward_t5layernorm.cpp
+    solver/layernorm/common_layernorm.cpp
     solver/layernorm/forward_addlayernorm.cpp
     solver/layernorm/forward_layernorm.cpp
     solver/layernorm/forward_t5layernorm.cpp
@@ -351,6 +330,7 @@ set( MIOpen_Source
     tensor_api.cpp
     transformers_adam_w_api.cpp
     seq_tensor.cpp
+    unique_path.cpp
 )
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
@@ -370,7 +350,7 @@ if(MIOPEN_ENABLE_SQLITE AND MIOPEN_ENABLE_SQLITE_KERN_CACHE)
     list(APPEND MIOpen_Source kern_db.cpp bz2.cpp)
 endif()
 
-if(MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND MATCHES "^HIP")
+if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     include(${PROJECT_SOURCE_DIR}/cmake/CopyExternalHeader.cmake)
     find_path(ROCRAND_INCLUDE_DIR "rocrand/rocrand_xorwow.h")
     if(ROCRAND_INCLUDE_DIR)
@@ -787,7 +767,7 @@ if(MIOPEN_USE_ROCBLAS OR MIOPEN_USE_HIPBLASLT)
     )
 endif()
 
-if(MIOPEN_BACKEND STREQUAL "OpenCL")
+if( MIOPEN_BACKEND STREQUAL "OpenCL" )
     list(APPEND MIOpen_Source
         ocl/handleocl.cpp
         ocl_kernel.cpp
@@ -796,7 +776,7 @@ if(MIOPEN_BACKEND STREQUAL "OpenCL")
     )
 endif()
 
-if(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
+if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
     list(APPEND MIOpen_Source
         hip/hiperrors.cpp
         hip/handlehip.cpp
@@ -808,14 +788,13 @@ endif()
 if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     list(APPEND MIOpen_Source
         hip/hiperrors.cpp
-#        nogpu/handle.cpp
-hip/handlehip.cpp
+        nogpu/handle.cpp
         hipoc/hipoc_kernel.cpp
         hipoc/hipoc_program.cpp
         )
 endif()
 
-if(MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND MATCHES "^HIP")
+if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     set(KERNELS_SRC_BATCH_FACTOR 50 CACHE STRING "Amount of kernel source files to inline to a single object file.")
     set(KERNELS_BATCH_ID 0)
 
@@ -1012,27 +991,27 @@ endif()
 
 ############################################################
 # MIOpen depends on OpenCL
-if(MIOPEN_BACKEND STREQUAL "OpenCL")
-    message(STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}")
-    target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS})
-    target_link_libraries(MIOpen PUBLIC ${OPENCL_LIBRARIES})
+if( MIOPEN_BACKEND STREQUAL "OpenCL")
+    MESSAGE( STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}" )
+    target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS} )
+    target_link_libraries( MIOpen PUBLIC ${OPENCL_LIBRARIES} )
     list(APPEND PACKAGE_DEPENDS PACKAGE OpenCL)
-elseif(MIOPEN_BACKEND MATCHES "^HIP")
-    target_link_libraries(MIOpen PRIVATE hip::device)
-    target_link_libraries(MIOpen INTERFACE hip::host)
+elseif(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
+    target_link_libraries( MIOpen PRIVATE hip::device )
+    target_link_libraries( MIOpen INTERFACE hip::host )
     if(MIOPEN_USE_HIPRTC)
         if(WIN32)
-            target_link_libraries(MIOpen PRIVATE hiprtc::hiprtc)
+            target_link_libraries( MIOpen PRIVATE hiprtc::hiprtc )
         else()
-            target_link_libraries(MIOpen PRIVATE hiprtc)
+            target_link_libraries( MIOpen PRIVATE hiprtc)
         endif()
     endif()
     if(ENABLE_HIP_WORKAROUNDS)
         # Workaround hip not setting its usage requirements correctly
-        target_compile_definitions(MIOpen PRIVATE -D__HIP_PLATFORM_AMD__=1)
+        target_compile_definitions( MIOpen PRIVATE -D__HIP_PLATFORM_AMD__=1 )
     endif()
     # This is helpful for the tests
-    target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:hip::device>)
+    target_link_libraries( MIOpen INTERFACE $<BUILD_INTERFACE:hip::device> )
     list(APPEND PACKAGE_DEPENDS PACKAGE hip)
 endif()
 
@@ -1075,22 +1054,23 @@ target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann
 
 target_internal_library(MIOpen Boost::filesystem)
 list(APPEND PACKAGE_STATIC_DEPENDS PACKAGE Boost COMPONENTS filesystem)
+
 if(NOT WIN32 AND NOT APPLE)
     file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/lib.def "
-MIOPEN_${MIOPEN_BACKEND}_1
-{
-global:
-    miopen*;
-    extern \"C++\" {
-        miopen::*;
-    };
-local:
-    *boost*;
-    extern \"C++\" {
-        std::*;
-    };
-};
-")
+        MIOPEN_${MIOPEN_BACKEND}_1
+        {
+            global:
+                miopen*;
+                extern \"C++\" {
+                    miopen::*;
+                };
+            local:
+                *boost*;
+                extern \"C++\" {
+                    std::*;
+                };
+        };
+    ")
     target_link_libraries(MIOpen PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/lib.def")
     target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
     # set_target_properties(MIOpen PROPERTIES CXX_VISIBILITY_PRESET hidden)

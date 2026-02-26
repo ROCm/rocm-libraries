@@ -219,7 +219,7 @@ endif()
 add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose -C ${CMAKE_CFG_INTDIR} --exclude-regex ".*-suite")
 add_custom_target(tests)
 
-if(MIOPEN_TEST_GPU_DETECTION_FAILED AND (NOT MIOPEN_NO_GPU))
+if(MIOPEN_TEST_GPU_DETECTION_FAILED AND NOT (MIOPEN_NO_GPU))
     add_custom_target(gpu_detection_check COMMAND echo "*** FATAL: GPU DETECTION FAILED DURING CMAKE PHASE, CHECK CMAKE WARNINGS ***" COMMAND exit 1)
     add_dependencies(check gpu_detection_check)
 endif()

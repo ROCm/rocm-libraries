@@ -31,18 +31,11 @@ struct GPU_LSTM_dropout_FP32 : LSTM_test<float>, testing::TestWithParam<std::tup
 
 TEST_P(GPU_LSTM_dropout_FP32, FloatTest)
 {
-    int device_count{0};
-    if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
-    {
-        GTEST_SKIP() << "No HIP devices available for testing";
-    }
+    auto [dirMode, flatBatchFill] = GetParam();
 
     int useDropout{1};
     int batchSize{17};
     int seqLength{25};
-
-    auto [dirMode, flatBatchFill] = GetParam();
-
     this->useDropout    = useDropout;
     this->batchSize     = batchSize;
     this->seqLength     = seqLength;

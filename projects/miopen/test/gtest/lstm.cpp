@@ -31,17 +31,10 @@ struct GPU_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<std::tuple<int, 
 
 TEST_P(GPU_LSTM_FP32, FloatTest)
 {
-    int device_count{0};
-    if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
-    {
-        GTEST_SKIP() << "No HIP devices available for testing";
-    }
+    auto [usePadding, inputMode, biasMode, dirMode, algoMode] = GetParam();
 
     int batchSize{17};
     int seqLength{2};
-
-    auto [usePadding, inputMode, biasMode, dirMode, algoMode] = GetParam();
-
     this->batchSize  = batchSize;
     this->seqLength  = seqLength;
     this->inVecLen   = batchSize;

@@ -81,24 +81,17 @@ struct GPU_DeepBench_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<TestCa
 
 TEST_P(GPU_DeepBench_LSTM_FP32, FloatTest)
 {
-    int device_count{0};
-    if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
-    {
-        GTEST_SKIP() << "No HIP devices available for testing";
-    }
+    auto [batchSize, seqLength, inVecLen, hiddenSize] = GetParam();
 
     this->numLayers     = 1;
     this->inputMode     = 1;
     this->biasMode      = 0;
     this->dirMode       = 0;
     this->flatBatchFill = 1;
-
-    auto [batchSize, seqLength, inVecLen, hiddenSize] = GetParam();
-
-    this->batchSize  = batchSize;
-    this->seqLength  = seqLength;
-    this->inVecLen   = inVecLen;
-    this->hiddenSize = hiddenSize;
+    this->batchSize     = batchSize;
+    this->seqLength     = seqLength;
+    this->inVecLen      = inVecLen;
+    this->hiddenSize    = hiddenSize;
 
     RunTest();
 };
