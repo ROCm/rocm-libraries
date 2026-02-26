@@ -19,6 +19,24 @@ namespace rocRoller::Serialization
     }
 
     template <typename IO>
+    struct MappingTraits<Client::GEMMClient::XYTuple, IO, EmptyContext>
+    {
+        static const bool flow = false;
+        using iot              = IOTraits<IO>;
+
+        static void mapping(IO& io, Client::GEMMClient::XYTuple& x)
+        {
+            iot::mapRequired(io, "x", x.x);
+            iot::mapRequired(io, "y", x.y);
+        }
+
+        static void mapping(IO& io, Client::GEMMClient::XYTuple& x, EmptyContext& ctx)
+        {
+            mapping(io, x);
+        }
+    };
+
+    template <typename IO>
     struct MappingTraits<Client::GEMMClient::MNKTuple, IO, EmptyContext>
     {
         static const bool flow = false;
