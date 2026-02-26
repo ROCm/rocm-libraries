@@ -74,6 +74,7 @@ load(unsigned int i, const unsigned int i_offset, const T* __restrict__ src)
 {
     if(I_STRIDE == 1 && i + load_factor<T> < BOUND)
     {
+        __builtin_amdgcn_sched_barrier(1);
         const load_t value = *reinterpret_cast<const load_t*>(&src[i + i_offset]);
         const auto values  = *reinterpret_cast<const vec_t<T>*>(&value);
         return values;
