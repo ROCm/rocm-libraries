@@ -74,9 +74,9 @@ struct greater_equal
 
 struct equal
 {
-    template<class A, class B>
+    template<class T, class U>
         HIPCUB_HOST_DEVICE
-    inline constexpr auto operator()(const A& a, const B& b) const
+    inline constexpr auto operator()(const T& a, const U& b) const
     {
         return a == b;
     }
@@ -84,9 +84,9 @@ struct equal
 
 struct not_equal
 {
-    template<class A, class B>
+    template<class T, class U>
         HIPCUB_HOST_DEVICE
-    inline constexpr auto operator()(const A& a, const B& b) const
+    inline constexpr auto operator()(const T& a, const U& b) const
     {
         return a != b;
     }
@@ -124,9 +124,9 @@ struct multiplies
 
 struct divides
 {
-    template<class A, class B>
+    template<class T, class U>
         HIPCUB_HOST_DEVICE
-    inline constexpr auto operator()(const A& a, const B& b) const -> decltype(a / b)
+    inline constexpr auto operator()(const T& a, const U& b) const -> decltype(a / b)
     {
         return a / b;
     }

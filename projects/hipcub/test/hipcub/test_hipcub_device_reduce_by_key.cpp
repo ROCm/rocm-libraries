@@ -90,7 +90,7 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
         std::uniform_int_distribution<test_utils::convert_to_fundamental_t<key_type>>>::type;
 
     reduce_op_type reduce_op;
-    hipcub::Equality key_compare_op;
+    test_utils::equal key_compare_op;
 
     hipStream_t stream = 0; // default
     if(TestFixture::params::use_graphs)

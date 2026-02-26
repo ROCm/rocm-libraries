@@ -36,6 +36,8 @@
 
 #include <cub/device/device_scan.cuh> // IWYU pragma: export
 
+#include <cuda/std/functional>
+
 BEGIN_HIPCUB_NAMESPACE
 
 class DeviceScan
@@ -260,7 +262,7 @@ public:
     template<typename KeysInputIteratorT,
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
-             typename EqualityOpT = ::hipcub::Equality,
+             typename EqualityOpT = ::cuda::std::equal_to<>,
              typename NumItemsT   = std::uint32_t>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ExclusiveSumByKey(void*                 d_temp_storage,
@@ -287,7 +289,7 @@ public:
              typename ValuesOutputIteratorT,
              typename ScanOpT,
              typename InitValueT,
-             typename EqualityOpT = ::hipcub::Equality,
+             typename EqualityOpT = ::cuda::std::equal_to<>,
              typename NumItemsT   = std::uint32_t>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ExclusiveScanByKey(void*                 d_temp_storage,
@@ -316,7 +318,7 @@ public:
     template<typename KeysInputIteratorT,
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
-             typename EqualityOpT = ::hipcub::Equality,
+             typename EqualityOpT = ::cuda::std::equal_to<>,
              typename NumItemsT   = std::uint32_t>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t InclusiveSumByKey(void*                 d_temp_storage,
@@ -342,7 +344,7 @@ public:
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
              typename ScanOpT,
-             typename EqualityOpT = ::hipcub::Equality,
+             typename EqualityOpT = ::cuda::std::equal_to<>,
              typename NumItemsT   = std::uint32_t>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t InclusiveScanByKey(void*                 d_temp_storage,
@@ -370,7 +372,7 @@ public:
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
              typename ScanOpT,
-             typename EqualityOpT = ::hipcub::Equality,
+             typename EqualityOpT = ::cuda::std::equal_to<>,
              typename NumItemsT   = std::uint32_t>
     HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
     static hipError_t InclusiveScanByKey(void*                 d_temp_storage,

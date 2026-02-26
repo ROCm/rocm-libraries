@@ -974,7 +974,7 @@ TEST_P(HipcubDeviceSelectLargeIndicesTests, LargeIndicesSelectOp)
 
 template<typename KeyType,
          typename ValueType,
-         typename EqualityOp        = hipcub::Equality,
+         typename EqualityOp        = test_utils::equal,
          typename OutputKeyType     = KeyType,
          typename OutputValueType   = ValueType,
          typename SelectedCountType = unsigned int,
