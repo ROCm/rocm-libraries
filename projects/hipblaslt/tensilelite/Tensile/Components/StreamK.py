@@ -186,9 +186,9 @@ class StreamK(Component):
         _DepthU = kernel["_DepthU%s" % tc]
         # swizzle
         if (tP["isSwizzled"] and tc == 'A'):
-            _DepthU = (_DepthU * 16) # MI_M = 16
+            _DepthU = (_DepthU * 16)
         elif (tP["isSwizzled"] and tc == 'B'):
-            _DepthU = (_DepthU * 16) # MI_N = 16
+            _DepthU = (_DepthU * 16)
 
         tileStart = sTmp + 2
         # StreamK partial tile - offset to tile start index
@@ -266,9 +266,9 @@ class StreamK(Component):
         _DepthU = kernel["_DepthU%s" % tc]
         # swizzle
         if (tP["isSwizzled"] and tc == 'A'):
-            _DepthU = (_DepthU * 16) # MI_M = 16
+            _DepthU = (_DepthU * 16)
         elif (tP["isSwizzled"] and tc == 'B'):
-            _DepthU = (_DepthU * 16) # MI_N = 16
+            _DepthU = (_DepthU * 16)
 
         # StreamK partial tile - offset to tile start index
         tmpOffset = writer.sgprPool.checkOut(2, "skStartOffset")

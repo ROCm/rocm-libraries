@@ -27,12 +27,12 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
-  # FP4SS
+  # FP8SS
   ########################################
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: F4
+      DataType: F8
       DestDataType: S
       ComputeDataType: S
       HighPrecisionAccumulate: True
