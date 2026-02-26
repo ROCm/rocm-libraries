@@ -13,11 +13,16 @@ using namespace hipdnn_frontend::graph;
 
 namespace
 {
-// Helper: create a tensor with given dims
-std::shared_ptr<TensorAttributes> makeTensor(const std::vector<int64_t>& dims)
+// Helper: create a tensor with given dims and optional strides
+std::shared_ptr<TensorAttributes> makeTensor(const std::vector<int64_t>& dims,
+                                             const std::vector<int64_t>& strides = {})
 {
     auto t = std::make_shared<TensorAttributes>();
     t->set_dim(dims);
+    if(!strides.empty())
+    {
+        t->set_stride(strides);
+    }
     return t;
 }
 
@@ -292,4 +297,355 @@ TEST(TestLayernormFpropNode, PackNode)
     EXPECT_EQ(fbNode->name()->str(), "TestLayerNorm");
     EXPECT_EQ(fbNode->attributes_type(),
               hipdnn_data_sdk::data_objects::NodeAttributes::LayernormFpropAttributes);
+}
+
+// ============================================================================
+// Pre-validation: Dimension and Scalar Validation Tests
+// ============================================================================
+
+TEST(TestLayernormFpropNode, PreValidateFailsXWithNoDimensions)
+{
+    LayernormFpropAttributes attrs;
+    attrs.set_x(std::make_shared<TensorAttributes>()); // No dimensions set
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
+    attrs.set_epsilon(epsilon);
+    attrs.set_y(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormFpropNode, PreValidateFailsEpsilonNotScalar)
+{
+    auto x = makeTensor({32, 512});
+    LayernormFpropAttributes attrs;
+    attrs.set_x(x);
+    attrs.set_y(std::make_shared<TensorAttributes>());
+
+    // Epsilon with more than one element
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_dim({2});
+    epsilon->set_value(1e-5f);
+    attrs.set_epsilon(epsilon);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormFpropNode, PreValidateFailsEpsilonNotPassByValue)
+{
+    auto x = makeTensor({32, 512});
+    LayernormFpropAttributes attrs;
+    attrs.set_x(x);
+    attrs.set_y(std::make_shared<TensorAttributes>());
+
+    // Epsilon with correct dim but not pass-by-value (no set_value call)
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_dim({1});
+    attrs.set_epsilon(epsilon);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormFpropNode, PreValidateFailsEpsilonWithNoDimensions)
+{
+    auto x = makeTensor({32, 512});
+    LayernormFpropAttributes attrs;
+    attrs.set_x(x);
+    attrs.set_y(std::make_shared<TensorAttributes>());
+
+    // Epsilon set but no dimensions
+    attrs.set_epsilon(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestLayernormFpropNode, PreValidateFailsXYShapeMismatch)
+{
+    auto x = makeTensor({32, 512});
+    LayernormFpropAttributes attrs;
+    attrs.set_x(x);
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
+    attrs.set_epsilon(epsilon);
+
+    // Y has different shape than X
+    auto y = makeTensor({32, 256});
+    attrs.set_y(y);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormFpropNode, PreValidateFailsScaleWithNoDimensions)
+{
+    auto x = makeTensor({32, 512});
+    auto attrs = makeMinimalAttrs(x);
+    attrs.set_scale(std::make_shared<TensorAttributes>()); // No dimensions
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormFpropNode, PreValidateFailsBiasWithNoDimensions)
+{
+    auto x = makeTensor({32, 512});
+    auto attrs = makeMinimalAttrs(x);
+    attrs.set_bias(std::make_shared<TensorAttributes>()); // No dimensions
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+// ============================================================================
+// Infer Properties: Error and Edge-Case Tests
+// ============================================================================
+
+TEST(TestLayernormFpropNode, InferPropertiesFailsMissingX)
+{
+    LayernormFpropAttributes attrs;
+    attrs.set_y(std::make_shared<TensorAttributes>());
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
+    attrs.set_epsilon(epsilon);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestLayernormFpropNode, InferPropertiesFailsMissingY)
+{
+    auto x = makeTensor({32, 512});
+    LayernormFpropAttributes attrs;
+    attrs.set_x(x);
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_dim({1});
+    epsilon->set_value(1e-5f);
+    attrs.set_epsilon(epsilon);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestLayernormFpropNode, InferPropertiesCopiesStridesFromX)
+{
+    // When x has strides set and y does not, y should get x's strides
+    auto x = makeTensor({32, 512}, {512, 1});
+    auto attrs = makeMinimalAttrs(x);
+    auto y = attrs.get_y();
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    EXPECT_EQ(y->get_dim(), (std::vector<int64_t>{32, 512}));
+    EXPECT_EQ(y->get_stride(), (std::vector<int64_t>{512, 1}));
+}
+
+TEST(TestLayernormFpropNode, InferPropertiesMeanStrideFromXStrideOrder)
+{
+    // When x has strides, mean stride should be inferred from x's stride order
+    auto x = makeTensor({32, 512}, {512, 1});
+    auto attrs = makeMinimalAttrs(x);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    attrs.set_mean(mean);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    EXPECT_EQ(mean->get_dim(), (std::vector<int64_t>{1}));
+    EXPECT_FALSE(mean->get_stride().empty());
+}
+
+TEST(TestLayernormFpropNode, InferPropertiesRstdStrideFromXStrideOrder)
+{
+    // When x has strides, rstd stride should be inferred from x's stride order
+    auto x = makeTensor({32, 512}, {512, 1});
+    auto attrs = makeMinimalAttrs(x);
+
+    auto rstd = std::make_shared<TensorAttributes>();
+    attrs.set_rstd(rstd);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    EXPECT_EQ(rstd->get_dim(), (std::vector<int64_t>{1}));
+    EXPECT_FALSE(rstd->get_stride().empty());
+}
+
+TEST(TestLayernormFpropNode, InferPropertiesPreservesExplicitMeanDims)
+{
+    // Mean with dims already set should not be overwritten
+    auto x = makeTensor({32, 512});
+    auto attrs = makeMinimalAttrs(x);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_dim({32});
+    attrs.set_mean(mean);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    // Dims should remain as set by user
+    EXPECT_EQ(mean->get_dim(), (std::vector<int64_t>{32}));
+    // Strides should be inferred
+    EXPECT_FALSE(mean->get_stride().empty());
+}
+
+TEST(TestLayernormFpropNode, InferPropertiesPreservesExplicitStatStrides)
+{
+    // Stats tensor with strides already set should not be overwritten
+    auto x = makeTensor({32, 512});
+    auto attrs = makeMinimalAttrs(x);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_dim({1});
+    mean->set_stride({1});
+    attrs.set_mean(mean);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    EXPECT_EQ(mean->get_dim(), (std::vector<int64_t>{1}));
+    EXPECT_EQ(mean->get_stride(), (std::vector<int64_t>{1}));
+}
+
+TEST(TestLayernormFpropNode, InferPropertiesSetsBothMeanAndRstd)
+{
+    // Both mean and rstd should be inferred when set
+    auto x = makeTensor({32, 512}, {512, 1});
+    auto attrs = makeMinimalAttrs(x);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    auto rstd = std::make_shared<TensorAttributes>();
+    attrs.set_mean(mean);
+    attrs.set_rstd(rstd);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    EXPECT_FALSE(mean->get_dim().empty());
+    EXPECT_FALSE(mean->get_stride().empty());
+    EXPECT_FALSE(rstd->get_dim().empty());
+    EXPECT_FALSE(rstd->get_stride().empty());
+}
+
+// ============================================================================
+// Gather Tensors Test
+// ============================================================================
+
+TEST(TestLayernormFpropNode, GatherHipdnnTensors)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1).set_name("X");
+
+    auto y = std::make_shared<TensorAttributes>();
+    y->set_uid(2).set_name("Y");
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(3).set_name("Scale");
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(4).set_name("Bias");
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(5).set_name("Epsilon").set_value(1e-5f);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_uid(6).set_name("Mean");
+
+    auto rstd = std::make_shared<TensorAttributes>();
+    rstd->set_uid(7).set_name("Rstd");
+
+    LayernormFpropAttributes attrs;
+    attrs.set_x(x);
+    attrs.set_y(y);
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
+    attrs.set_epsilon(epsilon);
+    attrs.set_mean(mean);
+    attrs.set_rstd(rstd);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    node.gather_hipdnn_tensors(allTensors);
+
+    EXPECT_TRUE(allTensors.find(x) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(y) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(scale) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(bias) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(epsilon) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(mean) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(rstd) != allTensors.end());
+    EXPECT_EQ(allTensors.size(), 7u);
+}
+
+TEST(TestLayernormFpropNode, GatherHipdnnTensorsMinimal)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1);
+
+    auto y = std::make_shared<TensorAttributes>();
+    y->set_uid(2);
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(3).set_value(1e-5f);
+
+    LayernormFpropAttributes attrs;
+    attrs.set_x(x);
+    attrs.set_y(y);
+    attrs.set_epsilon(epsilon);
+
+    GraphAttributes graphAttrs;
+    LayernormFpropNode node(std::move(attrs), graphAttrs);
+
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    node.gather_hipdnn_tensors(allTensors);
+
+    EXPECT_TRUE(allTensors.find(x) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(y) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(epsilon) != allTensors.end());
+    EXPECT_EQ(allTensors.size(), 3u);
 }
