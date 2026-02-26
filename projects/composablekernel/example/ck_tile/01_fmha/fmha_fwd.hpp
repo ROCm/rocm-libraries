@@ -275,7 +275,7 @@ struct fmha_fwd_args
 
     ck_tile::index_t window_size_left;
     ck_tile::index_t window_size_right;
-    ck_tile::index_t sink_size = 0;
+    ck_tile::index_t sink_size;
     ck_tile::index_t mask_type;
     ck_tile::index_t min_seqlen_q;
 
@@ -366,7 +366,7 @@ struct fmha_fwd_pagedkv_args
 
     ck_tile::index_t window_size_left;
     ck_tile::index_t window_size_right;
-    ck_tile::index_t sink_size = 0;
+    ck_tile::index_t sink_size;
     ck_tile::index_t mask_type;
     ck_tile::index_t min_seqlen_q;
 };
@@ -458,7 +458,7 @@ struct fmha_fwd_splitkv_args
 
     ck_tile::index_t window_size_left;
     ck_tile::index_t window_size_right;
-    ck_tile::index_t sink_size = 0;
+    ck_tile::index_t sink_size;
     ck_tile::index_t mask_type;
 };
 
@@ -594,7 +594,7 @@ struct fmha_batch_prefill_args
 
     ck_tile::index_t window_size_left;
     ck_tile::index_t window_size_right;
-    ck_tile::index_t sink_size = 0;
+    ck_tile::index_t sink_size;
     ck_tile::index_t mask_type;
 
     float p_drop;
