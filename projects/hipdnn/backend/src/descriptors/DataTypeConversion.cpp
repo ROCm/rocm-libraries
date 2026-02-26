@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "DataTypeConversion.hpp"
-#include "DescriptorAttributeUtils.hpp"
 
 namespace hipdnn_backend
 {
@@ -90,47 +89,6 @@ int64_t getDataTypeByteSize(hipdnn_data_sdk::data_objects::DataType type)
         return 1;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported DataType for byte size");
-    }
-}
-
-void setDataType(hipdnn_data_sdk::data_objects::DataType& target,
-                 hipdnnBackendAttributeType_t attributeType,
-                 int64_t elementCount,
-                 const void* arrayOfElements,
-                 const char* errorPrefix)
-{
-    checkSetArgs(HIPDNN_TYPE_DATA_TYPE, attributeType, arrayOfElements, errorPrefix);
-    THROW_IF_FALSE(elementCount == 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(errorPrefix) + ": elementCount is not 1");
-    target = toSdkDataType(*static_cast<const hipdnnDataType_t*>(arrayOfElements));
-}
-
-void getDataType(hipdnn_data_sdk::data_objects::DataType source,
-                 hipdnnBackendAttributeType_t attributeType,
-                 int64_t requestedElementCount,
-                 int64_t* elementCount,
-                 void* arrayOfElements,
-                 const char* errorPrefix)
-{
-    checkGetArgs(HIPDNN_TYPE_DATA_TYPE, attributeType, errorPrefix);
-
-    if(arrayOfElements == nullptr || requestedElementCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      std::string(errorPrefix) + ": elementCount is null");
-        *elementCount = 1;
-        return;
-    }
-
-    THROW_IF_FALSE(requestedElementCount >= 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(errorPrefix) + ": requestedElementCount < 1");
-    *static_cast<hipdnnDataType_t*>(arrayOfElements) = fromSdkDataType(source);
-    if(elementCount != nullptr)
-    {
-        *elementCount = 1;
     }
 }
 

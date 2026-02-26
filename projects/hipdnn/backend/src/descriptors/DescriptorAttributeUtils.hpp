@@ -4,8 +4,10 @@
 #pragma once
 
 #include "HipdnnBackendAttributeType.h"
+#include "HipdnnDataType.h"
 #include "HipdnnException.hpp"
 #include <cstring>
+#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <vector>
 
 namespace hipdnn_backend
@@ -78,5 +80,18 @@ void getScalar(const T& source,
     }
     std::memcpy(arrayOfElements, &source, sizeof(T));
 }
+
+void setDataType(hipdnn_data_sdk::data_objects::DataType& target,
+                 hipdnnBackendAttributeType_t attributeType,
+                 int64_t elementCount,
+                 const void* arrayOfElements,
+                 const char* errorPrefix);
+
+void getDataType(hipdnn_data_sdk::data_objects::DataType source,
+                 hipdnnBackendAttributeType_t attributeType,
+                 int64_t requestedElementCount,
+                 int64_t* elementCount,
+                 void* arrayOfElements,
+                 const char* errorPrefix);
 
 } // namespace hipdnn_backend

@@ -1085,6 +1085,16 @@ TEST_F(TestTensorDescriptor, ToStringContainsExpectedInfo)
     ASSERT_NE(str.find("999"), std::string::npos);
 }
 
+TEST_F(TestTensorDescriptor, ToStringHandlesUnsetDataType)
+{
+    auto desc = getDescriptor();
+    // Do not set data type — it remains UNSET
+
+    std::string str;
+    ASSERT_NO_THROW(str = desc->toString());
+    ASSERT_NE(str.find("UNSET"), std::string::npos);
+}
+
 // =============================================================================
 // Data Type Round-Trip Tests
 // =============================================================================

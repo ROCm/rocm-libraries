@@ -432,7 +432,15 @@ std::string TensorDescriptor::toString() const
     using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "TensorDescriptor: {uid=" + std::to_string(_data.uid);
     str += ", name=" + _data.name;
-    str += std::string(", dataType=") + hipdnnGetDataTypeString(fromSdkDataType(_data.data_type));
+    if(_data.data_type == hipdnn_data_sdk::data_objects::DataType::UNSET)
+    {
+        str += ", dataType=UNSET";
+    }
+    else
+    {
+        str += std::string(", dataType=")
+               + hipdnnGetDataTypeString(fromSdkDataType(_data.data_type));
+    }
     str += ", dims=" + vecToString(_data.dims);
     str += ", strides=" + vecToString(_data.strides);
     str += ", virtual=" + std::string(_data.virtual_ ? "true" : "false");

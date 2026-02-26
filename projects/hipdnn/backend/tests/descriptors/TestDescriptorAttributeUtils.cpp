@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "TestMacros.hpp"
-#include "descriptors/DataTypeConversion.hpp"
 #include "descriptors/DescriptorAttributeUtils.hpp"
 #include <array>
 #include <gtest/gtest.h>
@@ -22,6 +21,15 @@ TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnNegativeElementCount)
     std::array<int64_t, 3> data = {1, 2, 3};
 
     ASSERT_THROW_HIPDNN_STATUS(setInt64Vector(target, HIPDNN_TYPE_INT64, -1, data.data(), "test"),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnZeroElementCount)
+{
+    std::vector<int64_t> target;
+    std::array<int64_t, 3> data = {1, 2, 3};
+
+    ASSERT_THROW_HIPDNN_STATUS(setInt64Vector(target, HIPDNN_TYPE_INT64, 0, data.data(), "test"),
                                HIPDNN_STATUS_BAD_PARAM);
 }
 
