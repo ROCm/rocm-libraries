@@ -328,14 +328,14 @@ struct GridwiseNormalizationNaiveVariance_mk_to_mk
                                           make_tuple(I0, I0),
                                           gamma_thread_buf(i));
 
-                static_for<0, MThreadSliceSize, 1>{}([&](auto iM) {
-                    static_for<0, XSrcVectorSize, 1>{}([&](auto iK) {
-                        constexpr auto offset_m_k =
-                            thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK));
-                        x_square_thread_buf(i)(Number<offset_m_k>{}) =
-                            x_thread_buf(i)(Number<offset_m_k>{}) *
-                            x_thread_buf(i)(Number<offset_m_k>{});
-                    });
+                static_ford<Sequence<MThreadSliceSize, XSrcVectorSize>>{}([&](auto ii) {
+                    constexpr auto iM = Number<ii[Number<0>{}]>{};
+                    constexpr auto iK = Number<ii[Number<1>{}]>{};
+                    constexpr auto offset_m_k =
+                        thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK));
+                    x_square_thread_buf(i)(Number<offset_m_k>{}) =
+                        x_thread_buf(i)(Number<offset_m_k>{}) *
+                        x_thread_buf(i)(Number<offset_m_k>{});
                 });
 
                 ThreadwiseSumReduce::Reduce(x_thread_buf[i], mean_thread_buf);
@@ -392,21 +392,21 @@ struct GridwiseNormalizationNaiveVariance_mk_to_mk
 
             // normalization
             static_for<0, MThreadSliceSize, 1>{}([&](auto iM) {
-                static_for<0, ThreadBufferNumber, 1>{}([&](auto iK0) {
-                    static_for<0, XSrcVectorSize, 1>{}([&](auto iK1) {
-                        constexpr auto offset_m_k =
-                            thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK1));
+                static_ford<Sequence<ThreadBufferNumber, XSrcVectorSize>>{}([&](auto ii) {
+                    constexpr auto iK0 = Number<ii[Number<0>{}]>{};
+                    constexpr auto iK1 = Number<ii[Number<1>{}]>{};
+                    constexpr auto offset_m_k =
+                        thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK1));
 
-                        // normalize
-                        y_thread_buf(iK0)(Number<offset_m_k>{}) =
-                            (x_thread_buf(iK0)(Number<offset_m_k>{}) - mean_thread_buf(iM)) *
-                            inv_std_thread_buf(iM);
+                    // normalize
+                    y_thread_buf(iK0)(Number<offset_m_k>{}) =
+                        (x_thread_buf(iK0)(Number<offset_m_k>{}) - mean_thread_buf(iM)) *
+                        inv_std_thread_buf(iM);
 
-                        // gamma & beta
-                        y_thread_buf(iK0)(Number<offset_m_k>{}) =
-                            y_thread_buf(iK0)(Number<offset_m_k>{}) *
-                            gamma_thread_buf(iK0)(Number<offset_m_k>{});
-                    });
+                    // gamma & beta
+                    y_thread_buf(iK0)(Number<offset_m_k>{}) =
+                        y_thread_buf(iK0)(Number<offset_m_k>{}) *
+                        gamma_thread_buf(iK0)(Number<offset_m_k>{});
                 });
             });
 
@@ -423,16 +423,16 @@ struct GridwiseNormalizationNaiveVariance_mk_to_mk
             });
 
             static_for<0, MThreadSliceSize, 1>{}([&](auto iM) {
-                static_for<0, ThreadBufferNumber, 1>{}([&](auto iK0) {
-                    static_for<0, XSrcVectorSize, 1>{}([&](auto iK1) {
-                        constexpr auto offset_m_k =
-                            thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK1));
+                static_ford<Sequence<ThreadBufferNumber, XSrcVectorSize>>{}([&](auto ii) {
+                    constexpr auto iK0 = Number<ii[Number<0>{}]>{};
+                    constexpr auto iK1 = Number<ii[Number<1>{}]>{};
+                    constexpr auto offset_m_k =
+                        thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK1));
 
-                        // beta
-                        y_thread_buf(iK0)(Number<offset_m_k>{}) =
-                            y_thread_buf(iK0)(Number<offset_m_k>{}) +
-                            beta_thread_buf(iK0)(Number<offset_m_k>{});
-                    });
+                    // beta
+                    y_thread_buf(iK0)(Number<offset_m_k>{}) =
+                        y_thread_buf(iK0)(Number<offset_m_k>{}) +
+                        beta_thread_buf(iK0)(Number<offset_m_k>{});
                 });
             });
 
@@ -460,14 +460,14 @@ struct GridwiseNormalizationNaiveVariance_mk_to_mk
                                           x_thread_buf(i));
                     threadwise_x_load.MoveSrcSliceWindow(x_grid_desc_m_k, thread_copy_fwd_step_m_k);
 
-                    static_for<0, MThreadSliceSize, 1>{}([&](auto iM) {
-                        static_for<0, XSrcVectorSize, 1>{}([&](auto iK) {
-                            constexpr auto offset_m_k =
-                                thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK));
-                            x_square_thread_buf(i)(Number<offset_m_k>{}) =
-                                x_thread_buf(i)(Number<offset_m_k>{}) *
-                                x_thread_buf(i)(Number<offset_m_k>{});
-                        });
+                    static_ford<Sequence<MThreadSliceSize, XSrcVectorSize>>{}([&](auto ii) {
+                        constexpr auto iM = Number<ii[Number<0>{}]>{};
+                        constexpr auto iK = Number<ii[Number<1>{}]>{};
+                        constexpr auto offset_m_k =
+                            thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK));
+                        x_square_thread_buf(i)(Number<offset_m_k>{}) =
+                            x_thread_buf(i)(Number<offset_m_k>{}) *
+                            x_thread_buf(i)(Number<offset_m_k>{});
                     });
 
                     ThreadwiseSumReduce::Reduce(x_thread_buf[i], mean_thread_buf);
@@ -545,21 +545,21 @@ struct GridwiseNormalizationNaiveVariance_mk_to_mk
                 });
 
                 static_for<0, MThreadSliceSize, 1>{}([&](auto iM) {
-                    static_for<0, ThreadBufferNumber, 1>{}([&](auto iK0) {
-                        static_for<0, XSrcVectorSize, 1>{}([&](auto iK1) {
-                            constexpr auto offset_m_k =
-                                thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK1));
+                    static_ford<Sequence<ThreadBufferNumber, XSrcVectorSize>>{}([&](auto ii) {
+                        constexpr auto iK0 = Number<ii[Number<0>{}]>{};
+                        constexpr auto iK1 = Number<ii[Number<1>{}]>{};
+                        constexpr auto offset_m_k =
+                            thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK1));
 
-                            // normalize
-                            y_thread_buf(iK0)(Number<offset_m_k>{}) =
-                                (x_thread_buf(iK0)(Number<offset_m_k>{}) - mean_thread_buf(iM)) *
-                                inv_std_thread_buf(iM);
+                        // normalize
+                        y_thread_buf(iK0)(Number<offset_m_k>{}) =
+                            (x_thread_buf(iK0)(Number<offset_m_k>{}) - mean_thread_buf(iM)) *
+                            inv_std_thread_buf(iM);
 
-                            // gamma
-                            y_thread_buf(iK0)(Number<offset_m_k>{}) =
-                                y_thread_buf(iK0)(Number<offset_m_k>{}) *
-                                gamma_thread_buf(iK0)(Number<offset_m_k>{});
-                        });
+                        // gamma
+                        y_thread_buf(iK0)(Number<offset_m_k>{}) =
+                            y_thread_buf(iK0)(Number<offset_m_k>{}) *
+                            gamma_thread_buf(iK0)(Number<offset_m_k>{});
                     });
                 });
 
@@ -574,16 +574,16 @@ struct GridwiseNormalizationNaiveVariance_mk_to_mk
                 });
 
                 static_for<0, MThreadSliceSize, 1>{}([&](auto iM) {
-                    static_for<0, ThreadBufferNumber, 1>{}([&](auto iK0) {
-                        static_for<0, XSrcVectorSize, 1>{}([&](auto iK1) {
-                            constexpr auto offset_m_k =
-                                thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK1));
+                    static_ford<Sequence<ThreadBufferNumber, XSrcVectorSize>>{}([&](auto ii) {
+                        constexpr auto iK0 = Number<ii[Number<0>{}]>{};
+                        constexpr auto iK1 = Number<ii[Number<1>{}]>{};
+                        constexpr auto offset_m_k =
+                            thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK1));
 
-                            // beta
-                            y_thread_buf(iK0)(Number<offset_m_k>{}) =
-                                y_thread_buf(iK0)(Number<offset_m_k>{}) +
-                                beta_thread_buf(iK0)(Number<offset_m_k>{});
-                        });
+                        // beta
+                        y_thread_buf(iK0)(Number<offset_m_k>{}) =
+                            y_thread_buf(iK0)(Number<offset_m_k>{}) +
+                            beta_thread_buf(iK0)(Number<offset_m_k>{});
                     });
                 });
 
