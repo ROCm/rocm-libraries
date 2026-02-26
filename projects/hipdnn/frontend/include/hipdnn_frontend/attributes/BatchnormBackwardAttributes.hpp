@@ -1,5 +1,14 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file BatchnormBackwardAttributes.hpp
+ * @brief Attributes for batch normalization backward pass operation
+ *
+ * This file defines the BatchnormBackwardAttributes class used to configure
+ * the backward pass (gradient computation) of batch normalization.
+ */
+
 #pragma once
 
 #include "Attributes.hpp"
@@ -11,6 +20,37 @@
 
 namespace hipdnn_frontend::graph
 {
+
+/**
+ * @class BatchnormBackwardAttributes
+ * @brief Configuration attributes for batch normalization backward pass
+ *
+ * BatchnormBackwardAttributes configures the backward pass of batch normalization,
+ * computing gradients with respect to the input, scale, and bias.
+ *
+ * **Required inputs:**
+ * - DY: Gradient of the loss with respect to the output (upstream gradient)
+ * - X: Original input tensor from forward pass
+ * - Scale: Per-channel scale (gamma) tensor
+ *
+ * **Optional inputs (from forward pass):**
+ * - Mean: Saved mean from forward pass
+ * - Inv_variance: Saved inverse variance from forward pass
+ *
+ * **Outputs:**
+ * - DX: Gradient with respect to input
+ * - DScale: Gradient with respect to scale (gamma)
+ * - DBias: Gradient with respect to bias (beta)
+ *
+ * @code{.cpp}
+ * BatchnormBackwardAttributes attr;
+ * attr.set_saved_mean_and_inv_variance(savedMean, savedInvVar);
+ *
+ * auto [dx, dscale, dbias] = graph.batchnorm_backward(dy, x, scale, attr);
+ * @endcode
+ *
+ * @see BatchnormAttributes for forward pass
+ */
 class BatchnormBackwardAttributes : public Attributes<BatchnormBackwardAttributes>
 {
 public:

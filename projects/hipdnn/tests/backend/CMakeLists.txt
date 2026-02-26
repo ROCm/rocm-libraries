@@ -21,6 +21,8 @@ add_executable(
     IntegrationLoggingPipeline.cpp
     IntegrationPluginLoading.cpp
     IntegrationSetPluginPathsExt.cpp
+    IntegrationSetPluginUnloadingModeExt.cpp
+    IntegrationTensorDescriptorApi.cpp
     IntegrationVariantPackApi.cpp
     TestUtil.cpp
 )
@@ -55,6 +57,7 @@ target_compile_definitions(
             TEST_GOOD_DEFAULT_PLUGIN_NAME="${TEST_GOOD_DEFAULT_PLUGIN_NAME}"
             TEST_KNOBS_PLUGIN_NAME="${TEST_KNOBS_PLUGIN_NAME}"
             TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME="${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}"
+            TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME="${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME}"
 )
 
 # Ensure test plugins are built before tests

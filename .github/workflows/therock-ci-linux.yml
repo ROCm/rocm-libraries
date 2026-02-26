@@ -38,20 +38,12 @@ jobs:
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      # We only want to build MIOpen HEAD against CK HEAD, not applicable for other projects
-      - name: Checkout composable_kernel repository
-        if: ${{ contains(inputs.projects_to_test, 'miopen') || contains(inputs.projects_to_test, 'miopen_plugin') }}
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          repository: "ROCm/composable_kernel"
-          path: "composable_kernel"
-
       - name: Checkout TheRock repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 55fa089eecd5f20d13357b82b74b5572dda1d67b # 2026-02-03 commit
+          ref: 92ce23132a10477c0a2955b2dd902a628ac50428 # 2026-02-24 commit
 
       - name: Install python deps
         run: |
@@ -145,6 +137,8 @@ jobs:
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
+    # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu'}}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
