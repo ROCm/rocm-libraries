@@ -96,7 +96,6 @@ void PrecompileSolutions(const Handle& h,
 
 std::ostream& operator<<(std::ostream& os, const ConvSolution& s)
 {
-    os << s.solver_id << ": ";
     std::transform(s.construction_params.begin(),
                    s.construction_params.end(),
                    std::ostream_iterator<std::string>(os, "/"),
