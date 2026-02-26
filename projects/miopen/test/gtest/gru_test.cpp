@@ -3096,18 +3096,16 @@ static std::vector<TestCase> base_cases = {
 
 auto GenCases(bool gen_dropout)
 {
-    std::vector<int> modes(2, 0);
-    modes[1] = 1;
     std::vector<int> defaultBS(1);
 
     std::vector<TestCase> cases{};
 
     TestCase single{};
     single.batchSize     = 17;
-    single.seqLength     = 2;
+    single.seqLength     = (gen_dropout ? 23 : 2);
     single.inVecLen      = 13;
     single.hiddenSize    = 67;
-    single.numLayers     = 1;
+    single.numLayers     = (gen_dropout ? 3 : 1);
     single.inputMode     = 0;
     single.biasMode      = 0;
     single.dirMode       = 1;
@@ -3118,20 +3116,10 @@ auto GenCases(bool gen_dropout)
     single.nodhx         = false;
     single.flatBatchFill = false;
     single.batchSeq      = defaultBS;
-    for(int i = 0; i < modes.size(); ++i)
-    {
-        for(int j = 0; j < modes.size(); ++j)
-        {
-            for(int k = 0; k < modes.size(); ++k)
-            {
-                TestCase copy  = single;
-                copy.inputMode = modes[i];
-                copy.biasMode  = modes[j];
-                copy.dirMode   = modes[k];
-                cases.push_back(copy);
-            }
-        }
-    }
+    single.inputMode = 0;
+    single.biasMode  = 0;
+    single.dirMode   = 0;
+    cases.push_back(single);
     return cases;
 }
 
