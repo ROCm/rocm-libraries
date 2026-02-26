@@ -10,6 +10,16 @@ set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json
 set(HIPDNN_FMTLIB_VERSION "11.1.3" CACHE STRING "Version of fmtlib to use")
 set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
 
+# Optional features - JSON serialization (matches cuDNN's CUDNN_FRONTEND_SKIP_JSON_LIB pattern)
+option(HIPDNN_FRONTEND_SKIP_JSON_LIB "Defines whether FE should not include nlohmann/json.hpp." OFF)
+
+# Status message
+if(HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    message(STATUS "hipDNN: JSON serialization disabled")
+else()
+    message(STATUS "hipDNN: JSON serialization enabled (requires nlohmann_json)")
+endif()
+
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_compile_definitions(__HIP_PLATFORM_AMD__)

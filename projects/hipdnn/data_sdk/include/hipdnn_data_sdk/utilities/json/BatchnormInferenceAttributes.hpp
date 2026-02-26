@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/json/Common.hpp>
 
@@ -40,3 +42,5 @@ inline auto to<data_objects::BatchnormInferenceAttributes>(flatbuffers::FlatBuff
 }
 
 }
+
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB

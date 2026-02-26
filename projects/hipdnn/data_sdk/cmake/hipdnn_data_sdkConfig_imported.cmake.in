@@ -56,7 +56,14 @@ if(flatbuffers_VERSION AND NOT flatbuffers_VERSION IN_LIST _hipdnn_supported_fla
     )
 endif()
 
-find_dependency(nlohmann_json REQUIRED)
+# Export HIPDNN_FRONTEND_SKIP_JSON_LIB setting for consumers
+set(HIPDNN_FRONTEND_SKIP_JSON_LIB @HIPDNN_FRONTEND_SKIP_JSON_LIB@ CACHE BOOL
+    "Defines whether FE should not include nlohmann/json.hpp.")
+
+# nlohmann_json is optional based on HIPDNN_FRONTEND_SKIP_JSON_LIB
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    find_dependency(nlohmann_json REQUIRED)
+endif()
 
 # Subdirectory path for hipDNN engine plugins (relative to lib)
 set(HIPDNN_PLUGIN_ENGINE_SUBDIR "@HIPDNN_PLUGIN_ENGINE_SUBDIR@")
@@ -77,7 +84,9 @@ if(flatbuffers_VERSION)
 endif()
 
 hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
-hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
+endif()
 
 message(STATUS "hipDNN Data SDK: Engine plugin build directory is ${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
 message(STATUS "hipDNN Data SDK: Plugin absolute installation directory ${HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR}")
