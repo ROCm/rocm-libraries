@@ -485,6 +485,16 @@ inline constexpr auto ceiling_div(const T a, const U b)
     return a / b + (a % b > 0 ? 1 : 0);
 }
 
+struct minimum
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE
+    auto operator()(const T& a, const U& b) const
+    {
+        return a < b ? a : b;
+    }
+};
+
 } // namespace benchmark_utils
 
 // Need for hipcub::DeviceReduce::Min/Max etc.

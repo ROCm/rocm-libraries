@@ -279,50 +279,50 @@ struct AlgebraicSelector<OpT, test_utils::bfloat16, U>
 template<typename T, typename U>
 struct MaxSelector
 {
-    using type = hipcub::Max;
+    using type = test_utils::maximum;
 };
 
 template<typename T, typename U>
 struct MaxSelector<test_utils::custom_test_type<T>, test_utils::custom_test_type<U>>
 {
-    using type = CustomTestOp<hipcub::Max>;
+    using type = CustomTestOp<test_utils::maximum>;
 };
 
 template<typename U>
 struct MaxSelector<test_utils::half, U>
 {
-    using type = ExtendedFloatBinOp<hipcub::Max>;
+    using type = ExtendedFloatBinOp<test_utils::maximum>;
 };
 
 template<typename U>
 struct MaxSelector<test_utils::bfloat16, U>
 {
-    using type = ExtendedFloatBinOp<hipcub::Max>;
+    using type = ExtendedFloatBinOp<test_utils::maximum>;
 };
 
 // Min functor selector.
 template<typename T, typename U>
 struct MinSelector
 {
-    using type = hipcub::Min;
+    using type = test_utils::minimum;
 };
 
 template<typename T, typename U>
 struct MinSelector<test_utils::custom_test_type<T>, test_utils::custom_test_type<U>>
 {
-    using type = CustomTestOp<hipcub::Min>;
+    using type = CustomTestOp<test_utils::minimum>;
 };
 
 template<typename U>
 struct MinSelector<test_utils::half, U>
 {
-    using type = ExtendedFloatBinOp<hipcub::Min>;
+    using type = ExtendedFloatBinOp<test_utils::minimum>;
 };
 
 template<typename U>
 struct MinSelector<test_utils::bfloat16, U>
 {
-    using type = ExtendedFloatBinOp<hipcub::Min>;
+    using type = ExtendedFloatBinOp<test_utils::minimum>;
 };
 
 // ArgMax functor selector

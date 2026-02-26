@@ -166,7 +166,7 @@ struct Benchmark<T, hipcub::Sum>
 };
 
 template<typename T>
-struct Benchmark<T, hipcub::Min>
+struct Benchmark<T, benchmark_utils::minimum>
 {
     static void
         run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
@@ -235,9 +235,9 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
     std::vector<benchmark::internal::Benchmark*> bs = {
         CREATE_BENCHMARKS(hipcub::Sum),
         BENCHMARK_TYPE(custom_double2, hipcub::Sum),
-        CREATE_BENCHMARKS(hipcub::Min),
+        CREATE_BENCHMARKS(benchmark_utils::minimum),
 #ifdef HIPCUB_ROCPRIM_API
-        BENCHMARK_TYPE(custom_double2, hipcub::Min),
+        BENCHMARK_TYPE(custom_double2, benchmark_utils::minimum),
 #endif
         CREATE_BENCHMARKS(hipcub::ArgMin),
 #ifdef HIPCUB_ROCPRIM_API
