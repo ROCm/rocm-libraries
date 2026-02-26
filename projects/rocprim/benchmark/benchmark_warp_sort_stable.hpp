@@ -41,22 +41,11 @@
 #include <string>
 #include <vector>
 
-// Helper to print algorithm name in JSON
-inline std::string algo_to_string(rocprim::warp_sort_stable_algorithm algo)
-{
-    switch(algo)
-    {
-        case rocprim::warp_sort_stable_algorithm::merge_path: return "merge_path";
-        case rocprim::warp_sort_stable_algorithm::shuffle: return "shuffle";
-        default: return "unknown";
-    }
-}
-
 template<typename K,
          unsigned int                        BlockSize,
          unsigned int                        WarpSize,
          unsigned int                        ItemsPerThread,
-         rocprim::warp_sort_stable_algorithm Algo>
+         rocprim::warp_sort_stable_algorithm Algorithm>
 __global__ __launch_bounds__(BlockSize)
 void warp_sort_stable_kernel(K* input_keys, K* output_keys)
 {
@@ -65,10 +54,15 @@ void warp_sort_stable_kernel(K* input_keys, K* output_keys)
     const unsigned int block_offset    = blockIdx.x * items_per_block;
 
     K keys[ItemsPerThread];
+    rocprim::block_load_direct_striped<BlockSize>(flat_tid, input_keys + block_offset, keys);
 
-    using StableSort = rocprim::
-        warp_sort_stable<K, BlockSize, WarpSize, ItemsPerThread, rocprim::empty_type, Algo>;
-    StableSort().sort(keys, ::rocprim::less<K>());
+    using wsort_t = rocprim::
+        warp_sort_stable<K, BlockSize, WarpSize, ItemsPerThread, rocprim::empty_type, Algorithm>;
+
+    __shared__
+    typename wsort_t::storage_type storage;
+
+    wsort_t().sort(keys, storage);
 
     rocprim::block_store_direct_blocked(flat_tid, output_keys + block_offset, keys);
 }
@@ -78,7 +72,7 @@ template<typename K,
          unsigned int                        BlockSize,
          unsigned int                        WarpSize,
          unsigned int                        ItemsPerThread,
-         rocprim::warp_sort_stable_algorithm Algo>
+         rocprim::warp_sort_stable_algorithm Algorithm>
 __global__ __launch_bounds__(BlockSize)
 void warp_sort_stable_by_key_kernel(K* input_keys,
                                     V* input_values,
@@ -95,9 +89,12 @@ void warp_sort_stable_by_key_kernel(K* input_keys,
     rocprim::block_load_direct_striped<BlockSize>(flat_tid, input_keys + block_offset, keys);
     rocprim::block_load_direct_striped<BlockSize>(flat_tid, input_values + block_offset, values);
 
-    using StableSort = rocprim::detail::warp_sort_stable<K, BlockSize, WarpSize, ItemsPerThread, V>;
-    StableSort wsort;
-    wsort.sort(keys, values, ::rocprim::less<K>());
+    using wsort_t = rocprim::warp_sort_stable<K, BlockSize, WarpSize, ItemsPerThread, V, Algorithm>;
+
+    __shared__
+    typename wsort_t::storage_type storage;
+
+    wsort_t().sort(keys, values, storage);
 
     rocprim::block_store_direct_blocked(flat_tid, output_keys + block_offset, keys);
     rocprim::block_store_direct_blocked(flat_tid, output_values + block_offset, values);
@@ -106,22 +103,26 @@ void warp_sort_stable_by_key_kernel(K* input_keys,
 template<typename Key,
          unsigned int BlockSize,
          unsigned int WarpSize,
-         unsigned int ItemsPerThread              = 1,
-         typename Value                           = rocprim::empty_type,
-         rocprim::warp_sort_stable_algorithm Algo = rocprim::warp_sort_stable_algorithm::merge_path,
-         unsigned int                        Trials = 100,
-         typename Config                            = rocprim::default_config>
+         unsigned int ItemsPerThread = 1,
+         typename Value              = rocprim::empty_type,
+         rocprim::warp_sort_stable_algorithm Algorithm
+         = rocprim::warp_sort_stable_algorithm::merge_path,
+         unsigned int Trials = 100,
+         typename Config     = rocprim::default_config>
 struct warp_sort_stable_benchmark : public primbench::benchmark_interface
 {
     primbench::json meta() const override
     {
-        auto j = primbench::json{}
-                     .add("lvl", "warp")
-                     .add("algo", "warp_sort")
-                     .add("algo_variant", algo_to_string(Algo))
-                     .add("key_type", primbench::name<Key>())
-                     .add("ws", WarpSize)
-                     .add("cfg", primbench::json{}.add("bs", BlockSize).add("ipt", ItemsPerThread));
+        auto j
+            = primbench::json{}
+                  .add("lvl", "warp")
+                  .add("algo", "warp_sort_stable")
+                  .add("key_type", primbench::name<Key>())
+                  .add("ws", WarpSize)
+                  .add("backend",
+                       Algorithm == rocprim::warp_sort_stable_algorithm::merge_path ? "merge_path"
+                                                                                    : "shuffle")
+                  .add("cfg", primbench::json{}.add("bs", BlockSize).add("ipt", ItemsPerThread));
 
         if constexpr(SortByKey)
         {
@@ -134,7 +135,7 @@ struct warp_sort_stable_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         auto seeds = primbench::seeds<2>(seed);
@@ -222,21 +223,17 @@ private:
                 ROCPRIM_NO_UNROLL
                 for(unsigned int trial = 0; trial < Trials; ++trial)
                 {
-                    hipLaunchKernelGGL(
-                        HIP_KERNEL_NAME(warp_sort_stable_by_key_kernel<Key,
-                                                                       Value,
-                                                                       BlockSize,
-                                                                       WarpSize,
-                                                                       ItemsPerThread,
-                                                                       Algo>),
-                        dim3(items / items_per_block),
-                        dim3(BlockSize),
-                        0,
-                        stream,
-                        d_input_key,
-                        d_input_value,
-                        d_output_key,
-                        d_output_value);
+                    warp_sort_stable_by_key_kernel<Key,
+                                                   Value,
+                                                   BlockSize,
+                                                   WarpSize,
+                                                   ItemsPerThread,
+                                                   Algorithm>
+                        <<<dim3(items / items_per_block), dim3(BlockSize), 0, stream>>>(
+                            d_input_key,
+                            d_input_value,
+                            d_output_key,
+                            d_output_value);
                 }
             });
     }
@@ -255,17 +252,10 @@ private:
                 ROCPRIM_NO_UNROLL
                 for(unsigned int trial = 0; trial < Trials; ++trial)
                 {
-                    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_sort_stable_kernel<Key,
-                                                                               BlockSize,
-                                                                               WarpSize,
-                                                                               ItemsPerThread,
-                                                                               Algo>),
-                                       dim3(items / items_per_block),
-                                       dim3(BlockSize),
-                                       0,
-                                       stream,
-                                       d_input_key,
-                                       d_output_key);
+                    warp_sort_stable_kernel<Key, BlockSize, WarpSize, ItemsPerThread, Algorithm>
+                        <<<dim3(items / items_per_block), dim3(BlockSize), 0, stream>>>(
+                            d_input_key,
+                            d_output_key);
                 }
             });
     }
