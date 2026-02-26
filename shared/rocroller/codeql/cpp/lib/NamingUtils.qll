@@ -14,7 +14,7 @@ predicate isInCheckedDirs(Element v) {
     v.getFile()
         .getAbsolutePath()
         .toString()
-        .regexpMatch(".*(extern|build|test/unit/GemmGuidePost)/.*") or
+        .regexpMatch(".*(build|test/unit/GemmGuidePost)/.*") or
     v.getFile().getAbsolutePath().toString().regexpMatch(".*(Context\\.hpp)$")
   )
 }
