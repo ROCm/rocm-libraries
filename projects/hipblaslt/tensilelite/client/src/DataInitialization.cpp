@@ -1709,7 +1709,10 @@ namespace TensileLite
                    or i == ContractionProblemGemm::TENSOR::METADATA)
                     continue;
 
-                if(useMXGenerator && (i == ContractionProblemGemm::TENSOR::A || i == ContractionProblemGemm::TENSOR::B))
+                if(useMXGenerator && (i == ContractionProblemGemm::TENSOR::A
+                                      || i == ContractionProblemGemm::TENSOR::B
+                                      || i == ContractionProblemGemm::TENSOR::MXSA
+                                      || i == ContractionProblemGemm::TENSOR::MXSB))
                     continue;
 
                 if(m_problemDependentData)
