@@ -238,7 +238,7 @@ ADD miopen/dev-requirements.txt /dev-requirements.txt
 
 # rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
 # Composable Kernel install separated from rbuild 
-# Additionally remove components that are already installed by other compoenents as a part of the source build.
+# Remove components that are already built by TheRock.
 RUN cd / && \
     sed -i '/composablekernel/d; /half/d; /nlohmann/d' /requirements.txt && \
     if [ "$USE_FIN" = "ON" ]; then \
