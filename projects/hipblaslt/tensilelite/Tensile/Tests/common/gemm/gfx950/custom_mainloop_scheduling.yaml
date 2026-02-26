@@ -2562,7 +2562,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - LDSTrInst: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0, 1]
+        - UseCustomMainLoopSchedule: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

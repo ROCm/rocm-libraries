@@ -830,7 +830,7 @@ class RegisterSchedule:
         return func
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 96, 64, 2, 1, 1, True, 0, 0),
+    tile_config=TileConfig(256, 96, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -933,8 +933,27 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
 
             'LCC'    : [[47, 47]],
         }
-    elif isNT(kernel) and useLDSTr and TLDS == 0:
-        print("=== CMS ===")
+    else:
+        return False, None
+
+    numMfma = 48
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+@RegisterSchedule(
+    tile_config=TileConfig(256, 96, 64, 2, 1, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_256x96x64_16bit_useDtlPlusLdsBuf(kernel, useLDSTr, TLDS):
+
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+
+    if isNT(kernel) and useLDSTr and TLDS == 0:
         syncTable = [
             -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write for iteration == 0"),
             18, SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1, comment="wait for previous set of global reads"),
