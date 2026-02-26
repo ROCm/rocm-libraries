@@ -37,6 +37,20 @@ Lifecycle of a directory across runs:
        It then selects up to two directories to work on (one reactive,
        one proactive) based on priority queues.
 
+       Reactive changes are tracked at the **directory** level, not per
+       file.  ``git diff`` identifies which files changed, and those
+       changes are grouped by parent directory.  Only the directory
+       names enter the reactive queue — there is no per-file backlog.
+
+       Because only two directories can be worked on per run, reactive
+       directories that aren't picked are saved to ``pending_reactive``
+       so they carry over to the next run instead of being lost when
+       ``last_commit`` advances.  Note that for carried-over
+       directories, the file-level diff is no longer available (the
+       stored commit hash has advanced past those changes).  The agent
+       must compare existing docs against current source code to
+       identify what needs updating.
+
     3. ``mark-visited`` is called after the agent documents a directory.
        It updates files_covered and resets runs_since_last_visit to 0.
 
@@ -248,8 +262,9 @@ def cmd_get_work(_args: argparse.Namespace) -> None:
     The two slots are filled as follows:
       * slot1 = top of the reactive queue (if non-empty), otherwise top
         of the proactive queue.
-      * slot2 = top of the proactive queue (skipping slot1 if it came
-        from the proactive queue, to avoid duplicates).
+      * slot2 = first directory with missing documentation (no docs or
+        partial docs), then reactive, then staleness review — skipping
+        slot1 to avoid duplicates.
     """
     state = load_state()
     if state is None:
@@ -273,9 +288,9 @@ def cmd_get_work(_args: argparse.Namespace) -> None:
         del state["directories"][d]
 
     # ── Reactive queue ──────────────────────────────────────────────
-    # Directories whose source files changed since last run.  These
-    # may need their existing docs updated to match the new code.
-    reactive_queue: list[str] = []
+    # Directories whose source files changed since last run, plus any
+    # carried over from previous runs that weren't worked on yet.
+    reactive_set: set[str] = set(state.get("pending_reactive", []))
     last_commit = state.get("last_commit")
     if last_commit:
         changed_files = git_diff_files(last_commit, targets)
@@ -284,8 +299,16 @@ def cmd_get_work(_args: argparse.Namespace) -> None:
             parent = str(Path(f).parent)
             if parent in state["directories"]:
                 dir_change_count[parent] = dir_change_count.get(parent, 0) + 1
-        reactive_queue = sorted(dir_change_count.keys(),
-                                key=lambda d: dir_change_count[d], reverse=True)
+                reactive_set.add(parent)
+        # Sort by change count (dirs from pending_reactive with no new
+        # changes get a count of 0, so they appear after dirs with fresh changes).
+        reactive_queue: list[str] = sorted(
+            reactive_set,
+            key=lambda d: dir_change_count.get(d, 0),
+            reverse=True,
+        )
+    else:
+        reactive_queue = sorted(reactive_set)
 
     # ── Proactive queue ─────────────────────────────────────────────
     # Directories that need new documentation work regardless of
@@ -307,7 +330,11 @@ def cmd_get_work(_args: argparse.Namespace) -> None:
     stalest.sort(key=lambda d: state["directories"][d]["runs_since_last_visit"],
                  reverse=True)
 
-    proactive_queue: list[str] = no_docs + partial_docs + stalest
+    # High-priority proactive: directories with missing docs (no_docs + partial_docs).
+    # Low-priority proactive: staleness reviews (stalest).
+    # Reactive work (code changed) is more important than staleness reviews
+    # but less important than genuinely missing documentation.
+    high_priority_proactive: list[str] = no_docs + partial_docs
 
     # ── Fill the two work slots ─────────────────────────────────────
     slot1: str | None = None
@@ -319,23 +346,39 @@ def cmd_get_work(_args: argparse.Namespace) -> None:
     if reactive_queue:
         slot1 = reactive_queue[0]
         slot1_source = "reactive"
-    elif proactive_queue:
-        slot1 = proactive_queue[0]
+    elif high_priority_proactive:
+        slot1 = high_priority_proactive[0]
+        slot1_source = "proactive"
+    elif stalest:
+        slot1 = stalest[0]
         slot1_source = "proactive"
 
-    # slot2: always proactive (skip slot1 to avoid duplicates).
-    for candidate in proactive_queue:
+    # slot2: prefer high-priority proactive, then reactive, then stalest.
+    # Skip slot1 to avoid duplicates.
+    for candidate in high_priority_proactive:
         if candidate != slot1:
             slot2 = candidate
             slot2_source = "proactive"
             break
+    if slot2 is None:
+        for candidate in reactive_queue:
+            if candidate != slot1:
+                slot2 = candidate
+                slot2_source = "reactive"
+                break
+    if slot2 is None:
+        for candidate in stalest:
+            if candidate != slot1:
+                slot2 = candidate
+                slot2_source = "proactive"
+                break
 
     # ── Build output ────────────────────────────────────────────────
     output: dict[str, Any] = {
         "slot1": None,
         "slot2": None,
         "reactive_queue_size": len(reactive_queue),
-        "proactive_queue_size": len(proactive_queue),
+        "proactive_queue_size": len(high_priority_proactive) + len(stalest),
     }
 
     if slot1:
@@ -363,6 +406,11 @@ def cmd_get_work(_args: argparse.Namespace) -> None:
             "all_files": all_files,
             "runs_since_last_visit": entry["runs_since_last_visit"],
         }
+
+    # Persist reactive directories that weren't picked up this run.
+    # These carry over so they aren't lost when last_commit advances.
+    picked = {slot1, slot2}
+    state["pending_reactive"] = [d for d in reactive_queue if d not in picked]
 
     # Save any directory list updates we made
     save_state(state)
@@ -406,11 +454,18 @@ def cmd_finish_run(_args: argparse.Namespace) -> None:
         print("No state file found. Run 'init' first.", file=sys.stderr)
         sys.exit(1)
 
-    for entry in state["directories"].values():
+    visited_dirs: set[str] = set()
+    for dir_path, entry in state["directories"].items():
         if entry.get("visited_this_run"):
             entry["visited_this_run"] = False
+            visited_dirs.add(dir_path)
         else:
             entry["runs_since_last_visit"] += 1
+
+    # Remove visited directories from pending_reactive
+    state["pending_reactive"] = [
+        d for d in state.get("pending_reactive", []) if d not in visited_dirs
+    ]
 
     state["last_commit"] = git_rev_parse_head()
     state["last_run"] = now_iso()
@@ -1075,3 +1130,173 @@ def test_cmd_get_work_computes_uncovered_on_the_fly(tmp_path, monkeypatch, capsy
     # State should NOT contain files_uncovered
     updated = json.loads(state_file.read_text())
     assert "files_uncovered" not in updated["directories"]["src"]
+
+
+def test_cmd_get_work_slot2_falls_back_to_reactive(tmp_path, monkeypatch, capsys):
+    """When proactive queue is empty, slot2 should fill from reactive queue."""
+    state_file = tmp_path / "state.json"
+    monkeypatch.setattr("doc_agent_state.STATE_FILE", state_file)
+    monkeypatch.setattr("doc_agent_state.get_repo_root", lambda: tmp_path)
+
+    # Two directories, both fully documented (proactive queue will be empty)
+    for name in ("dir_a", "dir_b"):
+        d = tmp_path / name
+        (d / "docs").mkdir(parents=True)
+        (d / "file.py").write_text("code")
+
+    targets_file = tmp_path / "targets.json"
+    targets_file.write_text(json.dumps({"targets": ["dir_a", "dir_b"]}))
+    monkeypatch.setattr("doc_agent_state.TARGETS_FILE", targets_file)
+
+    # Both directories have all files covered → empty proactive queue
+    # Both have reactive changes
+    monkeypatch.setattr("doc_agent_state.git_diff_files",
+                        lambda *a: ["dir_a/file.py", "dir_b/file.py"])
+
+    state = {
+        "last_commit": "abc",
+        "directories": {
+            "dir_a": {
+                "last_visited": "2024-01-01",
+                "files_covered": ["file.py"],
+                "runs_since_last_visit": 0,
+                "visited_this_run": False,
+            },
+            "dir_b": {
+                "last_visited": "2024-01-01",
+                "files_covered": ["file.py"],
+                "runs_since_last_visit": 0,
+                "visited_this_run": False,
+            },
+        },
+    }
+    state_file.write_text(json.dumps(state))
+
+    cmd_get_work(argparse.Namespace())
+    output = json.loads(capsys.readouterr().out.split("\n", 1)[-1])
+
+    assert output["slot1"] is not None
+    assert output["slot1"]["source"] == "reactive"
+    assert output["slot2"] is not None
+    assert output["slot2"]["source"] == "reactive"
+    assert output["slot1"]["directory"] != output["slot2"]["directory"]
+
+
+def test_cmd_get_work_saves_pending_reactive(tmp_path, monkeypatch, capsys):
+    """Reactive directories not picked for slots are saved to pending_reactive."""
+    state_file = tmp_path / "state.json"
+    monkeypatch.setattr("doc_agent_state.STATE_FILE", state_file)
+    monkeypatch.setattr("doc_agent_state.get_repo_root", lambda: tmp_path)
+
+    # Three directories, all fully documented
+    for name in ("dir_a", "dir_b", "dir_c"):
+        d = tmp_path / name
+        (d / "docs").mkdir(parents=True)
+        (d / "file.py").write_text("code")
+
+    targets_file = tmp_path / "targets.json"
+    targets_file.write_text(json.dumps({"targets": ["dir_a", "dir_b", "dir_c"]}))
+    monkeypatch.setattr("doc_agent_state.TARGETS_FILE", targets_file)
+
+    # All three have reactive changes — only 2 can be picked
+    monkeypatch.setattr("doc_agent_state.git_diff_files",
+                        lambda *a: ["dir_a/file.py", "dir_b/file.py", "dir_c/file.py"])
+
+    state = {
+        "last_commit": "abc",
+        "directories": {
+            name: {
+                "last_visited": "2024-01-01",
+                "files_covered": ["file.py"],
+                "runs_since_last_visit": 0,
+                "visited_this_run": False,
+            }
+            for name in ("dir_a", "dir_b", "dir_c")
+        },
+    }
+    state_file.write_text(json.dumps(state))
+
+    cmd_get_work(argparse.Namespace())
+    capsys.readouterr()  # consume output
+
+    updated = json.loads(state_file.read_text())
+    # Two dirs were picked for slots, one should be in pending_reactive
+    assert len(updated["pending_reactive"]) == 1
+    assert updated["pending_reactive"][0] in ("dir_a", "dir_b", "dir_c")
+
+
+def test_cmd_get_work_merges_pending_reactive(tmp_path, monkeypatch, capsys):
+    """pending_reactive from previous run is merged into the reactive queue."""
+    state_file = tmp_path / "state.json"
+    monkeypatch.setattr("doc_agent_state.STATE_FILE", state_file)
+    monkeypatch.setattr("doc_agent_state.get_repo_root", lambda: tmp_path)
+
+    # One directory carried over from last run
+    d = tmp_path / "dir_a"
+    (d / "docs").mkdir(parents=True)
+    (d / "file.py").write_text("code")
+
+    targets_file = tmp_path / "targets.json"
+    targets_file.write_text(json.dumps({"targets": ["dir_a"]}))
+    monkeypatch.setattr("doc_agent_state.TARGETS_FILE", targets_file)
+
+    # No new reactive changes this run
+    monkeypatch.setattr("doc_agent_state.git_diff_files", lambda *a: [])
+
+    state = {
+        "last_commit": "abc",
+        "pending_reactive": ["dir_a"],
+        "directories": {
+            "dir_a": {
+                "last_visited": "2024-01-01",
+                "files_covered": ["file.py"],
+                "runs_since_last_visit": 0,
+                "visited_this_run": False,
+            },
+        },
+    }
+    state_file.write_text(json.dumps(state))
+
+    cmd_get_work(argparse.Namespace())
+    output = json.loads(capsys.readouterr().out.split("\n", 1)[-1])
+
+    # dir_a should be picked up from pending_reactive
+    assert output["slot1"] is not None
+    assert output["slot1"]["directory"] == "dir_a"
+    assert output["slot1"]["source"] == "reactive"
+
+
+def test_cmd_finish_run_clears_visited_from_pending_reactive(tmp_path, monkeypatch):
+    """finish-run removes visited directories from pending_reactive."""
+    state_file = tmp_path / "state.json"
+    monkeypatch.setattr("doc_agent_state.STATE_FILE", state_file)
+    monkeypatch.setattr("doc_agent_state.git_rev_parse_head", lambda: "newcommit")
+
+    state = {
+        "last_commit": "old",
+        "last_run": "2024-01-01",
+        "run_count": 1,
+        "pending_reactive": ["dir_a", "dir_b"],
+        "directories": {
+            "dir_a": {
+                "last_visited": "2024-01-01",
+                "files_covered": [],
+                "runs_since_last_visit": 0,
+                "visited_this_run": True,
+            },
+            "dir_b": {
+                "last_visited": None,
+                "files_covered": [],
+                "runs_since_last_visit": 0,
+                "visited_this_run": False,
+            },
+        },
+    }
+    state_file.write_text(json.dumps(state))
+
+    cmd_finish_run(argparse.Namespace())
+
+    updated = json.loads(state_file.read_text())
+    # dir_a was visited → removed from pending_reactive
+    # dir_b was not visited → stays
+    assert updated["pending_reactive"] == ["dir_b"]

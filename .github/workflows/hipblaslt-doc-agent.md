@@ -1,3 +1,4 @@
+<!-- Workflow structure reference: https://github.github.com/gh-aw/reference/workflow-structure/#file-organization -->
 ---
 on:
   schedule:
@@ -207,13 +208,13 @@ python projects/hipblaslt/.agent/docs/doc_agent_state.py get-work
 
 The script selects work from two priority queues:
 
-- **Reactive queue** — directories where source files have changed since the last run (detected via `git diff`). These need their existing documentation updated to reflect the code changes. The queue is sorted by number of changed files, most changes first.
-- **Proactive queue** — directories that need new documentation work, independent of recent code changes. Prioritised in this order: (1) directories with no `docs/` directory yet, (2) directories whose docs exist but have uncovered source files, (3) directories whose docs are fully covered but haven't been reviewed for staleness recently.
+- **Reactive queue** — directories where source files have changed since the last run (detected via `git diff`). Reactive changes are tracked at the directory level, not per file: `git diff` identifies changed files, which are grouped by parent directory. Only the directory names enter the queue. The queue is sorted by number of changed files, most changes first. Because only two directories can be worked on per run, any reactive directories that aren't picked are saved to a backlog (`pending_reactive`) and merged back into the reactive queue on the next run — this prevents changes from being silently dropped when the stored commit hash advances. Note: for directories carried over from previous runs via `pending_reactive`, the specific file-level diff information is no longer available (the stored commit hash has advanced). See §5.3 for how the agent handles this.
+- **Proactive queue** — directories that need new documentation work, independent of recent code changes. Prioritised in this order: (1) directories with no `docs/` directory yet, (2) directories whose docs exist but have uncovered source files, (3) directories whose docs are fully covered but haven't been reviewed for staleness recently. Staleness is tracked discretely by keeping track of the number of runs since the last time the directory was worked on. The Python script keeps track of this - as the agent, you just need to ask for work.
 
 The script fills two work slots from these queues:
 
 - `slot1`: the top item from the reactive queue (if non-empty), otherwise the top of the proactive queue.
-- `slot2`: the top item from the proactive queue (skipping `slot1` if it came from that queue, to avoid duplicates).
+- `slot2`: the first directory with missing documentation (no docs or partial docs), then reactive, then staleness review — skipping `slot1` to avoid duplicates.
 
 Each slot is a JSON object with these fields:
 
@@ -287,8 +288,10 @@ When you find such a file:
 
 ## 5.3 Update Changed Docs (`has_docs` is true, `source` is `"reactive"`)
 
-1. Identify which source files have changed (these triggered the reactive selection).
-2. Read the changed source files and the existing concept documents that cover them.
+Reactive directories may have been detected this run (via `git diff`) or carried over from a previous run (via the `pending_reactive` backlog). For carried-over directories, the specific file-level diff is no longer available — the stored commit hash has already advanced past those changes.
+
+1. Check whether a fresh `git diff` between the last commit and HEAD shows changed files in this directory. If it does, those are the files to focus on. If not (the directory was carried over), treat this as a full review: compare all existing documentation against the current source files.
+2. Read the relevant source files and the existing concept documents that cover them.
 3. Update the relevant concept documents to reflect the current code. If a change is significant enough to affect the overview, update that too.
 
 ## 5.4 Fill in Docs (`has_docs` is true, `source` is `"proactive"`, `files_uncovered` is non-empty)
