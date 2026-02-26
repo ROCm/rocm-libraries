@@ -1023,8 +1023,6 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
     for(const auto& s : interim)
     {
         const auto solver_id = solver::Id{s.solution_id};
-        if(!solver_id.GetSolver().IsApplicable(ctx, problem))
-            continue;
         if(!conv::IsEnoughWorkspace(
                "GetSolutionsFallback", solver_id, s.workspace_size, invokeParams, false))
             continue;
