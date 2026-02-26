@@ -698,8 +698,8 @@ namespace rocRoller
         BitFieldExtract deepBitFieldExtract(BitFieldExtract expr)
         {
             auto visitor = DeepBitfieldExtractVisitor(expr.offset, expr.width, expr.outputDataType);
-            auto extracted = visitor.call(expr.arg);
-            int  offset    = visitor.get_offset();
+            auto extracted  = visitor.call(expr.arg);
+            uint32_t offset = visitor.get_offset();
 
             return BitFieldExtract{{extracted}, expr.outputDataType, offset, expr.width};
         }

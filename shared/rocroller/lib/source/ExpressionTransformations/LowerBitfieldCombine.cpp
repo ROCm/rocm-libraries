@@ -87,19 +87,34 @@ namespace rocRoller
                                 ShowValue(expr.width));
                 }
 
+                AssertFatal(expr.width > 0,
+                            "BitfieldCombine width must be greater than 0, width 0 should have "
+                            "been optimized away by simplify");
+                AssertFatal(expr.width <= 32,
+                            "BitfieldCombine width must be less than or equal to 32");
+
+                // Calculate width mask, handling width=32 case to avoid UB
+                uint32_t widthMask;
+                if(expr.width == 32)
+                {
+                    widthMask = std::numeric_limits<uint32_t>::max();
+                }
+                else
+                {
+                    widthMask = (1u << expr.width) - 1u;
+                }
+
                 auto const srcIsZero = expr.srcIsZero && expr.srcIsZero.value();
                 if(not srcIsZero)
                 {
-                    rocRoller::Raw32 srcMask((static_cast<uint32_t>(1ul << expr.width) - 1ul)
-                                             << expr.srcOffset);
+                    rocRoller::Raw32 srcMask(widthMask << expr.srcOffset);
                     lhs = (literal(srcMask) & lhs); // Extract bits
                 }
 
                 auto const dstIsZero = expr.dstIsZero && expr.dstIsZero.value();
                 if(not dstIsZero)
                 {
-                    rocRoller::Raw32 dstMask(
-                        ~((static_cast<uint32_t>(1ul << expr.width) - 1ul) << expr.dstOffset));
+                    rocRoller::Raw32 dstMask(~(widthMask << expr.dstOffset));
                     rhs = (literal(dstMask) & rhs); // Clear bits
                 }
 
