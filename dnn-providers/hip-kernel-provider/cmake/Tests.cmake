@@ -12,6 +12,17 @@ set(CHECK_EXECUTABLE_PATHS_GLOBAL "" CACHE INTERNAL "Accumulated global check ex
 
 enable_testing() # Cmake wont discover or run tests without this line
 
+if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
+    # Ensure coverage report directory exists
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/coverage-report/profraw")
+
+    # For code coverage builds, we want each profraw file to have a unique name. The %m in the
+    # LLVM_PROFILE_FILE environment variable will auto generate a unique id.
+    set(COVERAGE_ENVIRONMENT
+        "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage-report/profraw/%m.profraw"
+    )
+endif()
+
 # Internal helper function to record, configure, and register a ctest test target.
 function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     set(TARGET_EXE ${TARGET})
@@ -48,6 +59,10 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
     set_tests_properties(${TARGET} PROPERTIES LABELS ${APPEND_FUNCTION_SUFFIX})
+
+    if(COVERAGE_ENVIRONMENT)
+        set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${COVERAGE_ENVIRONMENT}")
+    endif()
 endfunction()
 
 # Adds a unit test target

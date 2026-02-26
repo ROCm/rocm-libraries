@@ -48,6 +48,13 @@ option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+option(HIPKERNELPROVIDER_ENABLE_COVERAGE "Build with code coverage flags" OFF)
+
+if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
+    message(VERBOSE "Enabling compile flags for coverage-mapping")
+    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+    add_link_options(-fprofile-instr-generate -fcoverage-mapping)
+endif()
 
 list(
     PREPEND
@@ -154,6 +161,69 @@ if(NOT HIPDNN_SKIP_TESTS)
     finalize_test_targets()
 
     install_hip_kernel_plugin_ctest_files()
+endif()
+
+# ============================================================================
+# Code Coverage
+# ============================================================================
+if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
+    findandcheckllvmtools()
+
+    set(CODE_COVERAGE_IGNORE_REGEX ".*_deps.*|.*tests.*|.*integration_tests.*")
+    set(CODE_COVERAGE_OBJECTS
+        -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libhip_kernel_plugin.so
+        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_plugin_tests
+        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_plugin_integration_tests
+    )
+
+    # Creates a coverage target that merges profraw files and generates reports.
+    #
+    # @param TARGET_NAME name of the custom target to create
+    # @param DEPENDS_TARGET target to depend on (empty string for no dependency)
+    function(add_custom_coverage_target TARGET_NAME DEPENDS_TARGET)
+        set(DEPENDS_CLAUSE "")
+        if(NOT "${DEPENDS_TARGET}" STREQUAL "")
+            set(DEPENDS_CLAUSE DEPENDS ${DEPENDS_TARGET})
+        endif()
+
+        # cmake-format: off
+        add_custom_target(
+            ${TARGET_NAME}
+            COMMAND find . -name "*.profraw" -print0 | xargs -0 ${LLVM_PROFDATA_BINARY} merge
+                    -sparse -o ./coverage-report/hip_kernel_provider.profdata
+            COMMAND
+                ${LLVM_COV_BINARY} report ${CODE_COVERAGE_OBJECTS}
+                -instr-profile=./coverage-report/hip_kernel_provider.profdata
+                -ignore-filename-regex=${CODE_COVERAGE_IGNORE_REGEX} >
+                ./coverage-report/code_cov_hip_kernel_provider.report
+            COMMAND
+                ${LLVM_COV_BINARY} show -Xdemangler=${LLVM_CXXFILT_BINARY} ${CODE_COVERAGE_OBJECTS}
+                -instr-profile=./coverage-report/hip_kernel_provider.profdata
+                -ignore-filename-regex=${CODE_COVERAGE_IGNORE_REGEX} --format=html
+                --output-dir=coverage-report
+            COMMAND
+                ${LLVM_COV_BINARY} export ${CODE_COVERAGE_OBJECTS}
+                -instr-profile=./coverage-report/hip_kernel_provider.profdata
+                -ignore-filename-regex=${CODE_COVERAGE_IGNORE_REGEX} --format=lcov >
+                ./coverage-report/coverage.info
+            ${DEPENDS_CLAUSE}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Generating code coverage report"
+            VERBATIM
+            USES_TERMINAL
+        )
+        # cmake-format: on
+    endfunction()
+
+    add_custom_coverage_target(code_coverage check)
+    add_custom_coverage_target(unit-coverage unit-check)
+    add_custom_coverage_target(integration-coverage integration-check)
+
+    # Alias target
+    add_custom_target(coverage DEPENDS code_coverage COMMENT "Alias for code_coverage")
+
+    # Standalone coverage report from existing profdata (does not run tests)
+    add_custom_coverage_target(current-coverage "")
 endif()
 
 # Install the plugin
