@@ -1,3 +1,5 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  Apache-2.0
 
 #include <thrust/unique_ptr.h>
 #include "hip/hip_runtime.h"

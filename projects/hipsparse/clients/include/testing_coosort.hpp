@@ -41,7 +41,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_coosort_bad_arg(void)
+template <typename T>
+void testing_coosort_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int m         = 100;
@@ -108,7 +109,8 @@ void testing_coosort_bad_arg(void)
 #endif
 }
 
-hipsparseStatus_t testing_coosort(Arguments argus)
+template <typename T>
+void testing_coosort(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  m        = argus.M;
@@ -120,13 +122,6 @@ hipsparseStatus_t testing_coosort(Arguments argus)
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
-
-    if(m == 0 || n == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
-#endif
-    }
 
     srand(12345ULL);
 
@@ -140,7 +135,7 @@ hipsparseStatus_t testing_coosort(Arguments argus)
     if(!generate_coo_matrix(filename, m, n, nnz, hcoo_row_ind, hcoo_col_ind, hcoo_val, idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     // Unsort COO columns
@@ -345,8 +340,6 @@ hipsparseStatus_t testing_coosort(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_COOSORT_HPP

@@ -1,31 +1,9 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
 #include <common/mxDataGen.hpp>
@@ -105,11 +83,12 @@ namespace MatrixMultiplyTest
         CommandKernelPtr commandKernel;
 
         template <typename TA, typename TB, typename TD, typename ACC = float>
-        void matrixMultiplyMacroTile(int               wave_m,
-                                     int               wave_n,
-                                     int               wave_k,
-                                     int               wave_b,
-                                     bool              useLDSB     = true,
+        void matrixMultiplyMacroTile(int                            wave_m,
+                                     int                            wave_n,
+                                     int                            wave_k,
+                                     int                            wave_b,
+                                     Parameters::Solution::LoadPath loadPathB
+                                     = Parameters::Solution::LoadPath::BufferToLDSViaVGPR,
                                      std::string       transA      = "N",
                                      std::string       transB      = "N",
                                      const ScaleParams scaleParams = {})
@@ -216,11 +195,11 @@ namespace MatrixMultiplyTest
 
             auto command    = std::make_shared<Command>();
             auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataTypeA, transA == "N" ? unitStridesN : unitStridesT));
+                2, dataTypeA, {}, transA == "N" ? unitStridesN : unitStridesT));
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataTypeB, transB == "N" ? unitStridesN : unitStridesT));
+                2, dataTypeB, {}, transB == "N" ? unitStridesN : unitStridesT));
             auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
             std::optional<rocRoller::Operations::OperationTag> tagTensorScaleA, tagLoadScaleA,
@@ -229,7 +208,7 @@ namespace MatrixMultiplyTest
             if(scaleA)
             {
                 tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                    2, scaleTypeA, transA == "N" ? unitStridesN : unitStridesT));
+                    2, scaleTypeA, {}, transA == "N" ? unitStridesN : unitStridesT));
                 tagLoadScaleA
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleA));
             }
@@ -237,7 +216,7 @@ namespace MatrixMultiplyTest
             if(scaleB)
             {
                 tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                    2, scaleTypeB, transB == "N" ? unitStridesN : unitStridesT));
+                    2, scaleTypeB, {}, transB == "N" ? unitStridesN : unitStridesT));
                 tagLoadScaleB
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleB));
             }
@@ -306,11 +285,11 @@ namespace MatrixMultiplyTest
                 params->setDimensionInfo(tagLoadScaleA.value(), macTileScaleA);
             }
 
-            auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
-                {mac_k, mac_n},
-                LayoutType::MATRIX_B,
-                {wave_m, wave_n, wave_k, wave_b},
-                useLDSB ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+            auto macTileB
+                = KernelGraph::CoordinateGraph::MacroTile({mac_k, mac_n},
+                                                          LayoutType::MATRIX_B,
+                                                          {wave_m, wave_n, wave_k, wave_b},
+                                                          GetMemoryType(loadPathB));
             params->setDimensionInfo(tagLoadB, macTileB);
 
             if(scaleB)
@@ -452,71 +431,74 @@ namespace MatrixMultiplyTest
         }
 
         template <typename TA>
-        void matrixMultiplyMacroTileMixed(rocRoller::DataType typeB,
-                                          int                 m,
-                                          int                 n,
-                                          int                 k,
-                                          int                 b,
-                                          bool                useLDSB     = true,
-                                          std::string         transA      = "N",
-                                          std::string         transB      = "N",
-                                          const ScaleParams   scaleParams = {})
+        void matrixMultiplyMacroTileMixed(rocRoller::DataType            typeB,
+                                          int                            m,
+                                          int                            n,
+                                          int                            k,
+                                          int                            b,
+                                          Parameters::Solution::LoadPath loadPathB
+                                          = Parameters::Solution::LoadPath::BufferToLDSViaVGPR,
+                                          std::string       transA      = "N",
+                                          std::string       transB      = "N",
+                                          const ScaleParams scaleParams = {})
         {
             if(typeB == rocRoller::DataType::FP8)
                 matrixMultiplyMacroTile<TA, FP8, float>(
-                    m, n, k, b, useLDSB, transA, transB, scaleParams);
+                    m, n, k, b, loadPathB, transA, transB, scaleParams);
             else if(typeB == rocRoller::DataType::BF8)
                 matrixMultiplyMacroTile<TA, BF8, float>(
-                    m, n, k, b, useLDSB, transA, transB, scaleParams);
+                    m, n, k, b, loadPathB, transA, transB, scaleParams);
             else if(typeB == rocRoller::DataType::FP6)
                 matrixMultiplyMacroTile<TA, FP6, float>(
-                    m, n, k, b, useLDSB, transA, transB, scaleParams);
+                    m, n, k, b, loadPathB, transA, transB, scaleParams);
             else if(typeB == rocRoller::DataType::BF6)
                 matrixMultiplyMacroTile<TA, BF6, float>(
-                    m, n, k, b, useLDSB, transA, transB, scaleParams);
+                    m, n, k, b, loadPathB, transA, transB, scaleParams);
             else if(typeB == rocRoller::DataType::FP4)
                 matrixMultiplyMacroTile<TA, FP4, float>(
-                    m, n, k, b, useLDSB, transA, transB, scaleParams);
+                    m, n, k, b, loadPathB, transA, transB, scaleParams);
             else
                 Throw<FatalError>("Invalid type.");
         }
 
-        void matrixMultiplyMacroTileMixed(rocRoller::DataType typeA,
-                                          rocRoller::DataType typeB,
-                                          int                 m,
-                                          int                 n,
-                                          int                 k,
-                                          int                 b,
-                                          bool                useLDSB     = true,
-                                          std::string         transA      = "N",
-                                          std::string         transB      = "N",
-                                          const ScaleParams   scaleParams = {})
+        void matrixMultiplyMacroTileMixed(rocRoller::DataType            typeA,
+                                          rocRoller::DataType            typeB,
+                                          int                            m,
+                                          int                            n,
+                                          int                            k,
+                                          int                            b,
+                                          Parameters::Solution::LoadPath loadPathB
+                                          = Parameters::Solution::LoadPath::BufferToLDSViaVGPR,
+                                          std::string       transA      = "N",
+                                          std::string       transB      = "N",
+                                          const ScaleParams scaleParams = {})
         {
             if(typeA == rocRoller::DataType::FP8)
                 matrixMultiplyMacroTileMixed<FP8>(
-                    typeB, m, n, k, b, useLDSB, transA, transB, scaleParams);
+                    typeB, m, n, k, b, loadPathB, transA, transB, scaleParams);
             else if(typeA == rocRoller::DataType::BF8)
                 matrixMultiplyMacroTileMixed<BF8>(
-                    typeB, m, n, k, b, useLDSB, transA, transB, scaleParams);
+                    typeB, m, n, k, b, loadPathB, transA, transB, scaleParams);
             else if(typeA == rocRoller::DataType::FP6)
                 matrixMultiplyMacroTileMixed<FP6>(
-                    typeB, m, n, k, b, useLDSB, transA, transB, scaleParams);
+                    typeB, m, n, k, b, loadPathB, transA, transB, scaleParams);
             else if(typeA == rocRoller::DataType::BF6)
                 matrixMultiplyMacroTileMixed<BF6>(
-                    typeB, m, n, k, b, useLDSB, transA, transB, scaleParams);
+                    typeB, m, n, k, b, loadPathB, transA, transB, scaleParams);
             else if(typeA == rocRoller::DataType::FP4)
                 matrixMultiplyMacroTileMixed<FP4>(
-                    typeB, m, n, k, b, useLDSB, transA, transB, scaleParams);
+                    typeB, m, n, k, b, loadPathB, transA, transB, scaleParams);
             else
                 Throw<FatalError>("Invalid type.");
         }
 
         template <typename TA, typename TB, typename TD, typename ACC = float>
-        void matrixMultiplyAB(int  wave_m,
-                              int  wave_n,
-                              int  wave_k,
-                              int  wave_b,
-                              bool useLDS = false,
+        void matrixMultiplyAB(int                            wave_m,
+                              int                            wave_n,
+                              int                            wave_k,
+                              int                            wave_b,
+                              Parameters::Solution::LoadPath loadPathAB
+                              = Parameters::Solution::LoadPath::BufferToLDSViaVGPR,
                               bool transA = false,
                               bool transB = false)
         {
@@ -585,12 +567,12 @@ namespace MatrixMultiplyTest
             std::vector<size_t> unitStridesN = {1, 0};
             std::vector<size_t> unitStridesT = {0, 1};
 
-            auto tagTensorA = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataTypeA, transA ? unitStridesT : unitStridesN));
+            auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
+                2, dataTypeA, {}, transA ? unitStridesT : unitStridesN));
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataTypeB, transB ? unitStridesT : unitStridesN)); // B
+                2, dataTypeB, {}, transB ? unitStridesT : unitStridesN)); // B
             auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
             auto tagStoreD = command->addOperation(
@@ -611,16 +593,16 @@ namespace MatrixMultiplyTest
             params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
             // TODO: the translate step should figure out that there is a
             // T_Mul and do the right thing for the T_Load_Tiled commands
-            auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
-                {mac_m, mac_k},
-                LayoutType::MATRIX_A,
-                {wave_m, wave_n, wave_k, wave_b},
-                useLDS ? MemoryType::WAVE_LDS : MemoryType::WAVE);
-            auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
-                {mac_k, mac_n},
-                LayoutType::MATRIX_B,
-                {wave_m, wave_n, wave_k, wave_b},
-                useLDS ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+            auto macTileA
+                = KernelGraph::CoordinateGraph::MacroTile({mac_m, mac_k},
+                                                          LayoutType::MATRIX_A,
+                                                          {wave_m, wave_n, wave_k, wave_b},
+                                                          GetMemoryType(loadPathAB));
+            auto macTileB
+                = KernelGraph::CoordinateGraph::MacroTile({mac_k, mac_n},
+                                                          LayoutType::MATRIX_B,
+                                                          {wave_m, wave_n, wave_k, wave_b},
+                                                          GetMemoryType(loadPathAB));
 
             params->setDimensionInfo(tagLoadA, macTileA);
             params->setDimensionInfo(tagLoadB, macTileB);
@@ -656,7 +638,11 @@ namespace MatrixMultiplyTest
         }
 
         template <typename T, typename ACC = float>
-        void matrixMultiplyABC(int wave_m, int wave_n, int wave_k, int wave_b)
+        void matrixMultiplyABC(int                            wave_m,
+                               int                            wave_n,
+                               int                            wave_k,
+                               int                            wave_b,
+                               Parameters::Solution::LoadPath loadPathAB)
         {
             REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
 
@@ -746,10 +732,16 @@ namespace MatrixMultiplyTest
 
             // TODO: the translate step should figure out that there is a
             // T_Mul and do the right thing for the T_Load_Tiled commands
-            auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
-                {mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
-            auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
-                {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
+            auto macTileA
+                = KernelGraph::CoordinateGraph::MacroTile({mac_m, mac_k},
+                                                          LayoutType::MATRIX_A,
+                                                          {wave_m, wave_n, wave_k, wave_b},
+                                                          GetMemoryType(loadPathAB));
+            auto macTileB
+                = KernelGraph::CoordinateGraph::MacroTile({mac_k, mac_n},
+                                                          LayoutType::MATRIX_B,
+                                                          {wave_m, wave_n, wave_k, wave_b},
+                                                          GetMemoryType(loadPathAB));
             auto macTileC = KernelGraph::CoordinateGraph::MacroTile(
                 {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
 

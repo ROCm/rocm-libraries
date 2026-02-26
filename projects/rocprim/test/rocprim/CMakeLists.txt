@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,11 +32,21 @@ endfunction()
 function(add_rocprim_test TEST_NAME TEST_SOURCES)
   get_rocprim_test_target(${TEST_SOURCES} TEST_TARGET)
   add_rocprim_test_internal(${TEST_NAME} "${TEST_SOURCES}" ${TEST_TARGET})
+  # Re-propagate DLLS_COPIED_2 from add_rocprim_test_internal's scope to our
+  # caller (file scope). PARENT_SCOPE only propagates one level, so without
+  # this relay the guard resets on every call and each test target gets
+  # duplicate POST_BUILD copy commands that race on parallel builds.
+  if(DEFINED DLLS_COPIED_2)
+    set(DLLS_COPIED_2 "${DLLS_COPIED_2}" PARENT_SCOPE)
+  endif()
   if(WITH_ROCRAND)
     find_package(rocrand REQUIRED)
-    target_link_libraries(${TEST_TARGET} PRIVATE roc::rocrand) 
+    target_link_libraries(${TEST_TARGET} PRIVATE roc::rocrand)
     target_compile_definitions(${TEST_TARGET} PRIVATE WITH_ROCRAND)
-  endif() 
+  endif()
+  if(BUILD_CODE_COVERAGE)
+    target_compile_definitions(${TEST_TARGET} PRIVATE CODE_COVERAGE)
+  endif()
 endfunction()
 
 function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
@@ -334,7 +344,10 @@ add_rocprim_cpp_standard_test(20 OFF "_cpp20" "rocprim.type_traits_interface" te
 add_rocprim_cpp_standard_test(20 ON "_gnupp20" "rocprim.type_traits_interface" test_type_traits_interface.cpp)
 add_rocprim_test("rocprim.no_half_operators" test_no_half_operators.cpp)
 add_rocprim_test("rocprim.intrinsics" test_intrinsics.cpp)
+# Tests internal function, 128-bit atomic that currently is not yet supported with SPIR-V.
+if(NOT "amdgcnspirv" IN_LIST GPU_TARGETS)
 add_rocprim_test("rocprim.intrinsics_atomic" test_intrinsics_atomic.cpp)
+endif()
 add_rocprim_test("rocprim.invoke_result" test_invoke_result.cpp)
 add_rocprim_test("rocprim.warp_exchange" test_warp_exchange.cpp)
 add_rocprim_test("rocprim.warp_load" test_warp_load.cpp)

@@ -7,10 +7,11 @@ This guide provides practical information for both using hipDNN components and e
 - [Consuming hipDNN](#consuming-hipdnn)
   - [Using the Frontend](#using-the-frontend)
   - [Using the Backend](#using-the-backend)
-  - [Using the SDK](#using-the-sdk)
+  - [Using the SDKs](#using-the-sdks)
   - [CMake Integration](#cmake-integration)
   - [Logging Setup](#logging-setup)
   - [Working with Schemas](#working-with-schemas)
+  - [Configuring Engine Knobs](#configuring-engine-knobs)
 - [Extending hipDNN](#extending-hipdnn)
   - [Adding a New Plugin](#adding-a-new-plugin)
   - [Adding a New Operation](#adding-a-new-operation)
@@ -19,6 +20,9 @@ This guide provides practical information for both using hipDNN components and e
 ---
 
 ## Consuming hipDNN
+
+> [!TIP]
+> For a minimal end-to-end example of using hipDNN in a CMake project, see the [Consumer Quick Start](./ConsumerQuickStart.md).
 
 This section covers how to use the various components of hipDNN in your applications.
 
@@ -39,40 +43,58 @@ The hipDNN backend is a shared library that provides the core C API for graph ex
 - Public includes: [`backend/include/`](../backend/include/)
 - Public API tests: [`tests/backend/`](../tests/backend/)
 
-### Using the SDK
+### Using the SDKs
 
-The hipDNN SDK is a header-only C++ library that provides utilities and interfaces for plugin development. For complete SDK functionality and future roadmap, see the [SDK section in the Design Guide](./Design.md#sdk).
+hipDNN provides three header-only C++ SDK libraries for plugin development and testing. For complete SDK functionality and roadmap, see the [SDKs section in the Design Guide](./Design.md#sdks).
 
 #### Key Components
-- Plugin interface definitions: [`sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h`](../sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h)
-- Schema files: [`sdk/schemas/`](../sdk/schemas/)
-- Test utilities (incl. reference implementations): [`sdk/tests/test_utilities/`](../sdk/tests/test_utilities/)
-- Logging [`sdk/include/hipdnn_sdk/logging/Logger.hpp`](../sdk/include/hipdnn_sdk/logging/Logger.hpp)
+- **Data SDK**: Schema files and data structures: [`data_sdk/schemas/`](../data_sdk/schemas/)
+- **Plugin SDK**: Plugin interface definitions: [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
+- **Test SDK**: Test utilities and CPU reference implementations: [`test_sdk/include/hipdnn_test_sdk/`](../test_sdk/include/hipdnn_test_sdk/)
+- Logging: [`data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp`](../data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp)
 
 ### CMake Integration
 
 hipDNN components can be easily integrated into your CMake projects using the installed package files.
 
+> [!NOTE]
+> Enable PIC/PIE to ensure compatibility with the plugin loader system (dlopen). This prevents potential Thread Local Storage (TLS) allocation issues (such as static TLS exhaustion) between the executable and dynamically loaded backend plugins.
+> ```cmake
+> set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+> ```
+
 #### Frontend Integration
 ```cmake
 find_package(hipdnn_frontend REQUIRED)
-target_link_libraries(your_target PRIVATE hipdnn::frontend)
+target_link_libraries(your_target PRIVATE hipdnn_frontend)
 ```
 
 #### Backend Integration
 ```cmake
 find_package(hipdnn_backend REQUIRED)
-target_link_libraries(your_target PRIVATE hipdnn::backend)
+target_link_libraries(your_target PRIVATE hipdnn_backend)
 ```
 
-#### SDK Integration
+#### Data SDK Integration
 ```cmake
-find_package(hipdnn_sdk REQUIRED)
-target_link_libraries(your_plugin PRIVATE hipdnn::sdk)
+find_package(hipdnn_data_sdk REQUIRED)
+target_link_libraries(your_plugin PRIVATE hipdnn_data_sdk)
+```
+
+#### Plugin SDK Integration
+```cmake
+find_package(hipdnn_plugin_sdk REQUIRED)
+target_link_libraries(your_plugin PRIVATE hipdnn_plugin_sdk)
+```
+
+#### Test SDK Integration
+```cmake
+find_package(hipdnn_test_sdk REQUIRED)
+target_link_libraries(your_test PRIVATE hipdnn_test_sdk)
 ```
 
 #### Using AMD Half or BFloat16 Types
-If you use AMD half or bfloat16 types (via the SDK's `UtilsFp16.hpp` or `UtilsBfp16.hpp`), you need:
+If you use AMD half or bfloat16 types (via the Data SDK's `UtilsFp16.hpp` or `UtilsBfp16.hpp`), you need:
 ```cmake
 find_package(hip REQUIRED)
 enable_language(HIP)
@@ -86,6 +108,12 @@ target_link_libraries(your_target hip::host hip::device)
 
 hipDNN uses the spdlog header-only library for logging. See the [Environment docs](./Environment.md#logging-configuration) for further details.
 
+> [!CAUTION]
+> There is a known issue on Windows where logging must be explicitly shut down before the application exits to ensure all log messages are flushed and resources are released. See [spdlog Windows Issues](https://github.com/gabime/spdlog/wiki/Asynchronous-logging#windows-issues) for more information.
+> ```cpp
+> spdlog::shutdown();
+> ```
+
 ### Working with Schemas
 
 hipDNN uses FlatBuffers for schema-based data objects to describe graphs and operations.
@@ -93,7 +121,15 @@ hipDNN uses FlatBuffers for schema-based data objects to describe graphs and ope
 #### Key Concepts
 - Graphs and operations are defined using `.fbs` schema files
 - Attributes marked as `long` types in graphs are foreign keys to the `uid` in `tensor_attributes`
-- Schema files are located in [`sdk/schemas/`](../sdk/schemas/)
+- Schema files are located in [`data_sdk/schemas/`](../data_sdk/schemas/)
+
+### Configuring Engine Knobs
+
+hipDNN engines support runtime configuration through **knobs** - configurable parameters that control engine behavior, performance tuning, and feature selection.
+
+> [!TIP]
+> For comprehensive knobs documentation including all available knobs, constraints, validation, and advanced usage, see the [Knobs Documentation](./Knobs.md).
+
 ---
 
 ## Extending hipDNN
@@ -102,7 +138,13 @@ This section covers how to extend hipDNN with new functionality.
 
 ### Adding a New Plugin
 
-Plugins extend hipDNN to support new or additional implementations of kernel engines, benchmarking, and heuristics. For comprehensive guidance on plugin development, including architecture details, implementation steps, and examples, see the [Plugin Development Guide](./PluginDevelopment.md).
+Plugins extend hipDNN to support new or additional implementations of kernel engines, benchmarking, and heuristics. The Plugin SDK provides interfaces and utilities to simplify plugin development:
+
+- **Engine interfaces**: `IEngine`, `IPlanBuilder`, `IPlan` templates for building plugin components
+- **Engine management**: `EngineManager` template for managing multiple engines
+- **Knob utilities**: `KnobFactory`, `KnobSettingFactory`, and `GlobalKnobDefines` for implementing runtime-configurable knobs
+
+For comprehensive guidance on plugin development, including architecture details, implementation steps, and examples, see the [Plugin Development Guide](./PluginDevelopment.md).
 
 ### Adding a New Operation
 
@@ -112,21 +154,21 @@ Adding a new operation requires coordinated changes across multiple components. 
 
 When adding a completely new operation type (not currently supported in hipDNN), you'll need to:
 
-1. Define the operation in the SDK schemas
+1. Define the operation in the Data SDK schemas
 2. Create frontend classes
 3. Implement the operation in target plugins
 
-#### SDK Schema Changes
+#### Data SDK Schema Changes
 
 If the operation is new to hipDNN, start by defining its data structures:
 
 1. **Create Attribute Schema**
-   - Add a new `.fbs` file in [`sdk/schemas/`](../sdk/schemas/)
+   - Add a new `.fbs` file in [`data_sdk/schemas/`](../data_sdk/schemas/)
    - Define the operation's attributes (parameters, configurations)
-   - Example: [`sdk/schemas/batchnorm_attributes.fbs`](../sdk/schemas/batchnorm_attributes.fbs)
+   - Example: [`data_sdk/schemas/batchnorm_attributes.fbs`](../data_sdk/schemas/batchnorm_attributes.fbs)
 
 2. **Update Graph Schema**
-   - Modify [`sdk/schemas/graph.fbs`](../sdk/schemas/graph.fbs)
+   - Modify [`data_sdk/schemas/graph.fbs`](../data_sdk/schemas/graph.fbs)
    - Add your new attributes to the `NodeAttributes` union
    - Include your schema file
 
@@ -145,7 +187,7 @@ union NodeAttributes {
 After updating FlatBuffer schemas, regenerate the C++ headers:
 
 ```bash
-ninja generate_hipdnn_sdk_headers
+ninja generate_hipdnn_data_sdk_headers
 ```
 
 #### Frontend Implementation
@@ -167,7 +209,7 @@ Create C++ classes to expose the operation to users:
 
 #### Plugin Integration
 
-Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the operation execution in target plugins. 
+Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the operation execution in target plugins.
 
 ---
 
@@ -177,7 +219,7 @@ Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the
 
 1. **For New Operations**:
    ```
-   SDK Schema → Frontend Classes → Plugin Implementation → Tests
+   Data SDK Schema → Frontend Classes → Plugin Implementation → Tests
    ```
 
 2. **For Existing Operations in New Plugins**:
@@ -200,9 +242,27 @@ Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the
 - **Error Handling**: Implement proper error reporting through the plugin API
 - **Performance**: Optimization is critical for facilitating plugin adoption
 
+### CI Maintenance
+
+- **TheRock CI**: Uses a pinned Git commit hash from the TheRock repository. `therock_ci.yml` and several other workflows need their hash updated at a frequent cadence for CI to build hipDNN with recent deps.
+- **ROCm Version (hipdnn-clang-tidy.yml)**: Uses a fixed ROCm release version from TheRock artifacts (e.g., `7.11.0a20260112`). Update on-demand by changing the `--release` arg in the `install_rocm_from_artifacts.py` call. It will **need** to be bumped when new dependency APIs are required that are absent from past ROCm releases.
+
+
 ### Debugging Tips
 
 - Enable logging with environment variables (see [Environment Configuration](./Environment.md))
 - Use integration tests to verify operation behavior
 - Check plugin loading with `HIPDNN_LOG_LEVEL=info`
 - For plugin issues, check the default plugin path or use custom paths with `hipdnnSetEnginePluginPaths_ext`
+
+## ⚠️ Troubleshooting
+
+### Segmentation Faults during Graph Execution Plan Build
+
+If you are seeing segfaults when building execution plans for graphs, this might be caused by Thread Local Storage (TLS) allocation issues (such as static TLS exhaustion) between the executable and dynamically loaded backend plugins.
+
+To resolve this, enable PIC/PIE to ensure compatibility with the plugin loader system (dlopen). This setting instructs CMake to emit position-independent code (e.g., via `-fPIC`  or `-fPIE`), which is necessary for creating shared libraries or executables that load plugins dynamically.
+
+```cmake
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+```

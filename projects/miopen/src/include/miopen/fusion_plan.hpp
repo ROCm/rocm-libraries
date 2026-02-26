@@ -4,13 +4,12 @@
 #ifndef MIOPEN_GUARD_MLOPEN_FUSION_PLAN_HPP
 #define MIOPEN_GUARD_MLOPEN_FUSION_PLAN_HPP
 
-#include <miopen/config.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 #include <miopen/fusion.hpp>
 #include <miopen/search_options.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace miopen {
 
@@ -64,9 +63,10 @@ struct MIOPEN_INTERNALS_EXPORT FusionPlanDescriptor : miopenFusionPlanDescriptor
                            Data_t workspace,
                            size_t workspace_size);
     miopenStatus_t Compile(const Handle& handle);
-    std::vector<Solution> Find(const Handle& handle,
-                               const std::function<fusion::FusionInvokeParams()>& invoke_params,
-                               const std::optional<FindOptions>& options = std::nullopt) const;
+    std::vector<Solution>
+    Find(const Handle& handle,
+         const std::function<fusion::FusionInvokeParams(size_t)>& invoke_params,
+         const std::optional<FindOptions>& options = std::nullopt) const;
     friend std::ostream& operator<<(std::ostream& stream, const FusionPlanDescriptor& fpd);
 
     miopenStatus_t
@@ -87,7 +87,8 @@ struct MIOPEN_INTERNALS_EXPORT FusionPlanDescriptor : miopenFusionPlanDescriptor
     bool fp_contains_bn;
     miopenDataType_t data_type;
     std::vector<Exec_arg_t> arg_list;
-    std::vector<Invoker> invokers;
+    FindMode findMode{solver::Primitive::Fusion};
+    std::optional<std::pair<size_t, Invoker>> compiled_invoker;
     std::optional<miopenConvFwdAlgorithm_t> conv_fwd_algo;
 };
 

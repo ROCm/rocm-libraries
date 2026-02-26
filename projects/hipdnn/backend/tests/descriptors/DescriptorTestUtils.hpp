@@ -5,7 +5,9 @@
 
 #include "descriptors/BackendDescriptor.hpp"
 
-namespace hipdnn_sdk::test_utilities
+#include <memory>
+
+namespace hipdnn_backend::test_utilities
 {
 
 template <typename T>
@@ -19,4 +21,5 @@ std::unique_ptr<HipdnnBackendDescriptor> createDescriptor()
 {
     return std::unique_ptr<HipdnnBackendDescriptor>(createDescriptorPtr<T>());
 }
-}
+
+} // namespace hipdnn_backend::test_utilities

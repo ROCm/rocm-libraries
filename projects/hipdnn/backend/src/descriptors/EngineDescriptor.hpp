@@ -5,6 +5,8 @@
 
 #include "BackendDescriptor.hpp"
 
+#include <flatbuffers/detached_buffer.h>
+
 namespace hipdnn_backend
 {
 
@@ -22,6 +24,7 @@ private:
     int64_t _engineId;
     bool _engineIdSet = false;
     std::shared_ptr<const plugin::EngineDetailsWrapper> _engineDetails;
+    std::vector<flatbuffers::DetachedBuffer> _knobSerializedBuffers;
 
     void setGraph(hipdnnBackendAttributeType_t attributeType,
                   int64_t elementCount,
@@ -37,6 +40,11 @@ private:
                      const void* arrayOfElements);
 
     void getGlobalId(hipdnnBackendAttributeType_t attributeType,
+                     int64_t requestedElementCount,
+                     int64_t* elementCount,
+                     void* arrayOfElements) const;
+
+    void getKnobInfo(hipdnnBackendAttributeType_t attributeType,
                      int64_t requestedElementCount,
                      int64_t* elementCount,
                      void* arrayOfElements) const;
@@ -60,6 +68,8 @@ public:
     virtual int64_t getEngineId() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
+
+    std::string toString() const override;
 };
 
 } // namespace hipdnn_backend

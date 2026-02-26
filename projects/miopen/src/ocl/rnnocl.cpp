@@ -34,7 +34,6 @@
 #include <miopen/rnn/multi_stream_utils.hpp>
 
 #include <vector>
-#include <numeric>
 #include <algorithm>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_RNNFWD_EXP)
@@ -722,8 +721,7 @@ void RNNDescriptor::RNNForwardMS(const Handle& handle,
         const int direction = 0;
         const int cur_batch = in_n.at(time_id), use_batch = in_n.at(time_id);
 
-        const int hy_stride = RBuff.gemm_write_stride(), wei_len = RBuff.gemm_write_size(),
-                  wei_stride = RBuff.gemm_write_size();
+        const int hy_stride = RBuff.gemm_write_stride();
 
         const size_t cx_offset = get_HxBuff_offset(layer_id);
 
@@ -756,8 +754,6 @@ void RNNDescriptor::RNNForwardMS(const Handle& handle,
 
                                      hidden_size,
                                      hy_stride,
-                                     wei_len,
-                                     wei_stride,
                                      cx,
                                      cx_offset,
                                      extra_space,
@@ -2018,8 +2014,6 @@ void RNNDescriptor::RNNForwardInferencePacked(const Handle& handle,
                                 in_n.at(use_time),
                                 hy_h,
                                 hy_stride,
-                                wei_len,
-                                wei_stride,
                                 cx,
                                 hx_shift + ri * hy_n * hy_h,
                                 workSpace,
@@ -3501,8 +3495,6 @@ void RNNDescriptor::RNNForwardTrainingPackedTensors(
                                 in_n.at(use_time),
                                 hy_h,
                                 hy_stride,
-                                wei_len,
-                                wei_stride,
                                 cx,
                                 hx_shift + ri * hy_n * hy_h,
                                 reserveSpace,
@@ -4816,8 +4808,6 @@ void RNNDescriptor::RNNBackwardDataPackedTensors(
                                 in_n.at(use_time2),
                                 hy_h,
                                 hy_stride,
-                                wei_len,
-                                wei_stride,
                                 cx,
                                 hx_shift + ri * hy_n * hy_h,
                                 reserveSpace,

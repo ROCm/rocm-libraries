@@ -44,7 +44,7 @@ def get_file_and_line(up=2):
 
 
 def join(sep, n):
-    """Coerce elements in `n` to strings and join them seperator `sep`."""
+    """Coerce elements in `n` to strings and join them separator `sep`."""
     if isinstance(n, BaseNode):
         return sep + str(n)
     return sep.join(str(x) for x in n)

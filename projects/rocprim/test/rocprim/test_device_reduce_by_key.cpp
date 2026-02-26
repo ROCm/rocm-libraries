@@ -40,6 +40,7 @@
 #include <rocprim/device/config_types.hpp>
 #include <rocprim/device/device_reduce_by_key.hpp>
 #include <rocprim/functional.hpp>
+#include <rocprim/intrinsics/bit.hpp>
 #include <rocprim/iterator/constant_iterator.hpp>
 #include <rocprim/iterator/counting_iterator.hpp>
 #include <rocprim/iterator/discard_iterator.hpp>
@@ -373,7 +374,7 @@ void large_indices_reduce_by_key()
             {
                 // for i > 0, returns the position of the most significant set bit,
                 // which is equal to the floor of log2
-                return std::numeric_limits<size_t>::digits - 1 - __clzll(static_cast<long long>(i));
+                return std::numeric_limits<size_t>::digits - 1 - rocprim::clz(i);
             });
         // the input values are all one, so the reduction of plus over the segments
         // results in the size of the group
@@ -461,21 +462,42 @@ void large_indices_reduce_by_key()
 
 TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeySmallValueType)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
+
     large_indices_reduce_by_key<unsigned int>();
 }
 
 TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeyLargeValueType)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     large_indices_reduce_by_key<common::custom_type<size_t, size_t, true>>();
 }
 
 TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeyLargeValueTypeWithGraphs)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     large_indices_reduce_by_key<common::custom_type<size_t, size_t, true>, true>();
 }
 
 TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeyDeterministic)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     large_indices_reduce_by_key<double, false, true>();
 }
 
@@ -572,21 +594,42 @@ void large_segment_count_reduce_by_key()
 
 TEST(RocprimDeviceReduceByKey, LargeSegmentCountReduceByKeySmallValueType)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
+
     large_segment_count_reduce_by_key<unsigned int>();
 }
 
 TEST(RocprimDeviceReduceByKey, LargeSegmentCountReduceByKeyLargeValueType)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     large_segment_count_reduce_by_key<common::custom_type<size_t, size_t, true>>();
 }
 
 TEST(RocprimDeviceReduceByKey, GraphReduceByKey)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     large_segment_count_reduce_by_key<unsigned int, true>();
 }
 
 TEST(RocprimDeviceReduceByKey, LargeSegmentCountReduceByKeyDeterministic)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     large_segment_count_reduce_by_key<float, false, true>();
 }
 

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <compare>
 #include <fstream>
@@ -660,23 +637,75 @@ namespace HypergraphTest
     {
         myHypergraph g;
 
-        auto u0  = g.addElement(TestUser{});
-        auto sd0 = g.addElement(TestSubDimension{});
-        auto sd1 = g.addElement(TestSubDimension{});
-        auto sd2 = g.addElement(TestSubDimension{});
+        bool useSetElement = GENERATE(false, true);
+        DYNAMIC_SECTION("Use setElement: " << useSetElement)
+        {
 
-        auto TestSplit0  = g.addElement(TestSplit{}, {u0}, {sd0});
-        auto TestSplit1  = g.addElement(TestSplit{}, {u0}, {sd1});
-        auto TestSplit2  = g.addElement(TestSplit{}, {sd1}, {sd2});
-        auto TestForget0 = g.addElement(TestForget{}, {sd0}, {sd2});
+            int u0  = 0;
+            int sd0 = 0;
+            int sd1 = 0;
+            int sd2 = 0;
 
-        CHECK(g.followEdges<TestSplit>({}) == std::set<int>());
-        CHECK(g.followEdges<TestSplit>({u0}) == std::set<int>({u0, sd0, sd1, sd2}));
-        CHECK(g.followEdges<TestSplit>({sd0}) == std::set<int>({sd0}));
-        CHECK(g.followEdges<TestSplit>({sd1}) == std::set<int>({sd1, sd2}));
-        CHECK(g.followEdges<TestSplit>({sd2}) == std::set<int>({sd2}));
-        CHECK(g.followEdges<TestForget>({sd0}) == std::set<int>({sd0, sd2}));
-        CHECK(g.followEdges<TestForget>({sd2}) == std::set<int>({sd2}));
+            if(useSetElement)
+            {
+                u0  = 49;
+                sd0 = 32;
+                sd1 = 3;
+                sd2 = 96;
+
+                g.setElement(u0, TestUser{});
+                g.setElement(sd0, TestSubDimension{});
+                g.setElement(sd1, TestSubDimension{});
+                g.setElement(sd2, TestSubDimension{});
+            }
+            else
+            {
+                u0  = g.addElement(TestUser{});
+                sd0 = g.addElement(TestSubDimension{});
+                sd1 = g.addElement(TestSubDimension{});
+                sd2 = g.addElement(TestSubDimension{});
+            }
+
+            auto TestSplit0  = g.addElement(TestSplit{}, {u0}, {sd0});
+            auto TestSplit1  = g.addElement(TestSplit{}, {u0}, {sd1});
+            auto TestSplit2  = g.addElement(TestSplit{}, {sd1}, {sd2});
+            auto TestForget0 = g.addElement(TestForget{}, {sd0}, {sd2});
+
+            CHECK(g.followEdges<TestSplit>({}) == std::set<int>());
+            CHECK(g.followEdges<TestSplit>({u0}) == std::set<int>({u0, sd0, sd1, sd2}));
+            CHECK(g.followEdges<TestSplit>({sd0}) == std::set<int>({sd0}));
+            CHECK(g.followEdges<TestSplit>({sd1}) == std::set<int>({sd1, sd2}));
+            CHECK(g.followEdges<TestSplit>({sd2}) == std::set<int>({sd2}));
+            CHECK(g.followEdges<TestForget>({sd0}) == std::set<int>({sd0, sd2}));
+            CHECK(g.followEdges<TestForget>({sd2}) == std::set<int>({sd2}));
+
+            WHEN("An edge type is changed")
+            {
+                CHECK(g.getEdge(TestSplit0) == TestTransform(TestSplit{}));
+
+                g.setElement(TestSplit0, TestForget{});
+
+                CHECK(g.getEdge(TestSplit0) == TestTransform(TestForget{}));
+
+                THEN("followEdges also changes its behaviour")
+                {
+                    CHECK(g.followEdges<TestSplit>({}) == std::set<int>());
+                    CHECK(g.followEdges<TestSplit>({u0}) == std::set<int>({u0, sd1, sd2}));
+                    CHECK(g.followEdges<TestSplit>({sd0}) == std::set<int>({sd0}));
+                    CHECK(g.followEdges<TestSplit>({sd1}) == std::set<int>({sd1, sd2}));
+                    CHECK(g.followEdges<TestSplit>({sd2}) == std::set<int>({sd2}));
+                    CHECK(g.followEdges<TestForget>({sd0}) == std::set<int>({sd0, sd2}));
+                    CHECK(g.followEdges<TestForget>({sd2}) == std::set<int>({sd2}));
+                }
+            }
+
+            SECTION("Check that attempting to use setElement to change between node and edge "
+                    "throws an error")
+            {
+                CHECK_THROWS_AS(g.setElement(TestSplit0, TestUser{}), FatalError);
+                CHECK_THROWS_AS(g.setElement(u0, TestSplit{}), FatalError);
+            }
+        }
     }
 
     TEST_CASE("Hypergraph with reachable nodes", "[hypergraph][kernel-graph]")

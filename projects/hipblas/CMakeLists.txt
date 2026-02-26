@@ -44,9 +44,7 @@ endif()
 
 project( hipblas LANGUAGES CXX )
 
-if (NOT python)
-    set(python "python3") # default for linux
-endif()
+find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 # Append our library helper cmake path and the cmake path for hip (for convenience)
 # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
@@ -59,7 +57,7 @@ list( APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm /opt/rocm/ll
 # rocm-cmake contains common cmake code for rocm projects to help setup and install
 include(dependencies)
 
-set ( VERSION_STRING "3.2.0" )
+set ( VERSION_STRING "3.3.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 option( BUILD_VERBOSE "Output additional build information" OFF )

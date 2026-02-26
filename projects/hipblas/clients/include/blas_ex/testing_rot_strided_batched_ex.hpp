@@ -242,7 +242,7 @@ void testing_rot_strided_batched_ex(const Arguments& arg)
         return;
     }
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     device_strided_batch_vector<Tx> dx(N, incx, stridex, batch_count);
     device_strided_batch_vector<Ty> dy(N, incy, stridey, batch_count);

@@ -160,6 +160,7 @@ const std::vector<std::unique_ptr<ISolversFinder>>& GetConvSolverFinders();
 struct FindCoreResult
 {
     std::vector<Solution> solutions;
+    float find_search_best_time = std::numeric_limits<float>::max();
     bool is_optimal;
 };
 
@@ -168,7 +169,7 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                                        const AlgorithmName& algorithm_name,
                                        const NetworkConfig& network_config,
                                        const AnyInvokeParams& invoke_ctx,
-                                       bool& is_result_optimal,
+                                       FindCoreResult& core_result,
                                        bool force_attach_binary);
 
 FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
@@ -184,7 +185,8 @@ bool MIOPEN_INTERNALS_EXPORT IsAlgorithmDisabled(miopenConvAlgorithm_t algo);
 bool MIOPEN_INTERNALS_EXPORT IsEnoughWorkspace(std::string_view where,
                                                const miopen::solver::Id& solver_id,
                                                std::size_t required_size,
-                                               const miopen::AnyInvokeParams* invokeParams);
+                                               const miopen::AnyInvokeParams* invokeParams,
+                                               bool log_as_warning = true);
 
 struct ConvFindParameters : PrimitiveFindParameters
 {

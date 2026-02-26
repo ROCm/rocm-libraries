@@ -403,11 +403,11 @@ TEST(TestConvolutionWgradNode, PackNode)
 
     builder.Finish(offset);
     auto bufferPointer = builder.GetBufferPointer();
-    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_sdk::data_objects::Node>(bufferPointer);
+    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(bufferPointer);
 
     EXPECT_STREQ(nodeFlatbuffer->name()->c_str(), "ConvolutionWgrad");
     EXPECT_EQ(nodeFlatbuffer->attributes_type(),
-              hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes);
+              hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes);
 
     auto packedAttributes = nodeFlatbuffer->attributes_as_ConvolutionWrwAttributes();
     ASSERT_NE(packedAttributes, nullptr);
@@ -432,7 +432,8 @@ TEST(TestConvolutionWgradNode, PackNode)
     EXPECT_EQ(packedAttributes->dilation()->Get(0), 1);
     EXPECT_EQ(packedAttributes->dilation()->Get(1), 1);
 
-    EXPECT_EQ(packedAttributes->conv_mode(), hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+    EXPECT_EQ(packedAttributes->conv_mode(),
+              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 }
 
 TEST(TestConvolutionWgradNode, GatherHipdnnTensor)
@@ -1762,4 +1763,170 @@ TEST(TestConvolutionWgradNode, InferPropertiesStrideDimensionMismatch)
 
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestConvolutionWgradNode, InferPropertiesWithDroppedPixelsAndDilation)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 32, 16, 16});
+    xTensor->set_stride({8192, 256, 16, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 4, 5, 5});
+    dyTensor->set_stride({100, 25, 5, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({0, 0});
+    convAttributes.set_post_padding({0, 0});
+    convAttributes.set_stride({2, 2});
+    convAttributes.set_dilation({3, 3});
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+
+    auto inferredDims = dwTensor->get_dim();
+    EXPECT_EQ(inferredDims.size(), 4);
+    EXPECT_EQ(inferredDims[0], 4); // Output channels
+    EXPECT_EQ(inferredDims[1], 32); // Input channels
+    EXPECT_EQ(inferredDims[2], 3);
+    EXPECT_EQ(inferredDims[3], 3);
+}
+
+TEST(TestConvolutionWgradNode, InferPropertiesIncompatibleStrideDilationCombination)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    // xSize = 5
+    xTensor->set_dim({1, 1, 5, 5});
+    xTensor->set_stride({25, 25, 5, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    // dySize = 2
+    dyTensor->set_dim({1, 1, 2, 2});
+    dyTensor->set_stride({4, 4, 2, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({0, 0});
+    convAttributes.set_post_padding({0, 0});
+    convAttributes.set_stride({2, 2});
+    convAttributes.set_dilation({3, 3});
+
+    // numerator = 5 + 0 + 0 - (2 * (2 - 1)) - 1 = 2
+    // remainder = 2 % 3 = 2
+    // remainder (2) >= stride (2) -> Error because dropped pixels cannot exceed stride
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestConvolutionWgradNode, PreValidateNodeInvalidSpatialDimensions)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 32, 32});
+    xTensor->set_stride({3072, 1024, 32, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 30, 30}); // Incorrect dy size (should be 32x32)
+    dyTensor->set_stride({57600, 900, 30, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({64, 3, 3, 3});
+    dwTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestConvolutionWgradNode, PreValidateNodeWithDroppedPixels)
+{
+    ConvWgradAttributes convAttributes;
+
+    // For each spatial dim Index (0, 1, 2) & (2, 3, 4) are the two 3x3 kernels
+    // applied with stride 2 on 6x6 dx 5th is dropped / unused due to stride
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 6, 6}); // Input 6x6
+    xTensor->set_stride({108, 36, 6, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 2, 2}); // Output 2x2
+    dyTensor->set_stride({256, 4, 2, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({64, 3, 3, 3}); // Kernel 3x3
+    dwTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({0, 0});
+    convAttributes.set_post_padding({0, 0});
+    convAttributes.set_stride({2, 2});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+}
+
+TEST(TestConvolutionWgradNode, PreValidateNodeInputTooSmall)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 2, 2}); // Input smaller than kernel
+    xTensor->set_stride({12, 4, 2, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 1, 1});
+    dyTensor->set_stride({64, 1, 1, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({64, 3, 3, 3}); // Kernel 3x3
+    dwTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({0, 0});
+    convAttributes.set_post_padding({0, 0});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }

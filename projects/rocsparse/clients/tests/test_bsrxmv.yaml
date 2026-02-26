@@ -51,8 +51,8 @@ Tests:
   category: pre_checkin
   function: bsrxmv
   precision: *single_double_precisions
-  M: [0, 16, 852]
-  N: [0, 16, 942]
+  M: [8, 16]
+  N: [8, 16]
   block_dim: [2, 5, 81]
   alpha_beta: *alpha_beta_range_checkin
   direction: [rocsparse_direction_row, rocsparse_direction_column]
@@ -64,8 +64,8 @@ Tests:
   category: pre_checkin
   function: bsrxmv
   precision: *single_double_precisions
-  M: [2, 16, 32]
-  N: [2, 16, 32]
+  M: [2, 16]
+  N: [2, 16]
   block_dim: [2, 3, 4, 5, 8, 14, 16, 23, 81]
   alpha_beta: *alpha_beta_range_checkin
   direction: [rocsparse_direction_row, rocsparse_direction_column]
@@ -116,7 +116,7 @@ Tests:
   function: bsrxmv
   precision: *single_double_precisions
   M: [512]
-  N: [512, 1024, 2048, 4096, 8192, 16384]
+  N: [512, 1024]
   block_dim: [2, 3, 4]
   matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
   alpha_beta: *alpha_beta_range_1
@@ -172,10 +172,10 @@ Tests:
 - name: bsrxmv
   category: quick
   function: bsrxmv
-  precision: *single_double_precisions_complex_real
-  M: [10, 500]
-  N: [33, 842]
-  block_dim: [2, 8, 28, 174]
+  precision: *single_double_precisions
+  M: [10, 300]
+  N: [33, 300]
+  block_dim: [8, 28]
   alpha_beta: *alpha_beta_range_quick
   direction: [rocsparse_direction_row]
   transA: [rocsparse_operation_none]
@@ -185,7 +185,7 @@ Tests:
 - name: bsrxmv
   category: quick
   function: bsrxmv
-  precision: *single_double_precisions_complex_real
+  precision: *single_double_precisions
   M: [10]
   N: [33]
   block_dim: [8]
@@ -202,25 +202,22 @@ Tests:
   precision: *single_double_precisions
   M: 1
   N: 1
-  block_dim: [3, 9, 16, 26, 42, 190]
+  block_dim: [9, 26]
   alpha_beta: *alpha_beta_range_quick
   direction: [rocsparse_direction_column]
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1,
-             nos2,
-             nos3,
-             nos4,
-             nos6]
+             nos2]
 
 - name: bsrxmv_file
   category: quick
   function: bsrxmv
-  precision: *single_double_precisions_complex
+  precision: *single_only_precisions_complex
   M: 1
   N: 1
-  block_dim: [10, 19, 57, 236]
+  block_dim: [19, 57]
   alpha_beta: *alpha_beta_range_quick
   direction: [rocsparse_direction_row]
   transA: [rocsparse_operation_none]

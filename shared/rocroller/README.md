@@ -26,12 +26,11 @@ rocRoller is a software library for generating AMDGPU kernels.
   - [GEMM Client](#gemm-client)
   - [Development](#development)
     - [File Structure](#file-structure)
-    - [Coding Practices](#coding-practices)
-      - [Style](#style)
-      - [ISO C++ Standard](#iso-c-standard)
-      - [Documentation](#documentation)
-      - [PR submissions](#pr-submissions)
-      - [Testing](#testing)
+    - [Coding Style](#coding-style)
+    - [ISO C++ Standard](#iso-c-standard)
+    - [Documentation](#documentation)
+    - [PR submissions](#pr-submissions)
+    - [Testing](#testing)
   - [Logging and Debugging](#logging-and-debugging)
     - [Logging](#logging)
     - [Debugging](#debugging)
@@ -127,7 +126,6 @@ CXX=<g++ or clang++ path> CC=<gcc or clang path> cmake .. [cmake options]
 | ROCROLLER_EMBED_ARCH_DEF                  | ON      | Embed msgpack architecture data in library                |
 | ROCROLLER_BUILD_SHARED_LIBS               | ON      | Build as shared library                                   |
 | ROCROLLER_ENABLE_FETCH                    | OFF     | Fetch dependencies if not found                           |
-| ROCROLLER_ENABLE_LLD                      | OFF     | Build LLD-dependent functionality                         |
 | ROCROLLER_ENABLE_TIMERS                   | OFF     | Enable timer code                                         |
 | ROCROLLER_ENABLE_CPPCHECK                 | OFF     | Enable cppcheck                                           |
 | ROCROLLER_MRISAS_DIR                      | `<build>/GPUArchitectureGenerator/amd-mrisa` | MRISA XML directory |
@@ -274,7 +272,7 @@ Generally, we prioritize inlining.
  - Before submitting code as a PR for review all sources need to be formatted with `clang-format`, version 13.
 
 
-Code should be writing in a clearly descriptive fashion. [Good resource for expressing ideas in code.](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#p1-express-ideas-directly-in-code)
+Code should be written in a clearly descriptive fashion. [Good resource for expressing ideas in code.](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#p1-express-ideas-directly-in-code)
 
 ### ISO C++ Standard
 
@@ -316,19 +314,21 @@ This will generate an HTML website from the markdown readme files and Doxygen co
 ### Testing
 
 Each new feature is required to have a test.
-- Test sources are placed in the `test` folder.
-- CPP Files for Unit Tests should be included in the `rocroller-tests` executable in [CMakeLists.txt](https://github.com/ROCm/rocm-libraries/shared/rocroller/blob/develop/test/CMakeLists.txt).
+- Test sources are placed in one of the `test` folders.
+- Newer tests should be added to the sources listed in [test/catch/CMakeLists.txt](test/catch/CMakeLists.txt), which builds the `rocroller-tests-catch` executable.
+- CPP Files for older Unit Tests are included in the `rocroller-tests` executable.
 
 Some tests require multiple threads for properly testing a desired or undesired behaviour (e.g. thread-safety) or to benefit from faster execution. Therefore, it is recommended to set `OMP_NUM_THREADS` appropriately. A value between `[NUM_PHYSICAL_CORES/2, NUM_PHYSICAL_CORES)` is recommended. Setting `OMP_NUM_THREADS` to the number of available cores or higher can cause test to run slower due to oversubscription (e.g. increased contention).
 
-Note a few conditions:
+If your test needs to run against different option values, use `Settings::set()` to run the test with those values (overwriting previous values in memory). Once a test is completed, the context fixture calls `Settings::reset()`, which resets the settings to the env vars (if set) or default settings.
+
+Notes for working with older tests relying on GTest:
 - If your test requires a context but does not actually need to run on a GPU, inherit from `GenericContextFixture`.
 - If your test needs to run on an actual GPU, inherit from `CurrentGPUContextFixture`. This:
   - provides functionality to assemble a kernel
   - sets up `targetArchitecture()` to reflect a real GPU.
   - will include functionality to run a kernel in the future.
   - Name your test starting with `GPU_`.  This ensures that it is can be filtered out when running on a CPU-only node.
-- If your test needs to run against different option values, use `Settings::set()` to run the test with those values (overwriting previous values in memory). Once a test is completed, the context fixture calls `Settings::reset()`, which resets the settings to the env vars (if set) or default settings.
 
 [Catch2](https://github.com/catchorg/Catch2) is the preferred unit testing framework for new unit tests.  GTest information for working with older unit tests can be found in the [GoogleTest User's Guide](https://google.github.io/googletest/).
 
@@ -395,6 +395,9 @@ You can also use `Throw<FatalError>("message")` to catch and report incorrect co
 To run performance tests, use the `rrperf` tool. The `autoperf` command benchmarks multiple commits as well as your current workspace. For usage details, refer to the help documentation:
 
 ```bash
+./scripts/rrperf --help
+
+# e.g. For help with particular functionality
 ./scripts/rrperf autoperf --help
 ```
 
@@ -454,7 +457,7 @@ The following commands can be used to visualize memory access patterns to png fi
 ```console
 $ cd ${build_dir}
 
-$ ./bin/client/rocRoller_gemm --M=512 --N=768 --K=512 --mac_m=128 --mac_n=256 --mac_k=16 --alpha=2.0 --beta=0.5 --workgroup_size_x=256 --workgroup_size_y=1 --type_A=half --type_B=half --type_C=half --type_D=half --type_acc=float --num_warmup=2 --num_outer=10 --num_inner=1 --trans_A=N --trans_B=T --loadLDS_A=True --loadLDS_B=True --storeLDS_D=False --scheduler=Priority --visualize=True --match_memory_access=False
+$ ./bin/client/rocRoller_gemm --M=512 --N=768 --K=512 --mac_m=128 --mac_n=256 --mac_k=16 --alpha=2.0 --beta=0.5 --workgroup_size_x=256 --workgroup_size_y=1 --type_A=half --type_B=half --type_C=half --type_D=half --type_acc=float --num_warmup=2 --num_outer=10 --num_inner=1 --trans_A=N --trans_B=T --loadLDS_A=True --loadLDS_B=True --store="VGPRToGlobalMemoryWithBuffer" --scheduler=Priority --visualize=True --match_memory_access=False
 
 Visualizing to gemm.vis
 Wrote workitem_A.dat

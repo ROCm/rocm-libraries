@@ -4,7 +4,7 @@
 #pragma once
 
 #include <filesystem>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <string>
 
 #ifdef _WIN32
@@ -45,5 +45,6 @@ std::filesystem::path getCurrentModuleDirectory();
 PluginLibHandle openLibrary(const std::filesystem::path& libraryPath);
 void closeLibrary(PluginLibHandle handle);
 void* getSymbol(PluginLibHandle handle, const char* symbolName);
+std::string getSystemInfo();
 
 }

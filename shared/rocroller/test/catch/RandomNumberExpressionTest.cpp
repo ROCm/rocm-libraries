@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include "CustomMatchers.hpp"
 #include "CustomSections.hpp"
@@ -55,9 +32,6 @@ namespace ExpressionTest
             : AssemblyTestKernel(context)
             , m_numWorkItems(numWorkItems)
         {
-            auto const& arch = m_context->targetArchitecture().target();
-            if(!arch.isCDNAGPU())
-                SKIP("Test not yet supported on " << arch);
         }
 
         void generate() override
@@ -129,15 +103,21 @@ namespace ExpressionTest
                     vgprIndex, vgprIndex, Register::Value::Literal(inputBytesPerElement));
 
                 // Load first input value
+                Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
                 //rocRoller does the intial setup for the buffer (global memory)
-                auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
-                co_yield bufDesc->setup();
+                bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+                // set the buffer base pointer to the starting address of the input vector
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_input->expression());
+
+                auto bufferRegs = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+                bufferExpr = bufferRegs->expression();
+
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
-                // set the buffer base pointer to the starting address of the input vector
-                co_yield bufDesc->setBasePointer(s_input);
                 co_yield m_context->mem()->loadBuffer(
-                    vgpr_input, vgprIndex, 0, bufDesc, bufInstOpts, inputBytesPerElement);
+                    vgpr_input, vgprIndex, 0, bufferRegs, bufInstOpts, inputBytesPerElement);
 
                 // Add TID (vgprWorkitem) to seed
                 co_yield generateOp<Expression::Add>(vgpr_input, vgpr_input, vgprWorkitem);
@@ -155,10 +135,12 @@ namespace ExpressionTest
                     vgprIndex, vgprIndex, Register::Value::Literal(outputBytesPerElement));
 
                 // set the buffer base pointer to the starting address of the output vector
-                co_yield bufDesc->setBasePointer(s_output);
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_output->expression());
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+
                 // Write the result into global memory
                 co_yield m_context->mem()->storeBuffer(
-                    vgpr_output, vgprIndex, 0, bufDesc, bufInstOpts, outputBytesPerElement);
+                    vgpr_output, vgprIndex, 0, bufferRegs, bufInstOpts, outputBytesPerElement);
             };
 
             // rocRoller schedules kernel instructions and postamble (standard)

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/RemoveDuplicates.hpp>
@@ -148,7 +125,7 @@ namespace rocRoller
                     if(!maybeForLoop)
                         continue;
                     auto forLoop = *graph.control.get<ControlGraph::ForLoopOp>(*maybeForLoop);
-                    if(forLoop.loopName != rocRoller::KLOOP)
+                    if(not forLoop.loopName.starts_with(rocRoller::KLOOP))
                         continue;
 
                     // If LoadTiled, don't consider when loading directly
@@ -186,7 +163,7 @@ namespace rocRoller
                     if(!maybeForLoop)
                         continue;
                     auto forLoop = *graph.control.get<ControlGraph::ForLoopOp>(*maybeForLoop);
-                    if(forLoop.loopName != rocRoller::KLOOP)
+                    if(not forLoop.loopName.starts_with(rocRoller::KLOOP))
                         continue;
 
                     // If LoadTiled, only consider when loading directly
@@ -211,7 +188,7 @@ namespace rocRoller
                 {
                     auto forLoopOp = *graph.control.get<ControlGraph::ForLoopOp>(forLoopOpTag);
 
-                    if(forLoopOp.loopName != rocRoller::KLOOP)
+                    if(not forLoopOp.loopName.starts_with(rocRoller::KLOOP))
                     {
                         auto [forLoopCoord, _ignore] = getForLoopCoords(forLoopOpTag, graph);
                         auto maybeUnroll             = findUnrollNeighbour(graph, forLoopCoord);
@@ -359,31 +336,47 @@ namespace rocRoller
                     }
                 }
 
+                // Collapse reindexing chains in expressionReindexer.coordinates.
+                // If there are mappings like A -> B and B -> C, ensure A maps directly to C.
+                // This prevents intermediate mappings from leaving dangling references.
+                for(auto& [tag, mappedTag] : expressionReindexer.coordinates)
+                {
+                    while(expressionReindexer.coordinates.contains(mappedTag) and mappedTag != tag)
+                    {
+                        auto nextTag = expressionReindexer.coordinates.at(mappedTag);
+                        if(nextTag == mappedTag)
+                            break;
+                        mappedTag = nextTag;
+                    }
+                    // Update the mapping to point directly to the final target.
+                    expressionReindexer.coordinates[tag] = mappedTag;
+                }
+
                 // Update tile references
                 auto kernel = *graph.control.roots().begin();
                 reindexExpressions(graph, kernel, expressionReindexer);
 
                 // Update tile connections and remove old tiles
-                for(auto [oldTag, newTag] : expressionReindexer.coordinates)
+                for(auto [tag, mappedTag] : expressionReindexer.coordinates)
                 {
-                    auto connections = graph.mapper.getCoordinateConnections(oldTag);
-                    graph.mapper.purgeMappingsTo(oldTag);
+                    auto connections = graph.mapper.getCoordinateConnections(tag);
+                    graph.mapper.purgeMappingsTo(tag);
                     for(auto conn : connections)
                     {
-                        conn.coordinate = newTag;
+                        conn.coordinate = mappedTag;
                         graph.mapper.connect(conn);
                     }
 
-                    AssertFatal(newTag == oldTag
-                                || graph.mapper.getCoordinateConnections(oldTag).empty());
+                    AssertFatal(mappedTag == tag
+                                || graph.mapper.getCoordinateConnections(tag).empty());
 
-                    if(graph.mapper.getCoordinateConnections(oldTag).empty())
+                    if(graph.mapper.getCoordinateConnections(tag).empty())
                     {
-                        for(auto const& child : graph.coordinates.getLocation(oldTag).incoming)
+                        for(auto const& child : graph.coordinates.getLocation(tag).incoming)
                             graph.coordinates.deleteElement(child);
-                        for(auto const& child : graph.coordinates.getLocation(oldTag).outgoing)
+                        for(auto const& child : graph.coordinates.getLocation(tag).outgoing)
                             graph.coordinates.deleteElement(child);
-                        graph.coordinates.deleteElement(oldTag);
+                        graph.coordinates.deleteElement(tag);
                     }
                 }
                 return graph;

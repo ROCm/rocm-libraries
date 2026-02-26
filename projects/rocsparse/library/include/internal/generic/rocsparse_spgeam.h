@@ -128,6 +128,9 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *  \f$C\f$, and the compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different index and data types is to save on
 *  memory bandwidth and storage when a user application allows while performing the actual computation in a higher precision.
 *
+*  \note
+*  This routine does not support batched computation.
+*
 *  \par Uniform Precisions:
 *  <table>
 *  <caption id="spgeam_uniform">Uniform Precisions</caption>

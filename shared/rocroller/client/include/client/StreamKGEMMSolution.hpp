@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 #include <rocRoller/CommandSolution.hpp>
@@ -41,14 +18,16 @@ namespace rocRoller
         {
             class StreamKGEMMSolution : public DataParallelGEMMSolution
             {
-                Operations::OperationTag m_scratchTag, m_numWGsTag;
+                std::map<Operations::ScratchPolicy, Operations::OperationTag> m_scratchTags;
+                Operations::OperationTag                                      m_numWGsTag;
 
             public:
                 using DataParallelGEMMSolution::DataParallelGEMMSolution;
 
-                Operations::OperationTag getScratchTag() const override
+                Operations::OperationTag
+                    getScratchTag(Operations::ScratchPolicy scratchPolicy) const override
                 {
-                    return m_scratchTag;
+                    return m_scratchTags.at(scratchPolicy);
                 }
 
             protected:
@@ -63,13 +42,30 @@ namespace rocRoller
                                                                DataDirection::ReadOnly,
                                                                rocRoller::NUMWGS);
 
-                    m_scratchTag = command->allocateTag();
+                    // Create a scratch operation for tile data
+                    m_scratchTags[Operations::ScratchPolicy::None] = command->allocateTag();
+                    command->addOperation(
+                        Operations::Scratch(m_scratchTags[Operations::ScratchPolicy::None],
+                                            Operations::ScratchPolicy::None));
                     command->allocateArgument(
                         VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                        m_scratchTag,
+                        m_scratchTags[Operations::ScratchPolicy::None],
                         ArgumentType::Value,
                         DataDirection::ReadWrite,
-                        rocRoller::SCRATCH);
+                        getScratchName(Operations::ScratchPolicy::None));
+
+                    // Create a scratch operation for flags
+                    m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter]
+                        = command->allocateTag();
+                    command->addOperation(Operations::Scratch(
+                        m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter],
+                        Operations::ScratchPolicy::ZeroedBeforeAndAfter));
+                    command->allocateArgument(
+                        VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                        m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter],
+                        ArgumentType::Value,
+                        DataDirection::ReadWrite,
+                        getScratchName(Operations::ScratchPolicy::ZeroedBeforeAndAfter));
 
                     return command;
                 }
@@ -83,12 +79,7 @@ namespace rocRoller
 
                     params->loopOverOutputTilesDimensions = {0, 1};
 
-                    StreamKMode streamKMode = StreamKMode::Standard;
-                    if(solutionParams.streamKTwoTileDPFirst)
-                        streamKMode = StreamKMode::TwoTileDPFirst;
-                    else if(solutionParams.streamKTwoTile)
-                        streamKMode = StreamKMode::TwoTile;
-                    params->streamK = streamKMode;
+                    params->streamK = solutionParams.streamK;
 
                     return params;
                 }

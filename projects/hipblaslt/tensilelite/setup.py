@@ -48,7 +48,7 @@ setup(
   author="Advanced Micro Devices",
   license="MIT",
   install_requires=read_requirements_from_txt(),
-  python_requires='>=3.5',
+  python_requires='>=3.9',
   packages=["Tensile", "rocisa"],
   package_data={ "Tensile": ["Tensile/cmake/*"] },
   data_files=[ ("cmake", ["Tensile/cmake/TensileConfig.cmake", "Tensile/cmake/TensileConfigVersion.cmake"]) ],

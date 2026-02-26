@@ -28,6 +28,7 @@ from typing import List
 
 from pydantic import BaseModel
 
+
 class RepoEntry(BaseModel):
     """
     Represents a single repository entry in the repos-config.json file.
@@ -41,6 +42,7 @@ class RepoEntry(BaseModel):
         auto_subtree_push       : Whether to automatically push changes from the monorepo to the individual repo.
         monorepo_source_of_truth : Whether the monorepo is the source of truth for this project.
     """
+
     name: str
     url: str
     branch: str
@@ -49,6 +51,7 @@ class RepoEntry(BaseModel):
     auto_subtree_push: bool
     monorepo_source_of_truth: bool
 
+
 class RepoConfig(BaseModel):
     """
     Represents the full config file structure.
@@ -56,4 +59,5 @@ class RepoConfig(BaseModel):
     Fields:
         repositories : List of RepoEntry items.
     """
+
     repositories: List[RepoEntry]

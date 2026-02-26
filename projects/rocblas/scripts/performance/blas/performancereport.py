@@ -29,6 +29,8 @@ import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
 import math
+import ast
+import operator
 
 from matplotlib.ticker import (AutoMinorLocator)
 
@@ -92,6 +94,52 @@ SWEEP_YAML_KEYS = [
         'ldb',
         'ldc',
         ]
+
+# Allowed operators
+ALLOWED_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,   # unary minus
+}
+
+def _eval_node(node, variables):
+    if isinstance(node, ast.Constant):  # Python 3.8+
+        if isinstance(node.value, (int, float)):
+            return node.value
+        else:
+            raise ValueError("Only int/float constants allowed")
+    elif isinstance(node, ast.Name):
+        if node.id in variables:
+            return variables[node.id]
+        else:
+            raise ValueError(f"Unknown variable: {node.id}")
+    elif isinstance(node, ast.BinOp):
+        op = ALLOWED_OPERATORS.get(type(node.op))
+        if not op:
+            raise ValueError(f"Operator {type(node.op)} not allowed")
+        return op(_eval_node(node.left, variables), _eval_node(node.right, variables))
+    elif isinstance(node, ast.UnaryOp):
+        op = ALLOWED_OPERATORS.get(type(node.op))
+        if not op:
+            raise ValueError(f"Unary operator {type(node.op)} not allowed")
+        return op(_eval_node(node.operand, variables))
+    else:
+        raise ValueError(f"Unsupported expression: {ast.dump(node)}")
+
+def safe_eval(expr, variables=None):
+    """
+    Evaluate a math-only expression safely.
+    variables: dict of allowed variable names -> values
+    """
+    if variables is None:
+        variables = {}
+
+    # Parse into AST
+    tree = ast.parse(expr, mode='eval')
+    return _eval_node(tree.body, variables)
 
 # If an argument is not relevant to a function, then its value is set to '*'.
 # We cannot pass a '*' to subsequent commands because it will, so that flag
@@ -528,11 +576,12 @@ class FlopsComparison(RocBlasYamlComparison):
                     theoMax = float(sclk)/1000.00 * 128 * 120  * 32.00 / precisionBits #scaling to appropriate precision
                 elif self.flops and self.mem:
                     try:
-                        n=100000
                         m=100000
-                        flops = eval(self.flops)
-                        mem = eval(self.mem)
-                        theoMax = float(mclk) / float(eval(self.mem)) * eval(self.flops) * 32 / precisionBits / 4
+                        n=100000
+                        k=100000
+                        theoFlops = safe_eval(self.flops, {'m': m, 'n': n, 'k': k})
+                        theoMem = safe_eval(self.mem, {'m': m, 'n': n, 'k': k})
+                        theoMax = float(mclk) / float(theoMem) * float(theoFlops) * 32 / precisionBits / 4
                     except:
                         print("flops and mem equations produce errors")
 

@@ -963,11 +963,20 @@ void StockhamPP1DNode::SetupGridParam_internal(GridParam& gp)
 
 bool StockhamPP1DNode::CreateDeviceResources()
 {
-    // Create twiddle table for partial pass along ppOffDim
+    twd_attach_halfN = (ebtype != EmbeddedType::NONE);
+
+    // Create twiddle tables for partial pass along ppOffDim
+    std::tie(twiddles_off_dim, twiddles_off_dim_size)
+        = Repo::GetTwiddles1D(product(kernelFactorsPP.begin(), kernelFactorsPP.end()),
+                              GetTwiddleTableLengthLimit(),
+                              precision,
+                              deviceProp,
+                              0,
+                              twd_attach_halfN,
+                              kernelFactorsPP);
     std::tie(twiddles_pp, twiddles_pp_size)
         = Repo::GetTwiddlesPP(length[ppOffDim], precision, deviceProp);
 
-    twd_attach_halfN = (ebtype != EmbeddedType::NONE);
     return LeafNode::CreateDeviceResources();
 }
 
@@ -1065,7 +1074,7 @@ void SBCCNode::InitIntrinsicMode()
         return;
     }
 
-    // case 1: is runing tuning or a tuned solution, then use the setting in the config
+    // case 1: is running tuning or a tuned solution, then use the setting in the config
     if(specified_key != nullptr)
     {
         auto& config  = (*specified_key.get()).kernel_config;
@@ -1354,7 +1363,7 @@ void SBCRNode::InitIntrinsicMode()
         return;
     }
 
-    // case 1: is runing tuning or a tuned solution, then use the setting in the config
+    // case 1: is running tuning or a tuned solution, then use the setting in the config
     if(specified_key != nullptr)
     {
         auto& config  = (*specified_key.get()).kernel_config;

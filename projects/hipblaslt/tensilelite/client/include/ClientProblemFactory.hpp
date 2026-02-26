@@ -102,6 +102,11 @@ namespace TensileLite
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
+
+            TensorOps m_aOps;
+            TensorOps m_bOps;
+            TensorOps m_cOps;
+            TensorOps m_dOps;
         };
 
     } // namespace Client

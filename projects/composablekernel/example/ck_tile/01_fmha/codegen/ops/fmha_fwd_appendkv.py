@@ -1,7 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 # generate kernel instances to speed up compilation
-
 import copy
 import fnmatch
 import itertools
@@ -389,6 +388,22 @@ class KernelComponentFactoryGfx9(KernelComponentFactoryBase):
     arch = ArchTrait("gfx9")
 
 
+class KernelComponentFactoryGfx11(KernelComponentFactoryBase):
+    arch = ArchTrait("gfx11")
+
+    @staticmethod
+    def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
+        if dtype in ["fp16", "bf16"]:
+            return KernelComponentFactoryBase.get_hdim_tile_size_dict(dtype)
+        return None
+
+    @staticmethod
+    def get_pipelines(dtype, hdim) -> List[FmhaFwdAppendKVPipeline]:
+        if dtype in ["fp16", "bf16"]:
+            return KernelComponentFactoryBase.get_pipelines(dtype, hdim)
+        return []
+
+
 class KernelComponentFactoryGfx12(KernelComponentFactoryBase):
     arch = ArchTrait("gfx12")
 
@@ -399,6 +414,8 @@ def get_factory(target: str):
     if target.startswith("gfx9"):
         return KernelComponentFactoryGfx9
 
+    if target.startswith("gfx11"):
+        return KernelComponentFactoryGfx11
     if target.startswith("gfx12"):
         return KernelComponentFactoryGfx12
 
@@ -498,5 +515,5 @@ def list_blobs(
             targets, kernel_filter, receipt, mask_impl, optdim_list
         )
         for kernel in kernels:
-            f.write(str(file_path.parent / GEN_DIR / kernel.filename) + "\n")
-        f.write(str(file_path.parent / GEN_DIR / FMHA_FWD_APPENDKV_API_FILENAME) + "\n")
+            f.write((file_path.parent / GEN_DIR / kernel.filename).as_posix() + "\n")
+        f.write((file_path.parent / GEN_DIR / FMHA_FWD_APPENDKV_API_FILENAME).as_posix() + "\n")

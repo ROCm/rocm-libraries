@@ -35,9 +35,6 @@
 #if MIOPEN_EMBED_DB
 #include <miopen_data.hpp>
 #endif
-#include <boost/date_time/posix_time/posix_time_types.hpp>
-#include <boost/none.hpp>
-#include <boost/optional.hpp>
 
 #include <memory>
 #include <algorithm>
@@ -204,8 +201,8 @@ static int find_callback(void* _res, int argc, char** argv, char** azColName)
 }
 
 SQLite::SQLite() : pImpl(nullptr) {}
-SQLite::~SQLite()                 = default;
-SQLite::SQLite(SQLite&&) noexcept = default;
+SQLite::~SQLite()                            = default;
+SQLite::SQLite(SQLite&&) noexcept            = default;
 SQLite& SQLite::operator=(SQLite&&) noexcept = default;
 SQLite::result_type SQLite::Exec(const std::string& query) const
 {
@@ -336,7 +333,7 @@ SQLite::Statement::Statement(const SQLite& sql,
 }
 SQLite::Statement::~Statement() = default;
 SQLite::Statement::Statement() : pImpl{nullptr} {}
-SQLite::Statement::Statement(Statement&&) noexcept = default;
+SQLite::Statement::Statement(Statement&&) noexcept                    = default;
 SQLite::Statement& SQLite::Statement::operator=(Statement&&) noexcept = default;
 int SQLite::Statement::Step(const SQLite& sql)
 {

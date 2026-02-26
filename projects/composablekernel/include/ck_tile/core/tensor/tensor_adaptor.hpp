@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -11,6 +11,9 @@
 #include "ck_tile/core/numeric/math.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/core/numeric/numeric.hpp"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
 
@@ -76,7 +79,7 @@ struct tensor_adaptor
             number<ndim_top_>{});
 
         // TODO: make container_reduce support tuple of number and index_t
-        return container_reduce(lengths, multiplies{}, number<1>{});
+        return container_reduce(lengths, multiplies<>{}, number<1>{});
     }
 
     template <index_t IDimHidden>
@@ -950,3 +953,4 @@ CK_TILE_HOST_DEVICE constexpr auto chain_tensor_adaptors(const X& x, const Xs&..
                               remove_cvref_t<decltype(bottom_dim_ids)>,                            \
                               remove_cvref_t<decltype(top_dim_ids)>>{trans};                       \
     }()
+#pragma clang diagnostic pop

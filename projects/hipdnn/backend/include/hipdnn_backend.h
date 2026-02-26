@@ -1,5 +1,41 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file hipdnn_backend.h
+ * @brief hipDNN Backend C API
+ *
+ * This file defines the public C API for hipDNN backend operations.
+ * The backend provides handle management, descriptor operations, and
+ * execution of computational graphs.
+ *
+ * @section backend_usage Basic Usage
+ *
+ * 1. Create a handle:
+ *    @code{.c}
+ *    hipdnnHandle_t handle;
+ *    hipdnnCreate(&handle);
+ *    @endcode
+ *
+ * 2. Create and configure descriptors:
+ *    @code{.c}
+ *    hipdnnBackendDescriptor_t graphDesc;
+ *    hipdnnBackendCreateAndDeserializeGraph_ext(&graphDesc, serializedGraph, size);
+ *    @endcode
+ *
+ * 3. Execute operations:
+ *    @code{.c}
+ *    hipdnnBackendExecute(handle, executionPlan, variantPack);
+ *    @endcode
+ *
+ * 4. Clean up:
+ *    @code{.c}
+ *    hipdnnBackendDestroyDescriptor(graphDesc);
+ *    hipdnnDestroy(handle);
+ *    @endcode
+ *
+ * @see hipdnn_frontend.hpp for the C++ frontend API
+ */
 
 #pragma once
 
@@ -10,12 +46,14 @@
 
 #include "HipdnnBackendAttributeName.h"
 #include "HipdnnBackendAttributeType.h"
+#include "HipdnnBackendCallbackTypes.h"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendHeuristicType.h"
 #include "HipdnnBackendLimits.h"
 #include "HipdnnBackendPluginLoadingMode.h"
+#include "HipdnnBackendPluginUnloadingMode.h"
+#include "HipdnnDataType.h"
 #include "HipdnnStatus.h"
-#include <hipdnn_sdk/logging/CallbackTypes.h>
 
 // NOLINTBEGIN
 #ifdef __cplusplus
@@ -39,17 +77,17 @@ typedef struct HipdnnBackendDescriptor* hipdnnBackendDescriptor_t;
  * @retval HIPDNN_STATUS_SUCCESS            The creation was successful
  * @retval HIPDNN_STATUS_BAD_PARAM          The descriptor is not a valid (NULL) descriptor.
  * @retval HIPDNN_STATUS_ALLOC_FAILED       The memory allocation failed when creating handle object.
- * 
+ *
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnCreate(hipdnnHandle_t* handle);
 
 /*! @brief Destroyes hipdnnHandle_t
  *
  * @param [in] handle        An instance of hipdnnHandle_t
- * 
+ *
  * @retval HIPDNN_STATUS_BAD_PARAM          The descriptor is not a valid (NULL) descriptor.
  * @retval HIPDNN_STATUS_SUCCESS            The destruction was successful
- * 
+ *
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnDestroy(hipdnnHandle_t handle);
 
@@ -60,7 +98,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnDestroy(hipdnnHandle_t handle);
  *
  * @retval HIPDNN_STATUS_BAD_PARAM                  invalid (NULL) handle.
  * @retval HIPDNN_STATUS_SUCCESS                    The creation was successful
- * 
+ *
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetStream(hipdnnHandle_t handle, hipStream_t streamId);
 
@@ -92,7 +130,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetStream(hipdnnHandle_t handle, hipS
  * @retval  HIPDNN_STATUS_SUCCESS            The creation was successful
  * @retval  HIPDNN_STATUS_NOT_SUPPORTED       Creating a descriptor of a given type is not supported.
  * @retval  HIPDNN_STATUS_ALLOC_FAILED        The memory allocation failed.
- * 
+ *
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateDescriptor(
     hipdnnBackendDescriptorType_t descriptorType, hipdnnBackendDescriptor_t* descriptor);
@@ -111,7 +149,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateDescriptor(
  *
  * @retval  HIPDNN_STATUS_SUCCESS       The memory was destroyed successfully
  * @retval  HIPDNN_STATUS_ALLOC_FAILED   The destruction of memory failed.
- * 
+ *
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     hipdnnBackendDestroyDescriptor(hipdnnBackendDescriptor_t descriptor);
@@ -133,7 +171,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  * @retval  HIPDNN_STATUS_BAD_PARAM             An incorrect or inconsistent value is encountered. For example, a required data pointer is invalid.
  * @retval  HIPDNN_STATUS_INTERNAL_ERROR        Some internal errors were encountered.
  * @retval  HIPDNN_STATUS_EXECUTION_FAILED      An error was encountered executing the plan with the variantPack.
- * 
+ *
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
                                                           hipdnnBackendDescriptor_t executionPlan,
@@ -179,11 +217,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  *                                         table of hipdnnBackendAttributeType_t
  *
  * @retval  HIPDNN_STATUS_SUCCESS           The attributeName was retrieved from the descriptor successfully
- * @retval  HIPDNN_STATUS_BAD_PARAM         One or more invalid or inconsistent argument values were encountered. Some examples include: 
- *                                              attributeName is not a valid attribute for the descriptor. 
+ * @retval  HIPDNN_STATUS_BAD_PARAM         One or more invalid or inconsistent argument values were encountered. Some examples include:
+ *                                              attributeName is not a valid attribute for the descriptor.
  *                                              attributeType is not one of the valid types for the attribute.
  * @retval  HIPDNN_STATUS_NOT_INITIALIZED   The descriptor has not been successfully finalized using hipdnnBackendFinalize().
- * 
+ *
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     hipdnnBackendGetAttribute(hipdnnBackendDescriptor_t descriptor,
@@ -195,9 +233,9 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
 
 /*! @brief Sets an attribute of a descriptor
  *
- * This function sets an attribute of a descriptor to values provided as a pointer. descriptor is the descriptor to be set. 
- * attributeName is the name of the attribute to be set. attributeType is the type of attribute. 
- * The value to which the attribute is set, is pointed by the arrayOfElements. The number of elements is given by elementCount. 
+ * This function sets an attribute of a descriptor to values provided as a pointer. descriptor is the descriptor to be set.
+ * attributeName is the name of the attribute to be set. attributeType is the type of attribute.
+ * The value to which the attribute is set, is pointed by the arrayOfElements. The number of elements is given by elementCount.
  * This function will return HIPDNN_STATUS_NOT_INITIALIZED if the descriptor is already successfully finalized using hipdnnBackendFinalize().
  *
  * @param  [in]  descriptor         Instance of hipdnnBackendDescriptor_t whose attribute is being set
@@ -217,7 +255,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  *                                              elementCount value is unexpected.
  *                                              arrayOfElements contains values invalid for the attributeType.
  * @retval  HIPDNN_STATUS_NOT_SUPPORTED     The values to which the attributes are being set are not supported by the current version of hipDNN.
- * 
+ *
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     hipdnnBackendSetAttribute(hipdnnBackendDescriptor_t descriptor,
@@ -243,7 +281,10 @@ HIPDNN_BACKEND_EXPORT const char* hipdnnGetErrorString(hipdnnStatus_t status);
  * This function copies the last error message associated with the calling thread into the provided
  * message buffer, up to max_size bytes (including the null terminator).
  * Note the max size for an error message is HIPDNN_ERROR_STRING_MAX_LENGTH characters.
- * 
+ *
+ * After retrieving the error message, this function clears the internal error state.
+ * Use hipdnnPeekLastErrorString_ext() if you need to retrieve the error without clearing it.
+ *
  * @param[out] message   Pointer to a character buffer where the error message will be copied.
  * @param[in]  maxSize   Maximum number of bytes to copy, including the null terminator.
  */
@@ -257,17 +298,33 @@ HIPDNN_BACKEND_EXPORT void hipdnnGetLastErrorString(char* message, size_t maxSiz
  **************************************************************************************************
  */
 
+/**
+ * @brief Retrieves the last error message for the calling thread without clearing it.
+ *
+ * This function copies the last error message associated with the calling thread into the provided
+ * message buffer, up to max_size bytes (including the null terminator).
+ * Note the max size for an error message is HIPDNN_ERROR_STRING_MAX_LENGTH characters.
+ *
+ * Unlike hipdnnGetLastErrorString(), this function does NOT clear the internal error state after
+ * retrieval. This preserves the pre-existing behavior for cases where the error needs to be
+ * queried multiple times.
+ *
+ * @param[out] message   Pointer to a character buffer where the error message will be copied.
+ * @param[in]  maxSize   Maximum number of bytes to copy, including the null terminator.
+ */
+HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t maxSize);
+
 /*!
  * @brief Creates and deserializes a graph into a backend descriptor.
  *
- * This function creates a backend descriptor and deserializes a graph from a serialized byte array 
- * into the descriptor. The serialized graph is provided as an input byte array, and the size of 
+ * This function creates a backend descriptor and deserializes a graph from a serialized byte array
+ * into the descriptor. The serialized graph is provided as an input byte array, and the size of
  * the graph in bytes is specified. The created descriptor will encapsulate the deserialized graph.
- * 
+ *
  * IMPORTANT: Hipdnn expects that the serialized graph is sorted in topological order, has no cycles,
  * and is fully connected (no orphan nodes). Additionally, all tensors in the graph must have unique uids.
  *
- * @param [out] descriptor        Pointer to a backend descriptor where the deserialized graph will 
+ * @param [out] descriptor        Pointer to a backend descriptor where the deserialized graph will
  *                                be stored.
  * @param [in]  serializedGraph   Pointer to the serialized graph data in a byte array.
  * @param [in]  graphByteSize     Size of the serialized graph in bytes.
@@ -288,7 +345,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
  *
  * This function is called by the hipDNN library to log messages. The severity level of the message
  * is provided along with the message itself.
- * 
+ *
  * @param [in] severity  The severity level of the message.
  * @param [in] msg        The message to be logged.
  */
@@ -297,12 +354,12 @@ HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext(hipdnnSeverity_t severity, 
 /**
  * @brief Sets the search paths for hipDNN engine plugins.
  *
- * This function configures the search paths for engine plugins and must be called before 
+ * This function configures the search paths for engine plugins and must be called before
  * creating a hipDNN handle, as plugins are loaded during handle creation.
  *
- * Paths can be either directories or specific plugin files. Relative paths are resolved 
- * from the location of the libhipdnn_backend.so file. The backend can resolve 
- * platform-agnostic names, allowing users to omit prefixes like `lib` and extensions 
+ * Paths can be either directories or specific plugin files. Relative paths are resolved
+ * from the location of the libhipdnn_backend.so file. The backend can resolve
+ * platform-agnostic names, allowing users to omit prefixes like `lib` and extensions
  * like `.so` or `.dll`.
  *
  * @param[in] numPaths       The number of paths in the `pluginPaths` array.
@@ -318,13 +375,32 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
     size_t numPaths, const char* const* pluginPaths, hipdnnPluginLoadingMode_ext_t loadingMode);
 
 /**
+ * @brief Sets the plugin unloading mode for hipDNN.
+ *
+ * This function controls when plugins are unloaded from memory. By default, lazy unloading (HIPDNN_PLUGIN_UNLOAD_LAZY)
+ * is used, which keeps plugins loaded until the application exits or until
+ * hipdnnSetEnginePluginPaths_ext is called. This avoids expensive plugin reloading when
+ * handles are frequently created and destroyed.
+ *
+ * This function can be called at any time. When switching from lazy to eager mode (HIPDNN_PLUGIN_UNLOAD_EAGER) while
+ * no handles exist, plugins will be unloaded immediately.
+ *
+ * @param[in] unloadingMode  Specifies when plugins should be unloaded from memory.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS    The operation was successful.
+ * @retval HIPDNN_STATUS_BAD_PARAM  An invalid unloading mode was specified.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetPluginUnloadMode_ext(hipdnnPluginUnloadingMode_ext_t unloadingMode);
+
+/**
  * @brief Gets file paths of loaded engine plugins for a given handle.
  *
  * This function must be called twice:
  * 1. First call: Pass `pluginPaths` as `nullptr` to query the number of plugins and required buffer size.
  *    - Sets `numPluginPaths` to the total number of loaded plugins
  *    - Sets `maxStringLen` to the maximum string length needed (including null terminator)
- * 
+ *
  * 2. Second call: Pass allocated buffers to retrieve the actual plugin paths.
  *    - Allocate an array of `numPluginPaths` char pointers
  *    - Each char pointer should point to a buffer of at least `maxStringLen` characters
@@ -343,6 +419,63 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                                                                           size_t* numPluginPaths,
                                                                           char** pluginPaths,
                                                                           size_t* maxStringLen);
+
+/**
+ * @brief Gets the number of loaded engines for a given handle.
+ *
+ * @param[in]  handle       A valid hipDNN handle.
+ * @param[out] numEngines   Pointer where the engine count will be stored.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM         Invalid handle or null pointer.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR    Internal error.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext(hipdnnHandle_t handle,
+                                                              size_t* numEngines);
+
+/**
+ * @brief Gets information about a loaded engine by index.
+ *
+ * Retrieves the id, name, version, type, and plugin name of the engine at the given index.
+ * Valid indices are 0 to numEngines-1 as returned by hipdnnGetEngineCount_ext.
+ * Engines are sorted alphabetically by name.
+ *
+ * This function uses a two-call pattern for string fields:
+ * 1. First call: Pass all string buffers as `nullptr` to query required sizes.
+ *    - Sets `nameLen`, `versionLen`, `typeLen`, and `pluginNameLen` to the required buffer sizes
+ *      (including null terminator). Note: if any string buffer is null, all sizes are updated.
+ *
+ * 2. Second call: Pass allocated buffers with sizes set from the first call.
+ *
+ * @param[in]     handle           A valid hipDNN handle.
+ * @param[in]     engineIndex      Zero-based index of the engine to query.
+ * @param[out]    engineId         Pointer where the engine ID will be stored, or `nullptr` to skip.
+ * @param[out]    engineName       Buffer for the engine name, or `nullptr` to query size.
+ * @param[in,out] engineNameLen    Pointer to buffer size; updated with required size.
+ * @param[out]    pluginName       Buffer for the plugin name, or `nullptr` to query size.
+ * @param[in,out] pluginNameLen    Pointer to buffer size; updated with required size.
+ * @param[out]    version          Buffer for the engine version, or `nullptr` to query size.
+ * @param[in,out] versionLen       Pointer to buffer size; updated with required size.
+ * @param[out]    type             Buffer for the engine type string, or `nullptr` to query size.
+ * @param[in,out] typeLen          Pointer to buffer size; updated with required size.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM         Invalid handle, null pointers, or out-of-range index.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR    Internal error.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t handle,
+                                                             size_t engineIndex,
+                                                             int64_t* engineId,
+                                                             char* engineName,
+                                                             size_t* engineNameLen,
+                                                             char* pluginName,
+                                                             size_t* pluginNameLen,
+                                                             char* version,
+                                                             size_t* versionLen,
+                                                             char* type,
+                                                             size_t* typeLen);
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version);
 
 #ifdef __cplusplus
 }

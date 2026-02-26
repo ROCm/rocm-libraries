@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -159,6 +159,49 @@ namespace hiptensor
         };
     }
 
+    bool isColMajorLayout(std::vector<std::size_t> const& strides,
+                          std::vector<std::size_t> const& lengths)
+    {
+        if(strides.empty())
+        {
+            using hiptensor::HiptensorOptions;
+            auto& options = HiptensorOptions::instance();
+            return options->isColMajorStrides();
+        }
+
+        if(strides.size() > 0 && strides[0] != 1)
+            return false;
+        for(int i = 1; i < static_cast<int>(strides.size()); i++)
+        {
+            if(strides[i] != strides[i - 1] * lengths[i - 1])
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    std::vector<std::size_t>
+        applyCKColMajorStridesOptimizationForContraction(std::vector<std::size_t> const& lengths)
+    {
+        std::vector<std::size_t> strides(lengths.size(), 1);
+        // Assign second half of strides
+        int stride = 1;
+        for(int s = strides.size() / 2 - 1; s >= 0; s--)
+        {
+            strides[s] = stride;
+            stride *= lengths[s];
+        }
+
+        // Assign first half of strides
+        for(int s = strides.size() - 1; s > static_cast<int>(strides.size()) / 2 - 1; s--)
+        {
+            strides[s] = stride;
+            stride *= lengths[s];
+        }
+        return strides;
+    }
+
     ContractionSolution::ContractionSolution(
         std::unique_ptr<ck::tensor_operation::device::BaseOperator>&& deviceOp,
         std::unique_ptr<ContractionSolutionParams>&&                  params)
@@ -173,27 +216,28 @@ namespace hiptensor
     }
 
     std::tuple<hiptensorStatus_t, float>
-        ContractionSolution::operator()(void const*              alpha,
-                                        void const*              A,
-                                        void const*              B,
-                                        void const*              beta,
-                                        void const*              D,
-                                        void*                    E,
-                                        std::vector<std::size_t> a_ms_ns_lengths,
-                                        std::vector<std::size_t> a_ms_ks_strides,
-                                        std::vector<int32_t>     a_ms_ks_modes,
-                                        std::vector<std::size_t> b_ns_ks_lengths,
-                                        std::vector<std::size_t> b_ns_ks_strides,
-                                        std::vector<int32_t>     b_ns_ks_modes,
-                                        std::vector<std::size_t> ds_ms_ns_lengths,
-                                        std::vector<std::size_t> ds_ms_ns_strides,
-                                        std::vector<int32_t>     ds_ms_ns_modes,
-                                        std::vector<std::size_t> e_ms_ns_lengths,
-                                        std::vector<std::size_t> e_ms_ns_strides,
-                                        std::vector<int32_t>     e_ms_ns_modes,
-                                        void*                    workspacePtr,
-                                        unsigned long            workspaceSize,
-                                        StreamConfig const&      streamConfig /*= StreamConfig{}*/)
+        ContractionSolution::operator()(void const*                alpha,
+                                        void const*                A,
+                                        void const*                B,
+                                        void const*                beta,
+                                        void const*                D,
+                                        void*                      E,
+                                        std::vector<std::size_t>   a_ms_ns_lengths,
+                                        std::vector<std::size_t>   a_ms_ks_strides,
+                                        std::vector<int32_t>       a_ms_ks_modes,
+                                        std::vector<std::size_t>   b_ns_ks_lengths,
+                                        std::vector<std::size_t>   b_ns_ks_strides,
+                                        std::vector<int32_t>       b_ns_ks_modes,
+                                        std::vector<std::size_t>   ds_ms_ns_lengths,
+                                        std::vector<std::size_t>   ds_ms_ns_strides,
+                                        std::vector<int32_t>       ds_ms_ns_modes,
+                                        std::vector<std::size_t>   e_ms_ns_lengths,
+                                        std::vector<std::size_t>   e_ms_ns_strides,
+                                        std::vector<int32_t>       e_ms_ns_modes,
+                                        ContractionUnaryOps const& unaryOps,
+                                        void*                      workspacePtr,
+                                        unsigned long              workspaceSize,
+                                        StreamConfig const& streamConfig /*= StreamConfig{}*/)
     {
         if(!initArgs(alpha,
                      A,
@@ -213,6 +257,7 @@ namespace hiptensor
                      e_ms_ns_lengths,
                      e_ms_ns_strides,
                      e_ms_ns_modes,
+                     unaryOps,
                      workspacePtr))
         {
             return {HIPTENSOR_STATUS_INTERNAL_ERROR, -1.0f};

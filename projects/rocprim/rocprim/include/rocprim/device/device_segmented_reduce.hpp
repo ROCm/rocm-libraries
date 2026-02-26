@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -63,15 +63,11 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
     using input_type  = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
-    using config = wrapped_segmented_reduce_config<Config, result_type>;
+    using Selector = segmented_reduce_config_selector<result_type>;
 
-    detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const reduce_config_params params = dispatch_target_arch<config, false>(target_arch);
+    const target current_target(stream);
+
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int block_size = params.kernel_config.block_size;
 
@@ -92,22 +88,22 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
     {
         start = std::chrono::steady_clock::now();
     }
-    auto segmented_reduce_kernel = [=](auto arch_config)
+    auto segmented_reduce_kernel = [=](auto target_config)
     {
-        segmented_reduce<decltype(arch_config)>(input,
-                                                output,
-                                                begin_offsets,
-                                                end_offsets,
-                                                reduce_op,
-                                                static_cast<result_type>(initial_value));
+        segmented_reduce<decltype(target_config)>(input,
+                                                  output,
+                                                  begin_offsets,
+                                                  end_offsets,
+                                                  reduce_op,
+                                                  static_cast<result_type>(initial_value));
     };
 
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                        segmented_reduce_kernel,
-                                                        dim3(segments),
-                                                        dim3(block_size),
-                                                        0,
-                                                        stream));
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                  segmented_reduce_kernel,
+                                                                  dim3(segments),
+                                                                  dim3(block_size),
+                                                                  0,
+                                                                  stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce", segments, start);
 
     return hipSuccess;

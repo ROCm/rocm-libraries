@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <cmath>
 #include <memory>
@@ -77,6 +54,7 @@ namespace ExpressionTest
             auto expr13 = Expression::bfe(DataType::UInt8, a, 8, 8);
             auto expr14 = Expression::multiplyAdd(b, b, b);
             auto expr15 = Expression::splitBitfieldCombine(Expression::bfc(expr14, e, 0, 0, 32));
+            auto expr16 = Expression::reinterpret(DataType::UInt32, Expression::literal(10.0f));
 
             auto expr = GENERATE_COPY(expr1,
                                       expr2,
@@ -92,7 +70,8 @@ namespace ExpressionTest
                                       expr12,
                                       expr13,
                                       expr14,
-                                      expr15);
+                                      expr15,
+                                      expr16);
 
             CAPTURE(expr);
 
@@ -109,12 +88,12 @@ namespace ExpressionTest
 
             SECTION("Kernel arg")
             {
-                auto kernelArg                   = std::make_shared<AssemblyKernelArgument>();
-                kernelArg->name                  = "KernelArg1";
-                kernelArg->variableType.dataType = DataType::Int32;
-                kernelArg->expression            = Expression::literal(10);
-                kernelArg->offset                = 1;
-                kernelArg->size                  = 5;
+                auto kernelArg = std::make_shared<AssemblyKernelArgument>("KernelArg1",
+                                                                          DataType::Int32,
+                                                                          DataDirection::ReadOnly,
+                                                                          Expression::literal(10),
+                                                                          1,
+                                                                          5);
 
                 auto expr = b >> std::make_shared<Expression::Expression>(kernelArg);
 

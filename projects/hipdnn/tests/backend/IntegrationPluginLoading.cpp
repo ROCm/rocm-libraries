@@ -9,11 +9,11 @@
 #include <HipdnnBackendAttributeType.h>
 #include <HipdnnBackendHeuristicType.h>
 #include <hipdnn_backend.h>
-#include <hipdnn_sdk/plugin/EnginePluginApi.h>
-#include <hipdnn_sdk/plugin/PluginApi.h>
-#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
-#include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/EnginePluginApi.h>
+#include <hipdnn_plugin_sdk/PluginApi.h>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 #include <test_plugins/TestPluginEngineIdMap.hpp>
 
@@ -21,7 +21,7 @@
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>
 
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_tests::plugin_constants;
 namespace fs = std::filesystem;
 
@@ -98,7 +98,7 @@ void createHeuristicDescriptor(hipdnnBackendDescriptor_t* heuristicDescriptor,
 
 TEST_F(IntegrationPluginLoading, EmptyPluginPath)
 {
-    hipdnn_sdk::test_utilities::ScopedDirectory pluginDir("empty_plugins");
+    hipdnn_test_sdk::utilities::ScopedDirectory pluginDir("empty_plugins");
     auto pluginPath = pluginDir.path().string();
     const std::array<const char*, 1> paths = {pluginPath.c_str()};
     ASSERT_EQ(
@@ -180,7 +180,7 @@ TEST_F(IntegrationPluginLoading, DuplicateEngineIds)
 
 TEST_F(IntegrationPluginLoading, IncompleteAPI)
 {
-    using namespace hipdnn_sdk::utilities;
+    using namespace hipdnn_data_sdk::utilities;
     using namespace hipdnn_tests::plugin_constants;
 
     const std::array<const char*, 1> paths = {testIncompleteApiPluginPath().c_str()};
@@ -260,7 +260,7 @@ TEST_F(IntegrationPluginLoading, MultiplePluginsNoApplicableEngines)
 
 TEST_F(IntegrationPluginLoading, MultiplePluginsOneApplicableEngine)
 {
-    hipdnn_sdk::test_utilities::ScopedEnvironmentVariableSetter envSetter(
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     const std::array<const char*, 1> paths
@@ -294,7 +294,7 @@ TEST_F(IntegrationPluginLoading, MultiplePluginsOneApplicableEngine)
 TEST_F(IntegrationPluginLoading, MultiplePluginsMultipleApplicableEngines)
 {
 
-    hipdnn_sdk::test_utilities::ScopedEnvironmentVariableSetter envSetter(
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     const std::array<const char*, 1> paths
@@ -323,4 +323,26 @@ TEST_F(IntegrationPluginLoading, MultiplePluginsMultipleApplicableEngines)
               HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(availableEngineCount, 2);
+}
+
+TEST_F(IntegrationPluginLoading, PluginWithIncompatibleApiVersion)
+{
+
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
+        "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
+
+    const std::array<const char*, 1> paths
+        = {hipdnn_tests::plugin_constants::testIncompatibleVersionPluginPath().c_str()};
+    ASSERT_EQ(
+        hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> buffer;
+    hipdnnGetLastErrorString(buffer.data(), buffer.size());
+
+    EXPECT_NE(std::string{buffer.data()}.find("does not match backend major version"),
+              std::string::npos);
+    EXPECT_EQ(test_util::getLoadedPlugins(_handle).size(), 0);
 }

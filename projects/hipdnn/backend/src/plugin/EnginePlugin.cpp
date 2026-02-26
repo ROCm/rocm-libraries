@@ -106,7 +106,7 @@ std::vector<int64_t> EnginePlugin::getAllEngineIds() const
     THROW_IF_NE(numEngines,
                 maxEngines,
                 HIPDNN_STATUS_PLUGIN_ERROR,
-                "Number of engines returned does not match expected count");
+                "Number of engines returned does not match the number reported by the plugin");
 
     std::sort(engineIds.begin(), engineIds.end());
     if(std::adjacent_find(engineIds.begin(), engineIds.end()) != engineIds.end())

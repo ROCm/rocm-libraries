@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /*
  * Command to KernelGraph translator
@@ -237,6 +214,7 @@ namespace rocRoller
                 auto tensor = m_command->getOperation<Operations::Tensor>(tload.getSrcTag());
 
                 auto const sizes          = tensor.sizes();
+                auto const literalSizes   = tensor.literalSizes();
                 auto const strides        = tensor.strides();
                 auto const literalStrides = tensor.literalStrides();
 
@@ -248,8 +226,15 @@ namespace rocRoller
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
                 {
-                    auto sizeExpr = std::make_shared<Expression::Expression>(sizes[i]);
-                    std::shared_ptr<Expression::Expression> strideExpr;
+                    std::shared_ptr<Expression::Expression> sizeExpr, strideExpr;
+                    if(literalSizes.size() > i && literalSizes[i] > 0)
+                    {
+                        sizeExpr = std::make_shared<Expression::Expression>(literalSizes[i]);
+                    }
+                    else
+                    {
+                        sizeExpr = std::make_shared<Expression::Expression>(sizes[i]);
+                    }
                     if(literalStrides.size() > i && literalStrides[i] > 0)
                     {
                         strideExpr = std::make_shared<Expression::Expression>(literalStrides[i]);
@@ -698,11 +683,9 @@ namespace rocRoller
                             = std::get<rocRoller::KernelGraph::CoordinateGraph::MacroTile>(info);
                         size_t miKScale = tile.miTileSizes.at(2);
 
-                        std::vector<size_t> expectedTile{64, 4, miKScale};
-
-                        AssertFatal(scaleTranspose == expectedTile,
+                        AssertFatal((scaleTranspose.at(0) * scaleTranspose.at(1) == 256)
+                                        && scaleTranspose.at(2) == miKScale,
                                     ShowValue(scaleTranspose),
-                                    ShowValue(expectedTile),
                                     ShowValue(valueArg),
                                     ShowValue(tile),
                                     ShowValue(tile.miTileSizes));
@@ -776,6 +759,11 @@ namespace rocRoller
             }
 
             void operator()(Operations::SubTileTranspose const& t) {}
+
+            void operator()(Operations::Scratch const& t)
+            {
+                rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::Scratch");
+            }
 
             void operator()(Operations::Literal const& literal)
             {

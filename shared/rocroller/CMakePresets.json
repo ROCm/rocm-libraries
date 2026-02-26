@@ -49,8 +49,7 @@
       "inherits": "default:release",
       "cacheVariables": {
         "ROCROLLER_BUILD_SHARED_LIBS": "OFF",
-        "ROCROLLER_ENABLE_COVERAGE": "ON",
-        "ROCROLLER_ENABLE_LLD": "ON"
+        "ROCROLLER_ENABLE_COVERAGE": "ON"
       }
     },
     {

@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2019 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #pragma once
 
 #include <miopen/config.hpp>
@@ -39,14 +17,11 @@
 #include <miopen/lock_file.hpp>
 #include <miopen/env.hpp>
 
-#include <boost/core/explicit_operator_bool.hpp>
-#include <boost/none.hpp>
-#include <boost/optional/optional.hpp>
 #include "sqlite3.h"
 #include <mutex>
 
 #include <string>
-#include <chrono>
+#include <optional>
 #include <unordered_map>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_DISABLE_SQL_WAL)
@@ -237,7 +212,7 @@ public:
                 if(!fs::create_directories(directory))
                     MIOPEN_LOG_W("Unable to create a directory: " << directory);
                 else
-                    fs::permissions(directory, FS_ENUM_PERMS_ALL);
+                    fs::permissions(directory, miopen::fs::perms::all);
             }
         }
         sql = SQLite{filename_, is_system};
@@ -437,10 +412,10 @@ public:
         }
     }
     template <typename T>
-    inline boost::optional<DbRecord> FindRecordUnsafe(const T& problem_config)
+    inline std::optional<DbRecord> FindRecordUnsafe(const T& problem_config)
     {
         if(dbInvalid)
-            return boost::none;
+            return {};
 
         const auto& pdb_ovr = env::value(MIOPEN_DEBUG_PERFDB_OVERRIDE);
         if(!pdb_ovr.empty())
@@ -496,7 +471,7 @@ public:
             }
         }
         if(rec.GetSize() == 0)
-            return boost::none;
+            return {};
         else
             return {rec};
     }
@@ -538,11 +513,11 @@ public:
     /// Updates record under key PROBLEM_CONFIG with data ID:VALUES in database.
     /// Returns updated record or boost::none if insertion failed
     template <class T, class V>
-    inline boost::optional<DbRecord>
+    inline std::optional<DbRecord>
     UpdateUnsafe(const T& problem_config, const std::string& id, const V& values)
     {
         if(dbInvalid)
-            return boost::none;
+            return {};
         // UPSERT the value
         {
             std::string clause;
@@ -583,7 +558,7 @@ public:
             {
                 MIOPEN_LOG_E("Failed to insert performance record in the database: " +
                              sql.ErrorMessage());
-                return boost::none;
+                return {};
             }
         }
         DbRecord record;

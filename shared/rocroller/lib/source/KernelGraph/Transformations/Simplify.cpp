@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <map>
 #include <queue>
@@ -59,16 +36,21 @@ namespace rocRoller::KernelGraph
      */
     void removeRedundantSequenceEdges(KernelGraph& graph)
     {
+        removeRedundantSequenceEdges(graph.control);
+    }
+
+    void removeRedundantSequenceEdges(rocRoller::KernelGraph::ControlGraph::ControlGraph& graph)
+    {
         TIMER(t, "removeRedundantSequenceEdges");
 
         std::unordered_map<int, std::unordered_set<int>> predecessors;
         std::unordered_map<int, std::vector<int>>        successors;
 
-        for(auto const node : graph.control.getNodes())
+        for(auto const node : graph.getNodes())
         {
             predecessors[node];
             successors[node];
-            for(auto const parent : graph.control.getInputNodeIndices<Sequence>(node))
+            for(auto const parent : graph.getInputNodeIndices<Sequence>(node))
             {
                 if(predecessors.at(node).contains(parent))
                 {
@@ -77,8 +59,7 @@ namespace rocRoller::KernelGraph
                     // Each pair of nodes should be connected by at most one
                     // (sequence) edge after the outer for-loop finishes.
                     //
-                    graph.control.deleteElement<Sequence>(std::vector<int>{parent},
-                                                          std::vector<int>{node});
+                    graph.deleteElement<Sequence>(std::vector<int>{parent}, std::vector<int>{node});
                 }
                 else
                     predecessors.at(node).insert(parent);
@@ -199,8 +180,8 @@ namespace rocRoller::KernelGraph
                 {
                     if(seen.at(successor) > 1)
                     {
-                        graph.control.deleteElement<Sequence>(std::vector<int>{node},
-                                                              std::vector<int>{successor});
+                        graph.deleteElement<Sequence>(std::vector<int>{node},
+                                                      std::vector<int>{successor});
                     }
                 }
 
@@ -242,6 +223,11 @@ namespace rocRoller::KernelGraph
      */
     void removeRedundantBodyEdges(KernelGraph& graph)
     {
+        removeRedundantBodyEdges(graph.control);
+    }
+
+    void removeRedundantBodyEdges(rocRoller::KernelGraph::ControlGraph::ControlGraph& graph)
+    {
         TIMER(t, "removeRedundantBodyEdges");
 
         //
@@ -274,10 +260,10 @@ namespace rocRoller::KernelGraph
 
         std::unordered_map<int, std::unordered_set<int>> bodyPredecessors;
 
-        for(auto const node : graph.control.getNodes())
+        for(auto const node : graph.getNodes())
         {
             bodyPredecessors[node];
-            for(auto const parent : graph.control.getInputNodeIndices<Body>(node))
+            for(auto const parent : graph.getInputNodeIndices<Body>(node))
             {
                 if(bodyPredecessors.at(node).contains(parent))
                 {
@@ -286,8 +272,7 @@ namespace rocRoller::KernelGraph
                     // Each pair of nodes should be connected by at most one
                     // (Body) edge after the outer for-loop finishes.
                     //
-                    graph.control.deleteElement<Body>(std::vector<int>{parent},
-                                                      std::vector<int>{node});
+                    graph.deleteElement<Body>(std::vector<int>{parent}, std::vector<int>{node});
                 }
                 else
                     bodyPredecessors.at(node).insert(parent);
@@ -295,7 +280,7 @@ namespace rocRoller::KernelGraph
 
             predecessors[node];
             successors[node];
-            for(auto const parent : graph.control.getInputNodeIndices<Sequence>(node))
+            for(auto const parent : graph.getInputNodeIndices<Sequence>(node))
             {
                 predecessors.at(node).insert(parent);
                 successors[parent].insert(node);
@@ -362,8 +347,7 @@ namespace rocRoller::KernelGraph
                 AssertFatal(depth.at(pred) < depth.at(node),
                             "node's predecessor should have smaller depth");
                 if(depth.at(pred) + 1 != depth.at(node))
-                    graph.control.deleteElement<Body>(std::vector<int>{pred},
-                                                      std::vector<int>{node});
+                    graph.deleteElement<Body>(std::vector<int>{pred}, std::vector<int>{node});
             }
         }
     }

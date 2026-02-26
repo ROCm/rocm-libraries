@@ -75,7 +75,19 @@
 #endif // GOOGLE_TEST
 
 #define ASSERT_HALF_EQ(a, b) ASSERT_FLOAT_EQ(half_to_float(a), half_to_float(b))
-#define ASSERT_BFLOAT16_EQ(a, b) ASSERT_FLOAT_EQ(bfloat16_to_float(a), bfloat16_to_float(b))
+#define ASSERT_BF16_EQ(a, b) ASSERT_FLOAT_EQ(bfloat16_to_float(a), bfloat16_to_float(b))
+
+// Compare float to rocblas_bfloat16
+// Allow the rocblas_bfloat16 to match the rounded or truncated value of float
+// Only call ASSERT_FLOAT_EQ with the rounded value if the truncated value does not match
+#include <gtest/internal/gtest-internal.h>
+#define ASSERT_FLOAT_BF16_EQ(a, b)                                                          \
+    do                                                                                      \
+    {                                                                                       \
+        using testing::internal::FloatingPoint;                                             \
+        if(!FloatingPoint<float>(b).AlmostEquals(FloatingPoint<float>(hipblasBfloat16(a)))) \
+            ASSERT_FLOAT_EQ(b, hipblasBfloat16(a));                                         \
+    } while(0)
 
 #define ASSERT_FLOAT_COMPLEX_EQ(a, b)        \
     do                                       \
@@ -101,7 +113,7 @@ template <>
 void unit_check_general(
     int64_t M, int64_t N, int64_t lda, hipblasBfloat16* hCPU, hipblasBfloat16* hGPU)
 {
-    UNIT_CHECK(M, N, 1, lda, 0, hCPU, hGPU, ASSERT_BFLOAT16_EQ);
+    UNIT_CHECK(M, N, 1, lda, 0, hCPU, hGPU, ASSERT_BF16_EQ);
 }
 
 template <>
@@ -172,7 +184,7 @@ void unit_check_general(int64_t           M,
                         hipblasBfloat16** hCPU,
                         hipblasBfloat16** hGPU)
 {
-    UNIT_CHECK_B(M, N, batch_count, lda, hCPU, hGPU, ASSERT_BFLOAT16_EQ);
+    UNIT_CHECK_B(M, N, batch_count, lda, hCPU, hGPU, ASSERT_BF16_EQ);
 }
 
 template <>
@@ -245,7 +257,7 @@ void unit_check_general(int64_t                      M,
                         host_vector<hipblasBfloat16> hCPU[],
                         host_vector<hipblasBfloat16> hGPU[])
 {
-    UNIT_CHECK_B(M, N, batch_count, lda, hCPU, hGPU, ASSERT_BFLOAT16_EQ);
+    UNIT_CHECK_B(M, N, batch_count, lda, hCPU, hGPU, ASSERT_BF16_EQ);
 }
 
 template <>
@@ -325,7 +337,7 @@ void unit_check_general(int64_t          M,
                         hipblasBfloat16* hCPU,
                         hipblasBfloat16* hGPU)
 {
-    UNIT_CHECK(M, N, batch_count, lda, strideA, hCPU, hGPU, ASSERT_BFLOAT16_EQ);
+    UNIT_CHECK(M, N, batch_count, lda, strideA, hCPU, hGPU, ASSERT_BF16_EQ);
 }
 
 template <>
@@ -399,3 +411,40 @@ void unit_check_general(int64_t       M,
 {
     UNIT_CHECK(M, N, batch_count, lda, strideA, hCPU, hGPU, ASSERT_EQ);
 }
+
+// mixed
+
+template <typename T, typename T_hpa>
+void unit_check_mixed(
+    int64_t M, int64_t N, int64_t lda, const std::remove_cv_t<T_hpa>* hCPU, const T* hGPU)
+{
+    UNIT_CHECK(M, N, 1, lda, 0, hCPU, hGPU, ASSERT_EQ);
+}
+
+template <>
+void unit_check_mixed(
+    int64_t M, int64_t N, int64_t lda, const hipblasBfloat16* hCPU, const hipblasBfloat16* hGPU)
+{
+    UNIT_CHECK(M, N, 1, lda, 0, hCPU, hGPU, ASSERT_BF16_EQ);
+}
+
+template <>
+void unit_check_mixed(
+    int64_t M, int64_t N, int64_t lda, const hipblasHalf* hCPU, const hipblasHalf* hGPU)
+{
+    UNIT_CHECK(M, N, 1, lda, 0, hCPU, hGPU, ASSERT_HALF_EQ);
+}
+
+template <>
+void unit_check_mixed<hipblasBfloat16, float>(
+    int64_t M, int64_t N, int64_t lda, const float* hCPU, const hipblasBfloat16* hGPU)
+{
+    UNIT_CHECK(M, N, 1, lda, 0, hCPU, hGPU, ASSERT_FLOAT_BF16_EQ);
+}
+
+#define INST(Ta_, Tb_)                        \
+    template void unit_check_mixed<Ta_, Tb_>( \
+        int64_t M, int64_t N, int64_t lda, const Ta_* hCPU, const Tb_* hGPU);
+
+INST(float, float)
+INST(double, double)

@@ -155,7 +155,7 @@ void testing_rotm_strided_batched(const Arguments& arg)
         return;
     }
 
-    double gpu_time_used, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_device{0};
 
     // Initial Data on CPU
     host_strided_batch_vector<T> hx(N, incx, stride_x, batch_count);
