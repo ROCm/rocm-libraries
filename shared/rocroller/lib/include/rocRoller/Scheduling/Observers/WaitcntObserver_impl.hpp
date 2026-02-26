@@ -54,7 +54,7 @@ namespace rocRoller
                 auto count = rv.waitCount.getCount(wq);
 
                 if(count >= 0)
-                    rv.waitLengths.at(i) = std::min(rv.waitLengths.at(i), count);
+                    rv.waitLengths.at(wqType) = std::min(rv.waitLengths.at(wqType), count);
             }
 
             // Add contribution from this instruction
@@ -67,7 +67,7 @@ namespace rocRoller
                 AssertFatal(
                     idx < rv.waitLengths.size(), ShowValue(qt), ShowValue(rv.waitLengths.size()));
                 auto waitCount = info.getWaitCount();
-                rv.waitLengths.at(idx) += waitCount == 0 ? 1 : waitCount;
+                rv.waitLengths.at(qt) += waitCount == 0 ? 1 : waitCount;
             }
 
             return rv;

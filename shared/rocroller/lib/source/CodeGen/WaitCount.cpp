@@ -7,6 +7,7 @@
 #include "rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp"
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
+#include <rocRoller/Utilities/String.hpp>
 
 namespace rocRoller
 {
@@ -79,9 +80,9 @@ namespace rocRoller
     }
 
     WaitCount::WaitCount(GPUArchitecture const&       arch,
-                         EnumBitset<GPUWaitQueueType> queuesToEmpty,
+                         EnumBitset<GPUWaitQueueType> queuesToSync,
                          std::string const&           message)
-        : m_queuesToEmpty(queuesToEmpty)
+        : m_queuesToSync(queuesToSync)
         , m_comments({message})
     {
     }
@@ -180,23 +181,23 @@ namespace rocRoller
         return rv;
     }
 
-    WaitCount WaitCount::EmptyQueue(GPUArchitecture const& arch,
-                                    GPUWaitQueueType       queue,
-                                    std::string const&     message)
+    WaitCount WaitCount::SyncQueue(GPUArchitecture const& arch,
+                                   GPUWaitQueueType       queue,
+                                   std::string const&     message)
     {
-        return EmptyQueue(arch, EnumBitset<GPUWaitQueueType>{queue}, message);
+        return SyncQueues(arch, EnumBitset<GPUWaitQueueType>{queue}, message);
     }
 
-    WaitCount WaitCount::EmptyQueue(GPUArchitecture const&       arch,
+    WaitCount WaitCount::SyncQueues(GPUArchitecture const&       arch,
                                     EnumBitset<GPUWaitQueueType> queues,
                                     std::string const&           message)
     {
         return WaitCount(arch, queues, message);
     }
 
-    EnumBitset<GPUWaitQueueType> const& WaitCount::queuesToEmpty() const
+    EnumBitset<GPUWaitQueueType> const& WaitCount::queuesToSync() const
     {
-        return m_queuesToEmpty;
+        return m_queuesToSync;
     }
 
     int WaitCount::CombineValues(int lhs, int rhs)
@@ -229,7 +230,7 @@ namespace rocRoller
 
         m_comments.insert(m_comments.end(), other.m_comments.begin(), other.m_comments.end());
 
-        m_queuesToEmpty |= other.m_queuesToEmpty;
+        m_queuesToSync |= other.m_queuesToSync;
 
         return *this;
     }
@@ -447,7 +448,7 @@ namespace rocRoller
 
             if(commentIter != m_comments.end())
             {
-                for(auto const& line : Instruction::EscapeComment(*commentIter))
+                for(auto const& line : EscapeComment(*commentIter))
                     os << line;
                 commentIter++;
             }
@@ -463,7 +464,7 @@ namespace rocRoller
 
             if(commentIter != m_comments.end())
             {
-                for(auto const& line : Instruction::EscapeComment(*commentIter))
+                for(auto const& line : EscapeComment(*commentIter))
                     os << line;
                 commentIter++;
             }
@@ -482,7 +483,13 @@ namespace rocRoller
                 m_kmcnt,
                 m_expcnt);
 
-            for(auto const& line : Instruction::EscapeComment(fieldComment))
+            if(m_queuesToSync.any())
+            {
+                fieldComment
+                    += fmt::format(" m_queuesToSync({})", rocRoller::toString(m_queuesToSync));
+            }
+
+            for(auto const& line : EscapeComment(fieldComment))
                 os << line;
             os << "\n";
         }
@@ -491,7 +498,7 @@ namespace rocRoller
         {
             for(; commentIter != m_comments.end(); commentIter++)
             {
-                for(auto const& line : Instruction::EscapeComment(*commentIter))
+                for(auto const& line : EscapeComment(*commentIter))
                     os << line;
             }
             os << "\n";

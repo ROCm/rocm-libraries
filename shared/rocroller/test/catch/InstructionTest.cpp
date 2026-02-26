@@ -263,6 +263,23 @@ TEST_CASE("Instruction class will handle nops.", "[codegen][instruction]")
 
         CHECK(context.output() == "s_nop 0xf\ns_nop 0\n");
     }
+
+    SECTION("Not too many newlines between instructions")
+    {
+        for(int i = 0; i < 10; i++)
+        {
+            auto inst = Instruction::Nop();
+            context->schedule(inst);
+        }
+
+        std::string single = "s_nop 0\n";
+        std::string expected;
+        for(int i = 0; i < 10; i++)
+        {
+            expected += single;
+        }
+        CHECK(context.output() == expected);
+    }
 }
 
 TEST_CASE("Instruction class will handle nops on a regular instruction.", "[codegen][instruction]")

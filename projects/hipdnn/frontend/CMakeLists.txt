@@ -21,6 +21,11 @@ target_include_directories(
                               $<INSTALL_INTERFACE:${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}>
 )
 
+target_compile_definitions(
+    hipdnn_frontend INTERFACE
+    $<$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>:HIPDNN_FRONTEND_SKIP_JSON_LIB>
+)
+
 # Generate the config file from template
 configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_frontendConfig.cmake.in"

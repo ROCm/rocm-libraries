@@ -192,6 +192,15 @@ protected:
 };
 
 using GPU_FindModeTrustVerify_FP16 = FindModeTrustVerifyTest;
-TEST_P(GPU_FindModeTrustVerify_FP16, TrustVerifyTest) { TestConvSolutions(); }
+TEST_P(GPU_FindModeTrustVerify_FP16, TrustVerifyTest)
+{
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip solver performance validation tests when AddressSanitizer is enabled as ASan
+    // significantly affects memory allocation patterns and performance characteristics.
+    GTEST_SKIP();
+#else
+    TestConvSolutions();
+#endif
+}
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_FindModeTrustVerify_FP16, testing::ValuesIn(ConvTestCases()));
