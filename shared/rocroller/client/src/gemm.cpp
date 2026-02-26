@@ -1345,8 +1345,31 @@ namespace rocRoller::Client::GEMMClient::CLI
 
         // Workgroup size
 
+        bool wgsXYSet = false;
+        wgsXYSet |= update(SN(&SP::macM), solution.macM);
+        wgsXYSet |= update(SN(&SP::macN), solution.macN);
+        wgsXYSet |= update(SN(&SP::macK), solution.macK);
+
         update(SN(&SP::workgroupSizeX), solution.workgroupSizeX);
         update(SN(&SP::workgroupSizeY), solution.workgroupSizeY);
+
+        bool wgsSet = false;
+        if(app.get_option("--wgs")->count())
+        {
+            XYTuple xy{0, 0};
+            if(!ParseXY(app.get_option("--wgs")->as<std::string>(), xy))
+                Throw<FatalError>("Failed to parse WGS argument.");
+            solution.workgroupSizeX = xy.x;
+            solution.workgroupSizeY = xy.y;
+            wgsSet                  = true;
+        }
+
+        if(wgsSet && wgsXYSet)
+        {
+            Throw<FatalError>(
+                "Workgroup size was overspecified.  Please use only --wgs or "
+                "the --workgroup_size_x and --workgroup_size_y arguments; but not both.");
+        }
 
         // Workgroup mapping
 
