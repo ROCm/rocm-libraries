@@ -234,30 +234,6 @@ namespace rocsparse
         B[tid + ldb * hipBlockIdx_x] = sx[tid];
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_2x2_kernel(rocsparse_int n,
@@ -1054,6 +1030,382 @@ namespace rocsparse
             }
         }
     }
+
+    // Parallel cyclic reduction algorithm
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t NUM_RHS, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_nopivot_pcr_wavefront_kernel_32(rocsparse_int m,
+                                                  rocsparse_int n,
+                                                  rocsparse_int ldb,
+                                                  const T* __restrict__ dl,
+                                                  const T* __restrict__ d,
+                                                  const T* __restrict__ du,
+                                                  T* __restrict__ B,
+                                                  T* __restrict__ temp_a,
+                                                  T* __restrict__ temp_b,
+                                                  T* __restrict__ temp_c,
+                                                  T* __restrict__ temp_B)
+    {
+        const int tid = hipThreadIdx_x;
+        const int bid = hipBlockIdx_x;
+
+        const int lid = tid & (WF_SIZE - 1);
+        const int wid = tid / WF_SIZE;
+
+        const int iter   = static_cast<int>(rocsparse::log2(WF_SIZE / 2));
+        int stride = 1;
+
+        const int b_col = NUM_RHS * (BLOCKSIZE / WF_SIZE) * bid + NUM_RHS * wid;
+
+        T a = (lid < m) ? dl[lid] : static_cast<T>(0);
+        T b = (lid < m) ? d[lid] : static_cast<T>(1);
+        T c = (lid < m) ? du[lid] : static_cast<T>(0);
+        T x[NUM_RHS];
+        for(int i = 0; i < NUM_RHS; i++)
+        {
+            x[i] = (lid < m && b_col + i < n) ? B[ldb * (b_col + i) + lid] : static_cast<T>(0);
+        }
+
+        for(int it = 0; it < iter; it++)
+        {
+            const int right = lid + stride;
+            const int left = lid - stride;
+
+            T a_left = shfl_up(a, stride, WF_SIZE);
+            T b_left = shfl_up(b, stride, WF_SIZE);
+            T c_left = shfl_up(c, stride, WF_SIZE);
+
+            if(left < 0)
+            {
+                a_left = static_cast<T>(0);
+                b_left = static_cast<T>(0);
+                c_left = static_cast<T>(0);
+            }
+
+            T a_right = shfl_down(a, stride, WF_SIZE);
+            T b_right = shfl_down(b, stride, WF_SIZE);
+            T c_right = shfl_down(c, stride, WF_SIZE);
+
+            if(right > (WF_SIZE - 1))
+            {
+                a_right = static_cast<T>(0);
+                b_right = static_cast<T>(0);
+                c_right = static_cast<T>(0);
+            }
+
+            const T k1 = (left >= 0) ? a / b_left : static_cast<T>(0);
+            const T k2 = (right <= WF_SIZE - 1) ? c / b_right : static_cast<T>(0);
+
+            const T a_new = -a_left * k1;
+            const T b_new = b - c_left * k1 - a_right * k2;
+            const T c_new = -c_right * k2;
+
+            a = a_new;
+            b = b_new;
+            c = c_new;
+
+            for(int i = 0; i < NUM_RHS; i++)
+            {
+                T x_left = shfl_up(x[i], stride, WF_SIZE);
+                if(left < 0)
+                {
+                    x_left = static_cast<T>(0);
+                }
+                T x_right = shfl_down(x[i], stride, WF_SIZE);
+                if(right > (WF_SIZE - 1))
+                {
+                    x_right = static_cast<T>(0);
+                }
+
+                const T x_new = x[i] - x_left * k1 - x_right * k2;
+
+                x[i] = x_new;
+            }
+
+            // temp_a[lid] = a_left;
+            // temp_b[lid] = b_left;
+            // temp_c[lid] = c_left;
+            // temp_B[lid] = x_left;
+
+            stride <<= 1; //stride *= 2;
+        }
+
+        // Solve 2x2 systems (j = lid + stride)
+        // bi ci
+        // aj bj
+        // 
+        // det = bi * bj - aj * ci
+        const T aj = shfl_down(a, stride, WF_SIZE);
+        const T bj = shfl_down(b, stride, WF_SIZE);
+
+        const T   det = static_cast<T>(1) / (b * bj - aj * c);
+
+        for(int i = 0; i < NUM_RHS; i++)
+        {
+            const T xj = shfl_down(x[i], stride, WF_SIZE);
+
+            if(lid < WF_SIZE / 2) // same as lid < stride
+            {
+                if(lid < m && (b_col + i) < n)
+                {
+                    B[ldb * (b_col + i) + lid] = (bj * x[i] - c * xj) * det;
+                }
+                if ((lid + stride) < m && (b_col + i) < n)
+                {
+                    B[ldb * (b_col + i) + lid + stride] = (xj * b - x[i] * aj) * det;
+                }
+            }
+        }
+    }
+
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t NUM_RHS, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_no_pivot_pcr_shared_kernel2(rocsparse_int m,
+                                    rocsparse_int n,
+                                    rocsparse_int ldb,
+                                    const T* __restrict__ dl,
+                                    const T* __restrict__ d,
+                                    const T* __restrict__ du,
+                                    T* __restrict__ B,
+                                   T* __restrict__ temp_a,
+                                   T* __restrict__ temp_b,
+                                   T* __restrict__ temp_c,
+                                   T* __restrict__ temp_d)
+    {
+        const int tid = threadIdx.x;
+        const int bid = blockIdx.x;
+
+        const int lid = tid & (WF_SIZE - 1);
+        const int wid = tid / WF_SIZE;
+
+        const int iter_BLOCKSIZE   = static_cast<int>(log2(BLOCKSIZE / 2));
+        const int iter_WF_SIZE  = static_cast<int>(log2(WF_SIZE / 2));
+        const int iter = iter_BLOCKSIZE - iter_WF_SIZE;
+
+        int stride = 1;
+
+        T a = (tid < m) ? dl[tid] : static_cast<T>(0);
+        T b = (tid < m) ? d[tid] : static_cast<T>(1);
+        T c = (tid < m) ? du[tid] : static_cast<T>(0);
+
+        T x[NUM_RHS];
+        for(int rhs = 0; rhs < NUM_RHS; rhs++)
+        {
+            x[rhs] = (tid < m && (NUM_RHS * bid + rhs) < n) ? B[ldb * (NUM_RHS * bid + rhs) + tid] : static_cast<T>(0);
+        }
+
+        // Parallel cyclic reduction shared memory
+        __shared__ T a_shared[BLOCKSIZE];
+        __shared__ T b_shared[BLOCKSIZE];
+        __shared__ T c_shared[BLOCKSIZE];
+        __shared__ T x_shared[BLOCKSIZE * NUM_RHS];
+
+        // Fill parallel cyclic reduction shared memory
+        a_shared[tid] = a;
+        b_shared[tid] = b;
+        c_shared[tid] = c;
+        for(int rhs = 0; rhs < NUM_RHS; rhs++)
+        {
+            x_shared[tid + rhs * BLOCKSIZE] = x[rhs];
+        }
+        __syncthreads();
+
+        for(int j = 0; j < iter; j++)
+        {
+            const int right = tid + stride;
+            const int left  = tid - stride;
+
+            const T a_left = (left >= 0) ? a_shared[left] : static_cast<T>(0);
+            const T b_left = (left >= 0) ? b_shared[left] : static_cast<T>(0);
+            const T c_left = (left >= 0) ? c_shared[left] : static_cast<T>(0);
+
+            const T a_right = (right < BLOCKSIZE) ? a_shared[right] : static_cast<T>(0);
+            const T b_right = (right < BLOCKSIZE) ? b_shared[right] : static_cast<T>(0);
+            const T c_right = (right < BLOCKSIZE) ? c_shared[right] : static_cast<T>(0);
+
+            const T k1 = (b_left != static_cast<T>(0)) ? a / b_left : static_cast<T>(0);
+            const T k2 = (b_right != static_cast<T>(0)) ? c / b_right : static_cast<T>(0);
+
+            const T a_new = -a_left * k1;
+            const T b_new = b - c_left * k1 - a_right * k2;
+            const T c_new = -c_right * k2;
+
+            __syncthreads();
+            a_shared[tid] = a_new;
+            b_shared[tid] = b_new;
+            c_shared[tid] = c_new;
+
+            a = a_new;
+            b = b_new;
+            c = c_new;
+
+            for(int rhs = 0; rhs < NUM_RHS; rhs++)
+            {
+                const T x_left = (left >= 0) ? x_shared[left + rhs * BLOCKSIZE] : static_cast<T>(0);
+                const T x_right
+                    = (right < BLOCKSIZE) ? x_shared[right + rhs * BLOCKSIZE] : static_cast<T>(0);
+
+                const T x_new = x[rhs] - x_left * k1 - x_right * k2;
+
+                __syncthreads();
+                x_shared[tid + rhs * BLOCKSIZE] = x_new;
+
+                x[rhs] = x_new;
+                __syncthreads();
+            }
+
+            stride *= 2;
+        }
+
+        a = a_shared[(BLOCKSIZE / WF_SIZE) * lid + wid];
+        b = b_shared[(BLOCKSIZE / WF_SIZE) * lid + wid];
+        c = c_shared[(BLOCKSIZE / WF_SIZE) * lid + wid];
+        for(int rhs = 0; rhs < NUM_RHS; rhs++)
+        {
+            x[rhs] = x_shared[(BLOCKSIZE / WF_SIZE) * lid + wid + rhs * BLOCKSIZE];
+        }
+        __syncthreads();
+
+        int stride2 = 1;
+        for(int it = 0; it < iter_WF_SIZE; it++)
+        {
+            const int right = lid + stride2;
+            const int left  = lid - stride2;
+
+            T a_left = shfl_up(a, stride2, WF_SIZE);
+            T b_left = shfl_up(b, stride2, WF_SIZE);
+            T c_left = shfl_up(c, stride2, WF_SIZE);
+
+            if(left < 0)
+            {
+                a_left = static_cast<T>(0);
+                b_left = static_cast<T>(0);
+                c_left = static_cast<T>(0);
+            }
+
+            T a_right = shfl_down(a, stride2, WF_SIZE);
+            T b_right = shfl_down(b, stride2, WF_SIZE);
+            T c_right = shfl_down(c, stride2, WF_SIZE);
+
+            if(right > (WF_SIZE - 1))
+            {
+                a_right = static_cast<T>(0);
+                b_right = static_cast<T>(0);
+                c_right = static_cast<T>(0);
+            }
+
+            const T k1 = (b_left != static_cast<T>(0)) ? a / b_left : static_cast<T>(0);
+            const T k2 = (b_right != static_cast<T>(0)) ? c / b_right : static_cast<T>(0);
+
+            const T a_new = -a_left * k1;
+            const T b_new = b - c_left * k1 - a_right * k2;
+            const T c_new = -c_right * k2;
+
+            a = a_new;
+            b = b_new;
+            c = c_new;
+
+            for(int rhs = 0; rhs < NUM_RHS; rhs++)
+            {
+                T x_left  = shfl_up(x[rhs], stride2, WF_SIZE);
+                T x_right = shfl_down(x[rhs], stride2, WF_SIZE);
+
+                if(left < 0)
+                {
+                    x_left = static_cast<T>(0);
+                }
+
+                if(right > (WF_SIZE - 1))
+                {
+                    x_right = static_cast<T>(0);
+                }
+
+                const T x_new = x[rhs] - x_left * k1 - x_right * k2;
+                x[rhs]        = x_new;
+            }
+
+            //temp_a[lid] = e;
+            //temp_b[lid] = b_left;
+            //temp_c[lid] = c_left;
+            //temp_d[lid] = d_left;
+
+            stride2 <<= 1; //stride2 *= 2;
+        }
+
+        // Solve 2x2 systems (j = lid + stride2)
+        // bi ci
+        // aj bj
+        //
+        // det = bi * bj - aj * ci
+        const T aj = shfl_down(a, stride2, WF_SIZE);
+        const T bj = shfl_down(b, stride2, WF_SIZE);
+
+        const T det = static_cast<T>(1) / (b * bj - aj * c);
+
+        for(int rhs = 0; rhs < NUM_RHS; rhs++)
+        {
+            const T xj = shfl_down(x[rhs], stride2, WF_SIZE);
+
+            if(lid < WF_SIZE / 2) // same as lid < stride2
+            {
+                if(lid < m && (NUM_RHS * bid + rhs) < n)
+                {
+                    B[ldb * (NUM_RHS * bid + rhs) + (BLOCKSIZE / WF_SIZE) * lid + wid]
+                        = (bj * x[rhs] - c * xj) * det;
+                }
+                if((lid + stride2) < m && (NUM_RHS * bid + rhs) < n)
+                {
+                    B[ldb * (NUM_RHS * bid + rhs) + (BLOCKSIZE / WF_SIZE) * (lid + stride2) + wid]
+                        = (xj * b - x[rhs] * aj) * det;
+                }
+            }
+        }
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1990,7 +2342,11 @@ namespace rocsparse
                                                const T* __restrict__ dl,
                                                const T* __restrict__ d,
                                                const T* __restrict__ du,
-                                               T* __restrict__ B)
+                                               T* __restrict__ B,
+                                               T* __restrict__ temp_a,
+                                               T* __restrict__ temp_b,
+                                               T* __restrict__ temp_c,
+                                               T* __restrict__ temp_d)
     {
         rocsparse_int tid = hipThreadIdx_x;
 
@@ -2056,6 +2412,16 @@ namespace rocsparse
             __syncthreads();
         }
 
+        // temp_a[tid]             = sa[tid];
+        // temp_a[tid + BLOCKSIZE] = sa[tid + BLOCKSIZE];
+        // temp_b[tid]             = sb[tid];
+        // temp_b[tid + BLOCKSIZE] = sb[tid + BLOCKSIZE];
+        // temp_c[tid]             = sc[tid];
+        // temp_c[tid + BLOCKSIZE] = sc[tid + BLOCKSIZE];
+        // temp_d[tid]             = srhs[tid];
+        // temp_d[tid + BLOCKSIZE] = srhs[tid + BLOCKSIZE];
+        // __syncthreads();
+
         // Parallel cyclic reduction
         if(tid < PCR_SIZE)
         {
@@ -2109,6 +2475,15 @@ namespace rocsparse
             __syncthreads();
         }
 
+        if(tid < PCR_SIZE)
+        {
+            temp_a[tid]             = spa[tid];
+            temp_b[tid]             = spb[tid];
+            temp_c[tid]             = spc[tid];
+            temp_d[tid]             = sprhs[tid];
+        }
+        __syncthreads();
+
         if(tid < pcr_stride) // same as PCR_SIZE / 2
         {
             // Solve 2x2 systems
@@ -2160,6 +2535,246 @@ namespace rocsparse
         B[tid + ldb * hipBlockIdx_x]             = sx[tid];
         B[tid + BLOCKSIZE + ldb * hipBlockIdx_x] = sx[tid + BLOCKSIZE];
     }
+
+    // Combined Parallel cyclic reduction and cyclic reduction algorithm using shared memory
+    template <uint32_t BLOCKSIZE, uint32_t PCR_SIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_nopivot_crpcr_pow2_shared_kernel2(rocsparse_int m,
+                                                rocsparse_int n,
+                                                rocsparse_int ldb,
+                                                const T* __restrict__ dl,
+                                                const T* __restrict__ d,
+                                                const T* __restrict__ du,
+                                                T* __restrict__ B,
+                                                T* __restrict__ temp_a,
+                                                T* __restrict__ temp_b,
+                                                T* __restrict__ temp_c,
+                                                T* __restrict__ temp_d)
+    {
+        const int tid = hipThreadIdx_x;
+
+        const int tot_iter = static_cast<rocsparse_int>(rocsparse::log2((2 * BLOCKSIZE) / 2));
+        const int pcr_iter = static_cast<rocsparse_int>(rocsparse::log2(PCR_SIZE / 2));
+        const int cr_iter  = tot_iter - pcr_iter;
+        
+        int stride         = 1;
+        int active_threads = BLOCKSIZE;
+
+        // Cyclic reduction shared memory
+        __shared__ T sa[2 * BLOCKSIZE];
+        __shared__ T sb[2 * BLOCKSIZE];
+        __shared__ T sc[2 * BLOCKSIZE];
+        __shared__ T srhs[2 * BLOCKSIZE];
+        __shared__ T sx[2 * BLOCKSIZE];
+
+        // Fill cyclic reduction shared memory
+        sa[tid]               = dl[tid];
+        sa[tid + BLOCKSIZE]   = dl[tid + BLOCKSIZE];
+        sb[tid]               = d[tid];
+        sb[tid + BLOCKSIZE]   = d[tid + BLOCKSIZE];
+        sc[tid]               = du[tid];
+        sc[tid + BLOCKSIZE]   = du[tid + BLOCKSIZE];
+        srhs[tid]             = B[tid + ldb * hipBlockIdx_x];
+        srhs[tid + BLOCKSIZE] = B[tid + BLOCKSIZE + ldb * hipBlockIdx_x];
+
+        __syncthreads();
+
+        // Forward reduction using cyclic reduction
+        for(int j = 0; j < cr_iter; j++)
+        {
+            stride *= 2;
+
+            if(tid < active_threads)
+            {
+                const int index = stride * tid + stride - 1;
+                int left  = index - stride / 2;
+                int right = index + stride / 2;
+
+                if(right >= 2 * BLOCKSIZE)
+                {
+                    right = 2 * BLOCKSIZE - 1;
+                }
+
+                T k1 = sa[index] / sb[left];
+                T k2 = sc[index] / sb[right];
+
+                sb[index]   = sb[index] - sc[left] * k1 - sa[right] * k2;
+                srhs[index] = srhs[index] - srhs[left] * k1 - srhs[right] * k2;
+                sa[index]   = -sa[left] * k1;
+                sc[index]   = -sc[right] * k2;
+            }
+
+            active_threads /= 2;
+
+            __syncthreads();
+        }
+        // temp_a[0] = tot_iter;
+        // temp_a[1] = pcr_iter;
+        // temp_a[2] = cr_iter;
+        // temp_a[3] = stride;
+
+        // temp_a[tid]             = sa[tid];
+        // temp_a[tid + BLOCKSIZE] = sa[tid + BLOCKSIZE];
+        // temp_b[tid]             = sb[tid];
+        // temp_b[tid + BLOCKSIZE] = sb[tid + BLOCKSIZE];
+        // temp_c[tid]             = sc[tid];
+        // temp_c[tid + BLOCKSIZE] = sc[tid + BLOCKSIZE];
+        // temp_d[tid]             = srhs[tid];
+        // temp_d[tid + BLOCKSIZE] = srhs[tid + BLOCKSIZE];
+        // __syncthreads();
+
+        // Parallel cyclic reduction
+        const int index = stride * tid + stride - 1;
+        int pcr_stride = stride;
+
+        for(int j = 0; j < pcr_iter; j++)
+        {   
+            T ta;
+            T tb;
+            T tc;
+            T trhs;
+
+            if(tid < PCR_SIZE)
+            {
+                rocsparse_int right = index + pcr_stride;
+                if(right >= PCR_SIZE)
+                    right = PCR_SIZE - 1;
+
+                rocsparse_int left = index - pcr_stride;
+                if(left < 0)
+                    left = 0;
+
+                T k1 = sa[index] / sb[left];
+                T k2 = sc[index] / sb[right];
+
+                tb   = sb[index] - sc[left] * k1 - sa[right] * k2;
+                trhs = srhs[index] - srhs[left] * k1 - srhs[right] * k2;
+                ta   = -sa[left] * k1;
+                tc   = -sc[right] * k2;
+            }
+
+            __syncthreads();
+            if(tid < PCR_SIZE)
+            {
+                sb[index]   = tb;
+                srhs[index] = trhs;
+                sa[index]   = ta;
+                sc[index]   = tc;
+            }
+            pcr_stride *= 2;
+            __syncthreads();
+
+
+            // const int right = index + pcr_stride;
+            // const int left = index - pcr_stride;
+
+            // T a = static_cast<T>(0);
+            // T b = static_cast<T>(0);
+            // T c = static_cast<T>(0);
+            // T rhs = static_cast<T>(0);
+
+            // T a_left = static_cast<T>(0);
+            // T b_left = static_cast<T>(0);
+            // T c_left = static_cast<T>(0);
+            // T rhs_left = static_cast<T>(0);
+
+            // T a_right = static_cast<T>(0);
+            // T b_right = static_cast<T>(0);
+            // T c_right = static_cast<T>(0);
+            // T rhs_right = static_cast<T>(0);
+
+            // T k1 = static_cast<T>(0);
+            // T k2 = static_cast<T>(0);
+
+            // if(tid < PCR_SIZE)
+            // {
+            //     a = sa[index];
+            //     b = sb[index];
+            //     c = sc[index];
+            //     rhs = srhs[index];
+
+            //     a_left = (left >= 0) ? sa[left] : static_cast<T>(0);
+            //     b_left = (left >= 0) ? sb[left] : static_cast<T>(0);
+            //     c_left = (left >= 0) ? sc[left] : static_cast<T>(0);
+            //     rhs_left = (left >= 0) ? srhs[left] : static_cast<T>(0);
+
+            //     a_right = (right <= PCR_SIZE - 1) ? sa[right] : static_cast<T>(0);
+            //     b_right = (right <= PCR_SIZE - 1) ? sb[right] : static_cast<T>(0);
+            //     c_right = (right <= PCR_SIZE - 1) ? sc[right] : static_cast<T>(0);
+            //     rhs_right = (right <= PCR_SIZE - 1) ? srhs[right] : static_cast<T>(0);    
+
+            //     k1 = (left >= 0) ? a / b_left : static_cast<T>(0);
+            //     k2 = (right <= PCR_SIZE - 1) ? c / b_right : static_cast<T>(0);
+            // }
+
+            // __syncthreads();
+            // if(tid < PCR_SIZE)
+            // {
+            //     sb[index]   = b - c_left * k1 - a_right * k2;
+            //     srhs[index] = rhs - rhs_left * k1 - rhs_right * k2;
+            //     sa[index]   = -a_left * k1;
+            //     sc[index]   = -c_right * k2;
+            // }
+            // __syncthreads();
+
+            // pcr_stride *= 2;
+        }
+
+        temp_a[tid]             = sa[tid];
+        temp_a[tid + BLOCKSIZE] = sa[tid + BLOCKSIZE];
+        temp_b[tid]             = sb[tid];
+        temp_b[tid + BLOCKSIZE] = sb[tid + BLOCKSIZE];
+        temp_c[tid]             = sc[tid];
+        temp_c[tid + BLOCKSIZE] = sc[tid + BLOCKSIZE];
+        temp_d[tid]             = srhs[tid];
+        temp_d[tid + BLOCKSIZE] = srhs[tid + BLOCKSIZE];
+        __syncthreads();
+
+        if(tid < PCR_SIZE / 2)
+        {
+            const int index = stride * tid + stride - 1;
+
+            // Solve 2x2 systems
+            const int i = index;
+            const int j = index + pcr_stride;
+            const T det = static_cast<T>(1) / (sb[j] * sb[i] - sc[i] * sa[j]);
+
+            sx[i] = (sb[j] * srhs[i] - sc[i] * srhs[j]) * det;
+            sx[j] = (srhs[j] * sb[i] - srhs[i] * sa[j]) * det;
+        }
+
+        __syncthreads();
+
+        // Backward substitution using cyclic reduction
+        active_threads = PCR_SIZE;
+        for(int j = 0; j < cr_iter; j++)
+        {
+            __syncthreads();
+
+            if(tid < active_threads)
+            {
+                const int index = stride * tid + stride / 2 - 1;
+                const int left  = index - stride / 2;
+                const int right = index + stride / 2;
+
+                const T x_left  = (left >= 0) ? sx[left] : static_cast<T>(0);
+                const T x_right = (right < m) ? sx[right] : static_cast<T>(0);
+
+                sx[index] = (srhs[index] - sa[index] * x_left - sc[index] * x_right) / sb[index];
+            }
+
+            stride /= 2;
+            active_threads *= 2;
+        }
+
+        __syncthreads();
+
+        B[tid + ldb * hipBlockIdx_x]             = sx[tid];
+        B[tid + BLOCKSIZE + ldb * hipBlockIdx_x] = sx[tid + BLOCKSIZE];
+    }
+
+
+
 
     // Parallel cyclic reduction algorithm
     template <uint32_t BLOCKSIZE, typename T>
