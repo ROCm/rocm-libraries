@@ -61,5 +61,16 @@ int main()
                                    sequence<0>            // Y minor
                                    >>::print();
 
+    printf("\nCustom example\n");
+    TileDistrEncRegMap<
+        tile_distribution_encoding<sequence<1>,                            // R (= Repeat)
+                                   tuple<sequence<16>, sequence<1, 2, 8>>, // H (= Hidden dims =
+                                                                           // unmerged dims)
+                                   tuple<sequence<2, 1>>, // P major (= Parallelism = lanes)
+                                   tuple<sequence<1, 0>>, // P minor
+                                   sequence<2, 2>,        // Y major (= Yield = Vector items)
+                                   sequence<0, 2>         // Y minor
+                                   >>::print();
+
     return 0;
 }

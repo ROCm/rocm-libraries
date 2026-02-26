@@ -37,10 +37,10 @@ struct TileDistrEncRegMap
     }();
     static constexpr index_t num_lanes = ps_ys_to_xs_adaptor.get_top_dimension_length(number<0>{});
     static constexpr index_t num_vector_items =
-        ps_ys_to_xs_adaptor.get_top_dimension_length(number<1>{});
+        container_reduce(TileDistrEnc::detail::ys_lengths_, multiplies<>{}, 1);
 
-    CK_TILE_HOST_DEVICE static auto calc_matrix_indices_from_lane_vector(index_t lane_inx,
-                                                                         index_t vector_inx)
+    CK_TILE_HOST_DEVICE static constexpr auto
+    calc_matrix_indices_from_lane_vector(index_t lane_inx, index_t vector_inx)
     {
         // For some reason the Y dimension is not treated the same as the P dimension and we need to
         // manually unmerge the Y dimension index into its hidden indices before being able to use
