@@ -24,13 +24,18 @@
 
 #include "primbench.hpp"
 
-#define CREATE_SORT_BENCHMARK(K, BS, WS, IPT) executor.queue<warp_sort_benchmark<K, BS, WS, IPT>>();
+#define CREATE_SORT_BENCHMARK(K, BS, WS, IPT)                  \
+    if(is_warp_size_supported(WS, device_id))                  \
+    {                                                          \
+        executor.queue<warp_sort_benchmark<K, BS, WS, IPT>>(); \
+    }
 
-#define CREATE_SORTBYKEY_BENCHMARK(K, V, BS, WS, IPT) \
-    executor.queue<warp_sort_benchmark<K, BS, WS, IPT, V>>();
+#define CREATE_SORTBYKEY_BENCHMARK(K, V, BS, WS, IPT)             \
+    if(is_warp_size_supported(WS, device_id))                     \
+    {                                                             \
+        executor.queue<warp_sort_benchmark<K, BS, WS, IPT, V>>(); \
+    }
 
-// clang-format off
-#ifndef ROCPRIM_NAVI					    
 #define BENCHMARK_TYPE(type)                \
     CREATE_SORT_BENCHMARK(type, 64, 64, 1)  \
     CREATE_SORT_BENCHMARK(type, 64, 64, 2)  \
@@ -46,35 +51,14 @@
     CREATE_SORT_BENCHMARK(type, 64, 16, 1)  \
     CREATE_SORT_BENCHMARK(type, 64, 16, 2)  \
     CREATE_SORT_BENCHMARK(type, 64, 16, 4)
-#elif defined(_WIN32) // Currently, running a logical warpSize > hardware warpSize on Windows on Navi cards leads to a hang.
-#define BENCHMARK_TYPE(type)                \
-    CREATE_SORT_BENCHMARK(type, 64, 32, 1)  \
-    CREATE_SORT_BENCHMARK(type, 64, 32, 1)  \
-    CREATE_SORT_BENCHMARK(type, 64, 16, 2)  \
-    CREATE_SORT_BENCHMARK(type, 64, 16, 2)  \
-    CREATE_SORT_BENCHMARK(type, 64, 16, 4)	
-#endif
-// clang-format on
 
-// clang-format off
-#ifndef ROCPRIM_NAVI					    			
 #define BENCHMARK_KEY_TYPE(type, value)                 \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 1)  \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 2)  \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 4)  \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 1) \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 2) \
-    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 4) 
-#elif defined(_WIN32) // Currently, running a logical warpSize > hardware warpSize on Windows on Navi cards leads to a hang.											    
-#define BENCHMARK_KEY_TYPE(type, value)                 \
-    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 32, 1)  \
-    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 32, 2)  \
-    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 32, 4)  \
-    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 32, 1) \
-    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 32, 2) \
-    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 32, 4) 
-#endif
-// clang-format on
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 4)
 
 int main(int argc, char* argv[])
 {
@@ -82,6 +66,9 @@ int main(int argc, char* argv[])
     settings.size                    = 128 * primbench::MiB;
     settings.noise_tolerance_percent = 2;
     primbench::executor executor(argc, argv, settings);
+
+    int device_id;
+    HIP_CHECK(hipGetDevice(&device_id));
 
     BENCHMARK_TYPE(int32_t)
     BENCHMARK_TYPE(float)
