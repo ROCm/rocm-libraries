@@ -175,6 +175,7 @@ endif()
 string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
 # Filter out target flags as rocFFT builds generic code for each target.
 list(TRANSFORM GPU_TARGETS REPLACE ":[^;]+" "")
+list(REMOVE_DUPLICATES GPU_TARGETS)
 rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
   
 # HIP is required - library and clients use HIP to access the device
