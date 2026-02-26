@@ -161,10 +161,34 @@ INSTANTIATE_TEST_SUITE_P(
 
 
 
-class hipfftxtunitdesc : public ::testing::TestWithParam<std::tuple<int, bool, bool,
-                                                                    hipfftXtSubFormat,
-                                                                    hipfftXtSubFormat>>
+class hipfftxtunitdesc : public ::testing::TestWithParam<std::tuple<int, bool, hipfftXtSubFormat>>
 {};
+
+
+// FIXME: is this just for pre-transform?
+// real/complex, tx direction (0=forward, 1=backward), copy direction (d2h = 0, h2d=1), subformat
+static std::vector<std::tuple<bool, int, int, hipfftXtSubFormat>> goodlist =
+{
+    // real/complex must be inplace 
+    // {1, 0, HIPFFT_XT_FORMAT_INPLACE}, // bad?
+    {1, 0, 1, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
+    {1, 1, 1, HIPFFT_XT_FORMAT_INPLACE},
+    // {1, 1, 0, HIPFFT_XT_FORMAT_INPLACE}, // bad?
+    // {1, 1, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED}, // bad?
+    // complex/complex: 
+    // {0, 0, HIPFFT_XT_FORMAT_INPUT}, // bad?
+    // {0, 0, HIPFFT_XT_FORMAT_OUTPUT}, // bad?
+    // {0, 1, HIPFFT_XT_FORMAT_INPUT}, // bad?
+    // {0, 1, HIPFFT_XT_FORMAT_OUTPUT}, // bad?
+    {0, 0, 1, HIPFFT_XT_FORMAT_INPLACE},
+    {0, 0, 0, HIPFFT_XT_FORMAT_INPLACE},
+    {0, 0, 0, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
+    {0, 0, 1, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
+    {0, 1, 0, HIPFFT_XT_FORMAT_INPLACE},
+    {0, 1, 0, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
+    {0, 1, 1, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
+    {0, 1, 1, HIPFFT_XT_FORMAT_INPLACE},
+};
 
 TEST_P(hipfftxtunitdesc, desccreation)
 {
@@ -181,13 +205,12 @@ TEST_P(hipfftxtunitdesc, desccreation)
 
     const int direction = std::get<0>(GetParam());
     const bool realcomplex = std::get<1>(GetParam());
-    const bool inplace = std::get<2>(GetParam());
+    const hipfftXtSubFormat format = std::get<2>(GetParam());
+
+    const bool forward = (direction == HIPFFT_FORWARD);
     
-    const hipfftXtSubFormat informat = std::get<3>(GetParam());
-    const hipfftXtSubFormat outformat = std::get<4>(GetParam());
-    
-    const hipfftType transform_type  = realcomplex ?
-        ((direction == HIPFFT_FORWARD) ? HIPFFT_D2Z : HIPFFT_Z2D) : HIPFFT_Z2Z;
+    const hipfftType transform_type  = realcomplex
+        ? (forward ? HIPFFT_D2Z : HIPFFT_Z2D) : HIPFFT_Z2Z;
 
     if(verbose > 0)
     {
@@ -215,22 +238,67 @@ TEST_P(hipfftxtunitdesc, desccreation)
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2d failed with return code "
                                          << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
 
-    hipLibXtDesc*       indesc = nullptr;
-    hipfft_rt                     = hipfftXtMalloc(plan, &indesc, informat);
+    hipLibXtDesc*       mydesc = nullptr;
+    hipfft_rt                     = hipfftXtMalloc(plan, &mydesc, format);
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
                                          << hipfft_rt
                                          << " (" << hipfftResult_string(hipfft_rt) << ")";
-    hipfft_rt = hipfftXtFree(indesc);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+
+    // Fine, let's do a copy test and see what happens.
+
+    // host-to-device copies:
+    for(const bool h2d : {true, false})
+    {
+        const auto copydir = h2d ? HIPFFT_COPY_HOST_TO_DEVICE : HIPFFT_COPY_DEVICE_TO_HOST;
+        
+        // Transforms are double-precision, something. FIXME: actually figure this out.
+        std::vector<std::complex<double>> hostbuf(Nx * Ny, 0.0);
+        if(h2d)
+        {
+            hipfft_rt = hipfftXtMemcpy(plan,
+                                       reinterpret_cast<void*>(mydesc),
+                                       reinterpret_cast<void*>(hostbuf.data()),
+                                       copydir);
+        }
+        else
+        {
+            hipfft_rt = hipfftXtMemcpy(plan,
+                                       reinterpret_cast<void*>(hostbuf.data()),
+                                       reinterpret_cast<void*>(mydesc),
+                                       copydir);
+        }
+        const decltype(goodlist)::value_type v = {realcomplex, forward, h2d, format};
+        std::stringstream vstrings;
+        vstrings << std::get<0>(v) << ":" <<(std::get<0>(v) ? "rc": "cc")
+                 << " " << std::get<1>(v) << ":" << (std::get<1>(v) ? "forward" : "backward")
+                 << " " << std::get<2>(v) << ":" << (std::get<2>(v) ? "h2d" : "d2h")
+                 << " " << formatname(format);
+        if(verbose > 2)
+        {
+            std::cout << vstrings.str() << "\n";
+            std::cout <<  (h2d ? "H2D" : "D2H") << "\n";
+        }
+        const bool isgood = std::find(goodlist.begin(), goodlist.end(), v) != goodlist.end();
+        if(isgood)
+        {
+            EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy "  <<  (h2d ? "H2D" : "D2H")
+                                                 << " failed with code "
+                                                 << hipfft_rt
+                                                 << " (" << hipfftResult_string(hipfft_rt) << "): "
+                                                 << vstrings.str();
+        }
+        else
+        {
+            EXPECT_NE(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy " <<  (h2d ? "H2D" : "D2H")
+                                                 << " should not have succeeded with code "
+                                                 << hipfft_rt
+                                                 << " (" << hipfftResult_string(hipfft_rt) << "): "
+                                                 << vstrings.str();
+        }
+    }
     
-    hipLibXtDesc*       outdesc = nullptr;
-    hipfft_rt                     = hipfftXtMalloc(plan, &outdesc, outformat);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
-                                         << hipfft_rt
-                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
-    hipfft_rt = hipfftXtFree(outdesc);
+    hipfft_rt = hipfftXtFree(mydesc);
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-       
     
     hipfft_rt = hipfftDestroy(plan);
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
@@ -243,11 +311,6 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Combine(
         ::testing::Values(HIPFFT_FORWARD, HIPFFT_BACKWARD),
         ::testing::Values(true, false),
-        ::testing::Values(true, false),
-        ::testing::Values(HIPFFT_XT_FORMAT_INPUT,
-                          HIPFFT_XT_FORMAT_OUTPUT,
-                          HIPFFT_XT_FORMAT_INPLACE,
-                          HIPFFT_XT_FORMAT_INPLACE_SHUFFLED),
         ::testing::Values(HIPFFT_XT_FORMAT_INPUT,
                           HIPFFT_XT_FORMAT_OUTPUT,
                           HIPFFT_XT_FORMAT_INPLACE,
@@ -256,14 +319,10 @@ INSTANTIATE_TEST_SUITE_P(
     [](const testing::TestParamInfo<hipfftxtunitdesc::ParamType>& info) {
         const int direction = std::get<0>(info.param);
         const bool realcomplex = std::get<1>(info.param);
-        const bool inplace = std::get<2>(info.param);
-        const hipfftXtSubFormat informat = std::get<3>(info.param);
-        const hipfftXtSubFormat outformat = std::get<4>(info.param);
+        const hipfftXtSubFormat format = std::get<2>(info.param);
         std::string name = direction == HIPFFT_FORWARD ? "forward" : "backward";
         name += realcomplex ? "rc" : "cc";
-        name += inplace ? "i" : "o";
-        name += formatname(informat);
-        name += formatname(outformat);
+        name += formatname(format);
         return name;
     }
     );
