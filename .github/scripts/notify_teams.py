@@ -67,13 +67,12 @@ class ErrorExtractor:
         """
         if self.log_path.is_dir():
             return self._extract_from_directory()
-        elif self.log_path.is_file():
+        if self.log_path.is_file():
             return self._extract_from_file()
-        else:
-            return (
-                "Error details not found in logs. Check the GitHub Actions run for full output.",
-                f"{self.failure_type.title()} Failure",
-            )
+        return (
+            "Error details not found in logs. Check the GitHub Actions run for full output.",
+            f"{self.failure_type.title()} Failure",
+        )
 
     def _extract_from_directory(self) -> Tuple[str, str]:
         """Extract errors from a directory of log files"""
