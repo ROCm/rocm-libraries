@@ -279,9 +279,9 @@ struct BlockFmhaPipelineQRKSVSAsync
         using OaccBlockTileType = decltype(gemm_1.MakeCBlockTile());
 
         // init Oacc, M, L
-        auto o_acc = OaccBlockTileType{};
-        auto m     = MLBlockTileType{};
-        auto l     = MLBlockTileType{};
+        auto o_acc  = OaccBlockTileType{};
+        auto m      = MLBlockTileType{};
+        auto l      = MLBlockTileType{};
         auto sink_s = sink_v * scale_s;
 
         clear_tile(o_acc);
