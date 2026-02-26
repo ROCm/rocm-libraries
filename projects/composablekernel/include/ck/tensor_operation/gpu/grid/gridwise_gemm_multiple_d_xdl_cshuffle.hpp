@@ -376,6 +376,10 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
 
             return false;
         }
+        if constexpr(KPerBlock < 16)
+        {
+            return false;
+        }
 #endif
 
         if constexpr(Base::GetSharedMemoryNumberOfByte(get_device_arch()) >
