@@ -39,7 +39,6 @@
 #endif
 
 #include <stdexcept> // for std::runtime_error
-#include <utility> // for use of std::swap in the WAR below
 
 THRUST_NAMESPACE_BEGIN
 
@@ -199,16 +198,21 @@ THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::swap(contiguous_storage& x
 {
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
   using _THRUST_STD::swap;
-#else
-  using thrust::swap;
-#endif
   swap(m_begin, x.m_begin);
   swap(m_size, x.m_size);
+#else
+  thrust::swap(m_begin, x.m_begin);
+  thrust::swap(m_size, x.m_size);
+#endif
 
   // FIXME(bgruber): swap_allocators already swaps m_allocator, so we are swapping twice here !!
   swap_allocators(integral_constant<bool, allocator_traits<Alloc>::propagate_on_container_swap::value>(),
                   x.m_allocator);
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
   swap(m_allocator, x.m_allocator);
+#else
+  thrust::swap(m_allocator, x.m_allocator);
+#endif
 } // end contiguous_storage::swap()
 
 template <typename T, typename Alloc>
@@ -357,10 +361,10 @@ THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::swap_allocators(false_type
                (if (is_allocator_not_equal(other)) { throw allocator_mismatch_on_swap(); }));
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
   using _THRUST_STD::swap;
-#else
-  using thrust::swap;
-#endif
   swap(m_allocator, other);
+#else
+  thrust::swap(m_allocator, other);
+#endif
 } // end contiguous_storage::swap_allocators()
 
 template <typename T, typename Alloc>
