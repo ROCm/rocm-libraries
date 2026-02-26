@@ -5,7 +5,8 @@
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-namespace hip_kernel_provider {
+namespace hip_kernel_provider
+{
 
 // ============================================================================
 // Engine Registration
@@ -19,8 +20,8 @@ namespace hip_kernel_provider {
 // HIPDNN_REGISTER_ENGINE(HIP_KERNEL_ENGINE, "HIP_KERNEL_ENGINE")
 // ============================================================================
 
-const std::vector<HipKernelContainer::EngineDefinition>&
-HipKernelContainer::getEngineDefinitions() {
+const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::getEngineDefinitions()
+{
     static const std::vector<EngineDefinition> s_engineDefinitions = {
         // ====================================================================
         // Engines will be added here as plan builders are implemented
@@ -38,18 +39,21 @@ HipKernelContainer::getEngineDefinitions() {
     return s_engineDefinitions;
 }
 
-uint32_t HipKernelContainer::copyEngineIds(int64_t* engineIds, uint32_t maxEngines,
-                                           uint32_t& numEngines) {
+uint32_t
+    HipKernelContainer::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines)
+{
     const auto& engineDefinitions = getEngineDefinitions();
     auto totalEngines = static_cast<uint32_t>(engineDefinitions.size());
 
-    if (maxEngines == 0) {
+    if(maxEngines == 0)
+    {
         numEngines = totalEngines;
         return totalEngines;
     }
 
     auto enginesToCopy = std::min(maxEngines, totalEngines);
-    for (uint32_t i = 0; i < enginesToCopy; ++i) {
+    for(uint32_t i = 0; i < enginesToCopy; ++i)
+    {
         engineIds[i] = engineDefinitions[i].id;
     }
 
@@ -58,24 +62,28 @@ uint32_t HipKernelContainer::copyEngineIds(int64_t* engineIds, uint32_t maxEngin
     return totalEngines;
 }
 
-HipKernelContainer::HipKernelContainer() {
+HipKernelContainer::HipKernelContainer()
+{
     HIPDNN_PLUGIN_LOG_INFO("Creating HipKernelContainer");
 
     _engineManager = std::make_unique<
         hipdnn_plugin_sdk::EngineManager<HipKernelHandle, HipKernelSettings, HipKernelContext>>();
 
-    for (const auto& engineDefinition : getEngineDefinitions()) {
+    for(const auto& engineDefinition : getEngineDefinitions())
+    {
         _engineManager->addEngine(engineDefinition.createEngine());
     }
 }
 
-HipKernelContainer::~HipKernelContainer() {
+HipKernelContainer::~HipKernelContainer()
+{
     HIPDNN_PLUGIN_LOG_INFO("Destroying HipKernelContainer");
 }
 
 hipdnn_plugin_sdk::EngineManager<HipKernelHandle, HipKernelSettings, HipKernelContext>&
-HipKernelContainer::getEngineManager() {
+    HipKernelContainer::getEngineManager()
+{
     return *_engineManager;
 }
 
-}  // namespace hip_kernel_provider
+} // namespace hip_kernel_provider

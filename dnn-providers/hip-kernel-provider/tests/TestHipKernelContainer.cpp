@@ -7,11 +7,13 @@
 
 using namespace hip_kernel_provider;
 
-TEST(TestHipKernelContainer, ConstructsSuccessfully) {
+TEST(TestHipKernelContainer, ConstructsSuccessfully)
+{
     HipKernelContainer container;
 }
 
-TEST(TestHipKernelContainer, CopyEngineIdsReturnsZeroEngines) {
+TEST(TestHipKernelContainer, CopyEngineIdsReturnsZeroEngines)
+{
     uint32_t numEngines = 0;
     auto totalEngines = HipKernelContainer::copyEngineIds(nullptr, 0, numEngines);
 
@@ -19,7 +21,8 @@ TEST(TestHipKernelContainer, CopyEngineIdsReturnsZeroEngines) {
     EXPECT_EQ(numEngines, 0u);
 }
 
-TEST(TestHipKernelContainer, CopyEngineIdsWithBufferReturnsZero) {
+TEST(TestHipKernelContainer, CopyEngineIdsWithBufferReturnsZero)
+{
     int64_t engineIds[1] = {0};
     uint32_t numEngines = 0;
     auto totalEngines = HipKernelContainer::copyEngineIds(engineIds, 1, numEngines);
@@ -28,7 +31,8 @@ TEST(TestHipKernelContainer, CopyEngineIdsWithBufferReturnsZero) {
     EXPECT_EQ(numEngines, 0u);
 }
 
-TEST(TestHipKernelContainer, GetEngineManagerReturnsValidReference) {
+TEST(TestHipKernelContainer, GetEngineManagerReturnsValidReference)
+{
     HipKernelContainer container;
     auto& engineManager = container.getEngineManager();
 

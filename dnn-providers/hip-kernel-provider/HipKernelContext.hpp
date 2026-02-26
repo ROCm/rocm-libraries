@@ -20,4 +20,6 @@ struct HipKernelHandle;
  */
 struct HipKernelContext
     : HipdnnEnginePluginExecutionContext,
-      hipdnn_plugin_sdk::ExecutionContextBase<HipKernelHandle, HipKernelSettings> {};
+      hipdnn_plugin_sdk::ExecutionContextBase<HipKernelHandle, HipKernelSettings>
+{
+};

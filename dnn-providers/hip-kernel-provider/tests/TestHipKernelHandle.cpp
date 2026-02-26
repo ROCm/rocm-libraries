@@ -6,11 +6,13 @@
 #include "HipKernelContainer.hpp"
 #include "HipKernelHandle.hpp"
 
-TEST(TestHipKernelHandle, ConstructsAndDestructsSuccessfully) {
+TEST(TestHipKernelHandle, ConstructsAndDestructsSuccessfully)
+{
     HipKernelHandle handle;
 }
 
-TEST(TestHipKernelHandle, SetAndGetStream) {
+TEST(TestHipKernelHandle, SetAndGetStream)
+{
     HipKernelHandle handle;
 
     EXPECT_EQ(handle.getStream(), nullptr);
@@ -22,7 +24,8 @@ TEST(TestHipKernelHandle, SetAndGetStream) {
     EXPECT_EQ(handle.getStream(), stream);
 }
 
-TEST(TestHipKernelHandle, GetEngineManagerWithContainer) {
+TEST(TestHipKernelHandle, GetEngineManagerWithContainer)
+{
     HipKernelHandle handle;
     handle.container = std::make_shared<hip_kernel_provider::HipKernelContainer>();
 
@@ -30,7 +33,8 @@ TEST(TestHipKernelHandle, GetEngineManagerWithContainer) {
     (void)engineManager;
 }
 
-TEST(TestHipKernelHandle, StoreAndRemoveEngineDetailsBuffer) {
+TEST(TestHipKernelHandle, StoreAndRemoveEngineDetailsBuffer)
+{
     HipKernelHandle handle;
 
     auto buffer = std::make_unique<flatbuffers::DetachedBuffer>();
@@ -40,7 +44,8 @@ TEST(TestHipKernelHandle, StoreAndRemoveEngineDetailsBuffer) {
     handle.removeEngineDetailsDetachedBuffer(ptr);
 }
 
-TEST(TestHipKernelHandle, RemoveNonExistentBufferDoesNotThrow) {
+TEST(TestHipKernelHandle, RemoveNonExistentBufferDoesNotThrow)
+{
     HipKernelHandle handle;
 
     const void* ptr = reinterpret_cast<const void*>(0x1234);

@@ -6,6 +6,7 @@
 #include "HipKernelContainer.hpp"
 
 hipdnn_plugin_sdk::EngineManager<HipKernelHandle, HipKernelSettings, HipKernelContext>&
-HipKernelHandle::getEngineManager() {
+    HipKernelHandle::getEngineManager()
+{
     return container->getEngineManager();
 }

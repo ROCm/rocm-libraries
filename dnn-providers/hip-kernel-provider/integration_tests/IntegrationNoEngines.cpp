@@ -8,21 +8,25 @@
 
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-namespace {
+namespace
+{
 
 // ============================================================================
 // Test fixture for verifying the HIP kernel plugin has no engines
 // ============================================================================
 
-class IntegrationHipKernelNoEngines : public ::testing::Test {};
+class IntegrationHipKernelNoEngines : public ::testing::Test
+{
+};
 
-}  // namespace
+} // namespace
 
 // ============================================================================
 // Verify that the HIP kernel plugin reports zero engines
 // ============================================================================
 
-TEST_F(IntegrationHipKernelNoEngines, GetAllEngineIdsReturnsZero) {
+TEST_F(IntegrationHipKernelNoEngines, GetAllEngineIdsReturnsZero)
+{
     // Query the total number of engines (maxEngines=0 means query-only)
     uint32_t numEngines = 0;
     auto status = hipdnnEnginePluginGetAllEngineIds(nullptr, 0, &numEngines);
@@ -31,7 +35,8 @@ TEST_F(IntegrationHipKernelNoEngines, GetAllEngineIdsReturnsZero) {
     EXPECT_EQ(numEngines, 0u) << "HIP kernel plugin should have no engines registered yet";
 }
 
-TEST_F(IntegrationHipKernelNoEngines, CreateAndDestroyHandle) {
+TEST_F(IntegrationHipKernelNoEngines, CreateAndDestroyHandle)
+{
     hipdnnEnginePluginHandle_t handle = nullptr;
     auto status = hipdnnEnginePluginCreate(&handle);
     ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
@@ -41,7 +46,8 @@ TEST_F(IntegrationHipKernelNoEngines, CreateAndDestroyHandle) {
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
-TEST_F(IntegrationHipKernelNoEngines, GetPluginNameAndVersion) {
+TEST_F(IntegrationHipKernelNoEngines, GetPluginNameAndVersion)
+{
     const char* name = nullptr;
     auto status = hipdnnPluginGetName(&name);
     ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
@@ -53,7 +59,8 @@ TEST_F(IntegrationHipKernelNoEngines, GetPluginNameAndVersion) {
     EXPECT_STREQ(version, "1.0.0");
 }
 
-TEST_F(IntegrationHipKernelNoEngines, GetPluginType) {
+TEST_F(IntegrationHipKernelNoEngines, GetPluginType)
+{
     hipdnnPluginType_t type = static_cast<hipdnnPluginType_t>(0);
     auto status = hipdnnPluginGetType(&type);
     ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);

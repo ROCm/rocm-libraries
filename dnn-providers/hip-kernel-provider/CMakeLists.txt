@@ -46,6 +46,8 @@ endif()
 option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
+option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
 
 list(
     PREPEND
@@ -77,6 +79,10 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 find_package(hip REQUIRED)
 find_package(hipdnn_data_sdk CONFIG REQUIRED)
 find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+
+include(CheckToolVersion)
+include(ClangCheck)
+include(ClangTidy)
 
 # Setup testing dependencies
 include(Dependencies)
@@ -111,6 +117,8 @@ set_target_properties(hip_kernel_plugin_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     POSITION_INDEPENDENT_CODE ON
 )
+clang_tidy_check(hip_kernel_plugin_impl)
+add_clang_tidy_custom_target()
 
 # Static library for unit tests to link against (provides access to internal implementation)
 add_library(hip_kernel_plugin_private STATIC $<TARGET_OBJECTS:hip_kernel_plugin_impl>)

@@ -5,23 +5,27 @@
 
 #include "HipKernelContext.hpp"
 
-TEST(TestHipKernelContext, ConstructsSuccessfully) {
+TEST(TestHipKernelContext, ConstructsSuccessfully)
+{
     HipKernelContext context;
 }
 
-TEST(TestHipKernelContext, HasNoPlanByDefault) {
+TEST(TestHipKernelContext, HasNoPlanByDefault)
+{
     HipKernelContext context;
 
     EXPECT_FALSE(context.hasValidPlan());
 }
 
-TEST(TestHipKernelContext, GetPlanThrowsWhenNoPlan) {
+TEST(TestHipKernelContext, GetPlanThrowsWhenNoPlan)
+{
     HipKernelContext context;
 
     EXPECT_THROW(context.plan(), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestHipKernelContext, ExecutionSettingsAccessible) {
+TEST(TestHipKernelContext, ExecutionSettingsAccessible)
+{
     HipKernelContext context;
 
     const auto& settings = context.executionSettings();

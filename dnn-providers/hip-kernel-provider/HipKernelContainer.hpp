@@ -9,7 +9,8 @@
 
 #include "HipKernelHandle.hpp"
 
-namespace hip_kernel_provider {
+namespace hip_kernel_provider
+{
 
 /*
  * Container class to manage the instantiation and ownership of all HIP kernel plan builders
@@ -20,8 +21,9 @@ namespace hip_kernel_provider {
  * If logic is needed, it should be placed in a separate function that can be called after the
  * container has finished constructing all its components.
  */
-class HipKernelContainer {
-   public:
+class HipKernelContainer
+{
+public:
     HipKernelContainer();
     ~HipKernelContainer();
 
@@ -32,10 +34,11 @@ class HipKernelContainer {
     static uint32_t copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines);
 
     hipdnn_plugin_sdk::EngineManager<HipKernelHandle, HipKernelSettings, HipKernelContext>&
-    getEngineManager();
+        getEngineManager();
 
-   private:
-    struct EngineDefinition {
+private:
+    struct EngineDefinition
+    {
         int64_t id;
         std::function<std::unique_ptr<
             hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>>()>
@@ -49,4 +52,4 @@ class HipKernelContainer {
         _engineManager;
 };
 
-}  // namespace hip_kernel_provider
+} // namespace hip_kernel_provider
