@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
@@ -1529,3 +1531,5 @@ INSTANTIATE_TEST_SUITE_P(AllFormats,
                                            SerializationFormat::FLATBUFFER_DETACHED,
                                            SerializationFormat::FLATBUFFER_OBJECT),
                          serializationFormatToString);
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB

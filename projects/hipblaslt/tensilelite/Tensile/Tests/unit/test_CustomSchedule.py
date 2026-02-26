@@ -1091,7 +1091,7 @@ class TestCustomScheduleValidation:
 
         # A non-empty verification message means that the schedule info is considered invalid.
         status, message = isValid(
-            ScheduleInfo(1, None, invalid_schedule, None, None, None, None), {}
+            ScheduleInfo(1, None, invalid_schedule, None, None, None, None), {"kernel" : {"DepthU": 42}}
         )
         assert status == False
 
