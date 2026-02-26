@@ -9,7 +9,7 @@ Example 01: Basic Grouped Convolution
 Full workflow: config, validate, autocorrect, codegen, verify output files.
 
 Demonstrates:
-1. Define a grouped conv kernel config
+1. Define a grouped conv kernel config (all fields explicit)
 2. Validate against arch filter rules
 3. Auto-correct invalid configurations
 4. Generate kernel headers via codegen
@@ -33,9 +33,40 @@ from ctypes_utils import detect_gpu_arch
 from grouped_conv_utils import (
     validate_grouped_conv_config,
     auto_correct_grouped_conv_config,
-    get_grouped_conv_default_config,
     format_grouped_conv_summary,
 )
+
+
+def create_grouped_conv_config(
+    variant="forward", ndim_spatial=2, arch="gfx950", dtype="fp16", pipeline="compv4",
+):
+    """Build a grouped conv config with all fields explicit (like GEMM KernelConfig)."""
+    return {
+        "tile_config": {
+            "tile_m": [1],
+            "tile_n": [128],
+            "tile_k": [128],
+            "wave_m": [2],
+            "wave_n": [2],
+            "wave_k": [1],
+            "warp_tile_m": [32],
+            "warp_tile_n": [32],
+            "warp_tile_k": [16],
+        },
+        "trait_config": {
+            "pipeline": [pipeline],
+            "epilogue": ["cshuffle"],
+            "scheduler": ["intrawave"],
+            "pad_m": [True],
+            "pad_n": [True],
+            "pad_k": [True],
+        },
+        "variant": variant,
+        "ndim_spatial": ndim_spatial,
+        "arch": arch,
+        "layout": "nhwgc",
+        "dtype": dtype,
+    }
 
 
 def main():
@@ -75,21 +106,33 @@ def main():
     print(f"  Pipeline:  {args.pipeline}")
 
     # =========================================================================
-    # Step 1: Create default config
+    # Step 1: Create config (all fields explicit)
     # =========================================================================
     print("\n" + "-" * 50)
-    print("Step 1: Create Default Config")
+    print("Step 1: Create Config (all fields explicit)")
     print("-" * 50)
 
-    config = get_grouped_conv_default_config(
+    config = create_grouped_conv_config(
         variant=args.variant,
         ndim_spatial=args.ndim,
         arch=args.arch,
         dtype=args.dtype,
+        pipeline=args.pipeline,
     )
-    config["trait_config"]["pipeline"] = [args.pipeline]
 
-    print(format_grouped_conv_summary(config))
+    tile = config["tile_config"]
+    trait = config["trait_config"]
+    print(f"  variant:   {config['variant']}")
+    print(f"  ndim:      {config['ndim_spatial']}D")
+    print(f"  layout:    {config['layout']}")
+    print(f"  dtype:     {config['dtype']}")
+    print(f"  tile:      M={tile['tile_m'][0]} N={tile['tile_n'][0]} K={tile['tile_k'][0]}")
+    print(f"  wave:      {tile['wave_m'][0]}x{tile['wave_n'][0]}x{tile['wave_k'][0]}")
+    print(f"  warp:      {tile['warp_tile_m'][0]}x{tile['warp_tile_n'][0]}x{tile['warp_tile_k'][0]}")
+    print(f"  pipeline:  {trait['pipeline'][0]}")
+    print(f"  epilogue:  {trait['epilogue'][0]}")
+    print(f"  scheduler: {trait['scheduler'][0]}")
+    print(f"  padding:   M={trait['pad_m'][0]} N={trait['pad_n'][0]} K={trait['pad_k'][0]}")
 
     # =========================================================================
     # Step 2: Validate config
@@ -183,6 +226,8 @@ def main():
     print("=" * 70)
     print(f"  Arch:     {args.arch}")
     print(f"  Config:   {args.variant} {args.ndim}D {args.dtype}")
+    print(f"  Tile:     1x128x128, wave 2x2x1, warp 32x32x16")
+    print(f"  Pipeline: {args.pipeline}, epilogue cshuffle, scheduler intrawave")
     print(f"  Valid:    {result.is_valid}")
     print("  Status:   PASS")
     print("=" * 70)

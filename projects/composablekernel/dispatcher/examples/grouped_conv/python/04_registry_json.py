@@ -7,10 +7,13 @@
 Example 04: Registry and JSON Export/Import
 
 Demonstrates:
-- Building a kernel registry from configs
+- Building a kernel registry from explicit configs
 - JSON export with statistics
 - JSON import and reconstruction
 - Multi-registry selection (throughput vs latency)
+- Architecture filtering
+
+All configs built inline with every field visible.
 
 Usage:
     python3 04_registry_json.py
@@ -29,9 +32,37 @@ from ctypes_utils import detect_gpu_arch
 from grouped_conv_utils import (
     validate_grouped_conv_config,
     auto_correct_grouped_conv_config,
-    get_grouped_conv_default_config,
-    format_grouped_conv_summary,
 )
+
+
+def make_config(variant, dtype, arch, tile_n, tile_k, pipeline):
+    """Build a grouped conv config with all fields explicit."""
+    return {
+        "tile_config": {
+            "tile_m": [1],
+            "tile_n": [tile_n],
+            "tile_k": [tile_k],
+            "wave_m": [2],
+            "wave_n": [2],
+            "wave_k": [1],
+            "warp_tile_m": [32],
+            "warp_tile_n": [32],
+            "warp_tile_k": [16],
+        },
+        "trait_config": {
+            "pipeline": [pipeline],
+            "epilogue": ["cshuffle"],
+            "scheduler": ["intrawave"],
+            "pad_m": [True],
+            "pad_n": [True],
+            "pad_k": [True],
+        },
+        "variant": variant,
+        "ndim_spatial": 2,
+        "arch": arch,
+        "layout": "nhwgc",
+        "dtype": dtype,
+    }
 
 
 def build_registry(configs, name="default"):
@@ -47,50 +78,39 @@ def build_registry(configs, name="default"):
         if not result.is_valid:
             cfg, result = auto_correct_grouped_conv_config(cfg)
 
-        trait_cfg = cfg.get("trait_config", {})
+        tile = cfg["tile_config"]
+        trait = cfg["trait_config"]
+        tile_n = tile["tile_n"][0] if isinstance(tile["tile_n"], list) else tile["tile_n"]
+        tile_k = tile["tile_k"][0] if isinstance(tile["tile_k"], list) else tile["tile_k"]
+        pipeline = trait["pipeline"][0] if isinstance(trait["pipeline"], list) else trait["pipeline"]
 
-        variant = cfg.get("variant", "forward")
-        dtype = cfg.get("dtype", "fp16")
-        arch = cfg.get("arch", "gfx950")
-        ndim = cfg.get("ndim_spatial", 2)
-
-        pipeline = trait_cfg.get("pipeline", ["compv4"])
-        if isinstance(pipeline, list):
-            pipeline = pipeline[0]
-
-        tile_m = trait_cfg.get("tile_m", [1])
-        tile_n = trait_cfg.get("tile_n", [128])
-        tile_k = trait_cfg.get("tile_k", [128])
-        if isinstance(tile_m, list): tile_m = tile_m[0]
-        if isinstance(tile_n, list): tile_n = tile_n[0]
-        if isinstance(tile_k, list): tile_k = tile_k[0]
-
-        kernel_name = f"grouped_conv_{variant}_{dtype}_{ndim}d_{tile_m}x{tile_n}x{tile_k}_{pipeline}"
+        kernel_name = (f"grouped_conv_{cfg['variant']}_{cfg['dtype']}"
+                       f"_{cfg['ndim_spatial']}d_1x{tile_n}x{tile_k}_{pipeline}")
 
         kernel_entry = {
             "name": kernel_name,
             "signature": {
-                "variant": variant,
-                "dtype": dtype,
-                "ndim_spatial": ndim,
-                "layout": "nhwc",
+                "variant": cfg["variant"],
+                "dtype": cfg["dtype"],
+                "ndim_spatial": cfg["ndim_spatial"],
+                "layout": cfg["layout"],
             },
             "algorithm": {
-                "tile_m": tile_m,
-                "tile_n": tile_n,
-                "tile_k": tile_k,
+                "tile_m": 1, "tile_n": tile_n, "tile_k": tile_k,
+                "wave": "2x2x1", "warp": "32x32x16",
                 "pipeline": pipeline,
+                "epilogue": "cshuffle",
+                "scheduler": "intrawave",
             },
-            "arch": arch,
+            "arch": cfg["arch"],
             "valid": result.is_valid,
         }
         registry["kernels"].append(kernel_entry)
 
-        # Update statistics
         stats = registry["statistics"]
-        stats["by_variant"][variant] = stats["by_variant"].get(variant, 0) + 1
-        stats["by_dtype"][dtype] = stats["by_dtype"].get(dtype, 0) + 1
-        stats["by_arch"][arch] = stats["by_arch"].get(arch, 0) + 1
+        stats["by_variant"][cfg["variant"]] = stats["by_variant"].get(cfg["variant"], 0) + 1
+        stats["by_dtype"][cfg["dtype"]] = stats["by_dtype"].get(cfg["dtype"], 0) + 1
+        stats["by_arch"][cfg["arch"]] = stats["by_arch"].get(cfg["arch"], 0) + 1
 
     return registry
 
@@ -112,7 +132,6 @@ def filter_by_arch(registry, arch):
         "kernels": [k for k in registry["kernels"] if k["arch"] == arch],
         "statistics": {},
     }
-    # Recompute stats
     for k in filtered["kernels"]:
         for key_name, key_val in [
             ("by_variant", k["signature"]["variant"]),
@@ -155,46 +174,42 @@ def main():
     print(f"\n  Arch: {args.arch}\n")
 
     # =========================================================================
-    # Step 1: Build throughput registry (large tiles)
+    # Step 1: Build throughput registry (large tiles, explicit configs)
     # =========================================================================
     print("-" * 50)
-    print("Step 1: Throughput Registry")
+    print("Step 1: Throughput Registry (large tiles)")
     print("-" * 50)
 
-    throughput_configs = []
-    for variant in ["forward", "bwd_data", "bwd_weight"]:
-        cfg = get_grouped_conv_default_config(
-            variant=variant, ndim_spatial=2, arch=args.arch, dtype="fp16",
-        )
-        cfg["trait_config"]["tile_n"] = [256]
-        cfg["trait_config"]["tile_k"] = [256]
-        cfg["trait_config"]["pipeline"] = ["compv4"]
-        throughput_configs.append(cfg)
+    throughput_configs = [
+        make_config("forward",    "fp16", args.arch, tile_n=256, tile_k=256, pipeline="compv4"),
+        make_config("bwd_data",   "fp16", args.arch, tile_n=256, tile_k=256, pipeline="compv3"),
+        make_config("bwd_weight", "fp16", args.arch, tile_n=256, tile_k=256, pipeline="compv3"),
+    ]
 
+    print(f"  Configs: tile 1x256x256, wave 2x2x1, warp 32x32x16")
     throughput_reg = build_registry(throughput_configs, "throughput")
     print(f"  Kernels: {len(throughput_reg['kernels'])}")
-    print(f"  Stats:   {throughput_reg['statistics']}")
+    for k in throughput_reg["kernels"]:
+        print(f"    - {k['name']} (valid={k['valid']})")
 
     # =========================================================================
-    # Step 2: Build latency registry (small tiles)
+    # Step 2: Build latency registry (small tiles, explicit configs)
     # =========================================================================
     print("\n" + "-" * 50)
-    print("Step 2: Latency Registry")
+    print("Step 2: Latency Registry (small tiles)")
     print("-" * 50)
 
-    latency_configs = []
-    for variant in ["forward", "bwd_data", "bwd_weight"]:
-        cfg = get_grouped_conv_default_config(
-            variant=variant, ndim_spatial=2, arch=args.arch, dtype="fp16",
-        )
-        cfg["trait_config"]["tile_n"] = [64]
-        cfg["trait_config"]["tile_k"] = [64]
-        cfg["trait_config"]["pipeline"] = ["compv3"]
-        latency_configs.append(cfg)
+    latency_configs = [
+        make_config("forward",    "fp16", args.arch, tile_n=64, tile_k=64, pipeline="compv3"),
+        make_config("bwd_data",   "fp16", args.arch, tile_n=64, tile_k=64, pipeline="compv3"),
+        make_config("bwd_weight", "fp16", args.arch, tile_n=64, tile_k=64, pipeline="compv3"),
+    ]
 
+    print(f"  Configs: tile 1x64x64, wave 2x2x1, warp 32x32x16")
     latency_reg = build_registry(latency_configs, "latency")
     print(f"  Kernels: {len(latency_reg['kernels'])}")
-    print(f"  Stats:   {latency_reg['statistics']}")
+    for k in latency_reg["kernels"]:
+        print(f"    - {k['name']} (valid={k['valid']})")
 
     # =========================================================================
     # Step 3: Multi-registry kernel selection
@@ -221,7 +236,6 @@ def main():
         "kernels": throughput_reg["kernels"] + latency_reg["kernels"],
         "statistics": {},
     }
-    # Merge stats
     for cat in ["by_variant", "by_dtype", "by_arch"]:
         combined_reg["statistics"][cat] = {}
         for reg in [throughput_reg, latency_reg]:
@@ -233,7 +247,7 @@ def main():
     json_str = export_registry_json(combined_reg)
     print(f"  Combined kernels: {len(combined_reg['kernels'])}")
     print(f"  JSON size: {len(json_str)} bytes")
-    print(f"\n  Preview:\n{json_str[:400]}\n  ...")
+    print(f"\n  Preview:\n{json_str[:500]}\n  ...")
 
     if args.output:
         output_path = Path(args.output)
@@ -259,8 +273,8 @@ def main():
     print("\n" + "=" * 70)
     print("SUMMARY")
     print("=" * 70)
-    print(f"  Throughput registry: {len(throughput_reg['kernels'])} kernels")
-    print(f"  Latency registry:   {len(latency_reg['kernels'])} kernels")
+    print(f"  Throughput registry: {len(throughput_reg['kernels'])} kernels (tile 1x256x256)")
+    print(f"  Latency registry:   {len(latency_reg['kernels'])} kernels (tile 1x64x64)")
     print(f"  Combined:           {len(combined_reg['kernels'])} kernels")
     print(f"  JSON round-trip:    OK")
     print(f"  Arch filter:        OK")

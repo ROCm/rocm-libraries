@@ -28,8 +28,6 @@ from ctypes_utils import detect_gpu_arch
 from grouped_conv_utils import (
     validate_grouped_conv_config,
     auto_correct_grouped_conv_config,
-    get_grouped_conv_default_config,
-    format_grouped_conv_summary,
 )
 
 
@@ -394,29 +392,53 @@ def main():
     print(f"\n  Arch: {args.arch}\n")
 
     # =========================================================================
-    # Config validation for all directions
+    # Explicit configs for all directions (all fields visible)
     # =========================================================================
-    print("--- Config Validation ---")
-    test_cases = [
-        ("forward", 2), ("forward", 3),
-        ("bwd_data", 2), ("bwd_data", 3),
-        ("bwd_weight", 2), ("bwd_weight", 3),
+    print("--- Config Validation (explicit configs) ---")
+
+    TILE_CONFIG = {
+        "tile_m": [1], "tile_n": [128], "tile_k": [128],
+        "wave_m": [2], "wave_n": [2], "wave_k": [1],
+        "warp_tile_m": [32], "warp_tile_n": [32], "warp_tile_k": [16],
+    }
+    TRAIT_FWD = {
+        "pipeline": ["compv4"], "epilogue": ["cshuffle"], "scheduler": ["intrawave"],
+        "pad_m": [True], "pad_n": [True], "pad_k": [True],
+    }
+    TRAIT_BWD = {
+        "pipeline": ["compv3"], "epilogue": ["cshuffle"], "scheduler": ["intrawave"],
+        "pad_m": [True], "pad_n": [True], "pad_k": [True],
+    }
+
+    configs = [
+        {"tile_config": TILE_CONFIG, "trait_config": TRAIT_FWD,
+         "variant": "forward",    "ndim_spatial": 2, "arch": args.arch, "layout": "nhwgc", "dtype": "fp16"},
+        {"tile_config": TILE_CONFIG, "trait_config": TRAIT_FWD,
+         "variant": "forward",    "ndim_spatial": 3, "arch": args.arch, "layout": "nhwgc", "dtype": "fp16"},
+        {"tile_config": TILE_CONFIG, "trait_config": TRAIT_BWD,
+         "variant": "bwd_data",   "ndim_spatial": 2, "arch": args.arch, "layout": "nhwgc", "dtype": "fp16"},
+        {"tile_config": TILE_CONFIG, "trait_config": TRAIT_BWD,
+         "variant": "bwd_data",   "ndim_spatial": 3, "arch": args.arch, "layout": "nhwgc", "dtype": "fp16"},
+        {"tile_config": TILE_CONFIG, "trait_config": TRAIT_BWD,
+         "variant": "bwd_weight", "ndim_spatial": 2, "arch": args.arch, "layout": "nhwgc", "dtype": "fp16"},
+        {"tile_config": TILE_CONFIG, "trait_config": TRAIT_BWD,
+         "variant": "bwd_weight", "ndim_spatial": 3, "arch": args.arch, "layout": "nhwgc", "dtype": "fp16"},
     ]
 
-    print(f"  {'Direction':<20} {'Dims':<6} {'Valid':<8}")
-    print("  " + "-" * 40)
+    print(f"  Tile: M=1 N=128 K=128, wave 2x2x1, warp 32x32x16")
+    print(f"  Forward pipeline: compv4, Backward pipeline: compv3")
+    print(f"  {'Direction':<20} {'Dims':<6} {'Pipeline':<10} {'Valid':<8}")
+    print("  " + "-" * 50)
 
     config_results = []
-    for variant, ndim in test_cases:
-        config = get_grouped_conv_default_config(
-            variant=variant, ndim_spatial=ndim, arch=args.arch, dtype="fp16",
-        )
-        result = validate_grouped_conv_config(config)
+    for cfg in configs:
+        result = validate_grouped_conv_config(cfg)
         if not result.is_valid:
-            config, result = auto_correct_grouped_conv_config(config)
+            cfg, result = auto_correct_grouped_conv_config(cfg)
         config_results.append(result.is_valid)
         status = "OK" if result.is_valid else "FAIL"
-        print(f"  {variant:<20} {ndim}D    {status:<8}")
+        pl = cfg["trait_config"]["pipeline"][0]
+        print(f"  {cfg['variant']:<20} {cfg['ndim_spatial']}D    {pl:<10} {status:<8}")
 
     # =========================================================================
     # NumPy CPU Reference Tests
