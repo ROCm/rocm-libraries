@@ -67,7 +67,7 @@ namespace rocisa
  */
 
     std::string   TypeAbbrev(rocisa::DataType d);
-    float         GetElementSize(rocisa::DataType d);
+    size_t        GetElementSize(rocisa::DataType d);
     std::ostream& operator<<(std::ostream& stream, rocisa::DataType const& t);
     std::istream& operator>>(std::istream& stream, rocisa::DataType& t);
 
@@ -90,7 +90,7 @@ namespace TensileLite
         std::string      name;
         std::string      abbrev;
 
-        float  elementSize;
+        size_t elementSize;
         size_t packing;
         size_t segmentSize;
 
@@ -129,11 +129,13 @@ namespace TensileLite
         constexpr static rocisa::DataType Enum = T_Enum;
 
         /// Bytes of one element.  May contain multiple segments.
-        constexpr static float ElementSize = float(sizeof(T)) / float(T_Packing);
+        constexpr static size_t ElementSize = sizeof(T);
         /// Segments per element.
         constexpr static size_t Packing = T_Packing;
         /// Bytes per segment.
-        constexpr static float SegmentSize = ElementSize / Packing;
+        /// TODO: this needs to be enhanced as the value would be
+        ///       0 for MX data type, FP4: ElementSize=1 byte, Packing=2.
+        constexpr static size_t SegmentSize = ElementSize / Packing;
 
         constexpr static bool IsComplex  = T_IsComplex;
         constexpr static bool IsIntegral = T_IsIntegral;
@@ -159,7 +161,7 @@ namespace TensileLite
               int              T_Packing,
               bool             T_IsComplex,
               bool             T_IsIntegral>
-    constexpr float BaseTypeInfo<T, T_Enum, T_Packing, T_IsComplex, T_IsIntegral>::ElementSize;
+    constexpr size_t BaseTypeInfo<T, T_Enum, T_Packing, T_IsComplex, T_IsIntegral>::ElementSize;
     template <typename T,
               rocisa::DataType T_Enum,
               int              T_Packing,
@@ -171,7 +173,7 @@ namespace TensileLite
               int              T_Packing,
               bool             T_IsComplex,
               bool             T_IsIntegral>
-    constexpr float BaseTypeInfo<T, T_Enum, T_Packing, T_IsComplex, T_IsIntegral>::SegmentSize;
+    constexpr size_t BaseTypeInfo<T, T_Enum, T_Packing, T_IsComplex, T_IsIntegral>::SegmentSize;
 
     template <typename T,
               rocisa::DataType T_Enum,
