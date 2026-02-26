@@ -5,6 +5,8 @@
 
 #include "descriptors/BackendDescriptor.hpp"
 
+#include <memory>
+
 namespace hipdnn_backend::test_utilities
 {
 

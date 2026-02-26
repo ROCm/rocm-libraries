@@ -1510,6 +1510,23 @@ TEST_CASE("BitfieldCombine expression and lowering", "[expression][expression-tr
 
         CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
     }
+
+    SECTION("Lowering with width=32 (full width)")
+    {
+        auto const fullWidth   = 32u;
+        auto const srcOffset32 = 0u;
+        auto const dstOffset32 = 0u;
+
+        auto bfc = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{srcExpr, dstExpr, "", srcOffset32, dstOffset32, fullWidth});
+
+        // When width=32, srcMask should be 0xFFFFFFFF (all bits)
+        // and dstMask should be 0x00000000 (clear all bits)
+        auto expected = (Expression::literal(Raw32(0xFFFFFFFFu)) & srcExpr)
+                        | (Expression::literal(Raw32(0x00000000u)) & dstExpr);
+
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
+    }
 }
 
 TEST_CASE("Code gen with ConvertPropagation", "[expression][expression-transformation][codegen]")
