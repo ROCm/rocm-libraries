@@ -25,8 +25,12 @@
  ###############################################################################
 
 # Find / configure LLVM
-find_package(ZLIB REQUIRED)
-find_package(zstd CONFIG REQUIRED)
+if(WIN32)
+    # On Windows, LLVM is built with static dependencies and has a transitive dependency
+    # on zstd::libzstd_static, requiring the explicit find_packages below.
+    find_package(ZLIB REQUIRED)
+    find_package(zstd CONFIG REQUIRED)
+endif()
 find_package(LLVM CONFIG HINTS ${ROCM_DIR}/../../..)
 
 if (NOT LLVM_DIR)
