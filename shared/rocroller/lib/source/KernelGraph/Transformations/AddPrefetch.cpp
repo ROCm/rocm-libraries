@@ -1072,17 +1072,36 @@ namespace rocRoller
 
                 // When mixing memory operations and not prefetching LoadLDSTile ops,
                 // ensure that all LoadLDSTile operations in the current are scheduled
-                // before any prefetch load-store chains.
+                // before any StoreLDSTile part of prefetch load-store chains that
+                // are not Direct2LDS.
                 if(m_params->prefetchMixMemOps && m_params->prefetchLDSFactor == 0)
                 {
                     const auto currentSegmentStart = segmentBoundaries[u];
                     const auto currentSegmentEnd   = segmentBoundaries[u + 1];
+
+                    std::vector<int> nonDirect2LDSStoreLDSTileTops;
+                    for(const auto storeLDSTileOp : globalStores)
+                    {
+                        auto macroTile = graph.coordinates.get<MacroTile>(
+                            graph.mapper.get<MacroTile>(storeLDSTileOp.globalOperation));
+                        AssertFatal(macroTile,
+                                    "Expected a MacroTile coordinate for StoreLDSTile operation.");
+
+                        if(macroTile->memoryType != MemoryType::WAVE_Direct2LDS)
+                        {
+                            nonDirect2LDSStoreLDSTileTops.push_back(storeLDSTileOp.ldsChain);
+                        }
+                    }
+
                     for(const auto topSetCoordOfLoadLDSTile :
                         FindTopSetCoordOfLoadLDSTileOpsInCurrentSegment(
                             graph, currentSegmentStart, currentSegmentEnd))
                     {
-                        graph.control.addElement(
-                            Sequence(), {topSetCoordOfLoadLDSTile}, {globalLoads[0].globalChain});
+                        for(const auto storeLDSTileOp : nonDirect2LDSStoreLDSTileTops)
+                        {
+                            graph.control.addElement(
+                                Sequence(), {topSetCoordOfLoadLDSTile}, {storeLDSTileOp});
+                        }
                     }
                 }
             }
