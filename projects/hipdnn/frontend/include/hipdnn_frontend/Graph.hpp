@@ -1698,10 +1698,10 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    std::array<std::shared_ptr<TensorAttributes>, 2> sdpa_fprop(std::shared_ptr<TensorAttributes> q,
-                                                                std::shared_ptr<TensorAttributes> k,
-                                                                std::shared_ptr<TensorAttributes> v,
-                                                                SdpaAttributes attributes)
+    std::array<std::shared_ptr<TensorAttributes>, 2> sdpa(std::shared_ptr<TensorAttributes> q,
+                                                          std::shared_ptr<TensorAttributes> k,
+                                                          std::shared_ptr<TensorAttributes> v,
+                                                          SdpaAttributes attributes)
     {
         if(attributes.get_name().empty())
         {
@@ -1721,18 +1721,26 @@ public:
         }
 
         auto o = outputTensor(attributes.get_name() + "::O");
-        auto stats = outputTensor(attributes.get_name() + "::STATS");
+        std::array<std::shared_ptr<TensorAttributes>, 2> ret = {o, nullptr};
 
         attributes.set_q(std::move(q));
         attributes.set_k(std::move(k));
         attributes.set_v(std::move(v));
         attributes.set_o(o);
-        attributes.set_stats(stats);
+
+        if(attributes.generate_stats.has_value() && attributes.generate_stats.value())
+        {
+            HIPDNN_FE_LOG_INFO("SDPA node '" << attributes.get_name()
+                                             << "' is configured to generate stats output.");
+            auto stats = outputTensor(attributes.get_name() + "::STATS");
+            attributes.set_stats(stats);
+            ret[1] = stats;
+        }
 
         _sub_nodes.emplace_back(
             std::make_shared<SdpaFpropNode>(std::move(attributes), graph_attributes));
 
-        return {o, stats};
+        return ret;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)

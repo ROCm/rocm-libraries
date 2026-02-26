@@ -1690,7 +1690,30 @@ inline flatbuffers::FlatBufferBuilder
     }
 
     auto sdpaAttributes = hipdnn_data_sdk::data_objects::CreateSdpaAttributes(
-        builder, qUid, kUid, vUid, oUid, attnMaskUid, scaleUid, statsUid);
+        builder,
+        qUid,
+        kUid,
+        vUid,
+        oUid,
+        attnMaskUid,
+        scaleUid,
+        flatbuffers::nullopt, // seq_len_q_tensor_uid
+        flatbuffers::nullopt, // seq_len_kv_tensor_uid
+        flatbuffers::nullopt, // seed_tensor_uid
+        flatbuffers::nullopt, // offset_tensor_uid
+        flatbuffers::nullopt, // dropout_mask_tensor_uid
+        flatbuffers::nullopt, // dropout_scale_tensor_uid
+        flatbuffers::nullopt, // page_table_k_tensor_uid
+        flatbuffers::nullopt, // page_table_v_tensor_uid
+        flatbuffers::nullopt, // block_mask_tensor_uid
+        flatbuffers::nullopt, // sink_token_tensor_uid
+        flatbuffers::nullopt, // descale_q_tensor_uid
+        flatbuffers::nullopt, // descale_k_tensor_uid
+        flatbuffers::nullopt, // descale_v_tensor_uid
+        flatbuffers::nullopt, // descale_s_tensor_uid
+        flatbuffers::nullopt, // scale_s_tensor_uid
+        flatbuffers::nullopt, // scale_o_tensor_uid
+        statsUid);
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
